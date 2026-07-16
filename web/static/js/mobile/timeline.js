@@ -4,7 +4,7 @@
 // jumps across the WHOLE archive (undated photos land in a proper
 // "Undated" section at the end, matching the SQL sort order).
 
-import { getDateHistogram, getRankings, getScanStatus, getStack, thumbUrl } from './api.js';
+import { getDateHistogram, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl } from './api.js';
 import {
     byId, clearScope, clearSelection, emit, nav, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
@@ -149,7 +149,7 @@ function cellFor(img, mi) {
     const fig = document.createElement('figure');
     const stackCount = Number(img.stack_count) || 0;
     const previewReady = img.preview_ready !== false;
-    const previewSrc = img.thumb_url || thumbUrl('sm', img.id);
+    const previewSrc = previewThumbUrl(img);
     fig.className = `mcell${previewReady ? '' : ' preview-pending'}`;
     fig.dataset.id = String(img.id);
     fig.dataset.mi = String(mi);
@@ -684,7 +684,7 @@ function sharpenPreview(image) {
         const img = cell.querySelector('img[data-preview-src]');
         if (!img) continue;
         cell.classList.remove('preview-pending');
-        img.src = image.thumb_url || img.dataset.previewSrc || thumbUrl('sm', id);
+        img.src = previewThumbUrl(image) || img.dataset.previewSrc;
         changed = true;
     }
     return changed;

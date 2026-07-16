@@ -1,7 +1,7 @@
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
-import { getImageExif, getStack, thumbUrl, writeFlag } from './api.js';
+import { getImageExif, getStack, previewThumbUrl, thumbUrl, writeFlag } from './api.js';
 import { applyFlags, beginFlagMutation, flagMutationIsLatest } from './selection.js';
 import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
@@ -386,8 +386,11 @@ function stripMarkup(start, end) {
             continue;
         }
         const glyph = flagGlyph(img.flag || 'unflagged');
+        const previewSrc = previewThumbUrl(img);
         markup += `<button class="loupe-thumb ${i === index ? 'cur' : ''}" data-index="${i}" data-id="${esc(img.id)}" aria-label="Photo ${i + 1}"${i === index ? ' aria-current="true"' : ''}>`
-            + `<img loading="lazy" decoding="async" fetchpriority="low" src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" alt="">`
+            + (previewSrc
+                ? `<img loading="lazy" decoding="async" fetchpriority="low" src="${esc(previewSrc)}" alt="">`
+                : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
             + `<span class="loupe-thumb-flag" aria-hidden="true">${glyph}</span>`
             + '</button>';
     }
@@ -527,6 +530,7 @@ function render() {
         if (token !== renderToken) return;
         setImageMetrics({ focus });
     };
+    // preview_ready exception: opening Loupe intentionally uses its progressive proxy-to-full loader.
     image.src = img.thumb_url || thumbUrl('sm', img.id);
     upgradeStageToMedium(img, token);
     const size = imageSizeFromMetadata(img, image);

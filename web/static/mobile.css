@@ -1440,6 +1440,8 @@ body.sheet-keyboard #m-sheet {
     font-size: 12px;
 }
 .m-share-photo-preview img { width: 72px; height: 58px; object-fit: cover; background: #000; }
+.m-share-photo-placeholder { position: relative; width: 72px; height: 58px; flex: none; overflow: hidden; border-radius: var(--r-media); background: var(--surface-2); }
+.m-share-photo-placeholder::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer 1.2s var(--ease) infinite; }
 .sheet-btn {
     width: 100%;
     min-height: 48px;

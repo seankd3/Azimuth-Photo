@@ -617,7 +617,9 @@ async def map_markers_payload(
         _configured_cache_root(),
     )
     for marker in markers:
-        if int(marker["id"]) not in cached_ids:
+        ready = int(marker["id"]) in cached_ids
+        marker["preview_ready"] = ready
+        if not ready:
             marker.pop("thumb_url", None)
     return {**payload, "markers": markers}
 

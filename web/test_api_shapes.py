@@ -441,6 +441,7 @@ class ApiShapeTests(unittest.TestCase):
             [marker["thumb_url"] for marker in data["markers"]],
             [f"/api/thumb/sm/{self.ids[0]}", f"/api/thumb/sm/{self.ids[1]}"],
         )
+        self.assertTrue(all(marker["preview_ready"] for marker in data["markers"]))
 
         conn = sqlite3.connect(db.DB_PATH)
         try:
@@ -463,6 +464,8 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(satellite["gps_total_count"], 3)
         self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
         markers = {marker["id"]: marker for marker in satellite["markers"]}
+        self.assertTrue(markers[self.ids[0]]["preview_ready"])
+        self.assertFalse(markers[self.ids[3]]["preview_ready"])
         self.assertEqual(markers[self.ids[0]]["thumb_url"], f"/api/thumb/sm/{self.ids[0]}")
         self.assertNotIn("thumb_url", markers[self.ids[3]])
 

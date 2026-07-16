@@ -9,8 +9,8 @@ import {
     getCollectionShareFavorites,
     listCollections,
     listSharedSurfaces,
+    previewThumbUrl,
     revokeCollectionShare,
-    thumbUrl,
     writeFailureMessage,
 } from './api.js';
 import { applyFlags } from './flags.js';
@@ -237,10 +237,14 @@ export async function openPhotoShareSheet(image) {
     if (!image?.id) return;
     let collection = null;
     let share = null;
+    const previewSrc = previewThumbUrl(image);
+    const preview = previewSrc
+        ? `<img src="${esc(previewSrc)}" alt="">`
+        : '<i class="m-share-photo-placeholder" aria-hidden="true"></i>';
     const sheet = openSheet(
         `<h3>Share ${esc(photoShareName(image))}</h3>`
-        + '<div class="m-share-photo-preview">'
-        + `<img src="${esc(thumbUrl('sm', image.id))}" alt=""><span>Private link · one photo</span></div>`
+        + `<div class="m-share-photo-preview ${previewSrc ? '' : 'preview-pending'}">`
+        + `${preview}<span>Private link · one photo</span></div>`
         + '<button class="sheet-btn" id="mv-share-create" data-mutating>Share photo…</button>'
     );
     sheet.querySelector('#mv-share-create')?.addEventListener('click', async (event) => {

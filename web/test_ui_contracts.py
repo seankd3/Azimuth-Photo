@@ -159,6 +159,7 @@ class UiContractsTests(BackendTestCase):
             map_module = fh.read()
 
         self.assertIn("await getMapMarkers(scopeParams())", map_module)
+        self.assertIn("marker.preview_ready !== false && marker.thumb_url", map_module)
         self.assertNotIn("loadCollectionMarkers", map_module)
         self.assertNotIn("getCollection,", map_module)
 

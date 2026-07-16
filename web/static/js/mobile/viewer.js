@@ -167,6 +167,7 @@ function showCurrent({ stageReady = false } = {}) {
     resetZoom();
     if (!stageReady) {
         img.fetchPriority = 'high';
+        // preview_ready exception: opening Viewer intentionally uses its progressive proxy-to-full loader.
         img.src = image.thumb_url || thumbUrl('sm', image.id);
         upgradeToMedium(image, token);
     }

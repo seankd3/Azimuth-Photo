@@ -1,4 +1,4 @@
-import { thumbUrl } from '../api.js';
+import { previewThumbUrl, thumbUrl } from '../api.js';
 import { fetchOptionsWithTimeout } from '../../api.js';
 import { on, selection, viewState } from '../state.js';
 import { applyFlags } from '../selection.js';
@@ -503,7 +503,13 @@ function syncFilmstrip() {
     const currentId = Number(currentImage?.id);
     if (filmstrip.dataset.imageIds !== imageIds) {
         filmstrip.dataset.imageIds = imageIds;
-        filmstrip.innerHTML = viewState.images.map((image, index) => `<button class="develop-thumb ${Number(image.id) === currentId ? 'cur' : ''}" data-index="${index}" data-image-id="${image.id}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}"><img src="${image.thumb_url || thumbUrl('sm', image.id)}" loading="lazy" decoding="async" alt=""></button>`).join('');
+        filmstrip.innerHTML = viewState.images.map((image, index) => {
+            const previewSrc = previewThumbUrl(image);
+            const preview = previewSrc
+                ? `<img src="${previewSrc}" loading="lazy" decoding="async" alt="">`
+                : '<span class="preview-thumb-pending" aria-hidden="true"></span>';
+            return `<button class="develop-thumb ${previewSrc ? '' : 'preview-pending'} ${Number(image.id) === currentId ? 'cur' : ''}" data-index="${index}" data-image-id="${image.id}" data-tip="${developTip(image)}" aria-label="${String(image.filename || `Photo ${index + 1}`).replaceAll('"', '&quot;')}">${preview}</button>`;
+        }).join('');
     } else {
         filmstrip.querySelector('.develop-thumb.cur')?.classList.remove('cur');
         filmstrip.querySelector(`[data-image-id="${currentId}"]`)?.classList.add('cur');

@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+import thumbnails
 from features.quality import scorer as quality_scorer
 from features.quality import autocull
 
@@ -470,7 +471,11 @@ async def api_quality_autocull(body: AutocullBody | None = None):
             return cached
     conn = await _open_conn()
     try:
-        payload = await autocull.suggestions(conn, stack_ids=stack_ids)
+        payload = await autocull.suggestions(
+            conn,
+            stack_ids=stack_ids,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
     finally:
         await conn.close()
     if stack_ids is None:
@@ -484,7 +489,11 @@ async def api_quality_autocull_apply(body: AutocullApplyBody):
     """Explicitly accept the current stack suggestions and retain an audit row."""
     conn = await _open_conn()
     try:
-        payload = await autocull.apply(conn, stack_ids=body.stack_ids)
+        payload = await autocull.apply(
+            conn,
+            stack_ids=body.stack_ids,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
     finally:
         await conn.close()
     if payload.get("ok"):

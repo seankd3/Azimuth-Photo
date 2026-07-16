@@ -130,7 +130,7 @@ function openCluster(index, pin) {
     pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photo${item.markers.length === 1 ? '' : 's'} here</div>`
         + '<div class="mp-previews">'
         + item.markers.slice(0, 9).map((marker) => (
-            `<button class="mp-preview" data-id="${marker.id}">${marker.thumb_url
+            `<button class="mp-preview" data-id="${marker.id}">${marker.preview_ready !== false && marker.thumb_url
                 ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
                 : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
         )).join('')

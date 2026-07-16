@@ -1,5 +1,5 @@
-import { createCollection, removeFromCollection, thumbUrl } from './api.js';
-import { emit, on, selection, selectionChanged, setImages, setRankingsMeta, viewState } from './state.js';
+import { createCollection, getRankings, previewThumbUrl, removeFromCollection } from './api.js';
+import { emit, on, scopeParams, selection, selectionChanged, setImages, setRankingsMeta, viewState } from './state.js';
 import { loadScopePage } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
@@ -21,6 +21,7 @@ let groups = [];
 const imageIndexes = new Map();
 let observer = null;
 let imageObserver = null;
+let thumbnailPollTimer = 0;
 let menu = null;
 let savedScrollTop = 0;
 const expandedEvents = new Set();
@@ -105,8 +106,10 @@ function appendGroups(incoming) {
 
 function cellHtml(img, index) {
     const selected = selection.has(Number(img.id));
-    return `<figure class="cell ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
-        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+    const previewSrc = previewThumbUrl(img);
+    return `<figure class="cell ${previewSrc ? '' : 'preview-pending'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
+        + `<img data-preview-src="${esc(previewSrc)}" ${previewSrc ? `data-src="${esc(previewSrc)}"` : ''} loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+        + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span><span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span></figure>`;
 }
@@ -146,9 +149,15 @@ function renderSkeleton() {
         + '</div></div></div>';
 }
 
+function heroFor(group) {
+    const ranked = [...group.images].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0));
+    return ranked.find((image) => image.preview_ready !== false) || ranked[0];
+}
+
 function groupHtml(group, groupIndex) {
     const title = titleFor(group);
-    const hero = [...group.images].sort((a, b) => (Number(b.elo) || 0) - (Number(a.elo) || 0))[0];
+    const hero = heroFor(group);
+    const heroSrc = previewThumbUrl(hero, 'md');
     const expanded = expandedEvents.has(group.id) || group.images.length <= 18;
     const visibleTiles = (expanded ? group.images : group.images.slice(0, 18)).filter((img) => Number(img.id) !== Number(hero.id));
     const hidden = Math.max(0, group.images.length - visibleTiles.length - 1);
@@ -157,7 +166,7 @@ function groupHtml(group, groupIndex) {
         + `<span class="ev-dots" data-tip="Ranking coverage">${coverageDots(group)}</span><span class="ev-spacer"></span>`
         + `<button class="ev-menu-btn" data-menu="${groupIndex}" data-tip="Event actions" aria-label="Event actions">${icon('ellipsis')}</button></header>`
         + '<div class="event-body">'
-        + `<figure class="event-hero" data-id="${hero.id}"><img data-src="${esc(thumbUrl('md', hero.id))}" fetchpriority="low" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
+        + `<figure class="event-hero ${heroSrc ? '' : 'preview-pending'}" data-id="${hero.id}"><img data-preview-src="${esc(heroSrc)}" ${heroSrc ? `data-src="${esc(heroSrc)}"` : ''} fetchpriority="low" alt="${esc(hero.filename || '')}"><figcaption class="hero-cap"><span>${esc(hero.filename || '')}</span><span>${Math.round(Number(hero.elo) || 0)}</span></figcaption></figure>`
         + `<div class="event-tiles">${visibleTiles.map((img) => cellHtml(img, imageIndexes.get(Number(img.id)) ?? 0)).join('')}`
         + `${hidden > 0 ? `<button class="ev-more" data-expand="${groupIndex}">+${fmt(hidden)} more</button>` : ''}</div></div></article>`;
 }
@@ -191,6 +200,74 @@ function observeImages(root, { reset = false } = {}) {
     for (const img of root.querySelectorAll('img[data-src]')) {
         img.addEventListener('load', () => img.classList.add('ld'), { once: true });
         imageObserver.observe(img);
+    }
+}
+
+function stopThumbnailPoll() {
+    window.clearTimeout(thumbnailPollTimer);
+    thumbnailPollTimer = 0;
+}
+
+function pendingPreviewIds() {
+    return images
+        .filter((image) => image && image.preview_ready === false)
+        .map((image) => Number(image.id))
+        .filter((id) => id > 0);
+}
+
+function scheduleThumbnailPoll() {
+    if (!mounted || thumbnailPollTimer || !pendingPreviewIds().length) return;
+    thumbnailPollTimer = window.setTimeout(async () => {
+        thumbnailPollTimer = 0;
+        await refreshPendingPreviews();
+        scheduleThumbnailPoll();
+    }, 3000);
+}
+
+function loadSharpenedPreview(img, src) {
+    if (!img || !src) return;
+    img.addEventListener('load', () => img.classList.add('ld'), { once: true });
+    img.dataset.previewSrc = src;
+    img.dataset.src = src;
+    img.src = src;
+}
+
+function sharpenPreview(image) {
+    const id = Number(image?.id);
+    const known = images.find((item) => Number(item?.id) === id);
+    if (!id || !known || known.preview_ready) return false;
+    Object.assign(known, image);
+    const heroChanged = groups.some((group, groupIndex) => {
+        if (!group.images.some((item) => Number(item.id) === id)) return false;
+        const rendered = document.querySelector(`#events-flow .event-block[data-group="${groupIndex}"] .event-hero`);
+        return rendered && Number(rendered.dataset.id) !== Number(heroFor(group)?.id);
+    });
+    if (heroChanged) return true;
+    for (const cell of document.querySelectorAll(`#events-flow .cell[data-id="${id}"].preview-pending`)) {
+        cell.classList.remove('preview-pending');
+        loadSharpenedPreview(cell.querySelector('img[data-preview-src]'), previewThumbUrl(known));
+    }
+    for (const hero of document.querySelectorAll(`#events-flow .event-hero[data-id="${id}"].preview-pending`)) {
+        hero.classList.remove('preview-pending');
+        loadSharpenedPreview(hero.querySelector('img[data-preview-src]'), previewThumbUrl(known, 'md'));
+    }
+    return false;
+}
+
+async function refreshPendingPreviews() {
+    const ids = pendingPreviewIds();
+    if (!ids.length) return;
+    const params = scopeParams({ limit: Math.min(ids.length, 5000), offset: 0, sort: 'date_taken' });
+    params.set('ids', ids.join(','));
+    const data = await getRankings(params).catch(() => null);
+    if (!mounted || !Array.isArray(data?.images)) return;
+    let rerender = false;
+    for (const image of data.images) {
+        if (image.preview_ready) rerender = sharpenPreview(image) || rerender;
+    }
+    if (rerender) {
+        render();
+        setupSentinel();
     }
 }
 
@@ -243,6 +320,7 @@ async function loadPage() {
             renderAppendedGroups(appendGroups(incoming));
             setupSentinel();
         }
+        scheduleThumbnailPoll();
     } catch {
         if (seq !== generation) return;
         document.getElementById('events-flow').innerHTML = '<div class="load-error"><h4>Couldn\'t load events</h4><p>The archive did not respond.</p><button class="btn" id="events-retry">Try again</button></div>';
@@ -330,6 +408,7 @@ function openMenu(button, groupIndex) {
 }
 
 function resetData() {
+    stopThumbnailPoll();
     generation += 1;
     offset = 0;
     done = false;
@@ -430,6 +509,7 @@ export function mountEvents() {
     if (images.length) {
         observeImages(document.getElementById('events-flow'));
         setupSentinel();
+        scheduleThumbnailPoll();
         requestAnimationFrame(() => document.getElementById('canvas').scrollTo({ top: savedScrollTop, behavior: 'auto' }));
         revalidate();
     } else reload();
@@ -439,6 +519,7 @@ export function unmountEvents() {
     savedScrollTop = document.getElementById('canvas').scrollTop;
     mounted = false;
     generation += 1;
+    stopThumbnailPoll();
     closeMenu();
     if (observer) observer.disconnect();
     if (imageObserver) imageObserver.disconnect();

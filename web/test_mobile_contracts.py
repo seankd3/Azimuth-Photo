@@ -109,6 +109,17 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("coverId ? 'has-cover' : 'preview-pending'", months)
         self.assertNotIn("renderPreparingState", months)
 
+    def test_pending_photo_share_preview_does_not_synthesize_a_thumbnail(self):
+        sharing = self.read("static", "js", "mobile", "sharing.js")
+        photo_share = sharing[
+            sharing.index("export async function openPhotoShareSheet"):
+            sharing.index("function sharedUrl")
+        ]
+
+        self.assertIn("previewThumbUrl(image)", photo_share)
+        self.assertIn("m-share-photo-placeholder", photo_share)
+        self.assertNotIn("thumbUrl('sm', image.id)", photo_share)
+
     def test_info_sheet_rating_stays_bound_to_its_displayed_photo(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")
         info_sheet = viewer[viewer.index("function infoSheet()") :]

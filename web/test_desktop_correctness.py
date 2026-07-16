@@ -73,6 +73,59 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("scrollTop <= 160", timeline)
         self.assertIn("on('tab', (tab) =>", timeline)
 
+    def test_events_keep_pending_previews_off_the_thumbnail_decode_path(self):
+        events = read("events.js")
+        cell_html = events[events.index("function cellHtml"):events.index("function patchCells")]
+        group_html = events[events.index("function groupHtml"):events.index("function render()")]
+
+        self.assertIn("previewThumbUrl(img)", cell_html)
+        self.assertIn("preview-pending", cell_html)
+        self.assertIn("previewSrc ? `data-src=", cell_html)
+        self.assertIn("image.preview_ready !== false", events)
+        self.assertIn("previewThumbUrl(hero, 'md')", group_html)
+        self.assertIn("async function refreshPendingPreviews()", events)
+        self.assertIn("params.set('ids', ids.join(','));", events)
+        self.assertIn("stopThumbnailPoll();", events[events.index("export function unmountEvents"):])
+
+    def test_pending_preview_thumb_fallbacks_are_centralized_and_guarded(self):
+        allowed_progressive_exceptions = {
+            "desktop/loupe.js": {
+                "image.src = img.thumb_url || thumbUrl('sm', img.id);",
+            },
+            "mobile/viewer.js": {
+                "img.src = image.thumb_url || thumbUrl('sm', image.id);",
+            },
+        }
+        modules = WEB / "static" / "js"
+        violations = {}
+        for shell in ("desktop", "mobile"):
+            for path in sorted((modules / shell).rglob("*.js")):
+                relative = path.relative_to(modules).as_posix()
+                allowed = allowed_progressive_exceptions.get(relative, set())
+                unsafe = {
+                    line.strip()
+                    for line in path.read_text(encoding="utf-8").splitlines()
+                    if ".thumb_url" in line and "thumbUrl(" in line and line.strip() not in allowed
+                }
+                if unsafe:
+                    violations[relative] = sorted(unsafe)
+        self.assertEqual(violations, {})
+
+        desktop_api = read("api.js")
+        mobile_api = read_mobile("api.js")
+        for source in (desktop_api, mobile_api):
+            helper = source[source.index("export function previewThumbUrl"):]
+            helper = helper[:helper.index("\n}")]
+            self.assertIn("image.preview_ready === false", helper)
+            self.assertIn("return '';", helper)
+
+        timeline = read("timeline.js")
+        self.assertIn("previewThumbUrl(image)", timeline)
+        self.assertIn("preview-thumb-pending", timeline)
+        self.assertIn("function scheduleThumbnailPoll()", timeline)
+        for module in (read("omnibox.js"), read("loupe.js"), read("develop", "develop.js")):
+            self.assertIn("previewThumbUrl", module)
+
     def test_warm_events_revalidates_group_coverage_after_flags_change(self):
         events = read("events.js")
 

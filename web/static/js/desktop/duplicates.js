@@ -1,6 +1,6 @@
 import {
     createStack, getStackRebuildStatus, listStacks, rebuildStacks, restoreImages, setStackRepresentative,
-    thumbUrl, trashImages, unstack, writeFlags,
+    previewThumbUrl, thumbUrl, trashImages, unstack, writeFlags,
 } from './api.js';
 import { applyFlags } from './selection.js';
 import {
@@ -68,13 +68,14 @@ function currentFlag(image) {
 function mergeImage(image) {
     const id = Number(image?.id);
     const cached = byId.get(id) || {};
-    return {
+    const merged = {
         ...cached,
         ...image,
         id,
         flag: normalizeFlag(image?.flag || cached.flag),
-        thumb_url: image?.thumb_url || cached.thumb_url || thumbUrl('sm', id),
     };
+    merged.thumb_url = previewThumbUrl(merged);
+    return merged;
 }
 
 function normalizedExt(image) {

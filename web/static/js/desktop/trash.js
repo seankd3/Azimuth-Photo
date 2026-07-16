@@ -1,4 +1,4 @@
-import { emptyTrash, getTrash, restoreImages, thumbUrl, trashImages } from './api.js';
+import { emptyTrash, getTrash, previewThumbUrl, restoreImages, trashImages } from './api.js';
 import {
     byId, clearSelection, emit, on, selection, selectionChanged, setActiveLens,
 } from './state.js';
@@ -174,8 +174,9 @@ function cellHtml(img, index) {
     const id = Number(img.id);
     const flag = img.flag || 'unflagged';
     const pending = Boolean(img.pending_hub);
+    const previewSrc = previewThumbUrl(img);
     return `<figure class="cell trash-cell ${pending ? 'pending-hub' : ''} ${selection.has(id) ? 'sel' : ''} ${index === trashFocusIndex ? 'kb-focus' : ''}" data-id="${id}" data-idx="${index}" tabindex="${index === trashFocusIndex ? '0' : '-1'}" style="--ar:${aspect(img)}">`
-        + `<img src="${esc(img.thumb_url || thumbUrl('sm', id))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">`
+        + (previewSrc ? `<img src="${esc(previewSrc)}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">` : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
         + `<span class="trash-thumb-fallback" hidden>${icon('image')}<span>${esc(img.filename || 'Photo preview unavailable')}</span></span>`
         + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`

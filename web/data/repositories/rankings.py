@@ -2036,6 +2036,7 @@ async def map_markers(
                 "filename": row["filename"],
                 "lat": row["latitude"],
                 "lng": row["longitude"],
+                "preview_ready": True,
                 "thumb_url": f"/api/thumb/sm/{row['id']}",
             }
             for row in await cursor.fetchall()

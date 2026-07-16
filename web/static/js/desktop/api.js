@@ -69,6 +69,12 @@ export function thumbUrl(size, imageId) {
     return `/api/thumb/${size}/${imageId}`;
 }
 
+export function previewThumbUrl(image, size = 'sm') {
+    if (!image || image.preview_ready === false) return '';
+    if (size === 'sm' && image.thumb_url) return image.thumb_url;
+    return thumbUrl(size, image.id);
+}
+
 export async function getRankings(params, options = {}) {
     return fetchJson(`/api/rankings?${params.toString()}`, { defaultValue: null, ...options });
 }
