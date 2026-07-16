@@ -11,6 +11,7 @@ from data.repositories import stacks as stack_repository
 from features.media import routes as media_routes
 from features.sync import contract
 from features.sync.sync_worker import SyncWorker
+from features.develop import virtual_copies
 from features.trash import service as trash_service
 from features.trash import remote as trash_remote
 
@@ -604,3 +605,98 @@ class TrashTests(BackendTestCase):
         self.assertEqual(row["status"], "trashed")
         self.assertIsNotNone(row["trashed_at"])
         self.assertIsNone(row["trash_path"])
+
+
+class VirtualCopyTrashTests(BackendTestCase):
+    async def _source_root(self):
+        source = await self._source("catalog")
+        return source, source["path"]
+
+    async def _file_image(self, source, relpath, *, data=b"photo bytes", elo=1200.0):
+        filepath = os.path.join(source["path"], relpath)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        with open(filepath, "wb") as handle:
+            handle.write(data)
+        conn = await db.get_db()
+        try:
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, elo, comparisons, propagated_updates, status, file_ext, file_size) "
+                "VALUES (?, ?, ?, ?, 0, 0, 'kept', ?, ?)",
+                (
+                    int(source["id"]),
+                    os.path.basename(filepath),
+                    filepath,
+                    float(elo),
+                    os.path.splitext(filepath)[1].lower().lstrip("."),
+                    len(data),
+                ),
+            )
+            await db._update_source_counts(conn, int(source["id"]))
+            await conn.commit()
+            image_id = int(cursor.lastrowid)
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        return image_id, filepath
+
+    async def _master_with_copy(self):
+        source, _root = await self._source_root()
+        image_id, filepath = await self._file_image(source, "vc-master.jpg", data=b"vc bytes")
+        conn = await db.get_db()
+        copy = await virtual_copies.create_virtual_copy(conn, image_id)
+        await conn.commit()
+        return image_id, int(copy["id"]), filepath
+
+    async def test_trashing_master_takes_virtual_copies_catalog_only(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        result = await trash_service.trash_images(db.DB_PATH, [master_id])
+        self.assertIn(master_id, result["trashed"])
+        self.assertIn(copy_id, result["trashed"])
+        conn = await db.get_db()
+        rows = await (await conn.execute(
+            "SELECT id, status, trash_path FROM images WHERE id IN (?, ?)",
+            (master_id, copy_id),
+        )).fetchall()
+        by_id = {int(row["id"]): dict(row) for row in rows}
+        self.assertEqual(by_id[master_id]["status"], "trashed")
+        self.assertEqual(by_id[copy_id]["status"], "trashed")
+        self.assertTrue(by_id[master_id]["trash_path"])
+        self.assertIsNone(by_id[copy_id]["trash_path"])
+        self.assertFalse(os.path.exists(filepath))
+
+    async def test_trashing_a_virtual_copy_keeps_the_master_file(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        result = await trash_service.trash_images(db.DB_PATH, [copy_id])
+        self.assertEqual(result["errors"], [])
+        self.assertIn(copy_id, result["trashed"])
+        self.assertNotIn(master_id, result["trashed"])
+        self.assertTrue(os.path.exists(filepath))
+        conn = await db.get_db()
+        row = await (await conn.execute(
+            "SELECT status FROM images WHERE id = ?", (master_id,)
+        )).fetchone()
+        self.assertEqual(row["status"], "kept")
+
+    async def test_restoring_a_virtual_copy_restores_its_master_and_file(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        await trash_service.trash_images(db.DB_PATH, [master_id])
+        self.assertFalse(os.path.exists(filepath))
+        result = await trash_service.restore_images(db.DB_PATH, [copy_id])
+        self.assertIn(copy_id, result["restored"])
+        self.assertIn(master_id, result["restored"])
+        self.assertEqual(result["warnings"], [])
+        self.assertTrue(os.path.exists(filepath))
+
+    async def test_empty_trash_purges_family_without_double_delete(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        await trash_service.trash_images(db.DB_PATH, [master_id])
+        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[master_id, copy_id])
+        self.assertEqual(result["errors"], [])
+        conn = await db.get_db()
+        count = await (await conn.execute(
+            "SELECT COUNT(*) AS n FROM images WHERE id IN (?, ?)",
+            (master_id, copy_id),
+        )).fetchone()
+        self.assertEqual(int(count["n"]), 0)
+        self.assertFalse(os.path.exists(filepath))
