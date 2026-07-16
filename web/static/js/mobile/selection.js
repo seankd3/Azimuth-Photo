@@ -285,11 +285,33 @@ export function exportImages(ids, format = 'csv', size = '') {
         showToast(`Zip export tops out at ${ZIP_EXPORT_MAX.toLocaleString('en-US')} photos`);
         return;
     }
+    if (format !== 'zip') {
+        // Data exports are small — fetch so a server failure toasts honestly
+        // instead of the anchor saving an error body as the export file.
+        void (async () => {
+            showToast(`Exporting ${ids.length} photos…`);
+            try {
+                const response = await fetch(exportUrl(ids, format, size));
+                if (!response.ok) throw new Error('export failed');
+                const url = URL.createObjectURL(await response.blob());
+                const anchor = document.getElementById('m-dl');
+                anchor.href = url;
+                anchor.download = `azimuth-photo-export.${format}`;
+                anchor.click();
+                setTimeout(() => URL.revokeObjectURL(url), 30_000);
+            } catch {
+                showToast("Couldn't export — try again");
+            }
+        })();
+        return;
+    }
+    // Zips stream through the browser's download UI — buffering them in a blob
+    // would be worse than the residual silent-failure window.
     const anchor = document.getElementById('m-dl');
     anchor.href = exportUrl(ids, format, size);
-    anchor.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
+    anchor.download = 'azimuth-photo-export.zip';
     anchor.click();
-    showToast(format === 'zip' ? `Preparing ${ids.length} files…` : `Exporting ${ids.length} photos…`);
+    showToast(`Preparing ${ids.length} files…`);
 }
 
 /* ---------- selection bar ---------- */

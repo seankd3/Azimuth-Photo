@@ -33,11 +33,18 @@ function loadQueue() {
     }
 }
 
+let storageWarned = false;
+
 function saveQueue() {
     try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(queue));
     } catch {
-        // The current optimistic state still works if storage is unavailable.
+        // The current optimistic state still works, but a reload would drop
+        // the queued changes — say so once instead of pretending durability.
+        if (!storageWarned && queue.length) {
+            storageWarned = true;
+            showToast("Storage is full — changes may not survive a reload");
+        }
     }
 }
 
