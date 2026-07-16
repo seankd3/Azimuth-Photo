@@ -1895,6 +1895,7 @@ async def map_markers(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
 ) -> dict:
     if int(catalog_counts.get("active_images") or 0) <= 0:
         return empty_map_markers()
@@ -1913,6 +1914,7 @@ async def map_markers(
         tag=tag,
         caption_model_key=caption_model_key,
         text_query=text_query,
+        collection_id=collection_id,
         include_source=not all_sources_available,
     )
     if id_filter is not None:
@@ -1925,7 +1927,7 @@ async def map_markers(
     gps_conditions = conditions + ["i.latitude IS NOT NULL", "i.longitude IS NOT NULL"]
     gps_image_source = (
         "images i INDEXED BY idx_images_active_filepath_elo"
-        if has_absolute_folder_range(folder) and id_filter is None and not text_query
+        if has_absolute_folder_range(folder) and id_filter is None and not text_query and not collection_id
         else "images i INDEXED BY idx_images_active_gps_count"
     )
     conn = await connection.open_async(db_path)
@@ -2039,6 +2041,7 @@ async def map_markers_cached(
     cache_root: str = "",
     id_filter: set | None = None,
     text_query: str = "",
+    collection_id: int = 0,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
 ):
     cache_key = facet_cache_key(
@@ -2057,6 +2060,7 @@ async def map_markers_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     now = _time.time()
     cached = _map_markers_cache.get(cache_key) if cache_key is not None else None
@@ -2086,6 +2090,7 @@ async def map_markers_cached(
         tag=tag,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     if not has_filters:
         total_count = active_images
@@ -2103,6 +2108,7 @@ async def map_markers_cached(
             tag=tag,
             id_filter=id_filter,
             text_query=text_query,
+            collection_id=collection_id,
         )
 
     visible_total_count = total_count
@@ -2126,6 +2132,7 @@ async def map_markers_cached(
                 visible_thumb_size=visible_thumb_size,
                 cache_root=cache_root,
                 text_query=text_query,
+                collection_id=collection_id,
             )
 
     result = await map_markers(
@@ -2148,6 +2155,7 @@ async def map_markers_cached(
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
     )
     if cache_key is not None:
         _map_markers_cache[cache_key] = {

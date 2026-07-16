@@ -153,6 +153,15 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("scopeParams({ limit: SCOPE_PAGE_LIMIT", cull_brief)
         self.assertIn("getFilterOptions(scopeParams())", filters)
 
+    async def test_map_uses_the_server_resolved_scope(self):
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "static", "js", "desktop", "map.js"), encoding="utf-8") as fh:
+            map_module = fh.read()
+
+        self.assertIn("await getMapMarkers(scopeParams())", map_module)
+        self.assertNotIn("loadCollectionMarkers", map_module)
+        self.assertNotIn("getCollection,", map_module)
+
     async def test_develop_history_refresh_bypasses_the_empty_pre_save_cache(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "desktop", "develop", "history_panel.js"), encoding="utf-8") as fh:

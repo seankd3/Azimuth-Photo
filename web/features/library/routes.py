@@ -167,7 +167,7 @@ async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, request: Request = None,
+    import_batch: int = 0, collection_id: int = 0, request: Request = None,
 ):
     """Return images with GPS data for map display."""
     return await library_service.map_markers_payload(
@@ -185,6 +185,7 @@ async def api_map_markers(
         q=q,
         import_batch=import_batch,
         deep=deep,
+        collection_id=collection_id,
     )
 
 

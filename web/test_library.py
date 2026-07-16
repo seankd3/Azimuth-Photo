@@ -1350,6 +1350,45 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(histogram["months"], [{"month": "2025-04", "count": 1, "cover_id": picked}])
         self.assertEqual(histogram["total"], 1)
 
+    async def test_smart_collection_map_markers_compose_with_flag_filter(self):
+        source = await self._source()
+        scoped_picked = await self._image(source["id"], "smart-map-picked.jpg")
+        scoped_rejected = await self._image(source["id"], "smart-map-rejected.jpg")
+        outside_picked = await self._image(source["id"], "outside-map-picked.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET latitude = ?, longitude = ?, camera_make = ?, camera_model = ?, flag = ? WHERE id = ?",
+                [
+                    (45.0, -93.0, "Fuji", "X-T5", "picked", scoped_picked),
+                    (46.0, -94.0, "Fuji", "X-T5", "rejected", scoped_rejected),
+                    (47.0, -95.0, "Canon", "R5", "picked", outside_picked),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        await self._cache_entry(scoped_picked, "sm")
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Fuji map scope",
+                query={"camera": "Fuji X-T5", "sort": "elo"},
+            )
+        )
+
+        grid = await library_routes.api_rankings(
+            limit=10,
+            flag="picked",
+            collection_id=smart["collection"]["id"],
+        )
+        markers = await library_routes.api_map_markers(
+            flag="picked",
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual([image["id"] for image in grid["images"]], [scoped_picked])
+        self.assertEqual([marker["id"] for marker in markers["markers"]], [scoped_picked])
+
     async def test_smart_collection_scope_constrains_filter_options(self):
         source = await self._source()
         picked = await self._image(source["id"], "smart-filter-picked.jpg")
