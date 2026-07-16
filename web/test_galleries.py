@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import sqlite3
+import time
 import unittest
 import zipfile
 from pathlib import Path
@@ -100,17 +101,36 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(created.status_code, 200, created.text)
         self.assertIn("/s/gallery/", created.json()["gallery"]["url"])
         self.assertEqual(locked.status_code, 200)
-        self.assertIn("password protected", locked.text)
+        self.assertIn("lock-card", locked.text)
+        self.assertIn("lock-card", locked.text)
         self.assertEqual(wrong.status_code, 303)
         self.assertEqual(unlocked.status_code, 200)
         self.assertIn("Password gallery", unlocked.text)
-        self.assertIn('data-layout="slideshow"', unlocked.text)
+        self.assertIn('id="gallery-data"', unlocked.text)
+        self.assertIn("brand-line", unlocked.text)
         self.assertNotIn('id="download-all"', unlocked.text)
         self.assertEqual(thumb.status_code, 200)
         self.assertEqual(good_download.status_code, 200)
         self.assertEqual(good_download.content, f"md-{first}".encode("ascii"))
         self.assertEqual(blocked_download.status_code, 404)
         self.assertEqual(zip_blocked.status_code, 404)
+
+    async def test_client_gallery_lock_throttle_uses_shared_lock_copy(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH, collection_id=collection["id"], title="Protected",
+            image_ids=[first], options={}, password_hash=gallery_routes.auth.hash_password("open-sesame"),
+        )
+        gallery_routes._unlock_failures[gallery["token"]] = (5, time.time())
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.post(f"/s/gallery/{gallery['token']}/unlock", data={"password": "wrong"})
+
+        response = await asyncio.to_thread(probe)
+        self.assertEqual(response.status_code, 429)
+        self.assertIn("Too many tries. Please wait about", response.text)
+        self.assertIn("lock-card", response.text)
 
     async def test_tokened_gallery_media_never_enters_shared_caches(self):
         collection, first, _second = await self._collection()
