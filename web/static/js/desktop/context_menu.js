@@ -83,7 +83,7 @@ async function batchDevelopExport(ids) {
 function render() {
     const count = target.ids.length;
     menu.innerHTML = '<div class="pm-group">'
-        + `<button data-act="pick">${icon('star')} Pick</button>`
+        + `<button data-act="pick">${icon('flag')} Pick</button>`
         + `<button data-act="reject">${icon('x')} Reject</button>`
         + `<button data-act="unflag">${icon('circle')} Clear flag</button>`
         + '</div><div class="pm-group">'

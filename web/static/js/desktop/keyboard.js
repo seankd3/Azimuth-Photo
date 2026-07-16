@@ -471,7 +471,7 @@ export function initKeyboard() {
             const rating = Number(event.key);
             const next = Number(scope.min_stars || 0) === rating ? '' : rating;
             patchScope({ min_stars: next });
-            showToast(next ? `Rating ${rating}+` : 'Rating filter cleared');
+            showToast(next ? `Elo ${rating}+` : 'Elo filter cleared');
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();
