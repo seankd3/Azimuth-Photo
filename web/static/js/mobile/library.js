@@ -4,9 +4,9 @@
 // each member's ranking signals.
 
 import {
-    createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
+    createCollection, deleteCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
     getFoldersTree, getPeopleStatus, listCollections,
-    setBackgroundWork, thumbUrl, writeFailureMessage,
+    renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { nav, on, setScope, clearScope } from './state.js';
 import { canInstall, promptInstall } from './install.js';
@@ -14,7 +14,7 @@ import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { applyFlags } from './flags.js';
 import { icon } from '../icons.js';
-import { renderSharedView } from './sharing.js';
+import { openCollectionShareSheet, renderSharedView } from './sharing.js';
 import { offlineSummary, openOfflineStatusSheet } from './offline.js';
 import { renderBackupView, stopBackupView } from './backup.js';
 
@@ -672,6 +672,61 @@ function openCollectionView(coll) {
 
 export function popCollectionView() {
     return false;
+}
+
+/** Rename / share / delete for the collection currently open as a timeline scope. */
+export function openCollectionActionsSheet(coll) {
+    const sheet = openSheet(
+        `<h3>${esc(coll.name)}</h3>`
+        + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
+        + '<button class="sheet-btn" id="ml-rename-save" data-mutating>Save name</button>'
+        + `<button class="sheet-row" id="ml-share"><span class="g">${icon('share-2')}</span>Share link</button>`
+        + `<button class="sheet-row" id="ml-delete" data-mutating><span class="g">${icon('trash-2')}</span>Delete collection</button>`
+        + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
+    );
+    const input = sheet.querySelector('#ml-rename-name');
+    input.value = coll.name || '';
+    sheet.querySelector('#ml-rename-save').addEventListener('click', () => {
+        const next = input.value.trim();
+        if (!next || next === coll.name) return;
+        dismissSheetThen(async () => {
+            const result = await renameCollection(coll.id, next);
+            if (result && result.ok) {
+                showToast(`Renamed to \u201c${next}\u201d`);
+                collections = null;
+                setScope({ collectionId: String(coll.id), label: next });
+                document.dispatchEvent(new CustomEvent('collections-changed'));
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
+    });
+    sheet.querySelector('#ml-share')?.addEventListener('click', () => openCollectionShareSheet(coll));
+    const deleteButton = sheet.querySelector('#ml-delete');
+    const confirm = sheet.querySelector('#ml-delete-confirm');
+    deleteButton.addEventListener('click', () => {
+        deleteButton.hidden = true;
+        confirm.hidden = false;
+        confirm.querySelector('[data-yes]')?.focus();
+    });
+    confirm.querySelector('[data-no]')?.addEventListener('click', () => {
+        confirm.hidden = true;
+        deleteButton.hidden = false;
+    });
+    confirm.querySelector('[data-yes]')?.addEventListener('click', () => {
+        dismissSheetThen(async () => {
+            const result = await deleteCollection(coll.id);
+            if (result && result.ok) {
+                showToast('Collection deleted \u2014 photos stay in your library');
+                collections = null;
+                clearScope();
+                nav.setTab('library');
+                document.dispatchEvent(new CustomEvent('collections-changed'));
+            } else {
+                showToast(writeFailureMessage());
+            }
+        });
+    });
 }
 
 export function initLibrary() {

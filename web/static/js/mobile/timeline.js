@@ -18,6 +18,7 @@ import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 import { openPersonSheet } from './search.js';
+import { openCollectionActionsSheet } from './library.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -832,6 +833,22 @@ function renderScopeBar() {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }
     bar.innerHTML = html;
+    const collectionChip = bar.querySelector('.chip-x[data-clear="collectionId"]')?.closest('.chip');
+    if (collectionChip) {
+        collectionChip.setAttribute('role', 'button');
+        collectionChip.tabIndex = 0;
+        const openCollectionActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openCollectionActionsSheet({ id: scope.collectionId, name: scope.label || 'Collection' });
+        };
+        collectionChip.addEventListener('click', openCollectionActions);
+        collectionChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openCollectionActions(event);
+            }
+        });
+    }
     const personChip = bar.querySelector('.chip-x[data-clear="people"]')?.closest('.chip');
     if (personChip) {
         personChip.setAttribute('role', 'button');
