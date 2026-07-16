@@ -28,6 +28,8 @@ let activityTimer = null;
 let installTimer = null;
 let scanTimer = null;
 let scanSourceId = null;
+let installTimerGeneration = 0;
+let scanTimerGeneration = 0;
 let catalog = null;
 let aiStatus = null;
 let cacheStatus = null;
@@ -169,7 +171,7 @@ function normalizeSettingValue(field, value) {
     return String(value == null ? '' : value);
 }
 
-async function applySetting(field, value, { patch = null, undoPatch = null } = {}) {
+async function applySetting(field, value, { patch = null, undoPatch = null, control = null } = {}) {
     const next = normalizeSettingValue(field, value);
     const previous = savedSettings[field];
     const payload = patch || { [field]: next };
@@ -192,7 +194,8 @@ async function applySetting(field, value, { patch = null, undoPatch = null } = {
         },
     });
     renderActivity();
-    renderCurrentSystemSurface();
+    if (control && document.activeElement === control) patchSettingSurface(field);
+    else renderCurrentSystemSurface();
     if (field === 'publish_dir' && publishReturn && String(next).trim()) {
         showToast('Publishing folder saved');
         returnToPublish();
@@ -841,9 +844,16 @@ function renderMetadataSettings() {
 function publishingStatusNote() {
     const folder = String(settingValue('publish_dir') || '').trim();
     if (!folder) {
-        return '<div class="setting-status warn">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
+        return '<div class="setting-status warn" data-setting-status="publishing">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
     }
-    return `<div class="setting-status">Writing galleries to <code>${esc(folder)}</code></div>`;
+    return `<div class="setting-status" data-setting-status="publishing">Writing galleries to <code>${esc(folder)}</code></div>`;
+}
+
+function publishingStatusLine() {
+    const folder = String(settingValue('publish_dir') || '').trim();
+    return folder
+        ? `Writing galleries to ${folder}`
+        : 'Publishing is off until a Gallery folder is set. Empty folder disables Publish.';
 }
 
 function updateDrawerContext() {
@@ -1054,6 +1064,16 @@ function patchDrawerStatus(workerGenerations = null) {
     if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
 }
 
+function patchSettingSurface(field) {
+    patchDrawerStatus();
+    if (field === 'publish_dir') {
+        const body = systemSurfaceRender
+            ? document.getElementById('system-lens-content')
+            : document.getElementById('drawer-body');
+        if (body) patchNodeText(body, '[data-setting-status="publishing"]', publishingStatusLine());
+    }
+}
+
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
     const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
@@ -1092,11 +1112,15 @@ async function refreshDrawer({ initial = false } = {}) {
 }
 
 async function pollScanUntilDone(sourceId) {
+    const generation = ++scanTimerGeneration;
+    let scanning = true;
     scanSourceId = Number(sourceId) || null;
     clearInterval(scanTimer);
     const tick = async () => {
         const status = await getScanStatus().catch(() => null);
+        if (generation !== scanTimerGeneration) return;
         if (!status || !status.scanning) {
+            scanning = false;
             clearInterval(scanTimer);
             scanTimer = null;
             scanSourceId = null;
@@ -1111,6 +1135,7 @@ async function pollScanUntilDone(sourceId) {
         if (progressEl) progressEl.textContent = `Scanning · ${fmt(status.total_found || status.total_inserted || 0)} photos found · thumbnails appear as they’re ready`;
     };
     await tick();
+    if (generation !== scanTimerGeneration || !scanning) return;
     scanTimer = setInterval(tick, 1000);
     renderCurrentSystemSurface();
 }
@@ -1182,6 +1207,8 @@ function bindSettingInputs(body) {
     for (const input of body.querySelectorAll('[data-setting-field]')) {
         const field = input.dataset.settingField;
         const save = () => {
+            const pending = settingTimers.get(input);
+            if (pending) clearTimeout(pending.timer);
             settingTimers.delete(input);
             if (!input.validity.valid) {
                 const validation = input.closest('.setting-row')?.querySelector('.setting-validation');
@@ -1200,12 +1227,13 @@ function bindSettingInputs(body) {
                 return;
             }
             const patch = field === 'caption_model_preset' ? captionPresetConfig(value) : null;
-            applySetting(field, value, { patch });
+            return applySetting(field, value, { patch, control: input });
         };
-        if (input.type === 'text') {
+        if (input.type === 'text' || input.type === 'number') {
             input.addEventListener('input', () => {
-                clearTimeout(settingTimers.get(input));
-                settingTimers.set(input, setTimeout(save, 600));
+                const pending = settingTimers.get(input);
+                if (pending) clearTimeout(pending.timer);
+                settingTimers.set(input, { timer: setTimeout(save, 600), save });
             });
             input.addEventListener('blur', save);
             input.addEventListener('keydown', (event) => {
@@ -1281,9 +1309,11 @@ function aiInstallActive(status = aiStatus || {}) {
 }
 
 function pollModelInstall() {
+    const generation = ++installTimerGeneration;
     clearInterval(installTimer);
     const tick = async () => {
         const status = await getAiStatus();
+        if (generation !== installTimerGeneration) return;
         if (status) aiStatus = status;
         renderActivity();
         if (open) patchDrawerStatus();
@@ -1294,6 +1324,19 @@ function pollModelInstall() {
     };
     tick();
     installTimer = setInterval(tick, 1500);
+}
+
+export function suspendSystemTimers() {
+    scanTimerGeneration += 1;
+    clearInterval(scanTimer);
+    scanTimer = null;
+    scanSourceId = null;
+    installTimerGeneration += 1;
+    clearInterval(installTimer);
+    installTimer = null;
+    const pendingSaves = [...settingTimers.values()];
+    for (const pending of pendingSaves) clearTimeout(pending.timer);
+    return Promise.all(pendingSaves.map((pending) => pending.save()));
 }
 
 async function saveAndInstallModel() {
@@ -1556,25 +1599,11 @@ function stopDrawerPolling() {
 }
 
 function resolvePublishReturnTarget() {
-    const title = document.querySelector('#publish-overlay #publish-title')?.textContent || '';
-    const name = title.replace(/^Publish\s+/, '').trim() || 'Collection';
-    const sharedRow = Array.from(document.querySelectorAll('.shared-row'))
-        .find((row) => (row.dataset.name || '') === name);
-    if (sharedRow?.dataset.collectionId) {
-        return { collectionId: Number(sharedRow.dataset.collectionId), name };
-    }
-    const collRow = Array.from(document.querySelectorAll('.coll-row'))
-        .find((row) => (row.dataset.collName || '') === name);
-    if (collRow?.dataset.collId) {
-        return { collectionId: Number(collRow.dataset.collId), name };
-    }
-    if (scope.collectionId && (scope.collectionName || '') === name) {
-        return { collectionId: Number(scope.collectionId), name };
-    }
-    if (scope.collectionId) {
-        return { collectionId: Number(scope.collectionId), name: scope.collectionName || name };
-    }
-    return { collectionId: 0, name };
+    const overlay = document.getElementById('deliver-overlay');
+    return {
+        collectionId: Number(overlay?.dataset.collectionId) || 0,
+        name: overlay?.dataset.collectionName || 'Collection',
+    };
 }
 
 export function openPublishingSettings({ returnTo = null } = {}) {
@@ -1647,12 +1676,14 @@ export function initDrawer() {
         }
     });
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('#publish-open-settings');
+        const button = event.target.closest('#publish-open-settings, [data-deliver-open-settings]');
         if (!button) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const returnTo = resolvePublishReturnTarget();
-        document.getElementById('publish-close')?.click();
+        if (button.matches('[data-deliver-open-settings]')) {
+            document.querySelector('#deliver-overlay #deliver-close')?.click();
+        } else document.getElementById('publish-close')?.click();
         openPublishingSettings({ returnTo });
     }, true);
     on('thumbsize', () => {
