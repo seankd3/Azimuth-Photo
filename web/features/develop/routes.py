@@ -340,6 +340,16 @@ async def _load_settings(image_id: int) -> dict[str, Any] | None:
         await connection.close_async(conn, db_path=_configured_db_path())
 
 
+async def _preview_orientation(image_id: int) -> int:
+    """Return the discrete orientation the full Develop geometry pass will use."""
+    row = await _load_settings(image_id)
+    try:
+        orientation = int(_json_settings(row["settings"] if row else "{}").get("Orientation", 1))
+    except (TypeError, ValueError):
+        return 1
+    return orientation if orientation in (3, 6, 8) else 1
+
+
 async def _history(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(_configured_db_path())
     try:
@@ -600,7 +610,15 @@ async def api_develop_base_jpg(image_id: int):
             return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
-    return FileResponse(paths.preview, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+    orientation = await _preview_orientation(image_id)
+    return FileResponse(
+        paths.preview,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "X-Develop-Orientation": str(orientation),
+        },
+    )
 
 
 @router.post("/api/develop/{image_id}/auto")

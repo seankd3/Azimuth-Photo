@@ -443,6 +443,7 @@ class DevelopBackendTests(unittest.TestCase):
 
     def test_base_endpoints_and_pregen_contract(self):
         self._write_cached_base()
+        self.client.put(f"/api/develop/{self.raw_id}", json={"settings": {"Orientation": 3}})
         # A warm preview must be a pure disk response: the route may not enter
         # the RAW decoder before the browser gets its first visible image.
         with mock.patch.object(rawproc, "ensure_base_cache", side_effect=AssertionError("must not decode warm base")):
@@ -457,6 +458,7 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual((width, height, parsed.dtype), (1, 1, np.dtype("<u2")))
         self.assertEqual(preview.status_code, 200)
         self.assertEqual(preview.headers["content-type"], "image/jpeg")
+        self.assertEqual(preview.headers["x-develop-orientation"], "3")
         self.assertEqual(pregen.status_code, 202)
         self.assertEqual(pregen.json()["queued"], [])
 

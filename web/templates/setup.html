@@ -514,16 +514,7 @@
 
     finishBtn.addEventListener('click', async () => {
         try { await fetch('/api/setup/complete', { method: 'POST' }); } catch {}
-        // Never land on an empty grid: give the scan's final commit a moment
-        // to become visible before the library's first query.
-        for (let attempt = 0; attempt < 10; attempt++) {
-            try {
-                const peek = await json('/api/rankings?limit=1&_setup=' + attempt);
-                if (peek.images && peek.images.length) break;
-            } catch {}
-            await new Promise(r => setTimeout(r, 400));
-        }
-        window.location.href = '/d';
+        window.location.assign('/d');
     });
 })();
 </script>
