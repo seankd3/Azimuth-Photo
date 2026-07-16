@@ -2,11 +2,11 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    clearFacet, emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
-import { scopeTokenHtml } from './contextbar.js';
+import { scopeTokenFacetKey, scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
     requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
@@ -1043,7 +1043,8 @@ export function initOmnibox() {
         } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
             event.preventDefault();
             if (tokenSelected) {
-                navigateToScope({});
+                const facet = scopeTokenFacetKey();
+                if (facet) clearFacet(facet);
                 setTokenSelected(false);
                 input.focus();
                 hot = -1;
