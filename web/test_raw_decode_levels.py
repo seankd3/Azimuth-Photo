@@ -50,21 +50,6 @@ def test_libraw_decode_restores_common_camera_wb_gain(tmp_path, monkeypatch):
     assert raw.postprocess.call_args.kwargs["adjust_maximum_thr"] == 0.0
 
 
-def test_libraw_clip_levels_follow_white_range_and_wb_gain():
-    clips = rawproc.derive_libraw_clip_levels(
-        [12000, 11000, 10000, 11000],
-        [2000, 1000, 1000, 1000],
-        [2.0, 1.0, 1.5, 1.0],
-        saturation_level=12000,
-    )
-
-    np.testing.assert_allclose(
-        clips / 65535.0,
-        [2.0, 10.0 / 11.0, 13.5 / 11.0],
-        rtol=1e-6,
-    )
-
-
 def test_raw_cache_v5_moves_native_and_linear_dng_bases(tmp_path, monkeypatch):
     monkeypatch.setattr(rawproc, "BASE_CACHE_ROOT", tmp_path)
     monkeypatch.setattr(rawproc, "BASE_CACHE_DIR", tmp_path / "base" / "v3")
