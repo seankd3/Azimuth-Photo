@@ -220,11 +220,6 @@ function hiddenPendingThumbnailCount(data) {
     return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
 }
 
-function pendingNoticeCopy(count) {
-    const photos = `${count.toLocaleString('en-US')} photo${count === 1 ? '' : 's'}`;
-    return `${photos} ${count === 1 ? 'is' : 'are'} preparing previews — they appear as they’re ready.`;
-}
-
 function cachePregenPaused(status) {
     return Boolean(status?.pregen?.manual_pause);
 }
@@ -233,11 +228,11 @@ function appendPausedPreviewHint(target) {
     if (!target || target.querySelector('.grid-pending-paused')) return;
     const hint = document.createElement('span');
     hint.className = 'grid-pending-paused';
-    hint.append(' Previews are paused — resume in ');
+    hint.append('Preview engine is paused — ');
     const system = document.createElement('button');
     system.type = 'button';
     system.className = 'grid-pending-system';
-    system.textContent = 'System';
+    system.textContent = 'Resume';
     system.addEventListener('click', () => openSystemSettings());
     hint.append(system, '.');
     target.append(hint);
@@ -259,16 +254,11 @@ function renderPendingThumbnailNotice() {
         existing?.remove();
         return;
     }
-    if (existing) {
-        existing.querySelector('.grid-pending-copy').textContent = pendingNoticeCopy(count);
-        return;
-    }
+    if (existing) return;
     const notice = document.createElement('div');
     notice.id = 'grid-pending-notice';
     notice.className = 'grid-pending-notice';
     notice.setAttribute('role', 'status');
-    notice.innerHTML = '<span class="grid-pending-spinner" aria-hidden="true"></span><span class="grid-pending-copy"></span>';
-    notice.querySelector('.grid-pending-copy').textContent = pendingNoticeCopy(count);
     flow.append(notice);
     loadPausedPreviewHint(notice);
 }

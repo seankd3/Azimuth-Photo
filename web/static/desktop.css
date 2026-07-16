@@ -424,12 +424,11 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 
 #grid-sentinel { width: 100%; height: 2px; }
 .grid-end { text-align: center; color: var(--text-3); font-size: 12px; padding: var(--s5) 0 calc(var(--s5) * 2); }
-.grid-pending-notice { display: flex; align-items: center; justify-content: center; gap: 7px; width: 100%; padding: var(--s5) 0 var(--s3); color: var(--text-3); font-size: 12px; text-align: center; }
-.grid-pending-spinner { width: 11px; height: 11px; flex: 0 0 auto; border: 1.5px solid color-mix(in srgb, var(--text-3) 38%, transparent); border-top-color: var(--text-3); border-radius: 50%; animation: grid-pending-spin .75s linear infinite; }
+.grid-pending-notice { display: flex; align-items: center; justify-content: center; width: 100%; padding: var(--s5) 0 var(--s3); color: var(--text-3); font-size: 12px; text-align: center; }
+.grid-pending-notice:empty { display: none; }
 .grid-pending-paused { white-space: nowrap; }
 .grid-pending-system { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
 .grid-pending-system:hover, .grid-pending-system:focus-visible { color: var(--text); }
-@keyframes grid-pending-spin { to { transform: rotate(360deg); } }
 .load-error { margin: var(--s5) auto; max-width: 460px; padding: var(--s4) var(--s5); border: 1px solid var(--line); border-left: 2px solid var(--warn); border-radius: var(--r-card); background: var(--panel); }
 .load-error h4 { font-size: var(--fs-body); margin-bottom: 4px; }
 .load-error p { color: var(--text-2); font-size: var(--fs-ui); margin-bottom: var(--s3); }
