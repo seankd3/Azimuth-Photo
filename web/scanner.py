@@ -5,8 +5,10 @@ from collections.abc import Awaitable, Callable
 
 from core.source_files import inspect_source_file
 from data.repositories.catalog import SuspiciousEmptyScan
+from image_headers import HEADER_GEOMETRY_EXTENSIONS, read_header_dimensions
 
-SUPPORTED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".dng", ".cr2", ".cr3", ".tif", ".tiff", ".webp"}
+SUPPORTED_EXTENSIONS = HEADER_GEOMETRY_EXTENSIONS - {".bmp", ".gif"}
+SCAN_HEADER_BUDGET_SECONDS = 0.005
 
 MarkSourceScanStarted = Callable[[int], Awaitable[None]]
 InsertImagesBatch = Callable[..., Awaitable[None]]
@@ -93,7 +95,26 @@ def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = Non
                     continue
                 file_size = int(file_stat.st_size)
                 file_modified_at = float(file_stat.st_mtime)
-                yield f, filepath, file_ext, file_size, file_modified_at
+                dimensions = read_header_dimensions(
+                    filepath,
+                    budget_seconds=SCAN_HEADER_BUDGET_SECONDS,
+                )
+                if dimensions is None:
+                    orientation = None
+                    aspect_ratio = None
+                else:
+                    width, height = dimensions
+                    orientation = "landscape" if width >= height else "portrait"
+                    aspect_ratio = round(width / height, 4)
+                yield (
+                    f,
+                    filepath,
+                    file_ext,
+                    file_size,
+                    file_modified_at,
+                    orientation,
+                    aspect_ratio,
+                )
 
 
 def try_begin_scan() -> bool:

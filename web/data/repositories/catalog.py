@@ -103,22 +103,34 @@ async def active_source_id_set_cached(
 
 def insert_row_with_file_metadata(row):
     if len(row) >= 5:
-        return row[:5]
-    filename, filepath = row[:2]
-    file_ext = os.path.splitext(filename)[1].lower()
-    file_size = None
-    file_modified_at = None
-    try:
-        stat = os.stat(filepath)
-        file_size = int(stat.st_size)
-        file_modified_at = float(stat.st_mtime)
-    except Exception:
-        pass
-    return filename, filepath, file_ext, file_size, file_modified_at
+        file_row = row[:5]
+    else:
+        filename, filepath = row[:2]
+        file_ext = os.path.splitext(filename)[1].lower()
+        file_size = None
+        file_modified_at = None
+        try:
+            stat = os.stat(filepath)
+            file_size = int(stat.st_size)
+            file_modified_at = float(stat.st_mtime)
+        except Exception:
+            pass
+        file_row = (filename, filepath, file_ext, file_size, file_modified_at)
+    orientation = row[5] if len(row) > 5 else None
+    aspect_ratio = row[6] if len(row) > 6 else None
+    return *file_row, orientation, aspect_ratio
 
 
 def _insert_row_with_inferred_date(row, source_root: str | None = None):
-    filename, filepath, file_ext, file_size, file_modified_at = insert_row_with_file_metadata(row)
+    (
+        filename,
+        filepath,
+        file_ext,
+        file_size,
+        file_modified_at,
+        orientation,
+        aspect_ratio,
+    ) = insert_row_with_file_metadata(row)
     inferred = infer_image_date(
         filename=filename,
         filepath=filepath,
@@ -133,6 +145,8 @@ def _insert_row_with_inferred_date(row, source_root: str | None = None):
         file_modified_at,
         inferred.date_taken if inferred else None,
         inferred.date_source if inferred else None,
+        orientation,
+        aspect_ratio,
     )
 
 
@@ -350,6 +364,8 @@ async def _apply_missing_image_rematch_on_conn(
         "file_modified_at = COALESCE(?, file_modified_at), "
         "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
         "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
+        "orientation = COALESCE(orientation, ?), "
+        "aspect_ratio = COALESCE(aspect_ratio, ?), "
         "missing_at = NULL WHERE id = ? AND missing_at IS NOT NULL AND vc_of IS NULL",
         (
             source_id,
@@ -360,6 +376,8 @@ async def _apply_missing_image_rematch_on_conn(
             row[4],
             row[5],
             row[6],
+            row[7],
+            row[8],
             image_id,
         ),
     )
@@ -430,8 +448,9 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                     new_rows.append(row)
             await conn.executemany(
                 "INSERT OR IGNORE INTO images "
-                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, date_source) "
-                "VALUES (?, ?, ?, 'kept', ?, ?, ?, ?, ?)",
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, "
+                "date_taken, date_source, orientation, aspect_ratio) "
+                "VALUES (?, ?, ?, 'kept', ?, ?, ?, ?, ?, ?, ?)",
                 [(source_id, *row) for row in new_rows],
             )
             await conn.executemany(
@@ -443,6 +462,8 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 "file_modified_at = COALESCE(?, file_modified_at), "
                 "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
                 "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
+                "orientation = COALESCE(orientation, ?), "
+                "aspect_ratio = COALESCE(aspect_ratio, ?), "
                 "missing_at = CASE WHEN ? = 0 THEN missing_at ELSE NULL END "
                 "WHERE filepath = ? AND vc_of IS NULL "
                 "AND (source_id = ? OR source_id IS NULL)",
@@ -455,6 +476,8 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                         row[4],
                         row[5],
                         row[6],
+                        row[7],
+                        row[8],
                         row[3],
                         row[1],
                         source_id,
@@ -467,8 +490,9 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
         else:
             await conn.executemany(
                 "INSERT OR IGNORE INTO images "
-                "(filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, date_source) "
-                "VALUES (?, ?, 'kept', ?, ?, ?, ?, ?)",
+                "(filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, "
+                "date_source, orientation, aspect_ratio) "
+                "VALUES (?, ?, 'kept', ?, ?, ?, ?, ?, ?, ?)",
                 normalized_rows,
             )
         await conn.commit()
