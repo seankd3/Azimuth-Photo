@@ -12,6 +12,14 @@ const SECTIONS = [
 let root = null;
 let activeSection = localStorage.getItem(SECTION_KEY) || 'library';
 
+document.addEventListener('system:section', (event) => {
+    const section = event.detail;
+    if (!SECTIONS.some(([id]) => id === section)) return;
+    activeSection = section;
+    localStorage.setItem(SECTION_KEY, activeSection);
+    if (root) render();
+});
+
 function render() {
     if (!root) return;
     const content = renderSystemSections();
