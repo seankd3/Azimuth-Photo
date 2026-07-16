@@ -40,11 +40,51 @@ def _args() -> argparse.Namespace:
     parser.add_argument("--check", action="store_true", help="fail when a baseline metric regresses by more than 25%%")
     parser.add_argument("--write-baseline", action="store_true", help="replace baseline.json with this fixture run")
     parser.add_argument("--iterations", type=int, default=standing.DEFAULT_ITERATIONS)
+    parser.add_argument("--trend", action="store_true", help="print the KPI history from bench-runs/ and exit")
     return parser.parse_args()
+
+
+def _trend() -> int:
+    """Per-metric KPI history across every recorded run, grouped by profile."""
+    runs = []
+    for path in sorted(RUN_DIR.glob("*.json")):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        runs.append(data)
+    if not runs:
+        print("no runs in", RUN_DIR)
+        return 1
+    by_profile: dict[str, list[dict]] = {}
+    for run_data in runs:
+        profile = str((run_data.get("details") or {}).get("profile") or "unknown")
+        by_profile.setdefault(profile, []).append(run_data)
+    for profile, series in by_profile.items():
+        print(f"\n== KPI trend: {profile} ({len(series)} runs) ==")
+        metric_names = sorted({name for r in series for name in (r.get("metrics") or {})})
+        header = f"{'metric':38}" + "".join(
+            f"{(r.get('measured_at') or '')[5:16]:>13}" for r in series[-8:]
+        )
+        print(header)
+        print(f"{'':38}" + "".join(f"{(r.get('git_sha') or '')[:9]:>13}" for r in series[-8:]))
+        for name in metric_names:
+            row = f"{name:38}"
+            values = [(r.get("metrics") or {}).get(name) for r in series[-8:]]
+            for value in values:
+                row += f"{value:>13.1f}" if isinstance(value, (int, float)) else f"{'-':>13}"
+            numeric = [v for v in values if isinstance(v, (int, float))]
+            if len(numeric) >= 2 and numeric[0]:
+                change = (numeric[-1] - numeric[0]) / numeric[0] * 100.0
+                row += f"   {change:+6.1f}%"
+            print(row)
+    return 0
 
 
 def main() -> int:
     args = _args()
+    if args.trend:
+        return _trend()
     if args.iterations < 3:
         raise SystemExit("--iterations must be at least 3")
     if args.write_baseline and os.environ.get("PHOTOARCHIVE_BENCH_URL"):

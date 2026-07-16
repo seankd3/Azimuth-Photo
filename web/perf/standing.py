@@ -248,6 +248,12 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
             )
         suggestions, _payload = _timed_gets(session, "/api/collections/suggestions", 2)
         sync, _payload = _timed_gets(session, "/api/sync/status", min(iterations, 5))
+        # Heavy catalog surfaces — the interactions that must feel instant.
+        counts, _payload = _timed_gets(session, "/api/counts", min(iterations, 5))
+        histogram, _payload = _timed_gets(session, "/api/date-histogram", min(iterations, 5))
+        filter_options, _payload = _timed_gets(session, "/api/filter-options", min(iterations, 5))
+        people, _payload = _timed_gets(session, "/api/people?limit=24", 2)
+        map_markers, _payload = _timed_gets(session, "/api/map/markers", 2)
     metrics = {
         "images_first_page_p50_ms": images["p50_ms"],
         "images_first_page_p95_ms": images["p95_ms"],
@@ -256,6 +262,11 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
         "search_text_p50_ms": text_search["p50_ms"],
         "collection_suggestions_cached_ms": suggestions["p50_ms"],
         "sync_status_p50_ms": sync["p50_ms"],
+        "counts_p50_ms": counts["p50_ms"],
+        "date_histogram_p50_ms": histogram["p50_ms"],
+        "filter_options_p50_ms": filter_options["p50_ms"],
+        "people_p50_ms": people["p50_ms"],
+        "map_markers_p50_ms": map_markers["p50_ms"],
     }
     if semantic_search is not None:
         metrics["search_semantic_p50_ms"] = semantic_search["p50_ms"]
