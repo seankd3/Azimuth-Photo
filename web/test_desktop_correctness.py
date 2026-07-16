@@ -198,6 +198,24 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("finally {\n        if (button.isConnected) button.disabled = false;", action)
         self.assertLess(action.index("await reloadStacks();"), action.index("if (button.isConnected) button.disabled = false;"))
 
+    def test_partial_keep_cover_reload_keeps_stack_visible(self):
+        duplicates = read("duplicates.js")
+        action_start = duplicates.index("async function keepCoverForStack(")
+        action = duplicates[action_start:duplicates.index("\n}\n", action_start)]
+
+        self.assertIn(
+            "const trashComplete = errors.length === 0 && trashedIds.length === imageIds.length;",
+            action,
+        )
+        self.assertIn(
+            "if (trashComplete) {\n"
+            "        removeFinishedStack(stackId);\n"
+            "    } else {\n"
+            "        await reloadStacks();\n"
+            "    }",
+            action,
+        )
+
     def test_export_poll_reports_when_the_export_status_cannot_be_checked(self):
         export_dialog = read("develop", "export_dialog.js")
         poll_start = export_dialog.index("async function pollBatchStatus")

@@ -190,6 +190,30 @@ class MirrorAcceptanceTests(BackendTestCase):
 
 
 class MirrorDevelopGuardTests(BackendTestCase):
+    async def test_mirror_develop_preserves_local_rating(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "rated.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'user', '')",
+                (image_id, json.dumps({"Exposure2012": 0.25, "_lr_rating": 4})),
+            )
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": 1.0},
+                "develop_updated_at": "2026-07-16T02:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+        finally:
+            await conn.close()
+
+        self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.0, "_lr_rating": 4})
+
     async def test_mirror_never_rewinds_newer_local_develop_regardless_of_origin(self):
         from features.sync.mirror import MirrorPuller
 
