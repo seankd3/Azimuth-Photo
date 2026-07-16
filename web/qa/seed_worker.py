@@ -319,7 +319,7 @@ async def _seed() -> None:
             "(id, source_id, filename, filepath, content_hash, hub_image_id, hub_remote, elo, comparisons, "
             "status, flag, file_ext, file_size, width, height, trashed_at) "
             "VALUES (?, 3, ?, ?, ?, ?, 1, 1200, 0, 'trashed', 'unflagged', '.jpg', 8192, 96, 64, ?)",
-            (image_id, "qa-hub-trash.jpg", "hub://archive/qa-hub-trash.jpg", f"{image_id:032x}", 90_000 + offset, now),
+            (image_id, "qa-hub-trash.jpg", "hub://archive/qa-hub-trash.jpg", f"{image_id:032x}", image_id, now),
         )
 
     await conn.execute(
