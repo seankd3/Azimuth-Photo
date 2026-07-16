@@ -292,8 +292,12 @@ async def set_image_rating(db_path: str, image_id: int, rating: int):
             if cursor.rowcount == 0:
                 payload = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
                 await conn.execute(
-                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?)",
-                    (image_id, payload, now),
+                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?) "
+                    "ON CONFLICT(image_id) DO UPDATE SET settings = json_set("
+                    "CASE WHEN json_valid(develop_settings.settings) THEN "
+                    "  CASE WHEN json_type(develop_settings.settings) = 'object' THEN develop_settings.settings ELSE '{}' END "
+                    "ELSE '{}' END, '$._lr_rating', ?), updated_at = excluded.updated_at",
+                    (image_id, payload, now, rating),
                 )
             await conn.commit()
         finally:

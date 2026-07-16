@@ -193,3 +193,54 @@ class SettingsRouteTests(BackendTestCase):
         finally:
             await conn.close()
         self.assertEqual(json.loads(row["settings"]), {"_lr_rating": 3})
+
+    async def test_set_rating_upserts_when_a_first_develop_row_arrives_during_the_write(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "racing-rating.jpg")
+        original_open = image_repository.connection.open_async
+        rating_conn = await original_open(db.DB_PATH)
+        raced = False
+
+        class EmptyCursor:
+            rowcount = 0
+
+        class RacingConnection:
+            async def execute(self, sql, parameters=None):
+                nonlocal raced
+                if not raced and sql.lstrip().startswith("UPDATE develop_settings"):
+                    raced = True
+                    concurrent_conn = await original_open(db.DB_PATH)
+                    try:
+                        await concurrent_conn.execute(
+                            "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'user', 'concurrent')",
+                            (image_id, '{"Exposure2012":1.4}'),
+                        )
+                        await concurrent_conn.commit()
+                    finally:
+                        await image_repository.connection.close_async(concurrent_conn, db_path=db.DB_PATH)
+                    return EmptyCursor()
+                if parameters is None:
+                    return await rating_conn.execute(sql)
+                return await rating_conn.execute(sql, parameters)
+
+            async def commit(self):
+                await rating_conn.commit()
+
+            async def close(self):
+                await rating_conn.close()
+
+        async def open_racing(_db_path, **_kwargs):
+            return RacingConnection()
+
+        with patch.object(image_repository.connection, "open_async", open_racing):
+            await image_repository.set_image_rating(db.DB_PATH, image_id, 5)
+
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertTrue(raced)
+        self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.4, "_lr_rating": 5})
