@@ -11,6 +11,7 @@ const SECTIONS = [
 
 let root = null;
 let activeSection = localStorage.getItem(SECTION_KEY) || 'library';
+let pollTimer = null;
 
 document.addEventListener('system:section', (event) => {
     const section = event.detail;
@@ -33,6 +34,14 @@ function render() {
     }));
     root.querySelector('[data-system-close]')?.addEventListener('click', () => setActiveLens('grid'));
     bindSystemSurface(root.querySelector('#system-lens-content'));
+    if (activeSection === 'publishing' && sessionStorage.getItem('pa_d_system_focus_publish') === '1') {
+        sessionStorage.removeItem('pa_d_system_focus_publish');
+        const field = root.querySelector('#drawer-setting-publish_dir');
+        requestAnimationFrame(() => {
+            field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            field?.focus();
+        });
+    }
 }
 
 export function openSystemLens(section = null) {
@@ -48,9 +57,13 @@ export function mountSystemLens() {
     mountSystemSurface(render);
     render();
     refreshSystemSurface();
+    clearInterval(pollTimer);
+    pollTimer = setInterval(refreshSystemSurface, 5000);
 }
 
 export function unmountSystemLens() {
+    clearInterval(pollTimer);
+    pollTimer = null;
     unmountSystemSurface();
     root = null;
 }

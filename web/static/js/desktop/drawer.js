@@ -1542,6 +1542,7 @@ export function openPublishingSettings({ returnTo = null } = {}) {
     publishingFocusPending = true;
     openSettingSections.add('Publishing');
     localStorage.setItem('pa_d_system_section', 'publishing');
+    sessionStorage.setItem('pa_d_system_focus_publish', '1');
     document.dispatchEvent(new CustomEvent('system:section', { detail: 'publishing' }));
     if (open) closeSystemDrawer();
     setActiveLens('system');
