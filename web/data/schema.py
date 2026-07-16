@@ -117,6 +117,13 @@ CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS oplog_pending (
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    PRIMARY KEY (origin, origin_seq)
+);
 
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1132,6 +1139,7 @@ REQUIRED_TABLES = {
     "oplog_family_state",
     "oplog_settings",
     "oplog_cursors",
+    "oplog_pending",
     "devices",
     "images_metadata_fts",
     "comparisons",

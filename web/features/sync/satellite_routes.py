@@ -8,7 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from core.version import API_REV, app_version
-from features.sync import contract, satellite
+from features.sync import contract, oplog, satellite
 from features.sync.sync_worker import get_worker
 from features.trash import service as trash_service
 
@@ -71,6 +71,7 @@ async def sync_status():
         else {"count": 0}
     )
     status["pending_hub_trash"] = int(pending["count"])
+    status["pending_ops"] = await oplog.pending_entry_count(db.DB_PATH)
     return status
 
 

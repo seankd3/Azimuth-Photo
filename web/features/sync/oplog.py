@@ -53,6 +53,13 @@ CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS oplog_pending (
+    origin TEXT NOT NULL,
+    origin_seq INTEGER NOT NULL,
+    reason TEXT NOT NULL,
+    recorded_at REAL NOT NULL,
+    PRIMARY KEY (origin, origin_seq)
+);
 """
 
 KEYWORD_IPTC_DDL = """
@@ -447,6 +454,75 @@ async def _apply_entry_on_conn(conn, entry: Mapping[str, Any]) -> str:
     return "applied"
 
 
+_SOFT_FAILURES = frozenset({"unknown-content-hash", "unknown-collection-uuid"})
+
+
+async def _record_apply_result(
+    conn,
+    entry: Mapping[str, Any],
+    result: str,
+    *,
+    recorded_at: float,
+) -> None:
+    identity = (str(entry["origin"]), int(entry["origin_seq"]))
+    if result in _SOFT_FAILURES:
+        await conn.execute(
+            "INSERT INTO oplog_pending(origin, origin_seq, reason, recorded_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(origin, origin_seq) DO UPDATE SET "
+            "reason=excluded.reason, recorded_at=excluded.recorded_at",
+            (*identity, result, recorded_at),
+        )
+        return
+    await conn.execute(
+        "DELETE FROM oplog_pending WHERE origin = ? AND origin_seq = ?",
+        identity,
+    )
+
+
+async def retry_pending_entries(db_path: str) -> dict[str, int]:
+    """Re-apply durable soft failures whose catalog dependencies may now exist."""
+
+    await ensure_schema(db_path)
+    conn = await connection.open_async(db_path)
+    retried = 0
+    applied = 0
+    still_pending = 0
+    try:
+        await conn.execute("BEGIN IMMEDIATE")
+        rows = await (await conn.execute(
+            "SELECT oplog.origin, oplog.origin_seq, oplog.content_hash, oplog.family, "
+            "oplog.payload, oplog.ts, oplog.applied_from "
+            "FROM oplog_pending JOIN oplog USING (origin, origin_seq) "
+            "ORDER BY oplog_pending.recorded_at, oplog_pending.origin, oplog_pending.origin_seq"
+        )).fetchall()
+        for row in rows:
+            entry = _entry_dict(row)
+            result = await _apply_entry_on_conn(conn, entry)
+            await _record_apply_result(conn, entry, result, recorded_at=time.time())
+            retried += 1
+            if result in _SOFT_FAILURES:
+                still_pending += 1
+            else:
+                applied += 1
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return {"retried": retried, "applied": applied, "still_pending": still_pending}
+
+
+async def pending_entry_count(db_path: str) -> int:
+    await ensure_schema(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (await conn.execute("SELECT COUNT(*) AS count FROM oplog_pending")).fetchone()
+        return int(row["count"])
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def apply_entries(
     db_path: str,
     entries: Iterable[Mapping[str, Any]],
@@ -481,6 +557,7 @@ async def apply_entries(
             )).fetchone()
             canonical = _entry_dict(stored)
             result = await _apply_entry_on_conn(conn, canonical)
+            await _record_apply_result(conn, canonical, result, recorded_at=received_at)
             results.append({"origin": canonical["origin"], "origin_seq": canonical["origin_seq"], "result": result})
         await conn.commit()
     except Exception:
@@ -488,6 +565,8 @@ async def apply_entries(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
+    if any(item["result"] == "applied" for item in results):
+        await retry_pending_entries(db_path)
     return {
         "received": len(normalized),
         "inserted": inserted,
@@ -818,6 +897,7 @@ async def origin_entries(db_path: str, origin: str, *, after: int = 0, limit: in
 async def exchange_with_hub(db_path: str, request: JsonRequest) -> dict[str, int]:
     """Push locally authored entries, then pull and apply every unseen hub page."""
 
+    await retry_pending_entries(db_path)
     local_device = await device_id(db_path)
     pushed = 0
     after = await push_cursor(db_path)
