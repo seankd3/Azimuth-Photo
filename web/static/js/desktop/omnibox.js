@@ -303,11 +303,6 @@ function flattenPeople(peopleData) {
     return [...seen.values()];
 }
 
-function idQuery(term) {
-    const text = String(term || '').trim().toLowerCase();
-    return text.match(/^(?:#|id:?)?\d+$/) ? text.replace(/\D/g, '') : '';
-}
-
 function skeletonPhotosHtml() {
     return '<div class="sd-photo-strip" aria-label="Loading photo search results">'
         + Array.from({ length: LIVE_LIMIT }, (_, i) => `<span class="sd-photo sd-photo-skel skel" style="--ar:${[1.45, .8, 1.2, 1.7, 1, 1.55][i]}"></span>`).join('')
@@ -384,15 +379,15 @@ function buildPhotoRows(term) {
 }
 
 function buildPeopleRows(term) {
-    const idTerm = idQuery(term);
+    const unnamedPrefix = String(term || '').trim().toLowerCase();
+    const searchesUnnamed = unnamedPrefix && 'unnamed'.startsWith(unnamedPrefix);
     const matches = people
         .map((person) => {
             const label = personLabel(person);
             const named = !isUnnamedPersonLabel(label);
-            const idMatch = idTerm && String(person.id).includes(idTerm);
-            return { person, label: named ? label : 'Add name', named, idMatch };
+            return { person, label: named ? label : 'Add name', named };
         })
-        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && item.idMatch))
+        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && searchesUnnamed))
         .sort((a, b) => Number(b.named) - Number(a.named) || personCount(b.person) - personCount(a.person))
         .slice(0, MAX_SECTION_ROWS);
     if (!matches.length) return [];
@@ -403,7 +398,7 @@ function buildPeopleRows(term) {
             thumb: personThumb(person),
             label,
             labelHtml: named ? highlight(label, term) : esc(label),
-            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
+            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(person.face_count || personCount(person))} faces`,
             navRow: 10 + i,
             run: () => applyScope({
                 people: person.id,
