@@ -316,6 +316,42 @@ class SyncHubTests(unittest.TestCase):
         self.assertIn(b"PABASE1", gzip.decompress(rawproc.base_paths(image_id).binary.read_bytes()))
         self.assertIn(b'filename="base.json"', base.content)
 
+    def test_metadata_rating_preserves_develop_edit_interleaved_with_upsert(self):
+        payload = self.image_bytes("rating-race.jpg", (40, 50, 60))
+        content_hash = self.declare("rating-race.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'user', 'before')",
+                (image_id, json.dumps({"Exposure2012": 0.0})),
+            )
+            conn.execute(
+                "CREATE TRIGGER interleave_develop_before_rating BEFORE INSERT ON develop_settings "
+                f"WHEN NEW.image_id = {image_id} BEGIN "
+                "UPDATE develop_settings SET settings = json_set(settings, '$.Exposure2012', 2.25) "
+                "WHERE image_id = NEW.image_id; END"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 5,
+            "rating_updated_at": "2026-07-16T01:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 2.25, "_lr_rating": 5})
+
     def test_hash_backfill_batch_and_endpoint(self):
         path = self.root / "legacy.jpg"
         path.write_bytes(self.image_bytes("source.jpg", (4, 5, 6)))
