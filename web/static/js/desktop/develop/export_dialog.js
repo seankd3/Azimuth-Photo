@@ -9,11 +9,13 @@
  */
 
 import { fetchOptionsWithTimeout } from '../../api.js';
+import { pollJob } from '../jobs.js';
 
 const READ_TIMEOUT_MS = 10_000;
 const MUTATION_TIMEOUT_MS = 20_000;
 const EXPORT_TAB_STORAGE_KEY = 'pa_d_export_dialog_tab';
 const EXPORT_OPTIONS_STORAGE_KEY = 'pa_d_export_dialog_photos';
+let batchExportPoll = null;
 
 const SHARPEN_OPTIONS = [
     ['none', 'None'],
@@ -450,35 +452,40 @@ export async function queueBatchExport(imageIds, options = {}, { showToast } = {
     return payload;
 }
 
-async function pollBatchStatus(showToast) {
-    for (let attempt = 0; attempt < 600; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-        try {
-            const response = await fetch('/api/develop/export/batch/status', fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, READ_TIMEOUT_MS));
-            if (!response.ok) {
-                showToast?.('Export status unknown — check Exports later');
-                return;
+export function cancelBatchExportPoll() {
+    batchExportPoll?.cancel();
+    batchExportPoll = null;
+}
+
+function pollBatchStatus(showToast) {
+    cancelBatchExportPoll();
+    batchExportPoll = pollJob({
+        intervalMs: 1000,
+        fetchStatus: async () => {
+            try {
+                const response = await fetch('/api/develop/export/batch/status', fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, READ_TIMEOUT_MS));
+                if (!response.ok) return { state: 'error', error: 'Export status unavailable' };
+                return response.json();
+            } catch {
+                return { state: 'error', error: 'Export status unavailable' };
             }
-            const status = await response.json();
+        },
+        isDone: (status) => status.state !== 'running',
+        onTick: (status) => {
             if (status.state === 'running') {
                 showToast?.(`Develop export ${status.done}/${status.total}…`);
-                continue;
+                return;
             }
             if (status.state === 'complete') {
                 const errors = status.errors?.length || 0;
-                showToast?.(
-                    errors
-                        ? `Develop export done · ${status.done} finished, ${errors} failed`
-                        : `Develop export done · ${status.done} photo${status.done === 1 ? '' : 's'}`,
-                );
+                showToast?.(errors
+                    ? `Develop export completed · ${status.done} finished, ${errors} failed`
+                    : `Develop export completed · ${status.done} photo${status.done === 1 ? '' : 's'}`);
+                return;
             }
-            return;
-        } catch {
-            showToast?.('Export status unknown — check Exports later');
-            return;
-        }
-    }
-    showToast?.('Export status unknown — check Exports later');
+            showToast?.(`Develop export failed · ${status.error || 'Check Exports later'}`);
+        },
+    });
 }
 
 export const EXPORT_SHARPEN_OPTIONS = SHARPEN_OPTIONS;

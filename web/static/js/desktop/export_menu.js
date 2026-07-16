@@ -2,7 +2,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
 import { scope, scopeParams, viewState } from './state.js';
-import { openExportDialog } from './develop/export_dialog.js';
+import { cancelBatchExportPoll, openExportDialog } from './develop/export_dialog.js';
 
 export const ZIP_EXPORT_MAX = 2000;
 const SCOPE_EXPORT_PAGE_SIZE = 1000;
@@ -101,6 +101,7 @@ export function openExportMenu(anchor, choose, options = {}) {
 
 export function closeExportMenu() {
     if (!menu || menu.hidden) return;
+    cancelBatchExportPoll();
     menu.hidden = true;
     releaseFocus(menu);
     if (returnEl && document.contains(returnEl) && returnEl.focus) returnEl.focus({ preventScroll: true });

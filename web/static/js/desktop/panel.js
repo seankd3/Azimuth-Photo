@@ -15,6 +15,7 @@ import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmAction, confirmTypedCount } from './trash.js';
 import { downloadExport, openExportMenu } from './export_menu.js';
+import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
 import { openSourceAddFlow } from './drawer.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
@@ -37,7 +38,7 @@ let collectionMenuReturn = null;
 let deliverOverlay = null;
 let deliverOverlayToken = 0;
 let deliverOverlayReturn = null;
-let deliverPollTimer = 0;
+let deliverPoll = null;
 let deliverSession = null;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
@@ -248,8 +249,8 @@ function deliverOverlayIsCurrent(token) {
 }
 
 function closeDeliverOverlay() {
-    window.clearTimeout(deliverPollTimer);
-    deliverPollTimer = 0;
+    deliverPoll?.cancel();
+    deliverPoll = null;
     if (!deliverOverlay || deliverOverlay.hidden) return;
     deliverOverlayToken += 1;
     releaseFocus(deliverOverlay);
@@ -732,7 +733,7 @@ function renderWebsiteDeliver(session, token) {
             pollDeliverPublish(session, token, true);
         }
     });
-    if (busy) scheduleDeliverPoll(session, token);
+    if (busy && !deliverPoll) scheduleDeliverPoll(session, token);
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
 }
 
@@ -834,22 +835,26 @@ function switchDeliverTab(session, tab) {
 }
 
 function scheduleDeliverPoll(session, token) {
-    window.clearTimeout(deliverPollTimer);
-    deliverPollTimer = window.setTimeout(() => pollDeliverPublish(session, token), 2500);
+    pollDeliverPublish(session, token);
 }
 
-async function pollDeliverPublish(session, token, immediate = false) {
-    window.clearTimeout(deliverPollTimer);
+function pollDeliverPublish(session, token, immediate = false) {
+    deliverPoll?.cancel();
     if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
-    session.publish = await getCollectionPublish(session.collectionId);
-    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
-    if (session.publish?.in_progress) scheduleDeliverPoll(session, token);
-    else {
-        if (!immediate && session.publish?.job?.state === 'revoked') showToast('Gallery unpublished');
-        emitSharedSurfacesChanged(session.collectionId);
-        loadCollections();
-    }
-    if (session.activeTab === 'website') renderDeliver(session, token);
+    deliverPoll = pollJob({
+        fetchStatus: () => getCollectionPublish(session.collectionId),
+        isDone: (publish) => !publish?.in_progress,
+        onTick: (publish) => {
+            if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+            session.publish = publish;
+            if (!publish?.in_progress) {
+                if (!immediate && publish?.job?.state === 'revoked') showToast('Gallery unpublished');
+                emitSharedSurfacesChanged(session.collectionId);
+                loadCollections();
+            }
+            if (session.activeTab === 'website') renderDeliver(session, token);
+        },
+    });
 }
 
 function startCollectionRename(collectionId) {
