@@ -51,6 +51,21 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("viewState.images.some((image) =>", grid)
         self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
 
+    def test_pending_previews_refresh_idle_desktop_and_mobile_photo_views(self):
+        grid = read("grid.js")
+        timeline = read_mobile("timeline.js")
+
+        for source in (grid, timeline):
+            self.assertIn("let thumbnailPollTimer = 0;", source)
+            self.assertIn("function scheduleThumbnailPoll()", source)
+            self.assertIn("hidden_pending_thumbnails", source)
+            self.assertIn("selection.size", source)
+
+        self.assertIn("scrollTop <= 160", grid)
+        self.assertIn("stopThumbnailPoll();", grid[grid.index("export function unmountGrid()"):])
+        self.assertIn("scrollTop <= 160", timeline)
+        self.assertIn("on('tab', (tab) =>", timeline)
+
     def test_warm_events_revalidates_group_coverage_after_flags_change(self):
         events = read("events.js")
 
