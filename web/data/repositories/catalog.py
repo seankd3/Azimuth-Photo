@@ -280,6 +280,87 @@ async def refresh_source_online_states(db_path: str) -> bool:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def _content_hash_rematch_id(
+    conn,
+    source_id: int,
+    row: tuple,
+) -> tuple[int | None, bool]:
+    file_size = row[3]
+    cursor = await conn.execute(
+        "SELECT id, content_hash FROM images "
+        "WHERE source_id = ? AND missing_at IS NOT NULL AND vc_of IS NULL "
+        "AND content_hash IS NOT NULL AND trim(content_hash) != '' "
+        "AND (file_size = ? OR file_size IS NULL)",
+        (source_id, file_size),
+    )
+    candidates = await cursor.fetchall()
+    if not candidates:
+        return None, False
+    try:
+        from features.sync.hashing import compute_content_hash
+
+        content_hash = await asyncio.to_thread(compute_content_hash, row[1])
+    except OSError:
+        return None, True
+    matches = [
+        int(candidate["id"])
+        for candidate in candidates
+        if candidate["content_hash"] == content_hash
+    ]
+    return (matches[0], False) if len(matches) == 1 else (None, len(matches) > 1)
+
+
+async def _heuristic_rematch_id(conn, source_id: int, row: tuple) -> int | None:
+    filename, _filepath, _extension, file_size, modified_at = row[:5]
+    if file_size is None or modified_at is None:
+        return None
+    cursor = await conn.execute(
+        "SELECT id FROM images "
+        "WHERE source_id = ? AND missing_at IS NOT NULL AND vc_of IS NULL "
+        "AND (content_hash IS NULL OR trim(content_hash) = '') "
+        "AND file_size = ? AND file_modified_at = ? AND filename = ?",
+        (source_id, file_size, modified_at, filename),
+    )
+    candidates = [int(candidate["id"]) for candidate in await cursor.fetchall()]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+async def _rematch_missing_image_on_conn(conn, source_id: int, row: tuple) -> bool:
+    image_id, ambiguous_hash = await _content_hash_rematch_id(conn, source_id, row)
+    if ambiguous_hash:
+        return False
+    if image_id is None:
+        image_id = await _heuristic_rematch_id(conn, source_id, row)
+    if image_id is None:
+        return False
+    cursor = await conn.execute(
+        "UPDATE images SET source_id = ?, filename = ?, filepath = ?, "
+        "file_ext = COALESCE(?, file_ext), file_size = COALESCE(?, file_size), "
+        "file_modified_at = COALESCE(?, file_modified_at), "
+        "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
+        "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
+        "missing_at = NULL WHERE id = ? AND missing_at IS NOT NULL AND vc_of IS NULL",
+        (
+            source_id,
+            row[0],
+            row[1],
+            row[2],
+            row[3],
+            row[4],
+            row[5],
+            row[6],
+            image_id,
+        ),
+    )
+    if not cursor.rowcount:
+        return False
+    await conn.execute(
+        "UPDATE images SET filepath = ? WHERE vc_of = ?",
+        (row[1], image_id),
+    )
+    return True
+
+
 async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | None = None):
     if not rows:
         return
@@ -293,11 +374,35 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 source_root = source["path"]
         normalized_rows = [_insert_row_with_inferred_date(row, source_root) for row in rows]
         if source_id is not None:
+            placeholders = ",".join("?" for _ in normalized_rows)
+            cursor = await conn.execute(
+                "SELECT filepath FROM images WHERE source_id = ? AND vc_of IS NULL "
+                f"AND filepath IN ({placeholders})",
+                (source_id, *(row[1] for row in normalized_rows)),
+            )
+            existing_filepaths = {str(row["filepath"]) for row in await cursor.fetchall()}
+            unseen_rows = [row for row in normalized_rows if row[1] not in existing_filepaths]
+            has_missing_candidates = False
+            if unseen_rows:
+                cursor = await conn.execute(
+                    "SELECT 1 FROM images WHERE source_id = ? AND missing_at IS NOT NULL "
+                    "AND vc_of IS NULL LIMIT 1",
+                    (source_id,),
+                )
+                has_missing_candidates = await cursor.fetchone() is not None
+            new_rows = []
+            for row in unseen_rows:
+                if not has_missing_candidates or not await _rematch_missing_image_on_conn(
+                    conn,
+                    source_id,
+                    row,
+                ):
+                    new_rows.append(row)
             await conn.executemany(
                 "INSERT OR IGNORE INTO images "
                 "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, date_taken, date_source) "
                 "VALUES (?, ?, ?, 'kept', ?, ?, ?, ?, ?)",
-                [(source_id, *row) for row in normalized_rows],
+                [(source_id, *row) for row in new_rows],
             )
             await conn.executemany(
                 "UPDATE images SET "
