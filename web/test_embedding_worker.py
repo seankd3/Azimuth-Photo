@@ -80,12 +80,16 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._embed_executor = fake_embed_executor
         embedding_worker._preload_executor = fake_preload_executor
         load_task = asyncio.create_task(asyncio.Event().wait())
+        residency_task = asyncio.create_task(asyncio.Event().wait())
         embedding_worker._search_model_load_task = load_task
+        embedding_worker._search_model_residency_task = residency_task
         try:
             await embedding_worker.shutdown_embedding_worker()
 
             self.assertTrue(load_task.cancelled())
+            self.assertTrue(residency_task.cancelled())
             self.assertIsNone(embedding_worker._search_model_load_task)
+            self.assertIsNone(embedding_worker._search_model_residency_task)
             fake_embed_executor.shutdown.assert_called_once_with(
                 wait=False,
                 cancel_futures=True,
@@ -282,6 +286,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.old_loaded_model_id = embedding_worker._loaded_model_id
         self.old_loaded_model_revision = embedding_worker._loaded_model_revision
         self.old_search_model_load_task = embedding_worker._search_model_load_task
+        self.old_search_model_residency_task = embedding_worker._search_model_residency_task
         self.old_model_load_retry_after = embedding_worker._model_load_retry_after
         self.old_model_load_error_key = embedding_worker._model_load_error_key
 
@@ -366,6 +371,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._loaded_model_id = None
         embedding_worker._loaded_model_revision = None
         embedding_worker._search_model_load_task = None
+        embedding_worker._search_model_residency_task = None
         embedding_worker._model_load_retry_after = 0.0
         embedding_worker._model_load_error_key = None
         embedding_worker._batch_control.update({
@@ -417,15 +423,19 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._embedding_pause_reason = self.old_pause_reason
         embedding_worker._embedding_history.clear()
         embedding_worker._embedding_history.extend(self.old_history)
-        embedding_worker._model = self.old_model
-        embedding_worker._loaded_model_dir = self.old_loaded_model_dir
-        embedding_worker._loaded_model_id = self.old_loaded_model_id
-        embedding_worker._loaded_model_revision = self.old_loaded_model_revision
         task = embedding_worker._search_model_load_task
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        residency_task = embedding_worker._unload_model()
+        if residency_task is not None and not residency_task.done():
+            await asyncio.gather(residency_task, return_exceptions=True)
         embedding_worker._search_model_load_task = self.old_search_model_load_task
+        embedding_worker._search_model_residency_task = self.old_search_model_residency_task
+        embedding_worker._model = self.old_model
+        embedding_worker._loaded_model_dir = self.old_loaded_model_dir
+        embedding_worker._loaded_model_id = self.old_loaded_model_id
+        embedding_worker._loaded_model_revision = self.old_loaded_model_revision
         embedding_worker._model_load_retry_after = self.old_model_load_retry_after
         embedding_worker._model_load_error_key = self.old_model_load_error_key
         embedding_worker._embedding_oom_circuit.reset()
@@ -674,8 +684,99 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.gather(task, return_exceptions=True)
             work_coordination.release_manual_owner("captions")
             work_coordination.release_gpu_owner("captions")
-            work_coordination.release_manual_owner("embeddings")
-            work_coordination.release_gpu_owner("embeddings")
+
+        embedding_worker._unload_model()
+        self.assertIsNone(work_coordination.manual_owner())
+        self.assertIsNone(work_coordination.gpu_owner())
+
+    async def test_search_model_unload_lets_captions_claim_before_next_heartbeat(self):
+        heartbeat_seconds = 0.2
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            heartbeat_seconds,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            embedding_worker._unload_model()
+
+            await asyncio.wait_for(
+                work_coordination.wait_for_manual_turn("captions", poll_seconds=0.001),
+                timeout=heartbeat_seconds / 2,
+            )
+            await asyncio.wait_for(
+                work_coordination.wait_for_gpu_turn("captions", poll_seconds=0.001),
+                timeout=heartbeat_seconds / 2,
+            )
+
+        self.assertEqual(work_coordination.manual_owner(), "captions")
+        self.assertEqual(work_coordination.gpu_owner(), "captions")
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+
+    async def test_search_model_residency_unloads_after_lease_is_stolen(self):
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            expired_at = time.time() - work_coordination.OWNER_LEASE_SECONDS - 1
+            work_coordination._manual_owner_updated_at = expired_at
+            work_coordination._gpu_owner_updated_at = expired_at
+            work_coordination.claim_manual_owner("captions")
+            work_coordination.claim_gpu_owner("captions")
+
+            async def wait_for_unload():
+                while embedding_worker.search_model_ready():
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(wait_for_unload(), timeout=0.1)
+
+        self.assertFalse(embedding_worker.search_model_ready())
+        self.assertFalse(embedding_worker.get_worker_status()["ready"])
+        self.assertEqual(work_coordination.manual_owner(), "captions")
+        self.assertEqual(work_coordination.gpu_owner(), "captions")
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+
+    async def test_search_model_residency_renews_both_leases(self):
+        embedding_worker._load_model = lambda *_args: object()
+
+        with unittest.mock.patch.object(
+            work_coordination,
+            "LEASE_HEARTBEAT_SECONDS",
+            0.01,
+        ):
+            self.assertTrue(await embedding_worker.ensure_model_loaded_for_search())
+            manual_before = work_coordination._manual_owner_updated_at
+            gpu_before = work_coordination._gpu_owner_updated_at
+
+            async def wait_for_renewal():
+                while (
+                    work_coordination._manual_owner_updated_at <= manual_before
+                    or work_coordination._gpu_owner_updated_at <= gpu_before
+                ):
+                    await asyncio.sleep(0.001)
+
+            await asyncio.wait_for(wait_for_renewal(), timeout=0.1)
+
+        self.assertEqual(work_coordination.manual_owner(), "embeddings")
+        self.assertEqual(work_coordination.gpu_owner(), "embeddings")
+
+    async def test_search_model_load_failure_releases_both_owners(self):
+        def fail_load(*_args):
+            raise RuntimeError("load failed")
+
+        embedding_worker._load_model = fail_load
+
+        self.assertFalse(await embedding_worker.ensure_model_loaded_for_search())
+
+        self.assertIsNone(work_coordination.manual_owner())
+        self.assertIsNone(work_coordination.gpu_owner())
 
     async def test_start_search_model_load_warms_model_in_background_once(self):
         calls = []
@@ -697,6 +798,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(loaded)
         self.assertEqual(calls, [("/tmp/test-model", "test-model")])
         self.assertTrue(embedding_worker.search_model_ready())
+        self.assertEqual(embedding_worker.get_worker_status()["state"], "idle")
 
     async def test_missing_dependency_blocks_background_model_load(self):
         embedding_worker.settings.get_settings = lambda: {

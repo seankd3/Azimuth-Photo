@@ -62,6 +62,7 @@ _loaded_model_id = None
 _loaded_model_revision = None
 _model_load_lock = None
 _search_model_load_task = None
+_search_model_residency_task = None
 _model_load_retry_after = 0.0
 _model_load_error_key = None
 _worker_status = {
@@ -244,14 +245,96 @@ def _clear_cuda_cache():
         pass
 
 
-def _unload_model() -> None:
+def _cancel_search_model_residency_task() -> asyncio.Task | None:
+    global _search_model_residency_task
+
+    task = _search_model_residency_task
+    _search_model_residency_task = None
+    if task is None or task.done():
+        return task
+    try:
+        current_task = asyncio.current_task()
+    except RuntimeError:
+        current_task = None
+    if task is not current_task:
+        task.cancel()
+    return task
+
+
+def _release_embedding_owners() -> None:
+    work_coordination.release_manual_owner("embeddings")
+    work_coordination.release_gpu_owner("embeddings")
+
+
+def _unload_model() -> asyncio.Task | None:
     global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
+    residency_task = _cancel_search_model_residency_task()
     _model = None
     _loaded_model_dir = None
     _loaded_model_id = None
     _loaded_model_revision = None
     _clear_cuda_cache()
-    work_coordination.release_gpu_owner("embeddings")
+    _release_embedding_owners()
+    return residency_task
+
+
+async def _maintain_search_model_residency() -> None:
+    global _search_model_residency_task
+
+    current_task = asyncio.current_task()
+    heartbeat_seconds = work_coordination.LEASE_HEARTBEAT_SECONDS
+    try:
+        async with work_coordination.lease_heartbeat(
+            "embeddings",
+            gpu=True,
+            interval_seconds=heartbeat_seconds,
+        ):
+            while _model is not None:
+                await asyncio.sleep(heartbeat_seconds)
+                if work_coordination.lost_ownership("embeddings", gpu=True):
+                    _unload_model()
+                    _set_worker_status(
+                        "idle",
+                        "Search model released for other background work.",
+                        ready=False,
+                    )
+                    return
+    finally:
+        _release_embedding_owners()
+        if _search_model_residency_task is current_task:
+            _search_model_residency_task = None
+
+
+def _start_search_model_residency_task() -> bool:
+    global _search_model_residency_task
+
+    if _model is None:
+        return False
+    task = _search_model_residency_task
+    if task is not None and not task.done():
+        return True
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    _search_model_residency_task = loop.create_task(
+        _maintain_search_model_residency()
+    )
+    return True
+
+
+def _retain_search_model_residency(config: dict, model_id: str) -> bool:
+    if work_coordination.lost_ownership("embeddings", gpu=True):
+        return False
+    if not _start_search_model_residency_task():
+        return False
+    _set_worker_status(
+        "idle",
+        f"{model_id} ready for search.",
+        ready=True,
+        config=config,
+    )
+    return True
 
 
 async def _wait_for_embedding_turn() -> None:
@@ -286,8 +369,9 @@ async def shutdown_embedding_worker() -> None:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     _search_model_load_task = None
-    work_coordination.release_manual_owner("embeddings")
-    _unload_model()
+    residency_task = _unload_model()
+    if residency_task is not None and not residency_task.done():
+        await asyncio.gather(residency_task, return_exceptions=True)
     _embed_executor.shutdown(wait=False, cancel_futures=True)
     _preload_executor.shutdown(wait=False, cancel_futures=True)
     _embed_executor = _new_embed_executor()
@@ -632,7 +716,9 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
     model_dir, model_id, model_revision = _model_values(config)
 
     if _model_is_current(model_dir, model_id, model_revision):
-        return True
+        if _retain_search_model_residency(config, model_id):
+            return True
+        _unload_model()
     if not ai_models.model_files_present(model_dir):
         return False
     if _block_model_load_for_missing_dependency(model_dir, model_id, model_revision):
@@ -642,12 +728,15 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
 
     async with _get_model_load_lock():
         if _model_is_current(model_dir, model_id, model_revision):
-            return True
+            if _retain_search_model_residency(config, model_id):
+                return True
+            _unload_model()
         if _model_load_blocked(model_dir, model_id, model_revision):
             return False
 
         loop = asyncio.get_running_loop()
         _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
+        loaded = False
         try:
             await _wait_for_embedding_turn()
             _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
@@ -658,16 +747,17 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
             _loaded_model_id = model_id
             _loaded_model_revision = model_revision
             _clear_model_load_failure()
-            _set_worker_status("ready", f"{model_id} loaded locally.", ready=True, config=config)
+            if not _retain_search_model_residency(config, model_id):
+                raise RuntimeError("Could not start search model residency heartbeat")
+            loaded = True
             return True
         except Exception as exc:
-            _model = None
-            _loaded_model_dir = None
-            _loaded_model_id = None
-            _loaded_model_revision = None
             _note_model_load_failure(model_dir, model_id, model_revision, exc)
             log.error(f"Search model load error: {exc}", exc_info=True)
             return False
+        finally:
+            if not loaded:
+                _unload_model()
 
 
 async def ensure_model_loaded_for_search() -> bool:
