@@ -147,8 +147,13 @@ export function openOfflineStatusSheet() {
         const button = event.currentTarget;
         button.disabled = true;
         const ids = Object.keys(index);
-        await Promise.all(ids.map((id) => removeCached(Number(id))));
-        showToast('Offline photos removed');
+        try {
+            await Promise.all(ids.map((id) => removeCached(Number(id))));
+            showToast('Offline photos removed');
+        } catch {
+            // A silent throw left the button dead and the photos half-removed.
+            showToast("Couldn't remove offline photos — try again");
+        }
         openOfflineStatusSheet();
     });
 }

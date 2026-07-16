@@ -124,13 +124,26 @@ async function applyClientFavorites(collection, ids) {
         showToast('No client picks yet');
         return;
     }
-    const data = await getCollection(collection.id, 1000);
+    let data;
+    try {
+        data = await getCollection(collection.id, 1000);
+    } catch {
+        showToast(writeFailureMessage());
+        return;
+    }
     rememberImages((data && data.collection && data.collection.images) || []);
     dismissSheetThen(() => applyFlags(ids, 'picked'));
 }
 
 async function renderCollectionShare(collection, share) {
-    const picks = share ? await getCollectionShareFavorites(collection.id) : null;
+    // Favorites are decoration on the share sheet — a failed load must not
+    // leave the sheet dead, just render without picks.
+    let picks = null;
+    if (share) {
+        try {
+            picks = await getCollectionShareFavorites(collection.id);
+        } catch { /* render without picks */ }
+    }
     const ids = favoriteIds(picks);
     const sheet = openSheet(
         `<h3>Share ${esc(collection.name)}</h3>`
@@ -215,8 +228,14 @@ async function renderCollectionShare(collection, share) {
 
 export async function openCollectionShareSheet(collection) {
     openSheet(`<h3>Share ${esc(collection.name)}</h3><div class="ms-empty">Loading…</div>`);
-    const data = await getCollectionShare(collection.id);
-    await renderCollectionShare(collection, data && data.share);
+    try {
+        const data = await getCollectionShare(collection.id);
+        await renderCollectionShare(collection, data && data.share);
+    } catch {
+        // A sheet stuck on "Loading…" is a lie — close it and say what happened.
+        dismissSheetThen();
+        showToast(writeFailureMessage());
+    }
 }
 
 function photoShareName(image) {
@@ -270,6 +289,8 @@ export async function openPhotoShareSheet(image) {
             }
             document.dispatchEvent(new CustomEvent('collections-changed'));
             await shareLink(share.url, photoShareName(image));
+        } catch {
+            showToast(writeFailureMessage());
         } finally {
             if (document.contains(button)) {
                 button.disabled = false;
