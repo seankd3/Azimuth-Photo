@@ -8,6 +8,22 @@ import { FilmStockPicker } from './film_panel.js';
 import { LensPanel } from './lens_panel.js';
 import { CalibrationPanel } from './calibration_panel.js';
 
+const PANEL_OPEN_STORAGE_KEY = 'dev.panels.open';
+let storedPanelOpenStates = null;
+
+function readPanelOpenStates() {
+    try {
+        const value = JSON.parse(window.localStorage.getItem(PANEL_OPEN_STORAGE_KEY) || 'null');
+        return value && typeof value === 'object' ? value : null;
+    } catch {
+        return null;
+    }
+}
+
+function savePanelOpenStates() {
+    try { window.localStorage.setItem(PANEL_OPEN_STORAGE_KEY, JSON.stringify(storedPanelOpenStates)); } catch { /* Panel defaults remain usable. */ }
+}
+
 const slider = (key, label, min, max, step = 1, fallback = DEFAULTS[key] ?? 0) => ({ key, label, min, max, step, fallback });
 const BASIC = [slider('Temperature', 'Temp', 2000, 50000, 50, 5500), slider('Tint', 'Tint', -150, 150)];
 const TONE = [
@@ -50,7 +66,8 @@ function displayValue(value, step) {
 }
 
 function section(title, id, inner, open = true) {
-    return `<details class="develop-section" data-section="${id}" ${open ? 'open' : ''}>`
+    const isOpen = typeof storedPanelOpenStates?.[id] === 'boolean' ? storedPanelOpenStates[id] : open;
+    return `<details class="develop-section" data-section="${id}" ${isOpen ? 'open' : ''}>`
         + `<summary data-tip="Expand or collapse ${title}"><span>${title}</span><span aria-hidden="true">⌄</span></summary>`
         + `<div class="develop-section-body">${inner}</div></details>`;
 }
@@ -195,6 +212,7 @@ export class DevelopPanels {
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
+        storedPanelOpenStates = readPanelOpenStates();
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
             + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
@@ -212,6 +230,13 @@ export class DevelopPanels {
             + section('Masking', 'masking', '<div id="develop-masking"></div>', false)
             + section('Healing', 'healing', '<div id="develop-healing"></div>', false)
             + '<p class="develop-v1-note">Manual defringe and circular heal/clone spots are available. Automatic lateral CA remains planned.</p>';
+        host.addEventListener('toggle', (event) => {
+            const details = event.target;
+            if (!(details instanceof HTMLDetailsElement) || !details.matches('.develop-section')) return;
+            storedPanelOpenStates ??= {};
+            storedPanelOpenStates[details.dataset.section] = details.open;
+            savePanelOpenStates();
+        }, true);
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
