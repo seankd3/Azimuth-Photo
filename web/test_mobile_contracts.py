@@ -52,18 +52,13 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("resolveSecureAppUrl", bootstrap)
         self.assertIn("fallbackSecureAppUrl", bootstrap)
 
-    def test_loupe_vertical_swipes_favorite_or_close_without_replacing_navigation(self):
+    def test_loupe_swipes_favorite_dismiss_and_keep_horizontal_navigation(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")
 
         self.assertIn("function favoriteSwipe()", viewer)
         self.assertIn("void applyFlags([image.id], 'picked');", viewer)
         self.assertIn("settleDismissSwipe();", viewer)
         self.assertIn("favoriteSwipe();", viewer)
-    def test_loupe_swipe_favorites_without_replacing_navigation(self):
-        viewer = self.read("static", "js", "mobile", "viewer.js")
-
-        self.assertIn("function favoriteSwipe()", viewer)
-        self.assertIn("void applyFlags([image.id], 'picked')", viewer)
         self.assertIn("const dir = dx < 0 ? 1 : -1", viewer)
         self.assertIn("flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected'", viewer)
 
