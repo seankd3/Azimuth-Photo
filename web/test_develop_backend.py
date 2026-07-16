@@ -214,6 +214,24 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["history"]), 40)
 
+    def test_history_rail_pins_named_snapshots_past_the_step_cap(self):
+        saved = self.client.post(
+            f"/api/develop/{self.raw_id}/snapshots",
+            json={"label": "Keeper", "settings": {"Exposure2012": 0.5}},
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+        for index in range(45):
+            response = self.client.put(
+                f"/api/develop/{self.raw_id}",
+                json={"settings": {"Exposure2012": index / 10}, "label": f"Step {index}"},
+            )
+            self.assertEqual(response.status_code, 200)
+        history = self.client.get(f"/api/develop/{self.raw_id}/history")
+        self.assertEqual(history.status_code, 200, history.text)
+        labels = [row["label"] for row in history.json()]
+        self.assertIn("Snapshot: Keeper", labels)
+        self.assertEqual(len([l for l in labels if not l.startswith("Snapshot:")]), 40)
+
     def test_named_snapshots_are_not_truncated_by_edit_history(self):
         for label in ("Print", "Web"):
             saved = self.client.post(

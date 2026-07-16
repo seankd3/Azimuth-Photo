@@ -342,8 +342,12 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(_configured_db_path())
     try:
         cursor = await conn.execute(
-            "SELECT id, settings, label, created_at FROM develop_history WHERE image_id = ? ORDER BY id DESC LIMIT 40",
-            (image_id,),
+            # Named snapshots are pinned: they must survive the 40-step rail cap.
+            "SELECT id, settings, label, created_at FROM develop_history "
+            "WHERE image_id = ? AND (label LIKE 'Snapshot:%' OR id IN ("
+            "  SELECT id FROM develop_history WHERE image_id = ? ORDER BY id DESC LIMIT 40"
+            ")) ORDER BY id DESC",
+            (image_id, image_id),
         )
         return [
             {**dict(row), "settings": _json_settings(row["settings"])}

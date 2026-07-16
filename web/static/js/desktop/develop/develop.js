@@ -571,6 +571,7 @@ async function openImage(image) {
     paintPlaceholder(image.id, token);
     try {
         let entry = stateCache.get(Number(image.id));
+        const cachedEntry = Boolean(entry);
         if (!entry) {
             const payload = await fetchDevelop(image.id);
             entry = {
@@ -588,6 +589,8 @@ async function openImage(image) {
         if (token !== loadingToken) return;
         entry.imageId = Number(image.id);
         historyPanel?.setHistory(entry.serverHistory || []);
+        // Cached entries can hold a pre-edit rail; refresh it from the server.
+        if (cachedEntry) void historyPanel?.reload();
         applySettings(entry);
         if (!renderer) {
             setStatus('WebGL2 is required for Develop.', { error: true });
