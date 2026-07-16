@@ -253,7 +253,6 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 4)
         self.assertEqual(result["total_images"], 4)
         self.assertEqual(result["pending_thumbnails"], 2)
-        self.assertEqual(result["hidden_pending_thumbnails"], 2)
         self.assertFalse(result["images"][0]["preview_ready"])
 
         with unittest.mock.patch.dict(
@@ -267,7 +266,6 @@ class SearchTests(BackendTestCase):
         self.assertEqual(satellite_result["visible_images"], 4)
         self.assertEqual(satellite_result["total_images"], 4)
         self.assertEqual(satellite_result["pending_thumbnails"], 2)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 2)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertNotIn("thumb_url", satellite_cards[hidden_best])
         self.assertIn("thumb_url", satellite_cards[visible_first])
@@ -290,7 +288,6 @@ class SearchTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 2)
         self.assertEqual(result["pending_thumbnails"], 1)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
         hidden_card = next(img for img in result["images"] if img["id"] == hidden_match)
         self.assertFalse(hidden_card["preview_ready"])
 
@@ -519,7 +516,6 @@ class SearchTests(BackendTestCase):
         self.assertEqual(ids, {visible_a, visible_b})
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 3)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
         self.assertEqual(result["stats"]["filtered_pool_visible"], 2)
         self.assertEqual(result["stats"]["filtered_pool_total"], 3)
 

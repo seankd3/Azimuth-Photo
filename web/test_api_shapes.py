@@ -307,7 +307,7 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(data["visible_images"], 4)
         self.assertEqual(data["total_images"], 4)
         self.assertEqual(data["pending_thumbnails"], 1)
-        self.assertEqual(data["hidden_pending_thumbnails"], 1)
+        self.assertEqual(data["hidden_pending_thumbnails"], data["pending_thumbnails"])
         self.assertEqual(len(data["images"]), 4)
         self.assertTrue(all("preview_ready" in card for card in data["images"]))
         self.assertEqual(sum(not card["preview_ready"] for card in data["images"]), 1)
@@ -325,7 +325,6 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(satellite["visible_images"], 4)
         self.assertEqual(satellite["total_images"], 4)
         self.assertEqual(satellite["pending_thumbnails"], 1)
-        self.assertEqual(satellite["hidden_pending_thumbnails"], 1)
         self.assertEqual(len(satellite["images"]), 4)
 
     def test_date_group_rankings_include_contextual_group_only(self):

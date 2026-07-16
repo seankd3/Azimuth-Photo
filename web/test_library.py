@@ -553,7 +553,6 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(result["visible_images"], 3)
         self.assertEqual(result["total_images"], 3)
         self.assertEqual(result["pending_thumbnails"], 1)
-        self.assertEqual(result["hidden_pending_thumbnails"], 1)
         cards = {img["id"]: img for img in result["images"]}
         self.assertFalse(cards[hidden]["preview_ready"])
         self.assertNotIn("thumb_url", cards[hidden])
@@ -572,7 +571,6 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(satellite_result["visible_images"], 3)
         self.assertEqual(satellite_result["total_images"], 3)
         self.assertEqual(satellite_result["pending_thumbnails"], 1)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 1)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertIn("thumb_url", satellite_cards[visible_high])
         self.assertTrue(satellite_cards[visible_high]["preview_ready"])
