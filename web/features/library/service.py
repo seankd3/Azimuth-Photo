@@ -315,7 +315,6 @@ async def _blended_order_page(
     *,
     offset: int,
     limit: int,
-    visible_thumb_size: str,
 ) -> list[dict]:
     page_ids = cached["ids"][offset:offset + limit]
     if not page_ids:
@@ -325,8 +324,6 @@ async def _blended_order_page(
         offset=0,
         sort="elo",
         id_filter=set(page_ids),
-        visible_thumb_size=visible_thumb_size,
-        cache_root=_configured_cache_root(),
     )
     rows_by_id = {int(row["id"]): dict(row) for row in rows}
     annotations = cached.get("annotations") or {}
@@ -458,8 +455,31 @@ async def _attach_preview_state(cards: list[dict]) -> list[dict]:
     return result
 
 
+async def _preview_ready_count(image_ids) -> int:
+    ids = [int(image_id) for image_id in image_ids if int(image_id) > 0]
+    if not ids:
+        return 0
+    cached_ids = await _configured(_get_cached_image_ids)(
+        ids,
+        "sm",
+        _configured_cache_root(),
+    )
+    return len(cached_ids)
+
+
+def _ranking_preview_metadata(total_images: int, preview_ready_images: int) -> dict:
+    metadata = response_helpers.visibility_counts(total_images, preview_ready_images)
+    # Every registered row is visible now; preview readiness is independent metadata.
+    metadata["visible_images"] = metadata["total_images"]
+    return metadata
+
+
 def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
     return "" if satellite.is_satellite_mode() or _normalized_import_batch_id(import_batch) else "sm"
+
+
+def _preview_thumb_size_for_scope() -> str:
+    return "sm"
 
 
 def copy_rankings_response(response: dict) -> dict:
@@ -639,6 +659,8 @@ async def date_histogram_payload(
         id_filter=search_ids,
         collection_id=collection_id,
         text_query=search.get("text_query") or "",
+        visible_thumb_size=_preview_thumb_size_for_scope(),
+        cache_root=_configured_cache_root(),
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
@@ -744,7 +766,7 @@ async def api_rankings_impl(
     search_scores = search["scores"]
     search_mode = search["search_mode"]
     text_query = search["text_query"]
-    visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
+    visible_thumb_size = _preview_thumb_size_for_scope()
     if search_mode == "metadata" and text_query and not search_ids and not file_type:
         extension_query = text_query.lower().lstrip(".")
         if extension_query in _configured(_extension_search_terms)():
@@ -862,10 +884,10 @@ async def api_rankings_impl(
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
         total_images = await total_task
-        if visible_images <= 0:
+        if total_images <= 0:
             response = {
                 "images": [],
-                **response_helpers.visibility_counts(total_images, visible_images),
+                **_ranking_preview_metadata(total_images, visible_images),
                 "total_kept": total_images,
                 "search_mode": search_mode,
                 "search_sources": search.get("search_sources") or [],
@@ -877,13 +899,12 @@ async def api_rankings_impl(
             return response
 
         images = await _configured(_get_rankings)(
-            limit=visible_images, offset=0, sort="elo",
+            limit=total_images, offset=0, sort="elo",
             orientation=orientation, compared=compared, min_stars=min_stars,
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
             collection_id=collection_id,
-            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
@@ -923,7 +944,7 @@ async def api_rankings_impl(
             _configured_schedule_result_thumbnail_memory_warm(page)
         response = {
             "images": page,
-            **response_helpers.visibility_counts(total_images, visible_images),
+            **_ranking_preview_metadata(total_images, visible_images),
             "total_kept": total_images,
             "search_mode": search_mode,
             "search_sources": search.get("search_sources") or [],
@@ -956,13 +977,12 @@ async def api_rankings_impl(
         )
         total_images = await total_task
         images = await _configured(_get_rankings)(
-            limit=visible_images, offset=0, sort="elo",
+            limit=total_images, offset=0, sort="elo",
             orientation=orientation, compared=compared, min_stars=min_stars,
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
             collection_id=collection_id,
-            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
@@ -985,7 +1005,7 @@ async def api_rankings_impl(
             _configured_schedule_result_thumbnail_memory_warm(page)
         response = {
             "images": page,
-            **response_helpers.visibility_counts(total_images, visible_images),
+            **_ranking_preview_metadata(total_images, visible_images),
             "total_kept": total_images,
             "search_mode": search_mode,
             "search_sources": search.get("search_sources") or [],
@@ -1100,12 +1120,11 @@ async def api_rankings_impl(
         )
     if blend_context.get("active") and cached_blended_order is not None:
         total_images = int(cached_blended_order.get("total_images") or 0)
-        visible_images = len(cached_blended_order.get("ids") or [])
+        visible_images = await _preview_ready_count(cached_blended_order.get("ids") or [])
         images = await _blended_order_page(
             cached_blended_order,
             offset=offset,
             limit=limit,
-            visible_thumb_size=visible_thumb_size,
         )
     elif blend_context.get("active"):
         if unfiltered_rankings:
@@ -1143,42 +1162,26 @@ async def api_rankings_impl(
             visible_images = await visible_task
             total_images = await total_task
 
-        visible_rows = []
-        if visible_images > 0:
-            visible_rows = await _configured(_get_rankings)(
-                limit=visible_images, offset=0, sort=db_sort,
+        all_rows = []
+        if total_images > 0:
+            all_rows = await _configured(_get_rankings)(
+                limit=total_images, offset=0, sort=db_sort,
                 orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens, tag=tag,
                 id_filter=search_ids,
                 collection_id=collection_id,
-                visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
-        blended_rows = _sort_blended_rankings(_with_blended_rank_data(visible_rows, blend_context), db_sort)
+        blended_rows = _sort_blended_rankings(_with_blended_rank_data(all_rows, blend_context), db_sort)
         if int(min_stars or 0) > 0:
             blended_rows = [
                 row for row in blended_rows
                 if _passes_blended_star_filter(row, int(min_stars or 0))
             ]
-            visible_images = len(blended_rows)
-            if total_images > 0:
-                total_rows = await _configured(_get_rankings)(
-                    limit=total_images, offset=0, sort=db_sort,
-                    orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
-                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                    camera=camera, lens=lens, tag=tag,
-                    id_filter=search_ids,
-                    text_query=text_query,
-                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                )
-                total_images = sum(
-                    1 for row in _with_blended_rank_data(total_rows, blend_context)
-                    if _passes_blended_star_filter(row, int(min_stars or 0))
-                )
-            else:
-                total_images = 0
+            total_images = len(blended_rows)
+            visible_images = await _preview_ready_count(row["id"] for row in blended_rows)
         _cache_blended_order(
             blended_order_key,
             blended_rows,
@@ -1193,7 +1196,6 @@ async def api_rankings_impl(
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
             collection_id=collection_id,
-            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         )
@@ -1258,7 +1260,7 @@ async def api_rankings_impl(
     result = await _attach_preview_state(result)
     response = {
         "images": result,
-        **response_helpers.visibility_counts(total_images, visible_images),
+        **_ranking_preview_metadata(total_images, visible_images),
         "total_kept": total_images,
         "search_mode": search_mode,
         "search_sources": search.get("search_sources") or [],

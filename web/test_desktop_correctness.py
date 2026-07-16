@@ -61,7 +61,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
         for source in (grid, timeline):
             self.assertIn("let thumbnailPollTimer = 0;", source)
             self.assertIn("function scheduleThumbnailPoll()", source)
-            self.assertIn("hidden_pending_thumbnails", source)
+            self.assertIn("pending_thumbnails", source)
+            self.assertIn("refreshPendingPreviews", source)
+            self.assertIn("preview-pending", source)
+            self.assertIn("data-preview-src", source)
             self.assertIn("selection.size", source)
 
         self.assertIn("scrollTop <= 160", grid)

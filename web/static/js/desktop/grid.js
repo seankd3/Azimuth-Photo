@@ -1,7 +1,7 @@
 import {
-    byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
+    byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getCatalog, getScanStatus, getStack, thumbUrl, unstack } from './api.js';
+import { createStack, getCatalog, getRankings, getScanStatus, getStack, thumbUrl, unstack } from './api.js';
 import { loadScopePage } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -46,7 +46,7 @@ let activeJumpToken = 0;
 let reloadPending = false;
 let thumbRetryFocusBound = false;
 let thumbnailPollTimer = 0;
-let hiddenPendingThumbnails = 0;
+let pendingThumbnails = 0;
 const stackCache = new Map();
 const stackKindCache = new Map();
 
@@ -67,18 +67,19 @@ function canRefreshPendingThumbnails() {
 }
 
 function scheduleThumbnailPoll() {
-    if (!mounted || !hiddenPendingThumbnails || thumbnailPollTimer) return;
-    thumbnailPollTimer = window.setTimeout(() => {
+    if (!mounted || !pendingThumbnails || thumbnailPollTimer) return;
+    thumbnailPollTimer = window.setTimeout(async () => {
         thumbnailPollTimer = 0;
-        if (!mounted || !hiddenPendingThumbnails) return;
+        if (!mounted || !pendingThumbnails) return;
         if (canRefreshPendingThumbnails()) loadFirstPage();
+        else await refreshPendingPreviews();
         scheduleThumbnailPoll();
     }, 3000);
 }
 
 function updateThumbnailPoll(pending) {
-    hiddenPendingThumbnails = Math.max(0, Number(pending) || 0);
-    if (!hiddenPendingThumbnails) {
+    pendingThumbnails = Math.max(0, Number(pending) || 0);
+    if (!pendingThumbnails) {
         stopThumbnailPoll();
         return;
     }
@@ -107,8 +108,11 @@ export function cellHtml(img, index) {
         ? `<button class="c-stack ${versionStack ? 'version-stack' : ''}" data-stack-id="${stackId}" data-tip="${stackTip}" aria-label="Expand ${versionStack ? 'version' : 'stack'} with ${stackCount} photos" aria-expanded="false" tabindex="-1">${icon('layers')}<span>${stackLabel}</span></button>`
         : '';
     const selected = selection.has(Number(img.id));
-    return `<figure class="cell ${img.thumb_url ? '' : 'skel'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
-        + `<img data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}" loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+    const previewReady = img.preview_ready !== false;
+    const previewSrc = img.thumb_url || thumbUrl('sm', img.id);
+    return `<figure class="cell ${previewReady ? '' : 'preview-pending'} ${selected ? 'sel' : ''}" data-id="${img.id}" data-idx="${index}" draggable="true" tabindex="-1" aria-selected="${selected ? 'true' : 'false'}" style="--ar:${aspect(img)}">`
+        + `<img data-preview-src="${esc(previewSrc)}" ${previewReady ? `data-src="${esc(previewSrc)}"` : ''} loading="lazy" decoding="async" fetchpriority="low" alt="${esc(img.filename || '')}">`
+        + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
         + `<span class="c-thumb-offline" aria-live="polite">${icon('image')}<span>${esc(img.filename || 'Original offline')}</span></span>`
         + stackBadge
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
@@ -166,7 +170,7 @@ function ensureImageObserver() {
         for (const entry of entries) {
             const img = entry.target;
             if (entry.isIntersecting) {
-                if (!img.src) img.src = img.dataset.src;
+                if (!img.src && img.dataset.src) img.src = img.dataset.src;
             }
         }
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
@@ -205,26 +209,67 @@ function ensureThumbRetryFocusHandler() {
 function observeImages(rootEl) {
     ensureThumbRetryFocusHandler();
     const observer = ensureImageObserver();
-    for (const img of (rootEl || document).querySelectorAll('img[data-src]')) {
+    for (const img of (rootEl || document).querySelectorAll('img[data-preview-src]')) {
         if (img.dataset.thumbObserved === '1') {
-            observer.observe(img);
+            if (img.dataset.src) observer.observe(img);
             continue;
         }
         img.dataset.thumbObserved = '1';
         img.addEventListener('load', () => {
             img.classList.add('ld');
-            img.closest('.cell')?.classList.remove('skel', 'thumb-offline', 'thumb-retrying');
+            img.closest('.cell')?.classList.remove('preview-pending', 'thumb-offline', 'thumb-retrying');
         });
         img.addEventListener('error', () => markThumbOffline(img));
-        observer.observe(img);
+        if (img.dataset.src) observer.observe(img);
     }
 }
 
 function unobserveImages(rootEl) {
     if (!imageObserver || !rootEl) return;
-    for (const img of rootEl.querySelectorAll('img[data-src]')) {
+    for (const img of rootEl.querySelectorAll('img[data-preview-src]')) {
         imageObserver.unobserve(img);
     }
+}
+
+function pendingCount(data) {
+    return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
+}
+
+function sharpenPreview(image) {
+    const id = Number(image?.id);
+    if (!id || !image.preview_ready) return;
+    const known = byId.get(id);
+    if (known) Object.assign(known, image);
+    for (const cell of document.querySelectorAll(`.cell[data-id="${id}"]`)) {
+        if (!cell.classList.contains('preview-pending')) continue;
+        const img = cell.querySelector('img[data-preview-src]');
+        if (!img) continue;
+        cell.classList.remove('preview-pending');
+        img.dataset.src = image.thumb_url || img.dataset.previewSrc || thumbUrl('sm', id);
+        img.src = img.dataset.src;
+    }
+}
+
+async function refreshPendingPreviews() {
+    const ids = viewState.images
+        .filter((image) => image && !image.preview_ready)
+        .map((image) => Number(image.id))
+        .filter((id) => id > 0);
+    if (!ids.length) return;
+    const params = scopeParams({ limit: Math.min(ids.length, 5000), offset: 0 });
+    params.set('ids', ids.join(','));
+    const data = await getRankings(params).catch(() => null);
+    if (!mounted || !data || !Array.isArray(data.images)) return;
+    const before = pendingThumbnails;
+    let landed = 0;
+    for (const image of data.images) {
+        if (!image.preview_ready) continue;
+        const known = byId.get(Number(image.id));
+        if (known?.preview_ready) continue;
+        sharpenPreview(image);
+        landed += 1;
+    }
+    updateThumbnailPoll(Math.max(0, before - landed));
 }
 
 function warmMediumThumb(cell) {
@@ -367,17 +412,14 @@ function bindScopeEmptyActions(flow) {
 
 async function hydrateFirstRunEmpty(request) {
     if (scopeActive() || viewState.bestOf) return;
-    const [catalog, scan, probe] = await Promise.all([
+    const [catalog, scan] = await Promise.all([
         getCatalog().catch(() => null),
         getScanStatus().catch(() => null),
-        loadScopePage({ limit: 1, offset: 0 }).catch(() => null),
     ]);
     if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
     const flow = document.getElementById('grid-flow');
     const sources = (catalog && catalog.sources) || [];
     const scanning = Boolean(scan && scan.scanning);
-    const found = Number(scan && (scan.total_found || scan.total_inserted)) || 0;
-    const pendingThumbs = Number(probe && probe.hidden_pending_thumbnails) || 0;
     window.clearTimeout(emptyScanTimer);
     if (!sources.length) {
         flow.innerHTML = emptyStateHtml({
@@ -390,20 +432,13 @@ async function hydrateFirstRunEmpty(request) {
             iconName: 'folder-plus',
         });
     } else if (scanning) {
-        flow.innerHTML = emptyStateHtml({
-            title: 'Scanning this source',
-            detail: `This source is being indexed${found ? ` · ${found.toLocaleString('en-US')} photos found so far` : ''}. Photos will appear here as they are ready.`,
-            actions: [{ label: 'View scan progress', action: 'add-source', primary: true }],
-            iconName: 'loader',
-        });
+        renderPreparingState();
         emptyScanTimer = window.setTimeout(async () => {
             if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
             const page = await loadScopePage({ limit: 1, offset: 0 });
             if (page && (page.images || []).length) loadFirstPage();
             else hydrateFirstRunEmpty(request);
         }, 1500);
-    } else if (pendingThumbs > 0) {
-        renderPreparingState(pendingThumbs);
     } else {
         flow.innerHTML = emptyStateHtml({
             title: 'No photos found',
@@ -419,22 +454,20 @@ async function hydrateFirstRunEmpty(request) {
     flow.querySelector('[data-empty-action="import"]')?.addEventListener('click', () => emit('import:open'));
 }
 
-function renderPreparingState(pending) {
-    // Photos exist in this scope but previews are still building — say so and
-    // keep polling instead of presenting an empty or broken view.
+function renderPreparingState() {
+    // This survives only before the scan has registered its first photo row.
     const flow = document.getElementById('grid-flow');
     flow.innerHTML = emptyStateHtml({
         title: 'Preparing your photos',
-        detail: `Building previews for ${pending.toLocaleString('en-US')} photo${pending === 1 ? '' : 's'} — they’ll appear here as they’re ready.`,
+        detail: 'Finding photos and getting the first cards ready. They’ll appear here in a moment.',
         actions: [],
         iconName: 'loader',
     });
-    updateThumbnailPoll(pending);
 }
 
 function renderEmptyState() {
     stopThumbnailPoll();
-    hiddenPendingThumbnails = 0;
+    pendingThumbnails = 0;
     stackExpansionRequest += 1;
     closeExpandedStack();
     resetImageObserver();
@@ -570,11 +603,9 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     }
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
-    const pendingPreviewCount = Number(data.hidden_pending_thumbnails) || 0;
-    if (next.length === 0 && done && pendingPreviewCount > 0) renderPreparingState(pendingPreviewCount);
-    else if (next.length === 0 && done) renderEmptyState();
+    if (next.length === 0 && done) renderEmptyState();
     else {
-        updateThumbnailPoll(data.hidden_pending_thumbnails);
+        updateThumbnailPoll(pendingCount(data));
         const chunkEl = direction === 'before'
             ? prependChunk(requestStart, incoming)
             : (render({ append: !wasEmpty, start: requestStart, images: incoming }), ensureChunkLive(requestStart));
@@ -928,7 +959,7 @@ export function mountGrid() {
 export function unmountGrid() {
     mounted = false;
     stopThumbnailPoll();
-    hiddenPendingThumbnails = 0;
+    pendingThumbnails = 0;
     savedScrollTop = document.getElementById('canvas').scrollTop;
     generation += 1;
     cancelPendingLoad();

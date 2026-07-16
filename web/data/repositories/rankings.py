@@ -1361,6 +1361,8 @@ async def date_histogram(
     id_filter: set | None = None,
     collection_id: int = 0,
     text_query: str = "",
+    visible_thumb_size: str = "",
+    cache_root: str = "",
     exclude_collapsed_stack_members: bool = False,
 ) -> dict:
     """Month histogram for the whole filtered scope.
@@ -1393,14 +1395,22 @@ async def date_histogram(
             text_query=text_query,
             month_index_available=month_index_available,
         )
+        preview_expression = "1"
+        preview_params = []
+        if visible_thumb_size and cache_root:
+            preview_expression = (
+                "EXISTS (SELECT 1 FROM cache_entries c "
+                "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id)"
+            )
+            preview_params = [cache_root, visible_thumb_size]
         select = (
             "SELECT month, COUNT(*) AS count, "
-            "MAX(CASE WHEN month_rank = 1 THEN id END) AS cover_id, "
-            "MAX(CASE WHEN month_rank = 1 THEN elo END) AS cover_elo FROM ("
-            "SELECT i.id, substr(i.date_taken, 1, 7) AS month, "
-            "i.elo, "
-            "ROW_NUMBER() OVER (PARTITION BY substr(i.date_taken, 1, 7) "
-            "ORDER BY i.elo DESC, i.id DESC) AS month_rank "
+            "MAX(CASE WHEN month_rank = 1 AND preview_ready = 1 THEN id END) AS cover_id, "
+            "MAX(CASE WHEN month_rank = 1 AND preview_ready = 1 THEN elo END) AS cover_elo FROM ("
+            "SELECT ready_rows.*, ROW_NUMBER() OVER (PARTITION BY month "
+            "ORDER BY preview_ready DESC, elo DESC, id DESC) AS month_rank FROM ("
+            "SELECT i.id, substr(i.date_taken, 1, 7) AS month, i.elo, "
+            f"{preview_expression} AS preview_ready "
             f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
         )
         buckets: dict[str, dict] = {}
@@ -1408,7 +1418,10 @@ async def date_histogram(
 
         async def accumulate(where: str, query_params: list) -> None:
             nonlocal undated
-            cursor = await conn.execute(select + where + ") GROUP BY month", query_params)
+            cursor = await conn.execute(
+                select + where + ") ready_rows) ranked GROUP BY month",
+                [*preview_params, *query_params],
+            )
             for row in await cursor.fetchall():
                 month = row["month"]
                 count = int(row["count"] or 0)
@@ -1470,6 +1483,8 @@ async def date_histogram_cached(
     id_filter: set | None = None,
     collection_id: int = 0,
     text_query: str = "",
+    visible_thumb_size: str = "",
+    cache_root: str = "",
     force_refresh: bool = False,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
     exclude_collapsed_stack_members: bool = False,
@@ -1489,6 +1504,8 @@ async def date_histogram_cached(
         id_filter=id_filter,
         text_query=text_query,
         collection_id=collection_id,
+        visible_thumb_size=visible_thumb_size,
+        cache_root=cache_root,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     now = _time.time()
@@ -1518,6 +1535,8 @@ async def date_histogram_cached(
                         id_filter=id_filter,
                         collection_id=collection_id,
                         text_query=text_query,
+                        visible_thumb_size=visible_thumb_size,
+                        cache_root=cache_root,
                         force_refresh=True,
                         ttl_seconds=ttl_seconds,
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -1545,6 +1564,8 @@ async def date_histogram_cached(
         id_filter=id_filter,
         collection_id=collection_id,
         text_query=text_query,
+        visible_thumb_size=visible_thumb_size,
+        cache_root=cache_root,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
     if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:

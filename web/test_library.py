@@ -549,13 +549,14 @@ class LibraryTests(BackendTestCase):
 
         result = await library_routes.api_rankings(limit=10, sort="elo")
 
-        self.assertEqual([img["id"] for img in result["images"]], [visible_high, visible_low])
-        self.assertEqual(result["visible_images"], 2)
+        self.assertEqual([img["id"] for img in result["images"]], [visible_high, hidden, visible_low])
+        self.assertEqual(result["visible_images"], 3)
         self.assertEqual(result["total_images"], 3)
         self.assertEqual(result["pending_thumbnails"], 1)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
-        self.assertNotIn(hidden, [img["id"] for img in result["images"]])
-        self.assertTrue(all(img["preview_ready"] for img in result["images"]))
+        cards = {img["id"]: img for img in result["images"]}
+        self.assertFalse(cards[hidden]["preview_ready"])
+        self.assertNotIn("thumb_url", cards[hidden])
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -570,12 +571,39 @@ class LibraryTests(BackendTestCase):
         )
         self.assertEqual(satellite_result["visible_images"], 3)
         self.assertEqual(satellite_result["total_images"], 3)
-        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
+        self.assertEqual(satellite_result["pending_thumbnails"], 1)
+        self.assertEqual(satellite_result["hidden_pending_thumbnails"], 1)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertIn("thumb_url", satellite_cards[visible_high])
         self.assertTrue(satellite_cards[visible_high]["preview_ready"])
         self.assertNotIn("thumb_url", satellite_cards[hidden])
         self.assertFalse(satellite_cards[hidden]["preview_ready"])
+
+    async def test_date_histogram_prefers_a_ready_month_cover_over_a_higher_ranked_pending_photo(self):
+        source = await self._source()
+        pending = await self._image(source["id"], "pending-cover.jpg", elo=1800)
+        ready = await self._image(source["id"], "ready-cover.jpg", elo=1500)
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [
+                    ("2025-06-12 10:00:00", pending),
+                    ("2025-06-11 10:00:00", ready),
+                ],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        await self._cache_entry(ready, "sm")
+        db.invalidate_stats_cache()
+
+        response = await library_routes.api_date_histogram()
+
+        self.assertEqual(
+            response["months"],
+            [{"month": "2025-06", "count": 2, "cover_id": ready}],
+        )
 
     async def test_all_photos_includes_stale_hub_mirror_rows_across_dates(self):
         """All Photos must surface hub:// mirror rows even when denormalized counts drifted to 0.
@@ -731,7 +759,11 @@ class LibraryTests(BackendTestCase):
             await self._cache_entry(image_id, "sm")
 
         vector = await taste_service.taste_vector()
-        result = await library_routes.api_rankings(limit=10, sort="taste")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="taste",
+            ids=f"{winner_like},{loser_like}",
+        )
 
         self.assertTrue(vector["available"])
         self.assertEqual(vector["comparison_count"], 5)
@@ -958,7 +990,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(measured, "sm")
         await self._cache_entry(predicted, "sm")
 
-        result = await library_routes.api_rankings(limit=10, sort="elo")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{measured},{predicted}",
+        )
         cards = {image["id"]: image for image in result["images"]}
 
         self.assertEqual([image["id"] for image in result["images"][:2]], [predicted, measured])
@@ -984,7 +1020,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(high_elo, "sm")
         await self._cache_entry(taste_match, "sm")
 
-        result = await library_routes.api_rankings(limit=10, sort="elo")
+        result = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{high_elo},{taste_match}",
+        )
 
         self.assertEqual([image["id"] for image in result["images"][:2]], [high_elo, taste_match])
         self.assertNotIn("display_score", result["images"][0])
@@ -1025,7 +1065,11 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(high_elo, "sm")
         await self._cache_entry(taste_match, "sm")
 
-        pure = await library_routes.api_rankings(limit=10, sort="elo")
+        pure = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{high_elo},{taste_match}",
+        )
         old_taste_vector = taste_service.taste_vector
 
         async def fail_taste_vector():
@@ -1034,7 +1078,11 @@ class LibraryTests(BackendTestCase):
         taste_service.taste_vector = fail_taste_vector
         library_service._rankings_response_cache.clear()
         try:
-            without_taste = await library_routes.api_rankings(limit=10, sort="elo")
+            without_taste = await library_routes.api_rankings(
+                limit=10,
+                sort="elo",
+                ids=f"{high_elo},{taste_match}",
+            )
         finally:
             taste_service.taste_vector = old_taste_vector
 
@@ -1541,6 +1589,9 @@ class LibraryTests(BackendTestCase):
             await conn.close()
         db.invalidate_stats_cache()
 
+        for image_id in (january_first, february, march):
+            await self._cache_entry(image_id, "sm")
+
         response = await library_routes.api_date_histogram()
 
         self.assertEqual(response["months"], [
@@ -1605,6 +1656,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
+        await self._cache_entry(image_id, "sm")
 
         response = await library_routes.api_date_histogram(stacks="expanded")
 
@@ -1627,7 +1679,10 @@ class LibraryTests(BackendTestCase):
         db._date_histogram_cache.clear()
 
         first = await library_routes.api_date_histogram()
-        cache_key = db._facet_cache_key()
+        cache_key = db._facet_cache_key(
+            visible_thumb_size="sm",
+            cache_root=thumbnails.SSD_CACHE_DIR,
+        )
         self.assertIn(cache_key, db._date_histogram_cache)
         self.assertEqual(db._date_histogram_cache[cache_key]["data"], first)
 

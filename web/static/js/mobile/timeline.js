@@ -4,7 +4,7 @@
 // jumps across the WHOLE archive (undated photos land in a proper
 // "Undated" section at the end, matching the SQL sort order).
 
-import { getDateHistogram, getRankings, getStack, thumbUrl } from './api.js';
+import { getDateHistogram, getRankings, getScanStatus, getStack, thumbUrl } from './api.js';
 import {
     byId, clearScope, clearSelection, emit, nav, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
@@ -84,7 +84,8 @@ let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
 let renderedSelection = new Set();
 let thumbnailPollTimer = 0;
-let hiddenPendingThumbnails = 0;
+let pendingThumbnails = 0;
+let preparingPollTimer = 0;
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -147,7 +148,9 @@ function stackBadge(img) {
 function cellFor(img, mi) {
     const fig = document.createElement('figure');
     const stackCount = Number(img.stack_count) || 0;
-    fig.className = 'mcell';
+    const previewReady = img.preview_ready !== false;
+    const previewSrc = img.thumb_url || thumbUrl('sm', img.id);
+    fig.className = `mcell${previewReady ? '' : ' preview-pending'}`;
     fig.dataset.id = String(img.id);
     fig.dataset.mi = String(mi);
     fig.setAttribute('role', 'button');
@@ -157,12 +160,16 @@ function cellFor(img, mi) {
     );
     fig.innerHTML =
         `<div class="c-check">${icon('check')}</div>`
-        + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-src="${esc(img.thumb_url || thumbUrl('sm', img.id))}">`
+        + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-preview-src="${esc(previewSrc)}"${previewReady ? ` data-src="${esc(previewSrc)}"` : ''}>`
+        + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
-    image.addEventListener('load', () => image.classList.add('ld'));
-    imgObserver.observe(image);
+    image.addEventListener('load', () => {
+        image.classList.add('ld');
+        fig.classList.remove('preview-pending');
+    });
+    if (previewReady) imgObserver.observe(image);
     if (selection.has(Number(img.id))) fig.classList.add('sel');
     return fig;
 }
@@ -319,19 +326,16 @@ function renderOfflineEmpty() {
     timeline.querySelector('.m-offline-empty')?.addEventListener('click', reload);
 }
 
-function renderPreparingState(pending) {
-    pending = Math.max(0, Number(pending) || 0);
+function renderPreparingState() {
     timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
         + '<b>Preparing your photos</b><br>'
-        + `<span>Building previews for ${pending.toLocaleString('en-US')} photo${pending === 1 ? '' : 's'} — they’ll appear here as they’re ready.</span></div>`;
-    updateThumbnailPoll(pending);
+        + '<span>Finding photos and getting the first cards ready. They’ll appear here in a moment.</span></div>';
+    clearTimeout(preparingPollTimer);
+    preparingPollTimer = setTimeout(() => reload(), 1500);
 }
 
 function renderEmpty() {
-    if (hiddenPendingThumbnails > 0) {
-        renderPreparingState(hiddenPendingThumbnails);
-        return;
-    }
+    clearTimeout(preparingPollTimer);
     timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
         + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
 }
@@ -460,11 +464,6 @@ function cacheDaySectionOffsets() {
 function renderMonths() {
     closeExpandedStack();
     timeline.classList.remove('m-z5');
-    if (hiddenPendingThumbnails > 0 && !images.length) {
-        renderPreparingState(hiddenPendingThumbnails);
-        daySectionOffsets = [];
-        return;
-    }
     timeline.innerHTML = '';
     const wrap = document.createElement('div');
     wrap.id = 'm-months';
@@ -481,10 +480,10 @@ function renderMonths() {
             }
         }
         const card = document.createElement('button');
-        card.className = 'm-month-card';
-        card.setAttribute('aria-label', `${monthLabel(entry.key)}, ${entry.count} photos`);
         const coverId = Number(entry.coverId) || 0;
-        if (coverId) card.classList.add('has-cover');
+        card.className = `m-month-card ${coverId ? 'has-cover' : 'preview-pending'}`;
+        card.dataset.month = entry.key;
+        card.setAttribute('aria-label', `${monthLabel(entry.key)}, ${entry.count} photos`);
         card.innerHTML = (coverId
             ? `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`
             : '')
@@ -650,22 +649,64 @@ function canRefreshPendingThumbnails() {
 }
 
 function scheduleThumbnailPoll() {
-    if (!hiddenPendingThumbnails || thumbnailPollTimer || document.body.dataset.tab !== 'photos') return;
-    thumbnailPollTimer = setTimeout(() => {
+    if (!pendingThumbnails || thumbnailPollTimer || document.body.dataset.tab !== 'photos') return;
+    thumbnailPollTimer = setTimeout(async () => {
         thumbnailPollTimer = 0;
-        if (!hiddenPendingThumbnails || document.body.dataset.tab !== 'photos') return;
+        if (!pendingThumbnails || document.body.dataset.tab !== 'photos') return;
         if (canRefreshPendingThumbnails()) reload();
+        else await refreshPendingPreviews();
         scheduleThumbnailPoll();
     }, 3000);
 }
 
 function updateThumbnailPoll(pending) {
-    hiddenPendingThumbnails = Math.max(0, Number(pending) || 0);
-    if (!hiddenPendingThumbnails) {
+    pendingThumbnails = Math.max(0, Number(pending) || 0);
+    if (!pendingThumbnails) {
         stopThumbnailPoll();
         return;
     }
     scheduleThumbnailPoll();
+}
+
+function pendingCount(data) {
+    return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
+}
+
+function sharpenPreview(image) {
+    const id = Number(image?.id);
+    if (!id || !image.preview_ready) return false;
+    const known = byId.get(id);
+    if (known) Object.assign(known, image);
+    const loaded = images.find((item) => Number(item?.id) === id);
+    if (loaded) Object.assign(loaded, image);
+    let changed = false;
+    for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"].preview-pending`)) {
+        const img = cell.querySelector('img[data-preview-src]');
+        if (!img) continue;
+        cell.classList.remove('preview-pending');
+        img.src = image.thumb_url || img.dataset.previewSrc || thumbUrl('sm', id);
+        changed = true;
+    }
+    return changed;
+}
+
+async function refreshPendingPreviews() {
+    const ids = images
+        .filter((image) => image && !image.preview_ready)
+        .map((image) => Number(image.id))
+        .filter((id) => id > 0);
+    const before = pendingThumbnails;
+    let landed = 0;
+    if (ids.length) {
+        const params = scopeParams({ limit: Math.min(ids.length, 5000), offset: 0, sort: viewPrefs.sort || 'date_taken' });
+        params.set('ids', ids.join(','));
+        const data = await getRankings(params).catch(() => null);
+        if (data && Array.isArray(data.images)) {
+            for (const image of data.images) landed += sharpenPreview(image) ? 1 : 0;
+        }
+    }
+    if (zoomIdx === 2) await loadHistogram();
+    updateThumbnailPoll(Math.max(0, before - landed));
 }
 
 async function loadHistogram() {
@@ -686,11 +727,22 @@ async function loadHistogram() {
     if (data.undated > 0) {
         monthOffsets.push({ key: 'undated', offset, count: data.undated });
     }
+    if (zoomIdx === 2) {
+        for (const entry of monthOffsets) {
+            const coverId = Number(entry.coverId) || 0;
+            const card = timeline.querySelector(`.m-month-card[data-month="${entry.key}"]`);
+            if (!coverId || !card?.classList.contains('preview-pending')) continue;
+            card.insertAdjacentHTML('afterbegin', `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`);
+            card.classList.remove('preview-pending');
+            card.classList.add('has-cover');
+        }
+    }
     emit('histogram', histogram);
 }
 
 export async function reload() {
     const gen = ++generation;
+    clearTimeout(preparingPollTimer);
     initialLoading = true;
     stackRequest += 1;
     closeExpandedStack();
@@ -720,10 +772,12 @@ export async function reload() {
         return;
     }
     let page = null;
+    let scanStatus = null;
     try {
-        [, page] = await Promise.all([
+        [, page, scanStatus] = await Promise.all([
             loadHistogram(),
             getRankings(rankingParams(0)),
+            getScanStatus().catch(() => null),
         ]);
     } catch {
         page = null;
@@ -732,12 +786,13 @@ export async function reload() {
     timeline.innerHTML = '';
     timeline.classList.toggle('m-z5', zoomIdx === 1);
     if (page && Array.isArray(page.images)) {
-        updateThumbnailPoll(page.hidden_pending_thumbnails);
+        updateThumbnailPoll(pendingCount(page));
         images = page.images;
         currentSortQuality = page.sort_quality || null;
         rememberImages(images);
         if (zoomIdx === 2) renderMonths();
         else if (images.length) appendImages(images);
+        else if (scanStatus?.scanning) renderPreparingState();
         else renderEmpty();
         endReached = page.images.length < PAGE;
     } else if (isOffline()) {
@@ -766,7 +821,7 @@ export async function loadMore() {
     }
     loadingNext = false;
     if (gen !== generation || !page || !Array.isArray(page.images)) return;
-    updateThumbnailPoll(page.hidden_pending_thumbnails);
+    updateThumbnailPoll(pendingCount(page));
     if (!page.images.length) {
         endReached = true;
         endEl.hidden = false;
@@ -798,7 +853,7 @@ async function loadPrev() {
     }
     loadingPrev = false;
     if (gen !== generation || !page || !Array.isArray(page.images) || !page.images.length) return;
-    updateThumbnailPoll(page.hidden_pending_thumbnails);
+    updateThumbnailPoll(pendingCount(page));
     images = page.images.concat(images);
     startOffset = newStart;
     rememberImages(page.images);
@@ -852,7 +907,7 @@ export async function jumpToMonth(key) {
     if (gen !== generation) return;
     timeline.innerHTML = '';
     if (page && Array.isArray(page.images)) {
-        updateThumbnailPoll(page.hidden_pending_thumbnails);
+        updateThumbnailPoll(pendingCount(page));
         images = page.images;
         rememberImages(images);
         appendImages(images);
