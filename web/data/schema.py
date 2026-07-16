@@ -956,6 +956,8 @@ COMPARISON_COMPAT_COLUMNS = (
     ("action_id", "TEXT DEFAULT NULL"),
     ("elo_delta_winner", "REAL DEFAULT NULL"),
     ("elo_delta_loser", "REAL DEFAULT NULL"),
+)
+
 PEOPLE_COMPAT_COLUMNS = (
     ("photo_count", "INTEGER NOT NULL DEFAULT 0"),
     ("face_count", "INTEGER NOT NULL DEFAULT 0"),
@@ -1519,7 +1521,6 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "people", PEOPLE_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
