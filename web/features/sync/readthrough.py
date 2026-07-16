@@ -25,6 +25,7 @@ from urllib.request import Request, urlopen
 import numpy as np
 from PIL import Image
 
+from data import connection as data_connection
 from features.sync import satellite
 
 
@@ -94,13 +95,17 @@ def open_hub_preview(
 
 
 def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
+    conn = None
     try:
-        with sqlite3.connect(db_path) as conn:
-            row = conn.execute(
-                "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
-            ).fetchone()
+        conn = data_connection.open_sync(db_path)
+        row = conn.execute(
+            "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
+        ).fetchone()
     except sqlite3.Error as exc:
         raise BaseReadthroughError("Satellite content hashes are unavailable locally") from exc
+    finally:
+        if conn is not None:
+            data_connection.close_sync(conn, db_path=db_path)
     if row is None or not isinstance(row[0], str):
         return None
     value = row[0].strip().lower()

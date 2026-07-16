@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from core.runtime_paths import resolve_runtime_paths
+from data import connection as data_connection
 
 log = logging.getLogger(__name__)
 
@@ -109,16 +110,16 @@ def _parse_backup_name(name: str) -> datetime | None:
 
 def _sqlite_backup_to_path(source_db: str, dest_db: str) -> None:
     """Copy a live SQLite database via the BACKUP API (not a file copy)."""
-    src = sqlite3.connect(source_db, timeout=60.0)
+    src = data_connection.open_sync(source_db, timeout=60.0)
     try:
-        dst = sqlite3.connect(dest_db, timeout=60.0)
+        dst = data_connection.open_sync(dest_db, timeout=60.0)
         try:
             src.backup(dst)
             dst.commit()
         finally:
-            dst.close()
+            data_connection.close_sync(dst, db_path=dest_db)
     finally:
-        src.close()
+        data_connection.close_sync(src, db_path=source_db)
 
 
 def catalog_quick_check(db_path: str) -> dict[str, Any]:

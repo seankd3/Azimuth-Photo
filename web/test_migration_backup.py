@@ -57,6 +57,16 @@ class MigrationBackupTests(unittest.TestCase):
         self.assertTrue(Path(result["path"]).exists())
         self.assertIn(backups.PREMIGRATE_LABEL, result["name"])
 
+    def test_snapshot_copy_uses_fk_enabled_connection_helpers(self):
+        destination = os.path.join(self.tmp.name, "copy.db")
+        with mock.patch.object(
+            data_connection,
+            "open_sync",
+            wraps=data_connection.open_sync,
+        ) as open_sync:
+            backups._sqlite_backup_to_path(self.db, destination)
+        self.assertEqual(open_sync.call_count, 2)
+
     def test_backup_before_migration_raises_when_snapshot_fails(self):
         with self.assertRaises(FileNotFoundError):
             backups.backup_before_migration(self.db + ".nope", 20, 27)
