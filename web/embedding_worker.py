@@ -329,8 +329,8 @@ def _retain_search_model_residency(config: dict, model_id: str) -> bool:
     if not _start_search_model_residency_task():
         return False
     _set_worker_status(
-        "idle",
-        f"{model_id} ready for search.",
+        "resident",
+        "Search model warm.",
         ready=True,
         config=config,
     )

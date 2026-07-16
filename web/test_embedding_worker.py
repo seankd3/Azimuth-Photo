@@ -798,7 +798,9 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(loaded)
         self.assertEqual(calls, [("/tmp/test-model", "test-model")])
         self.assertTrue(embedding_worker.search_model_ready())
-        self.assertEqual(embedding_worker.get_worker_status()["state"], "idle")
+        status = embedding_worker.get_worker_status()
+        self.assertEqual(status["state"], "resident")
+        self.assertEqual(status["message"], "Search model warm.")
 
     async def test_missing_dependency_blocks_background_model_load(self):
         embedding_worker.settings.get_settings = lambda: {
