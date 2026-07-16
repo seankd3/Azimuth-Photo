@@ -54,3 +54,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
         self.assertIn("if (!undone) setFlagsLocally(normalized);", undo)
         self.assertLess(undo.index("const undone = await writeGrouped(previous);"), undo.index("if (!undone) setFlagsLocally(normalized);"))
+
+    def test_keyword_assignment_confirms_before_announcing_success(self):
+        keywords = read("keywords_panel.js")
+        assign_start = keywords.index("async function assign(")
+        assign = keywords[assign_start:keywords.index("\n}\n", assign_start)]
+
+        self.assertLess(assign.index("await mutation.commit;"), assign.index("showToast(`${keyword.path}"))

@@ -123,8 +123,8 @@ async function assign(keyword, imageIds = targetIds()) {
     const mutation = assignOptimistically(keyword, imageIds, true);
     armedKeyword = keyword;
     remember(Number(keyword.id));
-    showToast(`${keyword.path} · ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'}`);
     await mutation.commit;
+    showToast(`${keyword.path} · ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'}`);
 }
 
 async function resolveAndAssign(path) {
