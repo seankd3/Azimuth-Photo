@@ -1,7 +1,6 @@
 """Image lookup queries used by media, export, search, and compare flows."""
 
 import json
-import time
 
 from data import connection
 from data.repositories.common import chunked
@@ -303,23 +302,22 @@ async def set_image_rating(db_path: str, image_id: int, rating: int):
     async def _write() -> None:
         conn = await connection.open_async(db_path)
         try:
-            now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             cursor = await conn.execute(
                 "UPDATE develop_settings SET settings = json_set("
                 "CASE WHEN json_valid(settings) THEN "
                 "  CASE WHEN json_type(settings) = 'object' THEN settings ELSE '{}' END "
-                "ELSE '{}' END, '$._lr_rating', ?), updated_at = ? WHERE image_id = ?",
-                (rating, now, image_id),
+                "ELSE '{}' END, '$._lr_rating', ?) WHERE image_id = ?",
+                (rating, image_id),
             )
             if cursor.rowcount == 0:
                 payload = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
                 await conn.execute(
-                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?) "
+                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', '') "
                     "ON CONFLICT(image_id) DO UPDATE SET settings = json_set("
                     "CASE WHEN json_valid(develop_settings.settings) THEN "
                     "  CASE WHEN json_type(develop_settings.settings) = 'object' THEN develop_settings.settings ELSE '{}' END "
-                    "ELSE '{}' END, '$._lr_rating', ?), updated_at = excluded.updated_at",
-                    (image_id, payload, now, rating),
+                    "ELSE '{}' END, '$._lr_rating', ?)",
+                    (image_id, payload, rating),
                 )
             await conn.commit()
         finally:

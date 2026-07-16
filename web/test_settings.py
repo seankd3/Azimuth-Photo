@@ -101,6 +101,36 @@ class SettingsRouteTests(BackendTestCase):
         fetched = await self._request("GET", f"/api/image/{image_id}/rating")
         self.assertEqual(fetched.json()["rating"], 3)
 
+    async def test_set_rating_does_not_advance_the_develop_clock(self):
+        source = await self._source()
+        edited_id = await self._image(source["id"], "rated-edit.jpg")
+        unrated_id = await self._image(source["id"], "first-rating.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'user', 'develop-save')",
+                (edited_id, '{"Exposure2012":0.7}'),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await image_repository.set_image_rating(db.DB_PATH, edited_id, 4)
+        await image_repository.set_image_rating(db.DB_PATH, unrated_id, 5)
+
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                "SELECT image_id, updated_at FROM develop_settings WHERE image_id IN (?, ?)",
+                (edited_id, unrated_id),
+            )).fetchall()
+        finally:
+            await conn.close()
+        clocks = {row["image_id"]: row["updated_at"] for row in rows}
+        self.assertEqual(clocks[edited_id], "develop-save")
+        self.assertEqual(clocks[unrated_id], "")
+
     async def test_set_rating_preserves_interleaved_develop_save(self):
         source = await self._source()
         image_id = await self._image(source["id"], "interleaved-rating.jpg")
