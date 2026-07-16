@@ -1547,6 +1547,47 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(response["undated"], 1)
         self.assertEqual(response["total"], 5)
 
+    async def test_date_histogram_chooses_global_cover_across_id_chunks(self):
+        source = await self._source()
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, elo, status, date_taken) "
+                "VALUES (?, ?, ?, 1200, 'kept', '2025-04-12 09:30:00')",
+                (
+                    (
+                        source["id"],
+                        f"chunked-cover-{index}.jpg",
+                        os.path.join(source["path"], f"chunked-cover-{index}.jpg"),
+                    )
+                    for index in range(901)
+                ),
+            )
+            rows = await (
+                await conn.execute(
+                    "SELECT id FROM images WHERE source_id = ? ORDER BY id",
+                    (source["id"],),
+                )
+            ).fetchall()
+            scope_ids = {int(row["id"]) for row in rows}
+            global_cover_id = list(scope_ids)[900]
+            await conn.execute(
+                "UPDATE images SET elo = 1800 WHERE id = ?",
+                (global_cover_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        response = await db.date_histogram(id_filter=scope_ids)
+
+        self.assertEqual(
+            response["months"],
+            [{"month": "2025-04", "count": 901, "cover_id": global_cover_id}],
+        )
+        self.assertEqual(response["total"], 901)
+
     async def test_date_histogram_works_without_optional_month_index(self):
         source = await self._source()
         image_id = await self._image(source["id"], "indexed-later.jpg")
