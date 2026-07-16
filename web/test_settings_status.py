@@ -1,8 +1,62 @@
 from test_support import *  # noqa: F401,F403
+from unittest import mock
+
 from features.catalog import metadata as catalog_metadata
 
 
 class SettingsStatusTests(BackendTestCase):
+    async def test_orientation_worker_leaves_raws_for_preview_decoder(self):
+        source = await self._source("mixed-formats")
+        raw_id = await self._image(source["id"], "photo.cr3")
+        jpeg_id = await self._image(source["id"], "photo.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET file_ext = '.cr3' WHERE id = ?", (raw_id,))
+            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (jpeg_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        rows = await catalog_metadata.get_unclassified_images()
+
+        self.assertEqual([int(row["id"]) for row in rows], [jpeg_id])
+
+    async def test_orientation_worker_marks_unreadable_online_jpeg_missing(self):
+        source = await self._source("unreadable-jpeg")
+        image_id = await self._image(source["id"], "broken.jpg")
+        with open(os.path.join(source["path"], "broken.jpg"), "wb") as handle:
+            handle.write(b"not a jpeg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (image_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        rows = await catalog_metadata.get_unclassified_images()
+        batches = iter((rows,))
+
+        async def one_batch_then_stop(limit=200):
+            del limit
+            try:
+                return next(batches)
+            except StopIteration:
+                raise asyncio.CancelledError from None
+
+        catalog_metadata.resume_catalog_metadata()
+        try:
+            with mock.patch.object(
+                catalog_metadata,
+                "get_unclassified_images",
+                one_batch_then_stop,
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await catalog_metadata.classify_orientations_background()
+        finally:
+            catalog_metadata.pause_catalog_metadata()
+
+        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
+
     def test_restored_source_clears_all_orientation_poison_entries(self):
         old_ledger = dict(catalog_metadata._orientation_retry_ledger)
         catalog_metadata._orientation_retry_ledger.clear()

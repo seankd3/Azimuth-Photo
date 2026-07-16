@@ -170,6 +170,15 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
 
 
 class ThumbnailBudgetFacadeTests(unittest.TestCase):
+    def test_empty_catalog_keeps_disk_budget_uninitialized_for_first_import(self):
+        allocations = thumbnail_config.allocate_disk_budget(
+            100 * 1024 * 1024,
+            needed_bytes={tier: 0 for tier in thumbnails.ALL_TIERS},
+            profile="original_heavy",
+        )
+
+        self.assertEqual(allocations, {tier: 0 for tier in thumbnails.ALL_TIERS})
+
     def test_budget_module_owns_archive_estimates_and_facade_math(self):
         with tempfile.TemporaryDirectory() as tempdir:
             db_path = os.path.join(tempdir, "budget.db")

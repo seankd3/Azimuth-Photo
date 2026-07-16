@@ -119,7 +119,28 @@ async def set_image_orientation(db_path: str, image_id: int, orientation: str):
         await connection.close_async(conn, db_path=db_path)
 
 
-async def get_unclassified_images(db_path: str, limit: int = 200):
+async def get_unclassified_images(
+    db_path: str,
+    limit: int = 200,
+    *,
+    file_extensions: set[str] | frozenset[str] | None = None,
+):
+    extension_clause = ""
+    params: list = []
+    if file_extensions:
+        normalized_extensions = sorted({
+            form
+            for extension in file_extensions
+            for form in {
+                str(extension).strip().lower().lstrip("."),
+                f".{str(extension).strip().lower().lstrip('.')}",
+            }
+            if form and form != "."
+        })
+        placeholders = ",".join("?" for _extension in normalized_extensions)
+        extension_clause = f"AND LOWER(COALESCE(i.file_ext, '')) IN ({placeholders}) "
+        params.extend(normalized_extensions)
+    params.append(limit)
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -130,8 +151,9 @@ async def get_unclassified_images(db_path: str, limit: int = 200):
             "AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND COALESCE(i.hub_remote, 0) = 0 "
+            f"{extension_clause}"
             "LIMIT ?",
-            (limit,),
+            params,
         )
         return await cursor.fetchall()
     finally:
