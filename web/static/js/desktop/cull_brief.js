@@ -201,14 +201,30 @@ async function acceptCurrent() {
         });
 }
 
+function undoSkip(receipt) {
+    if (!receipt || receipt.undone || state.busy) return false;
+    receipt.undone = true;
+    state.skipped = Math.max(0, state.skipped - 1);
+    state.suggestions.splice(Math.min(receipt.index, state.suggestions.length), 0, receipt.suggestion);
+    state.index = Math.min(receipt.index, state.suggestions.length - 1);
+    updateBanner();
+    renderReview();
+    return true;
+}
+
 function skipCurrent() {
-    if (!current() || state.busy) return;
+    const suggestion = current();
+    if (!suggestion || state.busy) return;
+    const receipt = { suggestion, index: state.index, undone: false };
     state.skipped += 1;
     state.suggestions.splice(state.index, 1);
     if (state.index >= state.suggestions.length) state.index = Math.max(0, state.suggestions.length - 1);
     updateBanner();
-    advance();
-    showToast('Skipped');
+    if (!state.suggestions.length) finishReview({ undo: () => undoSkip(receipt) });
+    else {
+        advance();
+        showToast('Skipped', { undo: () => undoSkip(receipt) });
+    }
 }
 
 function togglePreviewZoom(preview) {
