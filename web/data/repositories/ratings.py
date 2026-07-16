@@ -848,6 +848,7 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             )
 
         direct_deltas: dict[int, float] = {}
+        relative_expected_elo: dict[int, float] = {}
         legacy_restore_elo: dict[int, float] = {}
         comparison_decrements: dict[int, int] = {}
         for row in rows:
@@ -856,14 +857,18 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             if row["elo_delta_winner"] is None:
                 legacy_restore_elo.setdefault(winner_id, float(row["elo_before_winner"]))
             else:
-                direct_deltas[winner_id] = direct_deltas.get(winner_id, 0.0) + float(
-                    row["elo_delta_winner"]
+                winner_delta = float(row["elo_delta_winner"])
+                direct_deltas[winner_id] = direct_deltas.get(winner_id, 0.0) + winner_delta
+                relative_expected_elo[winner_id] = (
+                    float(row["elo_before_winner"]) + winner_delta
                 )
             if row["elo_delta_loser"] is None:
                 legacy_restore_elo.setdefault(loser_id, float(row["elo_before_loser"]))
             else:
-                direct_deltas[loser_id] = direct_deltas.get(loser_id, 0.0) + float(
-                    row["elo_delta_loser"]
+                loser_delta = float(row["elo_delta_loser"])
+                direct_deltas[loser_id] = direct_deltas.get(loser_id, 0.0) + loser_delta
+                relative_expected_elo[loser_id] = (
+                    float(row["elo_before_loser"]) + loser_delta
                 )
             comparison_decrements[winner_id] = comparison_decrements.get(winner_id, 0) + 1
             comparison_decrements[loser_id] = comparison_decrements.get(loser_id, 0) + 1
@@ -873,15 +878,32 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             for image_id, delta in direct_deltas.items()
             if image_id not in legacy_restore_elo
         }
+        skipped_drift: list[int] = []
         if relative_updates:
-            await conn.executemany(
-                "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
-                "comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
-                [
-                    (delta, comparison_decrements.get(image_id, 0), image_id)
-                    for image_id, delta in relative_updates.items()
-                ],
+            placeholders = ",".join("?" for _ in relative_updates)
+            cursor = await conn.execute(
+                f"SELECT id, elo FROM images WHERE id IN ({placeholders})",
+                tuple(relative_updates),
             )
+            current_elo = {
+                int(row["id"]): None if row["elo"] is None else float(row["elo"])
+                for row in await cursor.fetchall()
+            }
+            applicable_updates = {
+                image_id: delta
+                for image_id, delta in relative_updates.items()
+                if current_elo.get(image_id) == relative_expected_elo[image_id]
+            }
+            skipped_drift = sorted(set(relative_updates) - set(applicable_updates))
+            if applicable_updates:
+                await conn.executemany(
+                    "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
+                    "comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
+                    [
+                        (delta, comparison_decrements.get(image_id, 0), image_id)
+                        for image_id, delta in applicable_updates.items()
+                    ],
+                )
         if legacy_restore_elo:
             await conn.executemany(
                 "UPDATE images SET elo = ?, comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",
@@ -904,6 +926,7 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             "comparisons_undone": len(rows),
             "propagations_undone": len(propagation_rows),
             "action_id": action_id,
+            "skipped_drift": skipped_drift,
         }
     except Exception:
         await conn.rollback()
