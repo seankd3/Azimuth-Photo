@@ -4,17 +4,26 @@ import asyncio
 
 import db
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from core.version import API_REV, app_version
-from features.sync import contract, oplog, satellite
+from features.sync import contract, freeup, oplog, satellite
 from features.sync.sync_worker import get_worker
 from features.trash import service as trash_service
 
 
 router = APIRouter(tags=["sync"])
 _manual_sync_tasks: set[asyncio.Task] = set()
+
+
+class FreeUpRequest(BaseModel):
+    older_than_days: int = Field(default=30, ge=0, le=36500)
+
+
+class FreeUpCancelRequest(BaseModel):
+    pass
 
 
 def _start_manual_sync_task(coro) -> None:
@@ -97,6 +106,49 @@ async def sync_now():
     if worker is not None:
         worker.sync_now()
     return await sync_status()
+
+
+@router.get("/api/sync/freeable")
+async def sync_freeable(
+    older_than_days: int = Query(default=30, ge=0, le=36500),
+):
+    if not satellite.has_hub():
+        return JSONResponse(
+            {"error": "A connected satellite is required to free local originals"},
+            status_code=400,
+        )
+    try:
+        return await freeup.freeable(db.DB_PATH, older_than_days)
+    except RuntimeError as error:
+        return JSONResponse({"error": str(error)}, status_code=503)
+
+
+@router.post("/api/sync/freeup")
+async def sync_freeup(body: FreeUpRequest):
+    if not satellite.has_hub():
+        return JSONResponse(
+            {"error": "A connected satellite is required to free local originals"},
+            status_code=400,
+        )
+    job = freeup.start_job(db.DB_PATH, body.older_than_days)
+    return JSONResponse(job.status(), status_code=202, headers={"Retry-After": "1"})
+
+
+@router.get("/api/sync/freeup/{job_id}")
+async def sync_freeup_status(job_id: str):
+    job = freeup.job_for_id(job_id)
+    if job is None:
+        return JSONResponse({"error": "Free up space job not found"}, status_code=404)
+    return job.status()
+
+
+@router.post("/api/sync/freeup/{job_id}/cancel")
+async def sync_freeup_cancel(job_id: str, _body: FreeUpCancelRequest):
+    job = freeup.job_for_id(job_id)
+    if job is None:
+        return JSONResponse({"error": "Free up space job not found"}, status_code=404)
+    freeup.request_cancel(job)
+    return job.status()
 
 
 @router.post("/api/sync/mirror/refresh")

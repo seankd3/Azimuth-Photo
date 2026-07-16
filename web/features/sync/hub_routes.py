@@ -54,6 +54,10 @@ class MetadataRequest(BaseModel):
     items: list[MetadataItem] = Field(max_length=5000)
 
 
+class HaveRequest(BaseModel):
+    content_hashes: list[str] = Field(max_length=1000)
+
+
 def configure(
     *,
     db_path: Callable[[], str],
@@ -89,6 +93,15 @@ async def api_sync_manifest(body: ManifestRequest):
         return await hub.manifest(_configured_db_path(), [item.model_dump() for item in body.items])
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/sync/have")
+async def api_sync_have(body: HaveRequest):
+    try:
+        present = await hub.have_content_hashes(_configured_db_path(), body.content_hashes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"present": present}
 
 
 @router.get("/api/sync/upload/{content_hash}/status")

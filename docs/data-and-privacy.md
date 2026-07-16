@@ -6,7 +6,8 @@ your library.
 
 ## Source Photo Safety
 
-Original photo folders remain the source of truth.
+Original photo folders remain the source of truth unless a satellite owner
+explicitly uses **Free up space** after the hub has accepted the same original.
 
 - Scanning reads source folders and records catalog metadata.
 - Normal browsing, scanning, AI work, People, captions, sharing, publishing,
@@ -14,6 +15,11 @@ Original photo folders remain the source of truth.
 - Trash is the explicit exception: deleting moves originals into a `.trash`
   area on the same source root, and **Empty trash** permanently deletes those
   moved files.
+- On a satellite, **Free up space** is a second explicit exception. It asks the
+  authenticated hub to confirm each synced original, re-hashes the local file
+  immediately before deletion, and skips locally changed or pending photos. The
+  catalog row stays in place and the original remains available on demand from
+  the hub.
 - Removing a source from the catalog changes app catalog/cache state, not the
   source folder itself.
 - Generated cache files and database rows can be rebuilt from the original

@@ -1,11 +1,12 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
-    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion, installAiModel, listDevices,
+    getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
+    installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan,
+    stopMetadataScan, startFreeUpSpace, cancelFreeUpJob,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -40,6 +41,10 @@ let metadataStatus = null;
 let remoteAccess = null;
 let pairStatus = null;
 let syncStatus = null;
+let freeableStatus = null;
+let freeupJob = null;
+let freeupOlderDays = 30;
+let freeupTimer = null;
 let devicesPayload = null;
 let linkSession = null;
 let discoverPayload = null;
@@ -537,6 +542,63 @@ function renderPeekHealth() {
     return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
 }
 
+function freeupActive() {
+    return Boolean(freeupJob && ['queued', 'confirming', 'deleting'].includes(freeupJob.phase));
+}
+
+function hubDisplayName() {
+    try {
+        return new URL(pairStatus?.hub_url || '').hostname.split('.')[0] || 'your hub';
+    } catch {
+        return 'your hub';
+    }
+}
+
+function freeupSummary() {
+    if (freeableStatus?.unavailable) return 'Hub unavailable — reconnect to check what is safe to free.';
+    if (!freeableStatus) return 'Checking synced originals…';
+    if (!Number(freeableStatus.files || 0)) return 'No synced originals match this age.';
+    return `${bytes(freeableStatus.bytes)} safe to free — everything already on ${hubDisplayName()}`;
+}
+
+function freeupJobDetail() {
+    if (!freeupJob) return '';
+    if (freeupJob.phase === 'confirming') return 'Confirming originals with the hub…';
+    const done = Number(freeupJob.files_done || 0);
+    const total = Number(freeupJob.files_total || 0);
+    if (freeupJob.phase === 'cancelled') return `Stopped · ${bytes(freeupJob.bytes_freed)} freed`;
+    if (freeupJob.phase === 'failed') return 'Stopped — the remaining originals are untouched';
+    if (freeupJob.phase === 'completed') return `Done · ${bytes(freeupJob.bytes_freed)} freed`;
+    return `${fmt(done)} of ${fmt(total)} files · ${bytes(freeupJob.bytes_freed)} freed`;
+}
+
+function renderFreeUp() {
+    if (!pairStatus || pairStatus.mode !== 'satellite' || !pairStatus.has_hub) return '';
+    const active = freeupActive();
+    const canStart = Number(freeableStatus?.files || 0) > 0;
+    const progressValue = freeupJob
+        ? progress(freeupJob.files_done, freeupJob.files_total)
+        : 0;
+    const jobRow = freeupJob
+        ? '<div class="work-row freeup-progress" data-freeup-job>'
+            + '<div class="wr-body"><div class="wr-top"><span>Local originals</span>'
+            + `<span class="v" data-freeup-job-detail>${esc(freeupJobDetail())}</span></div>`
+            + `<div class="wr-track"><i data-freeup-progress style="width:${progressValue}%"></i></div></div></div>`
+        : '';
+    return '<section class="dr-sec" id="freeup-panel"><h3>Free up space</h3>'
+        + `<div class="freeup-summary" data-freeup-summary>${esc(freeupSummary())}</div>`
+        + '<div class="freeup-controls">'
+        + '<label for="freeup-age"><span>Older than</span><select id="freeup-age"'
+        + `${active ? ' disabled' : ''}>`
+        + `<option value="30"${freeupOlderDays === 30 ? ' selected' : ''}>30 days</option>`
+        + `<option value="90"${freeupOlderDays === 90 ? ' selected' : ''}>90 days</option>`
+        + `<option value="365"${freeupOlderDays === 365 ? ' selected' : ''}>1 year</option>`
+        + `<option value="0"${freeupOlderDays === 0 ? ' selected' : ''}>Everything synced</option>`
+        + '</select></label>'
+        + `<button class="btn primary" id="freeup-btn" type="button"${active || canStart ? '' : ' disabled'}>${active ? 'Cancel' : 'Free up space'}</button>`
+        + '</div>' + jobRow + '</section>';
+}
+
 function formatSeen(value) {
     if (value == null) return 'Never';
     const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
@@ -962,7 +1024,7 @@ export function renderSystemSections() {
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
         publishing: renderPublishingSettings(),
-        connectivity: renderDevices() + renderConnectServer() + renderRemote(),
+        connectivity: renderDevices() + renderConnectServer() + renderFreeUp() + renderRemote(),
         preferences: renderPrefs(),
     };
 }
@@ -1052,6 +1114,10 @@ function patchDrawerStatus(workerGenerations = null) {
         patchNodeText(row, '[data-device-status]', `${device.platform || 'unknown'} · last seen ${formatSeen(device.last_seen)}`);
     }
     if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
+    patchNodeText(body, '[data-freeup-summary]', freeupSummary());
+    patchNodeText(body, '[data-freeup-job-detail]', freeupJobDetail());
+    const freeupProgress = body.querySelector('[data-freeup-progress]');
+    if (freeupProgress) freeupProgress.style.width = `${progress(freeupJob?.files_done, freeupJob?.files_total)}%`;
 }
 
 function patchSettingSurface(field) {
@@ -1093,6 +1159,10 @@ async function refreshDrawer({ initial = false } = {}) {
     pairStatus = pair || pairStatus;
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
+    if (pairStatus?.mode === 'satellite' && pairStatus.has_hub && freeableStatus == null && !freeupActive()) {
+        const available = await getFreeable(freeupOlderDays).catch(() => null);
+        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+    }
     renderActivity();
     const body = systemSurfaceRender
         ? document.getElementById('system-lens-content')
@@ -1252,6 +1322,63 @@ async function withBusyAction(key, button, action) {
         busyActions.delete(key);
         if (button && document.contains(button)) button.disabled = false;
     }
+}
+
+async function refreshFreeable() {
+    freeableStatus = null;
+    renderDrawer();
+    const available = await getFreeable(freeupOlderDays).catch(() => null);
+    freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+    renderDrawer();
+}
+
+function stopFreeUpPolling() {
+    clearTimeout(freeupTimer);
+    freeupTimer = null;
+}
+
+function pollFreeUpJob(jobId) {
+    stopFreeUpPolling();
+    const tick = async () => {
+        const status = await getFreeUpJob(jobId).catch(() => null);
+        if (!status) {
+            freeupTimer = window.setTimeout(tick, 1200);
+            return;
+        }
+        freeupJob = status;
+        patchDrawerStatus();
+        if (freeupActive()) {
+            freeupTimer = window.setTimeout(tick, 800);
+            return;
+        }
+        stopFreeUpPolling();
+        const available = await getFreeable(freeupOlderDays).catch(() => null);
+        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
+        renderDrawer();
+        if (status.phase === 'completed') showToast(`${bytes(status.bytes_freed)} freed from this computer`);
+        else if (status.phase === 'cancelled') showToast(`Free up space stopped · ${bytes(status.bytes_freed)} freed`);
+        else showToast('Free up space stopped — remaining originals are untouched');
+    };
+    tick();
+}
+
+async function handleFreeUpAction() {
+    if (freeupActive()) {
+        const status = await cancelFreeUpJob(freeupJob.job_id);
+        if (status) {
+            freeupJob = status;
+            patchDrawerStatus();
+        }
+        return;
+    }
+    const job = await startFreeUpSpace(freeupOlderDays);
+    if (!job?.job_id) {
+        showToast('Couldn’t start Free up space');
+        return;
+    }
+    freeupJob = job;
+    renderDrawer();
+    pollFreeUpJob(job.job_id);
 }
 
 async function applyCacheDefaults() {
@@ -1526,6 +1653,13 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Couldn’t clear cache');
     }));
+    body.querySelector('#freeup-age')?.addEventListener('change', (event) => {
+        freeupOlderDays = Number(event.currentTarget.value || 0);
+        refreshFreeable();
+    });
+    body.querySelector('#freeup-btn')?.addEventListener('click', (event) => withBusyAction(
+        'freeup', event.currentTarget, handleFreeUpAction,
+    ));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
         const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.https_url)
@@ -1586,6 +1720,7 @@ function stopDrawerPolling() {
     clearInterval(installTimer);
     installTimer = null;
     stopLibraryHealthPolling();
+    if (!freeupActive()) stopFreeUpPolling();
 }
 
 function resolvePublishReturnTarget() {
