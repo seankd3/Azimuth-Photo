@@ -5,6 +5,7 @@
 // truth (service workers cannot read it).
 
 import { emit } from './state.js';
+import { showToast } from './toast.js';
 
 const STORAGE_KEY = 'pa-m-write-queue-v1';
 const BASE_RETRY_MS = 500;
@@ -122,6 +123,7 @@ export async function drainWrites() {
                     saveQueue();
                     updateBadge();
                     finish(item, { status: 'failed', statusCode: Number(error.status) });
+                    showToast('Couldn’t save change');
                     continue;
                 }
                 item.attempts = Number(item.attempts || 0) + 1;

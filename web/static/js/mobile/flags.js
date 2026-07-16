@@ -3,7 +3,7 @@
 // previous flag values back — real writes both ways.
 
 import { writeFlag, writeFlags } from './api.js';
-import { byId, emit } from './state.js';
+import { byId, emit, on } from './state.js';
 import { showToast } from './toast.js';
 import { tick } from './haptics.js';
 
@@ -42,6 +42,14 @@ async function writeBack(prev) {
     return ok;
 }
 
+function rollback(ids, prev, appliedFlag) {
+    const restore = new Map();
+    for (const id of ids) {
+        if ((byId.get(id) || {}).flag === appliedFlag) restore.set(id, prev.get(id));
+    }
+    if (restore.size) setLocal([...restore.keys()], restore);
+}
+
 export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     const ids = [...new Set(rawIds.map(Number))].filter((id) => id > 0);
     if (!ids.length) return false;
@@ -52,11 +60,11 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     }
 
     setLocal(ids, flag);
-    const ok = await write(ids, flag);
-    if (!ok) {
-        setLocal(ids, prev);
-        return false;
-    }
+    const outcome = write(ids, flag);
+    void outcome.then((result) => {
+        if (result.status !== 'failed') return;
+        rollback(ids, prev, flag);
+    });
 
     if (toast) {
         const label = ids.length === 1
@@ -74,3 +82,8 @@ export async function applyFlags(rawIds, flag, { toast = true } = {}) {
     }
     return true;
 }
+
+on('flag-write', ({ ids, status }) => {
+    if (status !== 'committed') return;
+    emit('flags', { ids, flagOf: (id) => (byId.get(id) || {}).flag || 'unflagged' });
+});

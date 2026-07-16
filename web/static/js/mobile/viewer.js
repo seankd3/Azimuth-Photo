@@ -7,7 +7,7 @@
 
 import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
 import { applyFlags } from './flags.js';
-import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
+import { byId, emit, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
@@ -397,12 +397,18 @@ function infoSheet() {
         button.addEventListener('click', () => {
             const target = current() || image;
             const value = Number(button.dataset.rating);
-            const rating = imageRating(target) === value ? 0 : value;
+            const previous = imageRating(target);
+            const rating = previous === value ? 0 : value;
             target.rating = rating;
             const known = byId.get(Number(target.id));
             if (known) known.rating = rating;
             syncRatingButtons(sheet, rating);
-            void writeRating(target.id, rating);
+            void writeRating(target.id, rating).then((result) => {
+                if (result.status !== 'failed' || imageRating(target) !== rating) return;
+                target.rating = previous;
+                if (known) known.rating = previous;
+                if (sheet.isConnected) syncRatingButtons(sheet, previous);
+            });
         });
     }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
@@ -788,6 +794,10 @@ export function initViewer() {
     }
 
     on('flags', syncFlagButtons);
+    on('rating-write', ({ status, imageId }) => {
+        if (status !== 'committed') return;
+        emit('rating', { imageId, rating: imageRating(byId.get(imageId)) });
+    });
     on('offline-availability', syncOfflineButton);
     installGestures();
 }
