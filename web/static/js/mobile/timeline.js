@@ -653,7 +653,7 @@ function scheduleThumbnailPoll() {
     thumbnailPollTimer = setTimeout(async () => {
         thumbnailPollTimer = 0;
         if (!pendingThumbnails || document.body.dataset.tab !== 'photos') return;
-        if (canRefreshPendingThumbnails()) reload();
+        if (canRefreshPendingThumbnails()) await refreshFirstPagePreviews();
         else await refreshPendingPreviews();
         scheduleThumbnailPoll();
     }, 3000);
@@ -707,6 +707,23 @@ async function refreshPendingPreviews() {
     }
     if (zoomIdx === 2) await loadHistogram();
     updateThumbnailPoll(Math.max(0, before - landed));
+}
+
+async function refreshFirstPagePreviews() {
+    const page = await getRankings(rankingParams(0)).catch(() => null);
+    if (!page || !Array.isArray(page.images)) return;
+    const current = startOffset === 0 ? images.slice(0, page.images.length) : [];
+    const sameRows = current.length === page.images.length
+        && page.images.every((image, index) => Number(image.id) === Number(current[index]?.id));
+    if (!sameRows) {
+        reload();
+        return;
+    }
+    updateThumbnailPoll(pendingCount(page));
+    currentSortQuality = page.sort_quality || null;
+    for (const image of page.images) sharpenPreview(image);
+    if (zoomIdx === 2) await loadHistogram();
+    renderScopeBar();
 }
 
 async function loadHistogram() {

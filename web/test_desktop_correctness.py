@@ -63,6 +63,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
             self.assertIn("function scheduleThumbnailPoll()", source)
             self.assertIn("pending_thumbnails", source)
             self.assertIn("refreshPendingPreviews", source)
+            self.assertIn("refreshFirstPagePreviews", source)
             self.assertIn("preview-pending", source)
             self.assertIn("data-preview-src", source)
             self.assertIn("selection.size", source)
