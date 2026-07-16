@@ -187,3 +187,43 @@ class MirrorAcceptanceTests(BackendTestCase):
             self.assertEqual(int(count["c"]), 1)
         finally:
             await conn.close()
+
+
+class MirrorDevelopGuardTests(BackendTestCase):
+    async def test_mirror_never_rewinds_newer_local_develop_regardless_of_origin(self):
+        from features.sync.mirror import MirrorPuller
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "guarded.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, '{\"Exposure2012\":1.0}', 'sync', '2026-07-15T10:00:00Z')",
+                (image_id,),
+            )
+            await conn.commit()
+            # Older hub snapshot must not clobber the newer oplog-applied local row.
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": -5.0},
+                "develop_updated_at": "2026-07-14T10:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+            self.assertIn(chr(34) + "Exposure2012" + chr(34) + ":1.0", row["settings"])
+            # A genuinely newer hub snapshot still applies.
+            await MirrorPuller._apply_develop(conn, image_id, {
+                "develop_settings": {"Exposure2012": 2.5},
+                "develop_updated_at": "2026-07-16T10:00:00Z",
+                "develop_origin": "hub",
+            })
+            await conn.commit()
+            row = await (await conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            )).fetchone()
+            self.assertIn(chr(34) + "Exposure2012" + chr(34) + ":2.5", row["settings"])
+        finally:
+            await conn.close()

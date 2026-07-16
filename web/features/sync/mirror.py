@@ -232,7 +232,7 @@ class MirrorPuller:
         if not isinstance(settings, dict) or not updated_at:
             return
         current = await (await conn.execute("SELECT updated_at, origin FROM develop_settings WHERE image_id = ?", (image_id,))).fetchone()
-        if current and str(current["updated_at"] or "") > str(updated_at) and current["origin"] == "user":
+        if current and str(current["updated_at"] or "") > str(updated_at):
             return
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
