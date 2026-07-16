@@ -3,7 +3,7 @@
 // raw|jpg|tif file_type group aliases and flag scopes.
 
 import { getFilterOptions, getPeople, getTags, ignorePerson, labelPerson, writeFailureMessage } from './api.js';
-import { nav, patchScope, setScope } from './state.js';
+import { clearScope, nav, patchScope, scope, setScope } from './state.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
@@ -79,13 +79,13 @@ function commitSearch(raw) {
     nav.setTab('photos');
 }
 
-function openPersonSheet(person) {
+export function openPersonSheet(person) {
     const name = personLabel(person);
     const sheet = openSheet(
         `<h3>${esc(name)}</h3>`
         + '<input class="sheet-input" id="mp-name" type="text" autocomplete="off" placeholder="Name">'
         + '<button class="sheet-btn" id="mp-save" data-mutating>Rename</button>'
-        + `<button class="sheet-row" id="mp-ignore" data-mutating><span class="g">${icon('x')}</span>Ignore this person</button>`
+        + `<button class="sheet-row" id="mp-ignore" data-mutating><span class="g">${icon('x')}</span>Hide person</button>`
     );
     const input = sheet.querySelector('#mp-name');
     input.value = name === 'Unnamed' ? '' : name;
@@ -96,6 +96,7 @@ function openPersonSheet(person) {
             const result = await labelPerson(person.id, next);
             if (result && result.ok) {
                 showToast(`Renamed to “${next}”`);
+                if (String(scope.people) === String(person.id)) patchScope({ peopleLabel: next });
                 people = null;
                 built = false;
                 showSearch();
@@ -109,6 +110,7 @@ function openPersonSheet(person) {
             const result = await ignorePerson(person.id);
             if (result && result.ok) {
                 showToast('Person hidden');
+                if (String(scope.people) === String(person.id)) clearScope();
                 people = null;
                 built = false;
                 showSearch();

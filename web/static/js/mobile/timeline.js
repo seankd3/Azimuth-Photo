@@ -17,6 +17,7 @@ import { openViewer } from './viewer.js';
 import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
+import { openPersonSheet } from './search.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -794,6 +795,22 @@ function renderScopeBar() {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }
     bar.innerHTML = html;
+    const personChip = bar.querySelector('.chip-x[data-clear="people"]')?.closest('.chip');
+    if (personChip) {
+        personChip.setAttribute('role', 'button');
+        personChip.tabIndex = 0;
+        const openPersonActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openPersonSheet({ id: scope.people, label: scope.peopleLabel });
+        };
+        personChip.addEventListener('click', openPersonActions);
+        personChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openPersonActions(event);
+            }
+        });
+    }
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;
