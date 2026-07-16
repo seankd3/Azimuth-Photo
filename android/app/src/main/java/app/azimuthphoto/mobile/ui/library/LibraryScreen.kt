@@ -119,7 +119,7 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
                 onOpenPhotos = openPhotos,
             )
             Route.Search -> SearchScreen(onImmersive = onImmersive)
-            Route.People -> PeopleScreen(api = api, onOpenPerson = { push(Route.Person(it)) })
+            Route.People -> PeopleScreen(api = api, onBack = { pop() }, onOpenPerson = { push(Route.Person(it)) })
             is Route.Person -> PersonScreen(api, r.person, onBack = { pop() }, onOpenPhotos = openPhotos)
             Route.Collections -> CollectionsScreen(
                 api = api,
@@ -127,7 +127,7 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
                 onCreate = {},
             )
             is Route.Collection -> CollectionScreen(api, r.collection, onBack = { pop() }, onOpenPhotos = openPhotos)
-            Route.Places -> PlacesScreen(api = api, onOpenPhoto = { id -> openPhotos(listOf(ArchiveImage(id = id)), 0) })
+            Route.Places -> PlacesScreen(api = api, onBack = { pop() }, onOpenPhotos = openPhotos)
             is Route.Tag -> TagResultsScreen(api, r.tag, onBack = { pop() }, onOpenPhotos = openPhotos)
             is Route.Similar -> SimilarScreen(archiveApi, api, r.image, onBack = { pop() }, onOpenPhotos = openPhotos)
         }

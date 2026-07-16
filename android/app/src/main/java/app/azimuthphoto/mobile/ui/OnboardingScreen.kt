@@ -53,6 +53,24 @@ fun OnboardingScreen(
         if (hasMediaPermission && pagerState.currentPage == 1) pagerState.animateScrollToPage(2)
     }
 
+    // The app can answer "does this address work?" itself — probe on entering the
+    // connect step and after edits settle, instead of making the user tap a button.
+    LaunchedEffect(pagerState.currentPage, serverUrl) {
+        if (pagerState.currentPage != 2 || serverUrl.isBlank()) {
+            testResult = null
+            testing = false
+            return@LaunchedEffect
+        }
+        testing = true
+        testResult = null
+        kotlinx.coroutines.delay(500)
+        testResult = runCatching {
+            val count = ArchiveApi(serverUrl.trim().trimEnd('/')).stats().photoCount
+            if (count == null) "✓ Connected" else "✓ ${"%,d".format(count)} photos"
+        }.getOrElse { "× Can't reach this address" }
+        testing = false
+    }
+
     // Pages advance only through the gated buttons — no swiping past a step.
     HorizontalPager(
         state = pagerState,
@@ -120,28 +138,17 @@ fun OnboardingScreen(
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(
-                        enabled = !testing && serverUrl.isNotBlank(),
-                        onClick = {
-                            testing = true
-                            testResult = null
-                            scope.launch {
-                                testResult = runCatching {
-                                    val count = ArchiveApi(serverUrl.trim().trimEnd('/')).stats().photoCount
-                                    if (count == null) "✓ Connected" else "✓ ${"%,d".format(count)} photos"
-                                }.getOrElse { "× Could not connect" }
-                                testing = false
-                            }
+                    Spacer(Modifier.height(10.dp))
+                    // Live, self-checking status — no "test" button to remember to press.
+                    Text(
+                        text = when {
+                            testing -> "Checking…"
+                            testResult != null -> testResult!!
+                            else -> " ",
                         },
-                    ) { Text(if (testing) "Testing connection" else "Test connection") }
-                    testResult?.let {
-                        Text(
-                            it,
-                            color = if (it.startsWith("✓")) Positive else TextSecondary,
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                    }
+                        color = if (testResult?.startsWith("✓") == true) Positive else TextSecondary,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                     Spacer(Modifier.height(14.dp))
                     androidx.compose.foundation.layout.Row(
                         Modifier.fillMaxWidth(),

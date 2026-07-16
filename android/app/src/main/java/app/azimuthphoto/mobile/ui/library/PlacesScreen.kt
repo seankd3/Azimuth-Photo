@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.data.MapMarker
 import app.azimuthphoto.mobile.ui.Ink
@@ -41,7 +42,7 @@ import org.osmdroid.views.overlay.Marker
 private const val MAX_MARKERS = 1500
 
 @Composable
-fun PlacesScreen(api: LibraryApi, onOpenPhoto: (imageId: Long) -> Unit) {
+fun PlacesScreen(api: LibraryApi, onBack: () -> Unit, onOpenPhotos: (List<ArchiveImage>, Int) -> Unit) {
     var markers by remember { mutableStateOf<List<MapMarker>?>(null) }
     var loading by remember { mutableStateOf(true) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -75,55 +76,60 @@ fun PlacesScreen(api: LibraryApi, onOpenPhoto: (imageId: Long) -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    if (loading) {
-        Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = TextSecondary)
-        }
-        return
-    }
-
-    if (loadFailed) {
-        Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Couldn't load places",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                )
-                TextButton(onClick = { scope.launch { loadMarkers() } }) {
-                    Text("Retry", color = TextSecondary)
+    Column(Modifier.fillMaxSize().background(Ink)) {
+        LibraryTopBar(title = "Places", onBack = onBack)
+        val loaded = markers
+        when {
+            loading || loaded == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = TextSecondary)
+            }
+            loadFailed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Couldn't load places",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = TextSecondary,
+                    )
+                    TextButton(onClick = { scope.launch { loadMarkers() } }) {
+                        Text("Retry", color = TextSecondary)
+                    }
                 }
             }
+            loaded.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(
+                    text = "No places yet — photos with location will appear here",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = TextSecondary,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(32.dp),
+                )
+            }
+            else -> PlacesMap(shown = loaded.take(MAX_MARKERS), setMapView = { mapView = it }, onOpenPhotos = onOpenPhotos)
         }
-        return
     }
+}
 
-    val loaded = markers ?: return
-    if (loaded.isEmpty()) {
-        Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
-            Text(
-                text = "No places yet — photos with location will appear here",
-                style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(32.dp),
-            )
-        }
-        return
-    }
-
-    val shown = loaded.take(MAX_MARKERS)
-
-    Box(Modifier.fillMaxSize().background(Ink)) {
+@Composable
+private fun PlacesMap(
+    shown: List<MapMarker>,
+    setMapView: (MapView?) -> Unit,
+    onOpenPhotos: (List<ArchiveImage>, Int) -> Unit,
+) {
+    Box(Modifier.fillMaxSize()) {
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { context ->
                 Configuration.getInstance().userAgentValue = context.packageName
                 MapView(context).apply {
-                    mapView = this
+                    setMapView(this)
                     setTileSource(TileSourceFactory.MAPNIK)
                     setMultiTouchControls(true)
-                    val points = shown.map { marker ->
+                    // Seed the viewer with every located photo so tapping a pin lets you
+                    // swipe through the whole map, not just the one you touched.
+                    val locatedPhotos = shown.map { m ->
+                        ArchiveImage(id = m.id, filename = m.filename, thumb_url = m.thumb_url)
+                    }
+                    val points = shown.mapIndexed { index, marker ->
                         val point = GeoPoint(marker.lat, marker.lng)
                         overlays.add(
                             Marker(this).apply {
@@ -131,7 +137,7 @@ fun PlacesScreen(api: LibraryApi, onOpenPhoto: (imageId: Long) -> Unit) {
                                 title = marker.filename
                                 setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                                 setOnMarkerClickListener { _, _ ->
-                                    onOpenPhoto(marker.id)
+                                    onOpenPhotos(locatedPhotos, index)
                                     true
                                 }
                             },
@@ -142,7 +148,7 @@ fun PlacesScreen(api: LibraryApi, onOpenPhoto: (imageId: Long) -> Unit) {
                 }
             },
             onRelease = { releasedMapView ->
-                if (mapView === releasedMapView) mapView = null
+                setMapView(null)
                 releasedMapView.onDetach()
             },
         )

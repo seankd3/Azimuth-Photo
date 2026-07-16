@@ -41,30 +41,30 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
 @Composable
-fun PeopleScreen(api: LibraryApi, onOpenPerson: (Person) -> Unit) {
+fun PeopleScreen(api: LibraryApi, onBack: () -> Unit, onOpenPerson: (Person) -> Unit) {
     var people by remember { mutableStateOf<List<Person>?>(null) }
 
     LaunchedEffect(Unit) {
         people = runCatching { api.people() }.getOrDefault(emptyList())
     }
 
-    val loaded = people
-    if (loaded == null) {
-        Box(Modifier.fillMaxSize().background(Ink), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(color = TextSecondary)
-        }
-        return
-    }
-
-    LazyVerticalGrid(
-        columns = GridCells.Adaptive(96.dp),
-        modifier = Modifier.fillMaxSize().background(Ink),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        items(items = loaded, key = { it.id }) { person ->
-            PersonCard(api = api, person = person, onOpen = { onOpenPerson(person) })
+    Column(Modifier.fillMaxSize().background(Ink)) {
+        LibraryTopBar(title = "People", onBack = onBack)
+        when (val loaded = people) {
+            null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = TextSecondary)
+            }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Adaptive(96.dp),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                items(items = loaded, key = { it.id }) { person ->
+                    PersonCard(api = api, person = person, onOpen = { onOpenPerson(person) })
+                }
+            }
         }
     }
 }
