@@ -6,6 +6,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { toggleSelection } from './selection.js';
 import { createPendingPreviewPoll, pendingPreviewCount } from '../previews.js';
+import { photoAspect as aspect } from './dom.js';
 
 const GAP_KEY = 'pa_d_event_gap';
 const PAGE_SIZE = 100;
@@ -50,11 +51,6 @@ function titleFor(group) {
     const opts = { month: 'short', day: 'numeric', year: 'numeric' };
     if (sameDay) return first.toLocaleDateString(undefined, opts);
     return `${first.toLocaleDateString(undefined, opts)} - ${last.toLocaleDateString(undefined, opts)}`;
-}
-
-function aspect(img) {
-    const ar = Number(img.aspect_ratio) || (Number(img.width) && Number(img.height) ? Number(img.width) / Number(img.height) : 1.5);
-    return Math.max(.45, Math.min(3.8, ar));
 }
 
 function signals(img) {

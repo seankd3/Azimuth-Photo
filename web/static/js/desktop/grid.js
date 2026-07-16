@@ -16,7 +16,7 @@ import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc, photoAspect as aspect } from './dom.js';
 import { openSystemSettings } from './drawer.js';
 import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
 
@@ -75,11 +75,6 @@ function canRefreshPendingThumbnails() {
 function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
 
 function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
-
-function aspect(img) {
-    const ar = Number(img.aspect_ratio) || (Number(img.width) && Number(img.height) ? Number(img.width) / Number(img.height) : 1.5);
-    return Math.max(.45, Math.min(3.8, ar));
-}
 
 function flagGlyph(flag) {
     if (flag === 'picked') return icon('star');

@@ -10,7 +10,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt, photoAspect as aspect } from './dom.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';
@@ -157,11 +157,6 @@ export function confirmAction({
             }
         });
     });
-}
-
-function aspect(img) {
-    const ar = Number(img?.aspect_ratio) || (Number(img?.width) && Number(img?.height) ? Number(img.width) / Number(img.height) : 1.5);
-    return Math.max(.45, Math.min(3.8, ar));
 }
 
 function flagGlyph(flag) {
