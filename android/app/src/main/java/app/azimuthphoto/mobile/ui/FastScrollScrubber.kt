@@ -65,16 +65,26 @@ fun FastScrollScrubber(
                 .align(Alignment.CenterEnd)
                 .onSizeChanged { heightPx = it.height }
                 .pointerInput(total, heightPx) {
+                    // Only grab the drag if it starts on the handle (plus slop), so a
+                    // stray swipe near the right edge scrolls the grid instead of teleporting.
+                    val slop = handleHeightPx
                     detectVerticalDragGestures(
-                        onDragStart = {
-                            dragging = true
-                            scrollTo(it.y)
+                        onDragStart = { offset ->
+                            val handleTop = (heightPx - handleHeightPx).coerceAtLeast(0f) * fraction
+                            val onHandle = offset.y >= handleTop - slop &&
+                                offset.y <= handleTop + handleHeightPx + slop
+                            if (onHandle) {
+                                dragging = true
+                                scrollTo(offset.y)
+                            }
                         },
                         onDragEnd = { dragging = false },
                         onDragCancel = { dragging = false },
                         onVerticalDrag = { change, amount ->
-                            change.consume()
-                            scrollTo(dragY + amount)
+                            if (dragging) {
+                                change.consume()
+                                scrollTo(dragY + amount)
+                            }
                         },
                     )
                 },

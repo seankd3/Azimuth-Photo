@@ -46,11 +46,8 @@ import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.data.Person
 import app.azimuthphoto.mobile.ui.Accent
 import app.azimuthphoto.mobile.ui.Ink
-import app.azimuthphoto.mobile.ui.Panel
+import app.azimuthphoto.mobile.ui.PhotoGrid
 import app.azimuthphoto.mobile.ui.TextPrimary
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 
 private const val PAGE_SIZE = 200
@@ -74,8 +71,6 @@ fun PersonScreen(
     var renaming by remember { mutableStateOf(false) }
     val context = LocalContext.current
 
-    val gridState = rememberLazyGridState()
-
     suspend fun loadMore() {
         if (loading || reachedEnd) return
         loading = true
@@ -91,12 +86,6 @@ fun PersonScreen(
     }
 
     LaunchedEffect(person.id) { loadMore() }
-
-    LaunchedEffect(gridState, images.size) {
-        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
-            .distinctUntilChanged()
-            .collect { last -> if (images.isNotEmpty() && last >= images.size - 24) loadMore() }
-    }
 
     BackHandler(onBack = onBack)
 
@@ -152,33 +141,13 @@ fun PersonScreen(
             )
         },
     ) { padding ->
-        LazyVerticalGrid(
-            state = gridState,
-            columns = GridCells.Fixed(4),
+        PhotoGrid(
+            images = images,
+            thumbModel = { api.imageThumb(it.id, "sm") },
+            onOpen = { index -> onOpenPhotos(images, index) },
+            onNearEnd = { scope.launch { loadMore() } },
             modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
-            verticalArrangement = Arrangement.spacedBy(2.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp),
-        ) {
-            itemsIndexed(items = images, key = { _, image -> image.id }) { index, image ->
-                Box(
-                    Modifier
-                        .aspectRatio(1f)
-                        .background(Panel)
-                        .clickable { onOpenPhotos(images, index) },
-                ) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(api.imageThumb(image.id, "sm"))
-                            .crossfade(false)
-                            .size(256)
-                            .build(),
-                        contentDescription = image.filename,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                }
-            }
-        }
+        )
     }
 
     if (renaming) {

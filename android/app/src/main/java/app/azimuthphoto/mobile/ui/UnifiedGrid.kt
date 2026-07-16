@@ -49,6 +49,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.data.ArchiveApi
+import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.TimelineEntry
@@ -167,6 +168,122 @@ fun UnifiedGrid(
     }
 }
 
+/**
+ * The timeline's grid grammar — day headers, pinch-zoom columns (3–5), and the
+ * fast-scroll scrubber — over a plain list of hub images. Library leaf screens
+ * (person, collection, tag, similar) render through this so leaving the timeline
+ * never drops you into a lesser grid.
+ */
+@Composable
+fun PhotoGrid(
+    images: List<ArchiveImage>,
+    thumbModel: (ArchiveImage) -> Any,
+    onOpen: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    onNearEnd: () -> Unit = {},
+) {
+    val context = LocalContext.current
+    val settings by SettingsStore.flow(context).collectAsState(initial = null)
+    val columns = settings?.gridColumns ?: 4
+    val scope = rememberCoroutineScope()
+    val gridState = rememberLazyGridState()
+    var zoomAccumulator by remember(columns) { mutableFloatStateOf(1f) }
+
+    // Rows carry the source index so a tap maps back to the caller's list position.
+    val rows = remember(images) {
+        buildList {
+            var lastDay: LocalDate? = null
+            images.forEachIndexed { index, image ->
+                val day = image.localDate()
+                if (day != null && day != lastDay) {
+                    add(ImageRow.Header(day))
+                    lastDay = day
+                }
+                add(ImageRow.Cell(image, index))
+            }
+        }
+    }
+
+    LaunchedEffect(gridState, rows.size) {
+        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
+            .distinctUntilChanged()
+            .collect { last -> if (rows.isNotEmpty() && last >= rows.size - 40) onNearEnd() }
+    }
+
+    Box(modifier) {
+        LazyVerticalGrid(
+            state = gridState,
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier
+                .fillMaxSize()
+                .pointerInput(columns) {
+                    detectPinchZoom { zoom ->
+                        zoomAccumulator *= zoom
+                        val next = when {
+                            zoomAccumulator > 1.18f -> (columns - 1).coerceAtLeast(3)
+                            zoomAccumulator < 0.84f -> (columns + 1).coerceAtMost(5)
+                            else -> columns
+                        }
+                        if (next != columns) {
+                            zoomAccumulator = 1f
+                            scope.launch { SettingsStore.setGridColumns(context, next) }
+                        }
+                    }
+                },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            contentPadding = contentPadding,
+        ) {
+            items(
+                items = rows,
+                span = { row -> if (row is ImageRow.Header) GridItemSpan(maxLineSpan) else GridItemSpan(1) },
+                key = { row ->
+                    when (row) {
+                        is ImageRow.Header -> "h${row.day}"
+                        is ImageRow.Cell -> row.image.id
+                    }
+                },
+            ) { row ->
+                when (row) {
+                    is ImageRow.Header -> DayHeader(row.day)
+                    is ImageRow.Cell -> PhotoCell(
+                        model = thumbModel(row.image),
+                        isVideo = row.image.isVideo,
+                        hasRaw = row.image.isRaw,
+                        durationMs = 0,
+                        notBackedUp = false,
+                        showSelection = false,
+                        selected = false,
+                        onClick = { onOpen(row.index) },
+                        onLongClick = {},
+                    )
+                }
+            }
+        }
+        FastScrollScrubber(
+            state = gridState,
+            labelForIndex = { index ->
+                val day = when (val row = rows.getOrNull(index)) {
+                    is ImageRow.Header -> row.day
+                    is ImageRow.Cell -> row.image.localDate()
+                    null -> null
+                }
+                day?.format(DateTimeFormatter.ofPattern("MMM yyyy")).orEmpty()
+            },
+            modifier = Modifier.align(Alignment.CenterEnd),
+        )
+    }
+}
+
+private sealed class ImageRow {
+    data class Header(val day: LocalDate) : ImageRow()
+    data class Cell(val image: ArchiveImage, val index: Int) : ImageRow()
+}
+
+private fun ArchiveImage.localDate(): LocalDate? =
+    date_taken?.take(10)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun UnifiedCell(
@@ -201,6 +318,33 @@ private fun UnifiedCell(
             selectable = false
         }
     }
+    PhotoCell(
+        model = model,
+        isVideo = isVideo,
+        hasRaw = hasRaw,
+        durationMs = durationMs,
+        notBackedUp = notBackedUp,
+        showSelection = selectionMode && selectable,
+        selected = selected,
+        onClick = onClick,
+        onLongClick = onLongClick,
+    )
+}
+
+/** The one photo-tile visual used by every grid — timeline and library alike. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun PhotoCell(
+    model: Any,
+    isVideo: Boolean,
+    hasRaw: Boolean,
+    durationMs: Long,
+    notBackedUp: Boolean,
+    showSelection: Boolean,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val haptics = LocalHapticFeedback.current
     Box(
         Modifier
@@ -270,7 +414,7 @@ private fun UnifiedCell(
                 modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp).size(14.dp).alpha(0.85f),
             )
         }
-        if (selectionMode && selectable) {
+        if (showSelection) {
             Icon(
                 if (selected) Icons.Rounded.CheckCircle else Icons.Outlined.CheckCircle,
                 contentDescription = if (selected) "Selected" else "Not selected",

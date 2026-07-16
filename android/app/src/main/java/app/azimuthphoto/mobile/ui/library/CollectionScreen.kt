@@ -48,6 +48,7 @@ import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.ui.Accent
 import app.azimuthphoto.mobile.ui.Ink
 import app.azimuthphoto.mobile.ui.Panel
+import app.azimuthphoto.mobile.ui.PhotoGrid
 import app.azimuthphoto.mobile.ui.TextPrimary
 import app.azimuthphoto.mobile.ui.TextSecondary
 import coil.compose.AsyncImage
@@ -142,32 +143,12 @@ fun CollectionScreen(
                 Text("No photos in this collection yet.", color = TextSecondary)
             }
         } else {
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+            PhotoGrid(
+                images = loaded,
+                thumbModel = { api.imageThumb(it.id, "sm") },
+                onOpen = { index -> onOpenPhotos(loaded, index) },
                 modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(items = loaded, key = { _, image -> image.id }) { index, image ->
-                    Box(
-                        Modifier
-                            .aspectRatio(1f)
-                            .background(Panel)
-                            .clickable { onOpenPhotos(loaded, index) },
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(LocalContext.current)
-                                .data(api.imageThumb(image.id, "sm"))
-                                .crossfade(false)
-                                .size(256)
-                                .build(),
-                            contentDescription = image.filename,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                        )
-                    }
-                }
-            }
+            )
         }
     }
 

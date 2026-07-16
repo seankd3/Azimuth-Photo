@@ -37,6 +37,7 @@ import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.ui.Panel
+import app.azimuthphoto.mobile.ui.PhotoGrid
 import app.azimuthphoto.mobile.ui.TextPrimary
 import app.azimuthphoto.mobile.ui.TextSecondary
 import coil.compose.AsyncImage
@@ -73,23 +74,12 @@ fun SimilarScreen(
             list.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Nothing similar found.", color = TextSecondary)
             }
-            else -> LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+            else -> PhotoGrid(
+                images = list,
+                thumbModel = { archiveApi.thumbUrl(it) },
+                onOpen = { index -> onOpenPhotos(list, index) },
                 modifier = Modifier.fillMaxSize(),
-            ) {
-                itemsIndexed(list, key = { _, img -> img.id }) { index, img ->
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(archiveApi.thumbUrl(img)).crossfade(false).build(),
-                        contentDescription = img.filename,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.aspectRatio(1f).background(Panel)
-                            .clickable { onOpenPhotos(list, index) },
-                    )
-                }
-            }
+            )
         }
     }
 }

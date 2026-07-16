@@ -28,22 +28,18 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.ui.Ink
-import app.azimuthphoto.mobile.ui.Panel
+import app.azimuthphoto.mobile.ui.PhotoGrid
 import app.azimuthphoto.mobile.ui.TextPrimary
 import app.azimuthphoto.mobile.ui.TextSecondary
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.launch
 
 private const val PAGE_SIZE = 200
 
@@ -61,7 +57,7 @@ fun TagResultsScreen(
     var pageError by remember(tag) { mutableStateOf(false) }
     var reachedEnd by remember(tag) { mutableStateOf(false) }
 
-    val gridState = rememberLazyGridState()
+    val scope = rememberCoroutineScope()
 
     suspend fun loadMore() {
         if (loading || reachedEnd) return
@@ -78,15 +74,6 @@ fun TagResultsScreen(
     }
 
     LaunchedEffect(tag) { loadMore() }
-
-    LaunchedEffect(gridState, images?.size) {
-        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
-            .distinctUntilChanged()
-            .collect { last ->
-                val count = images?.size ?: 0
-                if (count > 0 && last >= count - 24) loadMore()
-            }
-    }
 
     BackHandler(onBack = onBack)
 
@@ -133,33 +120,13 @@ fun TagResultsScreen(
                 }
             }
             else -> {
-                LazyVerticalGrid(
-                    state = gridState,
-                    columns = GridCells.Fixed(4),
+                PhotoGrid(
+                    images = loaded,
+                    thumbModel = { api.imageThumb(it.id, "sm") },
+                    onOpen = { index -> onOpenPhotos(loaded, index) },
+                    onNearEnd = { scope.launch { loadMore() } },
                     modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    itemsIndexed(items = loaded, key = { _, image -> image.id }) { index, image ->
-                        Box(
-                            Modifier
-                                .aspectRatio(1f)
-                                .background(Panel)
-                                .clickable { onOpenPhotos(loaded, index) },
-                        ) {
-                            AsyncImage(
-                                model = ImageRequest.Builder(LocalContext.current)
-                                    .data(api.imageThumb(image.id, "sm"))
-                                    .crossfade(false)
-                                    .size(256)
-                                    .build(),
-                                contentDescription = image.filename,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                            )
-                        }
-                    }
-                }
+                )
             }
         }
     }
