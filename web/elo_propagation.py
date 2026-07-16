@@ -213,12 +213,14 @@ async def _apply_propagation_deltas(
     if not updates:
         return 0
 
+    await conn.execute("BEGIN IMMEDIATE")
     if action_id:
         cursor = await conn.execute(
             "SELECT 1 FROM comparisons WHERE action_id = ? LIMIT 1",
             (action_id,),
         )
         if await cursor.fetchone() is None:
+            await conn.rollback()
             return 0
         await conn.executemany(
             "INSERT INTO propagation_updates "

@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 import gzip
 import hashlib
 import json
@@ -397,14 +398,14 @@ class SyncHubTests(unittest.TestCase):
                 "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
             ).fetchone()[0])
             family_clocks = dict(conn.execute(
-                "SELECT family, updated_at FROM sync_metadata_state WHERE image_id = ?",
-                (image_id,),
+                "SELECT family, ts FROM oplog_family_state WHERE content_hash = ?",
+                (content_hash,),
             ))
         finally:
             conn.close()
         self.assertEqual(settings, {"Exposure2012": 1.0, "_lr_rating": 4})
-        self.assertEqual(family_clocks["rating"], rating_at)
-        self.assertEqual(family_clocks["develop"], "2026-07-16T02:00:00Z")
+        self.assertEqual(family_clocks["rating"], datetime.fromisoformat(rating_at.replace("Z", "+00:00")).timestamp())
+        self.assertEqual(family_clocks["develop"], datetime.fromisoformat("2026-07-16T02:00:00+00:00").timestamp())
 
         newer = self.client.post("/api/sync/metadata", json={"items": [{
             "content_hash": content_hash,
@@ -459,9 +460,9 @@ class SyncHubTests(unittest.TestCase):
                 (image_id,),
             ).fetchone()
             family_clock = conn.execute(
-                "SELECT updated_at FROM sync_metadata_state "
-                "WHERE image_id = ? AND family = 'develop'",
-                (image_id,),
+                "SELECT ts FROM oplog_family_state "
+                "WHERE content_hash = ? AND family = 'develop'",
+                (content_hash,),
             ).fetchone()
         finally:
             conn.close()

@@ -6,7 +6,7 @@ import tempfile
 import time
 import unittest
 
-from features.sync import oplog
+from features.sync import hub, oplog
 
 
 HASH_A = "a" * 32
@@ -243,6 +243,113 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()
         self.assertEqual(json.loads(settings), {"_lr_rating": 4})
         self.assertEqual(updated_at, "")
+
+    async def test_newer_oplog_rating_beats_legacy_metadata_in_both_orders(self):
+        legacy = {
+            "content_hash": HASH_A,
+            "rating": 1,
+            "rating_updated_at": oplog._iso_timestamp(100.0),
+        }
+        oplog_entry = {
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "rating",
+            "payload": {"value": 5},
+            "ts": 200.0,
+        }
+
+        for order in ("legacy-first", "oplog-first"):
+            with self.subTest(order=order):
+                path = self._catalog()
+                if order == "legacy-first":
+                    await hub.merge_metadata(path, [legacy])
+                    await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
+                else:
+                    await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
+                    await hub.merge_metadata(path, [legacy])
+
+                with sqlite3.connect(path) as conn:
+                    settings = json.loads(conn.execute(
+                        "SELECT settings FROM develop_settings WHERE image_id = 1"
+                    ).fetchone()[0])
+                self.assertEqual(settings["_lr_rating"], 5)
+
+    async def test_newer_legacy_develop_beats_oplog_in_both_orders(self):
+        legacy = {
+            "content_hash": HASH_A,
+            "develop_settings": {"Exposure2012": 2.0},
+            "develop_updated_at": oplog._iso_timestamp(200.0),
+        }
+        oplog_entry = {
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "develop",
+            "payload": {
+                "settings": {"Exposure2012": -2.0},
+                "updated_at": oplog._iso_timestamp(100.0),
+                "origin": "sync",
+            },
+            "ts": 100.0,
+        }
+
+        for order in ("oplog-first", "legacy-first"):
+            with self.subTest(order=order):
+                path = self._catalog()
+                if order == "oplog-first":
+                    await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
+                    await hub.merge_metadata(path, [legacy])
+                else:
+                    await hub.merge_metadata(path, [legacy])
+                    await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
+
+                with sqlite3.connect(path) as conn:
+                    settings = json.loads(conn.execute(
+                        "SELECT settings FROM develop_settings WHERE image_id = 1"
+                    ).fetchone()[0])
+                self.assertEqual(settings["Exposure2012"], 2.0)
+
+    async def test_pre_unification_legacy_clock_is_migrated_before_oplog_apply(self):
+        path = self._catalog()
+        with sqlite3.connect(path) as conn:
+            conn.executescript("""
+                CREATE TABLE sync_metadata_state (
+                    image_id INTEGER NOT NULL,
+                    family TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (image_id, family)
+                );
+            """)
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (1, ?, 'sync', ?)",
+                (json.dumps({"Exposure2012": 2.0}), oplog._iso_timestamp(200.0)),
+            )
+            conn.execute(
+                "INSERT INTO sync_metadata_state(image_id, family, updated_at) VALUES (1, 'develop', ?)",
+                (oplog._iso_timestamp(200.0),),
+            )
+            conn.commit()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "develop",
+            "payload": {
+                "settings": {"Exposure2012": -2.0},
+                "updated_at": oplog._iso_timestamp(100.0),
+                "origin": "sync",
+            },
+            "ts": 100.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = 1"
+            ).fetchone()[0])
+        self.assertEqual(settings["Exposure2012"], 2.0)
 
     async def test_two_catalog_exchange_replay_and_triple_exchange_do_not_echo(self):
         hub = self._catalog()

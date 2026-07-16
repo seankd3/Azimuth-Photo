@@ -158,26 +158,22 @@ async def _scoped_search(
     collection_id: int = 0,
     import_batch: int = 0,
 ) -> dict:
-    scoped_ids = set(int(image_id) for image_id in ids or [] if int(image_id) > 0)
+    scoped_ids = (
+        None
+        if ids is None
+        else {int(image_id) for image_id in ids if int(image_id) > 0}
+    )
     if collection_id and collection_id > 0:
         collection_ids = await _configured(_resolve_smart_collection_image_ids)(int(collection_id))
         if collection_ids is None:
             collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
-        if collection_ids is None:
-            scoped_ids = set()
-        elif scoped_ids:
-            scoped_ids.intersection_update(int(image_id) for image_id in collection_ids)
-        else:
-            scoped_ids = {int(image_id) for image_id in collection_ids}
+        collection_scope = {int(image_id) for image_id in collection_ids or []}
+        scoped_ids = collection_scope if scoped_ids is None else scoped_ids.intersection(collection_scope)
     if import_batch and import_batch > 0:
         batch_ids = await _configured(_get_import_batch_image_ids)(int(import_batch))
-        if batch_ids is None:
-            scoped_ids = set()
-        elif scoped_ids:
-            scoped_ids.intersection_update(int(image_id) for image_id in batch_ids)
-        else:
-            scoped_ids = {int(image_id) for image_id in batch_ids}
-    if not scoped_ids and not ids and not collection_id and not import_batch:
+        batch_scope = {int(image_id) for image_id in batch_ids or []}
+        scoped_ids = batch_scope if scoped_ids is None else scoped_ids.intersection(batch_scope)
+    if scoped_ids is None:
         return search
     scoped = dict(search)
     current_filter = scoped.get("id_filter")

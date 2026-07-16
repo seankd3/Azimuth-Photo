@@ -21,6 +21,7 @@ from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
 from features.imports import taxonomy
 from features.library import geodata, keywords
+from features.sync import family_clock
 from features.sync.hashing import compute_content_hash, compute_full_hash
 from features.sync.validation import validate_content_hash
 
@@ -40,12 +41,6 @@ CREATE TABLE IF NOT EXISTS sync_manifest_items (
     filename TEXT NOT NULL,
     date_taken TEXT,
     folder TEXT
-);
-CREATE TABLE IF NOT EXISTS sync_metadata_state (
-    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    family TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    PRIMARY KEY (image_id, family)
 );
 """
 
@@ -91,6 +86,7 @@ async def ensure_sync_schema(db_path: str) -> None:
             "ON images(content_hash) WHERE content_hash IS NOT NULL"
         )
         await conn.executescript(SYNC_DDL)
+        await family_clock.migrate_legacy_states(conn)
         manifest_columns = await (await conn.execute(
             "PRAGMA table_info(sync_manifest_items)"
         )).fetchall()
@@ -431,39 +427,38 @@ def _family_timestamp(item: dict[str, Any], family: str) -> str:
     return _timestamp(item.get(f"{family}_updated_at") or item.get("develop_updated_at") or item.get("updated_at"))
 
 
-async def _state_timestamp(conn, image_id: int, family: str) -> str:
-    row = await (await conn.execute(
-        "SELECT updated_at FROM sync_metadata_state WHERE image_id = ? AND family = ?",
-        (image_id, family),
-    )).fetchone()
-    return str(row["updated_at"] or "") if row else ""
+async def _state_key(conn, content_hash: str, family: str) -> tuple[float, str, int] | None:
+    return await family_clock.state_key(conn, content_hash, family)
 
 
-async def _record_state(conn, image_id: int, family: str, updated_at: str) -> None:
-    await conn.execute(
-        "INSERT INTO sync_metadata_state(image_id, family, updated_at) VALUES (?, ?, ?) "
-        "ON CONFLICT(image_id, family) DO UPDATE SET updated_at=excluded.updated_at",
-        (image_id, family, updated_at),
+async def _record_state(conn, content_hash: str, family: str, updated_at: str) -> None:
+    await family_clock.record_state(
+        conn,
+        content_hash,
+        family,
+        family_clock.legacy_key(updated_at),
     )
 
 
-def _is_newer(incoming: str, existing: str) -> bool:
-    return not existing or (bool(incoming) and incoming > existing)
+def _is_newer(incoming: tuple[float, str, int], existing: tuple[float, str, int] | None) -> bool:
+    return existing is None or incoming[0] > existing[0]
 
 
-async def _merge_scalar(conn, image_id: int, item: dict[str, Any], family: str, column: str) -> tuple[bool, str]:
-    incoming = _family_timestamp(item, family)
-    existing = await _state_timestamp(conn, image_id, family)
+async def _merge_scalar(conn, image_id: int, content_hash: str, item: dict[str, Any], family: str, column: str) -> tuple[bool, str]:
+    updated_at = _family_timestamp(item, family)
+    incoming = family_clock.legacy_key(updated_at)
+    existing = await _state_key(conn, content_hash, family)
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     await conn.execute(f"UPDATE images SET {column} = ? WHERE id = ?", (item[family], image_id))
-    await _record_state(conn, image_id, family, incoming)
+    await _record_state(conn, content_hash, family, updated_at)
     return True, "applied"
 
 
-async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, str]:
-    incoming = _family_timestamp(item, "rating")
-    existing = await _state_timestamp(conn, image_id, "rating")
+async def _merge_rating(conn, image_id: int, content_hash: str, item: dict[str, Any]) -> tuple[bool, str]:
+    updated_at = _family_timestamp(item, "rating")
+    incoming = family_clock.legacy_key(updated_at)
+    existing = await _state_key(conn, content_hash, "rating")
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     columns = {row["name"] for row in await (await conn.execute("PRAGMA table_info(images)")).fetchall()}
@@ -483,17 +478,19 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
             "ELSE '{}' END, '$._lr_rating', ?)",
             (image_id, settings, row["origin"] if row else "sync", item["rating"]),
         )
-    await _record_state(conn, image_id, "rating", incoming)
+    await _record_state(conn, content_hash, "rating", updated_at)
     return True, "applied"
 
 
-async def _merge_develop(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, str]:
-    incoming = _family_timestamp(item, "develop")
+async def _merge_develop(conn, image_id: int, content_hash: str, item: dict[str, Any]) -> tuple[bool, str]:
+    updated_at = _family_timestamp(item, "develop")
+    incoming = family_clock.legacy_key(updated_at)
     row = await (await conn.execute(
         "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
     )).fetchone()
-    row_updated_at = str(row["updated_at"] or "") if row else ""
-    existing = max(row_updated_at, await _state_timestamp(conn, image_id, "develop"))
+    row_key = family_clock.legacy_key(row["updated_at"]) if row else None
+    state_key = await _state_key(conn, content_hash, "develop")
+    existing = max(key for key in (row_key, state_key) if key is not None) if row_key or state_key else None
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     settings = dict(item["develop_settings"])
@@ -507,15 +504,16 @@ async def _merge_develop(conn, image_id: int, item: dict[str, Any]) -> tuple[boo
     await conn.execute(
         "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "
         "ON CONFLICT(image_id) DO UPDATE SET settings=excluded.settings, origin='sync', updated_at=excluded.updated_at",
-        (image_id, encoded, incoming),
+        (image_id, encoded, updated_at),
     )
-    await _record_state(conn, image_id, "develop", incoming)
+    await _record_state(conn, content_hash, "develop", updated_at)
     return True, "applied"
 
 
-async def _merge_iptc(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, str]:
-    incoming = _family_timestamp(item, "iptc")
-    existing = await _state_timestamp(conn, image_id, "iptc")
+async def _merge_iptc(conn, image_id: int, content_hash: str, item: dict[str, Any]) -> tuple[bool, str]:
+    updated_at = _family_timestamp(item, "iptc")
+    incoming = family_clock.legacy_key(updated_at)
+    existing = await _state_key(conn, content_hash, "iptc")
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     iptc = item["iptc"] or {}
@@ -528,10 +526,10 @@ async def _merge_iptc(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, 
         (
             image_id,
             str(iptc.get("title") or ""), str(iptc.get("caption") or ""),
-            str(iptc.get("copyright") or ""), str(iptc.get("creator") or ""), incoming,
+            str(iptc.get("copyright") or ""), str(iptc.get("creator") or ""), updated_at,
         ),
     )
-    await _record_state(conn, image_id, "iptc", incoming)
+    await _record_state(conn, content_hash, "iptc", updated_at)
     return True, "applied"
 
 
@@ -549,13 +547,13 @@ async def merge_metadata(db_path: str, items: Iterable[dict[str, Any]]) -> dict[
         try:
             families: list[tuple[str, Callable[..., Any]]] = []
             if "flag" in item and item["flag"] is not None:
-                families.append(("flag", lambda: _merge_scalar(conn, image_id, item, "flag", "flag")))
+                families.append(("flag", lambda: _merge_scalar(conn, image_id, content_hash, item, "flag", "flag")))
             if "develop_settings" in item and item["develop_settings"] is not None:
-                families.append(("develop", lambda: _merge_develop(conn, image_id, item)))
+                families.append(("develop", lambda: _merge_develop(conn, image_id, content_hash, item)))
             if "rating" in item and item["rating"] is not None:
-                families.append(("rating", lambda: _merge_rating(conn, image_id, item)))
+                families.append(("rating", lambda: _merge_rating(conn, image_id, content_hash, item)))
             if "iptc" in item and item["iptc"] is not None:
-                families.append(("iptc", lambda: _merge_iptc(conn, image_id, item)))
+                families.append(("iptc", lambda: _merge_iptc(conn, image_id, content_hash, item)))
             for family, merger in families:
                 applied, reason = await merger()
                 (result["applied"] if applied else result["skipped"]).append(
