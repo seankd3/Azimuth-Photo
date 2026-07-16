@@ -183,9 +183,30 @@ async def api_map_markers(
 
 
 @router.get("/api/filter-options")
-async def api_filter_options():
+async def api_filter_options(
+    orientation: str = "", compared: str = "", min_stars: int = 0,
+    folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
+    camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
+    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+):
     """Return metadata-backed filter choices for the bottom bar."""
-    return await library_service.filter_options_payload()
+    return await library_service.filter_options_payload(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=repeated_query_values(request, "folder", folder),
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        people=people,
+        q=q,
+        deep=deep,
+        import_batch=import_batch,
+        stacks=stacks,
+    )
 
 
 @router.get("/api/stats")

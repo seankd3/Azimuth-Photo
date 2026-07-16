@@ -2,11 +2,11 @@ import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, thumbUrl,
 } from './api.js';
 import {
-    emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
+    clearFacet, emit, folderLabel, folderValues, navigateToScope, on, patchScope, scope, scopeActive, setSort, smartQueryActive, smartQuerySummary, toggleBestOf,
 } from './state.js';
 import { currentFocusedImage } from './grid.js';
 import { openLoupe, toggleLoupeLights } from './loupe.js';
-import { scopeTokenHtml } from './contextbar.js';
+import { scopeTokenFacetKey, scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
     requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
@@ -15,6 +15,7 @@ import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
 import { icon } from '../icons.js';
 import { isUnnamedPersonLabel, personLabel } from '../people_labels.js';
+import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
 const LIVE_DELAY_MS = 250;
@@ -193,7 +194,7 @@ function scopeIcon(value) {
 }
 
 function remember(value) {
-    const storedScope = { ...value };
+    const storedScope = { ...value, folder: [...folderValues(value.folder)], similarIds: [...(value.similarIds || [])] };
     const values = recentScopes().filter((item) => JSON.stringify(item.scope) !== JSON.stringify(storedScope));
     values.unshift({ label: scopeLabel(storedScope), scope: storedScope });
     storeRecents(values);
@@ -302,11 +303,6 @@ function flattenPeople(peopleData) {
     return [...seen.values()];
 }
 
-function idQuery(term) {
-    const text = String(term || '').trim().toLowerCase();
-    return text.match(/^(?:#|id:?)?\d+$/) ? text.replace(/\D/g, '') : '';
-}
-
 function skeletonPhotosHtml() {
     return '<div class="sd-photo-strip" aria-label="Loading photo search results">'
         + Array.from({ length: LIVE_LIMIT }, (_, i) => `<span class="sd-photo sd-photo-skel skel" style="--ar:${[1.45, .8, 1.2, 1.7, 1, 1.55][i]}"></span>`).join('')
@@ -383,15 +379,15 @@ function buildPhotoRows(term) {
 }
 
 function buildPeopleRows(term) {
-    const idTerm = idQuery(term);
+    const unnamedPrefix = String(term || '').trim().toLowerCase();
+    const searchesUnnamed = unnamedPrefix && 'unnamed'.startsWith(unnamedPrefix);
     const matches = people
         .map((person) => {
             const label = personLabel(person);
             const named = !isUnnamedPersonLabel(label);
-            const idMatch = idTerm && String(person.id).includes(idTerm);
-            return { person, label: named ? label : 'Add name', named, idMatch };
+            return { person, label: named ? label : 'Add name', named };
         })
-        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && item.idMatch))
+        .filter((item) => (item.named && includesText(item.label, term)) || (!item.named && searchesUnnamed))
         .sort((a, b) => Number(b.named) - Number(a.named) || personCount(b.person) - personCount(a.person))
         .slice(0, MAX_SECTION_ROWS);
     if (!matches.length) return [];
@@ -402,7 +398,7 @@ function buildPeopleRows(term) {
             thumb: personThumb(person),
             label,
             labelHtml: named ? highlight(label, term) : esc(label),
-            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(personCount(person))} photos`,
+            meta: named ? fmt(personCount(person)) : `Unnamed · ${fmt(person.face_count || personCount(person))} faces`,
             navRow: 10 + i,
             run: () => applyScope({
                 people: person.id,
@@ -724,6 +720,9 @@ function render() {
             html += rowHtml(row, row.runIndex);
         }
     }
+    if (document.getElementById('scope-input')?.value.trim()) {
+        html += '<div class="sd-operator-footer">camera: · lens: · tag: · date (&quot;june 2024&quot;) · &gt; commands</div>';
+    }
     drop.innerHTML = html || '<div class="sd-empty">Type to search this archive</div>';
     const input = document.getElementById('scope-input');
     if (hot >= 0 && drop.querySelector(`#scope-option-${CSS.escape(String(hot))}`)) {
@@ -806,8 +805,6 @@ function run(index) {
 
 function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
-    const next = merge ? { ...scope, ...clean } : clean;
-    remember(next);
     navigateToScope(clean, { merge });
     const input = document.getElementById('scope-input');
     input.value = '';
@@ -833,8 +830,6 @@ function toggleDeepSearch() {
 
 function openPhotoResult(term, photo, images) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
-    const next = { ...scope, q: term, deep, sort: 'similarity' };
-    remember(next);
     navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
@@ -850,23 +845,30 @@ function openPhotoResult(term, photo, images) {
 function applyFacet({ key, value, remove, closeAfter = false }) {
     const input = document.getElementById('scope-input');
     const nextQ = remainingQuery(input.value, remove.start, remove.end);
+    const leavingScopedResults = Boolean(value) && (scope.collectionId || scope.similarIds.length);
+    const previousScope = { ...scope, folder: [...folderValues()], similarIds: [...scope.similarIds] };
     const patch = {
         [key]: String(value || ''),
         q: nextQ || scope.q || '',
-        collectionId: '',
-        collectionName: '',
-        collectionSmart: false,
-        similarIds: [],
-        similarSourceId: '',
-        similarLimit: 100,
-        similarLabel: '',
+        ...(leavingScopedResults ? {
+            collectionId: '',
+            collectionName: '',
+            collectionSmart: false,
+            similarIds: [],
+            similarSourceId: '',
+            similarLimit: 100,
+            similarLabel: '',
+        } : {}),
     };
     if (key === 'people') {
         patch.personLabel = '';
         patch.personThumb = '';
     }
-    remember({ ...scope, ...patch });
     navigateToScope(patch, { merge: true });
+    if (leavingScopedResults) {
+        const name = previousScope.collectionName || previousScope.similarLabel || 'this view';
+        showToast(`Left '${name}'`, { undo: () => navigateToScope(previousScope) });
+    }
     input.value = '';
     input.focus();
     if (closeAfter) close();
@@ -1035,7 +1037,8 @@ export function initOmnibox() {
         } else if (event.key === 'Backspace' && scopeActive() && inputAtTokenBoundary(input)) {
             event.preventDefault();
             if (tokenSelected) {
-                navigateToScope({});
+                const facet = scopeTokenFacetKey();
+                if (facet) clearFacet(facet);
                 setTokenSelected(false);
                 input.focus();
                 hot = -1;
@@ -1064,7 +1067,8 @@ export function initOmnibox() {
     document.addEventListener('pointerdown', (event) => {
         if (!box.contains(event.target)) close();
     });
-    on('scope', () => {
+    on('scope', (nextScope) => {
+        remember(nextScope);
         tokenSelected = false;
         renderToken();
     });

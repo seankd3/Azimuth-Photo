@@ -236,3 +236,22 @@ export function scopeTokenHtml() {
     const label = describeScope();
     return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('house')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
 }
+
+export function scopeTokenFacetKey() {
+    if (scope.people) return 'people';
+    if (scope.collectionId) return 'collectionId';
+    if (scope.import_batch) return 'import_batch';
+    if (scope.similarIds.length) return 'similarIds';
+    if (scope.q) return 'q';
+    if (scope.tag) return 'tag';
+    if (scope.flag) return 'flag';
+    if (folderChip()) return 'folder';
+    if (scope.date_taken) return 'date_taken';
+    if (scope.file_type) return 'file_type';
+    if (scope.camera) return 'camera';
+    if (scope.lens) return 'lens';
+    if (scope.orientation) return 'orientation';
+    if (scope.compared) return 'compared';
+    if (scope.min_stars) return 'min_stars';
+    return '';
+}

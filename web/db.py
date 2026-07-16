@@ -1280,7 +1280,16 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
     )
 
 
-async def get_filter_options():
+async def get_filter_options(**scope):
+    if scope:
+        scope["caption_model_key"] = scope.get("caption_model_key") or active_caption_model_key()
+        catalog_counts = await get_catalog_image_counts()
+        return await filter_options_repository.filter_options(
+            DB_PATH,
+            catalog_counts=catalog_counts,
+            active_source_ids=sorted(await get_active_source_id_set()),
+            **scope,
+        )
     try:
         return await filter_options_repository.filter_options_cached(
             DB_PATH,

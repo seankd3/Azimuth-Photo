@@ -92,8 +92,9 @@ export async function revealFolder(path, sourceId = null) {
     return postJsonWithStatus('/api/reveal', body);
 }
 
-export async function getFilterOptions() {
-    return fetchJson('/api/filter-options', { defaultValue: null });
+export async function getFilterOptions(params = new URLSearchParams()) {
+    const query = params.toString();
+    return fetchJson(`/api/filter-options${query ? `?${query}` : ''}`, { defaultValue: null });
 }
 
 export async function getTags({ q = '', limit = 100 } = {}) {
