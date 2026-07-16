@@ -8,6 +8,10 @@ from typing import Any
 
 
 LEGACY_ORIGIN = "legacy-metadata"
+ROW_CLOCK_TABLES = {
+    "develop": "develop_settings",
+    "iptc": "iptc_fields",
+}
 STATE_DDL = """
 CREATE TABLE IF NOT EXISTS oplog_family_state (
     content_hash TEXT NOT NULL,
@@ -45,6 +49,29 @@ def winner_key(entry: Mapping[str, Any]) -> tuple[float, str, int]:
 
 def legacy_key(updated_at: Any) -> tuple[float, str, int]:
     return timestamp_seconds(updated_at), LEGACY_ORIGIN, 0
+
+
+def newest_key(
+    *keys: tuple[float, str, int] | None,
+) -> tuple[float, str, int] | None:
+    return max((key for key in keys if key is not None), default=None)
+
+
+async def row_key(
+    conn,
+    image_id: int,
+    family: str,
+) -> tuple[float, str, int] | None:
+    """Return the durable row clock for families that store one."""
+
+    table = ROW_CLOCK_TABLES.get(family)
+    if table is None:
+        return None
+    row = await (await conn.execute(
+        f"SELECT updated_at FROM {table} WHERE image_id = ?",
+        (image_id,),
+    )).fetchone()
+    return legacy_key(row["updated_at"]) if row else None
 
 
 async def state_key(conn, content_hash: str, family: str) -> tuple[float, str, int] | None:

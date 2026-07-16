@@ -15,7 +15,7 @@ from urllib.parse import urlencode
 from core import cache_events
 from data import connection
 from data.repositories import catalog as catalog_repository
-from features.sync import satellite
+from features.sync import family_clock, satellite
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.executor import run_sync_work
 from features.trash import service as trash_service
@@ -68,6 +68,7 @@ async def ensure_mirror_schema(db_path: str) -> None:
         await conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL")
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)")
         await conn.executescript(_MIRROR_DDL)
+        await family_clock.migrate_legacy_states(conn)
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -235,17 +236,29 @@ class MirrorPuller:
         if not isinstance(settings, dict) or not updated_at:
             return
         current = await (await conn.execute(
-            "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+            "SELECT develop.settings, develop.updated_at, images.content_hash "
+            "FROM images LEFT JOIN develop_settings develop ON develop.image_id = images.id "
+            "WHERE images.id = ?",
+            (image_id,),
         )).fetchone()
-        if current and str(current["updated_at"] or "") > str(updated_at):
+        if current is None:
             return
-        settings = preserve_local_rating(settings, current["settings"] if current else None)
+        content_hash = str(current["content_hash"] or "")
+        row_key = family_clock.legacy_key(current["updated_at"]) if current["updated_at"] is not None else None
+        state_key = await family_clock.state_key(conn, content_hash, "develop") if content_hash else None
+        existing = family_clock.newest_key(row_key, state_key)
+        incoming = family_clock.legacy_key(updated_at)
+        if existing is not None and incoming[0] <= existing[0]:
+            return
+        settings = preserve_local_rating(settings, current["settings"])
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
                VALUES (?, ?, ?, ?)
                ON CONFLICT(image_id) DO UPDATE SET settings = excluded.settings, origin = excluded.origin, updated_at = excluded.updated_at""",
             (image_id, json.dumps(settings, separators=(",", ":")), remote.get("develop_origin") or "hub", updated_at),
         )
+        if content_hash:
+            await family_clock.record_state(conn, content_hash, "develop", incoming)
 
     @staticmethod
     async def _apply_keywords(conn, image_id: int, paths: Any) -> None:

@@ -494,7 +494,7 @@ async def _merge_develop(conn, image_id: int, content_hash: str, item: dict[str,
     )).fetchone()
     row_key = family_clock.legacy_key(row["updated_at"]) if row else None
     state_key = await _state_key(conn, content_hash, "develop")
-    existing = max(key for key in (row_key, state_key) if key is not None) if row_key or state_key else None
+    existing = family_clock.newest_key(row_key, state_key)
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     settings = preserve_local_rating(item["develop_settings"], row["settings"] if row else None)
@@ -511,11 +511,13 @@ async def _merge_develop(conn, image_id: int, content_hash: str, item: dict[str,
 async def _merge_iptc(conn, image_id: int, content_hash: str, item: dict[str, Any]) -> tuple[bool, str]:
     updated_at = _family_timestamp(item, "iptc")
     incoming = family_clock.legacy_key(updated_at)
-    existing = await _state_key(conn, content_hash, "iptc")
+    await keywords.ensure_schema(conn)
+    state_key = await _state_key(conn, content_hash, "iptc")
+    row_key = await family_clock.row_key(conn, image_id, "iptc")
+    existing = family_clock.newest_key(state_key, row_key)
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     iptc = item["iptc"] or {}
-    await keywords.ensure_schema(conn)
     await conn.execute(
         "INSERT INTO iptc_fields(image_id, title, caption, copyright, creator, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(image_id) DO UPDATE SET "

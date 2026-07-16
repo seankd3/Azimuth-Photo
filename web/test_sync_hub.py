@@ -17,6 +17,7 @@ from PIL import Image
 
 import db
 from features.develop import rawproc
+from features.library import keywords
 from features.sync import device_auth, hashing, hub, hub_routes
 
 
@@ -469,6 +470,42 @@ class SyncHubTests(unittest.TestCase):
         self.assertEqual(json.loads(row[0]), {"Exposure2012": 2.0})
         self.assertEqual(row[1:], ("lrcat", "2026-07-16T05:00:00Z"))
         self.assertIsNone(family_clock)
+
+    def test_older_sync_does_not_rewind_imported_iptc_without_family_clock(self):
+        payload = self.image_bytes("lrcat-iptc-order.jpg", (45, 55, 65))
+        content_hash = self.declare("lrcat-iptc-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        asyncio.run(keywords.ensure_schema())
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO iptc_fields(image_id, title, caption, copyright, creator, updated_at) "
+                "VALUES (?, 'Imported title', '', '', '', '2026-07-16T05:00:00Z')",
+                (image_id,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "iptc": {"title": "Older title", "updated_at": "2026-07-16T04:00:00Z"},
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn(
+            {"family": "iptc", "reason": "hub-newer-or-equal"},
+            response.json()["items"][0]["skipped"],
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT title, updated_at FROM iptc_fields WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row, ("Imported title", "2026-07-16T05:00:00Z"))
 
     def test_first_synced_rating_seeds_a_neutral_develop_clock(self):
         payload = self.image_bytes("first-rating.jpg", (55, 65, 75))
