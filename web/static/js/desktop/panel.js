@@ -34,11 +34,10 @@ let sourcesLoadError = false;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
-let shareOverlay = null;
-let shareOverlayToken = 0;
-let publishOverlay = null;
-let publishOverlayToken = 0;
-let publishPollTimer = 0;
+let deliverOverlay = null;
+let deliverOverlayToken = 0;
+let deliverOverlayReturn = null;
+let deliverPollTimer = 0;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
 let savedViews = [];
@@ -184,9 +183,7 @@ function openCollectionMenu(row, anchor) {
     collectionMenu.innerHTML = '<div class="pm-group">'
         + (smart ? `<button data-act="edit-query">${icon('sparkles')} Edit query</button>`
             + `<button data-act="materialize">${icon('archive')} Convert to static</button>` : '')
-        + `<button data-act="gallery">${icon('image')} Client gallery…</button>`
-        + `<button data-act="share">${icon('share-2')} Share…</button>`
-        + `<button data-act="publish">${icon('globe')} Publish to website…</button>`
+        + `<button data-act="deliver">${icon('send')} Deliver…</button>`
         + `<button data-act="rename">${icon('pencil')} Rename</button>`
         + `<button data-act="delete">${icon('trash-2')} Delete</button></div>`;
     collectionMenu.hidden = false;
@@ -198,13 +195,7 @@ function openCollectionMenu(row, anchor) {
             closeCollectionMenu();
             if (action === 'edit-query') startSmartQueryEdit(id);
             if (action === 'materialize') startSmartMaterialize(id, name);
-            if (action === 'gallery') {
-                import('./gallery_editor.js').then((module) => module.openGalleryEditor({
-                    button: anchor, collection: { id, name }, showToast,
-                })).catch(() => showToast("Couldn't open the gallery editor"));
-            }
-            if (action === 'share') openShareOverlay(id, name);
-            if (action === 'publish') openPublishOverlay(id, name);
+            if (action === 'deliver') openDeliverOverlay(id, name, anchor);
             if (action === 'rename') startCollectionRename(id);
             if (action === 'delete') startCollectionDelete(id, name);
         });
@@ -222,6 +213,80 @@ function formatShareDate(value) {
         hour: 'numeric',
         minute: '2-digit',
     });
+}
+
+const DELIVER_TABS = [
+    ['private', 'Private link'],
+    ['gallery', 'Client gallery'],
+    ['website', 'Website'],
+];
+
+function ensureDeliverOverlay() {
+    if (deliverOverlay) return deliverOverlay;
+    deliverOverlay = document.createElement('div');
+    deliverOverlay.id = 'deliver-overlay';
+    deliverOverlay.className = 'modal-scrim';
+    deliverOverlay.hidden = true;
+    document.body.appendChild(deliverOverlay);
+    deliverOverlay.addEventListener('click', (event) => {
+        if (event.target === deliverOverlay) closeDeliverOverlay();
+    });
+    deliverOverlay.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeDeliverOverlay();
+        }
+    });
+    return deliverOverlay;
+}
+
+function deliverOverlayIsCurrent(token) {
+    return Boolean(deliverOverlay && !deliverOverlay.hidden && token === deliverOverlayToken);
+}
+
+function closeDeliverOverlay() {
+    window.clearTimeout(deliverPollTimer);
+    deliverPollTimer = 0;
+    if (!deliverOverlay || deliverOverlay.hidden) return;
+    deliverOverlayToken += 1;
+    releaseFocus(deliverOverlay);
+    deliverOverlay.hidden = true;
+    if (deliverOverlayReturn && document.contains(deliverOverlayReturn) && deliverOverlayReturn.focus) {
+        deliverOverlayReturn.focus({ preventScroll: true });
+    }
+}
+
+function deliverTabMarkup(activeTab) {
+    return '<div class="deliver-tabs" role="tablist" aria-label="Delivery type">'
+        + DELIVER_TABS.map(([id, label]) => `<button type="button" role="tab" data-deliver-tab="${id}" aria-selected="${id === activeTab}">${label}</button>`).join('')
+        + '</div>';
+}
+
+function renderDeliverShell(name, activeTab, body = '<div class="muted">Loading…</div>') {
+    deliverOverlay.innerHTML = '<div class="modal-card deliver-card" role="dialog" aria-modal="true" aria-labelledby="deliver-title">'
+        + `<div class="mo-head"><h2 id="deliver-title">Deliver ${esc(name)}</h2><button type="button" id="deliver-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
+        + deliverTabMarkup(activeTab)
+        + `<div class="mo-body deliver-body" data-deliver-body>${body}</div>`
+        + '</div>';
+    deliverOverlay.hidden = false;
+    deliverOverlay.querySelector('#deliver-close')?.addEventListener('click', closeDeliverOverlay);
+}
+
+function bindDeliverTabs(onSelect) {
+    for (const button of deliverOverlay.querySelectorAll('[data-deliver-tab]')) {
+        button.addEventListener('click', () => onSelect(button.dataset.deliverTab));
+    }
+}
+
+export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = 'private') {
+    ensureDeliverOverlay();
+    const token = ++deliverOverlayToken;
+    deliverOverlayReturn = opener || document.activeElement;
+    renderDeliverShell(name, activeTab);
+    bindDeliverTabs((tab) => openDeliverOverlay(collectionId, name, opener, tab));
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
+    return token;
 }
 
 function formatRelativeShareDate(value) {
