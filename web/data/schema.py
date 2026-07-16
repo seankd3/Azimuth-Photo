@@ -10,7 +10,7 @@ from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -720,10 +720,11 @@ CREATE TABLE IF NOT EXISTS share_images (
 CREATE TABLE IF NOT EXISTS share_favorites (
     id INTEGER PRIMARY KEY,
     share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+    visitor_id TEXT NOT NULL DEFAULT 'legacy',
     image_id INTEGER NOT NULL,
     client_name TEXT NULL,
     created_at REAL NOT NULL,
-    UNIQUE(share_id, image_id)
+    UNIQUE(share_id, visitor_id, image_id)
 );
 
 CREATE TABLE IF NOT EXISTS collection_publishes (
@@ -776,8 +777,8 @@ CREATE INDEX IF NOT EXISTS idx_share_images_image
 ON share_images(image_id, share_id);
 CREATE INDEX IF NOT EXISTS idx_share_images_position
 ON share_images(share_id, position, added_at);
-CREATE INDEX IF NOT EXISTS idx_share_favorites_share
-ON share_favorites(share_id);
+CREATE INDEX IF NOT EXISTS idx_share_favorites_share_visitor
+ON share_favorites(share_id, visitor_id);
 CREATE INDEX IF NOT EXISTS idx_collection_publishes_updated
 ON collection_publishes(updated_at DESC);
 
@@ -1279,6 +1280,7 @@ REQUIRED_COLUMNS = {
         "last_viewed_at",
         "client_finished_at",
     },
+    "share_favorites": {"visitor_id"},
     "collection_publishes": {
         "collection_id",
         "slug",
@@ -1341,7 +1343,7 @@ REQUIRED_INDEXES = {
     "idx_collection_shares_one_active_published",
     "idx_share_images_image",
     "idx_share_images_position",
-    "idx_share_favorites_share",
+    "idx_share_favorites_share_visitor",
     "idx_collection_publishes_updated",
     "idx_people_status_seen",
     "idx_face_detections_image_model",
@@ -1445,6 +1447,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await migrate_stack_kind_for_versions(conn)
     await migrate_collection_shares_for_published_nodes(conn)
     await migrate_share_owner_cascades(conn)
+    await migrate_share_favorites_per_visitor(conn)
 
 
 async def migrate_stack_kind_for_versions(conn) -> None:
@@ -1635,6 +1638,53 @@ async def migrate_share_owner_cascades(conn) -> None:
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript("\n".join(statements))
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await conn.execute("PRAGMA foreign_keys=ON")
+
+
+async def migrate_share_favorites_per_visitor(conn) -> None:
+    """Give legacy share picks their own stable anonymous visitor bucket."""
+
+    if not await table_exists(conn, "share_favorites"):
+        return
+    if "visitor_id" in await table_columns(conn, "share_favorites"):
+        return
+
+    await conn.commit()
+    await backup_before_table_rebuild(conn, "share-favorites-visitors")
+    await conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        await conn.executescript(
+            """
+            BEGIN;
+            DROP TABLE IF EXISTS share_favorites_new;
+            CREATE TABLE share_favorites_new (
+                id INTEGER PRIMARY KEY,
+                share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
+                visitor_id TEXT NOT NULL DEFAULT 'legacy',
+                image_id INTEGER NOT NULL,
+                client_name TEXT NULL,
+                created_at REAL NOT NULL,
+                UNIQUE(share_id, visitor_id, image_id)
+            );
+            INSERT INTO share_favorites_new (
+                id, share_id, visitor_id, image_id, client_name, created_at
+            )
+            SELECT id, share_id, 'legacy', image_id, client_name, created_at
+            FROM share_favorites;
+            DROP TABLE share_favorites;
+            ALTER TABLE share_favorites_new RENAME TO share_favorites;
+            CREATE INDEX idx_share_favorites_share_visitor
+            ON share_favorites(share_id, visitor_id);
+            COMMIT;
+            """
+        )
     except Exception:
         try:
             await conn.rollback()

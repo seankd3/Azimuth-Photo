@@ -643,6 +643,7 @@ async def set_share_favorite(
     image_id: int,
     on: bool,
     client_name: str | None = None,
+    visitor_id: str = "legacy",
 ) -> bool:
     return await share_repository.set_favorite(
         DB_PATH,
@@ -650,11 +651,12 @@ async def set_share_favorite(
         image_id,
         on,
         client_name=client_name,
+        visitor_id=visitor_id,
     )
 
 
-async def list_share_favorites(share_id: int) -> list[dict]:
-    return await share_repository.list_favorites(DB_PATH, share_id)
+async def list_share_favorites(share_id: int, *, visitor_id: str | None = None) -> list[dict]:
+    return await share_repository.list_favorites(DB_PATH, share_id, visitor_id=visitor_id)
 
 
 async def mark_share_finished(share_id: int) -> float | None:
@@ -663,6 +665,10 @@ async def mark_share_finished(share_id: int) -> float | None:
 
 async def favorites_for_collection(collection_id: int) -> list[dict]:
     return await share_repository.favorites_for_collection(DB_PATH, collection_id)
+
+
+async def favorite_visitors_for_collection(collection_id: int) -> list[dict]:
+    return await share_repository.favorite_visitors_for_collection(DB_PATH, collection_id)
 
 
 async def set_image_status(image_id: int, status: str):
