@@ -336,15 +336,17 @@ function bindScopeEmptyActions(flow) {
 
 async function hydrateFirstRunEmpty(request) {
     if (scopeActive() || viewState.bestOf) return;
-    const [catalog, scan] = await Promise.all([
+    const [catalog, scan, probe] = await Promise.all([
         getCatalog().catch(() => null),
         getScanStatus().catch(() => null),
+        loadScopePage({ limit: 1, offset: 0 }).catch(() => null),
     ]);
     if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
     const flow = document.getElementById('grid-flow');
     const sources = (catalog && catalog.sources) || [];
     const scanning = Boolean(scan && scan.scanning);
     const found = Number(scan && (scan.total_found || scan.total_inserted)) || 0;
+    const pendingThumbs = Number(probe && probe.hidden_pending_thumbnails) || 0;
     window.clearTimeout(emptyScanTimer);
     if (!sources.length) {
         flow.innerHTML = emptyStateHtml({
@@ -369,6 +371,21 @@ async function hydrateFirstRunEmpty(request) {
             if (page && (page.images || []).length) loadFirstPage();
             else hydrateFirstRunEmpty(request);
         }, 1500);
+    } else if (pendingThumbs > 0) {
+        // Photos exist but previews are still building — never present that as
+        // an empty or broken library.
+        flow.innerHTML = emptyStateHtml({
+            title: 'Preparing your photos',
+            detail: `Building previews for ${pendingThumbs.toLocaleString('en-US')} photo${pendingThumbs === 1 ? '' : 's'} — they’ll appear here as they’re ready.`,
+            actions: [],
+            iconName: 'loader',
+        });
+        emptyScanTimer = window.setTimeout(async () => {
+            if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
+            const page = await loadScopePage({ limit: 1, offset: 0 });
+            if (page && (page.images || []).length) loadFirstPage();
+            else hydrateFirstRunEmpty(request);
+        }, 2000);
     } else {
         flow.innerHTML = emptyStateHtml({
             title: 'No photos found',
