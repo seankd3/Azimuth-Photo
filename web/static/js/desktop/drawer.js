@@ -528,7 +528,8 @@ function renderStorage() {
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
     const totalFiles = Object.values(tiers).reduce((sum, tier) => sum + Number(tier?.count || 0), 0);
-    return '<section class="dr-sec"><h3>Storage</h3>'
+    return '<section class="dr-sec"><h3>Cache</h3>'
+        + '<p class="setting-hint">Previews only — your photos live in the Archive.</p>'
         + `<div class="tier-chips">${chips}</div>`
         + `<button class="btn btn-danger" id="clear-cache-btn" data-cache-files="${totalFiles}">Clear cache</button>`
         + '</section>';
@@ -540,7 +541,7 @@ function renderPeekStorage() {
         const tier = tiers[size] || {};
         return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
     }).join('');
-    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+    return `<section class="dr-sec"><h3>Cache</h3><div class="tier-chips">${chips}</div></section>`;
 }
 
 function renderPeekSources() {
