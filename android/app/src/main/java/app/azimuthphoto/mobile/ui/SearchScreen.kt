@@ -1,5 +1,6 @@
 package app.azimuthphoto.mobile.ui
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -7,30 +8,42 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.foundation.lazy.itemsIndexed as rowItemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.BookmarkAdd
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Badge
+import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -42,7 +55,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
@@ -50,17 +62,25 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.data.ArchiveApi
-import app.azimuthphoto.mobile.data.ArchiveFolder
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.FilterOptions
+import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.data.MediaBucket
+import app.azimuthphoto.mobile.data.MediaItem
+import app.azimuthphoto.mobile.data.Person
+import app.azimuthphoto.mobile.data.SearchFilters
+import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.Shelf
 import app.azimuthphoto.mobile.data.ViewerMedia
-import app.azimuthphoto.mobile.data.MediaItem
-import app.azimuthphoto.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.ui.library.RefineSheet
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import java.util.Locale
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+
+private const val PAGE_SIZE = 120
 
 @Composable
 fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
@@ -73,32 +93,43 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         return
     }
     val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
+    val libApi = remember(currentSettings.serverUrl, currentSettings.deviceToken) {
+        LibraryApi(currentSettings.serverUrl, currentSettings.deviceToken.takeIf { it.isNotBlank() })
+    }
+
     var query by rememberSaveable { mutableStateOf("") }
-    var activeQuery by rememberSaveable { mutableStateOf("") }
-    var activeShelf by remember { mutableStateOf<Shelf?>(null) }
+    var filters by remember { mutableStateOf(SearchFilters()) }
     var activeBucket by remember { mutableStateOf<MediaBucket?>(null) }
-    var hasResults by rememberSaveable { mutableStateOf(false) }
-    var requestGeneration by remember { mutableIntStateOf(0) }
+    var retryTick by remember { mutableIntStateOf(0) }
+
     var shelves by remember { mutableStateOf<List<Shelf>>(emptyList()) }
     var buckets by remember { mutableStateOf<List<MediaBucket>>(emptyList()) }
+    var filterOptions by remember { mutableStateOf<FilterOptions?>(null) }
+    var peopleList by remember { mutableStateOf<List<Person>>(emptyList()) }
+
     var archiveImages by remember { mutableStateOf<List<ArchiveImage>>(emptyList()) }
-    var localItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
-    var archiveLoading by remember { mutableStateOf(false) }
-    var archiveDone by remember { mutableStateOf(false) }
+    var visibleTotal by remember { mutableStateOf(0L) }
+    var firstPageLoading by remember { mutableStateOf(false) }
+    var pageLoading by remember { mutableStateOf(false) }
     var archiveError by remember { mutableStateOf(false) }
+    var localItems by remember { mutableStateOf<List<MediaItem>>(emptyList()) }
+
+    var showRefine by remember { mutableStateOf(false) }
+    var refineDraft by remember { mutableStateOf<SearchFilters?>(null) }
+    var refineCount by remember { mutableStateOf<Long?>(null) }
+
+    var showSaveDialog by remember { mutableStateOf(false) }
     var archiveViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var localViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
-    val gridState = rememberLazyGridState()
+
+    val hasResults = !filters.isEmpty || activeBucket != null
 
     fun submit(term: String) {
         val clean = term.trim()
         if (clean.isEmpty()) return
         query = clean
-        activeQuery = clean
-        activeShelf = null
         activeBucket = null
-        hasResults = true
-        requestGeneration++
+        filters = filters.copy(q = clean)
         scope.launch { SettingsStore.addRecentSearch(context, clean) }
     }
 
@@ -106,60 +137,67 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         shelves = runCatching { api.shelves() }.getOrDefault(emptyList())
         buckets = DeviceMedia.queryBuckets(context)
     }
+    LaunchedEffect(libApi) {
+        filterOptions = runCatching { libApi.filterOptions() }.getOrNull()
+        peopleList = runCatching { libApi.people() }.getOrDefault(emptyList())
+    }
 
-    LaunchedEffect(requestGeneration) {
-        if (!hasResults) return@LaunchedEffect
+    // The one live search: any change to filters (submit, chip removal, refine
+    // apply) or a retry resets paging and re-queries the hub + device.
+    LaunchedEffect(filters, activeBucket, retryTick) {
         archiveImages = emptyList()
-        localItems = emptyList()
-        archiveDone = activeBucket != null
+        visibleTotal = 0L
         archiveError = false
-        archiveLoading = activeBucket == null
-        if (activeBucket == null) {
-            runCatching {
-                api.page(
-                    offset = 0,
-                    search = activeQuery,
-                    folders = activeShelf?.paths.orEmpty(),
-                )
-            }.onSuccess { page ->
-                archiveImages = page.images
-                archiveDone = page.images.isEmpty()
-            }.onFailure { archiveError = true }
-            archiveLoading = false
+        firstPageLoading = false
+        localItems = emptyList()
+        if (activeBucket != null) {
+            val bucket = activeBucket
+            val allLocal = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
+            localItems = allLocal.filter { it.bucketId == bucket?.id }.take(200)
+            return@LaunchedEffect
         }
-        val allLocal = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
-        localItems = when {
-            activeBucket != null -> allLocal.filter { it.bucketId == activeBucket?.id }.take(200)
-            activeShelf != null -> emptyList()
-            else -> allLocal.filter {
-                it.displayName.contains(activeQuery, ignoreCase = true)
-            }.take(200)
+        if (filters.isEmpty) return@LaunchedEffect
+        firstPageLoading = true
+        runCatching { libApi.search(filters, 0, PAGE_SIZE) }
+            .onSuccess { page ->
+                archiveImages = page.images
+                visibleTotal = page.visible_images
+            }
+            .onFailure { archiveError = true }
+        firstPageLoading = false
+        // Device-local matches only make sense for a text query; other
+        // refinements are hub-only concepts.
+        if (filters.q.isNotBlank()) {
+            val allLocal = DeviceMedia.collapseRawPairs(DeviceMedia.queryAll(context))
+            localItems = allLocal
+                .filter { it.displayName.contains(filters.q, ignoreCase = true) }
+                .take(200)
         }
     }
 
-    LaunchedEffect(requestGeneration, activeQuery, activeShelf) {
-        snapshotFlow { gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }
-            .collect { lastVisible ->
-                val resultCount = archiveImages.size + localItems.size + 2
-                val viewerOpen = archiveViewerIndex != null || localViewerIndex != null
-                if (
-                    hasResults && !viewerOpen && activeBucket == null && !archiveLoading && !archiveDone &&
-                    archiveImages.isNotEmpty() && lastVisible >= resultCount - 40
-                ) {
-                    archiveLoading = true
-                    runCatching {
-                        api.page(
-                            offset = archiveImages.size,
-                            search = activeQuery,
-                            folders = activeShelf?.paths.orEmpty(),
-                        )
-                    }.onSuccess { page ->
-                        if (page.images.isEmpty()) archiveDone = true
-                        else archiveImages = (archiveImages + page.images).distinctBy { it.id }
-                    }.onFailure { archiveError = true }
-                    archiveLoading = false
+    fun loadNextPage() {
+        if (pageLoading || firstPageLoading || archiveError) return
+        if (archiveImages.isEmpty() || archiveImages.size >= visibleTotal) return
+        pageLoading = true
+        val launched = filters
+        scope.launch {
+            runCatching { libApi.search(launched, archiveImages.size, PAGE_SIZE) }
+                .onSuccess { page ->
+                    if (filters == launched) {
+                        archiveImages = (archiveImages + page.images).distinctBy { it.id }
+                        visibleTotal = page.visible_images
+                    }
                 }
-            }
+            pageLoading = false
+        }
+    }
+
+    // Live count for the refine sheet's draft, debounced.
+    LaunchedEffect(refineDraft) {
+        val draft = refineDraft ?: return@LaunchedEffect
+        refineCount = null
+        delay(350)
+        refineCount = runCatching { libApi.search(draft, 0, 1).visible_images }.getOrNull()
     }
 
     LaunchedEffect(archiveViewerIndex != null || localViewerIndex != null) {
@@ -180,19 +218,21 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
             items = localItems,
             startIndex = index,
             onClose = { localViewerIndex = null },
-            onChanged = { requestGeneration++ },
+            onChanged = { retryTick++ },
         )
         return
     }
 
     BackHandler(enabled = hasResults || query.isNotBlank()) {
         if (hasResults) {
-            hasResults = false
-            activeQuery = ""
-            activeShelf = null
+            filters = SearchFilters()
             activeBucket = null
-        } else query = ""
+        } else {
+            query = ""
+        }
     }
+
+    val chips = remember(filters, peopleList) { refinementChips(filters, peopleList) }
 
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -215,75 +255,276 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
 
-        if (!hasResults) {
-            SearchHome(
+        // Deep toggle + active refinement chips scroll; Refine stays pinned at the end.
+        Row(
+            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Row(
+                Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                FilterChip(
+                    selected = filters.deep,
+                    enabled = filters.q.isNotBlank(),
+                    onClick = { filters = filters.copy(deep = !filters.deep) },
+                    label = { Text("Deep") },
+                )
+                chips.forEach { chip ->
+                    InputChip(
+                        selected = true,
+                        onClick = { filters = chip.cleared },
+                        label = { Text(chip.label) },
+                        trailingIcon = {
+                            Icon(
+                                Icons.Outlined.Close,
+                                contentDescription = "Remove ${chip.label}",
+                                modifier = Modifier.size(InputChipDefaults.IconSize),
+                            )
+                        },
+                    )
+                }
+                if (chips.isNotEmpty()) {
+                    TextButton(onClick = { filters = SearchFilters(q = filters.q, deep = filters.deep) }) {
+                        Text("Clear all", color = TextSecondary)
+                    }
+                }
+            }
+            IconButton(onClick = {
+                refineDraft = filters
+                refineCount = visibleTotal.takeIf { hasResults && !archiveError }
+                showRefine = true
+            }) {
+                BadgedBox(
+                    badge = {
+                        if (filters.activeCount > 0) {
+                            Badge(containerColor = Accent, contentColor = Ink) {
+                                Text("${filters.activeCount}")
+                            }
+                        }
+                    },
+                ) {
+                    Icon(Icons.Outlined.Tune, contentDescription = "Refine", tint = TextPrimary)
+                }
+            }
+        }
+
+        when {
+            !hasResults -> SearchHome(
                 recentSearches = currentSettings.recentSearches,
                 shelves = shelves,
                 buckets = buckets,
-                onRecent =(::submit),
+                onRecent = (::submit),
                 onShelf = { shelf ->
-                    activeQuery = ""
-                    activeShelf = shelf
                     activeBucket = null
-                    hasResults = true
-                    requestGeneration++
+                    filters = SearchFilters(folders = shelf.paths.map { "/$it" })
                 },
                 onBucket = { bucket ->
-                    activeQuery = ""
-                    activeShelf = null
+                    filters = SearchFilters()
                     activeBucket = bucket
-                    hasResults = true
-                    requestGeneration++
                 },
             )
-        } else {
-            LazyVerticalGrid(
-                state = gridState,
+
+            activeBucket != null -> LazyVerticalGrid(
                 columns = GridCells.Fixed(4),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier.fillMaxSize(),
             ) {
-                item(key = "archive-header", span = { GridItemSpan(maxLineSpan) }) {
-                    ResultHeader("From your archive")
-                }
-                if (archiveError) {
-                    item(key = "archive-error", span = { GridItemSpan(maxLineSpan) }) {
-                        Text(
-                            "Archive unreachable — check Tailscale",
-                            color = TextSecondary,
-                            modifier = Modifier.padding(16.dp),
-                        )
-                    }
-                } else if (!archiveLoading && archiveImages.isEmpty()) {
-                    item(key = "archive-empty", span = { GridItemSpan(maxLineSpan) }) {
-                        Text("No archive matches", color = TextSecondary, modifier = Modifier.padding(16.dp))
-                    }
-                }
-                itemsIndexed(archiveImages, key = { _, image -> "a${image.id}" }) { index, image ->
-                    ArchiveResultCell(api, image) { archiveViewerIndex = index }
-                }
-                item(key = "device-header", span = { GridItemSpan(maxLineSpan) }) {
-                    ResultHeader("On this device")
-                }
-                if (localItems.isEmpty()) {
-                    item(key = "device-empty", span = { GridItemSpan(maxLineSpan) }) {
-                        Text("No device matches", color = TextSecondary, modifier = Modifier.padding(16.dp))
-                    }
-                }
                 itemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
                     DeviceResultCell(item) { localViewerIndex = index }
                 }
-                if (archiveLoading) {
-                    item(key = "loading", span = { GridItemSpan(maxLineSpan) }) {
-                        Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
-                            CircularProgressIndicator()
+            }
+
+            firstPageLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+
+            archiveError -> Column(
+                Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text("Archive unreachable", color = TextSecondary)
+                TextButton(onClick = { retryTick++ }) { Text("Retry") }
+            }
+
+            else -> Column(Modifier.fillMaxSize()) {
+                if (localItems.isNotEmpty()) {
+                    Text(
+                        "On this device",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = TextPrimary,
+                        modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 6.dp),
+                    )
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        rowItemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
+                            Box(Modifier.size(96.dp)) {
+                                DeviceResultCell(item) { localViewerIndex = index }
+                            }
                         }
                     }
+                }
+                Row(
+                    Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        String.format(Locale.US, "%,d photos", visibleTotal),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = TextSecondary,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (archiveImages.isNotEmpty() && !filters.isEmpty) {
+                        IconButton(onClick = { showSaveDialog = true }) {
+                            Icon(
+                                Icons.Outlined.BookmarkAdd,
+                                contentDescription = "Save search as collection",
+                                tint = TextSecondary,
+                            )
+                        }
+                    }
+                }
+                if (archiveImages.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Nothing matches", color = TextSecondary)
+                    }
+                } else {
+                    PhotoGrid(
+                        images = archiveImages,
+                        thumbModel = { image -> api.thumbUrl(image) },
+                        onOpen = { index -> archiveViewerIndex = index },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = 12.dp),
+                        onNearEnd = { loadNextPage() },
+                    )
                 }
             }
         }
     }
+
+    if (showRefine) {
+        RefineSheet(
+            initial = filters,
+            options = filterOptions,
+            people = peopleList.map { person -> person.copy(face_thumb_url = libApi.thumb(person.face_thumb_url)) },
+            liveCount = refineCount,
+            onDraftChanged = { draft -> refineDraft = draft },
+            onApply = { applied ->
+                filters = applied
+                activeBucket = null
+                showRefine = false
+            },
+            onDismiss = { showRefine = false },
+        )
+    }
+
+    if (showSaveDialog) {
+        SaveSearchDialog(
+            defaultName = defaultCollectionName(filters, chips),
+            onDismiss = { showSaveDialog = false },
+            onSave = { name ->
+                showSaveDialog = false
+                scope.launch {
+                    val id = libApi.createSmartCollection(name, filters)
+                    Toast.makeText(
+                        context,
+                        if (id != null) "Saved to collections" else "Couldn't save",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                }
+            },
+        )
+    }
+}
+
+/** One removable chip per active refinement — human label + the filters with just that field cleared. */
+private data class RefinementChip(val label: String, val cleared: SearchFilters)
+
+private fun refinementChips(filters: SearchFilters, people: List<Person>): List<RefinementChip> = buildList {
+    filters.people.forEach { id ->
+        val name = people.firstOrNull { it.id == id }?.displayName ?: "Person $id"
+        add(RefinementChip(name, filters.copy(people = filters.people - id)))
+    }
+    if (filters.tag.isNotBlank()) add(RefinementChip("#${filters.tag}", filters.copy(tag = "")))
+    if (filters.dateTaken.isNotBlank()) add(RefinementChip(filters.dateTaken, filters.copy(dateTaken = "")))
+    if (filters.fileType.isNotBlank()) {
+        val label = if (filters.fileType == "video") "Video" else ".${filters.fileType}"
+        add(RefinementChip(label, filters.copy(fileType = "")))
+    }
+    if (filters.camera.isNotBlank()) add(RefinementChip(filters.camera, filters.copy(camera = "")))
+    if (filters.lens.isNotBlank()) add(RefinementChip(filters.lens, filters.copy(lens = "")))
+    if (filters.minStars > 0) add(RefinementChip("★${filters.minStars}+", filters.copy(minStars = 0)))
+    if (filters.flag.isNotBlank()) {
+        add(
+            RefinementChip(
+                filters.flag.replaceFirstChar { it.uppercase() },
+                filters.copy(flag = ""),
+            ),
+        )
+    }
+    if (filters.orientation.isNotBlank()) {
+        add(
+            RefinementChip(
+                filters.orientation.replaceFirstChar { it.uppercase() },
+                filters.copy(orientation = ""),
+            ),
+        )
+    }
+    filters.folders.forEach { folder ->
+        val label = folder.trim('/').substringAfterLast('/').ifBlank { folder }
+        add(RefinementChip(label, filters.copy(folders = filters.folders - folder)))
+    }
+}
+
+private fun defaultCollectionName(filters: SearchFilters, chips: List<RefinementChip>): String {
+    val parts = buildList {
+        if (filters.q.isNotBlank()) add(filters.q)
+        chips.forEach { add(it.label) }
+    }
+    return parts.joinToString(" · ").take(40).ifBlank { "Saved search" }
+}
+
+@Composable
+private fun SaveSearchDialog(
+    defaultName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf(defaultName) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Save search") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    singleLine = true,
+                    label = { Text("Name") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Saves as a smart collection that stays in sync with this search.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = name.isNotBlank(),
+                onClick = { onSave(name.trim()) },
+            ) { Text("Save") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable
@@ -346,36 +587,6 @@ private fun SearchHome(
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun ResultHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleMedium,
-        color = TextPrimary,
-        modifier = Modifier.padding(start = 14.dp, top = 20.dp, bottom = 10.dp),
-    )
-}
-
-@Composable
-private fun ArchiveResultCell(api: ArchiveApi, image: ArchiveImage, onClick: () -> Unit) {
-    Box(
-        Modifier
-            .aspectRatio(1f)
-            .background(Panel)
-            .clickable(onClick = onClick),
-    ) {
-        AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current)
-                .data(api.thumbUrl(image))
-                .crossfade(false)
-                .build(),
-            contentDescription = image.filename,
-            contentScale = ContentScale.Crop,
-            modifier = Modifier.fillMaxSize(),
-        )
     }
 }
 

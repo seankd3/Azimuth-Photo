@@ -7,15 +7,18 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Public
 import androidx.compose.material3.AlertDialog
@@ -223,11 +226,24 @@ private fun CollectionCard(api: LibraryApi, collection: Collection, onOpen: () -
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
         )
-        Text(
-            text = "${collection.image_count} photos",
-            style = MaterialTheme.typography.labelSmall,
-            color = TextSecondary,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-        )
+        ) {
+            if (collection.smart) {
+                // Smart = a saved search kept in sync with the library.
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    contentDescription = "Smart collection",
+                    tint = Accent.copy(alpha = 0.8f),
+                    modifier = Modifier.padding(end = 4.dp).size(14.dp),
+                )
+            }
+            Text(
+                text = "${collection.image_count} photos",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextSecondary,
+            )
+        }
     }
 }
