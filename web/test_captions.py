@@ -11,6 +11,76 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    def test_caption_resume_enables_persisted_scan_setting(self):
+        old_pause = caption_worker._caption_manual_pause
+        old_pause_message = caption_worker._caption_manual_pause_message
+        work_coordination.release_manual_owner("captions")
+        try:
+            with unittest.mock.patch.object(
+                settings,
+                "get_settings",
+                return_value={"caption_scan_enabled": False, "cache_profile": "balanced"},
+            ), unittest.mock.patch.object(settings, "save_settings") as save_settings:
+                caption_worker.resume_caption_worker()
+
+            saved = save_settings.call_args.args[0]
+            self.assertTrue(saved["caption_scan_enabled"])
+            self.assertEqual(saved["cache_profile"], "balanced")
+        finally:
+            caption_worker._caption_manual_pause = old_pause
+            caption_worker._caption_manual_pause_message = old_pause_message
+            work_coordination.release_manual_owner("captions")
+
+    async def test_caption_disabled_loop_releases_manual_owner(self):
+        old_pause = caption_worker._caption_manual_pause
+        old_pause_message = caption_worker._caption_manual_pause_message
+        old_status = dict(caption_worker._status)
+        sleep_started = asyncio.Event()
+
+        async def hold_sleep(_seconds):
+            sleep_started.set()
+            await asyncio.Future()
+
+        caption_worker._caption_manual_pause = False
+        caption_worker._caption_manual_pause_message = ""
+        work_coordination.release_manual_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        task = None
+        try:
+            with (
+                unittest.mock.patch.object(
+                    settings,
+                    "get_settings",
+                    return_value={"caption_scan_enabled": False},
+                ),
+                unittest.mock.patch.object(
+                    settings,
+                    "active_caption_config",
+                    return_value={
+                        "model_id": "test-caption-model",
+                        "model_key": "test-caption-model@main",
+                        "model_dir": "/tmp/test-caption-model",
+                        "quantization": "none",
+                        "prompt_version": "test-v1",
+                    },
+                ),
+                unittest.mock.patch.object(asyncio, "sleep", side_effect=hold_sleep),
+                unittest.mock.patch.object(caption_worker, "_clear_cuda_cache"),
+            ):
+                task = asyncio.create_task(caption_worker.run_caption_worker())
+                await asyncio.wait_for(sleep_started.wait(), timeout=1)
+                self.assertIsNone(work_coordination.manual_owner())
+        finally:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            caption_worker._caption_manual_pause = old_pause
+            caption_worker._caption_manual_pause_message = old_pause_message
+            caption_worker._status.clear()
+            caption_worker._status.update(old_status)
+            work_coordination.release_manual_owner("captions")
+
     def test_caption_oom_circuit_opens_after_repeated_minimum_batch_failures(self):
         circuit = CaptionOomCircuit(threshold=3)
 

@@ -135,18 +135,29 @@ def manual_pause_active() -> bool:
     return _caption_manual_pause
 
 
+def _release_worker_owners() -> None:
+    work_coordination.release_manual_owner("captions")
+    _unload_model()
+
+
+def _enter_paused(message: str) -> None:
+    _release_worker_owners()
+    _set_status(state="paused", ready=False, message=message, last_error="")
+
+
 def pause_caption_worker(message: str = "Captions are stopped.") -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message
     _caption_manual_pause = True
     _caption_manual_pause_message = message
-    work_coordination.release_manual_owner("captions")
-    _unload_model()
-    _set_status(state="paused", ready=False, message=message)
+    _enter_paused(message)
     return get_worker_status()
 
 
 def resume_caption_worker() -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
+    app_config = settings.get_settings()
+    if not bool(app_config.get("caption_scan_enabled", False)):
+        settings.save_settings({**app_config, "caption_scan_enabled": True})
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
     _model_load_failure_count = 0
@@ -347,18 +358,14 @@ async def run_caption_worker() -> None:
                 prompt_version=caption_config["prompt_version"],
             )
             if _caption_manual_pause or not bool(app_config.get("caption_scan_enabled", False)):
-                _unload_model()
-                _set_status(
-                    state="paused",
-                    ready=False,
-                    message=_caption_manual_pause_message or "Captions are stopped.",
-                    last_error="",
+                _enter_paused(
+                    _caption_manual_pause_message or "Captions are stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
             if not ai_models.model_files_present(caption_config["model_dir"]):
-                _unload_model()
+                _release_worker_owners()
                 _set_status(
                     state="waiting_for_model",
                     ready=False,
@@ -373,8 +380,7 @@ async def run_caption_worker() -> None:
             )(caption_config=caption_config, cache_root=str(app_config.get("ssd_cache_dir") or ""))
             _set_status(pending_cached_images=pending, last_error="")
             if pending <= 0:
-                work_coordination.release_manual_owner("captions")
-                _unload_model()
+                _release_worker_owners()
                 _set_status(
                     state="idle",
                     ready=True,
@@ -396,6 +402,7 @@ async def run_caption_worker() -> None:
                 limit=batch_size,
             )
             if not rows:
+                _release_worker_owners()
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
@@ -415,7 +422,7 @@ async def run_caption_worker() -> None:
                     if _is_cuda_oom_error(exc):
                         batch_size = max(1, batch_size // 2)
                         _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
-                    _unload_model()
+                    _release_worker_owners()
                     paused = _record_model_load_failure(exc)
                     if paused:
                         log.error("Caption worker paused after repeated model load failures: %s", exc, exc_info=True)
@@ -492,6 +499,7 @@ async def run_caption_worker() -> None:
                 session_captioned=int(_status.get("session_captioned") or 0) + captioned,
             )
         except Exception as exc:
+            _release_worker_owners()
             _set_status(
                 state="error",
                 ready=False,
