@@ -89,6 +89,17 @@ export function scopeActive() {
     );
 }
 
+function activeSmartCollectionId() {
+    if (!scope.smartCollectionId) return '';
+    const smartQuery = scope.smartQuery || {};
+    const ownedFacetsMatch = Object.entries(SMART_QUERY_FIELDS).every(([queryKey, scopeKey]) => {
+        const smartValue = smartQuery[queryKey];
+        return smartValue === undefined || smartValue === null || smartValue === ''
+            || scope[scopeKey] === String(smartValue);
+    });
+    return ownedFacetsMatch ? scope.smartCollectionId : '';
+}
+
 export function scopeParams(extra = {}) {
     const params = new URLSearchParams();
     if (scope.q) params.set('q', scope.q);
@@ -103,7 +114,8 @@ export function scopeParams(extra = {}) {
     if (scope.compared) params.set('compared', scope.compared);
     if (scope.minStars) params.set('min_stars', scope.minStars);
     if (scope.dateTaken) params.set('date_taken', scope.dateTaken);
-    if (scope.collectionId) params.set('collection_id', scope.collectionId);
+    const collectionId = scope.collectionId || activeSmartCollectionId();
+    if (collectionId) params.set('collection_id', collectionId);
     params.set('stacks', (scope.smartName || !viewPrefs.collapseStacks) ? 'expanded' : 'collapsed');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
