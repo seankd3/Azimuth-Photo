@@ -262,6 +262,50 @@ class TrashTests(BackendTestCase):
         self.assertFalse(await self._image_exists(first_id))
         self.assertFalse(await self._image_exists(second_id))
 
+    async def test_empty_trash_keeps_bytes_when_catalog_delete_fails(self):
+        source, _root = await self._source_root()
+        image_id, _ = await self._file_image(source, "delete-fails.jpg", data=b"irreplaceable")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+
+        async def fail_catalog_delete(_db_path, image_ids):
+            self.assertEqual(image_ids, [image_id])
+            self.assertTrue(os.path.exists(trash_path))
+            return [], [{"id": image_id, "reason": "injected catalog failure"}]
+
+        with patch.object(
+            trash_service,
+            "_delete_emptied_catalog_rows",
+            side_effect=fail_catalog_delete,
+        ):
+            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected catalog failure"}])
+        self.assertTrue(os.path.exists(trash_path))
+        self.assertTrue(await self._image_exists(image_id))
+
+    async def test_empty_trash_surfaces_unlink_failure_after_catalog_delete(self):
+        source, _root = await self._source_root()
+        image_id, _ = await self._file_image(source, "unlink-fails.jpg", data=b"leftover")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+
+        with patch.object(
+            trash_service,
+            "__to_thread_remove_trash_file",
+            new_callable=AsyncMock,
+            return_value=(0, "injected unlink failure"),
+        ):
+            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected unlink failure"}])
+        self.assertTrue(os.path.exists(trash_path))
+        self.assertFalse(await self._image_exists(image_id))
+
     async def test_empty_trash_deletes_offline_catalog_only_hub_mirror_rows(self):
         conn = await db.get_db()
         try:

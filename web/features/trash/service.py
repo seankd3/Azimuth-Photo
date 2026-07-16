@@ -599,7 +599,7 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
         await data_connection.close_async(conn, db_path=db_path)
 
 
-def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
+def _inspect_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
     if not path:
         return 0, ""
     if not source_root:
@@ -620,8 +620,20 @@ def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, 
         return 0, "trash path is a symlink"
     if not stat.S_ISREG(lstat_result.st_mode):
         return 0, "trash path is not a regular file"
+    return int(lstat_result.st_size or 0), ""
+
+
+def _remove_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
+    size, reason = _inspect_trash_file(path, source_root)
+    if reason or not path:
+        return 0, reason
+    try:
+        lstat_result = os.lstat(path)
+    except FileNotFoundError:
+        return 0, ""
+    except OSError as exc:
+        return 0, str(exc)
     expected_token = _stat_token(lstat_result)
-    size = int(lstat_result.st_size or 0)
     try:
         # Re-lstat immediately before remove narrows the local TOCTOU window on
         # platforms where Python cannot express a no-follow unlink.
@@ -701,10 +713,9 @@ async def _purge_trash_rows(
 ) -> dict:
     rows = await _trash_rows(db_path, older_than=older_than, image_ids=image_ids)
     deletable_ids: list[int] = []
-    paths_to_prune: list[str] = []
+    rows_by_id: dict[int, dict] = {}
     errors: list[Error] = []
     skipped_offline = 0
-    freed_bytes = 0
     for row in rows:
         image_id = int(row["id"])
         trash_path = row.get("trash_path")
@@ -714,19 +725,35 @@ async def _purge_trash_rows(
         if not int(row["source_online"]) and trash_path:
             skipped_offline += 1
             continue
-        freed, reason = await __to_thread_remove_trash_file(trash_path, row.get("source_path"))
+        _size, reason = await __to_thread_inspect_trash_file(
+            trash_path,
+            row.get("source_path"),
+        )
         if reason:
             errors.append(_error(image_id, reason))
             continue
-        freed_bytes += freed
         deletable_ids.append(image_id)
-        if trash_path:
-            paths_to_prune.append(trash_path)
+        rows_by_id[image_id] = row
 
     deleted_ids: list[int] = []
     if deletable_ids:
         deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, deletable_ids)
         errors.extend(delete_errors)
+    freed_bytes = 0
+    paths_to_prune: list[str] = []
+    for image_id in deleted_ids:
+        row = rows_by_id[image_id]
+        trash_path = row.get("trash_path")
+        freed, reason = await __to_thread_remove_trash_file(
+            trash_path,
+            row.get("source_path"),
+        )
+        if reason:
+            errors.append(_error(image_id, reason))
+            continue
+        freed_bytes += freed
+        if trash_path:
+            paths_to_prune.append(trash_path)
     await __to_thread_prune_empty_trash_dirs(paths_to_prune)
     return {
         "deleted_count": len(deleted_ids),
@@ -864,6 +891,12 @@ async def __to_thread_remove_trash_file(path: str | None, source_root: str | Non
     import asyncio
 
     return await asyncio.to_thread(_remove_trash_file, path, source_root)
+
+
+async def __to_thread_inspect_trash_file(path: str | None, source_root: str | None) -> tuple[int, str]:
+    import asyncio
+
+    return await asyncio.to_thread(_inspect_trash_file, path, source_root)
 
 
 async def __to_thread_prune_empty_trash_dirs(paths: list[str]) -> None:
