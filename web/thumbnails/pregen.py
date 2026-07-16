@@ -367,5 +367,9 @@ def background_decision(
     )
 
 
-def should_pause_for_priority() -> bool:
-    return False
+def should_pause_for_priority(
+    idle_seconds: float,
+    *,
+    settle_seconds: float,
+) -> bool:
+    return max(0.0, float(idle_seconds)) < max(0.0, float(settle_seconds))

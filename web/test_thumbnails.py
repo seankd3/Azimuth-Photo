@@ -591,7 +591,18 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             {"decision": "manual"},
         )
         self.assertEqual(calls, ["called"])
-        self.assertFalse(thumbnail_pregen.should_pause_for_priority())
+        self.assertTrue(
+            thumbnail_pregen.should_pause_for_priority(
+                0.25,
+                settle_seconds=1.0,
+            )
+        )
+        self.assertFalse(
+            thumbnail_pregen.should_pause_for_priority(
+                1.0,
+                settle_seconds=1.0,
+            )
+        )
 
     def test_session_bookkeeping_remains_facaded_from_pregen_module(self):
         old_history = thumbnails._pregen_history
@@ -2433,9 +2444,13 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_pregeneration_does_not_pause_for_priority_after_activity(self):
+    def test_pregeneration_yields_after_activity_then_resumes_when_idle(self):
         thumbnails.note_user_activity()
 
+        self.assertTrue(thumbnails._pregen_should_pause_for_priority())
+        thumbnails._last_user_activity = (
+            thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
+        )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
 
     def test_prefetch_worker_caps_manual_batch_to_configured_batch(self):

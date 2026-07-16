@@ -1488,7 +1488,10 @@ def _pregen_background_decision():
 
 
 def _pregen_should_pause_for_priority() -> bool:
-    return False
+    return pregen.should_pause_for_priority(
+        get_idle_seconds(),
+        settle_seconds=PREGENERATE_IDLE_SECONDS,
+    )
 
 
 async def run_prefetch_worker():
