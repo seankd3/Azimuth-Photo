@@ -1,7 +1,8 @@
 {
   "baseline_exposure": 0.23,
+  "baseline_exposure_offset": 0.16,
   "camera_model": "Canon EOS 1500D",
-  "content_hash": "087f8eb03d253c76ca00bbab15649cf409fdf8c19912447267880b1c5977bb99",
+  "content_hash": "435a0e5c4a13648e616d3996ac32d10899c544da7dd27ce5f391b899154a4116",
   "illuminants": {
     "calibration_illuminant1": 17,
     "calibration_illuminant2": 21

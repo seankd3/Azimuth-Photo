@@ -95,6 +95,7 @@ def _profile_content(profile: Mapping[str, Any]) -> dict[str, Any]:
             "matrices",
             "illuminants",
             "baseline_exposure",
+            "baseline_exposure_offset",
             "tone_curve",
             "hue_sat_map",
             "look_table",
@@ -130,6 +131,7 @@ def _profile_from_pages(pages: Iterable[object], source_file: str) -> dict[str, 
     illuminant1 = _scalar(_tag(pages, "CalibrationIlluminant1"))
     illuminant2 = _scalar(_tag(pages, "CalibrationIlluminant2"))
     baseline_exposure = _scalar(_tag(pages, "BaselineExposure"))
+    baseline_exposure_offset = _scalar(_tag(pages, "BaselineExposureOffset"))
     if illuminant1 is None or illuminant2 is None:
         return None
 
@@ -146,6 +148,8 @@ def _profile_from_pages(pages: Iterable[object], source_file: str) -> dict[str, 
     }
     if baseline_exposure is not None:
         profile["baseline_exposure"] = baseline_exposure
+    if baseline_exposure_offset is not None:
+        profile["baseline_exposure_offset"] = baseline_exposure_offset
 
     tone = _numbers(_tag(pages, "ProfileToneCurve"))
     if tone is not None and len(tone) % 2 == 0:
