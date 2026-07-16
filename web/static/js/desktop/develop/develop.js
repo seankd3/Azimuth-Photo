@@ -1000,9 +1000,18 @@ function editingField(event) {
     return event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement || event.target?.isContentEditable;
 }
 
+function canNavigateFrom(event) {
+    return event.target === document.body || event.target === stage || event.target === canvas;
+}
+
 function handleKey(event) {
     if (!mounted || editingField(event)) return;
     if (heal?.keydown(event)) return;
+    if (crop?.active && event.key.toLowerCase() === 'o') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) crop.cycleOverlay();
+        return;
+    }
     if (masking?.keydown(event)) return;
     const key = event.key.toLowerCase();
     if (event.ctrlKey || event.metaKey) {
@@ -1010,12 +1019,16 @@ function handleKey(event) {
         else if (event.shiftKey && key === 'c') { event.preventDefault(); event.stopImmediatePropagation(); openCopyPopover(toolbar.querySelector('[data-action="copy"]')); }
         else if (event.shiftKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); pasteSettings(); }
         else if (event.altKey && key === 'v') { event.preventDefault(); event.stopImmediatePropagation(); fromPrevious(); }
+        else if (event.code === 'Quote') { event.preventDefault(); event.stopImmediatePropagation(); createVirtualCopy(); }
         return;
     }
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && canNavigateFrom(event)) {
         event.preventDefault(); event.stopImmediatePropagation(); nav(event.key === 'ArrowLeft' ? -1 : 1);
     } else if (event.key === '\\') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) showBefore(true);
+    } else if (key === 'y') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) toggleDevelopCompare(event.altKey ? 'horizontal' : 'vertical');
     } else if (key === 'w') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) setWbPick(!wbPickActive);
     } else if (key === 'j') {
@@ -1024,6 +1037,12 @@ function handleKey(event) {
             const active = !(clipOverlay.shadow || clipOverlay.highlight);
             setClipOverlay(active, active);
         }
+    } else if (key === 'r' && event.shiftKey) {
+        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) holdDevelopReference(true);
+    } else if (key === 'r') {
+        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) crop.setActive(!crop.active);
+    } else if (key === 'k') {
+        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) masking?.togglePanel();
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
     } else if (key === 'p') {
@@ -1044,6 +1063,7 @@ function handleKey(event) {
 function handleKeyUp(event) {
     if (!mounted) return;
     if (event.key === '\\') showBefore(false);
+    if (event.key.toLowerCase() === 'r') holdDevelopReference(false);
     if (event.key.toLowerCase() === 'p') {
         toolbar.querySelector('[data-action="proof"]')?.setAttribute('aria-pressed', 'false');
         proofTile?.setHeld(false);
@@ -1057,12 +1077,39 @@ function handleKeyUp(event) {
 function init() {
     const histogramSlot = document.createElement('div');
     histogramSlot.id = 'develop-histogram';
+    const histogramGesture = { key: null, active: false, start: 0, previous: null };
     histogram = new DevelopHistogram(histogramSlot, {
         onClipToggle: (side, active) => setClipOverlay(
             side === 'shadow' ? active : clipOverlay.shadow,
             side === 'highlight' ? active : clipOverlay.highlight,
         ),
+        onAdjust: (key, delta) => {
+            const entry = currentImage && stateCache.get(Number(currentImage.id));
+            if (!entry) return;
+            if (!histogramGesture.active || histogramGesture.key !== key) {
+                histogramGesture.key = key;
+                histogramGesture.active = true;
+                histogramGesture.start = Number(entry.settings[key]) || 0;
+                histogramGesture.previous = clone(entry.settings);
+            }
+            const exposure = key === 'Exposure2012';
+            const low = exposure ? -5 : -100;
+            const high = exposure ? 5 : 100;
+            const value = Math.max(low, Math.min(high, histogramGesture.start + delta));
+            settingsChanged(key, exposure ? Math.round(value * 100) / 100 : Math.round(value), 'Histogram', { history: false });
+            panels?.setSettings(entry.settings);
+        },
     });
+    document.addEventListener('pointerup', () => {
+        if (!histogramGesture.active) return;
+        histogramGesture.active = false;
+        const entry = currentImage && stateCache.get(Number(currentImage.id));
+        if (entry && histogramGesture.previous) {
+            // One undo entry for the whole histogram drag (pre-gesture snapshot).
+            settingsChanged(histogramGesture.key, entry.settings[histogramGesture.key], 'Histogram', { previousSettings: histogramGesture.previous });
+        }
+        histogramGesture.previous = null;
+    }, true);
     const cropSlot = document.createElement('div');
     cropSlot.id = 'develop-crop-controls';
     const transformSlot = document.createElement('div');

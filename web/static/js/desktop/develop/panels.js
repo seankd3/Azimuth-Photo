@@ -41,6 +41,14 @@ const FILM = [
     { ...slider('pa_FilmGrain', 'Grain', 0, 100, 1, 100), tip: 'Scale density-dependent emulsion grain' },
     { ...slider('pa_FilmGrainSize', 'Grain Size', 0, 100, 1, 100), tip: 'Scale the physical grain-clump pitch' },
 ];
+const WB_PRESETS = Object.freeze({
+    Daylight: [5500, 10], Cloudy: [6500, 10], Shade: [7500, 10],
+    Tungsten: [2850, 0], Fluorescent: [3800, 21], Flash: [5500, 0],
+});
+
+function snapshot(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
+}
 
 function displayValue(value, step) {
     const decimals = step < .1 ? 2 : step < 1 ? 1 : 0;
@@ -79,15 +87,23 @@ class CurveEditor {
         this.channel = 'ToneCurvePV2012';
         this.settings = {};
         this.dragIndex = -1;
+        this.selectedIndex = -1;
         root.querySelector('select').addEventListener('change', (event) => {
             this.channel = event.target.value;
             this.draw();
         });
         this.canvas.addEventListener('pointerdown', (event) => this.pointerDown(event));
         this.canvas.addEventListener('dblclick', (event) => this.addPoint(event));
+        this.canvas.addEventListener('keydown', (event) => {
+            if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+            event.preventDefault();
+            this.deleteSelected();
+        });
         root.querySelector('[data-curve-reset]').addEventListener('click', () => {
+            const previousSettings = snapshot(this.settings);
             delete this.settings[this.channel];
-            this.onChange(this.channel, undefined, 'Tone Curve');
+            this.onChange(this.channel, undefined, 'Tone Curve', { previousSettings });
+            this.selectedIndex = -1;
             this.draw();
         });
     }
@@ -120,20 +136,29 @@ class CurveEditor {
             if (d < distance) { distance = d; nearest = index; }
         });
         if (distance > 18) return;
+        if (event.altKey) {
+            if (nearest > 0 && nearest < points.length - 1) this.deletePoint(points, nearest);
+            return;
+        }
         this.dragIndex = nearest;
+        this.selectedIndex = nearest;
+        const previousSettings = snapshot(this.settings);
+        let moved = false;
         this.canvas.setPointerCapture(event.pointerId);
         const move = (next) => {
             const [nx, ny] = this.coords(next);
             const min = nearest === 0 ? 0 : points[nearest - 1][0] + 1;
             const max = nearest === points.length - 1 ? 255 : points[nearest + 1][0] - 1;
             points[nearest] = [Math.max(min, Math.min(max, nx)), ny];
-            this.commit(points);
+            moved = true;
+            this.commit(points, { history: false });
         };
         const up = () => {
             this.canvas.removeEventListener('pointermove', move);
             this.canvas.removeEventListener('pointerup', up);
             this.canvas.removeEventListener('pointercancel', up);
             this.dragIndex = -1;
+            if (moved) this.commit(points, { previousSettings });
         };
         this.canvas.addEventListener('pointermove', move);
         this.canvas.addEventListener('pointerup', up);
@@ -141,16 +166,30 @@ class CurveEditor {
     }
 
     addPoint(event) {
+        const previousSettings = snapshot(this.settings);
         const points = this.points();
         const [x, y] = this.coords(event);
         points.push([x, y]);
-        this.commit(points);
+        this.selectedIndex = points.length - 1;
+        this.commit(points, { previousSettings });
     }
 
-    commit(points) {
+    deleteSelected() {
+        const points = this.points();
+        if (this.selectedIndex > 0 && this.selectedIndex < points.length - 1) this.deletePoint(points, this.selectedIndex);
+    }
+
+    deletePoint(points, index) {
+        const previousSettings = snapshot(this.settings);
+        points.splice(index, 1);
+        this.selectedIndex = -1;
+        this.commit(points, { previousSettings });
+    }
+
+    commit(points, options) {
         const value = normalizeCurve(points).map(([x, y]) => `${Math.round(x)}, ${Math.round(y)}`);
         this.settings[this.channel] = value;
-        this.onChange(this.channel, value, 'Tone Curve');
+        this.onChange(this.channel, value, 'Tone Curve', options);
         this.draw();
     }
 
@@ -212,8 +251,8 @@ export class DevelopPanels {
         host.querySelector('#develop-histogram-slot').replaceWith(histogramHost);
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
-        this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
-        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
+        this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label, options) => this.change(key, value, label, options));
+        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label, options) => this.change(key, value, label, options));
         this.lens = new LensPanel({ host: host.querySelector('#develop-lens-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.calibration = new CalibrationPanel({ host: host.querySelector('#develop-calibration-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
@@ -231,28 +270,35 @@ export class DevelopPanels {
     bindSliders() {
         for (const row of this.host.querySelectorAll('.develop-slider')) {
             const input = row.querySelector('input');
-            const updateFromPointer = (event, startX, startValue) => {
+            const updateFromPointer = (event, startX, startValue, options) => {
                 const min = Number(row.dataset.min);
                 const max = Number(row.dataset.max);
                 const step = Number(row.dataset.step);
                 const sensitivity = event.shiftKey ? .1 : 1;
                 const delta = (event.clientX - startX) / Math.max(120, row.clientWidth) * (max - min) * sensitivity;
                 const value = Math.max(min, Math.min(max, Math.round((startValue + delta) / step) * step));
-                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                const changed = value !== numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                if (changed) this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent, options);
                 this.syncSlider(row);
+                return changed;
             };
             row.addEventListener('pointerdown', (event) => {
                 if (event.target === input) return;
                 event.preventDefault();
                 const startX = event.clientX;
                 const startValue = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const previousSettings = snapshot(this.settings);
+                let moved = false;
                 row.setPointerCapture(event.pointerId);
-                const move = (next) => updateFromPointer(next, startX, startValue);
+                const move = (next) => {
+                    moved = updateFromPointer(next, startX, startValue, { history: false }) || moved;
+                };
                 const up = () => {
                     row.removeEventListener('pointermove', move);
                     row.removeEventListener('pointerup', up);
                     row.removeEventListener('pointercancel', up);
                     row.classList.remove('dragging');
+                    if (moved) this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default)), row.querySelector('.develop-slider-label').textContent, { previousSettings });
                 };
                 row.classList.add('dragging');
                 row.addEventListener('pointermove', move);
@@ -303,17 +349,14 @@ export class DevelopPanels {
     bindOtherControls() {
         this.host.querySelector('[data-wb-pick]')?.addEventListener('click', () => this.onWbPick?.());
         const wb = this.host.querySelector('#develop-wb');
-        wb.addEventListener('change', () => this.change('WhiteBalance', wb.value, 'White Balance'));
+        wb.addEventListener('change', () => this.applyWbPreset(wb.value));
         this.host.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             button.disabled = true;
             try { await this.onAutoTone?.(); } finally { button.disabled = false; }
         });
         this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
-            this.change('WhiteBalance', 'As Shot', 'White Balance');
-            delete this.settings.Temperature;
-            delete this.settings.Tint;
-            this.setSettings(this.settings);
+            this.applyWbPreset('As Shot');
         });
         const bw = this.host.querySelector('#develop-bw');
         bw.addEventListener('change', () => {
@@ -328,10 +371,28 @@ export class DevelopPanels {
         }
     }
 
-    change(key, value, label) {
+    applyWbPreset(preset) {
+        const previousSettings = snapshot(this.settings);
+        if (preset === 'As Shot') {
+            this.change('Temperature', undefined, 'White Balance', { history: false });
+            this.change('Tint', undefined, 'White Balance', { history: false });
+        } else if (WB_PRESETS[preset]) {
+            const [temperature, tint] = WB_PRESETS[preset];
+            this.change('Temperature', temperature, 'White Balance', { history: false });
+            this.change('Tint', tint, 'White Balance', { history: false });
+        }
+        this.change('WhiteBalance', preset, 'White Balance', { previousSettings });
+        this.setSettings(this.settings);
+    }
+
+    change(key, value, label, options) {
         if (value === undefined) delete this.settings[key];
         else this.settings[key] = value;
-        this.onChange(key, value, label);
+        if (key === 'Temperature' || key === 'Tint') {
+            this.settings.WhiteBalance = 'Custom';
+            this.host.querySelector('#develop-wb').value = 'Custom';
+        }
+        this.onChange(key, value, label, options);
     }
 
     syncSlider(row) {

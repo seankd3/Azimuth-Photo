@@ -29,7 +29,7 @@ import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
+    developOpen, openDevelop, pasteDevelopSettingsToGrid,
 } from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 
@@ -272,19 +272,9 @@ export function initKeyboard() {
             }
             return;
         }
-        if (developOpen() && !foregroundLayerOpen() && !inputFocused()) {
-            const key = event.key.toLowerCase();
-            if (key === 'y') {
-                event.preventDefault();
-                toggleDevelopCompare(event.altKey ? 'horizontal' : 'vertical');
-                return;
-            }
-            if (key === 'r') {
-                event.preventDefault();
-                if (!event.repeat) holdDevelopReference(true);
-                return;
-            }
-        }
+        // Develop owns its complete editing map. Do not let grid/lens keys leak
+        // through while the editor is open (ratings, flags, density, navigation).
+        if (developOpen()) return;
         if (event.ctrlKey || event.metaKey) {
             const key = event.key.toLowerCase();
             if (foregroundLayerOpen() || inputFocused()) return;
@@ -514,9 +504,6 @@ export function initKeyboard() {
             event.preventDefault();
             moveFocus(-focusColumns());
         }
-    });
-    window.addEventListener('keyup', (event) => {
-        if (developOpen() && event.key.toLowerCase() === 'r') holdDevelopReference(false);
     });
     on('help:open', openHelp);
 }
