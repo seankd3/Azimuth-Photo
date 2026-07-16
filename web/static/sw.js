@@ -39,6 +39,7 @@ const SHELL_URLS = [
     '/static/js/api.js',
     '/static/js/mobile/api.js',
     '/static/js/mobile/bootstrap.js',
+    '/static/js/mobile/flag_scope.js',
     '/static/js/mobile/flags.js',
     '/static/js/mobile/haptics.js',
     '/static/js/mobile/history.js',

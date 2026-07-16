@@ -19,6 +19,7 @@ import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 import { openPersonSheet } from './search.js';
 import { openCollectionActionsSheet } from './library.js';
+import { restoresFilteredMembership } from './flag_scope.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -1243,6 +1244,10 @@ function syncSelectionCells() {
 }
 
 function syncFlagCells({ ids, flagOf }) {
+    if (restoresFilteredMembership(images, ids, flagOf, scope.flag)) {
+        void reload();
+        return;
+    }
     const wanted = new Set(ids);
     const excluded = new Set(
         scope.flag ? ids.filter((id) => flagOf(id) !== scope.flag) : [],
