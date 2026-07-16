@@ -1,8 +1,54 @@
 from test_support import *  # noqa: F401,F403
+import contextlib
 import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
+    async def test_stale_work_owners_are_stolen_after_lease_expires(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.release_gpu_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        work_coordination.claim_gpu_owner("captions")
+        try:
+            expired_at = time.time() - work_coordination.OWNER_LEASE_SECONDS - 1
+            work_coordination._manual_owner_updated_at = expired_at
+            work_coordination._gpu_owner_updated_at = expired_at
+
+            await asyncio.wait_for(
+                work_coordination.wait_for_manual_turn("embeddings", poll_seconds=0.001),
+                timeout=0.1,
+            )
+            await asyncio.wait_for(
+                work_coordination.wait_for_gpu_turn("embeddings", poll_seconds=0.001),
+                timeout=0.1,
+            )
+
+            self.assertEqual(work_coordination.manual_owner(), "embeddings")
+            self.assertEqual(work_coordination.gpu_owner(), "embeddings")
+        finally:
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+
+    async def test_coordination_status_surfaces_waiting_owner(self):
+        work_coordination.release_manual_owner("captions")
+        work_coordination.claim_manual_owner("captions")
+        waiter = asyncio.create_task(
+            work_coordination.wait_for_manual_turn("embeddings", poll_seconds=0.01)
+        )
+        try:
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            status = work_coordination.status()
+            self.assertEqual(status["manual_waiters"], ["embeddings"])
+            self.assertEqual(status["waiting_for_owner"], ["embeddings"])
+        finally:
+            waiter.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await waiter
+            work_coordination.release_manual_owner("captions")
+
     async def test_concurrent_media_missing_marks_share_one_source_count_update(self):
         source = await self._source("missing-burst")
         image_ids = [
