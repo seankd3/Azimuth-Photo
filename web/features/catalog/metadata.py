@@ -9,6 +9,7 @@ from collections.abc import Callable
 from date_inference import infer_image_date
 import photo_metadata
 from core import work_coordination
+from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 
 
@@ -89,7 +90,11 @@ def catalog_metadata_status() -> dict:
 
 
 async def get_unclassified_images(limit: int = 200):
-    return await image_repository.get_unclassified_images(_configured_db_path(), limit)
+    return await image_repository.get_unclassified_images(
+        _configured_db_path(),
+        limit,
+        file_extensions=photo_metadata.PILLOW_METADATA_EXTENSIONS,
+    )
 
 
 async def batch_set_orientations(updates: list[tuple[str, float, int]]):
@@ -264,7 +269,7 @@ async def classify_orientations_background():
                     )
                     continue
                 _orientation_retry_ledger.pop(image_id, None)
-                changed = await image_repository.mark_image_missing(
+                changed = await catalog_repository.mark_image_missing(
                     _configured_db_path(),
                     image_id,
                 )
