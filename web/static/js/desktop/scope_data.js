@@ -1,4 +1,4 @@
-import { getCollection, getRankings } from './api.js';
+import { getRankings } from './api.js';
 import { byId, rememberImages, scope, scopeParams, viewState } from './state.js';
 
 export function collectionScopeActive() {
@@ -30,28 +30,4 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null, sign
     if (data || !viewState.prefs.collapseStacks) return data;
     params.set('stacks', 'expanded');
     return getRankings(params, options);
-}
-
-export async function loadCollectionImages(collectionId = scope.collectionId) {
-    if (!collectionId) return [];
-    const first = await getCollection(collectionId, { limit: 1000, offset: 0 });
-    const collection = first && first.collection;
-    if (!collection) return [];
-    const total = Number(collection.image_count) || 0;
-    let images = collection.images || [];
-    let offset = images.length;
-    while (offset < total) {
-        const page = await getCollection(collectionId, { limit: 1000, offset });
-        const incoming = (page && page.collection && page.collection.images) || [];
-        if (!incoming.length) break;
-        images = images.concat(incoming);
-        offset += incoming.length;
-    }
-    rememberImages(images);
-    return images;
-}
-
-export async function loadCollectionImageIds(collectionId = scope.collectionId) {
-    const images = await loadCollectionImages(collectionId);
-    return images.map((img) => Number(img.id)).filter((id) => id > 0);
 }
