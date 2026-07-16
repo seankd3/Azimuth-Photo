@@ -133,16 +133,17 @@ function render() {
     syncSimilarityOption();
     renderChips();
     renderQuality();
+    const sharpening = viewState.hiddenPendingThumbnails;
+    const sharpeningSuffix = sharpening
+        ? `<span class="ctx-count-sharpening">· ${fmt(sharpening)} sharpening</span>`
+        : '';
     if (viewState.bestOf) {
         const shown = viewState.bestOfLimit == null ? viewState.images.length : viewState.bestOfLimit;
-        const total = (viewState.bestOfTotal || viewState.visibleImages) + viewState.hiddenPendingThumbnails;
-        document.getElementById('ctx-count').innerHTML = `Top <b>${fmt(shown)}</b> of ${fmt(total)}`;
+        const total = viewState.bestOfTotal || viewState.visibleImages;
+        document.getElementById('ctx-count').innerHTML = `Top <b>${fmt(shown)}</b> of ${fmt(total)}${sharpeningSuffix}`;
     } else {
         const visible = fmt(viewState.visibleImages);
-        const total = viewState.visibleImages + viewState.hiddenPendingThumbnails;
-        document.getElementById('ctx-count').innerHTML = viewState.hiddenPendingThumbnails
-            ? `<b>${visible}</b> of ${fmt(total)} photos`
-            : `<b>${visible}</b> photos`;
+        document.getElementById('ctx-count').innerHTML = `<b>${visible}</b> photos${sharpeningSuffix}`;
     }
     document.getElementById('btn-bestof').classList.toggle('active', viewState.bestOf);
     const filterCount = nonSearchFacetCount();

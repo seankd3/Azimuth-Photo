@@ -170,12 +170,19 @@ function cellFor(img, mi) {
         `<div class="c-check">${icon('check')}</div>`
         + `<img alt="" loading="lazy" decoding="async" fetchpriority="low" data-preview-src="${esc(previewSrc)}"${previewReady ? ` data-src="${esc(previewSrc)}"` : ''}>`
         + `<span class="c-placeholder-name">${esc(img.filename || '')}</span>`
+        + `<span class="c-preview-error" aria-hidden="true">${icon('image')}</span>`
         + stackBadge(img)
         + flagBadge(img.flag);
     const image = fig.querySelector('img');
     image.addEventListener('load', () => {
         image.classList.add('ld');
+        fig.classList.remove('preview-pending', 'preview-error');
+    });
+    image.addEventListener('error', () => {
+        image.classList.remove('ld');
         fig.classList.remove('preview-pending');
+        fig.classList.add('preview-error');
+        fig.setAttribute('aria-label', `${img.filename || `Photo ${img.id}`} — preview unavailable`);
     });
     if (previewReady) imgObserver.observe(image);
     if (selection.has(Number(img.id))) fig.classList.add('sel');
@@ -327,6 +334,7 @@ function renderSkeleton() {
 function renderOfflineEmpty() {
     timeline.innerHTML =
         '<button class="ms-empty m-offline-empty" type="button">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
         + '<b>You’re offline</b>'
         + '<span>Some thumbnails may still show</span>'
         + '<small>Tap to retry</small>'
@@ -335,9 +343,10 @@ function renderOfflineEmpty() {
 }
 
 function renderPreparingState() {
-    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-        + '<b>Preparing your photos</b><br>'
-        + '<span>Finding photos and getting the first cards ready. They’ll appear here in a moment.</span></div>';
+    timeline.innerHTML = '<div class="ms-empty">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
+        + '<b>Preparing your photos</b>'
+        + '<span>Finding photos and getting the first cards ready.</span></div>';
     clearTimeout(preparingPollTimer);
     preparingPollTimer = setTimeout(() => reload(), 1500);
 }
@@ -345,12 +354,16 @@ function renderPreparingState() {
 function renderEmpty() {
     clearTimeout(preparingPollTimer);
     if (pendingPreviewTotal) {
-        timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-            + `<b>${esc(`${fmtInt(pendingPreviewTotal)} photos preparing previews — check back shortly`)}</b></div>`;
+        timeline.innerHTML = '<div class="ms-empty">'
+            + `<span class="ms-empty-icon" aria-hidden="true">${icon('image')}</span>`
+            + `<b>${esc(`All ${fmtInt(pendingPreviewTotal)} photos here are still sharpening`)}</b>`
+            + '<span>Try a different view to browse other photos.</span></div>';
         return;
     }
-    timeline.innerHTML = '<div class="ms-empty" style="padding:48px 24px;text-align:center">'
-        + '<b>No photos yet</b><br><span>Add a source in the desktop app. Photos will appear here as they’re scanned.</span></div>';
+    timeline.innerHTML = '<div class="ms-empty">'
+        + `<span class="ms-empty-icon" aria-hidden="true">${icon('folder')}</span>`
+        + '<b>No photos yet</b>'
+        + '<span>Add a source in the desktop app to start your private library.</span></div>';
 }
 
 function appendImages(batch) {
@@ -700,7 +713,6 @@ function sharpenPreview(image) {
     for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"].preview-pending`)) {
         const img = cell.querySelector('img[data-preview-src]');
         if (!img) continue;
-        cell.classList.remove('preview-pending');
         img.src = previewThumbUrl(image) || img.dataset.previewSrc;
         changed = true;
     }
