@@ -445,7 +445,7 @@ function cacheDaySectionOffsets() {
 function renderMonths() {
     closeExpandedStack();
     timeline.classList.remove('m-z5');
-    if (hiddenPendingThumbnails > 0) {
+    if (hiddenPendingThumbnails > 0 && !monthOffsets.length && !images.length) {
         renderPreparingState(hiddenPendingThumbnails);
         daySectionOffsets = [];
         return;
