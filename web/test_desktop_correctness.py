@@ -172,6 +172,17 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("getCollection(", page_loader)
         self.assertIn("getCollection(", scope_data[scope_data.index("export async function loadCollectionImages"):])
 
+    def test_collection_scope_export_uses_server_composition(self):
+        panel = read("panel.js")
+        export_scope = panel[
+            panel.index("export async function exportCurrentScope"):
+            panel.index("export function openScopeExportMenu")
+        ]
+
+        self.assertIn("const params = scopeParams({ format });", export_scope)
+        self.assertNotIn("loadCollectionImageIds", export_scope)
+        self.assertIn("Preparing ${count} file", export_scope)
+
     def test_collection_month_counts_compose_filters_through_histogram(self):
         filters = read("filters.js")
         month_counts = filters[

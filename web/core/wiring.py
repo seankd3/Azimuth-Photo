@@ -738,8 +738,11 @@ def configure_export_routes(
     db_path,
     get_import_batch_image_ids=None,
 ) -> None:
+    from features.library import service as library_service
+
     export_routes.configure(
         resolve_library_constraints=resolve_library_constraints,
+        resolve_collection_scope=library_service._resolve_collection_scope,
         db_path=db_path,
         get_import_batch_image_ids=get_import_batch_image_ids,
     )

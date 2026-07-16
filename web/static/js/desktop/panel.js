@@ -6,7 +6,6 @@ import {
     revokeCollectionPublish, revokeCollectionShare, thumbUrl, updateCollection,
     createSavedView, deleteSavedView, listSavedViews,
 } from './api.js';
-import { loadCollectionImageIds } from './scope_data.js';
 import {
     byId, emit, folderActive, navigateToScope, on, patchPrefs, scope, scopeActive, scopeParams, scopePatchFromSmartQuery, selection, selectionChanged, setActiveLens,
     setLeftCollapsed, setScope, smartQueryActive, smartQueryFromScope, smartQueryName, smartQuerySummary, sortBase, viewState,
@@ -1246,15 +1245,6 @@ export async function exportCurrentScope(format = 'csv', size = '') {
         params.set('limit', String(viewState.bestOfLimit));
     }
     let count = viewState.bestOf && viewState.bestOfLimit != null ? viewState.bestOfLimit : viewState.visibleImages;
-    if (scope.collectionId) {
-        const ids = await loadCollectionImageIds(scope.collectionId);
-        if (!ids.length) {
-            showToast('This collection has no photos');
-            return;
-        }
-        count = ids.length;
-        params.set('ids', ids.join(','));
-    }
     if (scope.similarIds.length) {
         const ids = scope.similarIds.map(Number).filter((id) => id > 0);
         count = ids.length;
@@ -1262,7 +1252,9 @@ export async function exportCurrentScope(format = 'csv', size = '') {
     }
     downloadExport(params, {
         count: format === 'zip' ? count : 0,
-        message: format === 'zip' ? 'Preparing current view zip' : `Exporting current view as ${format.toUpperCase()}`,
+        message: format === 'zip'
+            ? `Preparing ${count} file${count === 1 ? '' : 's'}`
+            : `Exporting ${count} photo${count === 1 ? '' : 's'} as ${format.toUpperCase()}`,
     });
 }
 

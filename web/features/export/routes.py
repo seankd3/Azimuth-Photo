@@ -24,9 +24,11 @@ import settings
 
 router = APIRouter()
 ResolveLibraryConstraints = Callable[..., Awaitable[dict]]
+ResolveCollectionScope = Callable[[set[int] | None, int], Awaitable[tuple[set[int] | None, int]]]
 DbPathProvider = Callable[[], str]
 GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
 _resolve_library_constraints: ResolveLibraryConstraints | None = None
+_resolve_collection_scope: ResolveCollectionScope | None = None
 _db_path: DbPathProvider | None = None
 _get_import_batch_image_ids: GetImportBatchImageIds | None = None
 
@@ -64,11 +66,13 @@ class InsufficientExportStorage(Exception):
 def configure(
     *,
     resolve_library_constraints: ResolveLibraryConstraints,
+    resolve_collection_scope: ResolveCollectionScope,
     db_path: DbPathProvider,
     get_import_batch_image_ids: GetImportBatchImageIds | None = None,
 ) -> None:
-    global _resolve_library_constraints, _db_path, _get_import_batch_image_ids
+    global _resolve_library_constraints, _resolve_collection_scope, _db_path, _get_import_batch_image_ids
     _resolve_library_constraints = resolve_library_constraints
+    _resolve_collection_scope = resolve_collection_scope
     _db_path = db_path
     _get_import_batch_image_ids = get_import_batch_image_ids
 
@@ -98,6 +102,8 @@ async def _get_export_images(
     deep: bool,
     people: str,
     import_batch: int = 0,
+    collection_id: int = 0,
+    stacks: str = "expanded",
 ):
     db_path = _configured_db_path()
     if ids:
@@ -120,6 +126,9 @@ async def _get_export_images(
             id_filter = set(batch_ids)
         else:
             id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
+    if _resolve_collection_scope is None:
+        raise RuntimeError("Export routes are not configured")
+    id_filter, collection_id = await _resolve_collection_scope(id_filter, collection_id)
     db_sort = "elo" if sort == "similarity" else sort
     return await ranking_repository.rankings(
         db_path,
@@ -139,7 +148,9 @@ async def _get_export_images(
         tag=tag,
         caption_model_key=settings.active_caption_config()["model_key"],
         id_filter=id_filter,
+        collection_id=collection_id,
         text_query=search.get("text_query") or "",
+        exclude_collapsed_stack_members=(stacks or "").strip().lower() == "collapsed",
     )
 
 
@@ -320,7 +331,8 @@ async def export_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, size: str = "original", request: Request = None,
+    import_batch: int = 0, collection_id: int = 0, stacks: str = "expanded",
+    size: str = "original", request: Request = None,
 ):
     normalized_format = (format or "json").lower()
     if normalized_format == "zip":
@@ -349,6 +361,8 @@ async def export_rankings(
         deep=deep,
         people=people,
         import_batch=import_batch,
+        collection_id=collection_id,
+        stacks=stacks,
     )
     if normalized_format == "zip":
         if len(images) > ZIP_EXPORT_MAX_IMAGES:
