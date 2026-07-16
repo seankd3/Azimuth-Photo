@@ -132,6 +132,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("if (controlInFlight || generation !== statusGeneration) return;", sync_chip)
         self.assertIn("const generation = ++statusGeneration;", sync_chip)
 
+    def test_sync_chip_surfaces_pending_metadata_operations(self):
+        sync_chip = read("sync_chip.js")
+
+        self.assertIn("const pendingOps = Number(status.pending_ops) || 0;", sync_chip)
+        self.assertIn("data-sync-pending", sync_chip)
+        self.assertIn("change${pendingOps === 1 ? '' : 's'} waiting to retry", sync_chip)
+        self.assertIn("depth || pendingOps", sync_chip)
+
     def test_worker_action_ignores_stale_poll_paint_for_its_row(self):
         drawer = read("drawer.js")
 
