@@ -3,7 +3,7 @@ import {
     getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
     getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion, installAiModel, listDevices,
     pauseAiEmbeddings,
-    pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resetSettings, resumeAiEmbeddings,
+    pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
     stopMetadataScan,
 } from './api.js';
@@ -43,13 +43,13 @@ let discoverPayload = null;
 let settingsPageData = null;
 let versionData = null;
 let savedSettings = {};
-let draftSettings = {};
-let dirtySettings = new Set();
 let openSettingSections = new Set();
-let resetConfirmArmed = false;
 let publishReturn = null;
 let publishingFocusPending = false;
 let thumbnailCachePolicy = 'keep';
+let systemSurfaceRender = null;
+let pendingModelPreset = null;
+const settingTimers = new Map();
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
@@ -64,9 +64,6 @@ const INACTIVE_WORKER_STATES = new Set([
     'stale',
 ]);
 
-const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
-const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
-const THUMB_FIELDS = ['thumb_size_sm', 'thumb_size_md', 'thumb_size_lg', 'thumb_quality'];
 const SETTING_DEFS = {
     embed_model_preset: { type: 'select' },
     memory_cache_gb: { type: 'number', min: 0, max: 64, step: 0.25, unit: 'GB' },
@@ -141,31 +138,20 @@ function metadataStateIsActive(status) {
     return !status?.manual_pause && workerStateIsActive(status);
 }
 
-function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
+
+function applySettingsData(data) {
     if (!data) return;
-    const previousDraft = { ...draftSettings };
-    const previousDirty = new Set(dirtySettings);
     settingsPageData = data;
     savedSettings = { ...(data.settings || {}) };
-    draftSettings = { ...savedSettings };
-    dirtySettings = new Set();
-    if (preserveDirtyExcept) {
-        for (const field of previousDirty) {
-            if (preserveDirtyExcept.has(field)) continue;
-            draftSettings[field] = previousDraft[field];
-            if (!sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.add(field);
-        }
-    }
     aiStatus = data.ai_status || aiStatus;
     cacheStatus = data.cache_stats || cacheStatus;
     peopleStatus = data.people_status || peopleStatus;
     metadataStatus = data.metadata_status || metadataStatus;
     catalog = data.catalog || catalog;
-    resetConfirmArmed = false;
 }
 
 function settingValue(field) {
-    if (Object.prototype.hasOwnProperty.call(draftSettings, field)) return draftSettings[field];
+    if (field === 'embed_model_preset' && pendingModelPreset != null) return pendingModelPreset;
     if (Object.prototype.hasOwnProperty.call(savedSettings, field)) return savedSettings[field];
     const defaults = settingsPageData?.defaults || {};
     if (Object.prototype.hasOwnProperty.call(defaults, field)) return defaults[field];
@@ -183,18 +169,41 @@ function normalizeSettingValue(field, value) {
     return String(value == null ? '' : value);
 }
 
-function sameSettingValue(field, left, right) {
-    const def = SETTING_DEFS[field] || {};
-    if (def.type === 'number') return Number(left) === Number(right);
-    if (def.type === 'checkbox') return Boolean(left) === Boolean(right);
-    return String(left == null ? '' : left) === String(right == null ? '' : right);
+async function applySetting(field, value, { patch = null, undoPatch = null } = {}) {
+    const next = normalizeSettingValue(field, value);
+    const previous = savedSettings[field];
+    const payload = patch || { [field]: next };
+    const result = await saveSettings(payload);
+    if (!result?.ok) {
+        showToast('Couldn’t save setting');
+        return false;
+    }
+    applySettingsData(result);
+    showToast('Setting saved', {
+        undo: async () => {
+            const rollback = undoPatch || (field === 'caption_model_preset'
+                ? captionPresetConfig(previous)
+                : { [field]: previous });
+            const undone = await saveSettings(rollback);
+            if (!undone?.ok) throw new Error('undo failed');
+            applySettingsData(undone);
+            renderCurrentSystemSurface();
+            showToast('Setting restored');
+        },
+    });
+    renderActivity();
+    renderCurrentSystemSurface();
+    if (field === 'publish_dir' && publishReturn && String(next).trim()) {
+        showToast('Publishing folder saved');
+        returnToPublish();
+    }
+    return true;
 }
 
-function setDraftSetting(field, value) {
-    draftSettings[field] = normalizeSettingValue(field, value);
-    if (sameSettingValue(field, draftSettings[field], savedSettings[field])) dirtySettings.delete(field);
-    else dirtySettings.add(field);
-    resetConfirmArmed = false;
+function applyPreference(patch) {
+    const previous = Object.fromEntries(Object.keys(patch).map((key) => [key, viewState.prefs[key]]));
+    patchPrefs(patch);
+    showToast('Setting saved', { undo: () => patchPrefs(previous) });
 }
 
 function embeddingPresetConfig(key = settingValue('embed_model_preset')) {
@@ -232,30 +241,12 @@ function collectCaptionSettings() {
     return captionPresetConfig(settingValue('caption_model_preset'));
 }
 
-function collectDirtySettings() {
-    const payload = {};
-    for (const field of dirtySettings) {
-        payload[field] = draftSettings[field];
-    }
-    if (dirtySettings.has('embed_model_preset')) Object.assign(payload, collectModelSettings());
-    if (dirtySettings.has('caption_model_preset')) Object.assign(payload, collectCaptionSettings());
-    if (THUMB_FIELDS.some((field) => dirtySettings.has(field))) {
-        payload.thumbnail_cache_policy = thumbnailCachePolicy;
-    }
-    return payload;
-}
-
 function recommendedMemoryGb(settings = {}) {
     const systemRam = Number(settings.system_memory_gb || 0);
     if (systemRam >= 32) return 4;
     if (systemRam >= 16) return 2;
     if (systemRam >= 8) return 1;
     return 0.5;
-}
-
-function hasInvalidSetting() {
-    const body = document.getElementById('drawer-body');
-    return Boolean(body && body.querySelector('[data-setting-field]:invalid'));
 }
 
 function peopleProgress(status) {
@@ -522,6 +513,37 @@ function renderStorage() {
         + '</section>';
 }
 
+function renderPeekStorage() {
+    const tiers = (cacheStatus && cacheStatus.disk && cacheStatus.disk.tiers) || {};
+    const chips = ['sm', 'md', 'lg'].map((size) => {
+        const tier = tiers[size] || {};
+        return `<span class="tier-chip" data-tier-size="${size}"><b>${size.toUpperCase()}</b><span data-tier-count>${fmt(tier.count)} files</span><span data-tier-bytes>${bytes(tier.bytes)}</span></span>`;
+    }).join('');
+    return `<section class="dr-sec"><h3>Storage</h3><div class="tier-chips">${chips}</div></section>`;
+}
+
+function renderPeekSources() {
+    const sources = (catalog && catalog.sources) || [];
+    const rows = sources.length ? sources.map((source) => {
+        const online = Number(source.online) === 1 || source.online === true;
+        const id = Number(source.id);
+        return `<article class="src-card" data-source-id="${id}">`
+            + `<span class="sc-dot ${online ? 'on' : ''}"></span><div>`
+            + `<div class="sc-name" title="${esc(sourceName(source))}">${esc(sourceName(source))}</div>`
+            + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
+            + `<div class="scan-progress" ${scanSourceId === id ? '' : 'hidden'}>Scanning…</div>`
+            + '</div></article>';
+    }).join('') : '<div class="source-empty"><b>No sources connected.</b><span>Open System settings to add a photo folder.</span></div>';
+    return `<section class="dr-sec"><h3>Sources</h3><div id="drawer-sources">${rows}</div></section>`;
+}
+
+function renderPeekHealth() {
+    const sources = (catalog && catalog.sources) || [];
+    const offline = sources.filter((source) => !(Number(source.online) === 1 || source.online === true)).length;
+    const detail = offline ? `${offline} source${offline === 1 ? '' : 's'} offline` : 'All connected sources reachable';
+    return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
+}
+
 function formatSeen(value) {
     if (value == null) return 'Never';
     const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
@@ -683,7 +705,6 @@ function detailsSection(title, description, body) {
 function settingInput(field, label, { hint = '' } = {}) {
     const def = SETTING_DEFS[field] || {};
     const value = settingValue(field);
-    const dirty = dirtySettings.has(field) ? ' dirty' : '';
     const unit = def.unit ? `<em>${esc(def.unit)}</em>` : '';
     const attrs = [
         `id="drawer-setting-${field}"`,
@@ -694,7 +715,7 @@ function settingInput(field, label, { hint = '' } = {}) {
         def.step != null ? `step="${def.step}"` : '',
         def.type === 'text' ? 'spellcheck="false" autocomplete="off"' : '',
     ].filter(Boolean).join(' ');
-    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+    return `<label class="setting-row" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b>${unit}</span>`
         + `<input class="drawer-input" ${attrs} aria-describedby="drawer-setting-${field}-validation" value="${esc(value)}">`
         + `${hint ? `<small>${esc(hint)}</small>` : ''}`
@@ -703,8 +724,7 @@ function settingInput(field, label, { hint = '' } = {}) {
 
 function settingSelect(field, label, options) {
     const value = String(settingValue(field));
-    const dirty = dirtySettings.has(field) ? ' dirty' : '';
-    return `<label class="setting-row${dirty}" for="drawer-setting-${field}">`
+    return `<label class="setting-row" for="drawer-setting-${field}">`
         + `<span><b>${esc(label)}</b></span>`
         + `<select id="drawer-setting-${field}" data-setting-field="${field}" aria-describedby="drawer-setting-${field}-validation">`
         + options.map((option) => `<option value="${esc(option.value)}"${String(option.value) === value ? ' selected' : ''}>${esc(option.label)}</option>`).join('')
@@ -876,16 +896,6 @@ function renderSettingsSections() {
         + renderMetadataSettings();
 }
 
-function renderSettingsSaveBar() {
-    const count = dirtySettings.size;
-    const invalid = hasInvalidSetting();
-    return '<div class="drawer-savebar" role="group" aria-label="Settings actions">'
-        + `<span id="drawer-save-state">${count ? `${fmt(count)} unsaved change${count === 1 ? '' : 's'}` : 'No unsaved settings'}</span>`
-        + `<button class="btn primary" id="drawer-save-settings" type="button" ${count && !invalid ? '' : 'disabled'}>Save settings</button>`
-        + `<button class="mini-btn btn-danger" id="drawer-reset-settings" type="button">${resetConfirmArmed ? 'Confirm reset' : 'Reset defaults'}</button>`
-        + '</div>';
-}
-
 function checkbox(key, label) {
     return `<div class="pref-row"><label for="pref-${key}">${esc(label)}</label><input id="pref-${key}" type="checkbox" data-pref="${key}" ${viewState.prefs[key] ? 'checked' : ''}></div>`;
 }
@@ -909,7 +919,7 @@ function renderPrefs() {
 function renderAbout() {
     const version = versionData?.version || 'Unknown';
     return '<section class="dr-sec"><h3>About</h3>'
-        + '<div class="setting-status"><b>Azimuth Photo</b><span>Version ' + esc(version) + '</span></div>'
+        + '<div class="setting-status"><b>Azimuth Photo</b><span> · Version ' + esc(version) + '</span></div>'
         + '</section>';
 }
 
@@ -931,16 +941,46 @@ function focusPublishingSection() {
 function renderDrawer() {
     const body = document.getElementById('drawer-body');
     if (!body) return;
-    openSettingSections = new Set(Array.from(body.querySelectorAll('.dr-details[open] summary span'))
-        .map((el) => el.textContent || ''));
-    if (publishingFocusPending || publishReturn) openSettingSections.add('Publishing');
-    body.innerHTML = renderSources() + renderLibraryHealth(catalog) + renderWork() + renderSharedHome() + renderDevices() + renderConnectServer() + renderSettingsSections() + renderStorage() + renderRemote() + renderPrefs() + renderAbout() + renderSettingsSaveBar();
-    updateDrawerContext();
-    bindDrawerActions();
-    if (publishingFocusPending && body.querySelector('.dr-details[data-settings-section="Publishing"]')) {
-        publishingFocusPending = false;
-        focusPublishingSection();
-    }
+    body.innerHTML = renderWork() + renderPeekStorage() + renderPeekHealth() + renderPeekSources()
+        + '<section class="dr-sec"><button class="btn primary" id="drawer-open-system" type="button">System settings →</button></section>';
+    bindDrawerActions(body);
+    body.querySelector('#drawer-open-system')?.addEventListener('click', () => {
+        closeSystemDrawer();
+        openSystemSettings();
+    });
+}
+
+function renderCurrentSystemSurface() {
+    if (systemSurfaceRender) systemSurfaceRender();
+    if (open || !systemSurfaceRender) renderDrawer();
+}
+
+export function renderSystemSections() {
+    return {
+        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
+        performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
+        import: renderImportSettings(),
+        publishing: renderPublishingSettings(),
+        connectivity: renderDevices() + renderConnectServer() + renderRemote(),
+        preferences: renderPrefs(),
+    };
+}
+
+export function mountSystemSurface(render) {
+    systemSurfaceRender = render;
+}
+
+export function unmountSystemSurface() {
+    systemSurfaceRender = null;
+}
+
+export function bindSystemSurface(body) {
+    bindDrawerActions(body);
+}
+
+export async function refreshSystemSurface() {
+    await refreshDrawer({ initial: false });
 }
 
 function patchNodeText(root, selector, value) {
@@ -950,7 +990,9 @@ function patchNodeText(root, selector, value) {
 }
 
 function patchDrawerStatus(workerGenerations = null) {
-    const body = document.getElementById('drawer-body');
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
     if (!body) return;
 
     for (const source of (catalog && catalog.sources) || []) {
@@ -1029,7 +1071,7 @@ async function refreshDrawer({ initial = false } = {}) {
         listDevices().catch(() => null),
         refreshLibraryHealth(),
     ]);
-    if (settingsData) applySettingsData(settingsData, { preserveDirtyExcept: new Set() });
+    if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
     aiStatus = ai || aiStatus;
     cacheStatus = cache || cacheStatus;
@@ -1042,8 +1084,10 @@ async function refreshDrawer({ initial = false } = {}) {
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
     renderActivity();
-    const body = document.getElementById('drawer-body');
-    if (initial || !body?.children.length) renderDrawer();
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    if (initial || !body?.children.length) renderCurrentSystemSurface();
     else patchDrawerStatus(workerGenerations);
 }
 
@@ -1057,7 +1101,7 @@ async function pollScanUntilDone(sourceId) {
             scanTimer = null;
             scanSourceId = null;
             catalog = await getCatalog().catch(() => catalog);
-            renderDrawer();
+            renderCurrentSystemSurface();
             emit('scan', { scanning: false, done: true });
             showToast('Source scan finished');
             return;
@@ -1068,7 +1112,7 @@ async function pollScanUntilDone(sourceId) {
     };
     await tick();
     scanTimer = setInterval(tick, 1000);
-    renderDrawer();
+    renderCurrentSystemSurface();
 }
 
 async function handleSourceAction(card, action) {
@@ -1090,7 +1134,7 @@ async function handleRemove(card, mode) {
     const result = await removeCatalogSource(sourceId, mode);
     if (result && result.ok) {
         catalog = result.catalog || await getCatalog().catch(() => catalog);
-        renderDrawer();
+        renderCurrentSystemSurface();
         showToast(mode === 'keep' ? 'Source removed; photos stay in the library' : 'Source and library records removed. This can’t be undone.');
     } else showToast('Couldn’t remove source');
 }
@@ -1115,34 +1159,6 @@ function sourceAddErrorMessage(result) {
         : `Could not add that folder (${result?.status || 'unknown status'}).`;
 }
 
-function updateSaveBar() {
-    const save = document.getElementById('drawer-save-settings');
-    const reset = document.getElementById('drawer-reset-settings');
-    const state = document.getElementById('drawer-save-state');
-    const invalid = hasInvalidSetting();
-    if (save) save.disabled = !dirtySettings.size || invalid;
-    if (reset) reset.textContent = resetConfirmArmed ? 'Confirm reset' : 'Reset defaults';
-    if (state) {
-        if (invalid) state.textContent = 'Check highlighted values';
-        else state.textContent = dirtySettings.size
-            ? `${fmt(dirtySettings.size)} unsaved change${dirtySettings.size === 1 ? '' : 's'}`
-            : 'No unsaved settings';
-    }
-    for (const input of document.querySelectorAll('[data-setting-field]')) {
-        const message = settingValidationMessage(input);
-        const row = input.closest('.setting-row');
-        const validation = row?.querySelector('.setting-validation');
-        if (message) input.setAttribute('aria-invalid', 'true');
-        else input.removeAttribute('aria-invalid');
-        row?.classList.toggle('invalid', Boolean(message));
-        if (validation) {
-            validation.hidden = !message;
-            validation.textContent = message;
-        }
-        input.closest('.setting-row')?.classList.toggle('dirty', dirtySettings.has(input.dataset.settingField));
-    }
-}
-
 function settingValidationMessage(input) {
     if (input.validity.valid) return '';
     const label = input.closest('.setting-row')?.querySelector('b')?.textContent || 'This value';
@@ -1165,21 +1181,45 @@ function bindSettingInputs(body) {
     }
     for (const input of body.querySelectorAll('[data-setting-field]')) {
         const field = input.dataset.settingField;
-        input.addEventListener('input', () => {
+        const save = () => {
+            settingTimers.delete(input);
+            if (!input.validity.valid) {
+                const validation = input.closest('.setting-row')?.querySelector('.setting-validation');
+                input.setAttribute('aria-invalid', 'true');
+                if (validation) {
+                    validation.hidden = false;
+                    validation.textContent = settingValidationMessage(input);
+                }
+                return;
+            }
+            input.removeAttribute('aria-invalid');
+            input.closest('.setting-row')?.querySelector('.setting-validation')?.setAttribute('hidden', '');
             const value = input.type === 'checkbox' ? input.checked : input.value;
-            setDraftSetting(field, value);
-            updateSaveBar();
-        });
-        input.addEventListener('change', () => {
-            const value = input.type === 'checkbox' ? input.checked : input.value;
-            setDraftSetting(field, value);
-            updateSaveBar();
-        });
+            if (field === 'embed_model_preset') {
+                pendingModelPreset = value;
+                return;
+            }
+            const patch = field === 'caption_model_preset' ? captionPresetConfig(value) : null;
+            applySetting(field, value, { patch });
+        };
+        if (input.type === 'text') {
+            input.addEventListener('input', () => {
+                clearTimeout(settingTimers.get(input));
+                settingTimers.set(input, setTimeout(save, 600));
+            });
+            input.addEventListener('blur', save);
+            input.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter') {
+                    event.preventDefault();
+                    save();
+                }
+            });
+        } else input.addEventListener('change', save);
     }
     for (const input of body.querySelectorAll('input[name="drawer_thumbnail_cache_policy"]')) {
         input.addEventListener('change', () => {
             thumbnailCachePolicy = input.value || 'keep';
-            updateSaveBar();
+            applySetting('thumbnail_cache_policy', thumbnailCachePolicy);
         });
     }
 }
@@ -1196,20 +1236,29 @@ async function withBusyAction(key, button, action) {
     }
 }
 
-function applyCacheDefaults() {
+async function applyCacheDefaults() {
     const defaults = (settingsPageData && settingsPageData.defaults) || {};
     const next = {
         memory_cache_gb: recommendedMemoryGb(settingsPageData.settings || savedSettings),
         ssd_cache_gb: defaults.ssd_cache_gb ?? 100,
         cache_profile: defaults.cache_profile || 'original_heavy',
     };
-    for (const [field, value] of Object.entries(next)) {
-        setDraftSetting(field, value);
-        const input = document.querySelector(`[data-setting-field="${field}"]`);
-        if (input) input.value = String(value);
+    const previous = Object.fromEntries(Object.keys(next).map((field) => [field, savedSettings[field]]));
+    const result = await saveSettings(next);
+    if (!result?.ok) {
+        showToast('Couldn’t apply cache defaults');
+        return;
     }
-    updateSaveBar();
-    showToast('Cache defaults applied; save settings to keep them');
+    applySettingsData(result);
+    renderCurrentSystemSurface();
+    showToast('Cache defaults applied', {
+        undo: async () => {
+            const undone = await saveSettings(previous);
+            if (!undone?.ok) throw new Error('undo failed');
+            applySettingsData(undone);
+            renderCurrentSystemSurface();
+        },
+    });
 }
 
 async function returnToPublish() {
@@ -1223,49 +1272,6 @@ async function returnToPublish() {
     }
     const { openPublishOverlay } = await import('./panel.js');
     openPublishOverlay(target.collectionId, target.name || 'Collection');
-}
-
-async function saveDrawerSettings() {
-    if (!dirtySettings.size) return;
-    if (hasInvalidSetting()) {
-        showToast('Check settings values before saving');
-        updateSaveBar();
-        return;
-    }
-    const result = await saveSettings(collectDirtySettings());
-    if (result && result.ok) {
-        applySettingsData(result);
-        renderActivity();
-        renderDrawer();
-        const folderReady = Boolean(String(settingValue('publish_dir') || '').trim());
-        if (publishReturn && folderReady) {
-            showToast('Publishing folder saved');
-            returnToPublish();
-            return;
-        }
-        showToast('Settings saved');
-    } else {
-        showToast('Couldn’t save settings');
-    }
-}
-
-async function resetDrawerSettings() {
-    if (!resetConfirmArmed) {
-        resetConfirmArmed = true;
-        updateSaveBar();
-        return;
-    }
-    const result = await resetSettings();
-    if (result && result.ok) {
-        applySettingsData(result);
-        renderActivity();
-        renderDrawer();
-        showToast('Settings reset — undo unavailable');
-    } else {
-        resetConfirmArmed = false;
-        updateSaveBar();
-        showToast('Couldn’t reset settings');
-    }
 }
 
 function aiInstallActive(status = aiStatus || {}) {
@@ -1293,14 +1299,14 @@ function pollModelInstall() {
 async function saveAndInstallModel() {
     const button = document.getElementById('drawer-install-model');
     if (button) button.disabled = true;
-    const modelFields = new Set(MODEL_SAVE_FIELDS);
     const saveData = await saveSettings(collectModelSettings());
     if (!saveData || !saveData.ok) {
         showToast('Couldn’t save model settings');
         if (button) button.disabled = false;
         return;
     }
-    applySettingsData(saveData, { preserveDirtyExcept: modelFields });
+    pendingModelPreset = null;
+    applySettingsData(saveData);
     const installData = await installAiModel('active');
     if (installData && installData.ok) {
         aiStatus = installData.ai_status || aiStatus;
@@ -1310,11 +1316,13 @@ async function saveAndInstallModel() {
         showToast('Couldn’t start model install');
     }
     renderActivity();
-    renderDrawer();
+    renderCurrentSystemSurface();
 }
 
 function renderLibraryHealthSection() {
-    const body = document.getElementById('drawer-body');
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
     const current = body?.querySelector('.library-health');
     if (!body || !current) return;
     const template = document.createElement('template');
@@ -1337,19 +1345,19 @@ function bindLibraryHealthActions(body) {
     });
 }
 
-function bindDrawerActions() {
-    const body = document.getElementById('drawer-body');
+function bindDrawerActions(body = document.getElementById('drawer-body')) {
+    if (!body) return;
     bindLibraryHealthActions(body);
     bindSettingInputs(body);
     body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
         sessionStorage.setItem('azimuth-server-update-dismissed', '1');
-        renderDrawer();
+        renderCurrentSystemSurface();
     });
     body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
         const result = await createDeviceLink();
         if (result && result.code) {
             linkSession = result;
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Pairing code ready');
         } else {
             showToast('Couldn’t create a pairing code');
@@ -1360,7 +1368,7 @@ function bindDrawerActions() {
             const result = await revokeDevice(Number(btn.dataset.revokeDevice));
             if (result && result.ok) {
                 devicesPayload = await listDevices().catch(() => devicesPayload);
-                renderDrawer();
+                renderCurrentSystemSurface();
                 showToast('Device revoked');
             } else {
                 showToast('Couldn’t revoke device');
@@ -1369,7 +1377,7 @@ function bindDrawerActions() {
     }
     body.querySelector('#discover-hubs-btn')?.addEventListener('click', (event) => withBusyAction('discover-hubs', event.currentTarget, async () => {
         discoverPayload = await discoverHubs().catch(() => null);
-        renderDrawer();
+        renderCurrentSystemSurface();
         const count = (discoverPayload && discoverPayload.hubs && discoverPayload.hubs.length) || 0;
         showToast(count ? `Found ${count} hub${count === 1 ? '' : 's'}` : 'No hubs found');
     }));
@@ -1389,15 +1397,13 @@ function bindDrawerActions() {
         const result = await connectToHub({ hubUrl, code });
         if (result && result.ok) {
             pairStatus = await getPairStatus().catch(() => pairStatus);
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Connected to hub');
         } else {
             showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
         }
     }));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
-    body.querySelector('#drawer-save-settings')?.addEventListener('click', (event) => withBusyAction('settings-save', event.currentTarget, saveDrawerSettings));
-    body.querySelector('#drawer-reset-settings')?.addEventListener('click', (event) => withBusyAction('settings-reset', event.currentTarget, resetDrawerSettings));
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
@@ -1408,7 +1414,7 @@ function bindDrawerActions() {
                     const data = result.data || {};
                     catalog = data.catalog || catalog;
                     clearSourcePickerSelection();
-                    renderDrawer();
+                    renderCurrentSystemSurface();
                     showToast('Source added · scanning for photos');
                     pollScanUntilDone(data.source && data.source.id);
                 } else {
@@ -1483,7 +1489,7 @@ function bindDrawerActions() {
         const result = await clearCache();
         if (result && result.ok) {
             cacheStatus = result.cache_stats || await getCacheStatus().catch(() => cacheStatus);
-            renderDrawer();
+            renderCurrentSystemSurface();
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Couldn’t clear cache');
     }));
@@ -1517,17 +1523,21 @@ function bindDrawerActions() {
                 state: 'up',
             },
         };
-        renderDrawer();
+        renderCurrentSystemSurface();
         showToast(result.dry_run ? 'HTTPS ready (dry-run)' : 'HTTPS ready on your tailnet');
     }));
     body.querySelector('#drawer-open-shared')?.addEventListener('click', () => {
         closeSystemDrawer();
         setActiveLens('shared');
     });
-    body.querySelector('#drawer-thumb-size')?.addEventListener('input', (event) => setThumbSize(event.target.value));
-    body.querySelector('[data-pref-sel="density"]')?.addEventListener('change', (event) => patchPrefs({ density: event.target.value }));
+    body.querySelector('#drawer-thumb-size')?.addEventListener('change', (event) => {
+        const previous = viewState.thumbSize;
+        setThumbSize(event.target.value);
+        showToast('Setting saved', { undo: () => setThumbSize(previous) });
+    });
+    body.querySelector('[data-pref-sel="density"]')?.addEventListener('change', (event) => applyPreference({ density: event.target.value }));
     for (const input of body.querySelectorAll('[data-pref]')) {
-        input.addEventListener('change', () => patchPrefs({ [input.dataset.pref]: input.checked }));
+        input.addEventListener('change', () => applyPreference({ [input.dataset.pref]: input.checked }));
     }
 }
 
@@ -1571,16 +1581,23 @@ export function openPublishingSettings({ returnTo = null } = {}) {
     publishReturn = returnTo;
     publishingFocusPending = true;
     openSettingSections.add('Publishing');
-    if (open) {
-        renderDrawer();
-        return;
-    }
-    openSystemDrawer();
+    localStorage.setItem('pa_d_system_section', 'publishing');
+    sessionStorage.setItem('pa_d_system_focus_publish', '1');
+    document.dispatchEvent(new CustomEvent('system:section', { detail: 'publishing' }));
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
+}
+
+export function openSystemSettings(section = 'library') {
+    localStorage.setItem('pa_d_system_section', section);
+    document.dispatchEvent(new CustomEvent('system:section', { detail: section }));
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
 }
 
 export function openSystemDrawer() {
     if (open) {
-        if (publishingFocusPending || publishReturn) renderDrawer();
+        if (publishingFocusPending || publishReturn) renderCurrentSystemSurface();
         return;
     }
     const drawer = document.getElementById('drawer');
@@ -1601,7 +1618,6 @@ export function closeSystemDrawer() {
     const drawer = document.getElementById('drawer');
     const scrim = document.getElementById('drawer-scrim');
     open = false;
-    resetConfirmArmed = false;
     publishingFocusPending = false;
     updateDrawerContext();
     scrim.classList.remove('on');
@@ -1619,7 +1635,7 @@ export function systemDrawerOpen() {
 }
 
 export function initDrawer() {
-    document.getElementById('system-btn').addEventListener('click', openSystemDrawer);
+    document.getElementById('system-btn').addEventListener('click', () => openSystemSettings());
     document.getElementById('activity-widget').addEventListener('click', openSystemDrawer);
     document.getElementById('drawer-close').addEventListener('click', closeSystemDrawer);
     document.getElementById('drawer-scrim').addEventListener('click', closeSystemDrawer);
@@ -1644,7 +1660,7 @@ export function initDrawer() {
         if (input) input.value = String(viewState.thumbSize);
     });
     on('prefs', () => {
-        if (open) renderDrawer();
+        if (open) renderCurrentSystemSurface();
     });
     refreshActivity();
     activityTimer = setInterval(refreshActivity, 10000);
