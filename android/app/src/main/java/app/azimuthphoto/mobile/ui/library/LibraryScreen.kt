@@ -149,6 +149,14 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
     }
 }
 
+/** Last-fetched home shelves, so returning to Library paints instantly. */
+private data class HomeCache(
+    val serverUrl: String,
+    val people: List<Person>,
+    val collections: List<Collection>,
+)
+private var homeCache: HomeCache? = null
+
 @Composable
 private fun LibraryHome(
     api: LibraryApi,
@@ -162,11 +170,14 @@ private fun LibraryHome(
     onOpenTag: (String) -> Unit,
     onOpenPhotos: (List<ArchiveImage>, Int) -> Unit,
 ) {
-    var people by remember { mutableStateOf<List<Person>>(emptyList()) }
-    var collections by remember { mutableStateOf<List<Collection>>(emptyList()) }
+    // Paint the last-known shelves instantly, then revalidate — home is never blank
+    // while the network round-trips (stale-while-revalidate).
+    var people by remember { mutableStateOf(homeCache?.takeIf { it.serverUrl == serverUrl }?.people ?: emptyList()) }
+    var collections by remember { mutableStateOf(homeCache?.takeIf { it.serverUrl == serverUrl }?.collections ?: emptyList()) }
     LaunchedEffect(api) {
-        people = runCatching { api.people() }.getOrDefault(emptyList())
-        collections = runCatching { api.collections() }.getOrDefault(emptyList())
+        runCatching { api.people() }.onSuccess { people = it }
+        runCatching { api.collections() }.onSuccess { collections = it }
+        homeCache = HomeCache(serverUrl, people, collections)
     }
 
     Column(

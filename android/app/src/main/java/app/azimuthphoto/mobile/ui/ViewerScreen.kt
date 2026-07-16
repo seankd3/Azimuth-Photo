@@ -649,6 +649,8 @@ private fun VideoPage(source: Uri, key: String, isActive: Boolean) {
                 player.setMediaItem(ExoMediaItem.fromUri(source))
                 player.prepare()
             }
+            // Paging to a video starts it — no dead frame waiting for a play tap.
+            player.play()
         } else {
             player.stop()
         }
