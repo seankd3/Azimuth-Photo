@@ -1739,6 +1739,67 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(copy["file_modified_at"], 1.0)
         self.assertEqual(copy["missing_at"], 42.0)
 
+    async def test_rescan_hashes_all_rematch_candidates_before_writing(self):
+        source = await self._source("scan-rematch-lock-source")
+        new_paths = [
+            os.path.join(source["path"], "new-first.jpg"),
+            os.path.join(source["path"], "new-second.jpg"),
+        ]
+        contents = [b"first", b"other"]
+        for path, content in zip(new_paths, contents):
+            with open(path, "wb") as handle:
+                handle.write(content)
+
+        conn = await db.get_db()
+        try:
+            for index, (path, content) in enumerate(zip(new_paths, contents)):
+                await conn.execute(
+                    "INSERT INTO images "
+                    "(source_id, filename, filepath, status, file_size, file_modified_at, "
+                    "content_hash, missing_at) VALUES (?, ?, ?, 'kept', ?, 1, ?, 100)",
+                    (
+                        source["id"],
+                        f"old-{index}.jpg",
+                        os.path.join(source["path"], f"old-{index}.jpg"),
+                        len(content),
+                        sync_hashing.compute_content_hash(path),
+                    ),
+                )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        real_compute_content_hash = sync_hashing.compute_content_hash
+        lock_probes = 0
+
+        def compute_hash_with_write_probe(path):
+            nonlocal lock_probes
+            probe = sqlite3.connect(db.DB_PATH, timeout=0.05)
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.rollback()
+                lock_probes += 1
+            finally:
+                probe.close()
+            return real_compute_content_hash(path)
+
+        rows = [
+            (os.path.basename(path), path, ".jpg", len(content), 1)
+            for path, content in zip(new_paths, contents)
+        ]
+        with unittest.mock.patch.object(
+            sync_hashing,
+            "compute_content_hash",
+            side_effect=compute_hash_with_write_probe,
+        ):
+            await catalog_repository.insert_images_batch(
+                db.DB_PATH,
+                rows,
+                source_id=source["id"],
+            )
+
+        self.assertEqual(lock_probes, 2)
+
     async def test_rescan_rematches_renamed_file_by_content_identity(self):
         source = await self._source("scan-rename-source")
         old_path = os.path.join(source["path"], "old-name.jpg")

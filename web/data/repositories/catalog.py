@@ -325,14 +325,25 @@ async def _heuristic_rematch_id(conn, source_id: int, row: tuple) -> int | None:
     return candidates[0] if len(candidates) == 1 else None
 
 
-async def _rematch_missing_image_on_conn(conn, source_id: int, row: tuple) -> bool:
+async def _missing_image_rematch_id_on_conn(
+    conn,
+    source_id: int,
+    row: tuple,
+) -> int | None:
     image_id, ambiguous_hash = await _content_hash_rematch_id(conn, source_id, row)
     if ambiguous_hash:
-        return False
+        return None
     if image_id is None:
         image_id = await _heuristic_rematch_id(conn, source_id, row)
-    if image_id is None:
-        return False
+    return image_id
+
+
+async def _apply_missing_image_rematch_on_conn(
+    conn,
+    source_id: int,
+    row: tuple,
+    image_id: int,
+) -> bool:
     cursor = await conn.execute(
         "UPDATE images SET source_id = ?, filename = ?, filepath = ?, "
         "file_ext = COALESCE(?, file_ext), file_size = COALESCE(?, file_size), "
@@ -390,12 +401,14 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                     (source_id,),
                 )
                 has_missing_candidates = await cursor.fetchone() is not None
+            rematch_ids = [
+                await _missing_image_rematch_id_on_conn(conn, source_id, row)
+                for row in unseen_rows
+            ] if has_missing_candidates else [None] * len(unseen_rows)
             new_rows = []
-            for row in unseen_rows:
-                if not has_missing_candidates or not await _rematch_missing_image_on_conn(
-                    conn,
-                    source_id,
-                    row,
+            for row, image_id in zip(unseen_rows, rematch_ids):
+                if image_id is None or not await _apply_missing_image_rematch_on_conn(
+                    conn, source_id, row, image_id
                 ):
                     new_rows.append(row)
             await conn.executemany(
