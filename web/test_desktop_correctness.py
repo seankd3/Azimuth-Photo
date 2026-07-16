@@ -366,7 +366,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         drawer = read("drawer.js")
 
         self.assertIn("const INACTIVE_WORKER_STATES = new Set([", drawer)
-        for state in ("idle", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
+        for state in ("idle", "ready", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
             self.assertIn(f"'{state}'", drawer)
         self.assertIn("return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);", drawer)
         self.assertNotIn("const ACTIVE_WORKER_STATES", drawer)

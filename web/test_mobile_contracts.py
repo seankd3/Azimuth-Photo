@@ -78,7 +78,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         library = self.read("static", "js", "mobile", "library.js")
 
         self.assertIn("const INACTIVE_WORKER_STATES = new Set([", library)
-        for state in ("idle", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
+        for state in ("idle", "ready", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
             self.assertIn(f"'{state}'", library)
         self.assertIn("return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);", library)
         self.assertNotIn("const ACTIVE_WORKER_STATES", library)

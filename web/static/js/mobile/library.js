@@ -24,6 +24,7 @@ const DISMISSED_SUGGESTIONS_KEY = 'pa_m_dismissed_suggestions';
 const TOAST_ACTION_RESET_MS = 6200;
 const INACTIVE_WORKER_STATES = new Set([
     'idle',
+    'ready',
     'paused',
     'complete',
     'caught_up',
