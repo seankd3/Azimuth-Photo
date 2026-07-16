@@ -148,6 +148,16 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("getCollection(", page_loader)
         self.assertIn("getCollection(", scope_data[scope_data.index("export async function loadCollectionImages"):])
 
+    def test_collection_month_counts_compose_filters_through_histogram(self):
+        filters = read("filters.js")
+        month_counts = filters[
+            filters.index("async function scopedMonthCounts"):
+            filters.index("async function expandYear")
+        ]
+
+        self.assertIn("getDateHistogram(params)", month_counts)
+        self.assertNotIn("loadCollectionImages", filters)
+
     def test_sync_refresh_cannot_overwrite_an_in_flight_control_result(self):
         sync_chip = read("sync_chip.js")
 

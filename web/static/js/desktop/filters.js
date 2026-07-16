@@ -1,6 +1,5 @@
 import { getDateHistogram, getFilterOptions, getFolders, getTags } from './api.js';
 import { byId, folderValues, on, scope, scopeParams, setScope } from './state.js';
-import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
@@ -255,19 +254,6 @@ function resetMonthCacheIfScopeChanged() {
 }
 
 async function scopedMonthCounts(year) {
-    if (scope.collectionId) {
-        let images = [];
-        try {
-            images = await loadCollectionImages(scope.collectionId);
-        } catch {
-            throw new Error('collection-months');
-        }
-        return images.reduce((acc, img) => {
-            const month = monthFromDate(img.date_taken);
-            if (month.startsWith(`${year}-`)) acc.set(month, (acc.get(month) || 0) + 1);
-            return acc;
-        }, new Map());
-    }
     if (scope.similarIds.length) {
         return scope.similarIds.map(Number).reduce((acc, id) => {
             const img = byId.get(id);
