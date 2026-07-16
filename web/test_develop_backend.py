@@ -69,7 +69,19 @@ class DevelopBackendTests(unittest.TestCase):
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
         develop_routes._base_generation_failures.clear()
-        self.tempdir.cleanup()
+        # Windows: dropped-but-uncollected sqlite handles block cleanup.
+        import gc
+        import time as _time
+
+        for attempt in range(20):
+            try:
+                self.tempdir.cleanup()
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                gc.collect()
+                _time.sleep(0.2)
 
     def _image(self, source_id, path):
         path.parent.mkdir(parents=True, exist_ok=True)

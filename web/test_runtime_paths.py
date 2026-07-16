@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import posixpath
 import tempfile
 import unittest
 from unittest import mock
@@ -155,12 +156,12 @@ class RuntimePathTests(unittest.TestCase):
                 (web / name).mkdir()
             paths = resolve_runtime_paths(web, {"HOME": str(Path(tmp) / "home")}, "linux")
             self.assertEqual(paths.layout, "legacy")
-            self.assertEqual(paths.catalog_db, str(web / "photoarchive.db"))
-            self.assertEqual(paths.settings_file, str(web / "settings.local.json"))
-            self.assertEqual(paths.thumb_cache_dir, str(web / ".thumbcache"))
-            self.assertEqual(paths.model_root, str(web / ".models"))
-            self.assertEqual(paths.embed_cache_dir, str(web / ".embedcache"))
-            self.assertEqual(paths.run_dir, str(web / ".run"))
+            self.assertEqual(paths.catalog_db, posixpath.join(str(web), "photoarchive.db"))
+            self.assertEqual(paths.settings_file, posixpath.join(str(web), "settings.local.json"))
+            self.assertEqual(paths.thumb_cache_dir, posixpath.join(str(web), ".thumbcache"))
+            self.assertEqual(paths.model_root, posixpath.join(str(web), ".models"))
+            self.assertEqual(paths.embed_cache_dir, posixpath.join(str(web), ".embedcache"))
+            self.assertEqual(paths.run_dir, posixpath.join(str(web), ".run"))
 
     def test_backup_file_alone_does_not_trigger_legacy(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -207,8 +208,8 @@ class RuntimePathTests(unittest.TestCase):
         after = (catalog.stat().st_ino, catalog.stat().st_size)
         self.assertEqual(paths.layout, "legacy")
         self.assertEqual(paths.catalog_db, str(catalog))
-        self.assertEqual(paths.thumb_cache_dir, str(web / ".thumbcache"))
-        self.assertEqual(paths.model_root, str(web / ".models"))
+        self.assertEqual(paths.thumb_cache_dir, posixpath.join(str(web), ".thumbcache"))
+        self.assertEqual(paths.model_root, posixpath.join(str(web), ".models"))
         self.assertEqual(after, before)
 
     def test_settings_preserve_explicit_cache_and_model_paths(self):
@@ -251,12 +252,12 @@ class RuntimePathTests(unittest.TestCase):
         ):
             normalized = settings.normalize_settings(raw)
         self.assertEqual(normalized["ssd_cache_dir"], "/deploy/previews")
-        self.assertEqual(normalized["embed_model_dir"], "/deploy/models/Qwen--Qwen3-VL-Embedding-8B")
+        self.assertEqual(normalized["embed_model_dir"], os.path.normpath("/deploy/models/Qwen--Qwen3-VL-Embedding-8B"))
         self.assertEqual(
             normalized["caption_model_dir"],
-            "/deploy/models/Qwen--Qwen2.5-VL-7B-Instruct",
+            os.path.normpath("/deploy/models/Qwen--Qwen2.5-VL-7B-Instruct"),
         )
-        self.assertEqual(normalized["face_model_dir"], "/deploy/models/insightface")
+        self.assertEqual(normalized["face_model_dir"], os.path.normpath("/deploy/models/insightface"))
 
 
 if __name__ == "__main__":
