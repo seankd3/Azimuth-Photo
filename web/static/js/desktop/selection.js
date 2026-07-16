@@ -147,7 +147,7 @@ function exportSelection(anchor) {
             count: format === 'zip' ? imageIds.length : 0,
             message: format === 'zip' ? `Preparing ${imageIds.length} files` : `Exporting ${imageIds.length} photos as ${format.toUpperCase()}`,
         });
-    });
+    }, { imageIds });
 }
 
 function render({ imageIds = null } = {}) {

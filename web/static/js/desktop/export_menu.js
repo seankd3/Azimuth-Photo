@@ -1,26 +1,21 @@
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
-import { icon } from '../icons.js';
+import { getRankings } from './api.js';
+import { loadCollectionImageIds } from './scope_data.js';
+import { scope, scopeParams } from './state.js';
+import { openExportDialog } from './develop/export_dialog.js';
 
 export const ZIP_EXPORT_MAX = 2000;
 
 let menu = null;
 let returnEl = null;
-let onChoose = null;
-
-function moveMenuFocus(delta) {
-    const items = [...menu.querySelectorAll('button:not([disabled])')];
-    if (!items.length) return;
-    const index = Math.max(0, items.indexOf(document.activeElement));
-    items[(index + delta + items.length) % items.length].focus();
-}
-
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
     menu.id = 'export-pop-menu';
-    menu.className = 'pop-menu grid-pop-menu export-pop-menu';
-    menu.setAttribute('role', 'menu');
+    menu.className = 'develop-popover export-pop-menu';
+    menu.setAttribute('role', 'dialog');
+    menu.setAttribute('aria-modal', 'true');
     menu.hidden = true;
     document.body.appendChild(menu);
     menu.addEventListener('keydown', (event) => {
@@ -28,15 +23,12 @@ function ensureMenu() {
             event.preventDefault();
             event.stopPropagation();
             closeExportMenu();
-        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-            event.preventDefault();
-            moveMenuFocus(event.key === 'ArrowDown' ? 1 : -1);
         }
     });
     return menu;
 }
 
-function clampPosition(anchor) {
+function positionDialog(anchor) {
     const rect = anchor.getBoundingClientRect();
     const menuRect = menu.getBoundingClientRect();
     const left = Math.max(8, Math.min(window.innerWidth - menuRect.width - 8, rect.left));
@@ -45,24 +37,22 @@ function clampPosition(anchor) {
     menu.style.top = `${top}px`;
 }
 
-function render({ allowSizes = true } = {}) {
-    menu.innerHTML = '<div class="pm-group">'
-        + `<button data-format="csv">${icon('download')} CSV</button>`
-        + `<button data-format="json">${icon('download')} JSON</button>`
-        + '</div><div class="pm-group">'
-        + '<div class="pm-label">Download files (zip)</div>'
-        + `<button data-format="zip" data-size="original">${icon('download')} Original${allowSizes ? '' : ''}</button>`
-        + (allowSizes ? `<button data-format="zip" data-size="lg">${icon('download')} Large</button><button data-format="zip" data-size="md">${icon('download')} Medium</button>` : '')
-        + '</div>';
-    for (const button of menu.querySelectorAll('button[data-format]')) {
-        button.setAttribute('role', 'menuitem');
-        button.addEventListener('click', () => {
-            const format = button.dataset.format;
-            const size = button.dataset.size || '';
-            closeExportMenu();
-            if (onChoose) onChoose({ format, size });
-        });
-    }
+function anchoredPopover(anchor, html) {
+    const popover = ensureMenu();
+    releaseFocus(popover);
+    popover.innerHTML = html;
+    popover.hidden = false;
+    popover.style.position = 'fixed';
+    positionDialog(anchor);
+    trapFocus(popover, popover.querySelector('button, input, select'));
+    return popover;
+}
+
+async function scopedImageIds() {
+    if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
+    if (scope.collectionId) return loadCollectionImageIds(scope.collectionId);
+    const payload = await getRankings(scopeParams({ limit: 50000 }));
+    return (payload?.images || []).map((image) => Number(image.id)).filter((id) => id > 0);
 }
 
 export function openExportMenu(anchor, choose, options = {}) {
@@ -70,11 +60,16 @@ export function openExportMenu(anchor, choose, options = {}) {
     ensureMenu();
     releaseFocus(menu);
     returnEl = anchor;
-    onChoose = choose;
-    render(options);
-    menu.hidden = false;
-    clampPosition(anchor);
-    trapFocus(menu, menu.querySelector('button'));
+    return openExportDialog({
+        button: anchor,
+        imageIds: options.imageIds || null,
+        getImageIds: options.imageIds ? null : scopedImageIds,
+        anchoredPopover,
+        closePopover: closeExportMenu,
+        showToast,
+        onDataExport: (format) => choose({ format }),
+        onOriginalsExport: () => choose({ format: 'zip', size: 'original' }),
+    });
 }
 
 export function closeExportMenu() {
