@@ -136,9 +136,6 @@ function ensureImageObserver() {
             const img = entry.target;
             if (entry.isIntersecting) {
                 if (!img.src) img.src = img.dataset.src;
-            } else if (Math.abs(entry.boundingClientRect.top) > window.innerHeight * 3) {
-                img.removeAttribute('src');
-                img.classList.remove('ld');
             }
         }
     }, { root: document.getElementById('canvas'), rootMargin: '900px 0px' });
