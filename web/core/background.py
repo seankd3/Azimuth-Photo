@@ -143,6 +143,10 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
 async def run_shutdown(*, thumbnails, background_task_tracker: BackgroundTaskTracker) -> None:
     thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
+    # Last act: earn the next boot its instant start.
+    from features.system import backups
+    import db
+    await asyncio.to_thread(backups.mark_clean_shutdown, db.DB_PATH)
 
 
 async def run_startup(
@@ -190,11 +194,25 @@ async def run_startup(
     from features.system import backups
     import db
 
-    catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
-    if not catalog["ok"]:
-        log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
-        await asyncio.to_thread(warm_templates)
-        return
+    # PRAGMA quick_check costs ~1s/GB and used to block every boot (~64s on a
+    # 139k catalog). fsck pattern: a clean shutdown earns an instant boot with a
+    # background verification; anything else (crash, kill, power loss) still
+    # pays the full blocking check before serving.
+    if backups.consume_clean_shutdown(db.DB_PATH):
+        async def _verify_catalog_in_background():
+            result = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+            if not result["ok"]:
+                log.error(
+                    "background catalog check FAILED after clean-shutdown boot "
+                    "state=%s error=%s", result["state"], result.get("error"),
+                )
+        track_background_task(_verify_catalog_in_background())
+    else:
+        catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+        if not catalog["ok"]:
+            log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
+            await asyncio.to_thread(warm_templates)
+            return
     await init_db()
     thumbnails.configure(settings.load_settings())
 
