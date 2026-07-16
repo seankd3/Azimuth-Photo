@@ -326,6 +326,24 @@ function selectAllTrash() {
     selectionChanged(images.map((img) => Number(img.id)));
 }
 
+function mutationIds(result, field) {
+    return [...new Set((result.data?.[field] || []).map(Number).filter((id) => id > 0))];
+}
+
+function mutationErrors(result) {
+    return Array.isArray(result.data?.errors) ? result.data.errors : [];
+}
+
+function clearChangedSelection(imageIds) {
+    const changedIds = imageIds.filter((id) => selection.delete(id));
+    if (changedIds.length) selectionChanged(changedIds);
+}
+
+function partialToast(action, completedIds, requestedIds, errors) {
+    if (!errors.length) return `${action} ${fmt(completedIds.length)} photo${completedIds.length === 1 ? '' : 's'}`;
+    return `${action} ${fmt(completedIds.length)} of ${fmt(requestedIds.length)} — ${fmt(errors.length)} couldn't be ${action === 'Moved' ? 'moved' : 'restored'}`;
+}
+
 export async function trashSelectedImages() {
     const imageIds = selectedIds();
     if (!imageIds.length) return false;
@@ -334,13 +352,27 @@ export async function trashSelectedImages() {
         showToast("Selection couldn't be trashed");
         return false;
     }
-    clearSelection();
-    emit('trash:changed', { imageIds });
-    showToast(`Moved ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'} to Trash`, {
+    const trashed = mutationIds(result, 'trashed');
+    const errors = mutationErrors(result);
+    if (!trashed.length) {
+        showToast("Selection couldn't be trashed");
+        return false;
+    }
+    clearChangedSelection(trashed);
+    emit('trash:changed', { imageIds: trashed });
+    showToast(errors.length
+        ? partialToast('Moved', trashed, imageIds, errors)
+        : `Moved ${fmt(trashed.length)} photo${trashed.length === 1 ? '' : 's'} to Trash`, {
         undo: async () => {
-            const restored = await restoreImages(imageIds);
-            emit('trash:changed', { imageIds });
-            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
+            const restored = await restoreImages(trashed);
+            const restoredIds = mutationIds(restored, 'restored');
+            const restoreErrors = mutationErrors(restored);
+            if (!restored.ok || !restoredIds.length) {
+                showToast('Couldn’t restore');
+                return;
+            }
+            emit('trash:changed', { imageIds: restoredIds });
+            showToast(restoreErrors.length ? partialToast('Restored', restoredIds, trashed, restoreErrors) : 'Restored');
         },
     });
     return true;
@@ -354,13 +386,25 @@ async function restoreSelectedTrash() {
         showToast('Couldn’t restore');
         return;
     }
-    clearSelection();
-    emit('trash:changed', { imageIds });
-    showToast(`Restored ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'}`, {
+    const restored = mutationIds(result, 'restored');
+    const errors = mutationErrors(result);
+    if (!restored.length) {
+        showToast('Couldn’t restore');
+        return;
+    }
+    clearChangedSelection(restored);
+    emit('trash:changed', { imageIds: restored });
+    showToast(partialToast('Restored', restored, imageIds, errors), {
         undo: async () => {
-            const trashed = await trashImages(imageIds);
-            emit('trash:changed', { imageIds });
-            showToast(trashed.ok ? 'Moved back to Trash' : 'Couldn’t undo');
+            const trashed = await trashImages(restored);
+            const trashedIds = mutationIds(trashed, 'trashed');
+            const trashErrors = mutationErrors(trashed);
+            if (!trashed.ok || !trashedIds.length) {
+                showToast('Couldn’t undo');
+                return;
+            }
+            emit('trash:changed', { imageIds: trashedIds });
+            showToast(trashErrors.length ? partialToast('Moved', trashedIds, restored, trashErrors) : 'Moved back to Trash');
         },
     });
 }

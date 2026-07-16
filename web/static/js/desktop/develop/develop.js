@@ -221,21 +221,39 @@ function setControlsLoading(loading) {
     panelHost.dataset.loading = String(loading);
 }
 
+async function saveDevelopSettings(imageId, entry, label, version) {
+    try {
+        const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: entry.settings, label }),
+        }, DEVELOP_MUTATION_TIMEOUT_MS));
+        if (!response.ok) throw new Error('save failed');
+        if (entry.saveVersion !== version) return;
+        entry.unsaved = false;
+        entry.saveFailureNotified = false;
+        settingsClipboard.markSaved(imageId);
+        historyPanel?.reload();
+    } catch {
+        if (entry.saveVersion !== version) return;
+        entry.unsaved = true;
+        if (entry.saveFailureNotified) return;
+        entry.saveFailureNotified = true;
+        showToast("Couldn't save your edits — check your connection");
+    }
+}
+
 function scheduleSave(label = 'Develop adjustment') {
     if (!currentImage) return;
     const imageId = Number(currentImage.id);
+    const entry = stateCache.get(imageId);
+    if (!entry) return;
+    const version = (entry.saveVersion || 0) + 1;
+    entry.saveVersion = version;
     clearTimeout(saveTimers.get(imageId));
     saveTimers.set(imageId, setTimeout(() => {
-        const entry = stateCache.get(imageId);
-        if (!entry) return;
-        fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings: entry.settings, label }),
-        }, DEVELOP_MUTATION_TIMEOUT_MS)).then((response) => {
-            if (!response.ok) throw new Error('save failed');
-            settingsClipboard.markSaved(imageId);
-            historyPanel?.reload();
-        }).catch(() => {});
+        const pendingEntry = stateCache.get(imageId);
+        if (!pendingEntry || pendingEntry.saveVersion !== version) return;
+        void saveDevelopSettings(imageId, pendingEntry, label, version);
     }, 400));
 }
 
