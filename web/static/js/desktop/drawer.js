@@ -909,11 +909,8 @@ function renderDrawer() {
 }
 
 function renderCurrentSystemSurface() {
-    if (systemSurfaceRender) {
-        systemSurfaceRender();
-        return;
-    }
-    renderDrawer();
+    if (systemSurfaceRender) systemSurfaceRender();
+    if (open || !systemSurfaceRender) renderDrawer();
 }
 
 export function renderSystemSections() {
