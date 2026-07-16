@@ -11,6 +11,7 @@ import db
 import scanner
 import settings
 import thumbnails
+from data.repositories import catalog as catalog_repository
 from features.catalog import metadata as catalog_metadata
 from features.catalog import routes as catalog_routes
 from features.library import service as library_service
@@ -23,6 +24,93 @@ class CatalogSourceRouteTests(BackendTestCase):
             with TestClient(__import__("app").app) as client:
                 return client.request(method, path, **kwargs)
         return await asyncio.to_thread(send)
+
+    async def _virtual_copy(self, master_id: int) -> int:
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                "SELECT source_id, filename, filepath FROM images WHERE id = ?",
+                (master_id,),
+            )).fetchone()
+            cursor = await conn.execute(
+                "INSERT INTO images (source_id, filename, filepath, status, vc_of) "
+                "VALUES (?, ?, ?, 'kept', ?)",
+                (master["source_id"], f"Copy of {master['filename']}", master["filepath"], master_id),
+            )
+            await conn.commit()
+            return int(cursor.lastrowid)
+        finally:
+            await conn.close()
+
+    async def test_sync_missing_mark_cascades_to_virtual_copy(self):
+        source = await self._source("sync-missing-vc")
+        master_id = await self._image(source["id"], "master.jpg")
+        copy_id = await self._virtual_copy(master_id)
+
+        changed = catalog_repository.mark_image_missing_sync(db.DB_PATH, master_id, 111.0)
+
+        self.assertTrue(changed)
+        self.assertEqual((await self._image_row(master_id))["missing_at"], 111.0)
+        self.assertEqual((await self._image_row(copy_id))["missing_at"], 111.0)
+
+    async def test_batched_missing_marks_cascade_each_timestamp_to_virtual_copies(self):
+        source = await self._source("batched-missing-vc")
+        first_id = await self._image(source["id"], "first.jpg")
+        second_id = await self._image(source["id"], "second.jpg")
+        first_copy_id = await self._virtual_copy(first_id)
+        second_copy_id = await self._virtual_copy(second_id)
+
+        changed = await asyncio.gather(
+            catalog_repository.mark_image_missing(db.DB_PATH, first_id, 111.0),
+            catalog_repository.mark_image_missing(db.DB_PATH, second_id, 222.0),
+        )
+
+        self.assertEqual(changed, [True, True])
+        self.assertEqual((await self._image_row(first_copy_id))["missing_at"], 111.0)
+        self.assertEqual((await self._image_row(second_copy_id))["missing_at"], 222.0)
+
+    async def test_zero_byte_missing_mark_cascades_to_virtual_copy(self):
+        source = await self._source("zero-byte-missing-vc")
+        master_id = await self._image(source["id"], "empty.jpg")
+        copy_id = await self._virtual_copy(master_id)
+        filepath = (await self._image_row(master_id))["filepath"]
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET file_size = 0 WHERE id = ?", (master_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        changed = await catalog_repository.mark_zero_byte_images_missing(db.DB_PATH, [filepath])
+
+        self.assertEqual([row["id"] for row in changed], [master_id])
+        master = await self._image_row(master_id)
+        self.assertIsNotNone(master["missing_at"])
+        self.assertEqual((await self._image_row(copy_id))["missing_at"], master["missing_at"])
+
+    async def test_exact_path_restore_cascades_to_virtual_copy(self):
+        source = await self._source("exact-path-restore-vc")
+        master_id = await self._image(source["id"], "returned.jpg")
+        copy_id = await self._virtual_copy(master_id)
+        filepath = (await self._image_row(master_id))["filepath"]
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET missing_at = 111 WHERE id IN (?, ?)",
+                (master_id, copy_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await catalog_repository.insert_images_batch(
+            db.DB_PATH,
+            [("returned.jpg", filepath, ".jpg", 10, 123.0)],
+            source_id=source["id"],
+        )
+
+        self.assertIsNone((await self._image_row(master_id))["missing_at"])
+        self.assertIsNone((await self._image_row(copy_id))["missing_at"])
 
     async def test_add_source_then_keep_remove_preserves_rows_and_originals(self):
         folder = os.path.join(self.tempdir.name, "camera")

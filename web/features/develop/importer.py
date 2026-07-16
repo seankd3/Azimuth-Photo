@@ -157,7 +157,9 @@ def _ensure_image(conn, source_id: int, row: tuple[str, str, str, int | None, fl
     ).fetchone()
     if image is None:
         raise RuntimeError(f"could not register RAW: {filepath}")
-    return int(image["id"]), created
+    image_id = int(image["id"])
+    catalog_repository.cascade_virtual_copy_missing_sync_on_conn(conn, [image_id])
+    return image_id, created
 
 
 def _needs_settings(conn, image_id: int, source_mtime: float) -> bool:
