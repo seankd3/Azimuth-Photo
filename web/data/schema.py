@@ -10,7 +10,7 @@ from data.repositories import catalog as catalog_repository
 from core.path_groups import safe_commonpath
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
-SCHEMA_VERSION = 28
+SCHEMA_VERSION = 29
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog_sources (
@@ -738,7 +738,11 @@ CREATE TABLE IF NOT EXISTS collection_publishes (
     last_commit TEXT DEFAULT NULL,
     hook_exit_code INTEGER DEFAULT NULL,
     hook_output TEXT NOT NULL DEFAULT '',
-    hook_ran_at REAL DEFAULT NULL
+    hook_ran_at REAL DEFAULT NULL,
+    hook_pending INTEGER NOT NULL DEFAULT 0,
+    hook_attempts INTEGER NOT NULL DEFAULT 0,
+    hook_next_retry_at REAL DEFAULT NULL,
+    hook_pending_operation TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_collections_updated
@@ -968,6 +972,10 @@ COLLECTION_PUBLISH_COMPAT_COLUMNS = (
     ("hook_exit_code", "INTEGER DEFAULT NULL"),
     ("hook_output", "TEXT NOT NULL DEFAULT ''"),
     ("hook_ran_at", "REAL DEFAULT NULL"),
+    ("hook_pending", "INTEGER NOT NULL DEFAULT 0"),
+    ("hook_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("hook_next_retry_at", "REAL DEFAULT NULL"),
+    ("hook_pending_operation", "TEXT NOT NULL DEFAULT ''"),
 )
 
 IMAGE_CAPTION_COMPAT_COLUMNS = (
@@ -1291,6 +1299,10 @@ REQUIRED_COLUMNS = {
         "hook_exit_code",
         "hook_output",
         "hook_ran_at",
+        "hook_pending",
+        "hook_attempts",
+        "hook_next_retry_at",
+        "hook_pending_operation",
     },
     "image_captions": {"user_edited"},
     "image_checksums": {"image_id", "sha256", "bytes", "checked_at"},

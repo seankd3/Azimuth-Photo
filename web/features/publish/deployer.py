@@ -215,6 +215,12 @@ class GalleryDeployer:
                 progress,
             )
 
+    async def retry_hook(self) -> HookStatus:
+        """Run only the configured confirmation hook for a pending publish."""
+        async with _deploy_lock:
+            config = self._active_config()
+            return await asyncio.to_thread(self._run_hook, config)
+
     def _publish_sync(
         self,
         slug: str,
