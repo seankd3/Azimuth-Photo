@@ -194,7 +194,7 @@ function scopeIcon(value) {
 }
 
 function remember(value) {
-    const storedScope = { ...value };
+    const storedScope = { ...value, folder: [...folderValues(value.folder)], similarIds: [...(value.similarIds || [])] };
     const values = recentScopes().filter((item) => JSON.stringify(item.scope) !== JSON.stringify(storedScope));
     values.unshift({ label: scopeLabel(storedScope), scope: storedScope });
     storeRecents(values);
@@ -807,8 +807,6 @@ function run(index) {
 
 function applyScope(patch, { keepFocus = false, merge = true } = {}) {
     const clean = { ...patch };
-    const next = merge ? { ...scope, ...clean } : clean;
-    remember(next);
     navigateToScope(clean, { merge });
     const input = document.getElementById('scope-input');
     input.value = '';
@@ -834,8 +832,6 @@ function toggleDeepSearch() {
 
 function openPhotoResult(term, photo, images) {
     const deep = pendingDeep == null ? scope.deep : pendingDeep;
-    const next = { ...scope, q: term, deep, sort: 'similarity' };
-    remember(next);
     navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
@@ -1073,7 +1069,8 @@ export function initOmnibox() {
     document.addEventListener('pointerdown', (event) => {
         if (!box.contains(event.target)) close();
     });
-    on('scope', () => {
+    on('scope', (nextScope) => {
+        remember(nextScope);
         tokenSelected = false;
         renderToken();
     });
