@@ -1203,6 +1203,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         prefetch_executor=_prefetch_executor,
         generate_thumbnail_set_sync=_generate_thumbnail_set_sync,
         record_pregen_result=_record_pregen_result,
+        activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
     )
 
 
@@ -1229,6 +1230,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         pregen_state=_pregen_status,
         current_time=_current_time,
         record_pregen_batch=_record_pregen_batch,
+        activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
     )
 
 

@@ -6,6 +6,7 @@ import tempfile
 import time
 import unittest
 from contextlib import closing
+from unittest import mock
 
 from PIL import Image
 
@@ -21,6 +22,7 @@ from thumbnails import generation as thumbnail_generation  # noqa: E402
 from thumbnails import jobs as thumbnail_jobs  # noqa: E402
 from thumbnails import maintenance as thumbnail_maintenance  # noqa: E402
 from thumbnails import pregen as thumbnail_pregen  # noqa: E402
+from thumbnails import pregen_worker as thumbnail_pregen_worker  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
 from thumbnails import status as thumbnail_status  # noqa: E402
 
@@ -2464,6 +2466,88 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
         )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
+
+    def test_pregeneration_makes_a_bounded_burst_during_continuous_activity(self):
+        path = self._make_image()
+        for image_id in range(1, 6):
+            self._add_catalog_original(image_id, path)
+        thumbnails.note_user_activity()
+
+        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=16))
+        cached = [
+            image_id
+            for image_id in range(1, 6)
+            if thumbnails.fast_disk_path_entry("sm", image_id) is not None
+        ]
+
+        self.assertGreater(warmed, 0)
+        self.assertEqual(
+            len(cached),
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS,
+        )
+
+    def test_prefetch_worker_reports_activity_yield_instead_of_complete(self):
+        old_sleep = thumbnails.asyncio.sleep
+        old_cache_target_total = thumbnails._cache_target_total
+        old_run_bulk = thumbnails._run_pregen_bulk_batch
+        old_run_full = thumbnails._run_full_warm_batch
+        old_flush_write_queue = thumbnails._flush_write_queue
+        old_flush_orientation = thumbnails.flush_orientation_updates
+        old_background_decision = thumbnails._pregen_background_decision
+        try:
+            thumbnails._prefetching = True
+            thumbnails._pregen_manual_pause = False
+            thumbnails._pregen_manual_mode = True
+            thumbnails._disk_allocations.update({
+                "sm": 64 * 1024 * 1024,
+                "md": 0,
+                "lg": 0,
+                thumbnails.FULL_TIER: 0,
+            })
+
+            async def fake_sleep(_seconds):
+                thumbnails._prefetching = False
+
+            async def fake_cache_target_total():
+                return 10
+
+            async def fake_run_bulk(generate_batch=None):
+                return thumbnail_pregen_worker.PREGEN_YIELDED
+
+            async def fake_flush_orientation():
+                return None
+
+            thumbnails.asyncio.sleep = fake_sleep
+            thumbnails._cache_target_total = fake_cache_target_total
+            thumbnails._run_pregen_bulk_batch = fake_run_bulk
+            thumbnails._run_full_warm_batch = mock.AsyncMock(return_value=0)
+            thumbnails._flush_write_queue = lambda: True
+            thumbnails.flush_orientation_updates = fake_flush_orientation
+            thumbnails._pregen_background_decision = lambda: thumbnail_pregen.BackgroundDecision(
+                mode="manual",
+                intensity=1.0,
+                pause=False,
+                sleep_seconds=0.0,
+                thumbnail_batch_size=16,
+                thumbnail_pause_seconds=0.25,
+                embedding_pause_seconds=0.25,
+                reason="manual background work",
+                checked_at=1.0,
+            )
+
+            asyncio.run(thumbnails.run_prefetch_worker())
+
+            self.assertEqual(thumbnails._pregen_status["state"], "waiting")
+            self.assertIn("browsing", thumbnails._pregen_status["message"].lower())
+            thumbnails._run_full_warm_batch.assert_not_awaited()
+        finally:
+            thumbnails.asyncio.sleep = old_sleep
+            thumbnails._cache_target_total = old_cache_target_total
+            thumbnails._run_pregen_bulk_batch = old_run_bulk
+            thumbnails._run_full_warm_batch = old_run_full
+            thumbnails._flush_write_queue = old_flush_write_queue
+            thumbnails.flush_orientation_updates = old_flush_orientation
+            thumbnails._pregen_background_decision = old_background_decision
 
     def test_prefetch_worker_caps_manual_batch_to_configured_batch(self):
         old_batch = thumbnails.PREGENERATE_GENERATE_BATCH
