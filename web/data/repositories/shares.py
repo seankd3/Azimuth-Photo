@@ -388,6 +388,7 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
                 s.view_count,
                 s.first_viewed_at,
                 s.last_viewed_at,
+                s.client_finished_at,
                 COUNT(i.id) AS image_count,
                 MIN(i.date_taken) AS date_min,
                 MAX(i.date_taken) AS date_max
@@ -722,6 +723,10 @@ async def _published_subtree_images_on_conn(conn, root_node_id: int) -> list[dic
             membership.added_at,
             i.id,
             i.filename,
+            i.filepath,
+            i.hub_remote,
+            i.hub_image_id,
+            source.path AS source_path,
             COALESCE(i.aspect_ratio, 1.5) AS aspect_ratio,
             i.date_taken
         FROM published_node_images membership
