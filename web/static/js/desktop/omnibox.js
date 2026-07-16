@@ -15,6 +15,7 @@ import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
 import { icon } from '../icons.js';
 import { isUnnamedPersonLabel, personLabel } from '../people_labels.js';
+import { showToast } from './toast.js';
 
 const RECENT_KEY = 'pa_d_recent_scopes';
 const LIVE_DELAY_MS = 250;
@@ -850,23 +851,30 @@ function openPhotoResult(term, photo, images) {
 function applyFacet({ key, value, remove, closeAfter = false }) {
     const input = document.getElementById('scope-input');
     const nextQ = remainingQuery(input.value, remove.start, remove.end);
+    const leavingScopedResults = Boolean(value) && (scope.collectionId || scope.similarIds.length);
+    const previousScope = { ...scope, folder: [...folderValues()], similarIds: [...scope.similarIds] };
     const patch = {
         [key]: String(value || ''),
         q: nextQ || scope.q || '',
-        collectionId: '',
-        collectionName: '',
-        collectionSmart: false,
-        similarIds: [],
-        similarSourceId: '',
-        similarLimit: 100,
-        similarLabel: '',
+        ...(leavingScopedResults ? {
+            collectionId: '',
+            collectionName: '',
+            collectionSmart: false,
+            similarIds: [],
+            similarSourceId: '',
+            similarLimit: 100,
+            similarLabel: '',
+        } : {}),
     };
     if (key === 'people') {
         patch.personLabel = '';
         patch.personThumb = '';
     }
-    remember({ ...scope, ...patch });
     navigateToScope(patch, { merge: true });
+    if (leavingScopedResults) {
+        const name = previousScope.collectionName || previousScope.similarLabel || 'this view';
+        showToast(`Left '${name}'`, { undo: () => navigateToScope(previousScope) });
+    }
     input.value = '';
     input.focus();
     if (closeAfter) close();

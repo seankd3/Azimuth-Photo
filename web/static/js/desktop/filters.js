@@ -4,6 +4,7 @@ import { loadCollectionImages } from './scope_data.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
+import { showToast } from './toast.js';
 
 let popover = null;
 let loaded = false;
@@ -46,17 +47,25 @@ function personThumb(person) {
 }
 
 function selectValue(key, value, extra = {}) {
+    const leavingScopedResults = Boolean(value) && (scope.collectionId || scope.similarIds.length);
+    const previousScope = { ...scope, folder: [...folderValues()], similarIds: [...scope.similarIds] };
     setScope({
         [key]: key === 'folder' ? folderValues(value) : String(value || ''),
-        collectionId: '',
-        collectionName: '',
-        collectionSmart: false,
-        similarIds: [],
-        similarSourceId: '',
-        similarLimit: 100,
-        similarLabel: '',
+        ...(leavingScopedResults ? {
+            collectionId: '',
+            collectionName: '',
+            collectionSmart: false,
+            similarIds: [],
+            similarSourceId: '',
+            similarLimit: 100,
+            similarLabel: '',
+        } : {}),
         ...extra,
     }, { merge: true });
+    if (leavingScopedResults) {
+        const name = previousScope.collectionName || previousScope.similarLabel || 'this view';
+        showToast(`Left '${name}'`, { undo: () => setScope(previousScope) });
+    }
     render();
 }
 
