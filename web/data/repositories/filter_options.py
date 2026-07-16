@@ -133,6 +133,7 @@ async def filter_options(
     tag: str = "",
     caption_model_key: str = "",
     id_filter: set[int] | None = None,
+    collection_id: int = 0,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
 ) -> dict:
@@ -159,6 +160,7 @@ async def filter_options(
         lens=lens,
         tag=tag,
         caption_model_key=caption_model_key,
+        collection_id=collection_id,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )

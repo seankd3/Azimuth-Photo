@@ -480,7 +480,7 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
             "CASE WHEN json_valid(develop_settings.settings) THEN "
             "  CASE WHEN json_type(develop_settings.settings) = 'object' "
             "    THEN develop_settings.settings ELSE '{}' END "
-            "ELSE '{}' END, '$._lr_rating', ?)",
+            "ELSE '{}' END, '$._lr_rating', ?), updated_at=excluded.updated_at",
             (image_id, settings, row["origin"] if row else "sync", incoming, item["rating"]),
         )
     await _record_state(conn, image_id, "rating", incoming)
@@ -490,14 +490,21 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
 async def _merge_develop(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, str]:
     incoming = _family_timestamp(item, "develop")
     row = await (await conn.execute(
-        "SELECT origin, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+        "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
     )).fetchone()
     existing = str(row["updated_at"] or "") if row else ""
     if row and row["origin"] == "user" and existing >= incoming:
         return False, "hub-user-newer"
     if not incoming or incoming <= existing:
         return False, "hub-newer-or-equal"
-    encoded = json.dumps(item["develop_settings"], separators=(",", ":"), sort_keys=True)
+    settings = dict(item["develop_settings"])
+    try:
+        current_settings = json.loads(row["settings"]) if row else {}
+    except (TypeError, ValueError, json.JSONDecodeError):
+        current_settings = {}
+    if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
+        settings["_lr_rating"] = current_settings["_lr_rating"]
+    encoded = json.dumps(settings, separators=(",", ":"), sort_keys=True)
     await conn.execute(
         "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "
         "ON CONFLICT(image_id) DO UPDATE SET settings=excluded.settings, origin='sync', updated_at=excluded.updated_at",

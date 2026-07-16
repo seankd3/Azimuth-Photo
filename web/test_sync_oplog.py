@@ -177,6 +177,49 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()[0])
         self.assertEqual(settings, {"Exposure2012": 1.75, "_lr_rating": 4})
 
+    async def test_rating_bumps_develop_timestamp_and_survives_older_develop_family(self):
+        path = self._catalog()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (1, ?, 'sync', 'before')",
+                (json.dumps({"Exposure2012": 0.5}),),
+            )
+            conn.commit()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "rating",
+            "payload": {"value": 4},
+            "ts": 300.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            updated_at = conn.execute(
+                "SELECT updated_at FROM develop_settings WHERE image_id = 1"
+            ).fetchone()[0]
+        self.assertEqual(updated_at, oplog._iso_timestamp(300.0))
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 2,
+            "content_hash": HASH_A,
+            "family": "develop",
+            "payload": {
+                "settings": {"Exposure2012": 1.5},
+                "updated_at": oplog._iso_timestamp(200.0),
+                "origin": "sync",
+            },
+            "ts": 200.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = 1"
+            ).fetchone()[0])
+        self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
+
     async def test_two_catalog_exchange_replay_and_triple_exchange_do_not_echo(self):
         hub = self._catalog()
         satellite = self._catalog()

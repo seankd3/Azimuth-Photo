@@ -688,9 +688,11 @@ async def filter_options_payload(
     deep: bool = False,
     import_batch: int = 0,
     stacks: str = "expanded",
+    collection_id: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
     return await _configured(_get_filter_options)(
         orientation=orientation,
         compared=compared,
@@ -704,6 +706,7 @@ async def filter_options_payload(
         tag=tag,
         caption_model_key=search.get("caption_model_key") or "",
         id_filter=search_ids,
+        collection_id=collection_id,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=_exclude_collapsed_stack_members(stacks),
     )
@@ -1076,7 +1079,7 @@ async def api_rankings_impl(
                 )
             )
     quality_task = None
-    if offset == 0 and _get_rank_quality is not None and not collection_id:
+    if offset == 0 and _get_rank_quality is not None and not requested_collection_id:
         quality_task = asyncio.create_task(
             _get_rank_quality(
                 orientation=orientation, compared=compared, min_stars=min_stars,

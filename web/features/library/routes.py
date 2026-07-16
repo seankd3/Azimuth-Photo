@@ -193,7 +193,7 @@ async def api_filter_options(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
 ):
     """Return metadata-backed filter choices for the bottom bar."""
     return await library_service.filter_options_payload(
@@ -212,6 +212,7 @@ async def api_filter_options(
         deep=deep,
         import_batch=import_batch,
         stacks=stacks,
+        collection_id=collection_id,
     )
 
 

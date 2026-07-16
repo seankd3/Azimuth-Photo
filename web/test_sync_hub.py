@@ -352,6 +352,63 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(settings, {"Exposure2012": 2.25, "_lr_rating": 5})
 
+    def test_rating_timestamp_blocks_older_develop_and_newer_develop_preserves_rating(self):
+        payload = self.image_bytes("rating-develop-order.jpg", (25, 35, 45))
+        content_hash = self.declare("rating-develop-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?)",
+                (image_id, json.dumps({"Exposure2012": 0.25}), "2026-07-16T00:00:00Z"),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        rating_at = "2026-07-16T03:00:00Z"
+        rating = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "rating": 4,
+            "rating_updated_at": rating_at,
+        }]})
+        self.assertEqual(rating.status_code, 200, rating.text)
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            updated_at = conn.execute(
+                "SELECT updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(updated_at, rating_at)
+
+        older = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": 1.0},
+            "develop_updated_at": "2026-07-16T02:00:00Z",
+        }]})
+        self.assertEqual(older.status_code, 200, older.text)
+        self.assertIn(
+            {"family": "develop", "reason": "hub-newer-or-equal"},
+            older.json()["items"][0]["skipped"],
+        )
+
+        newer = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": 1.5},
+            "develop_updated_at": "2026-07-16T04:00:00Z",
+        }]})
+        self.assertEqual(newer.status_code, 200, newer.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
+
     def test_hash_backfill_batch_and_endpoint(self):
         path = self.root / "legacy.jpg"
         path.write_bytes(self.image_bytes("source.jpg", (4, 5, 6)))

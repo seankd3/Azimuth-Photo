@@ -161,6 +161,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("workerActionsInFlight.has(item.key)", drawer)
         self.assertIn("workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);", drawer)
 
+    def test_background_lease_waits_remain_active_on_desktop(self):
+        drawer = read("drawer.js")
+
+        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry", "waiting_for_model"):
+            self.assertIn(f"'{state}'", drawer)
+        self.assertIn("workerStateIsActive(aiStatus)", drawer)
+        self.assertIn("workerStateIsActive(peopleStatus)", drawer)
+        self.assertIn("workerStateIsActive(captionStatus)", drawer)
+
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")
 

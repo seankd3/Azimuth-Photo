@@ -366,7 +366,7 @@ async def _apply_missing_image_rematch_on_conn(
     if not cursor.rowcount:
         return False
     await conn.execute(
-        "UPDATE images SET filepath = ? WHERE vc_of = ?",
+        "UPDATE images SET filepath = ?, missing_at = NULL WHERE vc_of = ?",
         (row[1], image_id),
     )
     return True
