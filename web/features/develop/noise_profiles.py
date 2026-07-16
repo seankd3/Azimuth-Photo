@@ -11,8 +11,8 @@ import json
 import math
 import re
 from functools import lru_cache
-from pathlib import Path
 from os import PathLike
+from pathlib import Path
 from typing import Mapping
 
 
@@ -82,8 +82,22 @@ def _profiles() -> tuple[dict[str, object], ...]:
             continue
         a = _coefficient_vector(entry.get("a"))
         b = _coefficient_vector(entry.get("b"))
-        if iso > 0.0 and math.isfinite(iso) and a is not None and b is not None and _text(entry.get("model")):
-            result.append({"maker": _text(entry.get("maker")), "model": _text(entry["model"]), "iso": iso, "a": a, "b": b})
+        if (
+            iso > 0.0
+            and math.isfinite(iso)
+            and a is not None
+            and b is not None
+            and _text(entry.get("model"))
+        ):
+            result.append(
+                {
+                    "maker": _text(entry.get("maker")),
+                    "model": _text(entry["model"]),
+                    "iso": iso,
+                    "a": a,
+                    "b": b,
+                }
+            )
     return tuple(result)
 
 
@@ -98,7 +112,10 @@ def _interpolate(lower: Mapping[str, object], upper: Mapping[str, object], iso: 
         return {key: list(lower[key]) for key in ("a", "b")}
     fraction = (math.log(iso) - math.log(lower_iso)) / (math.log(upper_iso) - math.log(lower_iso))
     return {
-        key: [float(left) + fraction * (float(right) - float(left)) for left, right in zip(lower[key], upper[key])]
+        key: [
+            float(left) + fraction * (float(right) - float(left))
+            for left, right in zip(lower[key], upper[key])
+        ]
         for key in ("a", "b")
     }
 
@@ -152,14 +169,18 @@ def suggested_defaults(camera_model: str, iso: float) -> dict[str, float] | None
     sigma, low_sigma, high_sigma = (_green_sigma(value) for value in (coefficients, low, high))
     if sigma is None or low_sigma is None or high_sigma is None or high_sigma <= low_sigma:
         return None
-    fraction = min(1.0, max(0.0, (sigma - low_sigma) / (high_sigma - low_sigma)))
+    # The R5 anchors establish the slider scale, while noisier bodies and
+    # ISOs continue above that reference until the slider's own hard cap.
+    fraction = max(0.0, (sigma - low_sigma) / (high_sigma - low_sigma))
     return {
         key: round(min(100.0, max(0.0, minimum + fraction * (maximum - minimum))), 3)
         for key, (minimum, maximum) in NR_CALIBRATION["slider_values"].items()
     }
 
 
-def resolve_defaults(settings: Mapping[str, object] | None, metadata: Mapping[str, object] | None) -> dict[str, object]:
+def resolve_defaults(
+    settings: Mapping[str, object] | None, metadata: Mapping[str, object] | None
+) -> dict[str, object]:
     """Return render settings with camera defaults only for untouched NR sliders.
 
     Any explicit NR setting suppresses this feature completely, preserving the
@@ -169,8 +190,12 @@ def resolve_defaults(settings: Mapping[str, object] | None, metadata: Mapping[st
     resolved = dict(settings or {})
     if any(key in resolved for key in NR_KEYS) or not isinstance(metadata, Mapping):
         return resolved
-    camera_model = metadata.get("camera_model") or metadata.get("UniqueCameraModel") or metadata.get("Model")
-    iso = metadata.get("iso") or metadata.get("ISO") or metadata.get("PhotographicSensitivity")
+    camera_model = (
+        metadata.get("camera_model") or metadata.get("UniqueCameraModel") or metadata.get("Model")
+    )
+    iso = (
+        metadata.get("iso") or metadata.get("ISO") or metadata.get("PhotographicSensitivity")
+    )
     defaults = suggested_defaults(_text(camera_model), iso)
     return {**resolved, **defaults} if defaults is not None else resolved
 
@@ -185,7 +210,9 @@ def resolve_file_defaults(
     if any(key in resolved for key in NR_KEYS):
         return resolved
     source_metadata = dict(metadata or {})
-    if source_path and not any(source_metadata.get(key) for key in ("iso", "ISO", "PhotographicSensitivity")):
+    if source_path and not any(
+        source_metadata.get(key) for key in ("iso", "ISO", "PhotographicSensitivity")
+    ):
         from .lens import read_exif
 
         source_metadata = {**read_exif(str(source_path)), **source_metadata}
