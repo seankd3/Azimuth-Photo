@@ -7,7 +7,7 @@ import time as _time
 
 from data import connection
 from data.repositories.catalog import HUB_MIRROR_SOURCE_PATH
-from data.repositories.common import chunked as _chunked
+from data.repositories.common import chunked as _chunked, stage_temp_ids
 
 RANKING_SORTS = {
     "elo": "i.elo DESC",
@@ -702,15 +702,21 @@ async def rankings(
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
 
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return []
-        placeholders = ",".join("?" * len(id_filter))
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(id_filter)
+        staged_id_filter = id_filter
 
     conn = await connection.open_async(db_path)
     try:
+        id_filter_join = ""
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_ranking_scope_ids", staged_id_filter)
+            id_filter_join = (
+                "JOIN temp_ranking_scope_ids ranking_scope "
+                "ON ranking_scope.image_id = i.id "
+            )
         if (
             visible_thumb_size
             and cache_root
@@ -760,6 +766,7 @@ async def rankings(
             if not all_catalog_images_active
             else ""
         )
+        source_join += id_filter_join
         page_projection = (
             folder_page_projection(sort)
             if has_absolute_folder_range(folder) and id_filter is None and not text_query
@@ -1720,12 +1727,15 @@ async def date_groups(
         include_source=not all_sources_available,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return []
-        placeholders = ",".join("?" for _ in id_filter)
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(int(image_id) for image_id in id_filter)
+        staged_id_filter = id_filter
+        conditions.append(
+            "EXISTS (SELECT 1 FROM temp_date_group_scope_ids scope_ids "
+            "WHERE scope_ids.image_id = i.id)"
+        )
 
     select_sql = (
         "SELECT "
@@ -1735,6 +1745,8 @@ async def date_groups(
     )
     conn = await connection.open_async(db_path)
     try:
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_date_group_scope_ids", staged_id_filter)
         if visible_thumb_size and cache_root:
             if has_absolute_folder_range(folder):
                 image_source = "images i INDEXED BY idx_images_active_filepath_date_taken"
@@ -1974,12 +1986,15 @@ async def map_markers(
         collection_id=collection_id,
         include_source=not all_sources_available,
     )
+    staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
             return empty_map_markers()
-        placeholders = ",".join("?" for _ in id_filter)
-        conditions.append(f"i.id IN ({placeholders})")
-        params.extend(int(image_id) for image_id in id_filter)
+        staged_id_filter = id_filter
+        conditions.append(
+            "EXISTS (SELECT 1 FROM temp_map_scope_ids scope_ids "
+            "WHERE scope_ids.image_id = i.id)"
+        )
 
     gps_conditions = conditions + ["i.latitude IS NOT NULL", "i.longitude IS NOT NULL"]
     gps_image_source = (
@@ -1989,6 +2004,8 @@ async def map_markers(
     )
     conn = await connection.open_async(db_path)
     try:
+        if staged_id_filter is not None:
+            await stage_temp_ids(conn, "temp_map_scope_ids", staged_id_filter)
         if all_sources_available:
             gps_total_cursor = await conn.execute(
                 f"SELECT COUNT(*) AS count FROM {gps_image_source} "

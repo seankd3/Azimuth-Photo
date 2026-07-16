@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 
 from data.repositories import rankings as ranking_repository
+from data.repositories.common import stage_temp_ids
 
 
 WINDOW_SECONDS = 30 * 60
@@ -133,6 +134,9 @@ async def priority_candidate_batch(
     ]
     params = [requested_collection_id] if requested_collection_id else []
     params.extend([cache_root, preview_size])
+    scope_ids = None
+    excluded_ids = None
+    scope_join = ""
 
     folder_filter = ranking_repository.folder_filter_sql(scope.get("folder"))
     if folder_filter is not None:
@@ -140,11 +144,13 @@ async def priority_candidate_batch(
         conditions.append(condition)
         params.extend(folder_params)
     if image_ids is not None:
-        ordered_ids = sorted(int(image_id) for image_id in image_ids)
-        if not ordered_ids:
+        scope_ids = sorted(int(image_id) for image_id in image_ids)
+        if not scope_ids:
             return []
-        conditions.append(f"i.id IN ({','.join('?' for _ in ordered_ids)})")
-        params.extend(ordered_ids)
+        scope_join = (
+            "JOIN temp_priority_scope_ids priority_scope "
+            "ON priority_scope.image_id = i.id "
+        )
     elif collection_id:
         conditions.append(
             "EXISTS (SELECT 1 FROM collection_images ci "
@@ -152,15 +158,22 @@ async def priority_candidate_batch(
         )
         params.append(collection_id)
     if processed_ids:
-        ordered_ids = sorted(int(image_id) for image_id in processed_ids)
-        conditions.append(f"i.id NOT IN ({','.join('?' for _ in ordered_ids)})")
-        params.extend(ordered_ids)
+        excluded_ids = sorted(int(image_id) for image_id in processed_ids)
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM temp_priority_processed_ids processed "
+            "WHERE processed.image_id = i.id)"
+        )
     params.append(max(1, int(limit)))
 
     conn = await get_db()
     try:
+        if scope_ids is not None:
+            await stage_temp_ids(conn, "temp_priority_scope_ids", scope_ids)
+        if excluded_ids is not None:
+            await stage_temp_ids(conn, "temp_priority_processed_ids", excluded_ids)
         cursor = await conn.execute(
             select
+            + scope_join
             + "WHERE "
             + " AND ".join(conditions)
             + " ORDER BY i.filepath ASC, i.id ASC LIMIT ?",
