@@ -352,7 +352,7 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(settings, {"Exposure2012": 2.25, "_lr_rating": 5})
 
-    def test_rating_timestamp_blocks_older_develop_and_newer_develop_preserves_rating(self):
+    def test_rating_clock_does_not_block_older_develop_family(self):
         payload = self.image_bytes("rating-develop-order.jpg", (25, 35, 45))
         content_hash = self.declare("rating-develop-order.jpg", payload)
         image_id = self.upload(content_hash, payload)
@@ -381,7 +381,7 @@ class SyncHubTests(unittest.TestCase):
             ).fetchone()[0]
         finally:
             conn.close()
-        self.assertEqual(updated_at, rating_at)
+        self.assertEqual(updated_at, "2026-07-16T00:00:00Z")
 
         older = self.client.post("/api/sync/metadata", json={"items": [{
             "content_hash": content_hash,
@@ -389,10 +389,22 @@ class SyncHubTests(unittest.TestCase):
             "develop_updated_at": "2026-07-16T02:00:00Z",
         }]})
         self.assertEqual(older.status_code, 200, older.text)
-        self.assertIn(
-            {"family": "develop", "reason": "hub-newer-or-equal"},
-            older.json()["items"][0]["skipped"],
-        )
+        self.assertIn("develop", older.json()["items"][0]["applied"])
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+            ).fetchone()[0])
+            family_clocks = dict(conn.execute(
+                "SELECT family, updated_at FROM sync_metadata_state WHERE image_id = ?",
+                (image_id,),
+            ))
+        finally:
+            conn.close()
+        self.assertEqual(settings, {"Exposure2012": 1.0, "_lr_rating": 4})
+        self.assertEqual(family_clocks["rating"], rating_at)
+        self.assertEqual(family_clocks["develop"], "2026-07-16T02:00:00Z")
 
         newer = self.client.post("/api/sync/metadata", json={"items": [{
             "content_hash": content_hash,

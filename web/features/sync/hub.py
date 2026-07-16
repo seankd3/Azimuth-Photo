@@ -480,7 +480,7 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
             "CASE WHEN json_valid(develop_settings.settings) THEN "
             "  CASE WHEN json_type(develop_settings.settings) = 'object' "
             "    THEN develop_settings.settings ELSE '{}' END "
-            "ELSE '{}' END, '$._lr_rating', ?), updated_at=excluded.updated_at",
+            "ELSE '{}' END, '$._lr_rating', ?)",
             (image_id, settings, row["origin"] if row else "sync", incoming, item["rating"]),
         )
     await _record_state(conn, image_id, "rating", incoming)
@@ -492,10 +492,11 @@ async def _merge_develop(conn, image_id: int, item: dict[str, Any]) -> tuple[boo
     row = await (await conn.execute(
         "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
     )).fetchone()
-    existing = str(row["updated_at"] or "") if row else ""
-    if row and row["origin"] == "user" and existing >= incoming:
+    row_updated_at = str(row["updated_at"] or "") if row else ""
+    if row and row["origin"] == "user" and row_updated_at >= incoming:
         return False, "hub-user-newer"
-    if not incoming or incoming <= existing:
+    existing = await _state_timestamp(conn, image_id, "develop")
+    if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     settings = dict(item["develop_settings"])
     try:

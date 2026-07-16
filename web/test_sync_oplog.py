@@ -177,7 +177,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             ).fetchone()[0])
         self.assertEqual(settings, {"Exposure2012": 1.75, "_lr_rating": 4})
 
-    async def test_rating_bumps_develop_timestamp_and_survives_older_develop_family(self):
+    async def test_rating_clock_does_not_bump_develop_timestamp(self):
         path = self._catalog()
         with sqlite3.connect(path) as conn:
             conn.execute(
@@ -199,7 +199,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             updated_at = conn.execute(
                 "SELECT updated_at FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0]
-        self.assertEqual(updated_at, oplog._iso_timestamp(300.0))
+        self.assertEqual(updated_at, "before")
 
         await oplog.apply_entries(path, [{
             "origin": "satellite",
@@ -218,7 +218,12 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             settings = json.loads(conn.execute(
                 "SELECT settings FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0])
+            family_clocks = dict(conn.execute(
+                "SELECT family, ts FROM oplog_family_state WHERE content_hash = ?",
+                (HASH_A,),
+            ))
         self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
+        self.assertEqual(family_clocks, {"develop": 200.0, "rating": 300.0})
 
     async def test_two_catalog_exchange_replay_and_triple_exchange_do_not_echo(self):
         hub = self._catalog()
