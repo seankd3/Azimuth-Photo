@@ -13,7 +13,7 @@ import {
     closeRefine, refineOpen, openRefine, pickByKey, undoRefine,
 } from './refine.js';
 import {
-    cycleDensity, emit, on, patchPrefs, patchScope, scope, toggleBestOf, viewState,
+    cycleDensity, developOpen, emit, on, patchPrefs, patchScope, scope, toggleBestOf, viewState,
 } from './state.js';
 import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
@@ -27,10 +27,6 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
-import {
-    applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
-} from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 
 function inputFocused() {
@@ -264,7 +260,7 @@ export function initKeyboard() {
         const input = document.getElementById('auto-advance-flags');
         if (input) input.checked = Boolean(prefs.autoAdvanceFlags);
     });
-    window.addEventListener('keydown', (event) => {
+    window.addEventListener('keydown', async (event) => {
         if (event.key === 'Escape') {
             if (escapeOneLayer()) {
                 event.preventDefault();
@@ -276,12 +272,16 @@ export function initKeyboard() {
             const key = event.key.toLowerCase();
             if (key === 'y') {
                 event.preventDefault();
+                const { toggleDevelopCompare } = await import('./develop/develop.js');
                 toggleDevelopCompare(event.altKey ? 'horizontal' : 'vertical');
                 return;
             }
             if (key === 'r') {
                 event.preventDefault();
-                if (!event.repeat) holdDevelopReference(true);
+                if (!event.repeat) {
+                    const { holdDevelopReference } = await import('./develop/develop.js');
+                    holdDevelopReference(true);
+                }
                 return;
             }
         }
@@ -290,6 +290,7 @@ export function initKeyboard() {
             if (foregroundLayerOpen() || inputFocused()) return;
             if (event.code === 'Quote' && developOpen()) {
                 event.preventDefault();
+                const { createVirtualCopy } = await import('./develop/develop.js');
                 createVirtualCopy();
                 return;
             }
@@ -307,16 +308,19 @@ export function initKeyboard() {
                 const targets = selection.size ? [...selection] : [currentFocusedImage()?.id];
                 if (event.shiftKey && key === 'c') {
                     event.preventDefault();
+                    const { copyDevelopSettingsFromGrid } = await import('./develop/develop.js');
                     copyDevelopSettingsFromGrid(currentFocusedImage(), document.getElementById('grid-flow'));
                     return;
                 }
                 if (event.shiftKey && key === 'v') {
                     event.preventDefault();
+                    const { pasteDevelopSettingsToGrid } = await import('./develop/develop.js');
                     pasteDevelopSettingsToGrid(targets);
                     return;
                 }
                 if (event.altKey && key === 'v') {
                     event.preventDefault();
+                    const { applyPreviousDevelopSettingsToGrid } = await import('./develop/develop.js');
                     applyPreviousDevelopSettingsToGrid(targets);
                     return;
                 }
@@ -346,7 +350,10 @@ export function initKeyboard() {
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
             event.preventDefault();
-            if (!developOpen()) openDevelop();
+            if (!developOpen()) {
+                const { openDevelop } = await import('./develop/develop.js');
+                openDevelop();
+            }
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
@@ -514,8 +521,11 @@ export function initKeyboard() {
             moveFocus(-focusColumns());
         }
     });
-    window.addEventListener('keyup', (event) => {
-        if (developOpen() && event.key.toLowerCase() === 'r') holdDevelopReference(false);
+    window.addEventListener('keyup', async (event) => {
+        if (developOpen() && event.key.toLowerCase() === 'r') {
+            const { holdDevelopReference } = await import('./develop/develop.js');
+            holdDevelopReference(false);
+        }
     });
     on('help:open', openHelp);
 }
