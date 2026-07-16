@@ -2,7 +2,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
 import { loadCollectionImageIds } from './scope_data.js';
-import { scope, scopeParams } from './state.js';
+import { scope, scopeParams, viewState } from './state.js';
 import { openExportDialog } from './develop/export_dialog.js';
 
 export const ZIP_EXPORT_MAX = 2000;
@@ -51,7 +51,11 @@ function anchoredPopover(anchor, html) {
 async function scopedImageIds() {
     if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
     if (scope.collectionId) return loadCollectionImageIds(scope.collectionId);
-    const payload = await getRankings(scopeParams({ limit: 50000 }));
+    const bestOf = viewState.bestOf && viewState.bestOfLimit != null;
+    const payload = await getRankings(scopeParams({
+        limit: bestOf ? viewState.bestOfLimit : 50000,
+        ...(bestOf ? { sort: 'elo' } : {}),
+    }));
     return (payload?.images || []).map((image) => Number(image.id)).filter((id) => id > 0);
 }
 
@@ -60,7 +64,7 @@ export function openExportMenu(anchor, choose, options = {}) {
     ensureMenu();
     releaseFocus(menu);
     returnEl = anchor;
-    return openExportDialog({
+    const popover = openExportDialog({
         button: anchor,
         imageIds: options.imageIds || null,
         getImageIds: options.imageIds ? null : scopedImageIds,
@@ -70,6 +74,8 @@ export function openExportMenu(anchor, choose, options = {}) {
         onDataExport: (format) => choose({ format }),
         onOriginalsExport: () => choose({ format: 'zip', size: 'original' }),
     });
+    requestAnimationFrame(() => positionDialog(anchor));
+    return popover;
 }
 
 export function closeExportMenu() {
