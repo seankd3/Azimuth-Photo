@@ -359,9 +359,10 @@ export function initKeyboard() {
             return;
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
+            // Only reachable with the editor closed — the develop guard above
+            // owns D-toggle-close while it is open.
             event.preventDefault();
-            if (developOpen()) closeDevelop();
-            else openDevelop();
+            openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
