@@ -657,17 +657,86 @@ function renderWebsiteDeliver(session, token) {
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
 }
 
-function renderGalleryDeliver(session) {
+async function renderGalleryDeliver(session, token) {
     renderDeliverShell(session.name, 'gallery', '<div class="muted">Client gallery settings are loading…</div>');
     bindDeliverTabs((tab) => switchDeliverTab(session, tab));
     trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
+    try {
+        const galleryEditor = await import('./gallery_editor.js');
+        const galleryData = await galleryEditor.loadGalleryDelivery(session.collectionId, getCollection);
+        if (!deliverOverlayIsCurrent(token) || deliverSession !== session || session.activeTab !== 'gallery') return;
+        session.galleryEditor = galleryEditor;
+        session.galleryData = galleryData;
+        const gallery = galleryData.gallery;
+        const body = deliverTitleRow(session, session.draft.title || gallery?.title || session.name)
+            + galleryEditor.galleryDeliveryFields(gallery, galleryData.images)
+            + deliverPasswordRow({ protected: Boolean(gallery?.protected), value: session.draft.password, action: gallery ? (gallery.protected ? 'Change' : 'Set') : '', clear: Boolean(gallery?.protected) })
+            + deliverLinkRow(gallery?.url || '')
+            + '<div class="publish-actions">'
+            + (gallery ? '<button data-deliver-gallery-revoke type="button" class="btn-danger">Revoke</button>' : '')
+            + `<button data-deliver-gallery-save type="button">${gallery ? 'Update client gallery' : 'Create client gallery'}</button></div>`;
+        renderDeliverShell(session.name, 'gallery', body);
+        bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+        bindDeliverCommon(session, gallery?.url || '');
+        deliverOverlay.querySelector('[data-deliver-gallery-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+            saveDeliverDraft(session);
+            try {
+                const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
+                    title: session.draft.title || session.name,
+                    password: session.draft.password,
+                }));
+                if (!deliverOverlayIsCurrent(token)) return;
+                session.galleryData.gallery = result.gallery;
+                session.draft.password = '';
+                showToast(gallery ? 'Client gallery updated' : 'Client gallery created');
+                emitSharedSurfacesChanged(session.collectionId);
+                renderGalleryDeliver(session, token);
+            } catch (error) {
+                showToast(error.message || 'Could not save client gallery');
+            }
+        }));
+        deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', () => deliverOverlay.querySelector('[data-deliver-gallery-save]')?.click());
+        deliverOverlay.querySelector('[data-deliver-password-clear]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+            try {
+                const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
+                    title: session.draft.title || session.name,
+                    clearPassword: true,
+                }));
+                if (!deliverOverlayIsCurrent(token)) return;
+                session.galleryData.gallery = result.gallery;
+                showToast('Password removed');
+                renderGalleryDeliver(session, token);
+            } catch (error) {
+                showToast(error.message || 'Could not remove password');
+            }
+        }));
+        bindDeliverConfirmButton('[data-deliver-gallery-revoke]', 'Confirm revoke', async () => {
+            try {
+                await galleryEditor.revokeGalleryDelivery(session.collectionId, gallery.id);
+                if (!deliverOverlayIsCurrent(token)) return;
+                session.galleryData.gallery = null;
+                showToast('Client gallery revoked');
+                emitSharedSurfacesChanged(session.collectionId);
+                renderGalleryDeliver(session, token);
+            } catch (error) {
+                showToast(error.message || 'Could not revoke client gallery');
+            }
+        });
+        trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
+    } catch (error) {
+        if (!deliverOverlayIsCurrent(token) || deliverSession !== session || session.activeTab !== 'gallery') return;
+        renderDeliverShell(session.name, 'gallery', `<div class="publish-error"><b>Couldn’t load client gallery settings.</b><p>${esc(error.message || 'Try again when ready.')}</p><button data-deliver-gallery-retry type="button">Try again</button></div>`);
+        bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+        deliverOverlay.querySelector('[data-deliver-gallery-retry]')?.addEventListener('click', () => renderGalleryDeliver(session, token));
+        trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
+    }
 }
 
 async function renderDeliver(session, token = deliverOverlayToken) {
     if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
     if (session.activeTab === 'private') return renderPrivateDeliver(session, token);
     if (session.activeTab === 'website') return renderWebsiteDeliver(session, token);
-    renderGalleryDeliver(session);
+    return renderGalleryDeliver(session, token);
 }
 
 function switchDeliverTab(session, tab) {
