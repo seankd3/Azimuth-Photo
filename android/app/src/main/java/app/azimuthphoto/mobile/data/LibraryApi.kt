@@ -158,12 +158,10 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
 
     /** A collection's photos — the dedicated route returns full image objects. */
     suspend fun collectionPhotos(id: Long): List<ArchiveImage> = withContext(Dispatchers.IO) {
-        runCatching {
-            val obj = json.parseToJsonElement(get("/api/collections/$id/images")).jsonObject
-            (obj["images"] as? JsonArray)?.let {
-                json.decodeFromString<List<ArchiveImage>>(it.toString())
-            } ?: emptyList()
-        }.getOrDefault(emptyList())
+        val obj = json.parseToJsonElement(get("/api/collections/$id/images")).jsonObject
+        (obj["images"] as? JsonArray)?.let {
+            json.decodeFromString<List<ArchiveImage>>(it.toString())
+        } ?: emptyList()
     }
 
     suspend fun createCollection(name: String): Long? = withContext(Dispatchers.IO) {

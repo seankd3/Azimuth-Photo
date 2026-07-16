@@ -165,11 +165,14 @@ private fun LibraryHome(
     onOpenTag: (String) -> Unit,
     onOpenPhotos: (List<ArchiveImage>, Int) -> Unit,
 ) {
-    var people by remember { mutableStateOf<List<Person>>(emptyList()) }
-    var collections by remember { mutableStateOf<List<Collection>>(emptyList()) }
-    LaunchedEffect(api) {
-        people = runCatching { api.people() }.getOrDefault(emptyList())
-        collections = runCatching { api.collections() }.getOrDefault(emptyList())
+    var people by remember { mutableStateOf<LoadState<List<Person>>>(LoadState.Loading) }
+    var collections by remember { mutableStateOf<LoadState<List<Collection>>>(LoadState.Loading) }
+    var reloads by remember { mutableStateOf(0) }
+    LaunchedEffect(api, reloads) {
+        people = LoadState.Loading
+        collections = LoadState.Loading
+        people = loadState { api.people() }
+        collections = loadState { api.collections() }
     }
 
     Column(
@@ -193,14 +196,15 @@ private fun LibraryHome(
 
         MemoriesStrip(serverUrl = serverUrl, onOpenPhotos = onOpenPhotos)
 
-        if (people.isNotEmpty()) {
+        val loadedPeople = (people as? LoadState.Ok<List<Person>>)?.value
+        if (loadedPeople?.isNotEmpty() == true) {
             SectionHeader("People", actionLabel = "See all", onAction = onOpenPeople)
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
-                people.take(12).forEach { person ->
+                loadedPeople.take(12).forEach { person ->
                     Column(
                         Modifier.width(76.dp).clickable { onOpenPerson(person) },
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -225,14 +229,20 @@ private fun LibraryHome(
             }
         }
 
-        if (collections.isNotEmpty()) {
+        else if (people is LoadState.Error) {
+            SectionHeader("People")
+            ArchiveOfflineRow(onRetry = { reloads++ }, modifier = Modifier.padding(horizontal = 16.dp))
+        }
+
+        val loadedCollections = (collections as? LoadState.Ok<List<Collection>>)?.value
+        if (loadedCollections?.isNotEmpty() == true) {
             SectionHeader("Collections", actionLabel = "See all", onAction = onOpenCollections)
             Row(
                 Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
                     .padding(horizontal = 12.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                collections.take(10).forEach { collection ->
+                loadedCollections.take(10).forEach { collection ->
                     Column(Modifier.width(150.dp).clickable { onOpenCollection(collection) }) {
                         AsyncImage(
                             model = ImageRequest.Builder(LocalContext.current)
@@ -256,6 +266,9 @@ private fun LibraryHome(
                     }
                 }
             }
+        } else if (collections is LoadState.Error) {
+            SectionHeader("Collections")
+            ArchiveOfflineRow(onRetry = { reloads++ }, modifier = Modifier.padding(horizontal = 16.dp))
         }
 
         // Places entry card.

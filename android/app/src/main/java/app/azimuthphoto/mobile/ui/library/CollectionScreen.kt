@@ -66,13 +66,15 @@ fun CollectionScreen(
 ) {
     val scope = rememberCoroutineScope()
     val toastContext = LocalContext.current
-    var photos by remember(collection.id) { mutableStateOf<List<ArchiveImage>?>(null) }
+    var photos by remember(collection.id) { mutableStateOf<LoadState<List<ArchiveImage>>>(LoadState.Loading) }
+    var reloads by remember(collection.id) { mutableStateOf(0) }
     var sharing by remember { mutableStateOf(false) }
     var shareUrl by remember { mutableStateOf<String?>(null) }
     val columns = rememberGridColumns()
 
-    LaunchedEffect(collection.id) {
-        photos = runCatching { api.collectionPhotos(collection.id) }.getOrDefault(emptyList())
+    LaunchedEffect(collection.id, reloads) {
+        photos = LoadState.Loading
+        photos = loadState { api.collectionPhotos(collection.id) }
     }
 
     BackHandler(onBack = onBack)
@@ -129,15 +131,22 @@ fun CollectionScreen(
             )
         },
     ) { padding ->
-        val loaded = photos
-        if (loaded == null) {
+        val state = photos
+        if (state is LoadState.Loading) {
             Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
                 CircularProgressIndicator(color = TextSecondary)
             }
-        } else if (loaded.isEmpty()) {
+        } else if (state is LoadState.Error) {
+            Box(
+                Modifier.fillMaxSize().padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                ArchiveOfflineRow(onRetry = { reloads++ })
+            }
+        } else if ((state as LoadState.Ok<List<ArchiveImage>>).value.isEmpty()) {
             Box(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
@@ -145,6 +154,7 @@ fun CollectionScreen(
                 Text("No photos in this collection yet.", color = TextSecondary)
             }
         } else {
+            val loaded = state.value
             LazyVerticalGrid(
                 columns = GridCells.Fixed(columns),
                 modifier = Modifier.fillMaxSize().background(Ink).padding(padding).gridDensityPinch(columns),
