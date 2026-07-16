@@ -71,6 +71,11 @@ class MobileOfflineContractsTests(unittest.TestCase):
         for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry", "waiting_for_model"):
             self.assertIn(f"'{state}'", library)
 
+    def test_cache_pregen_wait_remains_active_on_mobile(self):
+        library = self.read("static", "js", "mobile", "library.js")
+
+        self.assertIn("['running', 'waiting'].includes(cachePregen.state)", library)
+
     def test_smart_collection_scopes_hide_membership_actions(self):
         state = self.read("static", "js", "mobile", "state.js")
         library = self.read("static", "js", "mobile", "library.js")

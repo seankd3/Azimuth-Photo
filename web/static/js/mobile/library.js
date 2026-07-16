@@ -303,7 +303,7 @@ function workRows() {
                 ? `${fmtInt(preview.count)} / ${fmtInt(preview.total)} previews`
                 : 'Checking status…',
             paused: Boolean(cachePregen.manual_pause),
-            running: cachePregen.state === 'running',
+            running: ['running', 'waiting'].includes(cachePregen.state),
         },
         {
             key: 'people',
