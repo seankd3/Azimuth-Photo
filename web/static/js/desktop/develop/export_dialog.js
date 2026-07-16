@@ -1,9 +1,11 @@
 /**
  * Develop export dialog + settings sync (§24).
  *
- * Mounted from develop.js. Owns the expanded export popover (format, quality,
- * long-edge resize, output sharpening, filename pattern, save-to-library),
- * the Sync… checkbox popover, and grid batch-export queue helpers.
+ * Shared desktop export dialog plus Develop settings sync (§24).
+ *
+ * The dialog keeps Develop's existing Photos controls and batch pipeline, while
+ * callers supply the photos currently in hand and, when needed, their legacy
+ * Originals/Data export actions.
  */
 
 import { fetchOptionsWithTimeout } from '../../api.js';
@@ -59,12 +61,11 @@ function readExportOptions(root) {
     };
 }
 
-function exportDialogHtml(image) {
+function photoExportHtml(image) {
     const sharpen = SHARPEN_OPTIONS.map(([value, label]) => (
         `<option value="${value}">${escapeHtml(label)}</option>`
     )).join('');
     return [
-        '<strong>Export developed photo</strong>',
         '<label>Preset<select data-export-preset data-tip="Saved export presets"><option value="">Custom</option></select></label>',
         '<label>Format<select data-export-format data-tip="Export format"><option value="jpeg">JPEG</option><option value="tiff16">16-bit TIFF</option></select></label>',
         '<label>Quality<input data-export-quality type="number" min="1" max="100" value="92" data-tip="JPEG quality"></label>',
@@ -74,6 +75,26 @@ function exportDialogHtml(image) {
         '<label class="develop-export-check" data-tip="Register the JPEG under Develop Exports and keep it with this RAW"><input data-export-library type="checkbox"> Save to library</label>',
         '<button data-export-confirm class="primary" data-tip="Render and download export">Export</button>',
         '<button data-export-save-preset type="button" data-tip="Save these options as a named preset">Save preset…</button>',
+    ].join('');
+}
+
+function exportDialogHtml(image, title) {
+    return [
+        `<strong>${escapeHtml(title || 'Export')}</strong>`,
+        '<div class="export-dialog-tabs" role="tablist" aria-label="Export type">',
+        '<button type="button" role="tab" aria-selected="true" data-export-tab="photos">Photos</button>',
+        '<button type="button" role="tab" aria-selected="false" data-export-tab="originals">Originals</button>',
+        '<button type="button" role="tab" aria-selected="false" data-export-tab="data">Data</button>',
+        '</div>',
+        `<section class="export-dialog-panel" role="tabpanel" data-export-panel="photos">${photoExportHtml(image)}</section>`,
+        '<section class="export-dialog-panel" role="tabpanel" data-export-panel="originals" hidden>',
+        '<p class="export-dialog-hint">Download the original files together as a zip.</p>',
+        '<button type="button" class="primary" data-export-originals>Download originals</button>',
+        '</section>',
+        '<section class="export-dialog-panel" role="tabpanel" data-export-panel="data" hidden>',
+        '<p class="export-dialog-hint">Export photo metadata for the photos in hand.</p>',
+        '<div class="export-dialog-actions"><button type="button" data-export-data="csv">CSV</button><button type="button" data-export-data="json">JSON</button></div>',
+        '</section>',
     ].join('');
 }
 
@@ -192,21 +213,94 @@ function bindPresetSave(popover, { showToast }) {
     });
 }
 
-export function openExportDialog({ button, image, anchoredPopover, closePopover, showToast, isRaw }) {
-    if (!image || (isRaw && !isRaw(image))) return null;
-    const popover = anchoredPopover(button, exportDialogHtml(image));
+function idsFrom(image, imageIds) {
+    const ids = imageIds || (image?.id ? [image.id] : []);
+    return [...new Set(ids.map(Number).filter((id) => id > 0))];
+}
+
+function downloadLegacyExport(imageIds, format, { showToast }) {
+    const ids = idsFrom(null, imageIds);
+    if (!ids.length) return;
+    const params = new URLSearchParams({ format, ids: ids.join(',') });
+    const link = document.getElementById('download-link');
+    link.href = `/api/export?${params.toString()}`;
+    link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
+    link.click();
+    showToast?.(format === 'zip' ? 'Preparing original files' : `Exporting as ${format.toUpperCase()}`);
+}
+
+function setActiveTab(popover, tab) {
+    for (const button of popover.querySelectorAll('[data-export-tab]')) {
+        const active = button.dataset.exportTab === tab;
+        button.setAttribute('aria-selected', active ? 'true' : 'false');
+        button.tabIndex = active ? 0 : -1;
+    }
+    for (const panel of popover.querySelectorAll('[data-export-panel]')) {
+        panel.hidden = panel.dataset.exportPanel !== tab;
+    }
+    popover.dataset.exportActiveTab = tab;
+}
+
+export function openExportDialog({
+    button,
+    image = null,
+    imageIds = null,
+    getImageIds = null,
+    anchoredPopover,
+    closePopover,
+    showToast,
+    isRaw,
+    onDataExport = null,
+    onOriginalsExport = null,
+    title = 'Export',
+}) {
+    if (image && isRaw && !isRaw(image)) return null;
+    const fallbackIds = idsFrom(image, imageIds);
+    if (!fallbackIds.length && !getImageIds) return null;
+    const popover = anchoredPopover(button, exportDialogHtml(image, title));
     popover.classList.add('develop-export-dialog');
     loadPresetsInto(popover);
     bindPresetSave(popover, { showToast });
-    popover.querySelector('[data-export-confirm]')?.addEventListener('click', async () => {
+    const resolveIds = async () => {
+        const resolved = getImageIds ? await getImageIds() : fallbackIds;
+        return idsFrom(null, resolved);
+    };
+    const exportPhotos = async () => {
         const options = readExportOptions(popover);
         closePopover?.();
         try {
-            await downloadExportBlob(image, options, { showToast });
+            const ids = await resolveIds();
+            if (!ids.length) {
+                showToast?.('Select photos to export');
+            } else if (image && ids.length === 1 && ids[0] === Number(image.id)) {
+                await downloadExportBlob(image, options, { showToast });
+            } else {
+                await queueBatchExport(ids, options, { showToast });
+            }
         } catch {
             showToast?.('Export failed');
         }
+    };
+    popover.querySelector('[data-export-confirm]')?.addEventListener('click', exportPhotos);
+    popover.querySelector('[data-export-originals]')?.addEventListener('click', async () => {
+        closePopover?.();
+        const ids = await resolveIds();
+        if (onOriginalsExport) onOriginalsExport(ids);
+        else downloadLegacyExport(ids, 'zip', { showToast });
     });
+    for (const dataButton of popover.querySelectorAll('[data-export-data]')) {
+        dataButton.addEventListener('click', async () => {
+            closePopover?.();
+            const ids = await resolveIds();
+            const format = dataButton.dataset.exportData;
+            if (onDataExport) onDataExport(format, ids);
+            else downloadLegacyExport(ids, format, { showToast });
+        });
+    }
+    for (const tabButton of popover.querySelectorAll('[data-export-tab]')) {
+        tabButton.addEventListener('click', () => setActiveTab(popover, tabButton.dataset.exportTab));
+    }
+    setActiveTab(popover, 'photos');
     return popover;
 }
 
