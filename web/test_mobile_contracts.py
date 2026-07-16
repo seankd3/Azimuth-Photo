@@ -1,6 +1,10 @@
 import os
 import unittest
 
+from fastapi.testclient import TestClient
+
+import app as app_module
+
 class MobileOfflineContractsTests(unittest.TestCase):
     def setUp(self):
         self.base_dir = os.path.dirname(__file__)
@@ -45,13 +49,13 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("resolveSecureAppUrl", bootstrap)
         self.assertIn("fallbackSecureAppUrl", bootstrap)
 
-    def test_loupe_swipes_cull_without_replacing_navigation(self):
+    def test_loupe_swipe_favorites_without_replacing_navigation(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")
 
-        self.assertIn("cullSwipe('picked')", viewer)
-        self.assertIn("cullSwipe('rejected')", viewer)
+        self.assertIn("function favoriteSwipe()", viewer)
+        self.assertIn("void applyFlags([image.id], 'picked')", viewer)
         self.assertIn("const dir = dx < 0 ? 1 : -1", viewer)
-        self.assertIn("flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected'", viewer)
+        self.assertIn("flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected'", viewer)
 
     def test_search_flattens_grouped_people_before_rendering(self):
         search = self.read("static", "js", "mobile", "search.js")

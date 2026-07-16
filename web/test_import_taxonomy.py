@@ -354,6 +354,47 @@ class ReclassifyGatedTests(BackendTestCase):
         self.assertTrue(good.is_file())
         self.assertFalse(stranded.exists())
 
+    async def test_reclassify_personal_http_moves_only_stranded_rows_and_is_idempotent(self):
+        library = Path(self.tempdir.name) / "Photos"
+        bad = library / "RAWS" / "Personal Photos" / "2026" / "2026-07-10"
+        bad.mkdir(parents=True)
+        stranded = bad / "PXL_stranded.jpg"
+        stranded.write_bytes(b"mis-nested-phone")
+        source = await db.add_or_restore_source(str(library / "RAWS"))
+        await db.insert_images_batch(
+            [(stranded.name, str(stranded), ".jpg", stranded.stat().st_size, stranded.stat().st_mtime)],
+            source_id=source["id"],
+        )
+        untouched = library / "RAWS" / "2026" / "camera.jpg"
+        untouched.parent.mkdir(parents=True)
+        untouched.write_bytes(b"camera-original")
+        await db.insert_images_batch(
+            [(untouched.name, str(untouched), ".jpg", untouched.stat().st_size, untouched.stat().st_mtime)],
+            source_id=source["id"],
+        )
+
+        from features.imports import routes as import_routes
+
+        def request():
+            with TestClient(__import__("app").app) as client:
+                return client.post(
+                    "/api/import/taxonomy/reclassify-personal",
+                    json={"confirm": True, "dry_run": False, "move_files": True},
+                )
+
+        with patch.object(import_routes.sync_hub, "default_library_root", return_value=library):
+            response = await asyncio.to_thread(request)
+            retry = await asyncio.to_thread(request)
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["updated"], 1)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["updated"], 0)
+        moved = library / "Personal Photos" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
+        self.assertTrue(moved.is_file())
+        self.assertFalse(stranded.exists())
+        self.assertTrue(untouched.is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
