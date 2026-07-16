@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.develop import virtual_copies
 from features.library import watched_folders, watched_routes
 
 
@@ -127,6 +128,57 @@ class WatchedFolderTests(BackendTestCase):
         finally:
             conn.close()
         self.assertIn(preserved, paths)
+
+    async def test_watched_folder_rematch_restores_virtual_copy_availability(self):
+        inbox = os.path.join(self.tempdir.name, 'vc-rematch')
+        os.makedirs(inbox)
+        original = os.path.join(inbox, 'photo.jpg')
+        with open(original, 'wb') as handle:
+            handle.write(b'virtual copy source')
+
+        folder = await watched_folders.add_folder(db.DB_PATH, inbox, recursive=True)
+        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(initial['registered'], 1)
+
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                'SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL', (original,)
+            )).fetchone()
+            copy = await virtual_copies.create_virtual_copy(conn, int(master['id']))
+            await conn.commit()
+            master_id = int(master['id'])
+            copy_id = int(copy['id'])
+        finally:
+            await conn.close()
+
+        moved_dir = os.path.join(inbox, 'moved')
+        os.makedirs(moved_dir)
+        moved = os.path.join(moved_dir, 'photo.jpg')
+        os.rename(original, moved)
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                'UPDATE images SET missing_at = 100 WHERE id IN (?, ?)',
+                (master_id, copy_id),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        rematch = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        self.assertEqual(rematch['registered'], 1)
+        conn = await db.get_db()
+        try:
+            rows = await (await conn.execute(
+                'SELECT id, filepath, missing_at FROM images WHERE id IN (?, ?) ORDER BY id',
+                (master_id, copy_id),
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row['filepath'] for row in rows], [moved, moved])
+        self.assertTrue(all(row['missing_at'] is None for row in rows))
 
     async def test_watched_folder_ui_contract(self):
         base_dir = os.path.dirname(__file__)
