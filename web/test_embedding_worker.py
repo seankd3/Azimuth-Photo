@@ -649,6 +649,25 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["state"], "error")
         self.assertIn("torch", status["last_error"])
 
+    async def test_bulk_model_load_starts_search_model_residency(self):
+        observed = []
+
+        async def stop_after_model_load(**_kwargs):
+            task = embedding_worker._search_model_residency_task
+            observed.append((
+                embedding_worker.get_worker_status()["state"],
+                task is not None and not task.done(),
+            ))
+            raise asyncio.CancelledError
+
+        embedding_worker._load_model = lambda *_args: object()
+        embedding_worker._get_unembedded_images = stop_after_model_load
+
+        with self.assertRaises(asyncio.CancelledError):
+            await embedding_worker.run_embedding_worker()
+
+        self.assertEqual(observed, [("resident", True)])
+
     async def test_search_model_loader_waits_for_fresh_caption_lease(self):
         load_started = threading.Event()
 
