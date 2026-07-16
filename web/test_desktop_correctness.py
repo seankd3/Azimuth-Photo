@@ -1,6 +1,8 @@
 """Regression gates for desktop interaction correctness fixes."""
 
 from pathlib import Path
+import json
+import subprocess
 import unittest
 
 
@@ -86,6 +88,68 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("sessionImages = sessionImages.filter", loupe)
         self.assertIn("if (!remaining.length) {\n        closeLoupe();", loupe)
         self.assertIn("on('trash:changed', ({ imageIds } = {}) => discardTrashedImages(imageIds));", loupe)
+
+    def test_trash_change_emitters_use_only_server_confirmed_ids(self):
+        trash = read("trash.js")
+        duplicates = read("duplicates.js")
+        outcome_path = WEB / "static" / "js" / "desktop" / "trash_outcome.js"
+        script = f"""
+            import {{ imageMutationOutcome, mutationFailureReason, mutationPartialSuffix }}
+                from {json.dumps(outcome_path.as_uri())};
+            const empty = imageMutationOutcome({{
+                ok: true,
+                data: {{ trashed: [], errors: [{{ id: 4, reason: 'source path missing' }}] }},
+            }}, 'trashed');
+            if (empty.imageIds.length !== 0) throw new Error('empty result reported moved ids');
+            if (mutationFailureReason(empty.errors, 'fallback') !== 'source path missing') {{
+                throw new Error('server reason was not surfaced');
+            }}
+            const partial = imageMutationOutcome({{
+                ok: true,
+                data: {{ trashed: [7, 7], errors: [{{ id: 8 }}, {{ id: 9 }}] }},
+            }}, 'trashed');
+            if (JSON.stringify(partial.imageIds) !== '[7]') throw new Error('server ids were not normalized');
+            if (mutationPartialSuffix(partial.errors, 'trashed') !== " · 2 couldn't be trashed") {{
+                throw new Error('partial failure count was not surfaced');
+            }}
+        """
+        subprocess.run(
+            ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        for source in (trash, duplicates):
+            self.assertNotIn("emit('trash:changed', { imageIds });", source)
+        self.assertEqual(trash.count("imageMutationOutcome("), 4)
+        self.assertEqual(duplicates.count("imageMutationOutcome("), 4)
+
+        trash_start = trash.index("export async function trashSelectedImages()")
+        trash_action = trash[trash_start:trash.index("\n}\n", trash_start)]
+        self.assertLess(
+            trash_action.index("imageMutationOutcome(result, 'trashed')"),
+            trash_action.index("if (!trashedIds.length)"),
+        )
+        self.assertLess(
+            trash_action.index("if (!trashedIds.length)"),
+            trash_action.index("clearSelection();"),
+        )
+        self.assertLess(
+            trash_action.index("clearSelection();"),
+            trash_action.index("emit('trash:changed', { imageIds: trashedIds });"),
+        )
+        self.assertIn("fmt(trashedIds.length)", trash_action)
+        self.assertIn("mutationPartialSuffix(errors, 'trashed')", trash_action)
+
+        for function_name in ("keepCoverForStack", "keepCoversEverywhere"):
+            start = duplicates.index(f"async function {function_name}(")
+            action = duplicates[start:duplicates.index("\n}\n", start)]
+            self.assertLess(
+                action.index("if (!trashedIds.length)"),
+                action.index("emit('trash:changed', { imageIds: trashedIds });"),
+            )
+            self.assertIn("mutationPartialSuffix(errors, 'trashed')", action)
 
     def test_duplicate_undo_reapplies_server_flags_when_the_undo_write_fails(self):
         duplicates = read("duplicates.js")

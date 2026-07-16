@@ -11,6 +11,9 @@ import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import {
+    imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
+} from './trash_outcome.js';
 
 let root = null;
 let open = false;
@@ -379,17 +382,23 @@ export async function trashSelectedImages() {
     const imageIds = selectedIds();
     if (!imageIds.length) return false;
     const result = await trashImages(imageIds);
-    if (!result.ok) {
-        showToast("Selection couldn't be trashed");
+    const { imageIds: trashedIds, errors } = imageMutationOutcome(result, 'trashed');
+    if (!trashedIds.length) {
+        showToast(mutationFailureReason(errors, "Selection couldn't be trashed"));
         return false;
     }
     clearSelection();
-    emit('trash:changed', { imageIds });
-    showToast(`Moved ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'} to Trash`, {
+    emit('trash:changed', { imageIds: trashedIds });
+    showToast(`Moved ${fmt(trashedIds.length)} photo${trashedIds.length === 1 ? '' : 's'} to Trash${mutationPartialSuffix(errors, 'trashed')}`, {
         undo: async () => {
-            const restored = await restoreImages(imageIds);
-            emit('trash:changed', { imageIds });
-            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
+            const restored = await restoreImages(trashedIds);
+            const restoredOutcome = imageMutationOutcome(restored, 'restored');
+            if (!restoredOutcome.imageIds.length) {
+                showToast(mutationFailureReason(restoredOutcome.errors, 'Couldn’t restore'));
+                return;
+            }
+            emit('trash:changed', { imageIds: restoredOutcome.imageIds });
+            showToast(`Restored${mutationPartialSuffix(restoredOutcome.errors, 'restored')}`);
         },
     });
     return true;
@@ -399,17 +408,23 @@ async function restoreSelectedTrash() {
     const imageIds = selectedIds();
     if (!imageIds.length) return;
     const result = await restoreImages(imageIds);
-    if (!result.ok) {
-        showToast('Couldn’t restore');
+    const { imageIds: restoredIds, errors } = imageMutationOutcome(result, 'restored');
+    if (!restoredIds.length) {
+        showToast(mutationFailureReason(errors, 'Couldn’t restore'));
         return;
     }
     clearSelection();
-    emit('trash:changed', { imageIds });
-    showToast(`Restored ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'}`, {
+    emit('trash:changed', { imageIds: restoredIds });
+    showToast(`Restored ${fmt(restoredIds.length)} photo${restoredIds.length === 1 ? '' : 's'}${mutationPartialSuffix(errors, 'restored')}`, {
         undo: async () => {
-            const trashed = await trashImages(imageIds);
-            emit('trash:changed', { imageIds });
-            showToast(trashed.ok ? 'Moved back to Trash' : 'Couldn’t undo');
+            const trashed = await trashImages(restoredIds);
+            const trashedOutcome = imageMutationOutcome(trashed, 'trashed');
+            if (!trashedOutcome.imageIds.length) {
+                showToast(mutationFailureReason(trashedOutcome.errors, 'Couldn’t undo'));
+                return;
+            }
+            emit('trash:changed', { imageIds: trashedOutcome.imageIds });
+            showToast(`Moved back to Trash${mutationPartialSuffix(trashedOutcome.errors, 'trashed')}`);
         },
     });
 }
