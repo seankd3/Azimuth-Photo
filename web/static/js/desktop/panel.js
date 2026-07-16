@@ -97,15 +97,24 @@ function renderCollections() {
             closeLeftDrawer();
         });
         row.addEventListener('dragover', (event) => {
-            if (row.dataset.collSmart === '1' || !selectedIds().length) return;
+            if (row.dataset.collSmart === '1') {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'none';
+                row.classList.add('not-allowed');
+                return;
+            }
+            if (!selectedIds().length) return;
             event.preventDefault();
             row.classList.add('drag-over');
         });
-        row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+        row.addEventListener('dragleave', () => row.classList.remove('drag-over', 'not-allowed'));
         row.addEventListener('drop', async (event) => {
             event.preventDefault();
-            row.classList.remove('drag-over');
-            if (row.dataset.collSmart === '1') return;
+            row.classList.remove('drag-over', 'not-allowed');
+            if (row.dataset.collSmart === '1') {
+                await addImagesToCollection(Number(row.dataset.collId), selectedIds());
+                return;
+            }
             const ids = selectedIds();
             if (ids.length) await addImagesToCollection(Number(row.dataset.collId), ids);
         });
