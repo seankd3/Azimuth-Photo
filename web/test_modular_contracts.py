@@ -82,6 +82,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/settings"),
     ("GET", "/api/ui/settings"),
     ("POST", "/api/image/{image_id}/flag"),
+    ("GET", "/api/image/{image_id}/rating"),
     ("POST", "/api/image/{image_id}/rating"),
     ("POST", "/api/images/flag"),
     ("POST", "/api/settings"),

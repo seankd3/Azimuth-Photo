@@ -382,15 +382,27 @@ function infoSheet() {
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
     syncRatingButtons(sheet, imageRating(image));
+    const ratingGeneration = loadToken;
+    fetch(`/api/image/${image.id}/rating`, { headers: { Accept: application/json } })
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data) => {
+            if (!data || !viewerRequestCurrent(image.id, ratingGeneration)) return;
+            image.rating = data.rating;
+            const known = byId.get(Number(image.id));
+            if (known) known.rating = data.rating;
+            if (sheet.isConnected) syncRatingButtons(sheet, imageRating(image));
+        })
+        .catch(() => {});
     for (const button of sheet.querySelectorAll('[data-rating]')) {
         button.addEventListener('click', () => {
+            const target = current() || image;
             const value = Number(button.dataset.rating);
-            const rating = imageRating(image) === value ? 0 : value;
-            image.rating = rating;
-            const known = byId.get(Number(image.id));
+            const rating = imageRating(target) === value ? 0 : value;
+            target.rating = rating;
+            const known = byId.get(Number(target.id));
             if (known) known.rating = rating;
             syncRatingButtons(sheet, rating);
-            void writeRating(image.id, rating);
+            void writeRating(target.id, rating);
         });
     }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {

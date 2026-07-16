@@ -256,6 +256,25 @@ async def set_image_flag(db_path: str, image_id: int, flag: str):
     await connection.run_with_busy_retry(_write)
 
 
+async def get_image_rating(db_path: str, image_id: int) -> int:
+    """Read the user star rating (_lr_rating) — 0 when unrated."""
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (await conn.execute(
+            "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+        )).fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    try:
+        value = json.loads(row["settings"]).get("_lr_rating", 0) if row else 0
+    except (TypeError, ValueError, json.JSONDecodeError):
+        value = 0
+    try:
+        return max(0, min(5, int(value)))
+    except (TypeError, ValueError):
+        return 0
+
+
 async def set_image_rating(db_path: str, image_id: int, rating: int):
     """Store a user star rating as _lr_rating without disturbing other develop keys."""
 
@@ -279,7 +298,7 @@ async def set_image_rating(db_path: str, image_id: int, rating: int):
                 )
             else:
                 await conn.execute(
-                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, user, ?)",
+                    "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, 'user', ?)",
                     (image_id, payload, now),
                 )
             await conn.commit()

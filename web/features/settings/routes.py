@@ -195,6 +195,16 @@ async def api_set_image_flag(image_id: int, request: Request):
     return {"ok": True, "id": image_id, "flag": flag}
 
 
+@router.get("/api/image/{image_id}/rating")
+async def api_get_image_rating(image_id: int):
+    _configured()
+    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    if not image:
+        return JSONResponse({"error": "Image not found"}, status_code=404)
+    rating = await image_repository.get_image_rating(_configured_db_path(), image_id)
+    return {"ok": True, "id": image_id, "rating": rating}
+
+
 @router.post("/api/image/{image_id}/rating")
 async def api_set_image_rating(image_id: int, request: Request):
     _configured()

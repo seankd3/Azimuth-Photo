@@ -86,3 +86,14 @@ class SettingsRouteTests(BackendTestCase):
         self.assertEqual(settings["Exposure2012"], 0.7)
         self.assertEqual(len(ops), 1)
         self.assertEqual(_json.loads(ops[0]["payload"])["value"], 4)
+
+    async def test_get_rating_round_trips_the_posted_star(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "roundtrip.jpg")
+        empty = await self._request("GET", f"/api/image/{image_id}/rating")
+        self.assertEqual(empty.status_code, 200, empty.text)
+        self.assertEqual(empty.json()["rating"], 0)
+        posted = await self._request("POST", f"/api/image/{image_id}/rating", json={"rating": 3})
+        self.assertEqual(posted.status_code, 200, posted.text)
+        fetched = await self._request("GET", f"/api/image/{image_id}/rating")
+        self.assertEqual(fetched.json()["rating"], 3)
