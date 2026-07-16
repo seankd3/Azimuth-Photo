@@ -396,6 +396,8 @@ async def compare_undo():
     _configured()
     result = await _undo_last_comparison()
     if result:
+        if result.get("skipped_drift"):
+            return {"ok": False, "partial": True, **result}
         _invalidate_pairing_cache(matchups=True)
         return {"ok": True, **result}
     return JSONResponse({"error": "Nothing to undo"}, status_code=400)

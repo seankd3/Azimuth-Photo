@@ -147,6 +147,36 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(snapshot, expected)
             self.assertEqual(self._count(path), len(entries))
 
+    async def test_synced_rating_preserves_develop_edit_interleaved_with_upsert(self):
+        path = self._catalog()
+        with sqlite3.connect(path) as conn:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (1, ?, 'user', 'before')",
+                (json.dumps({"Exposure2012": 0.0}),),
+            )
+            conn.execute(
+                "CREATE TRIGGER interleave_develop_before_rating BEFORE INSERT ON develop_settings "
+                "WHEN NEW.image_id = 1 BEGIN "
+                "UPDATE develop_settings SET settings = json_set(settings, '$.Exposure2012', 1.75) "
+                "WHERE image_id = NEW.image_id; END"
+            )
+            conn.commit()
+
+        await oplog.apply_entries(path, [{
+            "origin": "satellite",
+            "origin_seq": 1,
+            "content_hash": HASH_A,
+            "family": "rating",
+            "payload": {"value": 4},
+            "ts": 200.0,
+        }], applied_from="satellite", receive_time=500.0)
+
+        with sqlite3.connect(path) as conn:
+            settings = json.loads(conn.execute(
+                "SELECT settings FROM develop_settings WHERE image_id = 1"
+            ).fetchone()[0])
+        self.assertEqual(settings, {"Exposure2012": 1.75, "_lr_rating": 4})
+
     async def test_two_catalog_exchange_replay_and_triple_exchange_do_not_echo(self):
         hub = self._catalog()
         satellite = self._catalog()

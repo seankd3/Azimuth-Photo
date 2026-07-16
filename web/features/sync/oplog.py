@@ -257,15 +257,15 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
         if "rating" in columns:
             await conn.execute("UPDATE images SET rating = ? WHERE id = ?", (value, image_id))
         else:
-            row = await (await conn.execute(
-                "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
-            )).fetchone()
-            settings = json.loads(row["settings"] or "{}") if row else {}
-            settings["_lr_rating"] = value
+            settings = _json_payload({"_lr_rating": value})
             await conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "
-                "ON CONFLICT(image_id) DO UPDATE SET settings=excluded.settings",
-                (image_id, _json_payload(settings), _iso_timestamp(float(entry["ts"]))),
+                "ON CONFLICT(image_id) DO UPDATE SET settings=json_set("
+                "CASE WHEN json_valid(develop_settings.settings) THEN "
+                "  CASE WHEN json_type(develop_settings.settings) = 'object' "
+                "    THEN develop_settings.settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?)",
+                (image_id, settings, _iso_timestamp(float(entry["ts"])), value),
             )
     elif family == "develop":
         settings_value = payload.get("settings")

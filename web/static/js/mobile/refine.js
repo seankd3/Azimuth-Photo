@@ -242,7 +242,7 @@ async function undo() {
     busy = false;
     if (!result || !result.ok) {
         history.push(last);
-        showToast(writeFailureMessage());
+        showToast(result?.partial ? 'Undo partial — ranking drifted' : writeFailureMessage());
         return;
     }
     picks = Math.max(0, picks - 1);

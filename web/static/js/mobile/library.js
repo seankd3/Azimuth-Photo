@@ -288,6 +288,7 @@ function workRows() {
             running: Boolean(ai && [
                 'embedding',
                 'loading_model',
+                'waiting_for_model',
                 'waiting_for_gpu',
                 'waiting_for_turn',
                 'waiting_retry',
@@ -672,7 +673,11 @@ function newCollectionSheet() {
 
 /* ---------- collection drill-in ---------- */
 function openCollectionView(coll) {
-    setScope({ collectionId: String(coll.id), label: coll.name || 'Collection' });
+    setScope({
+        collectionId: String(coll.id),
+        collectionSmart: Boolean(coll.smart),
+        label: coll.name || 'Collection',
+    });
     nav.setTab('photos');
 }
 
@@ -700,7 +705,11 @@ export function openCollectionActionsSheet(coll) {
             if (result && result.ok) {
                 showToast(`Renamed to \u201c${next}\u201d`);
                 collections = null;
-                setScope({ collectionId: String(coll.id), label: next });
+                setScope({
+                    collectionId: String(coll.id),
+                    collectionSmart: Boolean(coll.smart),
+                    label: next,
+                });
                 document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());

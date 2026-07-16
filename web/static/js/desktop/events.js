@@ -130,6 +130,14 @@ function coverageDots(group) {
     return Array.from({ length: 5 }, (_, i) => `<i class="${i < filled ? 'q' : ''}"></i>`).join('');
 }
 
+function patchCoverageDots() {
+    buildGroups();
+    groups.forEach((group, index) => {
+        const dotHost = document.querySelector(`#events-flow .event-block[data-group="${index}"] .ev-dots`);
+        if (dotHost) dotHost.innerHTML = coverageDots(group);
+    });
+}
+
 function renderSkeleton() {
     document.getElementById('events-flow').innerHTML = '<div class="event-block">'
         + '<div class="event-head"><div class="skel" style="width:220px;height:18px"></div></div>'
@@ -341,16 +349,28 @@ function reload({ skeleton = true } = {}) {
     loadPage();
 }
 
-async function revalidate() {
+async function revalidate({ refreshCoverage = false } = {}) {
     const seq = generation;
     try {
-        const data = await loadScopePage({ limit: PAGE_SIZE, offset: 0, sort: 'date_taken' });
+        const pageSize = refreshCoverage ? Math.max(PAGE_SIZE, images.length) : PAGE_SIZE;
+        const data = await loadScopePage({ limit: pageSize, offset: 0, sort: 'date_taken' });
         if (!mounted || seq !== generation || !data) return;
         const incoming = data.images || [];
         const changed = Number(data.visible_images) !== viewState.visibleImages
-            || incoming.length !== Math.min(images.length, PAGE_SIZE)
-            || incoming.some((image, i) => Number(image.id) !== Number(images[i]?.id));
-        if (!changed) return;
+            || incoming.length !== Math.min(images.length, pageSize)
+            || incoming.some((image, i) => (
+                Number(image.id) !== Number(images[i]?.id)
+                || captureMs(image) !== captureMs(images[i])
+            ));
+        if (!changed) {
+            if (refreshCoverage) {
+                incoming.forEach((image, index) => { images[index] = image; });
+                setImages(images);
+                setRankingsMeta({ visibleImages: data.visible_images, sortQuality: data.sort_quality });
+                patchCoverageDots();
+            }
+            return;
+        }
         resetData();
         images = incoming;
         incoming.forEach((image, i) => imageIndexes.set(Number(image.id), i));
@@ -398,7 +418,10 @@ export function initEvents() {
         if (mounted) reload();
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
-    on('flags', ({ imageIds } = {}) => patchCells(imageIds));
+    on('flags', ({ imageIds } = {}) => {
+        patchCells(imageIds);
+        if (mounted) revalidate({ refreshCoverage: true });
+    });
 }
 
 export function mountEvents() {

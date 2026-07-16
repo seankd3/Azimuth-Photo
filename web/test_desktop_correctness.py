@@ -42,6 +42,18 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("viewState.images.some((image) =>", grid)
         self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
 
+    def test_warm_events_revalidates_group_coverage_after_flags_change(self):
+        events = read("events.js")
+
+        self.assertIn("revalidate({ refreshCoverage: true })", events)
+        self.assertIn("function patchCoverageDots()", events)
+        self.assertIn("dotHost.innerHTML = coverageDots(group);", events)
+        revalidate = events[events.index("async function revalidate"):events.index("export function initEvents")]
+        self.assertLess(
+            revalidate.index("patchCoverageDots();"),
+            revalidate.index("resetData();"),
+        )
+
     def test_loupe_removes_trashed_photos_from_grid_and_session_lists(self):
         loupe = read("loupe.js")
 
@@ -80,6 +92,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("emit('collections:refresh');", events)
         self.assertEqual(mobile_selection.count("if (removed?.ok) showToast('Removed from collection');"), 2)
         self.assertEqual(mobile_selection.count("new CustomEvent('collections-changed')"), 2)
+
+    def test_refine_undo_surfaces_ranking_drift_on_desktop_and_mobile(self):
+        desktop_refine = read("refine.js")
+        mobile_refine = read_mobile("refine.js")
+
+        for refine in (desktop_refine, mobile_refine):
+            self.assertIn("result?.partial", refine)
+            self.assertIn("Undo partial — ranking drifted", refine)
 
     def test_keep_covers_button_is_reenabled_if_stack_reload_fails(self):
         duplicates = read("duplicates.js")
@@ -123,6 +143,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("let statusGeneration = 0;", sync_chip)
         self.assertIn("if (controlInFlight || generation !== statusGeneration) return;", sync_chip)
         self.assertIn("const generation = ++statusGeneration;", sync_chip)
+
+    def test_sync_chip_surfaces_pending_metadata_operations(self):
+        sync_chip = read("sync_chip.js")
+
+        self.assertIn("const pendingOps = Number(status.pending_ops) || 0;", sync_chip)
+        self.assertIn("data-sync-pending", sync_chip)
+        self.assertIn("change${pendingOps === 1 ? '' : 's'} waiting to retry", sync_chip)
+        self.assertIn("depth || pendingOps", sync_chip)
 
     def test_worker_action_ignores_stale_poll_paint_for_its_row(self):
         drawer = read("drawer.js")

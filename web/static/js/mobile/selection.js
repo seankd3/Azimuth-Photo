@@ -242,7 +242,8 @@ export async function openCollectionSheet(rawIds, { onDone = null } = {}) {
     }
     const listEl = sheet.querySelector('#sheet-coll-list');
     if (!listEl) return;
-    const collections = (data && data.collections) || [];
+    const collections = ((data && data.collections) || [])
+        .filter((collection) => !collection.smart);
     if (!collections.length) {
         listEl.innerHTML = '<div class="ms-empty">No collections yet — name one above.</div>';
         return;
@@ -298,7 +299,8 @@ export function initSelection() {
     const renderActions = () => {
         bottomBar.classList.toggle('collection-scope', Boolean(scope.collectionId));
         const collectionAction = scope.collectionId
-            ? `<button type="button" data-action="remove-collection" data-mutating>${icon('minus')}<span>Remove</span></button>`
+            ? scope.collectionSmart ? ''
+                : `<button type="button" data-action="remove-collection" data-mutating>${icon('minus')}<span>Remove</span></button>`
             : `<button type="button" data-action="collection" data-mutating aria-label="Add to collection">${icon('plus')}</button>`;
         bottomBar.innerHTML =
             `<button type="button" data-action="clear" aria-label="Clear selection">${icon('x')}</button>`
@@ -325,7 +327,7 @@ export function initSelection() {
         const ids = [...selection];
         const collectionId = Number(scope.collectionId) || 0;
         const collectionName = scope.label || 'collection';
-        if (!collectionId || !ids.length) return;
+        if (!collectionId || scope.collectionSmart || !ids.length) return;
         dismissLayerThen('selection', clearSelection, async () => {
             const result = await removeFromCollection(collectionId, ids);
             if (!(result && result.ok)) {
