@@ -315,6 +315,21 @@ function useMediumTier() {
     }
 }
 
+function upgradeStageToMedium(img, token) {
+    const image = document.getElementById('loupe-img');
+    if (!img || !image) return;
+    const medium = new Image();
+    medium.decoding = 'async';
+    medium.fetchPriority = 'high';
+    medium.onload = async () => {
+        if (medium.decode) await medium.decode().catch(() => {});
+        if (!open || token !== renderToken || Number(current()?.id) !== Number(img.id)) return;
+        image.dataset.tier = 'md';
+        image.src = medium.src;
+    };
+    medium.src = thumbUrl('md', img.id);
+}
+
 function requestFullImage() {
     const img = current();
     const image = document.getElementById('loupe-img');
@@ -496,12 +511,14 @@ function render() {
     const image = document.getElementById('loupe-img');
     setLoupeOffline(false);
     image.dataset.imageId = String(img.id);
-    image.dataset.tier = 'md';
+    image.fetchPriority = 'high';
+    image.dataset.tier = 'sm';
     image.onload = () => {
         if (token !== renderToken) return;
         setImageMetrics({ focus });
     };
-    image.src = thumbUrl('md', img.id);
+    image.src = img.thumb_url || thumbUrl('sm', img.id);
+    upgradeStageToMedium(img, token);
     const size = imageSizeFromMetadata(img, image);
     naturalWidth = size.width;
     naturalHeight = size.height;

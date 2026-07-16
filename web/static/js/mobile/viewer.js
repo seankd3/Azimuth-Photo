@@ -129,6 +129,18 @@ function preload(offset) {
     }
 }
 
+function upgradeToMedium(image, token) {
+    const medium = new Image();
+    medium.decoding = 'async';
+    medium.fetchPriority = 'high';
+    medium.onload = async () => {
+        if (medium.decode) await medium.decode().catch(() => {});
+        if (!viewerRequestCurrent(image.id, token)) return;
+        img.src = medium.src;
+    };
+    medium.src = thumbUrl('md', image.id);
+}
+
 function showCurrent() {
     const image = current();
     if (!image) return;
@@ -136,7 +148,9 @@ function showCurrent() {
     const token = loadToken;
     setViewerOffline(false);
     resetZoom();
-    img.src = thumbUrl('md', image.id);
+    img.fetchPriority = 'high';
+    img.src = image.thumb_url || thumbUrl('sm', image.id);
+    upgradeToMedium(image, token);
     loadLg();
     const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
     cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
