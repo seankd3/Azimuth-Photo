@@ -21,11 +21,45 @@ class SettingsStatusTests(BackendTestCase):
 
         self.assertEqual([int(row["id"]) for row in rows], [jpeg_id])
 
-    async def test_orientation_worker_marks_unreadable_online_jpeg_missing(self):
+    async def test_orientation_worker_keeps_existing_unreadable_jpeg_visible(self):
         source = await self._source("unreadable-jpeg")
         image_id = await self._image(source["id"], "broken.jpg")
         with open(os.path.join(source["path"], "broken.jpg"), "wb") as handle:
             handle.write(b"not a jpeg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (image_id,))
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        rows = await catalog_metadata.get_unclassified_images()
+        batches = iter((rows,))
+
+        async def one_batch_then_stop(limit=200):
+            del limit
+            try:
+                return next(batches)
+            except StopIteration:
+                raise asyncio.CancelledError from None
+
+        catalog_metadata.resume_catalog_metadata()
+        try:
+            with mock.patch.object(
+                catalog_metadata,
+                "get_unclassified_images",
+                one_batch_then_stop,
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await catalog_metadata.classify_orientations_background()
+        finally:
+            catalog_metadata.pause_catalog_metadata()
+
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
+    async def test_orientation_worker_marks_only_absent_jpeg_missing(self):
+        source = await self._source("absent-jpeg")
+        image_id = await self._image(source["id"], "gone.jpg")
         conn = await db.get_db()
         try:
             await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (image_id,))
