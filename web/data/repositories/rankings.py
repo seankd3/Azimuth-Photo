@@ -13,6 +13,9 @@ RANKING_SORTS = {
     "elo_asc": "i.elo ASC",
     "comparisons": "i.comparisons DESC",
     "least_compared": "i.comparisons ASC",
+    # Sampler-only: random tie-break so compare/Refine pools cover the whole
+    # tied tier instead of a deterministic head. Never use for grid pagination.
+    "least_compared_shuffled": "i.comparisons ASC, RANDOM()",
     "filename": "i.filename ASC",
     "filename_asc": "i.filename ASC",
     "filename_desc": "i.filename DESC",
@@ -35,6 +38,7 @@ RANKING_INDEXES = {
     "elo_asc": "idx_images_active_elo_asc",
     "comparisons": "idx_images_active_comparisons",
     "least_compared": "idx_images_active_comparisons_asc",
+    "least_compared_shuffled": "idx_images_active_comparisons_asc",
     "filename": "idx_images_active_filename",
     "filename_asc": "idx_images_active_filename",
     "filename_desc": None,
@@ -57,6 +61,7 @@ SPARSE_VISIBLE_ID_FILTER_SORTS = {
     "elo_asc",
     "comparisons",
     "least_compared",
+    "least_compared_shuffled",
     "filename",
     "filename_asc",
     "filename_desc",
@@ -73,6 +78,7 @@ SPARSE_VISIBLE_ID_FILTER_SORTS = {
 VISIBLE_CACHE_FIRST_SORTS = {
     "comparisons",
     "least_compared",
+    "least_compared_shuffled",
     "filename",
     "filename_asc",
     "filename_desc",
