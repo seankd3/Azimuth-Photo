@@ -192,7 +192,7 @@ function render() {
     }
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
-        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Picked photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
+        + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Favorited photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
         + `<button class="m-lib-row" id="ml-offline"><span class="g">${icon('download')}</span><span class="body">Available offline<span class="sub">Saved on this phone</span></span><span class="n num">${fmtInt(offlineSummary().count)}</span></button>`
         + `<button class="m-lib-row" id="ml-backup"><span class="g">${icon('upload')}</span><span class="body">Backup<span class="sub">Uploads and phone storage</span></span></button>`

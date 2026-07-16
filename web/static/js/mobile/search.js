@@ -183,7 +183,7 @@ function render() {
         + chip('data-type="raw"', icon('image'), 'RAW files', countFor('raw'))
         + chip('data-type="jpg"', icon('image'), 'JPGs', countFor('jpg'))
         + chip('data-type="tif"', icon('image'), 'TIFFs', countFor('tif'))
-        + chip('data-flag="picked"', icon('star'), 'Picked', null)
+        + chip('data-flag="picked"', icon('heart'), 'Favorited', null)
         + chip('data-flag="rejected"', icon('x'), 'Rejected', null)
         + chip('data-stars="4"', icon('star'), '4+ stars', null)
         + cams.map((c, i) => chip(`data-cam="${i}"`, icon('camera'), c.camera, c.count)).join('')

@@ -8,7 +8,7 @@ import { showToast } from './toast.js';
 import { tick } from './haptics.js';
 
 const FLAG_LABELS = {
-    picked: 'Picked',
+    picked: 'Favorited',
     rejected: 'Rejected',
     unflagged: 'Flag cleared',
 };

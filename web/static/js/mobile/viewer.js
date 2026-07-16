@@ -164,7 +164,7 @@ function syncFlagButtons() {
     if (flagBadge) {
         flagBadge.hidden = flag === 'unflagged';
         flagBadge.className = `mv-flag ${flag}`;
-        flagBadge.textContent = flag === 'picked' ? 'Picked' : 'Rejected';
+        flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected';
     }
 }
 

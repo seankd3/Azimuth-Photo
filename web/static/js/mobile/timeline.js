@@ -113,7 +113,7 @@ const imgObserver = new IntersectionObserver((entries) => {
 /* ---------- cells & day sections ---------- */
 function flagBadge(flag) {
     if (flag !== 'picked' && flag !== 'rejected') return '';
-    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('star') : icon('x')}</span>`;
+    return `<span class="c-flag ${flag}">${flag === 'picked' ? icon('heart') : icon('x')}</span>`;
 }
 
 function stackBadge(img) {
@@ -776,7 +776,7 @@ function renderScopeBar() {
         chips.push(chip('person', personLabel({ label: scope.peopleLabel }), 'people', face));
     }
     if (scope.q) chips.push(chip('search', scope.q, 'q'));
-    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Picked' : 'Rejected', 'flag'));
+    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Favorited' : 'Rejected', 'flag'));
     if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
     if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
     if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));

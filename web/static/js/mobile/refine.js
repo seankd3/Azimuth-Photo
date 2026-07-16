@@ -117,7 +117,7 @@ function renderSet() {
         return;
     }
     stage.innerHTML = currentSet.map((img) =>
-        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Pick ${esc(img.filename || img.id)}">`
+        `<button class="mr-card" data-id="${img.id}" data-mutating aria-label="Favorite ${esc(img.filename || img.id)}">`
         + `<img src="${esc(thumbUrl('md', img.id))}" decoding="async" alt=""></button>`
     ).join('');
     document.dispatchEvent(new CustomEvent('sheet-mutated'));
@@ -242,7 +242,7 @@ async function undo() {
     renderSet();
     prefetchNext();
     scheduleQualityRefresh();
-    showToast('Pick undone');
+    showToast('Favorite undone');
 }
 
 export function initRefine() {

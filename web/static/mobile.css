@@ -1191,7 +1191,7 @@ body.sheet-keyboard #m-sel-actions.on { opacity: 0; transform: translateY(16px);
     transform: translate(-50%, -50%) scale(.8);
 }
 #m-viewer.cull-picked::after {
-    content: "Picked";
+    content: "Favorited";
     background: var(--ok);
     animation: m-cull-feedback .26s var(--ease);
 }
