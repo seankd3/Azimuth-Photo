@@ -1,7 +1,7 @@
 import {
     byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
+import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
 import { loadScopePage, similarScopeActive } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -17,6 +17,7 @@ import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
 import { escapeHtml as esc } from './dom.js';
+import { openSystemSettings } from './drawer.js';
 
 let offset = 0;
 let loading = false;
@@ -47,6 +48,7 @@ let reloadPending = false;
 let thumbRetryFocusBound = false;
 let thumbnailPollTimer = 0;
 let pendingThumbnails = 0;
+let pendingNoticeRequest = 0;
 const stackCache = new Map();
 const stackKindCache = new Map();
 
@@ -235,6 +237,74 @@ function pendingCount(data) {
     return Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
 }
 
+function hiddenPendingThumbnailCount(data) {
+    return Math.max(0, Number(data?.hidden_pending_thumbnails) || 0);
+}
+
+function pendingNoticeCopy(count) {
+    const photos = `${count.toLocaleString('en-US')} photo${count === 1 ? '' : 's'}`;
+    return `${photos} ${count === 1 ? 'is' : 'are'} preparing previews — they appear as they’re ready.`;
+}
+
+function cachePregenPaused(status) {
+    return Boolean(status?.pregen?.manual_pause);
+}
+
+function appendPausedPreviewHint(target) {
+    if (!target || target.querySelector('.grid-pending-paused')) return;
+    const hint = document.createElement('span');
+    hint.className = 'grid-pending-paused';
+    hint.append(' Previews are paused — resume in ');
+    const system = document.createElement('button');
+    system.type = 'button';
+    system.className = 'grid-pending-system';
+    system.textContent = 'System';
+    system.addEventListener('click', () => openSystemSettings());
+    hint.append(system, '.');
+    target.append(hint);
+}
+
+function loadPausedPreviewHint(target) {
+    const request = ++pendingNoticeRequest;
+    getCacheStatus().then((status) => {
+        if (request !== pendingNoticeRequest || !target.isConnected || !cachePregenPaused(status)) return;
+        appendPausedPreviewHint(target);
+    }).catch(() => {});
+}
+
+function renderPendingThumbnailNotice() {
+    const flow = document.getElementById('grid-flow');
+    const count = viewState.hiddenPendingThumbnails;
+    const existing = flow.querySelector('#grid-pending-notice');
+    if (!count) {
+        existing?.remove();
+        return;
+    }
+    if (existing) {
+        existing.querySelector('.grid-pending-copy').textContent = pendingNoticeCopy(count);
+        return;
+    }
+    const notice = document.createElement('div');
+    notice.id = 'grid-pending-notice';
+    notice.className = 'grid-pending-notice';
+    notice.setAttribute('role', 'status');
+    notice.innerHTML = '<span class="grid-pending-spinner" aria-hidden="true"></span><span class="grid-pending-copy"></span>';
+    notice.querySelector('.grid-pending-copy').textContent = pendingNoticeCopy(count);
+    flow.append(notice);
+    loadPausedPreviewHint(notice);
+}
+
+function renderPendingThumbnailEmptyState() {
+    const flow = document.getElementById('grid-flow');
+    const count = viewState.hiddenPendingThumbnails;
+    flow.innerHTML = emptyStateHtml({
+        title: `All ${count.toLocaleString('en-US')} photos here are still preparing previews`,
+        detail: 'They’ll appear here as they’re ready.',
+        iconName: 'loader',
+    });
+    loadPausedPreviewHint(flow.querySelector('.empty-state p'));
+}
+
 function pendingPreviewCount(images) {
     return (images || []).filter((image) => image?.preview_ready === false).length;
 }
@@ -289,10 +359,12 @@ async function refreshFirstPagePreviews() {
     updateThumbnailPoll(pendingCount(data));
     setRankingsMeta({
         visibleImages: data.visible_images,
+        hiddenPendingThumbnails: hiddenPendingThumbnailCount(data),
         sortQuality: data.sort_quality,
         searchMode: data.search_mode,
         searchSources: data.search_sources,
     });
+    renderPendingThumbnailNotice();
     for (const image of data.images) sharpenPreview(image);
 }
 
@@ -497,6 +569,10 @@ function renderEmptyState() {
     resetImageObserver();
     resetGridWindow();
     const flow = document.getElementById('grid-flow');
+    if (viewState.hiddenPendingThumbnails) {
+        renderPendingThumbnailEmptyState();
+        return;
+    }
     const showClearFilters = nonSearchFacetCount() > 0;
     const showClearScope = scopeActive() || viewState.bestOf;
     const request = ++emptyStateRequest;
@@ -620,6 +696,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     if (wasEmpty) {
         setRankingsMeta({
             visibleImages: data.visible_images,
+            hiddenPendingThumbnails: hiddenPendingThumbnailCount(data),
             sortQuality: data.sort_quality,
             searchMode: data.search_mode,
             searchSources: data.search_sources,
@@ -640,6 +717,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
             setFocus(requestStart);
             watchWindowStart(chunkEl);
         }
+        renderPendingThumbnailNotice();
     }
     return incoming.length > 0;
 }
@@ -676,7 +754,7 @@ export function loadFirstPage() {
     done = false;
     loading = false;
     setImages([]);
-    setRankingsMeta({ visibleImages: 0, sortQuality: null });
+    setRankingsMeta({ visibleImages: 0, hiddenPendingThumbnails: 0, sortQuality: null });
     viewState.focusIndex = 0;
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = true;

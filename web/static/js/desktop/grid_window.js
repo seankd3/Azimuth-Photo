@@ -90,7 +90,7 @@ function insertChunk(startIndex, images, { preserveScroll = false } = {}) {
     const oldTop = scroller.scrollTop;
     const chunk = createChunk(startIndex, images);
     const next = chunks.find((item) => item.start > chunk.start);
-    host.insertBefore(chunk.el, next?.el || null);
+    host.insertBefore(chunk.el, next?.el || host.querySelector('#grid-pending-notice'));
     chunks.push(chunk);
     chunks.sort((a, b) => a.start - b.start);
     ensureObserver().observe(chunk.el);
