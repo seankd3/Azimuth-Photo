@@ -11,6 +11,7 @@ from features.sync import oplog
 
 HASH_A = "a" * 32
 HASH_B = "b" * 32
+HASH_C = "c" * 32
 COLLECTION_ROOT = "11111111-1111-4111-8111-111111111111"
 COLLECTION_CHILD = "22222222-2222-4222-8222-222222222222"
 
@@ -76,6 +77,11 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
     def _count(path: str) -> int:
         with sqlite3.connect(path) as conn:
             return int(conn.execute("SELECT COUNT(*) FROM oplog").fetchone()[0])
+
+    @staticmethod
+    def _pending_count(path: str) -> int:
+        with sqlite3.connect(path) as conn:
+            return int(conn.execute("SELECT COUNT(*) FROM oplog_pending").fetchone()[0])
 
     @staticmethod
     def _flags(path: str) -> dict[str, str]:
@@ -258,6 +264,101 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
         }
         self.assertEqual(self._collection_snapshot(node_a), expected)
         self.assertEqual(self._collection_snapshot(node_b), expected)
+
+    async def test_membership_before_collection_meta_applies_by_batch_end(self):
+        path = self._catalog()
+        entries = [
+            {
+                "origin": "alpha", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_membership",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "content_hash": HASH_A, "member": True},
+                "ts": 100.0,
+            },
+            {
+                "origin": "beta", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+                "family": "collection_meta",
+                "payload": {"collection_uuid": COLLECTION_CHILD, "name": "Beach", "parent_uuid": None, "deleted": False},
+                "ts": 110.0,
+            },
+        ]
+
+        await oplog.apply_entries(path, entries, applied_from="hub", receive_time=500.0)
+
+        self.assertEqual(
+            self._collection_snapshot(path)["memberships"],
+            [(COLLECTION_CHILD, HASH_A)],
+        )
+        self.assertEqual(self._pending_count(path), 0)
+
+    async def test_unknown_collection_membership_materializes_on_next_exchange(self):
+        hub = self._catalog()
+        satellite = self._catalog()
+        membership = {
+            "origin": "camera", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+            "family": "collection_membership",
+            "payload": {"collection_uuid": COLLECTION_CHILD, "content_hash": HASH_A, "member": True},
+            "ts": 100.0,
+        }
+        collection_meta = {
+            "origin": "desktop", "origin_seq": 1, "content_hash": oplog.COLLECTION_CONTENT_HASH,
+            "family": "collection_meta",
+            "payload": {"collection_uuid": COLLECTION_CHILD, "name": "Beach", "parent_uuid": None, "deleted": False},
+            "ts": 110.0,
+        }
+        await oplog.apply_entries(hub, [membership], applied_from="camera", receive_time=500.0)
+
+        async def hub_request(method, path, payload):
+            self.assertEqual(method, "POST")
+            if path.endswith("/push"):
+                return await oplog.apply_entries(
+                    hub, payload["entries"], applied_from=payload["device_id"]
+                )
+            return await oplog.pull_entries(
+                hub, device=payload["device_id"], cursors=payload["cursors"]
+            )
+
+        await oplog.exchange_with_hub(satellite, hub_request)
+        self.assertEqual(self._collection_snapshot(satellite)["memberships"], [])
+
+        await oplog.apply_entries(hub, [collection_meta], applied_from="desktop", receive_time=500.0)
+        await oplog.exchange_with_hub(satellite, hub_request)
+
+        self.assertEqual(
+            self._collection_snapshot(satellite)["memberships"],
+            [(COLLECTION_CHILD, HASH_A)],
+        )
+        self.assertEqual(self._pending_count(satellite), 0)
+
+    async def test_unknown_content_hash_applies_after_image_arrives(self):
+        path = self._catalog()
+        entry = {
+            "origin": "alpha", "origin_seq": 1, "content_hash": HASH_C,
+            "family": "flag", "payload": {"value": "picked"}, "ts": 100.0,
+        }
+        await oplog.apply_entries(path, [entry], applied_from="hub", receive_time=500.0)
+        with sqlite3.connect(path) as conn:
+            conn.execute("INSERT INTO images(id, content_hash) VALUES (3, ?)", (HASH_C,))
+            conn.commit()
+
+        result = await oplog.retry_pending_entries(path)
+
+        self.assertEqual(result, {"retried": 1, "applied": 1, "still_pending": 0})
+        self.assertEqual(self._flags(path)[HASH_C], "picked")
+        self.assertEqual(self._pending_count(path), 0)
+
+    async def test_permanently_unknown_hash_has_one_pending_row_across_retries(self):
+        path = self._catalog()
+        entry = {
+            "origin": "alpha", "origin_seq": 1, "content_hash": HASH_C,
+            "family": "flag", "payload": {"value": "picked"}, "ts": 100.0,
+        }
+        await oplog.apply_entries(path, [entry], applied_from="hub", receive_time=500.0)
+
+        for _ in range(5):
+            result = await oplog.retry_pending_entries(path)
+            self.assertEqual(result, {"retried": 1, "applied": 0, "still_pending": 1})
+
+        self.assertEqual(self._pending_count(path), 1)
 
 
 if __name__ == "__main__":

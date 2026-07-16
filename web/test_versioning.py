@@ -79,6 +79,10 @@ class HubContractTests(unittest.TestCase):
                 "features.sync.satellite_routes.trash_service.pending_hub_trash_refs",
                 new_callable=AsyncMock,
                 return_value={"count": 7},
+            ), patch(
+                "features.sync.satellite_routes.oplog.pending_entry_count",
+                new_callable=AsyncMock,
+                return_value=3,
             ):
                 return await satellite_routes.sync_status()
 
@@ -88,6 +92,7 @@ class HubContractTests(unittest.TestCase):
             {"hub_health": "needs_update", "api_rev": API_REV - 1, "app_version": "0.0.9"},
         )
         self.assertEqual(status["pending_hub_trash"], 7)
+        self.assertEqual(status["pending_ops"], 3)
 
 
 class VersionEndpointTests(unittest.TestCase):
