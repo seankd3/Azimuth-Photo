@@ -251,14 +251,18 @@ fun ViewerScreen(
             }
         }
 
-        if (chromeVisible) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = chromeVisible,
+            enter = androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter),
+        ) {
             val current = items[pagerState.currentPage]
             Row(
                 Modifier
                     .fillMaxWidth()
                     .background(Color.Black.copy(alpha = 0.45f))
-                    .statusBarsPadding()
-                    .align(Alignment.TopCenter),
+                    .statusBarsPadding(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 IconButton(onClick = onClose) {

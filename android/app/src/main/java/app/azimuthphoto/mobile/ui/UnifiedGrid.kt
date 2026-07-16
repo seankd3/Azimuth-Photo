@@ -39,8 +39,11 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputScope
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -198,11 +201,18 @@ private fun UnifiedCell(
             selectable = false
         }
     }
+    val haptics = LocalHapticFeedback.current
     Box(
         Modifier
             .aspectRatio(1f)
             .background(Panel)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = {
+                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongClick()
+                },
+            ),
     ) {
         AsyncImage(
             model = ImageRequest.Builder(LocalContext.current).data(model).crossfade(false).size(256).build(),
@@ -210,6 +220,19 @@ private fun UnifiedCell(
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),
         )
+        // Top scrim so white RAW/video glyphs stay legible on bright thumbnails.
+        if (hasRaw || isVideo) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            0f to Color.Black.copy(alpha = 0.28f),
+                            0.28f to Color.Transparent,
+                        ),
+                    ),
+            )
+        }
         if (hasRaw) {
             Text(
                 "RAW",
