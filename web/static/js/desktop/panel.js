@@ -288,6 +288,9 @@ export async function openDeliverOverlay(collectionId, name = 'Collection', open
     ensureDeliverOverlay();
     const token = ++deliverOverlayToken;
     deliverOverlayReturn = opener || document.activeElement;
+    deliverOverlay.dataset.collectionId = String(collectionId);
+    deliverOverlay.dataset.collectionName = name;
+    deliverOverlay.dataset.activeTab = activeTab;
     deliverSession = {
         collectionId,
         name,
@@ -633,10 +636,6 @@ function renderWebsiteDeliver(session, token) {
     slugInput?.addEventListener('input', () => {
         saveDeliverDraft(session);
         deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value), publish, publishing);
-    });
-    deliverOverlay.querySelector('[data-deliver-open-settings]')?.addEventListener('click', () => {
-        closeDeliverOverlay();
-        document.getElementById('system-btn')?.click();
     });
     const startPublish = async () => {
         saveDeliverDraft(session);

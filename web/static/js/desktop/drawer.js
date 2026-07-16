@@ -1556,25 +1556,11 @@ function stopDrawerPolling() {
 }
 
 function resolvePublishReturnTarget() {
-    const title = document.querySelector('#publish-overlay #publish-title')?.textContent || '';
-    const name = title.replace(/^Publish\s+/, '').trim() || 'Collection';
-    const sharedRow = Array.from(document.querySelectorAll('.shared-row'))
-        .find((row) => (row.dataset.name || '') === name);
-    if (sharedRow?.dataset.collectionId) {
-        return { collectionId: Number(sharedRow.dataset.collectionId), name };
-    }
-    const collRow = Array.from(document.querySelectorAll('.coll-row'))
-        .find((row) => (row.dataset.collName || '') === name);
-    if (collRow?.dataset.collId) {
-        return { collectionId: Number(collRow.dataset.collId), name };
-    }
-    if (scope.collectionId && (scope.collectionName || '') === name) {
-        return { collectionId: Number(scope.collectionId), name };
-    }
-    if (scope.collectionId) {
-        return { collectionId: Number(scope.collectionId), name: scope.collectionName || name };
-    }
-    return { collectionId: 0, name };
+    const overlay = document.getElementById('deliver-overlay');
+    return {
+        collectionId: Number(overlay?.dataset.collectionId) || 0,
+        name: overlay?.dataset.collectionName || 'Collection',
+    };
 }
 
 export function openPublishingSettings({ returnTo = null } = {}) {
@@ -1647,12 +1633,14 @@ export function initDrawer() {
         }
     });
     document.addEventListener('click', (event) => {
-        const button = event.target.closest('#publish-open-settings');
+        const button = event.target.closest('#publish-open-settings, [data-deliver-open-settings]');
         if (!button) return;
         event.preventDefault();
         event.stopImmediatePropagation();
         const returnTo = resolvePublishReturnTarget();
-        document.getElementById('publish-close')?.click();
+        if (button.matches('[data-deliver-open-settings]')) {
+            document.querySelector('#deliver-overlay #deliver-close')?.click();
+        } else document.getElementById('publish-close')?.click();
         openPublishingSettings({ returnTo });
     }, true);
     on('thumbsize', () => {
