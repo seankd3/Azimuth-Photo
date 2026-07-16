@@ -401,6 +401,12 @@ function deliverLinkRow(url) {
     return url ? `<div class="share-link-row deliver-link-row"><input readonly value="${esc(url)}"><button data-deliver-copy type="button">${icon('copy')} Copy</button><button data-deliver-open type="button">${icon('external-link')} Open</button></div>` : '';
 }
 
+function deliverStatusRows(rows) {
+    return '<div class="deliver-status-rows">' + rows.filter(Boolean).map(([label, value]) => (
+        `<div><span>${esc(label)}</span><b>${esc(value)}</b></div>`
+    )).join('') + '</div>';
+}
+
 function shareExpiryOptions() {
     return '<label class="share-expiry">Expires <select data-deliver-expiry>'
         + '<option value="">Never</option><option value="7">7 days</option><option value="30">30 days</option></select></label>';
@@ -498,7 +504,7 @@ function deliverPublishStatus(data) {
     const status = data?.publishing?.enabled === false ? 'Publishing is disabled until a folder is set.' : publishPhaseCopy(job);
     const hook = publish?.hook_status || job?.hook || null;
     return '<div class="publish-status">'
-        + `<span>${esc(status || 'Ready to publish.')}</span>`
+        + deliverStatusRows([['Website', status || 'Ready to publish.']])
         + (hook?.configured && !hook.ok ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
         + publishErrorBlock(job).replace('id="publish-retry"', 'data-deliver-publish-retry')
         + '</div>';
@@ -530,6 +536,7 @@ async function renderPrivateDeliver(session, token) {
                 + deliverLinkRow(share.url || '')
                 + `<div class="share-meta"><div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div><div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
                 + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
+                + deliverStatusRows([['Client selection', picks?.client_finished_at || share.client_finished_at ? `Finished ${formatShareDate(picks?.client_finished_at || share.client_finished_at)}` : 'In progress']])
                 + sharePicksRow(picks)
                 + deliverPasswordRow({ protected: share.protected, value: session.draft.password, action: share.protected ? 'Change' : 'Set', clear: share.protected })
                 + '<div class="share-actions"><button data-deliver-rotate type="button">Rotate link</button><button data-deliver-revoke type="button">Revoke</button></div>'
@@ -672,6 +679,10 @@ async function renderGalleryDeliver(session, token) {
             + galleryEditor.galleryDeliveryFields(gallery, galleryData.images)
             + deliverPasswordRow({ protected: Boolean(gallery?.protected), value: session.draft.password, action: gallery ? (gallery.protected ? 'Change' : 'Set') : '', clear: Boolean(gallery?.protected) })
             + deliverLinkRow(gallery?.url || '')
+            + (gallery ? deliverStatusRows([
+                ['Views', shareStatsLine(gallery)],
+                ['Photos', `${fmt(gallery.image_count)} frozen in this gallery`],
+            ]) : '')
             + '<div class="publish-actions">'
             + (gallery ? '<button data-deliver-gallery-revoke type="button" class="btn-danger">Revoke</button>' : '')
             + `<button data-deliver-gallery-save type="button">${gallery ? 'Update client gallery' : 'Create client gallery'}</button></div>`;

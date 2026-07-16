@@ -1971,6 +1971,14 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .deliver-tabs button { min-height: 30px; border-radius: var(--r-ctl); color: var(--text-2); font-size: var(--fs-caption); }
 .deliver-tabs button[aria-selected="true"] { background: var(--surface-raised); color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
 .deliver-body { display: grid; gap: var(--s3); }
+.deliver-title-row, .deliver-slug-row, .deliver-gallery-fields > label { display: grid; gap: 4px; color: var(--text-3); font-size: var(--fs-caption); }
+.deliver-title-row input, .deliver-slug-row input, .deliver-gallery-fields select { min-width: 0; height: 32px; padding: 0 var(--s2); border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); color: var(--text); }
+.deliver-gallery-fields { display: grid; gap: var(--s2); }
+.deliver-gallery-fields .gallery-download-all { display: flex; align-items: center; gap: var(--s2); color: var(--text-2); font-size: var(--fs-ui); }
+.deliver-status-rows { display: grid; gap: 1px; border: 1px solid var(--line); border-radius: var(--r-ctl); overflow: hidden; }
+.deliver-status-rows > div { display: flex; justify-content: space-between; gap: var(--s3); padding: 7px var(--s2); background: var(--surface-raised); font-size: var(--fs-caption); }
+.deliver-status-rows span { color: var(--text-3); }
+.deliver-status-rows b { color: var(--text-2); font-weight: var(--fw-medium); text-align: right; }
 
 /* ---- Staged import canvas (IMPORT_SPEC v1) ---------------------------- */
 body.import-stage-active #shell { grid-template-columns: 0 minmax(0, 1fr) 0 !important; }
