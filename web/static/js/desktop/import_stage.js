@@ -1,6 +1,8 @@
 // Staged import — the Lightroom-Classic-grade Import canvas (IMPORT_SPEC v1).
-// Full-screen takeover following the Develop precedent: Esc before commit
-// discards the staged scan and returns exactly where the user was, zero writes.
+// Full-screen takeover following the Develop precedent: Esc parks the stage —
+// the scan keeps collecting in the background, a peek chip in the main chrome
+// shows it live, and reopening resumes exactly where the user was. Zero writes
+// until commit; the stage only clears on commit or picking a new source.
 import {
     commitImportScan, getImportJob, getImportScan, getImportSources,
     browseImportPath, startImportScan,
@@ -40,6 +42,7 @@ let clearCard = true;
 let thumbPx = Number(localStorage.getItem('importThumbPx')) || 148;
 let categoryOverride = '';            // '' = the app decides (per-file EXIF/source diagnosis)
 let committing = false;
+let validating = false;         // resume revalidation in flight: hold commit until the stage is proven alive
 
 let thumbObserver = null;
 let sentinelObserver = null;
@@ -161,8 +164,8 @@ async function startScan() {
     renderedCount = 0;
     els.grid.querySelectorAll('.imps-cell').forEach((cell) => cell.remove());
     syncAll();
-    const result = await startImportScan(source.path, includeSubfolders);
-    if (!mounted || token !== generation) return;
+    const result = await startImportScan(source.path, includeSubfolders).catch(() => null);
+    if (token !== generation) return; // parking mid-start must not orphan the scan
     if (!result?.scan_id) {
         scanStatus = 'error';
         syncAll();
@@ -173,10 +176,20 @@ async function startScan() {
     pollScan(token);
 }
 
+// fetchJson throws on non-OK; a dead scan (server restart, expired stage) must
+// read as null here, not as an unhandled rejection that kills the poll loop.
+async function fetchScanPage(offset) {
+    try {
+        return await getImportScan(scanId, offset);
+    } catch {
+        return null;
+    }
+}
+
 async function pollScan(token) {
-    while (mounted && token === generation) {
-        const page = await getImportScan(scanId, entries.length);
-        if (!mounted || token !== generation) return;
+    while (token === generation) { // survives close: the stage keeps filling while parked
+        const page = await fetchScanPage(entries.length);
+        if (token !== generation) return;
         if (!page) { scanStatus = 'error'; syncAll(); return; }
         if (page.entries?.length) {
             for (const entry of page.entries) {
@@ -352,8 +365,23 @@ function syncCommit() {
         els.category.options[0].text = dominant && !categoryOverride
             ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'RAWS'}` : 'Auto';
     }
-    els.commit.disabled = !staged.length || committing || scanStatus === 'scanning';
+    els.commit.disabled = !staged.length || committing || validating
+        || scanStatus === 'scanning' || scanStatus === 'error'; // server rejects non-done scans
     els.commit.textContent = committing ? 'Importing…' : (scanStatus === 'scanning' ? 'Scanning…' : 'Import');
+}
+
+// The peek chip: while a stage is parked, the main chrome shows it live.
+function syncPeek() {
+    if (!els.peek) return;
+    const show = !mounted && stageAlive();
+    els.peek.hidden = !show;
+    if (!show) return;
+    els.peek.classList.toggle('busy', scanStatus === 'scanning');
+    els.peekText.textContent = scanStatus === 'scanning'
+        ? `Import — scanning ${source.label}… ${fmt(entries.length)}`
+        : (scanStatus === 'error'
+            ? `Import — ${source.label} couldn’t be read`
+            : `Import — ${fmt(checked.size)} staged in ${source.label}`);
 }
 
 function syncAll() {
@@ -362,6 +390,7 @@ function syncAll() {
     syncStatus();
     syncCommit();
     syncDestination();
+    syncPeek();
 }
 
 // ---------------------------------------------------------------- commit + job
@@ -390,7 +419,8 @@ async function commit() {
     }
     const label = source?.label || `Import ${result.batch_id}`;
     const clearingCard = body.clear_card;
-    closeImport({ keepGeneration: true });
+    closeImport();
+    resetStage();
     setScope({ import_batch: String(result.batch_id), importBatchLabel: label, sort: 'date_taken' });
     switchLens('grid');
     showToast(`Importing ${fmt(staged.length)} photos…`);
@@ -437,33 +467,68 @@ async function watchJob(jobId, clearingCard, batchId) {
 
 // ---------------------------------------------------------------- open/close
 
-export function openImport() {
-    if (mounted) return;
-    mounted = true;
-    generation += 1;
-    root.classList.add('active');
-    document.body.classList.add('import-stage-active');
+function stageAlive() {
+    return Boolean(source && (entries.length || scanStatus === 'scanning'));
+}
+
+function resetStage() {
+    generation += 1; // abandons scan pollers; server scan is just RAM
     source = null;
     scanId = null;
     scanStatus = 'idle';
     entries = [];
     checked = new Set();
+    insertedEntryKeys = new Set();
     expandedDirs = new Map();
+    anchorIndex = null;
     renderedCount = 0;
     els.grid.querySelectorAll('.imps-cell').forEach((cell) => cell.remove());
     els.keywords.value = '';
     categoryOverride = '';
     if (els.category) els.category.value = '';
+    syncPeek();
+}
+
+// A parked done-scan can outlive the server's in-RAM stage; confirm it still
+// answers before letting the user commit against a ghost.
+async function revalidateStage() {
+    if (!scanId || scanStatus === 'scanning') return;
+    const token = generation;
+    validating = true;
+    syncCommit();
+    const page = await fetchScanPage(entries.length);
+    validating = false;
+    if (!mounted || token !== generation) return;
+    if (!page) {
+        showToast('That staged import expired — rescanning');
+        startScan();
+        return;
+    }
+    syncCommit();
+}
+
+export function openImport() {
+    if (mounted) return;
+    mounted = true;
+    root.classList.add('active');
+    document.body.classList.add('import-stage-active');
+    if (stageAlive()) {
+        renderSources();
+        syncAll();
+        revalidateStage();
+        return;
+    }
+    resetStage();
     syncAll();
     loadSources();
 }
 
-export function closeImport(options = {}) {
+export function closeImport() {
     if (!mounted) return;
     mounted = false;
-    if (!options.keepGeneration) generation += 1; // abandons scan pollers; server scan is just RAM
     root.classList.remove('active');
     document.body.classList.remove('import-stage-active');
+    syncPeek();
 }
 
 export function importOpen() {
@@ -499,6 +564,8 @@ export function initImportStage() {
         summary: root.querySelector('#imps-summary'),
         category: root.querySelector('#imps-category'),
         commit: root.querySelector('#imps-commit'),
+        peek: document.getElementById('import-peek'),
+        peekText: document.getElementById('import-peek-text'),
     };
     els.size.value = String(thumbPx);
     root.style.setProperty('--imps-thumb', `${thumbPx}px`);
@@ -557,6 +624,7 @@ export function initImportStage() {
     });
     els.commit.addEventListener('click', commit);
 
+    els.peek?.addEventListener('click', openImport);
     document.getElementById('import-view')?.addEventListener('click', openImport);
     on('import:open', openImport);
     emit('import:ready');
