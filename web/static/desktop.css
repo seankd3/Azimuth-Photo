@@ -327,8 +327,9 @@ body.loupe-lights-out #ctxbar { display: none; }
 #ctx-mid[hidden], #ctx-right[hidden] { display: none; }
 #ctx-mid::before, #ctx-right::before { content: ""; width: 1px; height: 20px; background: var(--line-soft); flex: none; }
 #ctx-mid > *, #ctx-right > * { flex-shrink: 0; }
-#ctx-count { min-width: 0; max-width: clamp(82px, 16vw, 180px); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#ctx-count { width: clamp(82px, 16vw, 180px); min-width: 0; max-width: clamp(82px, 16vw, 180px); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #ctx-count b { color: var(--text); font-weight: 600; }
+.ctx-count-sharpening { color: var(--text-3); font-variant-numeric: tabular-nums; }
 #quality-wrap { display: none; align-items: center; gap: 8px; }
 #quality-wrap.on { display: flex; }
 #quality-bar { width: 64px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.09); overflow: hidden; }
