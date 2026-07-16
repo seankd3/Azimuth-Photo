@@ -1,4 +1,5 @@
 from test_support import *  # noqa: F401,F403
+import asyncio
 import random
 
 from features.compare import semantic_pairing
@@ -251,6 +252,131 @@ class CompareTests(BackendTestCase):
         finally:
             await conn.close()
         self.assertEqual(remaining["c"], 0)
+
+    async def test_undo_before_propagation_suppresses_action_updates(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "undo-first-winner.jpg")
+        loser = await self._image(source["id"], "undo-first-loser.jpg")
+        neighbor = await self._image(source["id"], "undo-first-neighbor.jpg")
+        action_id = "undo-before-propagation"
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id=action_id,
+        )
+        self.assertIsNotNone(await db.undo_last_comparison())
+
+        conn = await db.get_db()
+        try:
+            updated = await elo_propagation._apply_propagation_deltas(
+                conn,
+                {neighbor: {"elo": 1200.0, "comparisons": 0, "propagated_updates": 0}},
+                {neighbor: 5.0},
+                action_id=action_id,
+            )
+            if updated:
+                await conn.commit()
+            else:
+                await conn.rollback()
+        finally:
+            await conn.close()
+
+        self.assertEqual(updated, 0)
+        neighbor_row = await self._image_row(neighbor)
+        self.assertEqual(neighbor_row["elo"], 1200.0)
+        self.assertEqual(neighbor_row["propagated_updates"], 0)
+
+    async def test_undo_cannot_commit_between_propagation_check_and_writes(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "serialized-winner.jpg")
+        loser = await self._image(source["id"], "serialized-loser.jpg")
+        neighbor = await self._image(source["id"], "serialized-neighbor.jpg")
+        action_id = "serialized-propagation"
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id=action_id,
+        )
+
+        checked = asyncio.Event()
+        resume = asyncio.Event()
+
+        class PausingCursor:
+            def __init__(self, cursor):
+                self.cursor = cursor
+
+            async def fetchone(self):
+                row = await self.cursor.fetchone()
+                checked.set()
+                await resume.wait()
+                return row
+
+        class PausingConnection:
+            def __init__(self, conn):
+                self.conn = conn
+
+            async def execute(self, sql, parameters=()):
+                cursor = await self.conn.execute(sql, parameters)
+                if sql.lstrip().startswith("SELECT 1 FROM comparisons"):
+                    return PausingCursor(cursor)
+                return cursor
+
+            async def executemany(self, sql, parameters):
+                return await self.conn.executemany(sql, parameters)
+
+        raw_conn = await db.get_db()
+        conn = PausingConnection(raw_conn)
+
+        async def apply_propagation():
+            try:
+                updated = await elo_propagation._apply_propagation_deltas(
+                    conn,
+                    {neighbor: {"elo": 1200.0, "comparisons": 0, "propagated_updates": 0}},
+                    {neighbor: 5.0},
+                    action_id=action_id,
+                )
+                if updated:
+                    await raw_conn.commit()
+                else:
+                    await raw_conn.rollback()
+                return updated
+            finally:
+                await raw_conn.close()
+
+        propagation_task = asyncio.create_task(apply_propagation())
+        await asyncio.wait_for(checked.wait(), timeout=1.0)
+        undo_task = asyncio.create_task(db.undo_last_comparison())
+        try:
+            await asyncio.wait_for(asyncio.shield(undo_task), timeout=0.1)
+        except TimeoutError:
+            pass
+        resume.set()
+        await propagation_task
+        undo = await asyncio.wait_for(undo_task, timeout=1.0)
+
+        self.assertIsNotNone(undo)
+        neighbor_row = await self._image_row(neighbor)
+        self.assertEqual(neighbor_row["elo"], 1200.0)
+        self.assertEqual(neighbor_row["propagated_updates"], 0)
+        conn = await db.get_db()
+        try:
+            orphan_count = await (await conn.execute(
+                "SELECT COUNT(*) AS count FROM propagation_updates WHERE action_id = ?",
+                (action_id,),
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(orphan_count["count"], 0)
 
     async def test_direct_undo_keeps_action_retryable_when_a_rating_drifted(self):
         source = await self._source()
