@@ -98,7 +98,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("updateThumbnailPoll(pending)", preparing)
         self.assertIn("if (hiddenPendingThumbnails > 0)", preparing)
         self.assertIn("renderPreparingState(hiddenPendingThumbnails)", preparing)
-        self.assertIn("if (hiddenPendingThumbnails > 0 && !monthOffsets.length && !images.length)", months)
+        self.assertIn("if (hiddenPendingThumbnails > 0 && !images.length)", months)
         self.assertIn("renderPreparingState(hiddenPendingThumbnails)", months)
 
     def test_smart_collection_scopes_hide_membership_actions(self):
