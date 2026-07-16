@@ -101,6 +101,14 @@ class DevelopPipelineTests(unittest.TestCase):
         np.testing.assert_allclose(lut[[0, 64, 128, 255]], [0.0, 32 / 255, 160 / 255, 1.0], atol=2e-6)
         self.assertTrue(np.all(np.diff(lut) >= -1e-7))
 
+    def test_missing_user_curves_do_not_resample_identity_luts(self):
+        source = np.linspace(0.0, 1.0, 18, dtype=np.float32).reshape(2, 3, 3)
+
+        with mock.patch.object(pipeline, "_apply_lut", wraps=pipeline._apply_lut) as apply_lut:
+            pipeline._apply_tone_curves(source, {})
+
+        self.assertEqual(apply_lut.call_count, 3)  # Base curve only; four user curves are absent.
+
     def test_hsl_band_weights_sum_and_neutral_protect(self):
         weights = pipeline.hsl_band_weights(np.array([0, 30, 260, 350], dtype=np.float32))
         np.testing.assert_allclose(weights.sum(axis=-1), 1.0, atol=1e-7)

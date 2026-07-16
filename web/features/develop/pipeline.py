@@ -481,15 +481,23 @@ def _apply_tone_curves(
         result[..., index] = _apply_lut(c[..., index], base_lut)
     if not display_base and camera_profile is None:
         result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
-    main_lut = build_monotone_cubic_lut(settings.get("ToneCurvePV2012"))
-    # A main curve is RGB-linked; component curves are applied after it.
-    curved = result.copy()
-    for index in range(3):
-        curved[..., index] = _apply_lut(result[..., index], main_lut)
+    # Missing/invalid user curves resolve to identity LUTs. Preserve that exact
+    # result without resampling every full-resolution channel through np.interp.
+    curved = result
+    main_curve = settings.get("ToneCurvePV2012")
+    if len(_curve_points(main_curve)) >= 2:
+        main_lut = build_monotone_cubic_lut(main_curve)
+        # A main curve is RGB-linked; component curves are applied after it.
+        curved = result.copy()
+        for index in range(3):
+            curved[..., index] = _apply_lut(result[..., index], main_lut)
     for index, suffix in enumerate(("Red", "Green", "Blue")):
-        curved[..., index] = _apply_lut(
-            curved[..., index], build_monotone_cubic_lut(settings.get(f"ToneCurvePV2012{suffix}"))
-        )
+        component_curve = settings.get(f"ToneCurvePV2012{suffix}")
+        if len(_curve_points(component_curve)) < 2:
+            continue
+        if curved is result:
+            curved = result.copy()
+        curved[..., index] = _apply_lut(curved[..., index], build_monotone_cubic_lut(component_curve))
     return curved
 
 
