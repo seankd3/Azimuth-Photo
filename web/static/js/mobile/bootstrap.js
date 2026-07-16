@@ -9,7 +9,7 @@ import { initSelection } from './selection.js';
 import { initViewer } from './viewer.js';
 import { initRefine, showRefine } from './refine.js';
 import { initSearch, showSearch } from './search.js';
-import { initLibrary, showLibrary } from './library.js';
+import { initLibrary, popCollectionView, showLibrary } from './library.js';
 import { initHistory, onHistoryTab, replaceTab } from './history.js';
 import { mountIconSprite } from '../icons.js';
 import { initWriteQueue } from './write_queue.js';
@@ -55,11 +55,10 @@ function warmOwnedOfflineModules() {
 function setTab(tab) {
     if (!TABS.includes(tab)) return;
     if (tab === activeTab) {
-        if (tab === 'photos') {
-            const pane = document.getElementById('tab-photos');
-            pane?.scrollTo({ top: 0, behavior: 'smooth' });
-            scrollMemory.set('photos', 0);
-        }
+        if (tab === 'library' && popCollectionView()) return;
+        const pane = document.getElementById(`tab-${tab}`);
+        pane?.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollMemory.set(tab, 0);
         return;
     }
     const currentPane = document.getElementById(`tab-${activeTab}`);

@@ -730,6 +730,12 @@ function closeCollectionView({ fromHistory = false } = {}) {
     if (!fromHistory) syncLayerClosed('collection');
 }
 
+export function popCollectionView() {
+    if (!showingCollection) return false;
+    dismissLayer('collection', closeCollectionView);
+    return true;
+}
+
 function openCollectionActionsSheet(coll) {
     const sheet = openSheet(
         `<h3>${esc(coll.name)}</h3>`
