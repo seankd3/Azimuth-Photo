@@ -281,6 +281,17 @@ export class DevelopPanels {
                 this.syncSlider(row);
             });
             input.addEventListener('focus', () => input.select());
+            row.addEventListener('wheel', (event) => {
+                if (!event.altKey && document.activeElement !== input) return;
+                event.preventDefault();
+                const step = Number(row.dataset.step) || 1;
+                const direction = event.deltaY < 0 ? 1 : -1;
+                const size = event.shiftKey ? step * 10 : step;
+                const current = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const value = Math.max(Number(row.dataset.min), Math.min(Number(row.dataset.max), Math.round((current + direction * size) / step) * step));
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                this.syncSlider(row);
+            }, { passive: false });
         }
     }
 
