@@ -599,7 +599,17 @@ def _queue_hook_retry(row: dict | None, *, legacy_state: str, force: bool = Fals
 async def resume_pending_hook_retries() -> None:
     """Restore durable hook confirmations after the app process starts."""
     _configured()
-    for row in await _list_publishes():
+    import sqlite3
+
+    try:
+        rows = await _list_publishes()
+    except sqlite3.OperationalError:
+        # No publishes schema yet (smoke mode never runs init_db; startup
+        # handlers must tolerate a virgin catalog — 5a1b5017 doctrine). A
+        # fresh library has no durable retries to resume.
+        log.info("hook-retry resume skipped: publishes schema not initialized yet")
+        return
+    for row in rows:
         if row.get("hook_pending") and row.get("hook_pending_operation") in {"publish", "revoke"}:
             legacy_state = "hook_failed" if row["hook_pending_operation"] == "publish" else "revoked_hook_failed"
             _queue_hook_retry(row, legacy_state=legacy_state)

@@ -224,8 +224,12 @@ function render() {
 
     bindSuggestions();
     root.querySelector('#ml-install')?.addEventListener('click', async () => {
-        const accepted = await promptInstall();
-        showToast(accepted ? 'Installed — check your home screen' : 'Install cancelled');
+        try {
+            const accepted = await promptInstall();
+            showToast(accepted ? 'Installed — check your home screen' : 'Install cancelled');
+        } catch {
+            showToast("Couldn't start the install — try again");
+        }
         render();
     });
     bindWorkRows();

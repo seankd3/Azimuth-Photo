@@ -8,8 +8,11 @@ reverted), so this gate boots the app the way installs actually do: a
 subprocess server_entry against a virgin PHOTOARCHIVE_HOME.
 
 Doctrine this enforces (docs/background-work-behavior.md): startup handlers
-have NO ordering guarantee relative to init_db; every handler touching the
-catalog must tolerate missing schema.
+have NO ordering guarantee relative to init_db — and under SMOKE_MODE init_db
+never runs at all (core/background.py returns after warm_templates), so every
+handler touching the catalog must tolerate missing schema. The smoke-mode
+flavor below is the exact 5a1b5017 vector (Fix & Speed repro): a virgin home
+plus SMOKE_MODE=1 crashed boot in ~2s before the guard.
 """
 
 import os
@@ -35,6 +38,11 @@ def _free_port() -> int:
 class FreshHomeBootSmoke(unittest.TestCase):
     def test_fresh_hub_home_boots_clean(self):
         self._boot_fresh_home({})
+
+    def test_fresh_smoke_mode_home_boots_clean_without_any_schema(self):
+        # SMOKE_MODE skips init_db entirely: the strictest schema-tolerance
+        # probe — any startup handler that queries the catalog dies here.
+        self._boot_fresh_home({"PHOTOARCHIVE_SMOKE_MODE": "1", "PHOTOARCHIVE_ACCESS": "local"})
 
     def test_fresh_satellite_home_boots_clean_with_unreachable_hub(self):
         # Law 1: a satellite must boot and serve even when its hub is down.
