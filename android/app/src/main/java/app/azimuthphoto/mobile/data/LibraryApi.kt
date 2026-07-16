@@ -161,7 +161,7 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
     /** Verify payload against the hub before relying on this. */
     suspend fun mergePeople(sourceId: Long, targetId: Long): Boolean = withContext(Dispatchers.IO) {
         runCatching {
-            postJson("/api/people/merge", """{"source_id":$sourceId,"target_id":$targetId}""")
+            postJson("/api/people/merge", """{"source_person_id":$sourceId,"target_person_id":$targetId}""")
         }.isSuccess
     }
 
