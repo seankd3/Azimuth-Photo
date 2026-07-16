@@ -42,6 +42,18 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("viewState.images.some((image) =>", grid)
         self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
 
+    def test_warm_events_revalidates_group_coverage_after_flags_change(self):
+        events = read("events.js")
+
+        self.assertIn("revalidate({ refreshCoverage: true })", events)
+        self.assertIn("function patchCoverageDots()", events)
+        self.assertIn("dotHost.innerHTML = coverageDots(group);", events)
+        revalidate = events[events.index("async function revalidate"):events.index("export function initEvents")]
+        self.assertLess(
+            revalidate.index("patchCoverageDots();"),
+            revalidate.index("resetData();"),
+        )
+
     def test_loupe_removes_trashed_photos_from_grid_and_session_lists(self):
         loupe = read("loupe.js")
 
