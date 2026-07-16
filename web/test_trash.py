@@ -855,3 +855,34 @@ class VirtualCopyTrashTests(BackendTestCase):
         )).fetchone()
         self.assertEqual(int(count["n"]), 0)
         self.assertFalse(os.path.exists(filepath))
+
+    async def test_trash_listing_counts_edited_copies_for_the_empty_warning(self):
+        master_id, copy_id, _filepath = await self._master_with_copy()
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_history (image_id, settings, label, created_at) "
+                "VALUES (?, '{}', 'Virtual Copy', 'now')",
+                (copy_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await trash_service.trash_images(db.DB_PATH, [master_id])
+        listing = await trash_service.list_trash(db.DB_PATH)
+        self.assertEqual(listing["edited_copy_count"], 0)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_history (image_id, settings, label, created_at) "
+                "VALUES (?, '{\"Exposure2012\":1.0}', 'Exposure', 'now')",
+                (copy_id,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        listing = await trash_service.list_trash(db.DB_PATH)
+        self.assertEqual(listing["edited_copy_count"], 1)
+
