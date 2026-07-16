@@ -142,7 +142,8 @@ def content_hash_from_stream(path: Path) -> tuple[str, str, int]:
 
 
 def _fsync_file(path: Path) -> None:
-    with path.open("rb") as handle:
+    # Windows FlushFileBuffers needs a writable handle; an "rb" fsync EBADFs.
+    with path.open("rb+") as handle:
         os.fsync(handle.fileno())
 
 

@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -95,7 +96,7 @@ class XmpWriteTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.db_path = str(self.root / "photoarchive.db")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.executescript(
                 """
                 CREATE TABLE images (
@@ -117,7 +118,7 @@ class XmpWriteTests(unittest.TestCase):
     def _image(self, image_id: int, suffix: str, *, origin: str = "user", settings=None) -> Path:
         raw = self.root / f"image-{image_id}{suffix}"
         raw.write_bytes(b"raw fixture")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("INSERT INTO images (id, filepath) VALUES (?, ?)", (image_id, str(raw)))
             conn.execute(
                 "INSERT INTO develop_settings (image_id, settings, origin, updated_at) VALUES (?, ?, ?, 'now')",
@@ -149,7 +150,7 @@ class XmpWriteTests(unittest.TestCase):
         raw = self._image(9, ".cr3", settings={"Exposure2012": 0.25})
         sidecar = raw.with_suffix(".xmp")
         sidecar.write_bytes(b"master sidecar")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 "INSERT INTO images (id, filepath, vc_of) VALUES (?, ?, ?)",
                 (10, str(raw), 9),
@@ -224,7 +225,7 @@ class XmpWriteTests(unittest.TestCase):
     def test_hub_remote_write_is_explicit_and_excluded_from_bulk_counts(self):
         remote = self._image(11, ".cr3", settings={"Exposure2012": 1.0})
         self._image(12, ".cr3", settings={"Exposure2012": -1.0})
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("UPDATE images SET hub_remote = 1 WHERE id = 11")
         remote.unlink()
 

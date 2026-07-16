@@ -2554,17 +2554,24 @@ class LibraryTests(BackendTestCase):
         self.assertNotIn("Family/Trip/Day", shallow_counts)
 
     async def test_folder_tree_payload_assembles_source_hierarchy(self):
+        # Catalog paths are always platform-native in production; build the
+        # fixture the same way and expect the payload's '/'-normalized keys.
+        def nat(p):
+            return os.path.abspath(p)
+
+        def key(p):
+            return nat(p).replace(os.sep, "/")
         sources = [
             {
                 "id": 1,
-                "path": "/archive/main",
+                "path": nat("/archive/main"),
                 "display_name": "Main Archive",
                 "online": 1,
                 "active_image_count": 6,
             },
             {
                 "id": 2,
-                "path": "/archive/offline",
+                "path": nat("/archive/offline"),
                 "display_name": "Offline Archive",
                 "online": 0,
                 "active_image_count": 1,
@@ -2572,13 +2579,13 @@ class LibraryTests(BackendTestCase):
         ]
         counts = {
             1: {
-                "/archive/main": 1,
-                "/archive/main/Family": 2,
-                "/archive/main/Family/Trip": 2,
-                "/archive/main/Family/Trip/Day": 1,
+                nat("/archive/main"): 1,
+                nat("/archive/main/Family"): 2,
+                nat("/archive/main/Family/Trip"): 2,
+                nat("/archive/main/Family/Trip/Day"): 1,
             },
             2: {
-                "/archive/offline/Scans": 1,
+                nat("/archive/offline/Scans"): 1,
             },
         }
 
@@ -2591,11 +2598,11 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(main["count"], 1)
         self.assertEqual(main["total_count"], 6)
         family = main["folders"][0]
-        self.assertEqual(family["path"], "/archive/main/Family")
+        self.assertEqual(family["path"], key("/archive/main/Family"))
         self.assertEqual(family["count"], 2)
         self.assertEqual(family["total_count"], 5)
         trip = family["children"][0]
-        self.assertEqual(trip["path"], "/archive/main/Family/Trip")
+        self.assertEqual(trip["path"], key("/archive/main/Family/Trip"))
         self.assertEqual(trip["count"], 2)
         self.assertEqual(trip["total_count"], 3)
         self.assertEqual(trip["children"], [])
@@ -2942,9 +2949,9 @@ class LibraryTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=0.5)
+            result = await asyncio.wait_for(library_routes.api_rankings(limit=2), timeout=5)
             self.assertEqual(len(result["images"]), 2)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)

@@ -49,7 +49,7 @@ class RangeMaskTests(unittest.TestCase):
         self.assertLessEqual(max_delta, 2e-6, f"color-range JS/numpy max delta {max_delta:.8g}")
 
     def test_range_panel_has_luminance_histogram_and_rendered_canvas_eyedropper(self):
-        source = (Path(__file__).parent / "static/js/desktop/develop/masking.js").read_text()
+        source = (Path(__file__).parent / "static/js/desktop/develop/masking.js").read_text(encoding="utf-8")
         for marker in ("data-range-histogram", "data-range-eyedropper", "data-range-anchor", "PointModels", "linear OKLab working space"):
             self.assertIn(marker, source)
 

@@ -43,6 +43,11 @@ _TRAILING_VARIANT_COUNTER_RE = re.compile(r"-\d+$")
 _VARIANT_MARKER_SUFFIXES = tuple(sorted(VARIANT_MARKER_TOKENS, key=len, reverse=True))
 
 
+def _metadata_key(path: str) -> str:
+    """Platform-stable exiftool metadata key for a catalog filepath."""
+    return os.path.normcase(os.path.abspath(path))
+
+
 def _active_rows(db_path: str) -> dict[int, dict]:
     conn = data_connection.open_sync(db_path)
     try:
@@ -165,7 +170,7 @@ def _exiftool_version_metadata(rows: list[dict]) -> dict[str, tuple[str, str]]:
             model = " ".join(str(item.get("Model") or "").split()).casefold()
             captured_at = safe_datetime_fromtimestamp(timestamp) if timestamp is not None else None
             if path and captured_at is not None and model:
-                metadata[os.path.normcase(os.path.abspath(path))] = (
+                metadata[_metadata_key(path)] = (
                     captured_at.strftime("%Y-%m-%d %H:%M:%S"),
                     model,
                 )
@@ -339,7 +344,7 @@ def build_version_groups(db_path: str, rows: dict[int, dict] | None = None):
 
     def capture_key(row: dict) -> tuple[str, str] | None:
         return _version_capture_key(row) or fallback_metadata.get(
-            os.path.normcase(os.path.abspath(str(row.get("filepath") or "")))
+            _metadata_key(str(row.get("filepath") or ""))
         )
 
     raw_by_stem: dict[str, list[int]] = {}

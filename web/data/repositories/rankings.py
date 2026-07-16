@@ -1,5 +1,6 @@
 """Ranking query SQL fragments and constants."""
 
+import re
 import asyncio
 from datetime import datetime
 import time as _time
@@ -134,6 +135,13 @@ def escape_like(value: str) -> str:
     )
 
 
+_WINDOWS_ABS_RE = re.compile(r"^[A-Za-z]:[/\\]")
+
+
+def _is_windows_absolute(value: str) -> bool:
+    return bool(_WINDOWS_ABS_RE.match(value)) or value.startswith("\\\\")
+
+
 def normalized_folder_values(folder) -> list[str]:
     if not folder:
         return []
@@ -145,7 +153,17 @@ def normalized_folder_values(folder) -> list[str]:
     seen = set()
     for value in values:
         raw = str(value or "").strip()
-        clean = raw if raw == HUB_MIRROR_SOURCE_PATH else raw.rstrip("/")
+        if raw == HUB_MIRROR_SOURCE_PATH:
+            clean = raw
+        else:
+            # Folder keys travel the API as '/'; local Windows rows store '\'.
+            # Canonicalize here so both range and LIKE predicates line up with
+            # whatever separators the matching rows actually use.
+            clean = raw.rstrip("/\\")
+            if _is_windows_absolute(clean):
+                clean = clean.replace("/", "\\")
+            elif not clean.startswith("/"):
+                clean = clean.replace("\\", "/")
         if not clean or clean in seen:
             continue
         seen.add(clean)
@@ -177,16 +195,21 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
         if value == HUB_MIRROR_SOURCE_PATH:
             parts.append("i.source_id IN (SELECT id FROM catalog_sources WHERE path = ?)")
             params.append(value)
-        elif value.startswith("/"):
+        elif value.startswith("/") or _is_windows_absolute(value):
             # Absolute folder scopes are hot (grid browse): a range predicate
             # rides idx_images_active_filepath instead of a LIKE full scan
             # (folder-scoped rankings on 141k rows: seconds -> milliseconds).
-            prefix = f"{value}/"
+            sep = "/" if value.startswith("/") else "\\"
+            prefix = f"{value}{sep}"
             parts.append("(i.filepath >= ? AND i.filepath < ?)")
             params.extend([prefix, _prefix_upper_bound(prefix)])
         else:
-            parts.append("i.filepath LIKE ? ESCAPE '\\'")
-            params.append(f"%/{escape_like(value)}/%")
+            # Relative scopes must match rows from local sources (native
+            # separators) and hub mirrors ('/') alike.
+            posix_like = escape_like(value)
+            native_like = escape_like(value.replace("/", "\\"))
+            parts.append("(i.filepath LIKE ? ESCAPE '\\' OR i.filepath LIKE ? ESCAPE '\\')")
+            params.extend([f"%/{posix_like}/%", f"%\\\\{native_like}\\\\%"])
     if len(parts) == 1:
         return parts[0], params
     return f"({' OR '.join(parts)})", params
@@ -195,7 +218,9 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
 def has_absolute_folder_range(folder) -> bool:
     """Return whether every requested folder can use the filepath range indexes."""
     values = normalized_folder_values(folder)
-    return bool(values) and all(value.startswith("/") for value in values)
+    return bool(values) and all(
+        value.startswith("/") or _is_windows_absolute(value) for value in values
+    )
 
 
 def ranking_count_cache_key(

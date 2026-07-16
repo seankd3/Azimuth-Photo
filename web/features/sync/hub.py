@@ -6,6 +6,7 @@ import asyncio
 import json
 import ntpath
 import os
+import sys
 import re
 import shutil
 import tempfile
@@ -181,6 +182,8 @@ def upload_offset_path(intake_root: Path, content_hash: str) -> Path:
 
 
 def _fsync_directory(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        return  # Windows cannot open directories; os.replace is already durable-atomic on NTFS
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)

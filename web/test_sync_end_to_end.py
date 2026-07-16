@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import gzip
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from pathlib import Path
@@ -45,7 +46,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
         self.client = self.client_context.__enter__()
 
         self.thumb_paths: dict[int, Path] = {}
-        with sqlite3.connect(self.hub_db) as conn:
+        with closing(sqlite3.connect(self.hub_db)) as conn, conn:
             source_id = conn.execute(
                 "INSERT INTO catalog_sources(path, display_name) VALUES (?, ?)",
                 (str(self.root / "originals"), "Hub originals"),
@@ -94,7 +95,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
 
     @staticmethod
     def _flag(catalog: str, content_hash: str) -> str:
-        with sqlite3.connect(catalog) as conn:
+        with closing(sqlite3.connect(catalog)) as conn, conn:
             return str(conn.execute(
                 "SELECT flag FROM images WHERE content_hash = ?", (content_hash,)
             ).fetchone()[0])
@@ -109,7 +110,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             mirror_status = await mirror.refresh()
             self.assertEqual(mirror_status["rows_applied"], 50)
 
-            with sqlite3.connect(self.satellite_db) as conn:
+            with closing(sqlite3.connect(self.satellite_db)) as conn, conn:
                 mirrored = conn.execute(
                     "SELECT COUNT(*), SUM(missing_at IS NOT NULL), MIN(hub_remote), MAX(hub_remote) "
                     "FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE s.path = 'hub://'"
@@ -140,7 +141,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             self.assertEqual(first_exchange["pushed"], 1)
             self.assertEqual(self._flag(self.hub_db, f"{1:032x}"), "picked")
 
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 second_hub_id = int(conn.execute(
                     "SELECT id FROM images WHERE content_hash = ?", (f"{2:032x}",)
                 ).fetchone()[0])
@@ -150,7 +151,7 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             self.assertEqual(self._flag(self.satellite_db, f"{2:032x}"), "rejected")
 
             satellite_cursors = await oplog.local_cursors(self.satellite_db)
-            with sqlite3.connect(self.hub_db) as conn:
+            with closing(sqlite3.connect(self.hub_db)) as conn, conn:
                 hub_cursors = dict(conn.execute(
                     "SELECT origin, MAX(origin_seq) FROM oplog GROUP BY origin"
                 ))

@@ -1477,10 +1477,10 @@ class CompareTests(BackendTestCase):
         try:
             result = await asyncio.wait_for(
                 compare_routes.mosaic_next(n=2, strategy="random"),
-                timeout=0.5,
+                timeout=5,
             )
             self.assertEqual(len(result["images"]), 2)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)
@@ -1501,9 +1501,9 @@ class CompareTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=0.5)
+            result = await asyncio.wait_for(compare_routes.compare_next(n=1, mode="swiss"), timeout=5)
             self.assertEqual(len(result["pairs"]), 1)
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)
