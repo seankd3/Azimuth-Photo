@@ -6,6 +6,7 @@ from fastapi import APIRouter, Request
 from core.requests import repeated_query_values
 from data import connection as data_connection
 from features.library import service as library_service
+from features.library import storage
 
 
 router = APIRouter()
@@ -19,6 +20,11 @@ def configure(
 ) -> None:
     global _rankings_handler
     _rankings_handler = rankings_handler
+
+
+@router.get("/api/storage/overview")
+async def api_storage_overview():
+    return await storage.overview_payload()
 
 
 @router.get("/api/rankings")

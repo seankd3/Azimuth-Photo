@@ -5,7 +5,7 @@ import {
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan,
+    stopMetadataScan, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -32,6 +32,7 @@ let scanSourceId = null;
 let installTimerGeneration = 0;
 let scanTimerGeneration = 0;
 let catalog = null;
+let storageOverview = null;
 let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
@@ -422,6 +423,33 @@ function lastScan(source) {
     const date = Number.isFinite(stamp) ? new Date(stamp * 1000) : new Date(raw);
     if (Number.isNaN(date.getTime())) return 'not scanned';
     return `scanned ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+}
+
+function archiveHomeName(path) {
+    const clean = String(path || '').replace(/\/+$/, '');
+    return clean.split('/').filter(Boolean).pop() || clean || 'Archive home';
+}
+
+function archiveSummary(overview) {
+    const parts = ['Your archive'];
+    if (overview?.photo_count != null) parts.push(`${fmt(overview.photo_count)} photos`);
+    if (overview?.originals_bytes != null) parts.push(bytes(overview.originals_bytes));
+    if (overview?.disk_free_bytes != null) {
+        parts.push(`${bytes(overview.disk_free_bytes)} free${overview.disk_label ? ` on ${overview.disk_label}` : ''}`);
+    }
+    return parts.join(' · ');
+}
+
+function renderArchiveOverview() {
+    const overview = storageOverview;
+    const homePath = overview?.home_path || '';
+    const home = archiveHomeName(homePath);
+    return '<section class="dr-sec"><h3>Archive</h3><div class="setting-status archive-overview">'
+        + `<b>${esc(archiveSummary(overview))}</b>`
+        + (homePath
+            ? `<div class="archive-home"><span><b title="${esc(home)}">${esc(home)}</b><code title="${esc(homePath)}">${esc(homePath)}</code></span><button class="mini-btn" type="button" data-archive-open="${esc(homePath)}">Open</button></div>`
+            : '<span class="archive-unavailable">Archive details are unavailable right now.</span>')
+        + '</div></section>';
 }
 
 function dateTime(value) {
@@ -957,7 +985,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
@@ -1066,7 +1094,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1079,6 +1107,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getPairStatus().catch(() => null),
         getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
+        getStorageOverview().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData);
@@ -1093,6 +1122,7 @@ async function refreshDrawer({ initial = false } = {}) {
     pairStatus = pair || pairStatus;
     syncStatus = sync || syncStatus;
     devicesPayload = devices || devicesPayload;
+    storageOverview = overview || storageOverview;
     renderActivity();
     const body = systemSurfaceRender
         ? document.getElementById('system-lens-content')
@@ -1457,6 +1487,11 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
                 }
             });
         },
+    });
+    body.querySelector('[data-archive-open]')?.addEventListener('click', async (event) => {
+        const result = await revealFolder(event.currentTarget.dataset.archiveOpen || '');
+        if (result?.ok && result?.data?.ok) showToast('Opened archive home');
+        else showToast(result?.data?.error || 'Couldn’t open archive home');
     });
     for (const btn of body.querySelectorAll('[data-act]')) {
         btn.addEventListener('click', () => {

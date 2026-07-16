@@ -131,6 +131,10 @@ export async function getCatalog() {
     return fetchJson('/api/catalog', { defaultValue: null });
 }
 
+export async function getStorageOverview() {
+    return fetchJson('/api/storage/overview', { defaultValue: null });
+}
+
 export async function browseCatalogFolders(path = '') {
     const params = new URLSearchParams();
     if (path) params.set('path', path);

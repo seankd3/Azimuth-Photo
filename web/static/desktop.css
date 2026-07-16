@@ -1306,6 +1306,13 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .setting-status { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); color: var(--text-2); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
 .setting-status.warn { border-color: rgba(212,160,79,.35); background: rgba(212,160,79,.08); color: var(--warn); }
 .setting-status code { color: var(--text); font-size: 11px; }
+.archive-overview { display: grid; gap: var(--s3); }
+.archive-home { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.archive-home span { display: grid; min-width: 0; gap: 2px; }
+.archive-home span b, .archive-home code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.archive-home code { color: var(--text-3); }
+.archive-home .mini-btn { flex: none; }
+.archive-unavailable { color: var(--text-3); }
 .server-update-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s3); }
 .server-update-banner .mini-btn { flex: none; }
 .setting-hint { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
