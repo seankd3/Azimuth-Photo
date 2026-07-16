@@ -29,6 +29,8 @@ _batch_tasks: set[asyncio.Task] = set()
 _base_generation_tasks: dict[int, asyncio.Task] = {}
 _base_generation_failures: dict[int, tuple[float, rawproc.RawDecodeError]] = {}
 _BASE_FAILURE_TTL_SECONDS = 5.0
+HISTORY_EDIT_LIMIT = 40
+HISTORY_SNAPSHOT_LIMIT = 40
 _batch_status: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -342,12 +344,15 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(_configured_db_path())
     try:
         cursor = await conn.execute(
-            # Named snapshots are pinned: they must survive the 40-step rail cap.
-            "SELECT id, settings, label, created_at FROM develop_history "
-            "WHERE image_id = ? AND (label LIKE 'Snapshot:%' OR id IN ("
-            "  SELECT id FROM develop_history WHERE image_id = ? ORDER BY id DESC LIMIT 40"
-            ")) ORDER BY id DESC",
-            (image_id, image_id),
+            # Named snapshots are pinned separately from edits, but each lane is capped.
+            "WITH pinned AS ("
+            "  SELECT id, settings, label, created_at FROM develop_history "
+            "  WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
+            "), recent AS ("
+            "  SELECT id, settings, label, created_at FROM develop_history "
+            "  WHERE image_id = ? AND label NOT LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
+            ") SELECT * FROM pinned UNION ALL SELECT * FROM recent ORDER BY id DESC",
+            (image_id, HISTORY_SNAPSHOT_LIMIT, image_id, HISTORY_EDIT_LIMIT),
         )
         return [
             {**dict(row), "settings": _json_settings(row["settings"])}
