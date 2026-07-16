@@ -482,6 +482,25 @@ def configure_shared_routes() -> None:
     )
 
 
+def _smart_collection_image_ids_resolver(resolve_library_constraints):
+    import db
+    from features.collections import smart as smart_collections
+
+    async def resolve(collection_id: int) -> set[int] | None:
+        collection = await db.get_collection(collection_id, limit=1)
+        if not collection or not collection.get("smart"):
+            return None
+        image_ids = await smart_collections.resolve_image_ids(
+            collection.get("query") or {},
+            resolve_library_constraints=resolve_library_constraints,
+            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
+            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        )
+        return set(image_ids)
+
+    return resolve
+
+
 def configure_library_service(
     *,
     resolve_library_constraints,
@@ -493,21 +512,8 @@ def configure_library_service(
     rankings_response_cache_ttl_seconds,
 ) -> None:
     import db
-    from features.collections import smart as smart_collections
     from features.library import service as library_service
     from features.library import taste as taste_service
-
-    async def resolve_smart_collection_image_ids(collection_id: int) -> set[int] | None:
-        collection = await db.get_collection(collection_id, limit=1)
-        if not collection or not collection.get("smart"):
-            return None
-        image_ids = await smart_collections.resolve_image_ids(
-            collection.get("query") or {},
-            resolve_library_constraints=resolve_library_constraints,
-            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-        )
-        return set(image_ids)
 
     taste_service.configure(
         db_path=lambda: db.DB_PATH,
@@ -540,7 +546,7 @@ def configure_library_service(
             size,
             cache_root,
         ),
-        resolve_smart_collection_image_ids=resolve_smart_collection_image_ids,
+        resolve_smart_collection_image_ids=_smart_collection_image_ids_resolver(resolve_library_constraints),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
 
@@ -618,6 +624,7 @@ def configure_compare_service(
     get_visible_pairing_pool_counts=None,
     get_top_images=None,
     get_collection_image_ids=None,
+    resolve_smart_collection_image_ids=None,
     get_import_batch_image_ids=None,
 ) -> None:
     import db
@@ -655,6 +662,8 @@ def configure_compare_service(
         get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
         get_collection_image_ids=get_collection_image_ids
         or (lambda collection_id: db.collection_image_ids(collection_id)),
+        resolve_smart_collection_image_ids=resolve_smart_collection_image_ids
+        or _smart_collection_image_ids_resolver(resolve_library_constraints),
         get_import_batch_image_ids=get_import_batch_image_ids
         or (lambda batch_id: db.get_import_batch_image_ids(batch_id)),
     )

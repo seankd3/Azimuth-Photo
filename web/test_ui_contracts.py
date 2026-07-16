@@ -135,6 +135,24 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("getRankings", cull_brief)
         self.assertIn("key === 'z'", cull_brief)
 
+    async def test_desktop_smart_collection_id_reaches_all_scoped_consumers(self):
+        base_dir = os.path.dirname(__file__)
+        desktop_dir = os.path.join(base_dir, "static", "js", "desktop")
+        with open(os.path.join(desktop_dir, "state.js"), encoding="utf-8") as fh:
+            state = fh.read()
+        with open(os.path.join(desktop_dir, "timeline.js"), encoding="utf-8") as fh:
+            timeline = fh.read()
+        with open(os.path.join(desktop_dir, "cull_brief.js"), encoding="utf-8") as fh:
+            cull_brief = fh.read()
+        with open(os.path.join(desktop_dir, "filters.js"), encoding="utf-8") as fh:
+            filters = fh.read()
+
+        self.assertIn("if (scope.collectionId) params.set('collection_id', scope.collectionId);", state)
+        self.assertNotIn("scope.collectionId && !scope.collectionSmart", state)
+        self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)
+        self.assertIn("scopeParams({ limit: SCOPE_PAGE_LIMIT", cull_brief)
+        self.assertIn("getFilterOptions(scopeParams())", filters)
+
     async def test_develop_history_refresh_bypasses_the_empty_pre_save_cache(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "desktop", "develop", "history_panel.js"), encoding="utf-8") as fh:

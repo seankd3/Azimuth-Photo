@@ -730,6 +730,34 @@ class CompareTests(BackendTestCase):
         self.assertNotIn(outside, {image["id"] for image in result["images"]})
         self.assertEqual(result["total_images"], 2)
 
+    async def test_smart_collection_restricts_mosaic_and_duel_to_resolved_images(self):
+        source = await self._source()
+        first = await self._image(source["id"], "smart-first.jpg", elo=1500)
+        second = await self._image(source["id"], "smart-second.jpg", elo=1400)
+        outside = await self._image(source["id"], "smart-outside.jpg", elo=1300)
+        for image_id in (first, second):
+            await db.set_image_flag(image_id, "picked")
+        for image_id in (first, second, outside):
+            await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
+        smart = await db.create_collection(
+            name="Picked Refine",
+            query=json.dumps({"flag": "picked", "sort": "elo"}),
+        )
+
+        mosaic = await compare_routes.mosaic_next(n=2, collection_id=smart["id"])
+        duel = await compare_routes.compare_next(n=1, collection_id=smart["id"])
+        duel_ids = {
+            duel["pairs"][0]["left"]["id"],
+            duel["pairs"][0]["right"]["id"],
+        }
+
+        self.assertEqual({image["id"] for image in mosaic["images"]}, {first, second})
+        self.assertEqual(mosaic["total_images"], 2)
+        self.assertEqual(duel_ids, {first, second})
+        self.assertEqual(duel["total_images"], 2)
+        self.assertNotIn(outside, duel_ids)
+
     async def test_refine_restricts_mosaic_and_duel_to_import_batch(self):
         source = await self._source()
         first = await self._image(source["id"], "batch-first.jpg", elo=1500)

@@ -1350,6 +1350,37 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(histogram["months"], [{"month": "2025-04", "count": 1, "cover_id": picked}])
         self.assertEqual(histogram["total"], 1)
 
+    async def test_smart_collection_scope_constrains_filter_options(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "smart-filter-picked.jpg")
+        outside = await self._image(source["id"], "smart-filter-outside.jpg")
+        await db.set_image_flag(picked, "picked")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = 'Fuji', camera_model = 'X-T5' WHERE id = ?",
+                (picked,),
+            )
+            await conn.execute(
+                "UPDATE images SET camera_make = 'Canon', camera_model = 'R5' WHERE id = ?",
+                (outside,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        smart = await collection_routes.api_create_collection(
+            collection_routes.CreateCollectionBody(
+                name="Picked camera",
+                query={"flag": "picked", "sort": "elo"},
+            )
+        )
+
+        options = await library_routes.api_filter_options(
+            collection_id=smart["collection"]["id"],
+        )
+
+        self.assertEqual(options["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
+
     async def test_date_histogram_route_counts_months_undated_and_total(self):
         source = await self._source()
         january_first = await self._image(source["id"], "january-first.jpg")
