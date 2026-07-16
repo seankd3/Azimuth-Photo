@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import unittest
+import asyncio
+
+from fastapi.testclient import TestClient
 
 import db
+import app as app_module
 from features.quality import autocull
 from features.quality import routes as quality_routes
 from test_support import BackendTestCase
@@ -84,6 +88,22 @@ class AutocullTests(BackendTestCase):
         finally:
             await conn.close()
         self.assertEqual(rows, [("unflagged", "rejected"), ("unflagged", "picked")])
+
+    async def test_cull_brief_apply_http_sets_each_scene_member_flag(self):
+        source = await self._source()
+        soft = await self._image(source["id"], "soft.jpg")
+        sharp = await self._image(source["id"], "sharp.jpg")
+        stack_id = await self._stack([soft, sharp])
+        await self._quality(soft, 20)
+        await self._quality(sharp, 90)
+
+        def apply():
+            with TestClient(app_module.app) as client:
+                return client.post("/api/quality/autocull/apply", json={"stack_ids": [stack_id]})
+        response = await asyncio.to_thread(apply)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual((await self._image_row(sharp))["flag"], "picked")
+        self.assertEqual((await self._image_row(soft))["flag"], "rejected")
 
     async def test_existing_manual_flag_is_not_suggested_or_overwritten(self):
         source = await self._source()

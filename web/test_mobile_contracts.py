@@ -1,7 +1,6 @@
 import os
 import unittest
 
-
 class MobileOfflineContractsTests(unittest.TestCase):
     def setUp(self):
         self.base_dir = os.path.dirname(__file__)
