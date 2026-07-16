@@ -1395,8 +1395,10 @@ async def date_histogram(
         )
         select = (
             "SELECT month, COUNT(*) AS count, "
-            "MAX(CASE WHEN month_rank = 1 THEN id END) AS cover_id FROM ("
+            "MAX(CASE WHEN month_rank = 1 THEN id END) AS cover_id, "
+            "MAX(CASE WHEN month_rank = 1 THEN elo END) AS cover_elo FROM ("
             "SELECT i.id, substr(i.date_taken, 1, 7) AS month, "
+            "i.elo, "
             "ROW_NUMBER() OVER (PARTITION BY substr(i.date_taken, 1, 7) "
             "ORDER BY i.elo DESC, i.id DESC) AS month_rank "
             f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
@@ -1411,9 +1413,18 @@ async def date_histogram(
                 month = row["month"]
                 count = int(row["count"] or 0)
                 if month and len(month) == 7:
-                    bucket = buckets.setdefault(month, {"count": 0, "cover_id": None})
+                    bucket = buckets.setdefault(
+                        month,
+                        {"count": 0, "cover_id": None, "cover_order": (float("-inf"), -1)},
+                    )
                     bucket["count"] += count
-                    bucket["cover_id"] = bucket["cover_id"] or row["cover_id"]
+                    cover_order = (
+                        float(row["cover_elo"]) if row["cover_elo"] is not None else float("-inf"),
+                        int(row["cover_id"] or -1),
+                    )
+                    if cover_order > bucket["cover_order"]:
+                        bucket["cover_id"] = row["cover_id"]
+                        bucket["cover_order"] = cover_order
                 else:
                     undated += count
 

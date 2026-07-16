@@ -606,6 +606,39 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(lines[0], ",".join(EXPORT_FIELD_NAMES))
         self.assertIn("sunset-alpha.jpg", lines[1])
 
+    def test_scope_export_pages_past_the_api_default_limit(self):
+        total = 10001
+        offsets = []
+
+        async def paged_rankings(_db_path, *, limit, offset, **_kwargs):
+            offsets.append(offset)
+            return [
+                {
+                    "id": index + 1,
+                    "filename": f"scope-{index + 1}.jpg",
+                    "filepath": f"/catalog/scope-{index + 1}.jpg",
+                    "elo": 1200.0,
+                    "comparisons": 0,
+                    "propagated_updates": 0,
+                    "status": "kept",
+                    "flag": "unflagged",
+                }
+                for index in range(offset, min(offset + limit, total))
+            ]
+
+        with mock.patch.object(
+            export_routes.ranking_repository,
+            "rankings",
+            side_effect=paged_rankings,
+        ):
+            response = self.client.get("/api/export?format=json")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), total)
+        self.assertEqual(data[-1]["filename"], "scope-10001.jpg")
+        self.assertEqual(offsets, [0, 10000])
+
     def test_export_zip_streams_original_files_for_requested_ids(self):
         first_path = os.path.join(self.tempdir.name, "catalog", "sunset-alpha.jpg")
         second_path = os.path.join(self.tempdir.name, "catalog", "portrait-beta.jpg")

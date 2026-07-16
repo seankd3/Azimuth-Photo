@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from core.path_groups import safe_commonpath
-from core.requests import clamp_int, repeated_query_values
+from core.requests import repeated_query_values
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
@@ -53,6 +53,7 @@ EXPORT_FIELD_NAMES = (
     "latitude",
     "longitude",
 )
+EXPORT_PAGE_SIZE = 10000
 ZIP_EXPORT_MAX_IMAGES = 2000
 ZIP_EXPORT_SIZES = {"original", "lg", "md"}
 ZIP_EXPORT_ORIGINAL_MAX_BYTES = 8 * 1024 * 1024 * 1024
@@ -86,7 +87,7 @@ def _configured_db_path() -> str:
 async def _get_export_images(
     *,
     ids: str,
-    limit: int,
+    limit: int | None,
     sort: str,
     orientation: str,
     compared: str,
@@ -107,13 +108,12 @@ async def _get_export_images(
 ):
     db_path = _configured_db_path()
     if ids:
-        id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()][:50000]
+        id_list = _parse_ids(ids)
         images_dict = await image_repository.get_images_by_ids(db_path, id_list)
         return [images_dict[i] for i in id_list if i in images_dict]
 
     if _resolve_library_constraints is None:
         raise RuntimeError("Export routes are not configured")
-    limit = clamp_int(limit, 10000, 1, 50000)
     search = await _resolve_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:
@@ -130,11 +130,7 @@ async def _get_export_images(
         raise RuntimeError("Export routes are not configured")
     id_filter, collection_id = await _resolve_collection_scope(id_filter, collection_id)
     db_sort = "elo" if sort == "similarity" else sort
-    return await ranking_repository.rankings(
-        db_path,
-        catalog_counts=await stats_repository.catalog_image_counts_cached(db_path),
-        limit=limit,
-        offset=0,
+    ranking_args = dict(
         sort=db_sort,
         orientation=orientation,
         compared=compared,
@@ -152,6 +148,30 @@ async def _get_export_images(
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=(stacks or "").strip().lower() == "collapsed",
     )
+    catalog_counts = await stats_repository.catalog_image_counts_cached(db_path)
+    if limit is not None:
+        return await ranking_repository.rankings(
+            db_path,
+            catalog_counts=catalog_counts,
+            limit=max(1, int(limit)),
+            offset=0,
+            **ranking_args,
+        )
+
+    images = []
+    offset = 0
+    while True:
+        page = await ranking_repository.rankings(
+            db_path,
+            catalog_counts=catalog_counts,
+            limit=EXPORT_PAGE_SIZE,
+            offset=offset,
+            **ranking_args,
+        )
+        images.extend(page)
+        if len(page) < EXPORT_PAGE_SIZE:
+            return images
+        offset += len(page)
 
 
 def _export_row(rank: int, image: dict) -> dict:
@@ -327,7 +347,7 @@ def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
 
 @router.get("/api/export")
 async def export_rankings(
-    format: str = "json", ids: str = "", limit: int = 10000, sort: str = "elo",
+    format: str = "json", ids: str = "", limit: int | None = None, sort: str = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
@@ -343,9 +363,15 @@ async def export_rankings(
                 {"detail": f"Zip export is limited to {ZIP_EXPORT_MAX_IMAGES} images"},
                 status_code=400,
             )
+    export_limit = limit
+    if normalized_format == "zip":
+        export_limit = min(
+            max(1, int(limit)) if limit is not None else ZIP_EXPORT_MAX_IMAGES + 1,
+            ZIP_EXPORT_MAX_IMAGES + 1,
+        )
     images = await _get_export_images(
         ids=ids,
-        limit=limit,
+        limit=export_limit,
         sort=sort,
         orientation=orientation,
         compared=compared,

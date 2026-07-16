@@ -391,7 +391,7 @@ function infoSheet() {
         .catch(() => {});
     for (const button of sheet.querySelectorAll('[data-rating]')) {
         button.addEventListener('click', () => {
-            const target = current() || image;
+            const target = image;
             const value = Number(button.dataset.rating);
             const previous = imageRating(target);
             const rating = previous === value ? 0 : value;
