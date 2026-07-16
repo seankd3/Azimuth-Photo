@@ -22,7 +22,7 @@ CATALOG_FIELDS = frozenset({
     "quality_sharpness", "quality_subject_sharpness", "quality_exposure_clip",
     "quality_motion_blur", "quality_eyes_open", "stack_id", "stack_kind",
     "stack_is_representative", "kind", "is_representative", "collection_ids", "keywords", "develop_settings",
-    "develop_updated_at", "develop_origin", "status", "filepath", "row_version",
+    "develop_updated_at", "develop_origin", "rating", "rating_winner_key", "status", "filepath", "row_version",
 })
 
 _IMAGE_COLUMNS = (
@@ -33,6 +33,9 @@ _IMAGE_COLUMNS = (
     "CASE WHEN s.representative_image_id = i.id THEN 1 ELSE 0 END AS stack_is_representative, "
     "s.kind AS kind, CASE WHEN s.representative_image_id = i.id THEN 1 ELSE 0 END AS is_representative, "
     "ds.settings AS develop_settings, ds.updated_at AS develop_updated_at, ds.origin AS develop_origin, "
+    "json_extract(ds.settings, '$._lr_rating') AS rating, "
+    "rating_state.ts AS rating_ts, rating_state.origin AS rating_origin, "
+    "rating_state.origin_seq AS rating_origin_seq, "
     "q.score AS quality_score, q.sharpness AS quality_sharpness, "
     "q.subject_sharpness AS quality_subject_sharpness, q.exposure_clip AS quality_exposure_clip, "
     "q.motion_blur AS quality_motion_blur, q.eyes_open AS quality_eyes_open"
@@ -66,11 +69,22 @@ async def _keyword_paths(image_id: int) -> list[str]:
 async def build_row_payload(conn, row: Any) -> dict[str, Any]:
     """Serialize one hub image using the frozen mirror row contract."""
 
-    payload = {field: row[field] for field in CATALOG_FIELDS - {"collection_ids", "keywords"}}
+    generated_fields = {"collection_ids", "keywords", "rating", "rating_winner_key"}
+    payload = {field: row[field] for field in CATALOG_FIELDS - generated_fields}
     payload["stack_is_representative"] = bool(payload["stack_is_representative"])
     payload["is_representative"] = bool(payload["is_representative"])
     payload["collection_ids"] = await _collection_ids(conn, int(payload["hub_image_id"]))
     payload["keywords"] = await _keyword_paths(int(payload["hub_image_id"]))
+    payload["rating"] = row["rating"]
+    payload["rating_winner_key"] = (
+        {
+            "ts": float(row["rating_ts"]),
+            "origin": str(row["rating_origin"]),
+            "origin_seq": int(row["rating_origin_seq"]),
+        }
+        if row["rating_ts"] is not None
+        else None
+    )
     settings = payload["develop_settings"]
     if isinstance(settings, str):
         try:
@@ -79,6 +93,9 @@ async def build_row_payload(conn, row: Any) -> dict[str, Any]:
             payload["develop_settings"] = {}
     elif settings is None:
         payload["develop_settings"] = {}
+    if not isinstance(payload["develop_settings"], dict):
+        payload["develop_settings"] = {}
+    payload["develop_settings"].pop("_lr_rating", None)
     return payload
 
 
@@ -100,6 +117,8 @@ async def gzip_catalog_export_stream(db_path: str, cursor: int) -> AsyncIterator
             "LEFT JOIN stack_members sm ON sm.image_id = i.id "
             "LEFT JOIN stacks s ON s.id = sm.stack_id "
             "LEFT JOIN develop_settings ds ON ds.image_id = i.id "
+            "LEFT JOIN oplog_family_state rating_state "
+            "ON rating_state.content_hash = i.content_hash AND rating_state.family = 'rating' "
             "LEFT JOIN image_quality q ON q.image_id = i.id "
             "WHERE i.row_version > ? AND i.row_version <= ? "
             "ORDER BY i.row_version ASC, i.id ASC",

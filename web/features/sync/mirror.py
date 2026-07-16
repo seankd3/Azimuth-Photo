@@ -209,6 +209,7 @@ class MirrorPuller:
             assignments = ", ".join(f"{column} = ?" for column in values)
             await conn.execute(f"UPDATE images SET {assignments} WHERE id = ?", (*values.values(), image_id))
         await self._apply_develop(conn, image_id, remote)
+        await self._apply_rating(conn, image_id, remote, available_columns)
         await self._apply_keywords(conn, image_id, remote.get("keywords"))
 
     @staticmethod
@@ -250,6 +251,8 @@ class MirrorPuller:
         incoming = family_clock.legacy_key(updated_at)
         if existing is not None and incoming[0] <= existing[0]:
             return
+        settings = dict(settings)
+        settings.pop("_lr_rating", None)
         settings = preserve_local_rating(settings, current["settings"])
         await conn.execute(
             """INSERT INTO develop_settings(image_id, settings, origin, updated_at)
@@ -259,6 +262,50 @@ class MirrorPuller:
         )
         if content_hash:
             await family_clock.record_state(conn, content_hash, "develop", incoming)
+
+    @staticmethod
+    async def _apply_rating(
+        conn,
+        image_id: int,
+        remote: dict[str, Any],
+        available_columns: set[str],
+    ) -> None:
+        winner = remote.get("rating_winner_key")
+        if "rating" not in remote or not isinstance(winner, dict):
+            return
+        try:
+            incoming = family_clock.winner_key(winner)
+        except (KeyError, TypeError, ValueError):
+            return
+        row = await (await conn.execute(
+            "SELECT content_hash FROM images WHERE id = ?",
+            (image_id,),
+        )).fetchone()
+        if row is None or not row["content_hash"]:
+            return
+        content_hash = str(row["content_hash"])
+        existing = await family_clock.state_key(conn, content_hash, "rating")
+        if existing is not None and incoming <= existing:
+            return
+        rating = remote["rating"]
+        if "rating" in available_columns:
+            await conn.execute("UPDATE images SET rating = ? WHERE id = ?", (rating, image_id))
+        else:
+            current = await (await conn.execute(
+                "SELECT origin FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            )).fetchone()
+            settings = json.dumps({"_lr_rating": rating}, separators=(",", ":"))
+            await conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, ?, '') ON CONFLICT(image_id) DO UPDATE SET settings=json_set("
+                "CASE WHEN json_valid(develop_settings.settings) THEN "
+                "  CASE WHEN json_type(develop_settings.settings) = 'object' "
+                "    THEN develop_settings.settings ELSE '{}' END "
+                "ELSE '{}' END, '$._lr_rating', ?)",
+                (image_id, settings, current["origin"] if current else "sync", rating),
+            )
+        await family_clock.record_state(conn, content_hash, "rating", incoming)
 
     @staticmethod
     async def _apply_keywords(conn, image_id: int, paths: Any) -> None:
