@@ -15,6 +15,7 @@ img { display: block; max-width: 100%; }
     --z-tooltip: 400; --z-popover: 470; --z-toast: 500; --z-drawer: 540; --z-help: 570; --z-confirm: 580; --z-modal: 600;
     --dur-fast: .12s; --dur-base: .18s; --dur-slow: .24s;
     --dur-ctrl: var(--dur-fast); --dur-panel: var(--dur-slow);
+    --shimmer-cycle: 1.6s;
     --shadow-pop: 0 16px 48px rgba(0,0,0,.55); --shadow-float: 0 10px 34px rgba(0,0,0,.55); --shadow-modal: 0 20px 60px rgba(0,0,0,.62);
     --r-card: 8px; --r-ctl: 6px; --r-media: 4px; --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
     --topbar-h: 48px; --ctxbar-h: 44px; --lens-head-h: var(--ctxbar-h); --ctl-h: 28px; --left-w: 260px; --thumb-h: 176px; --cell-gap: 4px; --scrubber-gutter: 72px;
@@ -79,8 +80,8 @@ select.ctl { padding: 0 22px 0 8px; appearance: none; background: var(--card); c
 .ctl-range { appearance: none; width: 96px; height: 3px; background: rgba(255,255,255,.14); border-radius: 2px; outline: 0; cursor: pointer; }
 .ctl-range:focus-visible { outline: 2px solid var(--accent-lin); outline-offset: 7px; }
 .ctl-range::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--text-2); }
-@keyframes shimmer { 0% { background-position: -320px 0; } 100% { background-position: 320px 0; } }
-.skel, .skel-cell { background: linear-gradient(90deg, var(--card) 25%, var(--card-hi) 42%, var(--card) 60%); background-size: 640px 100%; animation: shimmer 1.3s linear infinite; border-radius: var(--r-ctl); }
+.skel, .skel-cell { position: relative; overflow: hidden; background: var(--card); border-radius: var(--r-ctl); }
+.skel::after, .skel-cell::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer var(--shimmer-cycle) linear infinite; }
 #app { display: grid; grid-template-rows: var(--topbar-h) 1fr; height: 100dvh; }
 #shell { --right-w: 280px; display: grid; grid-template-columns: var(--left-w) minmax(0, 1fr) var(--right-w); min-height: 0; transition: grid-template-columns var(--dur-slow) var(--ease); }
 #shell.left-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--right-w); }
@@ -365,11 +366,11 @@ body.loupe-lights-out #ctxbar { display: none; }
 .event-hero.preview-pending::after {
     content: ""; position: absolute; inset: 0; z-index: 0; transform: translateX(-100%);
     background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent);
-    animation: preview-shimmer 1.2s var(--ease) infinite;
+    animation: preview-shimmer var(--shimmer-cycle) linear infinite;
 }
-@keyframes preview-shimmer { to { transform: translateX(100%); } }
+@keyframes preview-shimmer { 0% { transform: translateX(-100%); } 75%, 100% { transform: translateX(100%); } }
 .preview-thumb-pending { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; background: var(--surface-2); }
-.preview-thumb-pending::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer 1.2s var(--ease) infinite; }
+.preview-thumb-pending::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer var(--shimmer-cycle) linear infinite; }
 .c-placeholder-name { display: none; position: absolute; left: 7px; right: 7px; bottom: 6px; z-index: 2; overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
 .cell.preview-pending .c-placeholder-name { display: block; }
 .cell.preview-pending .c-elo { display: none; }
@@ -1610,9 +1611,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-toggle input:checked + i::after { transform: translateX(14px); background: var(--accent); }
 .develop-hist-wrap { position: relative; height: 112px; }
 .develop-hist { display: block; width: 100%; height: 112px; border-radius: 2px; }
-#develop-histogram[data-loading="true"] .develop-hist-wrap::after { content: ""; position: absolute; inset: 0; border-radius: 2px; pointer-events: none; background: linear-gradient(100deg, transparent 25%, rgba(255,255,255,.12) 50%, transparent 75%); background-size: 220% 100%; animation: develop-histogram-shimmer 1.5s ease-in-out infinite; }
+#develop-histogram[data-loading="true"] .develop-hist-wrap::after { content: ""; position: absolute; inset: 0; border-radius: 2px; pointer-events: none; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer var(--shimmer-cycle) linear infinite; }
 #develop-panels[data-loading="true"] { opacity: .62; }
-@keyframes develop-histogram-shimmer { from { background-position: 110% 0; } to { background-position: -110% 0; } }
 .develop-clip { position: absolute; z-index: 2; top: 2px; width: 22px; height: 20px; padding: 0; border: 0; color: rgba(255,255,255,.34); font-size: 12px; background: transparent; }
 .develop-clip-shadow { left: 2px; }
 .develop-clip-highlight { right: 2px; }
@@ -1891,7 +1891,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
     color: var(--text-3); font-size: var(--fs-ui); line-height: var(--lh-body); text-align: center;
 }
 .publishing-loading { display: grid; gap: var(--s2); padding: var(--s3); }
-.publishing-loading i { height: 34px; border-radius: var(--r-ctl); background: linear-gradient(90deg, var(--card) 25%, var(--card-hi) 42%, var(--card) 60%); background-size: 640px 100%; animation: shimmer 1.3s linear infinite; }
+.publishing-loading i { position: relative; height: 34px; overflow: hidden; border-radius: var(--r-ctl); background: var(--card); }
+.publishing-loading i::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%); background: linear-gradient(90deg, transparent, rgba(255,255,255,.055), transparent); animation: preview-shimmer var(--shimmer-cycle) linear infinite; }
 .publishing-error { margin: var(--s4); padding: var(--s3); border: 1px solid var(--line); border-left: 2px solid var(--warn); border-radius: var(--r-card); background: var(--card); }
 .publishing-error b { font-size: var(--fs-ui); }
 .publishing-error p { margin: 4px 0 var(--s2); color: var(--text-3); font-size: var(--fs-caption); line-height: var(--lh-body); }
