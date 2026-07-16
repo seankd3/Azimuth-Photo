@@ -31,6 +31,7 @@ let scanId = null;
 let scanStatus = 'idle';        // idle | scanning | done | error
 let entries = [];
 let checked = new Set();        // entry keys staged for import
+let insertedEntryKeys = new Set();
 let filter = 'new';             // new | all
 let anchorIndex = null;         // shift-range anchor into the visible list
 let mode = 'copy';
@@ -155,6 +156,7 @@ async function startScan() {
     scanStatus = 'scanning';
     entries = [];
     checked = new Set();
+    insertedEntryKeys = new Set();
     anchorIndex = null;
     renderedCount = 0;
     els.grid.querySelectorAll('.imps-cell').forEach((cell) => cell.remove());
@@ -178,6 +180,8 @@ async function pollScan(token) {
         if (!page) { scanStatus = 'error'; syncAll(); return; }
         if (page.entries?.length) {
             for (const entry of page.entries) {
+                if (insertedEntryKeys.has(entry.key)) continue;
+                insertedEntryKeys.add(entry.key);
                 entries.push(entry);
                 if (!entry.suspect) checked.add(entry.key); // new photos arrive checked
             }
@@ -390,15 +394,21 @@ async function commit() {
     setScope({ import_batch: String(result.batch_id), importBatchLabel: label, sort: 'date_taken' });
     switchLens('grid');
     showToast(`Importing ${fmt(staged.length)} photos…`);
-    watchJob(result.job_id, clearingCard);
+    watchJob(result.job_id, clearingCard, result.batch_id);
 }
 
-async function watchJob(jobId, clearingCard) {
+async function watchJob(jobId, clearingCard, batchId) {
     let lastEta = null;
     for (;;) {
         await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
         const job = await getImportJob(jobId);
-        if (!job) return;
+        if (!job) {
+            showToast('Import status lost — this import may still be running');
+            if (String(scope.import_batch || '') === String(batchId || '')) {
+                setScope({ import_batch: '', importBatchLabel: '' });
+            }
+            return;
+        }
         if (clearingCard && job.card_free_eta_seconds != null && job.card_free_eta_seconds !== lastEta
             && job.phase === 'copying' && job.files_done > 0 && job.files_done % 250 === 0) {
             lastEta = job.card_free_eta_seconds;

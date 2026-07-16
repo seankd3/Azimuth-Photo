@@ -132,3 +132,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("const workerGenerations = new Map(workerActionGenerations);", drawer)
         self.assertIn("workerActionsInFlight.has(item.key)", drawer)
         self.assertIn("workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);", drawer)
+
+    def test_import_scan_never_rechecks_a_user_cleared_key(self):
+        import_stage = read("import_stage.js")
+
+        self.assertIn("let insertedEntryKeys = new Set();", import_stage)
+        self.assertIn("insertedEntryKeys = new Set();", import_stage)
+        self.assertLess(
+            import_stage.index("if (insertedEntryKeys.has(entry.key)) continue;"),
+            import_stage.index("if (!entry.suspect) checked.add(entry.key);"),
+        )
+        self.assertIn("Import status lost — this import may still be running", import_stage)
+        self.assertIn("setScope({ import_batch: '', importBatchLabel: '' });", import_stage)
