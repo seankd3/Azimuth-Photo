@@ -55,6 +55,10 @@ function section(title, id, inner, open = true) {
         + `<div class="develop-section-body">${inner}</div></details>`;
 }
 
+function snapshotSettings(settings) {
+    return JSON.parse(JSON.stringify(settings || {}));
+}
+
 function sliderHtml(config) {
     return `<div class="develop-slider" data-setting="${config.key}" data-min="${config.min}" data-max="${config.max}" data-step="${config.step}" data-default="${config.fallback}" data-tip="${config.tip || `Drag to adjust ${config.label}; Shift for fine; double-click to reset`}">`
         + `<span class="develop-slider-label">${config.label}</span><span class="develop-slider-track"><i></i><b></b></span>`
@@ -212,7 +216,7 @@ export class DevelopPanels {
         host.querySelector('#develop-crop-slot').replaceWith(cropHost);
         host.querySelector('#develop-transform-slot').replaceWith(transformHost);
         this.curve = new CurveEditor(host.querySelector('[data-section="curve"]'), (key, value, label) => this.change(key, value, label));
-        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label) => this.change(key, value, label));
+        this.colorWheels = new ColorWheels(host.querySelector('#develop-color-wheels'), (key, value, label, options) => this.change(key, value, label, options));
         this.lens = new LensPanel({ host: host.querySelector('#develop-lens-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.calibration = new CalibrationPanel({ host: host.querySelector('#develop-calibration-controls'), onChange: (key, value, label) => this.change(key, value, label) });
         this.masking = new MaskingController({ host: host.querySelector('#develop-masking'), onChange, ...masking });
@@ -237,21 +241,29 @@ export class DevelopPanels {
                 const sensitivity = event.shiftKey ? .1 : 1;
                 const delta = (event.clientX - startX) / Math.max(120, row.clientWidth) * (max - min) * sensitivity;
                 const value = Math.max(min, Math.min(max, Math.round((startValue + delta) / step) * step));
-                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent, { history: false });
                 this.syncSlider(row);
+                return value;
             };
             row.addEventListener('pointerdown', (event) => {
                 if (event.target === input) return;
                 event.preventDefault();
                 const startX = event.clientX;
                 const startValue = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const previousSettings = snapshotSettings(this.settings);
+                let changed = false;
                 row.setPointerCapture(event.pointerId);
-                const move = (next) => updateFromPointer(next, startX, startValue);
+                const move = (next) => {
+                    changed ||= updateFromPointer(next, startX, startValue) !== startValue;
+                };
                 const up = () => {
                     row.removeEventListener('pointermove', move);
                     row.removeEventListener('pointerup', up);
                     row.removeEventListener('pointercancel', up);
                     row.classList.remove('dragging');
+                    if (changed) {
+                        this.change(row.dataset.setting, numberSetting(this.settings, row.dataset.setting, startValue), row.querySelector('.develop-slider-label').textContent, { previousSettings });
+                    }
                 };
                 row.classList.add('dragging');
                 row.addEventListener('pointermove', move);
@@ -299,10 +311,10 @@ export class DevelopPanels {
         }
     }
 
-    change(key, value, label) {
+    change(key, value, label, options) {
         if (value === undefined) delete this.settings[key];
         else this.settings[key] = value;
-        this.onChange(key, value, label);
+        this.onChange(key, value, label, options);
     }
 
     syncSlider(row) {
