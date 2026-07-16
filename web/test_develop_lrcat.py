@@ -126,6 +126,22 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['develop_settings_updated'], 1)
         self.assertEqual(result['develop_settings_skipped'], 2)
 
+    def test_rating_import_does_not_advance_the_develop_clock(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (1, ?, 'user', 'develop-save')",
+                ('{"Exposure2012":0.5}',),
+            )
+            lrcat_import._store_rating(conn, 1, 5, rating_column=False)
+            lrcat_import._store_rating(conn, 2, 3, rating_column=False)
+            clocks = dict(conn.execute(
+                "SELECT image_id, updated_at FROM develop_settings WHERE image_id IN (1, 2)"
+            ))
+
+        self.assertEqual(clocks[1], "develop-save")
+        self.assertEqual(clocks[2], "")
+
     def test_is_idempotent_and_dry_run_does_not_write(self):
         first = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
         second = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
