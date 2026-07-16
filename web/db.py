@@ -1271,7 +1271,7 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
                           file_type: str = "", camera: str = "", lens: str = "",
                           tag: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
-                          id_filter: set | None = None, text_query: str = ""):
+                          id_filter: set | None = None, text_query: str = "", collection_id: int = 0):
     return await ranking_repository.map_markers_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1291,6 +1291,7 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
         cache_root=cache_root,
         id_filter=id_filter,
         text_query=text_query,
+        collection_id=collection_id,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
         caption_model_key=active_caption_model_key(),
     )

@@ -1,4 +1,4 @@
-import { getCollection, getMapMarkers, thumbUrl } from './api.js';
+import { getMapMarkers } from './api.js';
 import { emit, navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
@@ -8,7 +8,6 @@ let mounted = false;
 let initialized = false;
 let generation = 0;
 let markers = [];
-const COLLECTION_MARKER_LIMIT = 1000;
 
 function latOf(marker) {
     return Number(marker.lat ?? marker.latitude);
@@ -82,33 +81,13 @@ function renderMap(data = {}) {
         + '<div id="map-popover"></div>';
 }
 
-async function loadCollectionMarkers() {
-    const data = await getCollection(scope.collectionId, { limit: COLLECTION_MARKER_LIMIT, offset: 0 });
-    const collection = data && data.collection;
-    const total = Number(collection?.image_count) || 0;
-    const all = collection?.images || [];
-    const located = all.filter((img) => Number.isFinite(Number(img.latitude)) && Number.isFinite(Number(img.longitude)));
-    return {
-        markers: located.map((img) => ({
-            ...img,
-            lat: img.latitude,
-            lng: img.longitude,
-            thumb_url: img.thumb_url || thumbUrl('sm', img.id),
-        })),
-        total_count: total,
-        gps_count: located.length,
-    };
-}
-
 async function load() {
     if (!mounted) return;
     const seq = ++generation;
     const stage = document.getElementById('map-stage');
     stage.innerHTML = '<div class="map-loading skel"></div>';
     try {
-        const data = scope.collectionId
-            ? await loadCollectionMarkers()
-            : await getMapMarkers(scopeParams());
+        const data = await getMapMarkers(scopeParams());
         if (seq !== generation) return;
         markers = (data && data.markers) || [];
         setImages(markers);

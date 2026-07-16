@@ -560,9 +560,11 @@ async def map_markers_payload(
     q: str = "",
     deep: bool = False,
     import_batch: int = 0,
+    collection_id: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
+    search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
     payload = await _configured(_get_map_markers)(
         orientation=orientation,
@@ -578,6 +580,7 @@ async def map_markers_payload(
         visible_thumb_size=visible_thumb_size,
         cache_root=_configured_cache_root(),
         id_filter=search_ids,
+        collection_id=collection_id,
         text_query=search.get("text_query") or "",
     )
     if not satellite.is_satellite_mode() or not payload.get("markers"):
