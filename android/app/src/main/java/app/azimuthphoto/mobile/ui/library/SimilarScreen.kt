@@ -39,6 +39,8 @@ import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.ui.Panel
 import app.azimuthphoto.mobile.ui.TextPrimary
 import app.azimuthphoto.mobile.ui.TextSecondary
+import app.azimuthphoto.mobile.ui.gridDensityPinch
+import app.azimuthphoto.mobile.ui.rememberGridColumns
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
@@ -53,6 +55,7 @@ fun SimilarScreen(
 ) {
     BackHandler(onBack = onBack)
     var results by remember(image.id) { mutableStateOf<List<ArchiveImage>?>(null) }
+    val columns = rememberGridColumns()
     LaunchedEffect(image.id) { results = library.similar(image.id) }
 
     Column(Modifier.fillMaxSize().statusBarsPadding()) {
@@ -74,10 +77,10 @@ fun SimilarScreen(
                 Text("Nothing similar found.", color = TextSecondary)
             }
             else -> LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+                columns = GridCells.Fixed(columns),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().gridDensityPinch(columns),
             ) {
                 itemsIndexed(list, key = { _, img -> img.id }) { index, img ->
                     AsyncImage(

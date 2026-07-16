@@ -73,6 +73,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         return
     }
     val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
+    val columns = currentSettings.gridColumns
     var query by rememberSaveable { mutableStateOf("") }
     var activeQuery by rememberSaveable { mutableStateOf("") }
     var activeShelf by remember { mutableStateOf<Shelf?>(null) }
@@ -239,10 +240,10 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         } else {
             LazyVerticalGrid(
                 state = gridState,
-                columns = GridCells.Fixed(4),
+                columns = GridCells.Fixed(columns),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier.fillMaxSize().gridDensityPinch(columns),
             ) {
                 item(key = "archive-header", span = { GridItemSpan(maxLineSpan) }) {
                     ResultHeader("From your archive")

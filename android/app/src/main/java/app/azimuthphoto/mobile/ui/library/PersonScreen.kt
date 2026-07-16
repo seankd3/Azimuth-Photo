@@ -48,6 +48,8 @@ import app.azimuthphoto.mobile.ui.Accent
 import app.azimuthphoto.mobile.ui.Ink
 import app.azimuthphoto.mobile.ui.Panel
 import app.azimuthphoto.mobile.ui.TextPrimary
+import app.azimuthphoto.mobile.ui.gridDensityPinch
+import app.azimuthphoto.mobile.ui.rememberGridColumns
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -75,6 +77,7 @@ fun PersonScreen(
     val context = LocalContext.current
 
     val gridState = rememberLazyGridState()
+    val columns = rememberGridColumns()
 
     suspend fun loadMore() {
         if (loading || reachedEnd) return
@@ -154,8 +157,8 @@ fun PersonScreen(
     ) { padding ->
         LazyVerticalGrid(
             state = gridState,
-            columns = GridCells.Fixed(4),
-            modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier.fillMaxSize().background(Ink).padding(padding).gridDensityPinch(columns),
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
         ) {

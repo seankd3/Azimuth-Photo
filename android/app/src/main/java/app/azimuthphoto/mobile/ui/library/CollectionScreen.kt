@@ -50,6 +50,8 @@ import app.azimuthphoto.mobile.ui.Ink
 import app.azimuthphoto.mobile.ui.Panel
 import app.azimuthphoto.mobile.ui.TextPrimary
 import app.azimuthphoto.mobile.ui.TextSecondary
+import app.azimuthphoto.mobile.ui.gridDensityPinch
+import app.azimuthphoto.mobile.ui.rememberGridColumns
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
@@ -67,6 +69,7 @@ fun CollectionScreen(
     var photos by remember(collection.id) { mutableStateOf<List<ArchiveImage>?>(null) }
     var sharing by remember { mutableStateOf(false) }
     var shareUrl by remember { mutableStateOf<String?>(null) }
+    val columns = rememberGridColumns()
 
     LaunchedEffect(collection.id) {
         photos = runCatching { api.collectionPhotos(collection.id) }.getOrDefault(emptyList())
@@ -143,8 +146,8 @@ fun CollectionScreen(
             }
         } else {
             LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
+                columns = GridCells.Fixed(columns),
+                modifier = Modifier.fillMaxSize().background(Ink).padding(padding).gridDensityPinch(columns),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
                 horizontalArrangement = Arrangement.spacedBy(2.dp),
             ) {
