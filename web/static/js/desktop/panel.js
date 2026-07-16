@@ -38,6 +38,7 @@ let deliverOverlay = null;
 let deliverOverlayToken = 0;
 let deliverOverlayReturn = null;
 let deliverPollTimer = 0;
+let deliverSession = null;
 let chromeRefreshTimer = 0;
 let editingSmartCollection = null;
 let savedViews = [];
@@ -283,9 +284,24 @@ export async function openDeliverOverlay(collectionId, name = 'Collection', open
     ensureDeliverOverlay();
     const token = ++deliverOverlayToken;
     deliverOverlayReturn = opener || document.activeElement;
+    deliverSession = {
+        collectionId,
+        name,
+        activeTab,
+        share: null,
+        publish: null,
+        draft: { title: name, password: '', expiry: '', slug: slugifyName(name) },
+    };
     renderDeliverShell(name, activeTab);
-    bindDeliverTabs((tab) => openDeliverOverlay(collectionId, name, opener, tab));
+    bindDeliverTabs((tab) => switchDeliverTab(deliverSession, tab));
     trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
+    const [shareData, publishData] = await Promise.all([getCollectionShare(collectionId), getCollectionPublish(collectionId)]);
+    if (!deliverOverlayIsCurrent(token)) return token;
+    deliverSession.share = shareData?.share || null;
+    deliverSession.publish = publishData;
+    if (deliverSession.publish?.publish?.title) deliverSession.draft.title = deliverSession.publish.publish.title;
+    if (deliverSession.publish?.publish?.slug) deliverSession.draft.slug = deliverSession.publish.publish.slug;
+    renderDeliver(deliverSession, token);
     return token;
 }
 
@@ -329,8 +345,8 @@ function sharePicksRow(pickData) {
     return '<div class="share-picks">'
         + `<span>Client picks: <b>${fmt(count)}</b></span>`
         + '<div>'
-        + `<button id="share-view-picks" type="button" ${ids.length ? '' : 'disabled'}>View picks</button>`
-        + `<button id="share-apply-picks" type="button" ${ids.length ? '' : 'disabled'}>Apply as picks</button>`
+        + `<button data-deliver-view-picks type="button" ${ids.length ? '' : 'disabled'}>View picks</button>`
+        + `<button data-deliver-apply-picks type="button" ${ids.length ? '' : 'disabled'}>Apply as picks</button>`
         + '</div></div>';
 }
 
@@ -352,7 +368,7 @@ function selectClientPicks(ids) {
     ids.forEach((id) => selection.add(id));
     const changed = [...new Set([...before, ...selection])];
     selectionChanged(changed);
-    closeShareOverlay();
+    closeDeliverOverlay();
     showToast(`${fmt(ids.length)} client picks selected`);
 }
 
@@ -365,61 +381,32 @@ async function applyClientPicks(collectionId, ids) {
     await applyFlags(ids, 'picked');
 }
 
-function sharePasswordControls(share) {
-    const canSave = Boolean(share);
-    const isProtected = Boolean(share?.protected);
-    return '<div class="share-password-row">'
+function deliverTitleRow(session, value, disabled = false) {
+    return `<label class="deliver-title-row">Title<input data-deliver-title value="${esc(value || session.name)}" maxlength="160" ${disabled ? 'disabled' : ''}></label>`;
+}
+
+function deliverPasswordRow({ protected: isProtected = false, value = '', action = '', clear = false } = {}) {
+    return '<div class="share-password-row deliver-password-row">'
         + '<div class="share-password-head"><span>Password</span>'
         + (isProtected ? `<span class="shared-badge">${icon('lock')} Protected</span>` : '')
+        + '</div><div class="share-link-row">'
+        + `<input data-deliver-password type="password" autocomplete="new-password" value="${esc(value)}" placeholder="${isProtected ? 'Protected' : 'Optional'}">`
+        + (action ? `<button data-deliver-password-save type="button">${action}</button>` : '')
         + '</div>'
-        + '<div class="share-link-row">'
-        + `<input id="share-password" type="password" autocomplete="new-password" placeholder="${isProtected ? 'Protected' : 'No password'}">`
-        + (canSave ? `<button id="share-password-save" type="button">${isProtected ? 'Change' : 'Set'}</button>` : '')
-        + '</div>'
-        + (isProtected ? '<button class="share-remove-password" id="share-password-clear" type="button">Remove password</button>' : '')
+        + (clear ? '<button class="share-remove-password" data-deliver-password-clear type="button">Remove password</button>' : '')
         + '</div>';
 }
 
+function deliverLinkRow(url) {
+    return url ? `<div class="share-link-row deliver-link-row"><input readonly value="${esc(url)}"><button data-deliver-copy type="button">${icon('copy')} Copy</button><button data-deliver-open type="button">${icon('external-link')} Open</button></div>` : '';
+}
+
 function shareExpiryOptions() {
-    return '<label class="share-expiry">Expires <select id="share-expiry">'
-        + '<option value="">Never</option>'
-        + '<option value="7">7 days</option>'
-        + '<option value="30">30 days</option>'
-        + '</select></label>';
+    return '<label class="share-expiry">Expires <select data-deliver-expiry>'
+        + '<option value="">Never</option><option value="7">7 days</option><option value="30">30 days</option></select></label>';
 }
 
-function ensureShareOverlay() {
-    if (shareOverlay) return shareOverlay;
-    shareOverlay = document.createElement('div');
-    shareOverlay.id = 'share-overlay';
-    shareOverlay.className = 'modal-scrim';
-    shareOverlay.hidden = true;
-    document.body.appendChild(shareOverlay);
-    shareOverlay.addEventListener('click', (event) => {
-        if (event.target === shareOverlay) closeShareOverlay();
-    });
-    shareOverlay.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            closeShareOverlay();
-        }
-    });
-    return shareOverlay;
-}
-
-function shareOverlayIsCurrent(token) {
-    return Boolean(shareOverlay && !shareOverlay.hidden && token === shareOverlayToken);
-}
-
-function closeShareOverlay() {
-    if (!shareOverlay || shareOverlay.hidden) return;
-    shareOverlayToken += 1;
-    releaseFocus(shareOverlay);
-    shareOverlay.hidden = true;
-}
-
-async function copyShareUrl(url) {
+async function copyDeliverUrl(url) {
     try {
         await navigator.clipboard.writeText(url);
         showToast('Link copied');
@@ -438,110 +425,8 @@ async function withBusyButton(button, action) {
     }
 }
 
-async function renderShareOverlay(collectionId, name, share = null, token = shareOverlayToken) {
-    ensureShareOverlay();
-    if (!shareOverlayIsCurrent(token)) return;
-    const pickData = share ? await getCollectionShareFavorites(collectionId) : null;
-    if (!shareOverlayIsCurrent(token)) return;
-    const body = share
-        ? (share.expired ? '<div class="share-expired">Expired - rotate to renew</div>' : '')
-            + '<div class="share-link-row"><input id="share-url" readonly value="' + esc(share.url || '') + '"><button id="share-copy" type="button">Copy</button></div>'
-            + '<div class="share-meta">'
-            + `<div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div>`
-            + `<div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
-            + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
-            + sharePicksRow(pickData)
-            + sharePasswordControls(share)
-            + '<div class="share-actions"><button id="share-rotate" type="button">Rotate link</button><button id="share-revoke" type="button">Revoke</button></div>'
-        : '<p class="share-empty">Create a private gallery link for this collection.</p>'
-            + shareExpiryOptions()
-            + sharePasswordControls(null)
-            + '<div class="share-actions"><button id="share-create" type="button">Create share link</button></div>';
-    shareOverlay.innerHTML = '<div class="modal-card share-card" role="dialog" aria-modal="true" aria-labelledby="share-title">'
-        + `<div class="mo-head"><h2 id="share-title">Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
-        + '<div class="mo-body">' + body + '</div></div>';
-    shareOverlay.hidden = false;
-    const pickIds = clientPickIds(pickData);
-    shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
-    shareOverlay.querySelector('#share-copy')?.addEventListener('click', () => copyShareUrl(share.url));
-    shareOverlay.querySelector('#share-view-picks')?.addEventListener('click', () => selectClientPicks(pickIds));
-    shareOverlay.querySelector('#share-apply-picks')?.addEventListener('click', () => applyClientPicks(collectionId, pickIds));
-    shareOverlay.querySelector('#share-create')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
-        const actionToken = shareOverlayToken;
-        const value = shareOverlay.querySelector('#share-expiry')?.value || '';
-        const password = shareOverlay.querySelector('#share-password')?.value || '';
-        const result = await createCollectionShare(collectionId, {
-            expiresInDays: value ? Number(value) : null,
-            ...(password ? { password } : {}),
-        });
-        if (!shareOverlayIsCurrent(actionToken)) return;
-        if (result && result.ok) {
-            showToast('Share link created');
-            await renderShareOverlay(collectionId, name, result.share, actionToken);
-            emitSharedSurfacesChanged(collectionId);
-        } else {
-            showToast("Couldn't create share link");
-        }
-    }));
-    shareOverlay.querySelector('#share-password-save')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
-        if (!share) return;
-        const actionToken = shareOverlayToken;
-        const password = shareOverlay.querySelector('#share-password')?.value || '';
-        if (!password) {
-            showToast('Enter a password');
-            return;
-        }
-        const result = await createCollectionShare(collectionId, { password });
-        if (!shareOverlayIsCurrent(actionToken)) return;
-        if (result && result.ok) {
-            showToast(share.protected ? 'Password changed' : 'Password set');
-            await renderShareOverlay(collectionId, name, result.share, actionToken);
-            emitSharedSurfacesChanged(collectionId);
-        } else {
-            showToast("Couldn't save password");
-        }
-    }));
-    shareOverlay.querySelector('#share-password-clear')?.addEventListener('click', async (event) => withBusyButton(event.currentTarget, async () => {
-        const actionToken = shareOverlayToken;
-        const result = await createCollectionShare(collectionId, { clearPassword: true });
-        if (!shareOverlayIsCurrent(actionToken)) return;
-        if (result && result.ok) {
-            showToast('Password removed');
-            await renderShareOverlay(collectionId, name, result.share, actionToken);
-            emitSharedSurfacesChanged(collectionId);
-        } else {
-            showToast("Couldn't remove password");
-        }
-    }));
-    bindShareConfirmButton('#share-rotate', 'Confirm rotate', async () => {
-        const actionToken = shareOverlayToken;
-        const result = await createCollectionShare(collectionId, { rotate: true });
-        if (!shareOverlayIsCurrent(actionToken)) return;
-        if (result && result.ok) {
-            showToast('New share link created');
-            await renderShareOverlay(collectionId, name, result.share, actionToken);
-            emitSharedSurfacesChanged(collectionId);
-        } else {
-            showToast("Couldn't rotate link");
-        }
-    });
-    bindShareConfirmButton('#share-revoke', 'Confirm revoke', async () => {
-        const actionToken = shareOverlayToken;
-        const result = await revokeCollectionShare(collectionId);
-        if (!shareOverlayIsCurrent(actionToken)) return;
-        if (result && result.ok) {
-            showToast('Share link revoked');
-            await renderShareOverlay(collectionId, name, null, actionToken);
-            emitSharedSurfacesChanged(collectionId);
-        } else {
-            showToast("Couldn't revoke link");
-        }
-    });
-    trapFocus(shareOverlay, shareOverlay.querySelector('input, select, button'));
-}
-
-function bindShareConfirmButton(selector, label, action) {
-    const button = shareOverlay?.querySelector(selector);
+function bindDeliverConfirmButton(selector, label, action) {
+    const button = deliverOverlay?.querySelector(selector);
     if (!button) return;
     let armed = false;
     const original = button.textContent;
@@ -556,51 +441,6 @@ function bindShareConfirmButton(selector, label, action) {
         button.disabled = false;
         button.textContent = original;
     });
-}
-
-export async function openShareOverlay(collectionId, name = 'Collection') {
-    ensureShareOverlay();
-    const token = ++shareOverlayToken;
-    shareOverlay.innerHTML = `<div class="modal-card share-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Share ${esc(name)}</h2><button type="button" id="share-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
-    shareOverlay.hidden = false;
-    shareOverlay.querySelector('#share-close')?.addEventListener('click', closeShareOverlay);
-    trapFocus(shareOverlay, shareOverlay.querySelector('button'));
-    const data = await getCollectionShare(collectionId);
-    if (!shareOverlayIsCurrent(token)) return;
-    await renderShareOverlay(collectionId, name, data && data.share, token);
-}
-
-function ensurePublishOverlay() {
-    if (publishOverlay) return publishOverlay;
-    publishOverlay = document.createElement('div');
-    publishOverlay.id = 'publish-overlay';
-    publishOverlay.className = 'modal-scrim';
-    publishOverlay.hidden = true;
-    document.body.appendChild(publishOverlay);
-    publishOverlay.addEventListener('click', (event) => {
-        if (event.target === publishOverlay) closePublishOverlay();
-    });
-    publishOverlay.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            closePublishOverlay();
-        }
-    });
-    return publishOverlay;
-}
-
-function publishOverlayIsCurrent(token) {
-    return Boolean(publishOverlay && !publishOverlay.hidden && token === publishOverlayToken);
-}
-
-function closePublishOverlay() {
-    window.clearTimeout(publishPollTimer);
-    publishPollTimer = 0;
-    if (!publishOverlay || publishOverlay.hidden) return;
-    publishOverlayToken += 1;
-    releaseFocus(publishOverlay);
-    publishOverlay.hidden = true;
 }
 
 function slugifyName(value) {
@@ -652,190 +492,208 @@ function publishErrorBlock(job) {
         + '</div>';
 }
 
-function publishStatusBlock(data) {
+function deliverPublishStatus(data) {
     const job = data?.job || null;
     const publish = data?.publish || job?.publish || null;
-    const url = data?.url || job?.url || publish?.url || '';
-    const setupNeeded = data?.publishing?.enabled === false;
-    const status = setupNeeded ? 'Publishing is disabled until a folder is set.' : publishPhaseCopy(job);
+    const status = data?.publishing?.enabled === false ? 'Publishing is disabled until a folder is set.' : publishPhaseCopy(job);
     const hook = publish?.hook_status || job?.hook || null;
-    const hookFailed = hook && hook.configured && !hook.ok;
     return '<div class="publish-status">'
-        + (status ? `<span>${esc(status)}</span>` : '<span>Ready to publish.</span>')
-        + (url ? `<div class="share-link-row"><input id="publish-url" readonly value="${esc(url)}"><button id="publish-copy" type="button">${icon('copy')} Copy</button></div>` : '')
-        + (hookFailed ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
-        + publishErrorBlock(job)
+        + `<span>${esc(status || 'Ready to publish.')}</span>`
+        + (hook?.configured && !hook.ok ? `<div class="publish-error"><b>Gallery files are ready, but the website update didn’t finish.</b><p>${esc(hook.output || 'The website update did not finish successfully.')}</p></div>` : '')
+        + publishErrorBlock(job).replace('id="publish-retry"', 'data-deliver-publish-retry')
         + '</div>';
 }
 
-async function copyPublishUrl(url) {
-    try {
-        await navigator.clipboard.writeText(url);
-        showToast('Link copied');
-    } catch {
-        showToast("Couldn't copy URL");
-    }
+function saveDeliverDraft(session) {
+    const root = deliverOverlay;
+    session.draft.title = root.querySelector('[data-deliver-title]')?.value || session.draft.title;
+    session.draft.password = root.querySelector('[data-deliver-password]')?.value || session.draft.password;
+    session.draft.expiry = root.querySelector('[data-deliver-expiry]')?.value || session.draft.expiry;
+    session.draft.slug = root.querySelector('[data-deliver-slug]')?.value || session.draft.slug;
 }
 
-function patchPublishOverlayStatus(data, token) {
-    if (!publishOverlayIsCurrent(token)) return false;
-    const status = publishOverlay.querySelector('.publish-status');
-    if (!status) return false;
-    status.outerHTML = publishStatusBlock(data);
-    const liveUrl = data?.url || data?.publish?.url || data?.job?.url || '';
-    publishOverlay.querySelector('#publish-copy')?.addEventListener('click', () => copyPublishUrl(liveUrl));
-    return true;
+function bindDeliverCommon(session, url = '') {
+    deliverOverlay.querySelector('[data-deliver-title]')?.addEventListener('input', () => saveDeliverDraft(session));
+    deliverOverlay.querySelector('[data-deliver-password]')?.addEventListener('input', () => saveDeliverDraft(session));
+    deliverOverlay.querySelector('[data-deliver-expiry]')?.addEventListener('change', () => saveDeliverDraft(session));
+    deliverOverlay.querySelector('[data-deliver-copy]')?.addEventListener('click', () => copyDeliverUrl(url));
+    deliverOverlay.querySelector('[data-deliver-open]')?.addEventListener('click', () => window.open(url, '_blank', 'noopener,noreferrer'));
 }
 
-async function renderPublishOverlay(collectionId, name, data = null, token = publishOverlayToken) {
-    ensurePublishOverlay();
-    if (!publishOverlayIsCurrent(token)) return;
-    const coll = collectionById(collectionId) || {};
-    const publish = data?.publish || null;
+async function renderPrivateDeliver(session, token) {
+    const share = session.share;
+    const picks = share ? await getCollectionShareFavorites(session.collectionId) : null;
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    const body = deliverTitleRow(session, session.draft.title)
+        + (share
+            ? (share.expired ? '<div class="share-expired">Expired - rotate to renew</div>' : '')
+                + deliverLinkRow(share.url || '')
+                + `<div class="share-meta"><div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div><div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
+                + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
+                + sharePicksRow(picks)
+                + deliverPasswordRow({ protected: share.protected, value: session.draft.password, action: share.protected ? 'Change' : 'Set', clear: share.protected })
+                + '<div class="share-actions"><button data-deliver-rotate type="button">Rotate link</button><button data-deliver-revoke type="button">Revoke</button></div>'
+            : '<p class="share-empty">Create a private gallery link for this collection.</p>'
+                + shareExpiryOptions()
+                + deliverPasswordRow({ value: session.draft.password })
+                + '<div class="share-actions"><button data-deliver-create type="button">Create private link</button></div>');
+    renderDeliverShell(session.name, 'private', body);
+    bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+    bindDeliverCommon(session, share?.url || '');
+    const pickIds = clientPickIds(picks);
+    deliverOverlay.querySelector('[data-deliver-view-picks]')?.addEventListener('click', () => selectClientPicks(pickIds));
+    deliverOverlay.querySelector('[data-deliver-apply-picks]')?.addEventListener('click', () => applyClientPicks(session.collectionId, pickIds));
+    deliverOverlay.querySelector('[data-deliver-create]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+        saveDeliverDraft(session);
+        const result = await createCollectionShare(session.collectionId, { expiresInDays: session.draft.expiry ? Number(session.draft.expiry) : null, ...(session.draft.password ? { password: session.draft.password } : {}) });
+        if (deliverOverlayIsCurrent(token) && result?.ok) {
+            session.share = result.share;
+            showToast('Private link created');
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        } else if (deliverOverlayIsCurrent(token)) showToast("Couldn't create private link");
+    }));
+    deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+        saveDeliverDraft(session);
+        if (!session.draft.password) return showToast('Enter a password');
+        const result = await createCollectionShare(session.collectionId, { password: session.draft.password });
+        if (deliverOverlayIsCurrent(token) && result?.ok) {
+            session.share = result.share;
+            session.draft.password = '';
+            showToast(share.protected ? 'Password changed' : 'Password set');
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        }
+    }));
+    deliverOverlay.querySelector('[data-deliver-password-clear]')?.addEventListener('click', async () => {
+        const result = await createCollectionShare(session.collectionId, { clearPassword: true });
+        if (deliverOverlayIsCurrent(token) && result?.ok) {
+            session.share = result.share;
+            showToast('Password removed');
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        }
+    });
+    bindDeliverConfirmButton('[data-deliver-rotate]', 'Confirm rotate', async () => {
+        const result = await createCollectionShare(session.collectionId, { rotate: true });
+        if (deliverOverlayIsCurrent(token) && result?.ok) {
+            session.share = result.share;
+            showToast('New private link created');
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        }
+    });
+    bindDeliverConfirmButton('[data-deliver-revoke]', 'Confirm revoke', async () => {
+        const result = await revokeCollectionShare(session.collectionId);
+        if (deliverOverlayIsCurrent(token) && result?.ok) {
+            session.share = null;
+            showToast('Private link revoked');
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        }
+    });
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
+}
+
+function renderWebsiteDeliver(session, token) {
+    const data = session.publish;
+    const publish = data?.publish || data?.job?.publish || null;
     const job = data?.job || null;
     const publishing = data?.publishing || {};
     const setupNeeded = publishing.enabled === false;
     const busy = Boolean(data?.in_progress || (job && ['publishing', 'revoking'].includes(job.state)));
-    const count = Number(coll.image_count || publish?.image_count || 0);
-    const slug = (job?.slug || publish?.slug || slugifyName(name));
-    const title = (job?.title || publish?.title || name || 'Gallery');
-    const liveUrl = data?.url || publish?.url || job?.url || '';
-    const actionLabel = publish ? 'Republish to website' : 'Publish to website';
-    publishOverlay.innerHTML = '<div class="modal-card publish-card" role="dialog" aria-modal="true" aria-labelledby="publish-title">'
-        + `<div class="mo-head"><h2 id="publish-title">Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
-        + '<div class="mo-body">'
-        + (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>Choose a folder for public galleries in System, then come back here to publish.</p><button class="btn primary" id="publish-open-settings" type="button">Open Publishing settings</button></div>' : '')
+    const count = Number(collectionById(session.collectionId)?.image_count || publish?.image_count || 0);
+    const slug = session.draft.slug || job?.slug || publish?.slug || slugifyName(session.name);
+    const title = session.draft.title || job?.title || publish?.title || session.name;
+    const url = data?.url || publish?.url || job?.url || '';
+    const body = (setupNeeded ? '<div class="publish-setup"><b>Choose a publishing folder first.</b><p>Choose a folder for public galleries in System, then come back here to publish.</p><button class="btn primary" data-deliver-open-settings type="button">Open Publishing settings</button></div>' : '')
+        + deliverTitleRow(session, title, busy || setupNeeded)
+        + `<label class="deliver-slug-row">URL name<input data-deliver-slug value="${esc(slug)}" maxlength="96" ${busy || publish || setupNeeded ? 'disabled' : ''}>${publish ? '<small>URL is fixed after first publish.</small>' : ''}</label>`
         + `<p class="publish-confirm-copy"${setupNeeded ? ' hidden' : ''}>${esc(publishLeadText(count, slug, publish, publishing))}</p>`
-        + '<div class="publish-fields">'
-        + `<label>Title <input id="publish-title-input" value="${esc(title)}" maxlength="160" ${busy || setupNeeded ? 'disabled' : ''}></label>`
-        + `<label>URL name <input id="publish-slug-input" value="${esc(slug)}" maxlength="96" ${busy || publish || setupNeeded ? 'disabled' : ''}>${publish ? '<small>URL is fixed after first publish.</small>' : ''}</label>`
-        + '</div>'
-        + publishStatusBlock(data)
+        + deliverLinkRow(url)
+        + deliverPublishStatus(data)
         + '<div class="publish-actions">'
-        + (publish ? '<button id="publish-revoke" type="button" class="btn-danger" ' + (busy ? 'disabled' : '') + '>Unpublish</button>' : '')
-        + `<button id="publish-submit" type="button" ${busy || setupNeeded ? 'disabled' : ''}>${esc(actionLabel)}</button>`
-        + '</div>'
-        + '</div></div>';
-    publishOverlay.hidden = false;
-    publishOverlay.querySelector('#publish-close')?.addEventListener('click', closePublishOverlay);
-    publishOverlay.querySelector('#publish-copy')?.addEventListener('click', () => copyPublishUrl(liveUrl));
-    const slugInput = publishOverlay.querySelector('#publish-slug-input');
-    const copy = publishOverlay.querySelector('.publish-confirm-copy');
+        + (publish ? `<button data-deliver-unpublish type="button" class="btn-danger" ${busy ? 'disabled' : ''}>Unpublish</button>` : '')
+        + `<button data-deliver-publish type="button" ${busy || setupNeeded ? 'disabled' : ''}>${esc(publish ? 'Republish to website' : 'Publish to website')}</button></div>`;
+    renderDeliverShell(session.name, 'website', body);
+    bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+    bindDeliverCommon(session, url);
+    const slugInput = deliverOverlay.querySelector('[data-deliver-slug]');
     slugInput?.addEventListener('input', () => {
-        const nextSlug = slugifyName(slugInput.value);
-        copy.textContent = publishLeadText(count, nextSlug, publish, publishing);
+        saveDeliverDraft(session);
+        deliverOverlay.querySelector('.publish-confirm-copy').textContent = publishLeadText(count, slugifyName(slugInput.value), publish, publishing);
     });
-    publishOverlay.querySelector('#publish-open-settings')?.addEventListener('click', () => {
-        closePublishOverlay();
+    deliverOverlay.querySelector('[data-deliver-open-settings]')?.addEventListener('click', () => {
+        closeDeliverOverlay();
         document.getElementById('system-btn')?.click();
     });
     const startPublish = async () => {
-        const nextSlug = slugifyName(slugInput?.value || slug);
-        const nextTitle = publishOverlay.querySelector('#publish-title-input')?.value.trim() || title;
-        const result = await publishCollection(collectionId, { slug: nextSlug, title: nextTitle });
-        if (!publishOverlayIsCurrent(token)) return;
+        saveDeliverDraft(session);
+        const result = await publishCollection(session.collectionId, { slug: slugifyName(session.draft.slug || slug), title: session.draft.title.trim() || title });
+        if (!deliverOverlayIsCurrent(token)) return;
         if (result.ok) {
             showToast(publish ? 'Republishing gallery' : 'Publishing gallery');
-            emitSharedSurfacesChanged(collectionId);
-            await pollPublishStatus(collectionId, name, token, true);
+            emitSharedSurfacesChanged(session.collectionId);
+            pollDeliverPublish(session, token, true);
         } else {
-            await renderPublishOverlay(collectionId, name, {
-                ...data,
-                job: {
-                    state: 'error',
-                    status_code: result.status,
-                    error: result.data?.error || "Couldn't start publishing.",
-                },
-            }, token);
+            session.publish = { ...data, job: { state: 'error', error: result.data?.error || "Couldn't start publishing." } };
+            renderDeliver(session, token);
         }
     };
-    if (publish) {
-        bindPublishConfirmButton('#publish-submit', 'Confirm republish', startPublish);
-    } else {
-        publishOverlay.querySelector('#publish-submit')?.addEventListener('click', startPublish);
-    }
-    publishOverlay.querySelector('#publish-retry')?.addEventListener('click', startPublish);
-    publishOverlay.querySelector('#publish-revoke')?.addEventListener('click', async () => {
-        const ok = await confirmTypedCount({
-            title: 'Unpublish gallery',
-            message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`,
-            count,
-            confirmLabel: 'Unpublish',
-        });
+    if (publish) bindDeliverConfirmButton('[data-deliver-publish]', 'Confirm republish', startPublish);
+    else deliverOverlay.querySelector('[data-deliver-publish]')?.addEventListener('click', startPublish);
+    deliverOverlay.querySelector('[data-deliver-publish-retry]')?.addEventListener('click', startPublish);
+    deliverOverlay.querySelector('[data-deliver-unpublish]')?.addEventListener('click', async () => {
+        const ok = await confirmTypedCount({ title: 'Unpublish gallery', message: `Remove this public gallery from the website? Type ${fmt(count).replace(/,/g, '')} to confirm.`, count, confirmLabel: 'Unpublish' });
         if (!ok) return;
-        const result = await revokeCollectionPublish(collectionId);
-        if (!publishOverlayIsCurrent(token)) return;
-        if (result.ok) {
+        const result = await revokeCollectionPublish(session.collectionId);
+        if (deliverOverlayIsCurrent(token) && result.ok) {
             showToast('Unpublishing gallery');
-            emitSharedSurfacesChanged(collectionId);
-            await pollPublishStatus(collectionId, name, token, true);
-        } else {
-            await renderPublishOverlay(collectionId, name, {
-                ...data,
-                job: {
-                    state: 'error',
-                    status_code: result.status,
-                    error: result.data?.error || "Couldn't start unpublishing.",
-                },
-            }, token);
+            emitSharedSurfacesChanged(session.collectionId);
+            pollDeliverPublish(session, token, true);
         }
     });
-    if (busy) schedulePublishPoll(collectionId, name, token);
-    trapFocus(publishOverlay, publishOverlay.querySelector('input, button'));
+    if (busy) scheduleDeliverPoll(session, token);
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
 }
 
-function bindPublishConfirmButton(selector, label, action) {
-    const button = publishOverlay?.querySelector(selector);
-    if (!button) return;
-    let armed = false;
-    const original = button.textContent;
-    button.addEventListener('click', async () => {
-        if (!armed) {
-            armed = true;
-            button.textContent = label;
-            return;
-        }
-        button.disabled = true;
-        await action();
-        button.disabled = false;
-        button.textContent = original;
-    });
+function renderGalleryDeliver(session) {
+    renderDeliverShell(session.name, 'gallery', '<div class="muted">Client gallery settings are loading…</div>');
+    bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
 }
 
-function schedulePublishPoll(collectionId, name, token) {
-    window.clearTimeout(publishPollTimer);
-    publishPollTimer = window.setTimeout(() => pollPublishStatus(collectionId, name, token), 2500);
+async function renderDeliver(session, token = deliverOverlayToken) {
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    if (session.activeTab === 'private') return renderPrivateDeliver(session, token);
+    if (session.activeTab === 'website') return renderWebsiteDeliver(session, token);
+    renderGalleryDeliver(session);
 }
 
-async function pollPublishStatus(collectionId, name, token, immediate = false) {
-    window.clearTimeout(publishPollTimer);
-    if (!publishOverlayIsCurrent(token)) return;
-    const data = await getCollectionPublish(collectionId);
-    if (!publishOverlayIsCurrent(token)) return;
-    if (data?.in_progress && patchPublishOverlayStatus(data, token)) {
-        schedulePublishPoll(collectionId, name, token);
-    } else {
-        await renderPublishOverlay(collectionId, name, data, token);
-        if (data?.in_progress) {
-            schedulePublishPoll(collectionId, name, token);
-            return;
-        }
-        if (!immediate && data?.job?.state === 'revoked') showToast('Gallery unpublished');
-        emitSharedSurfacesChanged(collectionId);
-        await loadCollections();
+function switchDeliverTab(session, tab) {
+    if (!DELIVER_TABS.some(([id]) => id === tab)) return;
+    saveDeliverDraft(session);
+    session.activeTab = tab;
+    renderDeliver(session);
+}
+
+function scheduleDeliverPoll(session, token) {
+    window.clearTimeout(deliverPollTimer);
+    deliverPollTimer = window.setTimeout(() => pollDeliverPublish(session, token), 2500);
+}
+
+async function pollDeliverPublish(session, token, immediate = false) {
+    window.clearTimeout(deliverPollTimer);
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    session.publish = await getCollectionPublish(session.collectionId);
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    if (session.publish?.in_progress) scheduleDeliverPoll(session, token);
+    else {
+        if (!immediate && session.publish?.job?.state === 'revoked') showToast('Gallery unpublished');
+        emitSharedSurfacesChanged(session.collectionId);
+        loadCollections();
     }
-}
-
-export async function openPublishOverlay(collectionId, name = 'Collection') {
-    ensurePublishOverlay();
-    const token = ++publishOverlayToken;
-    publishOverlay.innerHTML = `<div class="modal-card publish-card" role="dialog" aria-modal="true"><div class="mo-head"><h2>Publish ${esc(name)}</h2><button type="button" id="publish-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div><div class="mo-body"><div class="muted">Loading…</div></div></div>`;
-    publishOverlay.hidden = false;
-    publishOverlay.querySelector('#publish-close')?.addEventListener('click', closePublishOverlay);
-    trapFocus(publishOverlay, publishOverlay.querySelector('button'));
-    const data = await getCollectionPublish(collectionId);
-    if (!publishOverlayIsCurrent(token)) return;
-    await renderPublishOverlay(collectionId, name, data, token);
+    if (session.activeTab === 'website') renderDeliver(session, token);
 }
 
 function startCollectionRename(collectionId) {
@@ -1489,7 +1347,7 @@ export function requestShareCurrentCollection() {
         showToast('Open a collection first');
         return;
     }
-    openShareOverlay(scope.collectionId, scope.collectionName || 'Collection');
+    openDeliverOverlay(scope.collectionId, scope.collectionName || 'Collection');
 }
 
 export async function initPanel() {
