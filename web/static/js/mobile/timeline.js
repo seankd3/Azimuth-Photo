@@ -66,6 +66,7 @@ let currentSortQuality = null;
 let longPressPending = false;
 let cancelLongPressGesture = () => {};
 let tasteAvailable = false;
+let renderedSelection = new Set();
 
 async function loadTasteStatus() {
     const data = await getRankings(new URLSearchParams({ sort: 'taste', limit: '0' })).catch(() => null);
@@ -190,8 +191,8 @@ function toggleDay(sec) {
     selectionChanged();
 }
 
-function updateDayChecks() {
-    for (const sec of timeline.querySelectorAll('.m-day')) {
+function updateDayChecks(sections = null) {
+    for (const sec of sections || timeline.querySelectorAll('.m-day')) {
         const ids = dayIds(sec);
         const all = ids.length > 0 && ids.every((id) => selection.has(id));
         const chk = sec.querySelector('.m-day-check');
@@ -908,16 +909,32 @@ function installSelectionGestures() {
     let anchorMi = -1;
     let dragPoint = null;
     let dragFrame = null;
+    let dragRange = null;
 
     function applyDragRange(mi) {
         const a = Math.min(anchorMi, mi);
         const b = Math.max(anchorMi, mi);
-        selection.clear();
-        for (const id of dragBase) selection.add(id);
-        for (let i = a; i <= b; i++) {
-            if (flatIds[i] != null) selection.add(flatIds[i]);
+        const nextRange = { a, b };
+        const changed = [];
+        const setAt = (i, inRange) => {
+            const id = flatIds[i];
+            if (id == null) return;
+            const shouldSelect = inRange || dragBase.has(id);
+            if (selection.has(id) === shouldSelect) return;
+            if (shouldSelect) selection.add(id);
+            else selection.delete(id);
+            changed.push(id);
+        };
+        if (!dragRange) {
+            for (let i = a; i <= b; i += 1) setAt(i, true);
+        } else {
+            for (let i = dragRange.a; i < Math.min(dragRange.b + 1, a); i += 1) setAt(i, false);
+            for (let i = Math.max(dragRange.a, b + 1); i <= dragRange.b; i += 1) setAt(i, false);
+            for (let i = a; i < Math.min(b + 1, dragRange.a); i += 1) setAt(i, true);
+            for (let i = Math.max(a, dragRange.b + 1); i <= b; i += 1) setAt(i, true);
         }
-        selectionChanged();
+        dragRange = nextRange;
+        if (changed.length) selectionChanged();
     }
 
     function edgeScrollSpeed(y) {
@@ -987,6 +1004,7 @@ function installSelectionGestures() {
                 selState.mode = true;
                 dragBase = new Set(selection);
                 anchorMi = mi;
+                dragRange = null;
                 dragActive = true;
                 applyDragRange(mi);
                 dragPoint = { x: lp.x, y: lp.y };
@@ -1016,6 +1034,7 @@ function installSelectionGestures() {
         longPressPending = false;
         dragActive = false;
         dragBase = null;
+        dragRange = null;
         dragPoint = null;
         if (dragFrame != null) cancelAnimationFrame(dragFrame);
         dragFrame = null;
@@ -1125,10 +1144,18 @@ function installPullToRefresh() {
 /* ---------- event wiring ---------- */
 function syncSelectionCells() {
     timeline.classList.toggle('selmode', selState.mode);
-    for (const cell of timeline.querySelectorAll('.mcell[data-id]')) {
-        cell.classList.toggle('sel', selection.has(Number(cell.dataset.id)));
+    const changed = new Set([...renderedSelection, ...selection]);
+    const affectedDays = new Set();
+    for (const id of changed) {
+        if (renderedSelection.has(id) === selection.has(id)) continue;
+        for (const cell of timeline.querySelectorAll(`.mcell[data-id="${id}"]`)) {
+            cell.classList.toggle('sel', selection.has(id));
+            const day = cell.closest('.m-day');
+            if (day) affectedDays.add(day);
+        }
     }
-    updateDayChecks();
+    updateDayChecks(affectedDays);
+    renderedSelection = new Set(selection);
 }
 
 function syncFlagCells({ ids, flagOf }) {
