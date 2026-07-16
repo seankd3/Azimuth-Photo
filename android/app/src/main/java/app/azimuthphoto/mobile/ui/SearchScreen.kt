@@ -53,17 +53,22 @@ import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.ArchiveFolder
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.DeviceMedia
+import app.azimuthphoto.mobile.data.LibraryApi
 import app.azimuthphoto.mobile.data.MediaBucket
 import app.azimuthphoto.mobile.data.Shelf
 import app.azimuthphoto.mobile.data.ViewerMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.ui.library.AddToCollectionSheet
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
 
 @Composable
-fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
+fun SearchScreen(
+    onImmersive: (Boolean) -> Unit = {},
+    onFindSimilar: (ArchiveImage) -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -73,6 +78,9 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         return
     }
     val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
+    val libraryApi = remember(currentSettings.serverUrl, currentSettings.deviceToken) {
+        LibraryApi(currentSettings.serverUrl, currentSettings.deviceToken.takeIf { it.isNotBlank() })
+    }
     val columns = currentSettings.gridColumns
     var query by rememberSaveable { mutableStateOf("") }
     var activeQuery by rememberSaveable { mutableStateOf("") }
@@ -89,6 +97,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     var archiveError by remember { mutableStateOf(false) }
     var archiveViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var localViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
+    var addToCollection by remember { mutableStateOf<List<Long>?>(null) }
     val gridState = rememberLazyGridState()
 
     fun submit(term: String) {
@@ -173,7 +182,19 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
             startIndex = index,
             onClose = { archiveViewerIndex = null },
             api = api,
+            onAddToCollection = { id -> addToCollection = listOf(id) },
+            onFindSimilar = { image ->
+                archiveViewerIndex = null
+                onFindSimilar(image)
+            },
         )
+        addToCollection?.let { ids ->
+            AddToCollectionSheet(
+                api = libraryApi,
+                imageIds = ids,
+                onDismiss = { addToCollection = null },
+            )
+        }
         return
     }
     localViewerIndex?.let { index ->
