@@ -11,9 +11,13 @@ async function requestJson(url, options = {}) {
     return payload;
 }
 
+export async function listGalleryDeliveries(collectionId) {
+    return requestJson(`/api/user-collections/${collectionId}/galleries`);
+}
+
 export async function loadGalleryDelivery(collectionId, getCollection) {
     const [listed, detail] = await Promise.all([
-        requestJson(`/api/user-collections/${collectionId}/galleries`),
+        listGalleryDeliveries(collectionId),
         getCollection(collectionId, { limit: 500 }),
     ]);
     return {

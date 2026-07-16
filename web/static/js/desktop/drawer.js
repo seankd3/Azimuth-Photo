@@ -1527,7 +1527,7 @@ async function returnToPublish() {
         return;
     }
     const { openDeliverOverlay } = await import('./panel.js');
-    openDeliverOverlay(target.collectionId, target.name || 'Collection', null, 'website');
+    openDeliverOverlay(target.collectionId, target.name || 'Collection', null, target.tab);
 }
 
 function aiInstallActive(status = aiStatus || {}) {
@@ -1820,6 +1820,7 @@ function resolvePublishReturnTarget() {
     return {
         collectionId: Number(overlay?.dataset.collectionId) || 0,
         name: overlay?.dataset.collectionName || 'Collection',
+        tab: overlay?.dataset.activeTab || 'website',
     };
 }
 
