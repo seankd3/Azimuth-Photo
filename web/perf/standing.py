@@ -63,9 +63,14 @@ class _Session:
         return status, payload, elapsed
 
 
-def _timed_gets(session: _Session, path: str, iterations: int) -> tuple[dict[str, float], dict]:
+def _timed_gets(
+    session: _Session, path: str, iterations: int, *, warm: bool = False
+) -> tuple[dict[str, float], dict]:
     samples: list[float] = []
     payload: dict = {}
+    if warm:
+        # Discard one cold hit so the recorded p50/p95 is steady-state latency.
+        session.json_fetch(path)
     for _ in range(iterations):
         status, payload, elapsed = session.json_fetch(path)
         if status != 200:
@@ -240,7 +245,7 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
 
     base_url = base_url.rstrip("/")
     with _Session(base_url) as session:
-        images, first_page = _timed_gets(session, "/api/rankings?limit=100&sort=elo", iterations)
+        images, first_page = _timed_gets(session, "/api/rankings?limit=100&sort=elo", iterations, warm=True)
         image_ids = [int(image["id"]) for image in first_page.get("images") or []]
         thumb_samples = []
         for image_id in image_ids[:iterations]:
@@ -248,7 +253,7 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
             if status not in (200, 204):
                 raise RuntimeError(f"read-only cached thumbnail probe returned {status}")
             thumb_samples.append(elapsed)
-        text_search, payload = _timed_gets(session, "/api/search?q=photo&limit=50", min(iterations, 5))
+        text_search, payload = _timed_gets(session, "/api/search?q=photo&limit=50", min(iterations, 5), warm=True)
         sources = {str(source).lower() for source in payload.get("search_sources") or []}
         semantic_search: dict[str, float] | None = None
         if "semantic" in sources or "embedding" in sources:
@@ -257,14 +262,14 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
                 "/api/search?q=photo&limit=50&deep=true",
                 min(iterations, 5),
             )
-        suggestions, _payload = _timed_gets(session, "/api/collections/suggestions", 2)
-        sync, _payload = _timed_gets(session, "/api/sync/status", min(iterations, 5))
+        suggestions, _payload = _timed_gets(session, "/api/collections/suggestions", 2, warm=True)
+        sync, _payload = _timed_gets(session, "/api/sync/status", min(iterations, 5), warm=True)
         # Heavy catalog surfaces — the interactions that must feel instant.
-        counts, _payload = _timed_gets(session, "/api/counts", min(iterations, 5))
-        histogram, _payload = _timed_gets(session, "/api/date-histogram", min(iterations, 5))
-        filter_options, _payload = _timed_gets(session, "/api/filter-options", min(iterations, 5))
-        people, _payload = _timed_gets(session, "/api/people?limit=24", 2)
-        map_markers, _payload = _timed_gets(session, "/api/map/markers", 2)
+        counts, _payload = _timed_gets(session, "/api/counts", min(iterations, 5), warm=True)
+        histogram, _payload = _timed_gets(session, "/api/date-histogram", min(iterations, 5), warm=True)
+        filter_options, _payload = _timed_gets(session, "/api/filter-options", min(iterations, 5), warm=True)
+        people, _payload = _timed_gets(session, "/api/people?limit=24", 2, warm=True)
+        map_markers, _payload = _timed_gets(session, "/api/map/markers", 2, warm=True)
     metrics = {
         "images_first_page_p50_ms": images["p50_ms"],
         "images_first_page_p95_ms": images["p95_ms"],

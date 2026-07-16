@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-07-16T11:54:39Z",
+  "git_sha": "a7d918eac871",
+  "details": {
+    "profile": "real-read-only",
+    "base_url": "http://100.102.150.104:8000",
+    "semantic_available": false,
+    "get_only": true
+  },
+  "metrics": {
+    "images_first_page_p50_ms": 4.29,
+    "images_first_page_p95_ms": 4.85,
+    "thumb_sm_cached_p50_ms": 1.29,
+    "thumb_sm_cached_p95_ms": 2.16,
+    "search_text_p50_ms": 16.15,
+    "collection_suggestions_cached_ms": 130.17,
+    "sync_status_p50_ms": 0.91,
+    "counts_p50_ms": 107.09,
+    "date_histogram_p50_ms": 2.98,
+    "filter_options_p50_ms": 5.9,
+    "people_p50_ms": 169.98,
+    "map_markers_p50_ms": 178.42
+  },
+  "top_offenders": [
+    {
+      "metric": "map_markers_p50_ms",
+      "value": 178.42,
+      "disposition": "profile before changing"
+    },
+    {
+      "metric": "people_p50_ms",
+      "value": 169.98,
+      "disposition": "profile before changing"
+    },
+    {
+      "metric": "collection_suggestions_cached_ms",
+      "value": 130.17,
+      "disposition": "profile before changing"
+    }
+  ]
+}
