@@ -960,7 +960,15 @@ function renderScopeBar() {
                 nav.setTab('library');
                 return;
             }
-            scope[field] = '';
+            const smartQueryKey = Object.keys(SMART_SCOPE_FIELDS).find(
+                (queryKey) => SMART_SCOPE_FIELDS[queryKey] === field,
+            );
+            const smartValue = smartQueryKey ? smartQuery[smartQueryKey] : undefined;
+            if (scope.smartName && smartValue !== undefined && smartValue !== null && smartValue !== '') {
+                scope[field] = String(smartValue);
+            } else {
+                scope[field] = '';
+            }
             if (field === 'similarId') {
                 scope.similarImages = null;
                 scope.label = '';

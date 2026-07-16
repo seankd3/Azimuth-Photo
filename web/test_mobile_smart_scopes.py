@@ -14,12 +14,37 @@ class MobileSmartScopeContractsTests(unittest.TestCase):
         self.assertIn("scope[scopeKey] === String(smartQuery[queryKey])", timeline)
         self.assertIn("!smartSets('flag')", timeline)
 
-    def test_search_composes_with_an_active_scope(self):
+    def test_clearing_a_smart_owned_facet_restores_its_smart_value(self):
+        timeline = self.read("static", "js", "mobile", "timeline.js")
+
+        self.assertIn(
+            """const smartQueryKey = Object.keys(SMART_SCOPE_FIELDS).find(
+                (queryKey) => SMART_SCOPE_FIELDS[queryKey] === field,
+            );
+            const smartValue = smartQueryKey ? smartQuery[smartQueryKey] : undefined;
+            if (scope.smartName && smartValue !== undefined && smartValue !== null && smartValue !== '') {
+                scope[field] = String(smartValue);
+            } else {
+                scope[field] = '';
+            }""",
+            timeline,
+        )
+
+    def test_search_replaces_a_local_similar_scope(self):
         search = self.read("static", "js", "mobile", "search.js")
 
-        self.assertIn("scopeActive", search)
-        self.assertIn("function applySearchScope(patch)", search)
-        self.assertIn("if (scopeActive()) patchScope(patch);", search)
+        self.assertIn(
+            """function applySearchScope(patch) {
+    if (scope.similarId || scope.similarImages) {
+        setScope(patch);
+    } else if (scopeActive()) {
+        patchScope(patch);
+    } else {
+        setScope(patch);
+    }
+}""",
+            search,
+        )
         self.assertEqual(search.count("applySearchScope({"), 2)
 
     def test_smart_chip_retains_its_collection_actions_without_becoming_a_collection_scope(self):
