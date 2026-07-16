@@ -72,7 +72,7 @@ export function openExportMenu(anchor, choose, options = {}) {
         closePopover: closeExportMenu,
         showToast,
         onDataExport: (format) => choose({ format }),
-        onOriginalsExport: () => choose({ format: 'zip', size: 'original' }),
+        onOriginalsExport: (_ids, size) => choose({ format: 'zip', size }),
     });
     requestAnimationFrame(() => positionDialog(anchor));
     return popover;

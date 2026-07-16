@@ -60,6 +60,7 @@ function readExportOptions(root) {
         sharpen: root.querySelector('[data-export-sharpen]')?.value || 'none',
         filename_pattern: (root.querySelector('[data-export-filename]')?.value || '').trim() || undefined,
         save_to_library: Boolean(root.querySelector('[data-export-library]')?.checked),
+        originals_size: root.querySelector('[data-export-originals-size]')?.value || 'original',
     };
 }
 
@@ -82,6 +83,7 @@ function applyExportOptions(root, options) {
     assign('[data-export-size]', options.max_px ?? '');
     assign('[data-export-sharpen]', options.sharpen);
     assign('[data-export-filename]', options.filename_pattern);
+    assign('[data-export-originals-size]', options.originals_size || 'original');
     const library = root.querySelector('[data-export-library]');
     if (library && options.save_to_library !== undefined) library.checked = Boolean(options.save_to_library);
 }
@@ -130,6 +132,7 @@ function exportDialogHtml(image, title) {
         `<section class="export-dialog-panel" role="tabpanel" data-export-panel="photos">${photoExportHtml(image)}</section>`,
         '<section class="export-dialog-panel" role="tabpanel" data-export-panel="originals" hidden>',
         '<p class="export-dialog-hint">Download the original files together as a zip.</p>',
+        '<label>Size<select data-export-originals-size data-tip="Choose which stored rendition to include"><option value="original">Original</option><option value="lg">Large</option><option value="md">Medium</option></select></label>',
         '<button type="button" class="primary" data-export-originals>Download originals</button>',
         '</section>',
         '<section class="export-dialog-panel" role="tabpanel" data-export-panel="data" hidden>',
@@ -259,10 +262,11 @@ function idsFrom(image, imageIds) {
     return [...new Set(ids.map(Number).filter((id) => id > 0))];
 }
 
-function downloadLegacyExport(imageIds, format, { showToast }) {
+function downloadLegacyExport(imageIds, format, { showToast, size = '' } = {}) {
     const ids = idsFrom(null, imageIds);
     if (!ids.length) return;
     const params = new URLSearchParams({ format, ids: ids.join(',') });
+    if (size) params.set('size', size);
     const link = document.getElementById('download-link');
     link.href = `/api/export?${params.toString()}`;
     link.download = format === 'zip' ? 'azimuth-photo-export.zip' : `azimuth-photo-export.${format}`;
@@ -310,6 +314,7 @@ export function openExportDialog({
     bindPresetSave(popover, { showToast });
     popover.querySelector('[data-export-panel="photos"]')?.addEventListener('input', () => rememberExportOptions(popover));
     popover.querySelector('[data-export-panel="photos"]')?.addEventListener('change', () => rememberExportOptions(popover));
+    popover.querySelector('[data-export-panel="originals"]')?.addEventListener('change', () => rememberExportOptions(popover));
     const resolveIds = async () => {
         const resolved = getImageIds ? await getImageIds() : fallbackIds;
         return idsFrom(null, resolved);
@@ -332,12 +337,13 @@ export function openExportDialog({
     };
     popover.querySelector('[data-export-confirm]')?.addEventListener('click', exportPhotos);
     const exportOriginals = async () => {
+        const size = readExportOptions(popover).originals_size;
         closePopover?.();
         try {
             const ids = await resolveIds();
             if (!ids.length) return showToast?.('Select photos to export');
-            if (onOriginalsExport) await onOriginalsExport(ids);
-            else downloadLegacyExport(ids, 'zip', { showToast });
+            if (onOriginalsExport) await onOriginalsExport(ids, size);
+            else downloadLegacyExport(ids, 'zip', { showToast, size });
         } catch {
             showToast?.('Export failed');
         }
