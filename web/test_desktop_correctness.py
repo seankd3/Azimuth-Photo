@@ -442,5 +442,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("if (session.publish?.in_progress) scheduleDeliverPoll(session, token);", panel)
         # The editable input is disabled whenever the poll loop could rebuild it.
         self.assertIn("data-deliver-slug", panel)
-        slug_line = next(line for line in panel.splitlines() if "data-deliver-slug" in line)
-        self.assertIn("busy || publish || setupNeeded ? 'disabled'", slug_line)
+        slug_markup = next(
+            line for line in panel.splitlines() if "input data-deliver-slug" in line
+        )
+        self.assertIn("busy || publish || setupNeeded ? 'disabled'", slug_markup)
