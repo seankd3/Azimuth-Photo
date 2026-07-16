@@ -793,27 +793,49 @@ function startCollectionRename(collectionId) {
     input.select();
 }
 
-function startCollectionDelete(collectionId, name = 'Collection') {
+async function startCollectionDelete(collectionId, name = 'Collection') {
     const row = document.querySelector(`.coll-row[data-coll-id="${collectionId}"]`);
     if (!row) return;
-    const coll = collectionById(collectionId) || {};
-    confirmTypedCount({
+    const ok = await confirmAction({
         title: 'Delete collection',
-        message: `Delete “${name}”? Photos stay in the archive, but this collection is removed. Type ${fmt(coll.image_count || 0).replace(/,/g, '')} to confirm.`,
-        count: coll.image_count || 0,
+        message: `Delete “${name}”? Photos stay in the archive, but this collection is removed.`,
         confirmLabel: 'Delete',
-    }).then(async (ok) => {
-        if (!ok) return;
-        const result = await deleteCollection(collectionId);
-        if (result && result.ok) {
-            showToast(`Deleted “${name}”`);
-            if (String(scope.collectionId || '') === String(collectionId)) setScope({});
-            await loadCollections();
-        } else {
-            showToast("Couldn't delete collection");
-            renderCollections();
-        }
     });
+    if (!ok) return;
+    let offset = 0;
+    let snapshot = null;
+    const imageIds = [];
+    do {
+        const detail = await getCollection(collectionId, { limit: 1000, offset });
+        snapshot = detail?.collection || snapshot;
+        const images = detail?.collection?.images || [];
+        imageIds.push(...images.map((image) => Number(image.id)).filter((id) => id > 0));
+        offset += images.length;
+        if (!snapshot || snapshot.smart || images.length < 1000 || offset >= Number(snapshot.image_count || 0)) break;
+    } while (true);
+    if (!snapshot) {
+        showToast("Couldn't prepare collection deletion");
+        return;
+    }
+    const result = await deleteCollection(collectionId);
+    if (result && result.ok) {
+        showToast(`Deleted “${name}”`, {
+            undo: async () => {
+                const restored = await createCollection(snapshot.name || name, imageIds, '', snapshot.smart ? snapshot.query : null);
+                if (restored?.ok && restored.collection?.id) {
+                    await loadCollections();
+                    showToast(`Restored “${snapshot.name || name}”`);
+                } else {
+                    showToast("Couldn't restore collection");
+                }
+            },
+        });
+        if (String(scope.collectionId || '') === String(collectionId)) setScope({});
+        await loadCollections();
+    } else {
+        showToast("Couldn't delete collection");
+        renderCollections();
+    }
 }
 
 function startSmartQueryEdit(collectionId) {
