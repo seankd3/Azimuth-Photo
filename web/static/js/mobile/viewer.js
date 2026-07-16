@@ -29,6 +29,7 @@ let needMore = null;
 let loadToken = 0;
 let incomingStageImage = null;
 const mediumPreloads = new Map();
+const captionCache = new Map();
 
 let zScale = 1;
 let tx = 0;
@@ -134,7 +135,21 @@ function preload(offset) {
             pre.src = thumbUrl('md', neighbor.id);
             mediumPreloads.set(Number(neighbor.id), pre);
         }
+        preloadCaption(neighbor.id);
     }
+}
+
+function preloadCaption(imageId) {
+    const id = Number(imageId);
+    if (!id) return Promise.resolve(null);
+    if (!captionCache.has(id)) {
+        const request = getImageCaption(id).catch(() => {
+            captionCache.delete(id);
+            return null;
+        });
+        captionCache.set(id, request);
+    }
+    return captionCache.get(id);
 }
 
 function upgradeToMedium(image, token) {
@@ -164,7 +179,7 @@ function showCurrent({ stageReady = false } = {}) {
     loadLg();
     const date = image.date_taken ? String(image.date_taken).slice(0, 16).replace('T', ' · ') : '';
     cap.textContent = [image.filename, date].filter(Boolean).join('  —  ');
-    getImageCaption(image.id).then((data) => {
+    preloadCaption(image.id).then((data) => {
         if (!viewerRequestCurrent(image.id, token)) return;
         const caption = data?.has_caption ? String(data.caption || '').trim() : '';
         cap.textContent = [caption || image.filename, date].filter(Boolean).join('  —  ');
