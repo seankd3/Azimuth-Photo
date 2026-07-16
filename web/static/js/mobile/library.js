@@ -8,7 +8,7 @@ import {
     getFoldersTree, getPeopleStatus, listCollections,
     renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
-import { applySmartScopeSort, nav, on, setScope, clearScope, scopePatchFromSmartQuery } from './state.js';
+import { applySmartScopeSort, nav, on, patchScope, setScope, clearScope, scopePatchFromSmartQuery } from './state.js';
 import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
@@ -685,6 +685,7 @@ function openCollectionView(coll) {
         setScope({
             ...scopePatchFromSmartQuery(coll.query || {}),
             smartName: coll.name || 'Smart collection',
+            smartCollectionId: String(coll.id),
             smartQuery: coll.query || {},
         });
         applySmartScopeSort(coll.query && coll.query.sort);
@@ -722,11 +723,14 @@ export function openCollectionActionsSheet(coll) {
             if (result && result.ok) {
                 showToast(`Renamed to \u201c${next}\u201d`);
                 collections = null;
-                setScope({
-                    collectionId: String(coll.id),
-                    collectionSmart: Boolean(coll.smart),
-                    label: next,
-                });
+                if (coll.smart) patchScope({ smartName: next });
+                else {
+                    setScope({
+                        collectionId: String(coll.id),
+                        collectionSmart: false,
+                        label: next,
+                    });
+                }
                 document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());

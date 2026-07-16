@@ -131,7 +131,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         selection = self.read("static", "js", "mobile", "selection.js")
 
         self.assertIn("collectionSmart: false", state)
-        self.assertIn("collectionSmart: Boolean(coll.smart)", library)
+        self.assertIn("smartCollectionId: String(coll.id)", library)
         self.assertIn("scope.collectionSmart ? ''", selection)
         self.assertIn(".filter((collection) => !collection.smart)", selection)
 

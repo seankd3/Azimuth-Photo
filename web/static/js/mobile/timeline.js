@@ -915,19 +915,21 @@ function renderScopeBar() {
     }
     bar.innerHTML = html;
     const collectionChip = bar.querySelector('.chip-x[data-clear="collectionId"]')?.closest('.chip');
-    if (collectionChip) {
-        collectionChip.setAttribute('role', 'button');
-        collectionChip.tabIndex = 0;
+    const smartChip = bar.querySelector('.chip-x[data-clear="smartName"]')?.closest('.chip');
+    const actionChip = scope.smartCollectionId ? smartChip : collectionChip;
+    if (actionChip) {
+        actionChip.setAttribute('role', 'button');
+        actionChip.tabIndex = 0;
         const openCollectionActions = (event) => {
             if (event.target.closest('.chip-x')) return;
             openCollectionActionsSheet({
-                id: scope.collectionId,
-                name: scope.label || 'Collection',
-                smart: scope.collectionSmart,
+                id: scope.smartCollectionId || scope.collectionId,
+                name: scope.smartName || scope.label || 'Collection',
+                smart: Boolean(scope.smartCollectionId) || scope.collectionSmart,
             });
         };
-        collectionChip.addEventListener('click', openCollectionActions);
-        collectionChip.addEventListener('keydown', (event) => {
+        actionChip.addEventListener('click', openCollectionActions);
+        actionChip.addEventListener('keydown', (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
                 openCollectionActions(event);

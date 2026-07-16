@@ -69,6 +69,7 @@ export const scope = {
     collectionId: '',
     collectionSmart: false,
     smartName: '',
+    smartCollectionId: '',
     smartQuery: {},
     smartPreviousSort: '',
     similarId: '',
@@ -129,6 +130,7 @@ export function setScope(patch) {
     scope.collectionId = '';
     scope.collectionSmart = false;
     scope.smartName = '';
+    scope.smartCollectionId = '';
     scope.smartQuery = {};
     scope.smartPreviousSort = carriesSmartSort ? previousSmartSort : '';
     scope.similarId = '';

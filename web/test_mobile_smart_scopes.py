@@ -22,6 +22,19 @@ class MobileSmartScopeContractsTests(unittest.TestCase):
         self.assertIn("if (scopeActive()) patchScope(patch);", search)
         self.assertEqual(search.count("applySearchScope({"), 2)
 
+    def test_smart_chip_retains_its_collection_actions_without_becoming_a_collection_scope(self):
+        state = self.read("static", "js", "mobile", "state.js")
+        library = self.read("static", "js", "mobile", "library.js")
+        timeline = self.read("static", "js", "mobile", "timeline.js")
+
+        self.assertIn("smartCollectionId: ''", state)
+        self.assertIn("scope.smartCollectionId = '';", state)
+        self.assertIn("smartCollectionId: String(coll.id)", library)
+        self.assertIn("if (coll.smart) patchScope({ smartName: next });", library)
+        self.assertIn("const smartChip =", timeline)
+        self.assertIn("const actionChip = scope.smartCollectionId ? smartChip : collectionChip;", timeline)
+        self.assertIn("id: scope.smartCollectionId || scope.collectionId", timeline)
+
 
 if __name__ == "__main__":
     unittest.main()
