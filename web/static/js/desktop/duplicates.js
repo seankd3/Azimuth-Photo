@@ -11,6 +11,9 @@ import { confirmAction } from './trash.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import {
+    imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
+} from './trash_outcome.js';
 
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
@@ -764,18 +767,24 @@ async function keepCoverForStack(stackId) {
     const imageIds = stackMembers(stack).map((image) => Number(image.id)).filter((id) => id && id !== repId);
     if (!imageIds.length) return;
     const result = await trashImages(imageIds);
-    if (!result.ok) {
-        showToast('Couldn’t move photos to Trash');
+    const { imageIds: trashedIds, errors } = imageMutationOutcome(result, 'trashed');
+    if (!trashedIds.length) {
+        showToast(mutationFailureReason(errors, 'Couldn’t move photos to Trash'));
         return;
     }
-    emit('trash:changed', { imageIds });
+    emit('trash:changed', { imageIds: trashedIds });
     removeFinishedStack(stackId);
-    showToast(`Trashed ${fmt(imageIds.length)} stack member${imageIds.length === 1 ? '' : 's'}`, {
+    showToast(`Trashed ${fmt(trashedIds.length)} stack member${trashedIds.length === 1 ? '' : 's'}${mutationPartialSuffix(errors, 'trashed')}`, {
         undo: async () => {
-            const restored = await restoreImages(imageIds);
-            emit('trash:changed', { imageIds });
+            const restored = await restoreImages(trashedIds);
+            const restoredOutcome = imageMutationOutcome(restored, 'restored');
+            if (!restoredOutcome.imageIds.length) {
+                showToast(mutationFailureReason(restoredOutcome.errors, 'Couldn’t restore'));
+                return;
+            }
+            emit('trash:changed', { imageIds: restoredOutcome.imageIds });
             if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
+            showToast(`Restored${mutationPartialSuffix(restoredOutcome.errors, 'restored')}`);
         },
     });
 }
@@ -820,21 +829,27 @@ async function keepCoversEverywhere() {
         return;
     }
     const result = await trashImages(imageIds);
-    if (!result.ok) {
+    const { imageIds: trashedIds, errors } = imageMutationOutcome(result, 'trashed');
+    if (!trashedIds.length) {
         button.disabled = false;
-        showToast('Couldn’t move photos to Trash');
+        showToast(mutationFailureReason(errors, 'Couldn’t move photos to Trash'));
         return;
     }
     try {
-        emit('trash:changed', { imageIds });
+        emit('trash:changed', { imageIds: trashedIds });
         invalidateBulkNonCoverCount();
         await reloadStacks();
-        showToast(`Trashed ${fmt(imageIds.length)} non-cover photos`, {
+        showToast(`Trashed ${fmt(trashedIds.length)} non-cover photos${mutationPartialSuffix(errors, 'trashed')}`, {
             undo: async () => {
-                const restored = await restoreImages(imageIds);
-                emit('trash:changed', { imageIds });
+                const restored = await restoreImages(trashedIds);
+                const restoredOutcome = imageMutationOutcome(restored, 'restored');
+                if (!restoredOutcome.imageIds.length) {
+                    showToast(mutationFailureReason(restoredOutcome.errors, 'Couldn’t restore'));
+                    return;
+                }
+                emit('trash:changed', { imageIds: restoredOutcome.imageIds });
                 if (open && mode === 'stacks') await reloadStacks();
-                showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
+                showToast(`Restored${mutationPartialSuffix(restoredOutcome.errors, 'restored')}`);
             },
         });
     } finally {
