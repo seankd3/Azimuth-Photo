@@ -37,6 +37,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -205,15 +206,19 @@ private fun Root(
             }
         },
     ) { padding ->
+        // Each tab keeps its saveable state (scroll, route stack) across switches.
+        val stateHolder = rememberSaveableStateHolder()
         Box(Modifier.padding(padding)) {
-            when (tab) {
-                0 -> TimelineScreen(
-                    onOpenSettings = { tab = 2 },
-                    onOpenTrash = { showTrash = true },
-                    onImmersive = { immersive = it },
-                )
-                1 -> LibraryScreen(onImmersive = { immersive = it })
-                else -> SettingsScreen(onOpenTrash = { showTrash = true })
+            stateHolder.SaveableStateProvider(tab) {
+                when (tab) {
+                    0 -> TimelineScreen(
+                        onOpenSettings = { tab = 2 },
+                        onOpenTrash = { showTrash = true },
+                        onImmersive = { immersive = it },
+                    )
+                    1 -> LibraryScreen(onImmersive = { immersive = it })
+                    else -> SettingsScreen(onOpenTrash = { showTrash = true })
+                }
             }
         }
     }
