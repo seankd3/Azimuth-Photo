@@ -40,9 +40,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.VolumeOff
 import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.material3.AlertDialog
@@ -142,6 +144,8 @@ fun ViewerScreen(
     var confirmHubTrash by remember { mutableStateOf<ArchiveImage?>(null) }
     var busy by remember { mutableStateOf(false) }
     var currentZoom by remember { mutableFloatStateOf(1f) }
+    var favoriteOverrides by remember(items) { mutableStateOf<Map<Long, Boolean>>(emptyMap()) }
+    var flagWritesInFlight by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val dismissY = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -175,6 +179,32 @@ fun ViewerScreen(
                 }
             } finally {
                 busy = false
+            }
+        }
+    }
+
+    fun toggleFavorite(remote: ViewerMedia.Remote) {
+        val imageId = remote.image.id
+        if (imageId in flagWritesInFlight) return
+        val previousOverride = favoriteOverrides[imageId]
+        val wasFavorite = previousOverride ?: (remote.image.flag == "picked")
+        val willFavorite = !wasFavorite
+        favoriteOverrides = favoriteOverrides + (imageId to willFavorite)
+        flagWritesInFlight = flagWritesInFlight + imageId
+        scope.launch {
+            val updated = runCatching {
+                api?.setFlag(imageId, if (willFavorite) "picked" else "unflagged") == true
+            }.getOrDefault(false)
+            flagWritesInFlight = flagWritesInFlight - imageId
+            if (updated) {
+                onChanged()
+            } else {
+                favoriteOverrides = if (previousOverride == null) {
+                    favoriteOverrides - imageId
+                } else {
+                    favoriteOverrides + (imageId to previousOverride)
+                }
+                Toast.makeText(context, "Couldn't update — check connection", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -253,6 +283,10 @@ fun ViewerScreen(
 
         if (chromeVisible) {
             val current = items[pagerState.currentPage]
+            val favoriteRemote = (current as? ViewerMedia.Remote)?.takeUnless { current.isVideo }
+            val isFavorite = favoriteRemote?.let {
+                favoriteOverrides[it.image.id] ?: (it.image.flag == "picked")
+            } ?: false
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -271,6 +305,18 @@ fun ViewerScreen(
                         strokeWidth = 2.dp,
                         modifier = Modifier.padding(horizontal = 12.dp).size(18.dp),
                     )
+                }
+                favoriteRemote?.let { remote ->
+                    IconButton(
+                        enabled = remote.image.id !in flagWritesInFlight,
+                        onClick = { toggleFavorite(remote) },
+                    ) {
+                        Icon(
+                            if (isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
+                            contentDescription = if (isFavorite) "Remove from favorites" else "Favorite",
+                            tint = if (isFavorite) Accent else Color.White,
+                        )
+                    }
                 }
                 IconButton(enabled = !busy, onClick = {
                     withShareable(current) { uri, mime -> share(context, uri, mime) }
