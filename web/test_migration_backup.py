@@ -2,6 +2,7 @@
 
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -145,7 +146,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
 
         backup_path = f"{stack_db}.pre-rebuild-stacks.bak"
         self.assertTrue(os.path.exists(backup_path))
-        with sqlite3.connect(backup_path) as backup:
+        with closing(sqlite3.connect(backup_path)) as backup, backup:
             table_sql = backup.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'stacks'"
             ).fetchone()[0]

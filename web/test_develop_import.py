@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 
@@ -30,7 +31,7 @@ class DevelopImporterTests(unittest.TestCase):
         self.root = os.path.join(self.tempdir.name, "RAWS", "2024", "2024-02-06")
         os.makedirs(self.root)
         self.db_path = os.path.join(self.tempdir.name, "throwaway.db")
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.executescript(
                 """
                 CREATE TABLE catalog_sources (
@@ -65,7 +66,7 @@ class DevelopImporterTests(unittest.TestCase):
         return raw_path, xmp_path
 
     def _setting_row(self, raw_path):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             return conn.execute(
                 "SELECT ds.*, i.id AS image_id FROM develop_settings ds JOIN images i ON i.id = ds.image_id WHERE i.filepath = ?",
@@ -109,7 +110,7 @@ class DevelopImporterTests(unittest.TestCase):
     def test_rescan_restores_virtual_copy_availability_without_changing_file_metadata(self):
         raw_path, _ = self._raw_with_xmp()
         importer.scan_raws(self.root, self.db_path)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             master_id = conn.execute(
                 "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
                 (raw_path,),
@@ -123,7 +124,7 @@ class DevelopImporterTests(unittest.TestCase):
 
         importer.scan_raws(self.root, self.db_path)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             copy = conn.execute(
                 "SELECT filename, file_ext, file_size, file_modified_at, missing_at "
                 "FROM images WHERE id = ?",
@@ -135,7 +136,7 @@ class DevelopImporterTests(unittest.TestCase):
         raw_path, xmp_path = self._raw_with_xmp()
         importer.scan_raws(self.root, self.db_path)
         row = self._setting_row(raw_path)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 "UPDATE develop_settings SET settings = ?, origin = 'user' WHERE image_id = ?",
                 (json.dumps({"Exposure2012": -2}), row["image_id"]),

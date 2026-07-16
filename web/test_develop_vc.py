@@ -1,5 +1,6 @@
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 
@@ -133,7 +134,7 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
             await connection.close_async(conn, db_path=legacy_path)
         backup_path = f"{legacy_path}.pre-virtual-copies.bak"
         self.assertTrue(os.path.exists(backup_path))
-        with sqlite3.connect(backup_path) as backup:
+        with closing(sqlite3.connect(backup_path)) as backup, backup:
             table_sql = backup.execute(
                 "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'images'"
             ).fetchone()[0]

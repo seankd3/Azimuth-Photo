@@ -6,6 +6,7 @@ import asyncio
 import io
 import json
 import sqlite3
+from contextlib import closing
 import time
 import unittest
 import zipfile
@@ -191,7 +192,7 @@ class GalleryTests(BackendTestCase):
             image_ids=[first],
             options={"download_size": "md"},
         )
-        with sqlite3.connect(db.DB_PATH) as conn:
+        with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
             conn.execute("UPDATE images SET filename = ? WHERE id = ?", (r"..\..\evil.jpg", first))
 
         async def preview(_filepath, _size, _image_id):
@@ -250,7 +251,7 @@ class GalleryTests(BackendTestCase):
         local = await self._image_row(local_id)
         Path(local["filepath"]).parent.mkdir(parents=True, exist_ok=True)
         Path(local["filepath"]).write_bytes(b"local original")
-        with sqlite3.connect(db.DB_PATH) as conn:
+        with closing(sqlite3.connect(db.DB_PATH)) as conn, conn:
             conn.execute(
                 "UPDATE images SET hub_remote = 1, hub_image_id = 90210 WHERE id = ?",
                 (remote_id,),

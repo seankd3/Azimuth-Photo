@@ -2,6 +2,7 @@ import json
 import os
 import random
 import sqlite3
+from contextlib import closing
 import tempfile
 import time
 import unittest
@@ -75,22 +76,22 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _count(path: str) -> int:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             return int(conn.execute("SELECT COUNT(*) FROM oplog").fetchone()[0])
 
     @staticmethod
     def _pending_count(path: str) -> int:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             return int(conn.execute("SELECT COUNT(*) FROM oplog_pending").fetchone()[0])
 
     @staticmethod
     def _flags(path: str) -> dict[str, str]:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             return dict(conn.execute("SELECT content_hash, flag FROM images"))
 
     @staticmethod
     def _snapshot(path: str) -> dict:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             flags = [tuple(row) for row in conn.execute("SELECT content_hash, flag FROM images ORDER BY id")]
             iptc = [tuple(row) for row in conn.execute(
@@ -108,7 +109,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
     @staticmethod
     def _collection_snapshot(path: str) -> dict:
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             collections = list(conn.execute(
                 "SELECT uuid, name FROM collections ORDER BY uuid"
             ))
@@ -149,7 +150,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_synced_rating_preserves_develop_edit_interleaved_with_upsert(self):
         path = self._catalog()
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (1, ?, 'user', 'before')",
                 (json.dumps({"Exposure2012": 0.0}),),
@@ -171,7 +172,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 200.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             settings = json.loads(conn.execute(
                 "SELECT settings FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0])
@@ -179,7 +180,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_rating_clock_does_not_bump_develop_timestamp(self):
         path = self._catalog()
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (1, ?, 'sync', 'before')",
                 (json.dumps({"Exposure2012": 0.5}),),
@@ -195,7 +196,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 300.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             updated_at = conn.execute(
                 "SELECT updated_at FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0]
@@ -214,7 +215,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 200.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             settings = json.loads(conn.execute(
                 "SELECT settings FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0])
@@ -237,7 +238,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 300.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             settings, updated_at = conn.execute(
                 "SELECT settings, updated_at FROM develop_settings WHERE image_id = 1"
             ).fetchone()
@@ -295,7 +296,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
         }
         with self.assertLogs(oplog.log, level="WARNING"):
             await oplog.apply_entries(path, [entry], applied_from="satellite", receive_time=received_at)
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             stored = conn.execute("SELECT ts, payload FROM oplog").fetchone()
         self.assertEqual(stored[0], received_at)
         self.assertEqual(json.loads(stored[1]), {"value": "picked"})
@@ -433,7 +434,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "family": "flag", "payload": {"value": "picked"}, "ts": 100.0,
         }
         await oplog.apply_entries(path, [entry], applied_from="hub", receive_time=500.0)
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute("INSERT INTO images(id, content_hash) VALUES (3, ?)", (HASH_C,))
             conn.commit()
 

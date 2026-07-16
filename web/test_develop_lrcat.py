@@ -1,6 +1,7 @@
 import json
 import os
 import sqlite3
+from contextlib import closing
 import tempfile
 import unittest
 
@@ -19,7 +20,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.tempdir.cleanup()
 
     def _make_library(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE,
                     date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
@@ -39,7 +40,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
             ])
 
     def _make_catalog(self):
-        with sqlite3.connect(self.catalog_path) as conn:
+        with closing(sqlite3.connect(self.catalog_path)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE Adobe_images (id_local INTEGER PRIMARY KEY, rootFile INTEGER, pick INTEGER, rating INTEGER, captureTime TEXT, touchTime REAL);
                 CREATE TABLE Adobe_imageDevelopSettings (id_local INTEGER PRIMARY KEY, image INTEGER, text TEXT);
@@ -80,7 +81,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['picks_protected'], 1)
         self.assertEqual(result['keywords_skipped'], 1)
         self.assertEqual(result['collections_created'], 1)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             flags = dict(conn.execute('SELECT id, flag FROM images'))
             settings = dict(conn.execute('SELECT image_id, settings FROM develop_settings'))
             collection = conn.execute("SELECT id FROM collections WHERE name = 'LR 2023/Favorites'").fetchone()
@@ -92,7 +93,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
 
     def test_imports_full_catalog_settings_and_respects_fresher_xmp_or_user_work(self):
         epoch = 978307200.0
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.executemany(
                 "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                 [
@@ -102,7 +103,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
                 ],
             )
         result = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             stored = {
                 image_id: (json.loads(settings), origin)
                 for image_id, settings, origin in conn.execute(
@@ -127,7 +128,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['develop_settings_skipped'], 2)
 
     def test_rating_import_does_not_advance_the_develop_clock(self):
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
                 "VALUES (1, ?, 'user', 'develop-save')",
@@ -153,12 +154,12 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(second['picks_updated'], 0)
         self.assertEqual(second['ratings_updated'], 0)
         self.assertEqual(dry['matched'], 3)
-        with sqlite3.connect(dry_db) as conn:
+        with closing(sqlite3.connect(dry_db)) as conn, conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM develop_settings').fetchone()[0], 0)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM collections').fetchone()[0], 0)
 
     def _make_library_copy(self, destination):
-        with sqlite3.connect(destination) as conn:
+        with closing(sqlite3.connect(destination)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE, date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
                 CREATE TABLE develop_settings (image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL);

@@ -163,7 +163,25 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         catalog_routes.clear_folders_cache()
         cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
-        self.tempdir.cleanup()
+        await self._cleanup_tempdir()
+
+    async def _cleanup_tempdir(self):
+        """Windows holds file locks while background tasks finish; retry briefly.
+
+        A bounded retry absorbs the teardown race (post-response prefetch or a
+        worker still closing its connection) without masking real leaks -- a
+        connection that never closes still fails after the retries.
+        """
+        import asyncio as _asyncio
+
+        for attempt in range(10):
+            try:
+                self.tempdir.cleanup()
+                return
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                await _asyncio.sleep(0.2)
 
     def _reset_shared_runtime_state(self):
         thumbnails._clear_memory_cache()

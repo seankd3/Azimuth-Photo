@@ -57,8 +57,8 @@ class VersionStackBuilderTests(unittest.TestCase):
         raw = self._row(30, "IMG_4023.dng")
         edit = self._row(31, "renamed-export.jpg", file_modified_at=400.0)
         fallback = {
-            "/catalog/IMG_4023.dng": ("2024-06-01 14:10:10", "canon eos r5"),
-            "/catalog/renamed-export.jpg": ("2024-06-01 14:10:10", "canon eos r5"),
+            builders._metadata_key(raw["filepath"]): ("2024-06-01 14:10:10", "canon eos r5"),
+            builders._metadata_key(edit["filepath"]): ("2024-06-01 14:10:10", "canon eos r5"),
         }
 
         with mock.patch.object(builders, "_exiftool_version_metadata", return_value=fallback) as exiftool:
