@@ -1314,6 +1314,41 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(picked_only["total_images"], 1)
         self.assertEqual(await db.count_rankings(flag="picked", collection_id=collection["id"]), 1)
 
+    async def test_collection_export_composes_flag_filter(self):
+        source = await self._source()
+        picked = await self._image(source["id"], "collection-export-picked.jpg")
+        rejected = await self._image(source["id"], "collection-export-rejected.jpg")
+        outside = await self._image(source["id"], "outside-export-picked.jpg")
+        await db.set_image_flag(picked, "picked")
+        await db.set_image_flag(rejected, "rejected")
+        await db.set_image_flag(outside, "picked")
+        collection = await db.create_collection(
+            name="Filtered export scope",
+            image_ids=[picked, rejected],
+        )
+
+        def probe():
+            client = TestClient(app_module.app)
+            try:
+                return client.get(
+                    "/api/export",
+                    params={
+                        "format": "json",
+                        "collection_id": collection["id"],
+                        "flag": "picked",
+                    },
+                )
+            finally:
+                client.close()
+
+        response = await asyncio.to_thread(probe)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [row["filename"] for row in response.json()],
+            ["collection-export-picked.jpg"],
+        )
+
     async def test_smart_collection_scope_resolves_rankings_and_timeline_histogram(self):
         source = await self._source()
         picked = await self._image(source["id"], "smart-picked.jpg", elo=1500)

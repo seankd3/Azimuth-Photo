@@ -61,6 +61,7 @@ const ACTIVE_WORKER_STATES = new Set([
     'waiting_for_turn',
     'waiting_retry',
 ]);
+const CACHE_ACTIVE_PREGEN_STATES = new Set(['running', 'waiting']);
 const METADATA_ACTIVE_WORKER_STATES = new Set(['running', 'waiting', 'waiting_retry']);
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
@@ -129,6 +130,11 @@ function workerStateIsActive(status) {
     const index = (status && status.embedding_index) || {};
     const state = index.worker_state || (status && status.worker_state) || worker.state || '';
     return ACTIVE_WORKER_STATES.has(state);
+}
+
+function cachePregenStateIsActive(status) {
+    const pregen = (status && status.pregen) || {};
+    return !pregen.manual_pause && CACHE_ACTIVE_PREGEN_STATES.has(pregen.state);
 }
 
 function metadataStateIsActive(status) {
@@ -257,7 +263,8 @@ function hasInvalidSetting() {
 function activeProgress() {
     const ai = pct(aiStatus && aiStatus.progress_pct);
     const pregen = cacheStatus && cacheStatus.pregen ? cacheStatus.pregen : {};
-    const cache = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
+    const cacheProgress = pct((pregen.preview && pregen.preview.progress_pct) || pregen.progress_pct);
+    const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
     const peopleWorker = (peopleStatus && peopleStatus.worker) || {};
     const people = peopleWorker.progress_pct != null ? pct(peopleWorker.progress_pct) : 0;
     const captionWorker = (captionStatus && captionStatus.worker) || {};
@@ -364,6 +371,7 @@ function renderActivity() {
     const captionsPaused = captionStatus && !captionStatus.active;
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     const workerActive = workerStateIsActive(aiStatus)
+        || cachePregenStateIsActive(cacheStatus)
         || workerStateIsActive(peopleStatus)
         || workerStateIsActive(captionStatus)
         || metadataStateIsActive(metadataStatus);

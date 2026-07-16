@@ -172,6 +172,17 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("getCollection(", page_loader)
         self.assertIn("getCollection(", scope_data[scope_data.index("export async function loadCollectionImages"):])
 
+    def test_collection_scope_export_uses_server_composition(self):
+        panel = read("panel.js")
+        export_scope = panel[
+            panel.index("export async function exportCurrentScope"):
+            panel.index("export function openScopeExportMenu")
+        ]
+
+        self.assertIn("const params = scopeParams({ format });", export_scope)
+        self.assertNotIn("loadCollectionImageIds", export_scope)
+        self.assertIn("Preparing ${count} file", export_scope)
+
     def test_collection_month_counts_compose_filters_through_histogram(self):
         filters = read("filters.js")
         month_counts = filters[
@@ -230,6 +241,23 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("Boolean(status?.active)", drawer)
         self.assertEqual(drawer.count("metadataStateIsActive(metadataStatus)"), 3)
         self.assertNotIn("workerStateIsActive(metadataStatus)", drawer)
+
+    def test_cache_waiting_keeps_system_activity_active(self):
+        drawer = read("drawer.js")
+        active_progress = drawer[
+            drawer.index("function activeProgress"):
+            drawer.index("function modelStateLine")
+        ]
+        activity = drawer[
+            drawer.index("function renderActivity"):
+            drawer.index("async function refreshActivity")
+        ]
+
+        self.assertIn("const CACHE_ACTIVE_PREGEN_STATES = new Set(['running', 'waiting']);", drawer)
+        self.assertIn("function cachePregenStateIsActive(status)", drawer)
+        self.assertIn("!pregen.manual_pause", drawer)
+        self.assertIn("cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress", active_progress)
+        self.assertIn("|| cachePregenStateIsActive(cacheStatus)", activity)
 
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")
