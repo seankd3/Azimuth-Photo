@@ -217,13 +217,13 @@ def create_snapshot(
 
 def backup_before_migration(
     db_path: str, from_version: int, to_version: int
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Snapshot an existing catalog immediately before a schema migration.
 
     Reuses the time-machine snapshot engine with a protected ``premigrate``
     label so the pre-upgrade catalog is always restorable if the new schema
-    misbehaves. Best-effort: a backup failure is logged loudly but does not
-    block startup, because migrations are forward-only and tested.
+    misbehaves. Failures propagate so startup cannot run a destructive
+    migration without a verified snapshot.
     """
     try:
         result = create_snapshot(db_path, label=PREMIGRATE_LABEL)
@@ -236,12 +236,12 @@ def backup_before_migration(
         return result
     except Exception:
         log.exception(
-            "catalog_backup premigration FAILED from=v%s to=v%s db=%s — proceeding with migration",
+            "catalog_backup premigration FAILED from=v%s to=v%s db=%s — migration refused",
             from_version,
             to_version,
             db_path,
         )
-        return None
+        raise
 
 
 def list_backups() -> list[dict[str, Any]]:

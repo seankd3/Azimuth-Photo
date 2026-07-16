@@ -2,7 +2,7 @@
 
 import asyncio
 import os
-import shutil
+import sqlite3
 import uuid
 
 from date_inference import infer_image_date
@@ -1348,6 +1348,53 @@ async def table_exists(conn, table: str) -> bool:
     return await cursor.fetchone() is not None
 
 
+def _write_local_rebuild_backup(source_path: str, temporary_path: str) -> None:
+    source = sqlite3.connect(source_path, timeout=60.0)
+    try:
+        destination = sqlite3.connect(temporary_path, timeout=60.0)
+        try:
+            source.backup(destination)
+            destination.commit()
+            quick_check = destination.execute("PRAGMA quick_check").fetchone()
+            if not quick_check or str(quick_check[0]).lower() != "ok":
+                raise RuntimeError("local schema rebuild backup failed SQLite quick_check")
+        finally:
+            destination.close()
+    finally:
+        source.close()
+
+
+async def backup_before_table_rebuild(conn, label: str) -> str | None:
+    """Atomically snapshot the live catalog immediately before a DROP rebuild."""
+
+    cursor = await conn.execute("PRAGMA database_list")
+    main = next((row for row in await cursor.fetchall() if row["name"] == "main"), None)
+    db_path = str(main["file"] or "") if main is not None else ""
+    if not db_path or db_path == ":memory:":
+        return None
+    safe_label = "".join(
+        character for character in label if character.isalnum() or character == "-"
+    )
+    if not safe_label:
+        raise ValueError("schema rebuild backup label must not be empty")
+    backup_path = f"{db_path}.pre-{safe_label}.bak"
+    temporary_path = f"{backup_path}.tmp-{uuid.uuid4().hex}"
+    try:
+        await asyncio.to_thread(
+            _write_local_rebuild_backup,
+            db_path,
+            temporary_path,
+        )
+        os.replace(temporary_path, backup_path)
+    except Exception:
+        try:
+            os.remove(temporary_path)
+        except FileNotFoundError:
+            pass
+        raise
+    return backup_path
+
+
 async def _add_columns_if_missing(conn, table: str, columns: tuple[tuple[str, str], ...]) -> None:
     if not await table_exists(conn, table):
         return
@@ -1392,6 +1439,7 @@ async def migrate_stack_kind_for_versions(conn) -> None:
         return
 
     await conn.commit()
+    await backup_before_table_rebuild(conn, "rebuild-stacks")
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript(
@@ -1561,6 +1609,7 @@ async def migrate_share_owner_cascades(conn) -> None:
     statements.append("COMMIT;")
 
     await conn.commit()
+    await backup_before_table_rebuild(conn, "share-owner-cascades")
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.executescript("\n".join(statements))
@@ -1622,19 +1671,7 @@ async def _ensure_collection_share_indexes(conn) -> None:
 
 
 async def _backup_before_v20_rebuild(conn) -> None:
-    cursor = await conn.execute("PRAGMA database_list")
-    main = next((row for row in await cursor.fetchall() if row["name"] == "main"), None)
-    db_path = str(main["file"] or "") if main is not None else ""
-    if not db_path or db_path == ":memory:":
-        return
-    backup_path = f"{db_path}.pre-v20.bak"
-    if os.path.exists(backup_path):
-        return
-    try:
-        await conn.execute("PRAGMA wal_checkpoint(FULL)")
-    except Exception:
-        pass
-    await asyncio.to_thread(shutil.copy2, db_path, backup_path)
+    await backup_before_table_rebuild(conn, "v20")
 
 
 async def ensure_compatibility_columns(conn) -> None:

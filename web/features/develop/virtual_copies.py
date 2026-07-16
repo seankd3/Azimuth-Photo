@@ -89,6 +89,9 @@ async def _rebuild_images_without_filepath_uniqueness(conn, table_sql: str, colu
     quoted = ", ".join(copy_columns)
 
     await conn.commit()
+    from data.schema import backup_before_table_rebuild
+
+    await backup_before_table_rebuild(conn, "virtual-copies")
     await conn.execute("PRAGMA foreign_keys=OFF")
     try:
         await conn.execute("BEGIN IMMEDIATE")
