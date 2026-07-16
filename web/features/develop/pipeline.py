@@ -1070,6 +1070,11 @@ def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mappi
     embedded = color_profile.get("adobe_profile")
     if isinstance(embedded, Mapping):
         return dng_pipeline.normalize_adobe_profile(embedded)
+    if not any(
+        color_profile.get(key)
+        for key in ("filepath", "path", "camera_model", "UniqueCameraModel")
+    ):
+        return None
     return dng_pipeline.resolve_adobe_profile(color_profile)
 
 

@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -13,6 +14,14 @@ from features.develop import camera_profile, pipeline  # noqa: E402
 
 
 class DevelopPipelineTests(unittest.TestCase):
+    def test_fitted_only_color_payload_skips_adobe_library_resolution(self):
+        color = {"camera_profile": {"model": "Canon EOS R5"}}
+
+        with mock.patch.object(pipeline.dng_pipeline, "resolve_adobe_profile") as resolve:
+            self.assertIsNone(pipeline._resolved_adobe_profile(color))
+
+        resolve.assert_not_called()
+
     def test_fitted_profile_replaces_base_curve_and_skips_generic_saturation(self):
         source = np.full((2, 2, 3), 0.25, dtype=np.float32)
         identity_profile = {
