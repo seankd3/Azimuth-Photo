@@ -47,12 +47,12 @@ class NoiseProfileTests(unittest.TestCase):
     def test_default_resolution_preserves_explicit_nr_and_scales_with_iso(self):
         explicit = {"LuminanceSmoothing": 42, "ColorNoiseReduction": 17, "Exposure2012": 0.5}
         self.assertEqual(
-            noise_profiles.resolve_defaults(explicit, {"camera_model": "EOS R5", "ISO": 12800}),
+            noise_profiles.resolve_file_defaults(explicit, {"camera_model": "EOS R5", "ISO": 12800}),
             explicit,
         )
 
-        low = noise_profiles.resolve_defaults({}, {"camera_model": "EOS R5", "ISO": 100})
-        high = noise_profiles.resolve_defaults({}, {"camera_model": "EOS R5", "ISO": 12800})
+        low = noise_profiles.resolve_file_defaults({}, {"camera_model": "EOS R5", "ISO": 100})
+        high = noise_profiles.resolve_file_defaults({}, {"camera_model": "EOS R5", "ISO": 12800})
         self.assertGreater(high["LuminanceSmoothing"], low["LuminanceSmoothing"])
         self.assertGreater(high["ColorNoiseReduction"], low["ColorNoiseReduction"])
 

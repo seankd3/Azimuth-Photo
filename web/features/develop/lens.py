@@ -27,6 +27,7 @@ EXIF_FIELDS = (
     "FNumber",
     "Aperture",
     "FocusDistance",
+    "ISO",
 )
 
 

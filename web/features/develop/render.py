@@ -694,7 +694,9 @@ def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | No
                 settings = _json.loads(row[0]) or {}
         except Exception:
             settings = {}
-        developed = develop_default_render(linear, meta, settings)
+        from features.develop.noise_profiles import resolve_file_defaults
+
+        developed = develop_default_render(linear, meta, resolve_file_defaults(settings, meta, raw_path))
         developed = apply_geometry(developed, settings, max_px=max_px)
         encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
         return Image.fromarray(encoded, mode="RGB")
