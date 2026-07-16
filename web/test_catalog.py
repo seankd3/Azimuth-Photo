@@ -42,6 +42,32 @@ class CatalogSourceRouteTests(BackendTestCase):
         finally:
             await conn.close()
 
+    async def test_scan_registration_stores_orientation_corrected_aspect(self):
+        source = await self._source("scan-aspect")
+        filepath = os.path.join(source["path"], "rotated.jpg")
+        exif = Image.Exif()
+        exif[274] = 6
+        Image.new("RGB", (1200, 800), color=(80, 100, 120)).save(
+            filepath,
+            "JPEG",
+            exif=exif,
+        )
+
+        await scanner.scan_folder(source["path"], source_id=int(source["id"]))
+
+        conn = await db.get_db()
+        try:
+            row = await (
+                await conn.execute(
+                    "SELECT orientation, aspect_ratio FROM images WHERE filepath = ?",
+                    (filepath,),
+                )
+            ).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(row["orientation"], "portrait")
+        self.assertAlmostEqual(row["aspect_ratio"], 0.6667, places=4)
+
     async def test_sync_missing_mark_cascades_to_virtual_copy(self):
         source = await self._source("sync-missing-vc")
         master_id = await self._image(source["id"], "master.jpg")

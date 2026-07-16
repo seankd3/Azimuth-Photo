@@ -111,7 +111,7 @@ def parse_xmp_file(xmp_path: str) -> dict[str, Any]:
         return parse_xmp_text(handle.read())
 
 
-def _iter_raw_rows(root: str) -> Iterator[tuple[str, str, str, int | None, float | None]]:
+def _iter_raw_rows(root: str) -> Iterator[tuple]:
     """Use the scanner's source-boundary-safe RAW enumeration."""
 
     for row in scanner.walk_images(root):
@@ -135,8 +135,8 @@ def _ensure_source(conn, root: str):
     return conn.execute("SELECT id FROM catalog_sources WHERE path = ?", (normalized,)).fetchone()
 
 
-def _ensure_image(conn, source_id: int, row: tuple[str, str, str, int | None, float | None]) -> tuple[int, bool]:
-    filename, filepath, extension, size, modified_at = row
+def _ensure_image(conn, source_id: int, row: tuple) -> tuple[int, bool]:
+    filename, filepath, extension, size, modified_at = row[:5]
     cursor = conn.execute(
         "INSERT OR IGNORE INTO images "
         "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at) "

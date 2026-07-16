@@ -7,6 +7,7 @@ import time
 from collections.abc import Callable
 
 from date_inference import infer_image_date
+import image_headers
 import photo_metadata
 from core import work_coordination
 from data.repositories import catalog as catalog_repository
@@ -93,7 +94,7 @@ async def get_unclassified_images(limit: int = 200):
     return await image_repository.get_unclassified_images(
         _configured_db_path(),
         limit,
-        file_extensions=photo_metadata.PILLOW_METADATA_EXTENSIONS,
+        file_extensions=image_headers.HEADER_GEOMETRY_EXTENSIONS,
     )
 
 
@@ -194,7 +195,6 @@ def _orientation_retry_summary() -> dict[str, int]:
 
 async def classify_orientations_background():
     """Continuously classify unclassified images by reading just the image header."""
-    from PIL import Image as PILImage, UnidentifiedImageError
     loop = asyncio.get_event_loop()
 
     def _classify_batch(rows):
@@ -202,12 +202,17 @@ async def classify_orientations_background():
         failures = []
         for row in rows:
             try:
-                with PILImage.open(row["filepath"]) as img:
-                    w, h = img.size
+                dimensions = image_headers.read_header_dimensions(
+                    row["filepath"],
+                    budget_seconds=None,
+                )
+                if dimensions is None:
+                    raise ValueError("unsupported or unreadable image header")
+                w, h = dimensions
                 orient = "landscape" if w >= h else "portrait"
                 ar = round(w / h, 4) if h > 0 else 1.5
                 results.append((orient, ar, row["id"]))
-            except (FileNotFoundError, UnidentifiedImageError, OSError) as exc:
+            except (FileNotFoundError, OSError, ValueError) as exc:
                 failures.append(
                     (
                         int(row["id"]),
