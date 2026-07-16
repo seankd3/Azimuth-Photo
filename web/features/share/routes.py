@@ -9,10 +9,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
-from starlette.background import BackgroundTask
 
 import settings
 from features.share import auth
@@ -586,11 +585,26 @@ async def public_share_download_all(token: str, request: Request):
     except Exception:
         Path(handle.name).unlink(missing_ok=True)
         return _public_response(JSONResponse({"error": "Could not prepare share download"}, status_code=422))
+    raw_name = str(collection.get("name") or "Shared photos")
+    safe_name = "".join(c for c in raw_name if c.isalnum() or c in " ._-").strip()[:120] or "Shared photos"
+
+    async def _stream_and_cleanup(path: str):
+        # `finally` runs on normal completion AND on aclose() when the client
+        # disconnects mid-stream, so the temp zip is never orphaned in /tmp.
+        try:
+            with open(path, "rb") as fh:
+                for chunk in iter(lambda: fh.read(1 << 16), b""):
+                    yield chunk
+        finally:
+            Path(path).unlink(missing_ok=True)
+
     return _public_response(
-        FileResponse(
-            handle.name,
-            filename=f"{collection.get('name') or 'Shared photos'}.zip",
-            headers={"X-Azimuth-Skipped-Count": str(len(result["skipped"]))},
-            background=BackgroundTask(lambda: Path(handle.name).unlink(missing_ok=True)),
+        StreamingResponse(
+            _stream_and_cleanup(handle.name),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{safe_name}.zip"',
+                "X-Azimuth-Skipped-Count": str(len(result["skipped"])),
+            },
         )
     )

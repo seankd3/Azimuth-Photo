@@ -1,5 +1,7 @@
 import asyncio
+import glob
 import io
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -250,11 +252,15 @@ class ShareTests(BackendTestCase):
             with TestClient(app_module.app) as client:
                 return client.get(f"/s/{share['token']}/download-all")
 
+        pattern = f"{tempfile.gettempdir()}/photoarchive-share-*.zip"
+        before = set(glob.glob(pattern))
         response = await asyncio.to_thread(probe)
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(response.headers.get("x-azimuth-skipped-count"), "0")
+        # Streaming generator's finally must delete the temp zip once consumed.
+        self.assertEqual(set(glob.glob(pattern)) - before, set())
         with zipfile.ZipFile(io.BytesIO(response.content)) as archive:
             self.assertEqual(archive.namelist(), ["same-name.jpg", "same-name-2.jpg"])
             self.assertEqual(archive.read("same-name.jpg"), f"thumb-{first}".encode("ascii"))
