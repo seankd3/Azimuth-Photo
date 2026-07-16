@@ -612,6 +612,16 @@ async function copyPublishUrl(url) {
     }
 }
 
+function patchPublishOverlayStatus(data, token) {
+    if (!publishOverlayIsCurrent(token)) return false;
+    const status = publishOverlay.querySelector('.publish-status');
+    if (!status) return false;
+    status.outerHTML = publishStatusBlock(data);
+    const liveUrl = data?.url || data?.publish?.url || data?.job?.url || '';
+    publishOverlay.querySelector('#publish-copy')?.addEventListener('click', () => copyPublishUrl(liveUrl));
+    return true;
+}
+
 async function renderPublishOverlay(collectionId, name, data = null, token = publishOverlayToken) {
     ensurePublishOverlay();
     if (!publishOverlayIsCurrent(token)) return;
@@ -737,10 +747,14 @@ async function pollPublishStatus(collectionId, name, token, immediate = false) {
     if (!publishOverlayIsCurrent(token)) return;
     const data = await getCollectionPublish(collectionId);
     if (!publishOverlayIsCurrent(token)) return;
-    await renderPublishOverlay(collectionId, name, data, token);
-    if (data?.in_progress) {
+    if (data?.in_progress && patchPublishOverlayStatus(data, token)) {
         schedulePublishPoll(collectionId, name, token);
     } else {
+        await renderPublishOverlay(collectionId, name, data, token);
+        if (data?.in_progress) {
+            schedulePublishPoll(collectionId, name, token);
+            return;
+        }
         if (!immediate && data?.job?.state === 'revoked') showToast('Gallery unpublished');
         emitSharedSurfacesChanged(collectionId);
         await loadCollections();

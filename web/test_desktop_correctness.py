@@ -144,3 +144,13 @@ class DesktopCorrectnessTests(unittest.TestCase):
         )
         self.assertIn("Import status lost — this import may still be running", import_stage)
         self.assertIn("setScope({ import_batch: '', importBatchLabel: '' });", import_stage)
+
+    def test_publish_poll_patches_status_without_rebuilding_inputs_while_busy(self):
+        panel = read("panel.js")
+        poll_start = panel.index("async function pollPublishStatus")
+        poll = panel[poll_start:panel.index("\n}\n", poll_start)]
+
+        self.assertIn("function patchPublishOverlayStatus(data, token)", panel)
+        self.assertIn("status.outerHTML = publishStatusBlock(data);", panel)
+        self.assertIn("if (data?.in_progress && patchPublishOverlayStatus(data, token))", poll)
+        self.assertLess(poll.index("patchPublishOverlayStatus"), poll.index("await renderPublishOverlay"))
