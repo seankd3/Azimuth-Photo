@@ -45,6 +45,7 @@ let saveFailureToastShown = false;
 let wbPickActive = false;
 
 const DEVELOP_READ_TIMEOUT_MS = 10_000;
+const DEVELOP_ENTRY_ATTEMPTS = 2;
 const DEVELOP_MUTATION_TIMEOUT_MS = 20_000;
 const DEVELOP_BASE_BUDGET_MS = 12_000;
 const DEVELOP_BACKGROUND_RETRY_MS = 10_000;
@@ -71,6 +72,7 @@ const status = document.getElementById('develop-status');
 const panelHost = document.getElementById('develop-panels');
 const filmstrip = document.getElementById('develop-filmstrip');
 const toolbar = document.getElementById('develop-toolbar');
+const statusRetry = status.querySelector('[data-develop-retry]');
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));
@@ -105,11 +107,13 @@ function chosenImage() {
     return viewState.images[viewState.focusIndex] || viewState.images[0] || null;
 }
 
-function setStatus(message = '', { busy = false, error = false } = {}) {
+function setStatus(message = '', { busy = false, error = false, retry = null } = {}) {
     status.hidden = !message;
     status.classList.toggle('busy', busy);
     status.classList.toggle('error', error);
     status.querySelector('span').textContent = message;
+    statusRetry.hidden = typeof retry !== 'function';
+    statusRetry.onclick = typeof retry === 'function' ? retry : null;
 }
 
 function originSettings(payload) {
@@ -123,13 +127,30 @@ function originSettings(payload) {
 }
 
 async function fetchDevelop(imageId) {
-    const response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+    let response = null;
+    let fetchError = null;
+    for (let attempt = 0; attempt < DEVELOP_ENTRY_ATTEMPTS; attempt += 1) {
+        try {
+            response = await fetch(`/api/develop/${imageId}`, fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, DEVELOP_READ_TIMEOUT_MS));
+            break;
+        } catch (error) {
+            fetchError = error;
+        }
+    }
+    if (!response) throw fetchError;
     if (response.status === 202) throw new PendingOriginalError();
     if (!response.ok) {
         const payload = await response.json().catch(() => null);
         throw new Error(payload?.error || (response.status === 404 ? 'Develop settings are not ready for this photo.' : 'Could not load develop settings.'));
     }
     return response.json();
+}
+
+function developLoadErrorMessage(error) {
+    if (['AbortError', 'TimeoutError'].includes(error?.name) || /signal timed out/i.test(error?.message || '')) {
+        return 'Develop took too long to respond.';
+    }
+    return error?.message || 'Develop could not open this photo.';
 }
 
 function parseBase(buffer, scale = 1) {
@@ -610,7 +631,7 @@ async function openImage(image) {
                 if (entry) scheduleBackgroundBaseRetry(image, entry, token);
                 else scheduleBackgroundDevelopRetry(image, token);
             } else {
-                setStatus(error.message || 'Develop could not open this photo.', { error: true });
+                setStatus(developLoadErrorMessage(error), { error: true, retry: () => openImage(image) });
             }
         }
     }

@@ -1466,6 +1466,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #develop-status i { display: none; flex: 0 0 auto; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.2); border-top-color: var(--accent); border-radius: 50%; }
 #develop-status.busy i { display: block; animation: develop-spin var(--dur-slow) linear infinite; }
 #develop-status.error { border-color: color-mix(in srgb, var(--danger) 55%, transparent); color: var(--danger); }
+#develop-status [data-develop-retry] { flex: 0 0 auto; }
+#develop-status [data-develop-retry][hidden] { display: none; }
 @keyframes develop-spin { to { transform: rotate(360deg); } }
 #develop-filmstrip { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; border-top: 1px solid var(--line); background: var(--surface-chrome); scrollbar-width: thin; }
 .develop-thumb { position: relative; flex: 0 0 66px; height: 66px; padding: 2px; overflow: hidden; border: 1px solid transparent; border-radius: var(--r-media); background: var(--surface-ink); }

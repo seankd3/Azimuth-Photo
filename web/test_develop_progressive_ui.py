@@ -37,3 +37,12 @@ def test_gl_preview_is_display_referred_and_swaps_to_linear_source():
     assert "this.displayPreview = true" in source
     assert "this.displayPreview = false" in source
     assert "gl.useProgram(this.displayPreviewProgram)" in source
+
+
+def test_develop_entry_timeout_retries_once_then_offers_manual_retry():
+    loader = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    template = (WEB / "templates/desktop.html").read_text(encoding="utf-8")
+    assert "const DEVELOP_ENTRY_ATTEMPTS = 2" in loader
+    assert "attempt < DEVELOP_ENTRY_ATTEMPTS" in loader
+    assert "data-develop-retry" in template
+    assert "retry: () => openImage(image)" in loader
