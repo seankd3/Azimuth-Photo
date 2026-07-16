@@ -825,17 +825,21 @@ async function keepCoversEverywhere() {
         showToast('Couldn’t move photos to Trash');
         return;
     }
-    emit('trash:changed', { imageIds });
-    invalidateBulkNonCoverCount();
-    await reloadStacks();
-    showToast(`Trashed ${fmt(imageIds.length)} non-cover photos`, {
-        undo: async () => {
-            const restored = await restoreImages(imageIds);
-            emit('trash:changed', { imageIds });
-            if (open && mode === 'stacks') await reloadStacks();
-            showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
-        },
-    });
+    try {
+        emit('trash:changed', { imageIds });
+        invalidateBulkNonCoverCount();
+        await reloadStacks();
+        showToast(`Trashed ${fmt(imageIds.length)} non-cover photos`, {
+            undo: async () => {
+                const restored = await restoreImages(imageIds);
+                emit('trash:changed', { imageIds });
+                if (open && mode === 'stacks') await reloadStacks();
+                showToast(restored.ok ? 'Restored' : 'Couldn’t restore');
+            },
+        });
+    } finally {
+        if (button.isConnected) button.disabled = false;
+    }
 }
 
 async function rescanStacks() {

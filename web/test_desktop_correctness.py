@@ -80,3 +80,12 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("emit('collections:refresh');", events)
         self.assertEqual(mobile_selection.count("if (removed?.ok) showToast('Removed from collection');"), 2)
         self.assertEqual(mobile_selection.count("new CustomEvent('collections-changed')"), 2)
+
+    def test_keep_covers_button_is_reenabled_if_stack_reload_fails(self):
+        duplicates = read("duplicates.js")
+        action_start = duplicates.index("async function keepCoversEverywhere()")
+        action = duplicates[action_start:duplicates.index("\n}\n", action_start)]
+
+        self.assertIn("await reloadStacks();", action)
+        self.assertIn("finally {\n        if (button.isConnected) button.disabled = false;", action)
+        self.assertLess(action.index("await reloadStacks();"), action.index("if (button.isConnected) button.disabled = false;"))
