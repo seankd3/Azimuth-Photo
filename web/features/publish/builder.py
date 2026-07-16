@@ -419,6 +419,21 @@ def _replace_bundle_dir(work_target: Path, target: Path) -> None:
 
 
 def _atomic_exchange_paths(source: Path, target: Path) -> None:
+    if platform.system() == "Windows":
+        # No RENAME_EXCHANGE on NTFS: rename-aside with rollback. The window
+        # where the target is briefly absent is accepted for standalone
+        # installs; the hook/deploy layer republishes the whole bundle anyway.
+        backup = target.with_name(target.name + ".previous")
+        shutil.rmtree(backup, ignore_errors=True)
+        os.rename(target, backup)
+        try:
+            os.rename(source, target)
+        except OSError:
+            os.rename(backup, target)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+        # The caller removes the swapped-out work dir; nothing remains here.
+        return
     if platform.system() != "Linux":
         raise RuntimeError("Atomic gallery republish requires Linux rename exchange support.")
     renameat2_syscall = _renameat2_syscall_number()

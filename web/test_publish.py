@@ -286,15 +286,17 @@ class PublishDeployerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_name:
             public_g = Path(temp_name)
             pid_path = public_g / "child.pid"
-            command = (
-                f"{sys.executable} -c "
-                + shlex.quote(
-                    "import pathlib, subprocess, time; "
-                    "p = subprocess.Popen(['sleep', '30']); "
-                    f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid)); "
-                    "time.sleep(30)"
-                )
+            # A script file sidesteps sh-vs-cmd quoting; python-as-sleep works
+            # on every platform (there is no `sleep` binary on Windows).
+            hang_script = public_g / "hang_hook.py"
+            hang_script.write_text(
+                "import pathlib, subprocess, sys, time\n"
+                "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid))\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
             )
+            command = f'"{sys.executable}" "{hang_script}"'
 
             result = default_command_runner(command, public_g, 1)
 
@@ -464,16 +466,26 @@ class PublishDeployerTests(unittest.TestCase):
 
     def _process_exited(self, pid):
         for _ in range(20):
-            status = subprocess.run(
-                ["ps", "-o", "stat=", "-p", str(pid)],
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            if status.returncode != 0 or not status.stdout.strip():
-                return True
-            if status.stdout.strip().startswith("Z"):
-                return True
+            if os.name == "nt":
+                status = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if str(pid) not in status.stdout:
+                    return True
+            else:
+                status = subprocess.run(
+                    ["ps", "-o", "stat=", "-p", str(pid)],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if status.returncode != 0 or not status.stdout.strip():
+                    return True
+                if status.stdout.strip().startswith("Z"):
+                    return True
             time.sleep(0.1)
         return False
 

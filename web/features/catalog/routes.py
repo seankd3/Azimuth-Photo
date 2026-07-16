@@ -585,15 +585,18 @@ def add_folder_counts(
         rel = safe_relpath(directory, root)
         if rel is None:
             rel = directory
+    # Folder keys are '/'-separated in every payload, on every platform —
+    # the desktop JS splits on '/'. Rows may carry native or hub separators.
+    rel = rel.replace("\\", "/")
     start = 0
     while True:
-        idx = rel.find(os.sep, start)
+        idx = rel.find("/", start)
         if idx < 0:
-            if max_depth is None or rel.count(os.sep) <= max_depth:
+            if max_depth is None or rel.count("/") <= max_depth:
                 folder_counts[rel] = folder_counts.get(rel, 0) + count
             return
         key = rel[:idx]
-        if max_depth is None or key.count(os.sep) <= max_depth:
+        if max_depth is None or key.count("/") <= max_depth:
             folder_counts[key] = folder_counts.get(key, 0) + count
         start = idx + 1
 
@@ -626,7 +629,7 @@ def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> d
             continue
         rel = safe_relpath(source_path, root) or os.path.basename(source_path.rstrip(os.sep)) or "."
         folders.append({
-            "path": rel if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
+            "path": rel.replace("\\", "/") if rel != "." else os.path.basename(source_path.rstrip(os.sep)) or ".",
             "count": int(active_image_count or 0),
             "depth": 0,
         })

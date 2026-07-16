@@ -173,15 +173,19 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         connection that never closes still fails after the retries.
         """
         import asyncio as _asyncio
+        import gc as _gc
 
-        for attempt in range(10):
+        for attempt in range(20):
             try:
                 self.tempdir.cleanup()
                 return
             except PermissionError:
-                if attempt == 9:
+                if attempt == 19:
                     raise
-                await _asyncio.sleep(0.2)
+                # Dropped-but-uncollected sqlite3/aiosqlite handles keep the
+                # file locked on Windows; a collect closes what tests forgot.
+                _gc.collect()
+                await _asyncio.sleep(0.4)
 
     def _reset_shared_runtime_state(self):
         thumbnails._clear_memory_cache()
