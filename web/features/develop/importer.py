@@ -147,10 +147,14 @@ def _ensure_image(conn, source_id: int, row: tuple[str, str, str, int | None, fl
     conn.execute(
         "UPDATE images SET source_id = CASE WHEN source_id IS NULL THEN ? ELSE source_id END, "
         "filename = ?, file_ext = COALESCE(?, file_ext), file_size = COALESCE(?, file_size), "
-        "file_modified_at = COALESCE(?, file_modified_at), missing_at = NULL WHERE filepath = ?",
+        "file_modified_at = COALESCE(?, file_modified_at), missing_at = NULL "
+        "WHERE filepath = ? AND vc_of IS NULL",
         (source_id, filename, extension, size, modified_at, filepath),
     )
-    image = conn.execute("SELECT id FROM images WHERE filepath = ?", (filepath,)).fetchone()
+    image = conn.execute(
+        "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+        (filepath,),
+    ).fetchone()
     if image is None:
         raise RuntimeError(f"could not register RAW: {filepath}")
     return int(image["id"]), created

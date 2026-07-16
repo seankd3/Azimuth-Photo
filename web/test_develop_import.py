@@ -39,9 +39,12 @@ class DevelopImporterTests(unittest.TestCase):
                     created_at REAL, last_scan_at REAL, last_seen_at REAL, removed_at REAL
                 );
                 CREATE TABLE images (
-                    id INTEGER PRIMARY KEY, source_id INTEGER, filename TEXT, filepath TEXT UNIQUE,
-                    status TEXT, file_ext TEXT, file_size INTEGER, file_modified_at REAL, missing_at REAL
+                    id INTEGER PRIMARY KEY, source_id INTEGER, filename TEXT, filepath TEXT,
+                    status TEXT, file_ext TEXT, file_size INTEGER, file_modified_at REAL, missing_at REAL,
+                    vc_of INTEGER REFERENCES images(id)
                 );
+                CREATE UNIQUE INDEX idx_images_original_filepath
+                    ON images(filepath) WHERE vc_of IS NULL;
                 CREATE TABLE develop_settings (
                     image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user',
                     xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL
@@ -102,6 +105,31 @@ class DevelopImporterTests(unittest.TestCase):
         changed = importer.scan_raws(self.root, self.db_path)
         self.assertEqual(changed["status"]["sidecars"], 1)
         self.assertEqual(json.loads(self._setting_row(raw_path)["settings"])["Exposure2012"], 1.25)
+
+    def test_rescan_leaves_virtual_copy_file_metadata_untouched(self):
+        raw_path, _ = self._raw_with_xmp()
+        importer.scan_raws(self.root, self.db_path)
+        with sqlite3.connect(self.db_path) as conn:
+            master_id = conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (raw_path,),
+            ).fetchone()[0]
+            copy_id = conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, missing_at, vc_of) "
+                "VALUES (1, 'copy-name.dng', ?, 'kept', '.copy', 999, 1, 42, ?)",
+                (raw_path, master_id),
+            ).lastrowid
+
+        importer.scan_raws(self.root, self.db_path)
+
+        with sqlite3.connect(self.db_path) as conn:
+            copy = conn.execute(
+                "SELECT filename, file_ext, file_size, file_modified_at, missing_at "
+                "FROM images WHERE id = ?",
+                (copy_id,),
+            ).fetchone()
+        self.assertEqual(copy, ("copy-name.dng", ".copy", 999, 1.0, 42.0))
 
     def test_user_origin_is_never_clobbered(self):
         raw_path, xmp_path = self._raw_with_xmp()

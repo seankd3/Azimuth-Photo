@@ -1705,6 +1705,39 @@ class LibraryTests(BackendTestCase):
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
 
+    async def test_rescan_leaves_virtual_copy_file_metadata_untouched(self):
+        source = await self._source("scan-vc-source")
+        filepath = os.path.join(source["path"], "master.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            master = await (await conn.execute(
+                "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL",
+                (filepath,),
+            )).fetchone()
+            cursor = await conn.execute(
+                "INSERT INTO images "
+                "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, missing_at, vc_of) "
+                "VALUES (?, 'copy-name.jpg', ?, 'kept', '.copy', 999, 1, 42, ?)",
+                (source["id"], filepath, master["id"]),
+            )
+            copy_id = cursor.lastrowid
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        copy = await self._image_row(copy_id)
+        self.assertEqual(copy["filename"], "copy-name.jpg")
+        self.assertEqual(copy["file_ext"], ".copy")
+        self.assertEqual(copy["file_size"], 999)
+        self.assertEqual(copy["file_modified_at"], 1.0)
+        self.assertEqual(copy["missing_at"], 42.0)
+
     async def test_rescan_preserves_photos_in_real_and_fenced_directories(self):
         source = await self._source("scan-junk-fence")
         visible_path = os.path.join(source["path"], "visible.jpg")

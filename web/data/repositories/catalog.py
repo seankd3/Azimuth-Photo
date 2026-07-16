@@ -309,7 +309,8 @@ async def insert_images_batch(db_path: str, rows: list[tuple], source_id: int | 
                 "date_taken = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_taken END, "
                 "date_source = CASE WHEN date_taken IS NULL OR date_taken = '' THEN ? ELSE date_source END, "
                 "missing_at = CASE WHEN ? = 0 THEN missing_at ELSE NULL END "
-                "WHERE filepath = ? AND (source_id = ? OR source_id IS NULL)",
+                "WHERE filepath = ? AND vc_of IS NULL "
+                "AND (source_id = ? OR source_id IS NULL)",
                 [
                     (
                         source_id,
@@ -346,7 +347,7 @@ async def image_signatures_for_source(db_path: str, source_id: int) -> set[tuple
     try:
         cursor = await conn.execute(
             "SELECT filename, filepath, file_size FROM images "
-            "WHERE source_id = ? AND missing_at IS NULL",
+            "WHERE source_id = ? AND missing_at IS NULL AND vc_of IS NULL",
             (int(source_id),),
         )
         return {
@@ -387,12 +388,13 @@ async def mark_source_missing_files_on_conn(
     await conn.execute(
         "UPDATE images SET missing_at = NULL "
         "WHERE source_id = ? AND filepath IN (SELECT filepath FROM source_scan_seen) "
-        "AND COALESCE(file_size, -1) != 0",
+        "AND vc_of IS NULL AND COALESCE(file_size, -1) != 0",
         (source_id,),
     )
     await conn.execute(
         "UPDATE images SET missing_at = ? "
         "WHERE source_id = ? AND missing_at IS NULL "
+        "AND vc_of IS NULL "
         "AND filepath NOT IN (SELECT filepath FROM source_scan_seen) "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM source_scan_excluded "
