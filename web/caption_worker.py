@@ -33,7 +33,17 @@ CAPTION_PROMPT = (
     "scene, style, lighting, and colors."
 )
 
-_caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+def _deprioritize_ai_thread() -> None:
+    """Lower this worker thread's scheduling priority so interactive request
+    handling wins CPU under contention. Linux nice() is per-thread; advisory."""
+    try:
+        import os
+        os.nice(10)
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
+_caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu", initializer=_deprioritize_ai_thread)
 _oom_circuit = CaptionOomCircuit(threshold=3)
 _model = None
 _processor = None

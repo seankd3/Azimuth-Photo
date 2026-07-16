@@ -18,8 +18,18 @@ from typing import Any
 import numpy as np
 
 # Dedicated executors — separate CPU prep from GPU encode
-_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
-_preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+def _deprioritize_ai_thread() -> None:
+    """Lower this worker thread's scheduling priority so interactive request
+    handling wins CPU under contention. Linux nice() is per-thread; advisory."""
+    try:
+        import os
+        os.nice(10)
+    except (OSError, AttributeError, ValueError):
+        pass
+
+
+_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu", initializer=_deprioritize_ai_thread)
+_preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload", initializer=_deprioritize_ai_thread)
 
 import ai_models
 import embed_cache
