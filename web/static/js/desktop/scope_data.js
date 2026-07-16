@@ -23,21 +23,6 @@ export async function loadScopePage({ limit = 100, offset = 0, sort = null, sign
             source: 'similar',
         };
     }
-    if (collectionScopeActive()) {
-        const data = await getCollection(scope.collectionId, { limit, offset, signal });
-        const collection = data && data.collection;
-        if (!collection) return null;
-        const images = collection.images || [];
-        rememberImages(images);
-        return {
-            images,
-            visible_images: Number(collection.image_count) || images.length,
-            total_images: Number(collection.image_count) || images.length,
-            sort_quality: null,
-            collection,
-            source: 'collection',
-        };
-    }
     const params = scopeParams({ limit, offset });
     if (sort) params.set('sort', sort);
     const options = signal ? { fetchOptions: { signal } } : {};

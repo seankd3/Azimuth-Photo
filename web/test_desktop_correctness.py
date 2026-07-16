@@ -136,6 +136,18 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("data-filter-retry", filters)
         self.assertIn("loadOptions({ force: true })", filters)
 
+    def test_collection_scope_pages_compose_filters_through_rankings(self):
+        scope_data = read("scope_data.js")
+        page_loader = scope_data[
+            scope_data.index("export async function loadScopePage"):
+            scope_data.index("export async function loadCollectionImages")
+        ]
+
+        self.assertIn("const params = scopeParams({ limit, offset });", page_loader)
+        self.assertIn("getRankings(params, options)", page_loader)
+        self.assertNotIn("getCollection(", page_loader)
+        self.assertIn("getCollection(", scope_data[scope_data.index("export async function loadCollectionImages"):])
+
     def test_sync_refresh_cannot_overwrite_an_in_flight_control_result(self):
         sync_chip = read("sync_chip.js")
 
