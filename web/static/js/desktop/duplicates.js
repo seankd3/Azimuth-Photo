@@ -773,7 +773,12 @@ async function keepCoverForStack(stackId) {
         return;
     }
     emit('trash:changed', { imageIds: trashedIds });
-    removeFinishedStack(stackId);
+    const trashComplete = errors.length === 0 && trashedIds.length === imageIds.length;
+    if (trashComplete) {
+        removeFinishedStack(stackId);
+    } else {
+        await reloadStacks();
+    }
     showToast(`Trashed ${fmt(trashedIds.length)} stack member${trashedIds.length === 1 ? '' : 's'}${mutationPartialSuffix(errors, 'trashed')}`, {
         undo: async () => {
             const restored = await restoreImages(trashedIds);
