@@ -1415,6 +1415,27 @@ body.sheet-keyboard #m-sheet {
 .sheet-meta b { color: var(--text); font-weight: 600; text-align: right; overflow-wrap: anywhere; }
 .sheet-meta div { padding: 5px 0; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; }
 .sheet-meta div:last-child { border-bottom: none; }
+.sheet-rating {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 4px;
+    border-bottom: 1px solid var(--line);
+    color: var(--text-2);
+    font-size: 13px;
+}
+.sheet-stars { display: flex; align-items: center; gap: 2px; }
+.sheet-stars button {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    color: var(--text-3);
+}
+.sheet-stars button.on { color: var(--accent); }
+.sheet-stars button:active { transform: scale(.9); }
 .sheet-caption {
     padding: 8px 4px 10px;
     border-bottom: 1px solid var(--line);

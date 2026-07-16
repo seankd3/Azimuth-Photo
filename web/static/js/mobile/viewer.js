@@ -5,7 +5,7 @@
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { getExif, getImageCaption, getSimilar, thumbUrl } from './api.js';
+import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
 import { applyFlags } from './flags.js';
 import { byId, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
@@ -252,6 +252,20 @@ function dismissViewerThen(afterClose = null) {
     dismissLayerThen('viewer', closeViewer, afterClose);
 }
 
+function imageRating(image) {
+    const value = Number(image?.rating ?? image?.stars ?? image?._lr_rating ?? 0);
+    return Number.isFinite(value) ? clamp(Math.round(value), 0, 5) : 0;
+}
+
+function syncRatingButtons(sheet, rating) {
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        const value = Number(button.dataset.rating);
+        const active = value <= rating;
+        button.classList.toggle('on', active);
+        button.setAttribute('aria-pressed', String(active));
+    }
+}
+
 function infoSheet() {
     const image = current();
     if (!image) return;
@@ -277,6 +291,11 @@ function infoSheet() {
     const sheet = openSheet(
         '<h3>Info</h3>'
         + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
+        + '<div class="sheet-rating"><span>Rating</span><div class="sheet-stars" role="group" aria-label="Star rating">'
+        + [1, 2, 3, 4, 5].map((rating) =>
+            `<button type="button" data-rating="${rating}" aria-label="Set ${rating} star rating">${icon('star')}</button>`
+        ).join('')
+        + '</div></div>'
         + '<div class="sheet-caption" id="mv-caption">'
         + '<div class="sheet-caption-label">Caption</div>'
         + '<div class="sheet-caption-text sheet-caption-muted">Loading…</div>'
@@ -287,6 +306,18 @@ function infoSheet() {
         + '<details class="sheet-details"><summary>More details</summary>'
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
+    syncRatingButtons(sheet, imageRating(image));
+    for (const button of sheet.querySelectorAll('[data-rating]')) {
+        button.addEventListener('click', () => {
+            const value = Number(button.dataset.rating);
+            const rating = imageRating(image) === value ? 0 : value;
+            image.rating = rating;
+            const known = byId.get(Number(image.id));
+            if (known) known.rating = rating;
+            syncRatingButtons(sheet, rating);
+            void writeRating(image.id, rating);
+        });
+    }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
         let data = null;
         try {
