@@ -236,6 +236,10 @@ function escapeOneLayer() {
         closeRefine();
         return true;
     }
+    if (developOpen()) {
+        switchLens('grid');
+        return true;
+    }
     if (systemDrawerOpen()) {
         closeSystemDrawer();
         return true;
@@ -349,7 +353,8 @@ export function initKeyboard() {
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
             event.preventDefault();
-            if (!developOpen()) openDevelop();
+            if (developOpen()) switchLens('grid');
+            else openDevelop();
             return;
         }
         if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
