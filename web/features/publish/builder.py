@@ -228,12 +228,14 @@ async def export_website_tree(
     root = Path(destination)
     await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
     images_by_node: dict[int, list[dict]] = {}
+    expected_paths: set[Path] = set()
 
     async def write_subtree(node: dict, parent_path: Path) -> None:
         node_id = int(node["id"])
         images = await published_nodes.node_images(db_path, node_id) or []
         images_by_node[node_id] = images
         node_path = parent_path / node["slug"]
+        expected_paths.add(node_path.relative_to(root))
         await build_published_node_bundle(
             node=node,
             images=images,
@@ -247,9 +249,46 @@ async def export_website_tree(
     for root_node in children.get(None, []):
         await write_subtree(root_node, root)
 
+    await asyncio.to_thread(_prune_orphaned_export_dirs, root, expected_paths)
     manifest = website_tree_manifest(tree, images_by_node)
     await asyncio.to_thread(_write_json_atomic, root / "manifest.json", manifest)
     return manifest
+
+
+def _prune_orphaned_export_dirs(root: Path, expected_paths: set[Path]) -> None:
+    """Remove stale bundle directories without ever traversing export-root symlinks."""
+    if root.is_symlink():
+        log.warning("worker=publish refusing to prune symlinked export root: %s", root)
+        return
+    try:
+        resolved_root = root.resolve(strict=True)
+    except FileNotFoundError:
+        return
+    if not resolved_root.is_dir():
+        return
+
+    keep: set[Path] = set()
+    for relative in expected_paths:
+        if relative.is_absolute() or any(part in {"", ".", ".."} for part in relative.parts):
+            raise ValueError(f"Unsafe export path: {relative}")
+        for parent in (relative, *relative.parents):
+            if parent != Path("."):
+                keep.add(parent)
+
+    for current, directories, _files in os.walk(root, topdown=False, followlinks=False):
+        current_path = Path(current)
+        for name in directories:
+            candidate = current_path / name
+            if candidate.is_symlink():
+                continue
+            try:
+                relative = candidate.relative_to(root)
+                candidate.resolve(strict=True).relative_to(resolved_root)
+            except (FileNotFoundError, ValueError):
+                log.warning("worker=publish refusing to prune outside export root: %s", candidate)
+                continue
+            if relative not in keep:
+                shutil.rmtree(candidate)
 
 
 def website_tree_manifest(tree: dict, images_by_node: dict[int, list[dict]]) -> dict:

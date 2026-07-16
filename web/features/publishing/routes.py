@@ -146,6 +146,15 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     return {"ok": True, "gallery": _owner_payload(request, updated)}
 
 
+@router.delete("/api/user-collections/{collection_id}/galleries/{gallery_id}")
+async def api_delete_gallery(collection_id: int, gallery_id: int):
+    current = await galleries.get_gallery(_configured_db_path(), gallery_id)
+    if current is None or current["collection_id"] != collection_id:
+        return JSONResponse({"error": "Gallery not found"}, status_code=404)
+    await galleries.delete_gallery(_configured_db_path(), gallery_id)
+    return {"ok": True}
+
+
 def _public_page_payload(gallery: dict) -> dict:
     token = gallery["token"]
     download_size = gallery["download_size"]
@@ -173,6 +182,7 @@ def _safe_json(value: dict) -> str:
 
 def _public_response(response: Response) -> Response:
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 
@@ -358,7 +368,7 @@ def _zip_gallery(gallery: dict, destination: str) -> dict:
                     arcname = (
                         _attachment_name(image_id, filename.name)
                         if size == "original"
-                        else f"{filename.stem}.jpg"
+                        else _attachment_name(image_id, filename.name, suffix=".jpg")
                     )
                     try:
                         with tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024) as staged:
@@ -382,7 +392,7 @@ def _zip_gallery(gallery: dict, destination: str) -> dict:
                     data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, image_id))
                     if not data:
                         raise FileNotFoundError("Preview unavailable")
-                    archive.writestr(f"{filename.stem}.jpg", data)
+                    archive.writestr(_attachment_name(image_id, filename.name, suffix=".jpg"), data)
                 included += 1
             except (IncompleteRead, OSError, ValueError):
                 skipped.append({

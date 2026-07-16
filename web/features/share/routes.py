@@ -153,6 +153,7 @@ def _share_payload(request: Request, share: dict | None) -> dict | None:
 
 def _public_response(response: Response) -> Response:
     response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "private, no-store"
     return response
 
 

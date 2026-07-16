@@ -112,6 +112,80 @@ class GalleryTests(BackendTestCase):
         self.assertEqual(blocked_download.status_code, 404)
         self.assertEqual(zip_blocked.status_code, 404)
 
+    async def test_tokened_gallery_media_never_enters_shared_caches(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Cache-safe gallery",
+            image_ids=[first],
+            options={"download_size": "md"},
+        )
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                thumb = client.get(f"/s/gallery/{gallery['token']}/thumb/sm/{first}")
+                archive = client.get(f"/s/gallery/{gallery['token']}/download-all")
+                return thumb, archive
+
+        thumb, archive = await asyncio.to_thread(probe)
+
+        self.assertEqual(thumb.status_code, 200)
+        self.assertEqual(archive.status_code, 200)
+        self.assertEqual(thumb.headers.get("cache-control"), "private, no-store")
+        self.assertEqual(archive.headers.get("cache-control"), "private, no-store")
+
+    async def test_delete_gallery_revokes_its_token(self):
+        collection, first, _second = await self._collection()
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                created = client.post(
+                    f"/api/user-collections/{collection['id']}/galleries",
+                    json={"title": "Disposable gallery"},
+                )
+                gallery = created.json()["gallery"]
+                deleted = client.delete(
+                    f"/api/user-collections/{collection['id']}/galleries/{gallery['id']}",
+                )
+                public = client.get(f"/s/gallery/{gallery['token']}")
+                listed = client.get(f"/api/user-collections/{collection['id']}/galleries")
+                return created, deleted, public, listed
+
+        created, deleted, public, listed = await asyncio.to_thread(probe)
+
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json(), {"ok": True})
+        self.assertEqual(public.status_code, 404)
+        self.assertEqual(listed.json()["galleries"], [])
+
+    async def test_gallery_zip_preview_names_are_attachment_safe(self):
+        collection, first, _second = await self._collection()
+        gallery = await galleries.create_gallery(
+            db.DB_PATH,
+            collection_id=collection["id"],
+            title="Safe preview zip",
+            image_ids=[first],
+            options={"download_size": "md"},
+        )
+        with sqlite3.connect(db.DB_PATH) as conn:
+            conn.execute("UPDATE images SET filename = ? WHERE id = ?", (r"..\..\evil.jpg", first))
+
+        async def preview(_filepath, _size, _image_id):
+            return b"preview"
+
+        def probe():
+            with mock.patch("thumbnails.get_thumbnail", preview):
+                with TestClient(app_module.app) as client:
+                    return client.get(f"/s/gallery/{gallery['token']}/download-all")
+
+        archive = await asyncio.to_thread(probe)
+
+        self.assertEqual(archive.status_code, 200, archive.text)
+        with zipfile.ZipFile(io.BytesIO(archive.content)) as payload:
+            self.assertEqual(payload.namelist(), [gallery_routes._attachment_name(first, r"..\..\evil.jpg", suffix=".jpg")])
+
     async def test_gallery_patch_renames_owner_payload_and_public_page(self):
         collection, _first, _second = await self._collection()
 
