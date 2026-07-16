@@ -51,6 +51,8 @@ let publishReturn = null;
 let publishingFocusPending = false;
 let thumbnailCachePolicy = 'keep';
 const busyActions = new Set();
+const workerActionGenerations = new Map();
+const workerActionsInFlight = new Set();
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
 const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
@@ -906,7 +908,7 @@ function patchNodeText(root, selector, value) {
     if (node && node.textContent !== text) node.textContent = text;
 }
 
-function patchDrawerStatus() {
+function patchDrawerStatus(workerGenerations = null) {
     const body = document.getElementById('drawer-body');
     if (!body) return;
 
@@ -922,6 +924,10 @@ function patchDrawerStatus() {
     }
 
     for (const item of workItems()) {
+        if (workerGenerations && (
+            workerActionsInFlight.has(item.key)
+            || workerGenerations.get(item.key) !== (workerActionGenerations.get(item.key) || 0)
+        )) continue;
         const row = body.querySelector(`[data-worker-row="${item.key}"]`);
         if (!row) continue;
         patchNodeText(row, '.wr-top .v', item.detail);
@@ -966,6 +972,7 @@ function patchDrawerStatus() {
 }
 
 async function refreshDrawer({ initial = false } = {}) {
+    const workerGenerations = new Map(workerActionGenerations);
     const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
@@ -996,7 +1003,7 @@ async function refreshDrawer({ initial = false } = {}) {
     renderActivity();
     const body = document.getElementById('drawer-body');
     if (initial || !body?.children.length) renderDrawer();
-    else patchDrawerStatus();
+    else patchDrawerStatus(workerGenerations);
 }
 
 async function pollScanUntilDone(sourceId) {
@@ -1398,19 +1405,27 @@ function bindDrawerActions() {
     for (const btn of body.querySelectorAll('[data-worker-action]')) {
         btn.addEventListener('click', () => withBusyAction(`worker-${btn.dataset.workerAction}`, btn, async () => {
             const key = btn.dataset.workerAction;
+            workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);
+            workerActionsInFlight.add(key);
             let result = null;
-            if (key === 'ai') result = aiStatus && aiStatus.embedding_manual_pause ? await resumeAiEmbeddings() : await pauseAiEmbeddings();
-            if (key === 'cache') {
-                const pregen = (cacheStatus && cacheStatus.pregen) || {};
-                result = pregen.manual_pause || pregen.state === 'paused' ? await startCachePregen() : await stopCachePregen();
+            try {
+                if (key === 'ai') result = aiStatus && aiStatus.embedding_manual_pause ? await resumeAiEmbeddings() : await pauseAiEmbeddings();
+                if (key === 'cache') {
+                    const pregen = (cacheStatus && cacheStatus.pregen) || {};
+                    result = pregen.manual_pause || pregen.state === 'paused' ? await startCachePregen() : await stopCachePregen();
+                }
+                if (key === 'people') {
+                    const worker = (peopleStatus && peopleStatus.worker) || {};
+                    result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
+                }
+                if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
+                if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
+                if (!result) showToast('Couldn’t update background work');
+            } catch {
+                showToast('Couldn’t update background work');
+            } finally {
+                workerActionsInFlight.delete(key);
             }
-            if (key === 'people') {
-                const worker = (peopleStatus && peopleStatus.worker) || {};
-                result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
-            }
-            if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
-            if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
-            if (!result) showToast('Couldn’t update background work');
             await refreshDrawer();
         }));
     }

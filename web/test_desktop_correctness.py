@@ -123,3 +123,12 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("let statusGeneration = 0;", sync_chip)
         self.assertIn("if (controlInFlight || generation !== statusGeneration) return;", sync_chip)
         self.assertIn("const generation = ++statusGeneration;", sync_chip)
+
+    def test_worker_action_ignores_stale_poll_paint_for_its_row(self):
+        drawer = read("drawer.js")
+
+        self.assertIn("const workerActionGenerations = new Map();", drawer)
+        self.assertIn("const workerActionsInFlight = new Set();", drawer)
+        self.assertIn("const workerGenerations = new Map(workerActionGenerations);", drawer)
+        self.assertIn("workerActionsInFlight.has(item.key)", drawer)
+        self.assertIn("workerActionGenerations.set(key, (workerActionGenerations.get(key) || 0) + 1);", drawer)
