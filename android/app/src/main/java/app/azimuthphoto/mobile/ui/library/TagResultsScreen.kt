@@ -99,12 +99,16 @@ fun TagResultsScreen(
     ) { padding ->
         val loaded = images
         when {
-            loaded == null -> {
+            loaded == null || (loaded.isEmpty() && pageError) -> {
                 Box(
                     Modifier.fillMaxSize().background(Ink).padding(padding),
                     contentAlignment = Alignment.Center,
                 ) {
-                    CircularProgressIndicator(color = TextSecondary)
+                    if (pageError) {
+                        ArchiveOfflineRow(onRetry = { scope.launch { loadMore() } })
+                    } else {
+                        CircularProgressIndicator(color = TextSecondary)
+                    }
                 }
             }
             loaded.isEmpty() -> {

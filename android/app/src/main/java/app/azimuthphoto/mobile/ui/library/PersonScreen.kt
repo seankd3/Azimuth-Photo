@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -141,13 +142,22 @@ fun PersonScreen(
             )
         },
     ) { padding ->
-        PhotoGrid(
-            images = images,
-            thumbModel = { api.imageThumb(it.id, "sm") },
-            onOpen = { index -> onOpenPhotos(images, index) },
-            onNearEnd = { scope.launch { loadMore() } },
-            modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
-        )
+        if (images.isEmpty() && pageError) {
+            Box(
+                Modifier.fillMaxSize().background(Ink).padding(padding),
+                contentAlignment = Alignment.Center,
+            ) {
+                ArchiveOfflineRow(onRetry = { scope.launch { loadMore() } })
+            }
+        } else {
+            PhotoGrid(
+                images = images,
+                thumbModel = { api.imageThumb(it.id, "sm") },
+                onOpen = { index -> onOpenPhotos(images, index) },
+                onNearEnd = { scope.launch { loadMore() } },
+                modifier = Modifier.fillMaxSize().background(Ink).padding(padding),
+            )
+        }
     }
 
     if (renaming) {

@@ -19,7 +19,7 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("C:/Users/smast/.azimuth/release.keystore")
+            storeFile = file(System.getenv("AZIMUTH_KEYSTORE") ?: "${System.getProperty("user.home")}/.azimuth/release.keystore")
             storePassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"
             keyAlias = "azimuth"
             keyPassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"

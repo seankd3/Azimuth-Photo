@@ -3,9 +3,6 @@ package app.azimuthphoto.mobile.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -28,28 +25,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.data.MediaItem
-import app.azimuthphoto.mobile.data.SettingsStore
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import kotlinx.coroutines.launch
 
 private sealed class MediaGridRow {
     data class Header(val day: LocalDate) : MediaGridRow()
@@ -67,12 +55,8 @@ fun MediaGrid(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val settings by SettingsStore.flow(context).collectAsState(initial = null)
-    val columns = settings?.gridColumns ?: 4
-    val scope = rememberCoroutineScope()
+    val columns = rememberGridColumns()
     val gridState = rememberLazyGridState()
-    var zoomAccumulator by remember(columns) { mutableFloatStateOf(1f) }
     val rawShots = remember(items) {
         items.asSequence().filter { it.isRaw }.map { it.shotKey }.toHashSet()
     }
@@ -96,20 +80,7 @@ fun MediaGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(columns) {
-                    detectPinchZoom { zoom ->
-                        zoomAccumulator *= zoom
-                        val next = when {
-                            zoomAccumulator > 1.18f -> (columns - 1).coerceAtLeast(3)
-                            zoomAccumulator < 0.84f -> (columns + 1).coerceAtMost(5)
-                            else -> columns
-                        }
-                        if (next != columns) {
-                            zoomAccumulator = 1f
-                            scope.launch { SettingsStore.setGridColumns(context, next) }
-                        }
-                    }
-                },
+                .gridDensityPinch(columns),
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = contentPadding,
@@ -156,20 +127,6 @@ fun MediaGrid(
     }
 }
 
-private suspend fun PointerInputScope.detectPinchZoom(onZoom: (Float) -> Unit) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        while (true) {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.isEmpty()) break
-            if (pressed.size >= 2) {
-                onZoom(event.calculateZoom())
-                event.changes.forEach { it.consume() }
-            }
-        }
-    }
-}
 
 private val HEADER_FORMAT = DateTimeFormatter.ofPattern("EEE, MMM d, yyyy")
 private val HEADER_FORMAT_THIS_YEAR = DateTimeFormatter.ofPattern("EEE, MMM d")

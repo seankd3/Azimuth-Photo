@@ -48,14 +48,23 @@ import java.time.LocalDate
  */
 @Composable
 fun MemoriesStrip(serverUrl: String, onOpenPhotos: (List<ArchiveImage>, Int) -> Unit) {
-    var memories by remember { mutableStateOf<List<Memory>?>(null) }
+    var memories by remember { mutableStateOf<LoadState<List<Memory>>>(LoadState.Loading) }
+    var reloads by remember { mutableStateOf(0) }
 
-    LaunchedEffect(serverUrl) {
+    LaunchedEffect(serverUrl, reloads) {
+        memories = LoadState.Loading
         val today = LocalDate.now()
-        memories = runCatching { Memories.onThisDay(serverUrl, today) }.getOrDefault(emptyList())
+        memories = loadState { Memories.onThisDay(serverUrl, today) }
     }
 
-    val loaded = memories ?: emptyList()
+    if (memories is LoadState.Loading) {
+        return
+    }
+    if (memories is LoadState.Error) {
+        ArchiveOfflineRow(onRetry = { reloads++ }, modifier = Modifier.padding(horizontal = 16.dp))
+        return
+    }
+    val loaded = (memories as LoadState.Ok<List<Memory>>).value
     if (loaded.isEmpty()) {
         Spacer(Modifier.height(0.dp))
         return

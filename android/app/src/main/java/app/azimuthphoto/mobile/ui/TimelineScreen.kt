@@ -2,6 +2,10 @@ package app.azimuthphoto.mobile.ui
 
 import android.app.Activity
 import android.content.Intent
+import android.database.ContentObserver
+import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -64,8 +68,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import app.azimuthphoto.mobile.backup.BackupDb
 import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.BackupWorker
@@ -80,6 +87,7 @@ import app.azimuthphoto.mobile.data.TimelineEntry
 import app.azimuthphoto.mobile.data.UnifiedTimeline
 import app.azimuthphoto.mobile.data.ViewerMedia
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -122,10 +130,45 @@ fun TimelineScreen(
     var hubOffline by remember { mutableStateOf(false) }
     var wantMore by remember { mutableStateOf(false) }
     var loadTick by remember { mutableStateOf(0) }
+    var mediaStoreChanges by remember { mutableStateOf(0) }
     var viewerSession by remember { mutableStateOf<Pair<List<ViewerMedia>, Int>?>(null) }
     var selectedIds by rememberSaveable(
         stateSaver = listSaver(save = { it.toList() }, restore = { it.toSet() }),
     ) { mutableStateOf(emptySet<Long>()) }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(context.contentResolver) {
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                super.onChange(selfChange, uri)
+                mediaStoreChanges++
+            }
+        }
+        context.contentResolver.registerContentObserver(
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer,
+        )
+        context.contentResolver.registerContentObserver(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            true,
+            observer,
+        )
+        onDispose { context.contentResolver.unregisterContentObserver(observer) }
+    }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) loadTick++
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(mediaStoreChanges) {
+        if (mediaStoreChanges > 0) {
+            delay(500)
+            loadTick++
+        }
+    }
 
     LaunchedEffect(progress.running, loadTick) {
         val all = DeviceMedia.queryAll(context)
@@ -203,17 +246,6 @@ fun TimelineScreen(
     }
     LaunchedEffect(viewerSession != null) { onImmersive(viewerSession != null) }
     DisposableEffect(Unit) { onDispose { onImmersive(false) } }
-    viewerSession?.let { (items, index) ->
-        ViewerScreen(
-            items = items,
-            startIndex = index,
-            onClose = { viewerSession = null },
-            api = api,
-            onChanged = { loadTick++ },
-        )
-        return
-    }
-
     BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
     val trashLocal = rememberMediaTrash(onTrashed = { loadTick++; selectedIds = emptySet() })
 
@@ -326,6 +358,16 @@ fun TimelineScreen(
                     onRetry = { loadTick++ },
                 )
             }
+        }
+
+        viewerSession?.let { (items, index) ->
+            ViewerScreen(
+                items = items,
+                startIndex = index,
+                onClose = { viewerSession = null },
+                api = api,
+                onChanged = { loadTick++ },
+            )
         }
     }
 

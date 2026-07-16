@@ -73,6 +73,7 @@ import app.azimuthphoto.mobile.data.SearchFilters
 import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.Shelf
 import app.azimuthphoto.mobile.data.ViewerMedia
+import app.azimuthphoto.mobile.ui.library.AddToCollectionSheet
 import app.azimuthphoto.mobile.ui.library.RefineSheet
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
@@ -83,7 +84,10 @@ import kotlinx.coroutines.launch
 private const val PAGE_SIZE = 120
 
 @Composable
-fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
+fun SearchScreen(
+    onImmersive: (Boolean) -> Unit = {},
+    onFindSimilar: (ArchiveImage) -> Unit = {},
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
@@ -120,6 +124,7 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
     var refineCount by remember { mutableStateOf<Long?>(null) }
 
     var showSaveDialog by remember { mutableStateOf(false) }
+    var addToCollection by remember { mutableStateOf<List<Long>?>(null) }
     var archiveViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
     var localViewerIndex by rememberSaveable { mutableStateOf<Int?>(null) }
 
@@ -211,25 +216,6 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
         onImmersive(archiveViewerIndex != null || localViewerIndex != null)
     }
     DisposableEffect(Unit) { onDispose { onImmersive(false) } }
-    archiveViewerIndex?.let { index ->
-        ViewerScreen(
-            items = archiveImages.map { ViewerMedia.Remote(it) },
-            startIndex = index,
-            onClose = { archiveViewerIndex = null },
-            api = api,
-        )
-        return
-    }
-    localViewerIndex?.let { index ->
-        ViewerScreen(
-            items = localItems,
-            startIndex = index,
-            onClose = { localViewerIndex = null },
-            onChanged = { retryTick++ },
-        )
-        return
-    }
-
     BackHandler(enabled = hasResults || query.isNotBlank()) {
         if (hasResults) {
             filters = SearchFilters()
@@ -241,179 +227,210 @@ fun SearchScreen(onImmersive: (Boolean) -> Unit = {}) {
 
     val chips = remember(filters, peopleList) { refinementChips(filters, peopleList) }
 
-    Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            placeholder = { Text("Search your photos", color = TextSecondary) },
-            leadingIcon = { Icon(Icons.Outlined.Search, null, tint = TextSecondary) },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { submit(query) }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedContainerColor = Panel,
-                unfocusedContainerColor = Panel,
-                focusedBorderColor = PanelHigh,
-                unfocusedBorderColor = Panel,
-            ),
-            shape = MaterialTheme.shapes.extraLarge,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-
-        // Deep toggle + active refinement chips scroll; Refine stays pinned at the end.
-        Row(
-            Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Row(
-                Modifier
-                    .weight(1f)
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FilterChip(
-                    selected = filters.deep,
-                    enabled = filters.q.isNotBlank(),
-                    onClick = { filters = filters.copy(deep = !filters.deep) },
-                    label = { Text("Deep") },
-                )
-                chips.forEach { chip ->
-                    InputChip(
-                        selected = true,
-                        onClick = { filters = chip.cleared },
-                        label = { Text(chip.label) },
-                        trailingIcon = {
-                            Icon(
-                                Icons.Outlined.Close,
-                                contentDescription = "Remove ${chip.label}",
-                                modifier = Modifier.size(InputChipDefaults.IconSize),
-                            )
-                        },
-                    )
-                }
-                if (chips.isNotEmpty()) {
-                    TextButton(onClick = { filters = SearchFilters(q = filters.q, deep = filters.deep) }) {
-                        Text("Clear all", color = TextSecondary)
-                    }
-                }
-            }
-            IconButton(onClick = {
-                refineDraft = filters
-                refineCount = visibleTotal.takeIf { hasResults && !archiveError }
-                showRefine = true
-            }) {
-                BadgedBox(
-                    badge = {
-                        if (filters.activeCount > 0) {
-                            Badge(containerColor = Accent, contentColor = Ink) {
-                                Text("${filters.activeCount}")
-                            }
-                        }
-                    },
-                ) {
-                    Icon(Icons.Outlined.Tune, contentDescription = "Refine", tint = TextPrimary)
-                }
-            }
-        }
-
-        when {
-            !hasResults -> SearchHome(
-                recentSearches = currentSettings.recentSearches,
-                shelves = shelves,
-                buckets = buckets,
-                onRecent = (::submit),
-                onShelf = { shelf ->
-                    activeBucket = null
-                    filters = SearchFilters(folders = shelf.paths.map { "/$it" })
-                },
-                onBucket = { bucket ->
-                    filters = SearchFilters()
-                    activeBucket = bucket
-                },
+    // The search UI stays composed under the viewers so grid scroll and loaded
+    // pages survive opening and closing a photo.
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Search your photos", color = TextSecondary) },
+                leadingIcon = { Icon(Icons.Outlined.Search, null, tint = TextSecondary) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { submit(query) }),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = Panel,
+                    unfocusedContainerColor = Panel,
+                    focusedBorderColor = PanelHigh,
+                    unfocusedBorderColor = Panel,
+                ),
+                shape = MaterialTheme.shapes.extraLarge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
             )
 
-            activeBucket != null -> LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                modifier = Modifier.fillMaxSize(),
+            // Deep toggle + active refinement chips scroll; Refine stays pinned at the end.
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                itemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
-                    DeviceResultCell(item) { localViewerIndex = index }
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    FilterChip(
+                        selected = filters.deep,
+                        enabled = filters.q.isNotBlank(),
+                        onClick = { filters = filters.copy(deep = !filters.deep) },
+                        label = { Text("Deep") },
+                    )
+                    chips.forEach { chip ->
+                        InputChip(
+                            selected = true,
+                            onClick = { filters = chip.cleared },
+                            label = { Text(chip.label) },
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Outlined.Close,
+                                    contentDescription = "Remove ${chip.label}",
+                                    modifier = Modifier.size(InputChipDefaults.IconSize),
+                                )
+                            },
+                        )
+                    }
+                    if (chips.isNotEmpty()) {
+                        TextButton(onClick = { filters = SearchFilters(q = filters.q, deep = filters.deep) }) {
+                            Text("Clear all", color = TextSecondary)
+                        }
+                    }
+                }
+                IconButton(onClick = {
+                    refineDraft = filters
+                    refineCount = visibleTotal.takeIf { hasResults && !archiveError }
+                    showRefine = true
+                }) {
+                    BadgedBox(
+                        badge = {
+                            if (filters.activeCount > 0) {
+                                Badge(containerColor = Accent, contentColor = Ink) {
+                                    Text("${filters.activeCount}")
+                                }
+                            }
+                        },
+                    ) {
+                        Icon(Icons.Outlined.Tune, contentDescription = "Refine", tint = TextPrimary)
+                    }
                 }
             }
 
-            firstPageLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            when {
+                !hasResults -> SearchHome(
+                    recentSearches = currentSettings.recentSearches,
+                    shelves = shelves,
+                    buckets = buckets,
+                    onRecent = (::submit),
+                    onShelf = { shelf ->
+                        activeBucket = null
+                        filters = SearchFilters(folders = shelf.paths.map { "/$it" })
+                    },
+                    onBucket = { bucket ->
+                        filters = SearchFilters()
+                        activeBucket = bucket
+                    },
+                )
 
-            archiveError -> Column(
-                Modifier.fillMaxSize(),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center,
-            ) {
-                Text("Archive unreachable", color = TextSecondary)
-                TextButton(onClick = { retryTick++ }) { Text("Retry") }
-            }
+                activeBucket != null -> LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.fillMaxSize(),
+                ) {
+                    itemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
+                        DeviceResultCell(item) { localViewerIndex = index }
+                    }
+                }
 
-            else -> Column(Modifier.fillMaxSize()) {
-                if (localItems.isNotEmpty()) {
-                    Text(
-                        "On this device",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = TextPrimary,
-                        modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 6.dp),
-                    )
-                    LazyRow(
-                        contentPadding = PaddingValues(horizontal = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    ) {
-                        rowItemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
-                            Box(Modifier.size(96.dp)) {
-                                DeviceResultCell(item) { localViewerIndex = index }
+                firstPageLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+
+                archiveError -> Column(
+                    Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text("Archive unreachable", color = TextSecondary)
+                    TextButton(onClick = { retryTick++ }) { Text("Retry") }
+                }
+
+                else -> Column(Modifier.fillMaxSize()) {
+                    if (localItems.isNotEmpty()) {
+                        Text(
+                            "On this device",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(start = 14.dp, top = 10.dp, bottom = 6.dp),
+                        )
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            rowItemsIndexed(localItems, key = { _, item -> "d${item.id}" }) { index, item ->
+                                Box(Modifier.size(96.dp)) {
+                                    DeviceResultCell(item) { localViewerIndex = index }
+                                }
                             }
                         }
                     }
-                }
-                Row(
-                    Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        String.format(Locale.US, "%,d photos", visibleTotal),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = TextSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (archiveImages.isNotEmpty() && !filters.isEmpty) {
-                        IconButton(onClick = { showSaveDialog = true }) {
-                            Icon(
-                                Icons.Outlined.BookmarkAdd,
-                                contentDescription = "Save search as collection",
-                                tint = TextSecondary,
-                            )
+                    Row(
+                        Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            String.format(Locale.US, "%,d photos", visibleTotal),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = TextSecondary,
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (archiveImages.isNotEmpty() && !filters.isEmpty) {
+                            IconButton(onClick = { showSaveDialog = true }) {
+                                Icon(
+                                    Icons.Outlined.BookmarkAdd,
+                                    contentDescription = "Save search as collection",
+                                    tint = TextSecondary,
+                                )
+                            }
                         }
                     }
-                }
-                if (archiveImages.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Nothing matches", color = TextSecondary)
+                    if (archiveImages.isEmpty()) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text("Nothing matches", color = TextSecondary)
+                        }
+                    } else {
+                        PhotoGrid(
+                            images = archiveImages,
+                            thumbModel = { image -> api.thumbUrl(image) },
+                            onOpen = { index -> archiveViewerIndex = index },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(bottom = 12.dp),
+                            onNearEnd = { loadNextPage() },
+                        )
                     }
-                } else {
-                    PhotoGrid(
-                        images = archiveImages,
-                        thumbModel = { image -> api.thumbUrl(image) },
-                        onOpen = { index -> archiveViewerIndex = index },
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(bottom = 12.dp),
-                        onNearEnd = { loadNextPage() },
-                    )
                 }
             }
         }
+
+        archiveViewerIndex?.let { index ->
+            ViewerScreen(
+                items = archiveImages.map { ViewerMedia.Remote(it) },
+                startIndex = index,
+                onClose = { archiveViewerIndex = null },
+                api = api,
+                onAddToCollection = { id -> addToCollection = listOf(id) },
+                onFindSimilar = onFindSimilar,
+            )
+        }
+        localViewerIndex?.let { index ->
+            ViewerScreen(
+                items = localItems,
+                startIndex = index,
+                onClose = { localViewerIndex = null },
+                onChanged = { retryTick++ },
+            )
+        }
+    }
+
+    addToCollection?.let { ids ->
+        AddToCollectionSheet(
+            api = libApi,
+            imageIds = ids,
+            onDismiss = { addToCollection = null },
+        )
     }
 
     if (showRefine) {

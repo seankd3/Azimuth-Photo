@@ -77,8 +77,12 @@ fun CollectionScreen(
     var confirmingRemove by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
 
+    var loadError by remember(collection.id) { mutableStateOf(false) }
+
     suspend fun reload() {
-        photos = runCatching { api.collectionPhotos(collection.id) }.getOrDefault(emptyList())
+        runCatching { api.collectionPhotos(collection.id) }
+            .onSuccess { photos = it; loadError = false }
+            .onFailure { loadError = true }
     }
 
     LaunchedEffect(collection.id) { reload() }
@@ -210,7 +214,11 @@ fun CollectionScreen(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
             ) {
-                CircularProgressIndicator(color = TextSecondary)
+                if (loadError) {
+                    ArchiveOfflineRow(onRetry = { scope.launch { reload() } })
+                } else {
+                    CircularProgressIndicator(color = TextSecondary)
+                }
             }
         } else if (loaded.isEmpty()) {
             Box(

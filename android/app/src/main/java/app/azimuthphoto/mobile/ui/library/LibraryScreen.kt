@@ -118,7 +118,10 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
                 onOpenTag = { push(Route.Tag(it)) },
                 onOpenPhotos = openPhotos,
             )
-            Route.Search -> SearchScreen(onImmersive = onImmersive)
+            Route.Search -> SearchScreen(
+                onImmersive = onImmersive,
+                onFindSimilar = { image -> push(Route.Similar(image)) },
+            )
             Route.People -> PeopleScreen(api = api, onBack = { pop() }, onOpenPerson = { push(Route.Person(it)) })
             is Route.Person -> PersonScreen(api, r.person, onBack = { pop() }, onOpenPhotos = openPhotos)
             Route.Collections -> CollectionsScreen(

@@ -3,9 +3,6 @@ package app.azimuthphoto.mobile.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -29,12 +26,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -42,23 +34,19 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.ArchiveImage
 import app.azimuthphoto.mobile.data.MediaItem
-import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.TimelineEntry
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.launch
 
 private sealed class Row {
     data class Header(val day: LocalDate) : Row()
@@ -77,12 +65,8 @@ fun UnifiedGrid(
     contentPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
 ) {
-    val context = LocalContext.current
-    val settings by SettingsStore.flow(context).collectAsState(initial = null)
-    val columns = settings?.gridColumns ?: 4
-    val scope = rememberCoroutineScope()
+    val columns = rememberGridColumns()
     val gridState = rememberLazyGridState()
-    var zoomAccumulator by remember(columns) { mutableFloatStateOf(1f) }
     val selectionMode = selectedIds.isNotEmpty()
 
     val rows = remember(entries) {
@@ -110,20 +94,7 @@ fun UnifiedGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(columns) {
-                    detectPinchZoom { zoom ->
-                        zoomAccumulator *= zoom
-                        val next = when {
-                            zoomAccumulator > 1.18f -> (columns - 1).coerceAtLeast(3)
-                            zoomAccumulator < 0.84f -> (columns + 1).coerceAtMost(5)
-                            else -> columns
-                        }
-                        if (next != columns) {
-                            zoomAccumulator = 1f
-                            scope.launch { SettingsStore.setGridColumns(context, next) }
-                        }
-                    }
-                },
+                .gridDensityPinch(columns),
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = contentPadding,
@@ -187,12 +158,8 @@ fun PhotoGrid(
     selectedIds: Set<Long> = emptySet(),
     onLongPress: ((ArchiveImage) -> Unit)? = null,
 ) {
-    val context = LocalContext.current
-    val settings by SettingsStore.flow(context).collectAsState(initial = null)
-    val columns = settings?.gridColumns ?: 4
-    val scope = rememberCoroutineScope()
+    val columns = rememberGridColumns()
     val gridState = rememberLazyGridState()
-    var zoomAccumulator by remember(columns) { mutableFloatStateOf(1f) }
 
     // Rows carry the source index so a tap maps back to the caller's list position.
     val rows = remember(images) {
@@ -221,20 +188,7 @@ fun PhotoGrid(
             columns = GridCells.Fixed(columns),
             modifier = Modifier
                 .fillMaxSize()
-                .pointerInput(columns) {
-                    detectPinchZoom { zoom ->
-                        zoomAccumulator *= zoom
-                        val next = when {
-                            zoomAccumulator > 1.18f -> (columns - 1).coerceAtLeast(3)
-                            zoomAccumulator < 0.84f -> (columns + 1).coerceAtMost(5)
-                            else -> columns
-                        }
-                        if (next != columns) {
-                            zoomAccumulator = 1f
-                            scope.launch { SettingsStore.setGridColumns(context, next) }
-                        }
-                    }
-                },
+                .gridDensityPinch(columns),
             verticalArrangement = Arrangement.spacedBy(2.dp),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             contentPadding = contentPadding,
@@ -445,19 +399,4 @@ private fun DayHeader(day: LocalDate) {
         color = TextPrimary,
         modifier = Modifier.padding(start = 14.dp, top = 22.dp, bottom = 8.dp),
     )
-}
-
-private suspend fun PointerInputScope.detectPinchZoom(onZoom: (Float) -> Unit) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        while (true) {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.isEmpty()) break
-            if (pressed.size >= 2) {
-                onZoom(event.calculateZoom())
-                event.changes.forEach { it.consume() }
-            }
-        }
-    }
 }
