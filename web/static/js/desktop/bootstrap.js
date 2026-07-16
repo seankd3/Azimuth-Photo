@@ -17,7 +17,7 @@ import { initKeyboard } from './keyboard.js';
 import { initShortcutSheet } from './shortcut_sheet.js';
 import { initWatchedFolders } from './watched_folders.js';
 import { initFilters } from './filters.js';
-import { initImporter } from './importer.js';
+import { initImportStage } from './import_stage.js';
 import { initSimilar } from './similar.js';
 import { initGridContextMenu } from './context_menu.js';
 import { initExportMenu } from './export_menu.js';
@@ -35,7 +35,7 @@ async function boot() {
     initSelection();
     initContextbar();
     initFilters();
-    initImporter();
+    initImportStage();
     initCullBrief();
     initKeywordsPanel();
     initSimilar();

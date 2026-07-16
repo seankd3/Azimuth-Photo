@@ -22,7 +22,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { activeLens, switchLens } from './lenses.js';
 import { reviewPeopleMergeByKey } from './people.js';
 import { closeFilters, filtersOpen } from './filters.js';
-import { closeImport, importOpen } from './importer.js';
+import { closeImport, importOpen } from './import_stage.js';
 import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, trashOpen, trashSelectedImages } from './trash.js';

@@ -576,3 +576,30 @@ export async function compareUndo() {
 export async function getPropagationLast() {
     return fetchJson('/api/propagation/last', { defaultValue: null });
 }
+
+
+// --- staged import (IMPORT_SPEC v1) ---
+
+export async function getImportSources() {
+    return fetchJson('/api/import/sources', { defaultValue: { sources: [] } });
+}
+
+export async function browseImportPath(path) {
+    return fetchJson(`/api/import/browse?path=${encodeURIComponent(path)}`, { defaultValue: { dirs: [] } });
+}
+
+export async function startImportScan(path, includeSubfolders) {
+    return postJson('/api/import/scan', { path, include_subfolders: includeSubfolders });
+}
+
+export async function getImportScan(scanId, offset = 0) {
+    return fetchJson(`/api/import/scan/${scanId}?offset=${offset}`, { defaultValue: null });
+}
+
+export async function commitImportScan(body) {
+    return postJson('/api/import/commit', body);
+}
+
+export async function getImportJob(jobId) {
+    return fetchJson(`/api/import/jobs/${jobId}`, { defaultValue: null });
+}
