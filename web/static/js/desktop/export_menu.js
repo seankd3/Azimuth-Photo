@@ -5,6 +5,8 @@ import { scope, scopeParams, viewState } from './state.js';
 import { openExportDialog } from './develop/export_dialog.js';
 
 export const ZIP_EXPORT_MAX = 2000;
+const SCOPE_EXPORT_PAGE_SIZE = 1000;
+const SCOPE_EXPORT_PROGRESS_DELAY_MS = 1000;
 
 let menu = null;
 let returnEl = null;
@@ -50,11 +52,32 @@ function anchoredPopover(anchor, html) {
 async function scopedImageIds() {
     if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
     const bestOf = viewState.bestOf && viewState.bestOfLimit != null;
-    const payload = await getRankings(scopeParams({
-        limit: bestOf ? viewState.bestOfLimit : 50000,
-        ...(bestOf ? { sort: 'elo' } : {}),
-    }));
-    return (payload?.images || []).map((image) => Number(image.id)).filter((id) => id > 0);
+    const maxIds = bestOf ? Math.max(0, Number(viewState.bestOfLimit) || 0) : Infinity;
+    const imageIds = [];
+    let offset = 0;
+    let showProgress = false;
+    const progressTimer = setTimeout(() => {
+        showProgress = true;
+        showToast('Preparing photos for export…');
+    }, SCOPE_EXPORT_PROGRESS_DELAY_MS);
+    try {
+        while (offset < maxIds) {
+            const limit = Math.min(SCOPE_EXPORT_PAGE_SIZE, maxIds - offset);
+            const payload = await getRankings(scopeParams({
+                limit,
+                offset,
+                ...(bestOf ? { sort: 'elo' } : {}),
+            }));
+            const images = payload?.images || [];
+            imageIds.push(...images.map((image) => Number(image.id)).filter((id) => id > 0));
+            offset += images.length;
+            if (showProgress) showToast(`Preparing ${imageIds.length.toLocaleString('en-US')} photos for export…`);
+            if (images.length < limit) break;
+        }
+        return imageIds;
+    } finally {
+        clearTimeout(progressTimer);
+    }
 }
 
 export function openExportMenu(anchor, choose, options = {}) {

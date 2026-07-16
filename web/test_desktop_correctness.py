@@ -269,6 +269,10 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("loadCollectionImageIds", export_scope)
         self.assertIn("Preparing ${count} file", export_scope)
         self.assertIn("getRankings(scopeParams({", shared_dialog_scope)
+        self.assertIn("while (offset < maxIds)", shared_dialog_scope)
+        self.assertIn("SCOPE_EXPORT_PAGE_SIZE", shared_dialog_scope)
+        self.assertIn("SCOPE_EXPORT_PROGRESS_DELAY_MS", shared_dialog_scope)
+        self.assertNotIn("50000", shared_dialog_scope)
         self.assertNotIn("loadCollectionImageIds", shared_dialog_scope)
 
     def test_collection_membership_loaders_stay_out_of_scope_consumers(self):
@@ -366,7 +370,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         drawer = read("drawer.js")
 
         self.assertIn("const INACTIVE_WORKER_STATES = new Set([", drawer)
-        for state in ("idle", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
+        for state in ("idle", "ready", "paused", "complete", "caught_up", "error", "disabled", "unavailable", "stale"):
             self.assertIn(f"'{state}'", drawer)
         self.assertIn("return Boolean(state) && !INACTIVE_WORKER_STATES.has(state);", drawer)
         self.assertNotIn("const ACTIVE_WORKER_STATES", drawer)

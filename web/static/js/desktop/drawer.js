@@ -57,6 +57,7 @@ const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
 const INACTIVE_WORKER_STATES = new Set([
     'idle',
+    'ready',
     'paused',
     'complete',
     'caught_up',
