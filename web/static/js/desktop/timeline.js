@@ -104,6 +104,36 @@ async function loadMonth(month, seq) {
     }
 }
 
+function samplesMatch(current, incoming) {
+    return current.length === incoming.length
+        && current.every((image, index) => Number(image.id) === Number(incoming[index]?.id)
+            && image.date_taken === incoming[index]?.date_taken);
+}
+
+function visibleSampledMonths() {
+    const canvasRect = document.getElementById('canvas')?.getBoundingClientRect();
+    if (!canvasRect) return [];
+    return months.filter((month) => {
+        if (!monthSamples.has(month.key)) return false;
+        const rect = document.getElementById(monthId(month.key))?.getBoundingClientRect();
+        return rect && rect.bottom >= canvasRect.top && rect.top <= canvasRect.bottom;
+    });
+}
+
+function refreshVisibleMonths(seq) {
+    for (const month of visibleSampledMonths()) {
+        getRankings(scopeForMonth(month)).then((data) => {
+            if (!mounted || seq !== generation) return;
+            const incoming = data?.images || [];
+            if (samplesMatch(monthSamples.get(month.key) || [], incoming)) return;
+            monthSamples.set(month.key, incoming);
+            renderMonth(month);
+        }).catch(() => {
+            // Keep the last visible month samples when the background refresh is unavailable.
+        });
+    }
+}
+
 function observeMonths(seq) {
     if (monthObserver) monthObserver.disconnect();
     monthObserver = new IntersectionObserver((entries) => {
@@ -180,7 +210,11 @@ async function load({ keepVisible = false } = {}) {
         if (Number(histogram?.undated) || visibleGroups.has('undated')) {
             nextMonths.push({ key: 'undated', count: Number(histogram?.undated) || visibleGroups.get('undated') || 0 });
         }
-        if (keepVisible && monthSignature(nextMonths) === monthSignature(months)) return;
+        if (keepVisible && monthSignature(nextMonths) === monthSignature(months)) {
+            observeMonths(seq);
+            refreshVisibleMonths(seq);
+            return;
+        }
         months = nextMonths;
         if (keepVisible) monthSamples = new Map();
         renderRiver();

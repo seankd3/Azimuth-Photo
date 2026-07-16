@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from collections.abc import Awaitable, Callable, Collection
+from datetime import datetime
 
 import numpy as np
 from fastapi.responses import Response
@@ -474,7 +475,38 @@ async def date_groups_payload(
     deep: bool = False,
     import_batch: int = 0,
     stacks: str = "expanded",
+    collection_id: int = 0,
 ) -> dict:
+    if collection_id:
+        histogram = await date_histogram_payload(
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            people=people,
+            q=q,
+            deep=deep,
+            import_batch=import_batch,
+            stacks=stacks,
+            collection_id=collection_id,
+        )
+        groups = [
+            {
+                "date": month["month"],
+                "label": datetime.strptime(month["month"], "%Y-%m").strftime("%B %Y"),
+                "count": month["count"],
+            }
+            for month in histogram["months"]
+        ]
+        if histogram["undated"]:
+            groups.append({"date": "", "label": "No Date", "count": histogram["undated"]})
+        return {"groups": groups}
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
