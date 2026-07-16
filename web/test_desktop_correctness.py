@@ -89,3 +89,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("await reloadStacks();", action)
         self.assertIn("finally {\n        if (button.isConnected) button.disabled = false;", action)
         self.assertLess(action.index("await reloadStacks();"), action.index("if (button.isConnected) button.disabled = false;"))
+
+    def test_export_poll_reports_when_the_export_status_cannot_be_checked(self):
+        export_dialog = read("develop", "export_dialog.js")
+        poll_start = export_dialog.index("async function pollBatchStatus")
+        poll = export_dialog[poll_start:export_dialog.index("\n}\n", poll_start)]
+
+        self.assertEqual(poll.count("showToast?.('Export status unknown — check Exports later');"), 3)
+        self.assertLess(poll.index("if (!response.ok)"), poll.index("const status = await response.json();"))

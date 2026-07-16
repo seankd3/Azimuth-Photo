@@ -287,7 +287,10 @@ async function pollBatchStatus(showToast) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         try {
             const response = await fetch('/api/develop/export/batch/status', fetchOptionsWithTimeout({ headers: { Accept: 'application/json' } }, READ_TIMEOUT_MS));
-            if (!response.ok) return;
+            if (!response.ok) {
+                showToast?.('Export status unknown — check Exports later');
+                return;
+            }
             const status = await response.json();
             if (status.state === 'running') {
                 showToast?.(`Develop export ${status.done}/${status.total}…`);
@@ -303,9 +306,11 @@ async function pollBatchStatus(showToast) {
             }
             return;
         } catch {
+            showToast?.('Export status unknown — check Exports later');
             return;
         }
     }
+    showToast?.('Export status unknown — check Exports later');
 }
 
 export const EXPORT_SHARPEN_OPTIONS = SHARPEN_OPTIONS;
