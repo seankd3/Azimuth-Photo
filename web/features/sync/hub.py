@@ -185,7 +185,7 @@ async def have_content_hashes(db_path: str, content_hashes: Iterable[str]) -> li
         placeholders = ",".join("?" for _ in hashes)
         rows = await (
             await conn.execute(
-                f"SELECT i.content_hash, i.filepath, s.path AS source_path "
+                f"SELECT i.content_hash, i.filepath, i.file_size, s.path AS source_path "
                 f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
                 f"WHERE i.content_hash IN ({placeholders}) "
                 "AND COALESCE(i.hub_remote, 0) = 0 "
@@ -196,17 +196,31 @@ async def have_content_hashes(db_path: str, content_hashes: Iterable[str]) -> li
     finally:
         await connection.close_async(conn, db_path=db_path)
 
-    def physically_present() -> set[str]:
+    def identity_verified() -> set[str]:
+        # "present" must mean the hub holds bytes of this exact identity RIGHT NOW,
+        # not merely a non-empty file at the path. A satellite deletes its only local
+        # copy on this answer, so a truncated/bit-rotted hub file must NOT qualify:
+        # require the size to match and re-derive the content hash from the live bytes.
         present: set[str] = set()
         for row in rows:
-            state, _file_stat = inspect_source_file(
-                str(row["filepath"] or ""), str(row["source_path"] or "")
-            )
-            if state == "available":
-                present.add(str(row["content_hash"]))
+            content_hash = str(row["content_hash"])
+            if content_hash in present:
+                continue
+            filepath = str(row["filepath"] or "")
+            state, file_stat = inspect_source_file(filepath, str(row["source_path"] or ""))
+            if state != "available" or file_stat is None:
+                continue
+            expected_size = row["file_size"]
+            if expected_size is not None and int(file_stat.st_size) != int(expected_size):
+                continue
+            try:
+                if compute_content_hash(filepath) == content_hash:
+                    present.add(content_hash)
+            except OSError:
+                continue
         return present
 
-    present = await asyncio.to_thread(physically_present)
+    present = await asyncio.to_thread(identity_verified)
     return [content_hash for content_hash in hashes if content_hash in present]
 
 
