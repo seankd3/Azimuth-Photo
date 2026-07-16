@@ -272,6 +272,7 @@ function settlePhotoSwipe(direction) {
     stage.append(incoming);
     incomingStageImage = incoming;
     const finish = (event) => {
+        if (incomingStageImage !== incoming) return;
         if (event.target !== incoming || event.propertyName !== 'transform') return;
         incoming.removeEventListener('transitionend', finish);
         img.src = incoming.src;
@@ -283,6 +284,7 @@ function settlePhotoSwipe(direction) {
         showCurrent({ stageReady: true });
     };
     incoming.addEventListener('transitionend', finish);
+    window.setTimeout(() => finish({ target: incoming, propertyName: 'transform' }), 350);
     requestAnimationFrame(() => {
         img.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
         incoming.style.transition = 'transform .16s cubic-bezier(.2,.7,.2,1)';
