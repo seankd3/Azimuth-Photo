@@ -18,6 +18,7 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
                 filename TEXT NOT NULL,
                 filepath TEXT NOT NULL,
                 status TEXT DEFAULT 'kept',
+                missing_at REAL,
                 vc_of INTEGER REFERENCES images(id) ON DELETE CASCADE
             );
             CREATE TABLE develop_settings (
@@ -34,6 +35,26 @@ class VirtualCopiesTest(unittest.IsolatedAsyncioTestCase):
                 settings TEXT NOT NULL,
                 label TEXT,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE collections (
+                id INTEGER PRIMARY KEY,
+                cover_image_id INTEGER REFERENCES images(id)
+            );
+            CREATE TABLE collection_images (
+                collection_id INTEGER REFERENCES collections(id),
+                image_id INTEGER REFERENCES images(id),
+                position INTEGER,
+                added_at REAL
+            );
+            CREATE TABLE stacks (
+                id INTEGER PRIMARY KEY,
+                representative_image_id INTEGER REFERENCES images(id)
+            );
+            CREATE TABLE stack_members (
+                stack_id INTEGER REFERENCES stacks(id),
+                image_id INTEGER REFERENCES images(id),
+                score REAL,
+                added_at REAL
             );
             INSERT INTO images (id, filename, filepath) VALUES (1, 'original.dng', '/photos/original.dng');
             INSERT INTO develop_settings (image_id, settings, origin, updated_at)

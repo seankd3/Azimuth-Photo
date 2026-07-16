@@ -49,7 +49,7 @@ def _active_rows(db_path: str) -> dict[int, dict]:
         cursor = conn.execute(
             "SELECT i.*, s.path AS source_path, s.display_name AS source_name "
             "FROM images i LEFT JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE i.status IN ('kept', 'maybe') AND i.missing_at IS NULL"
+            "WHERE i.status IN ('kept', 'maybe') AND i.missing_at IS NULL AND i.vc_of IS NULL"
         )
         return {int(row["id"]): dict(row) for row in cursor.fetchall()}
     finally:
