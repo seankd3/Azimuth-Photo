@@ -65,7 +65,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
     def test_background_lease_waits_remain_active_on_mobile(self):
         library = self.read("static", "js", "mobile", "library.js")
 
-        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry"):
+        for state in ("waiting_for_gpu", "waiting_for_turn", "waiting_retry", "waiting_for_model"):
             self.assertIn(f"'{state}'", library)
 
 

@@ -288,6 +288,7 @@ function workRows() {
             running: Boolean(ai && [
                 'embedding',
                 'loading_model',
+                'waiting_for_model',
                 'waiting_for_gpu',
                 'waiting_for_turn',
                 'waiting_retry',
