@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import importlib
 import os
 import tempfile
 import unittest
@@ -15,6 +16,7 @@ from PIL import Image
 
 from test_support import *  # noqa: F401,F403
 from features.imports import card, staging, taxonomy
+from data import connection
 from features.sync import hub, hub_routes
 
 
@@ -394,6 +396,177 @@ class ReclassifyGatedTests(BackendTestCase):
         self.assertTrue(moved.is_file())
         self.assertFalse(stranded.exists())
         self.assertTrue(untouched.is_file())
+
+    async def test_reclassify_recovers_catalog_after_crash_between_move_and_update(self):
+        """A disk move must remain repairable if the process dies before its SQL commit."""
+        library = Path(self.tempdir.name) / "Photos"
+        bad = library / "RAWS" / "Personal Photos" / "2026" / "2026-07-10"
+        bad.mkdir(parents=True)
+        stranded = [bad / f"PXL_crash_{index}.jpg" for index in range(3)]
+        for path in stranded:
+            path.write_bytes(path.name.encode())
+        source = await db.add_or_restore_source(str(library / "RAWS"))
+        await db.insert_images_batch(
+            [
+                (path.name, str(path), ".jpg", path.stat().st_size, path.stat().st_mtime)
+                for path in stranded
+            ],
+            source_id=source["id"],
+        )
+
+        original_move = taxonomy._to_thread_move
+        completed_moves = 0
+
+        async def crash_after_second_move(src: Path, dest: Path) -> None:
+            nonlocal completed_moves
+            await original_move(src, dest)
+            completed_moves += 1
+            if completed_moves == 2:
+                raise RuntimeError("simulated process crash after disk move")
+
+        with patch.object(taxonomy, "_to_thread_move", side_effect=crash_after_second_move):
+            with self.assertRaisesRegex(RuntimeError, "simulated process crash"):
+                await taxonomy.reclassify_misplaced_personal_photos(
+                    db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+                )
+
+        moved_paths = [
+            library / "Personal Photos" / "2026" / "2026-07-10" / path.name
+            for path in stranded[:2]
+        ]
+        self.assertTrue(all(path.exists() for path in moved_paths))
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            stale = await (
+                await conn.execute("SELECT filepath FROM images WHERE filename = ?", (stranded[1].name,))
+            ).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(stale["filepath"], str(stranded[1]))
+
+        try:
+            importlib.import_module("features.imports.move_journal")
+        except ModuleNotFoundError:
+            self.fail(
+                "pre-journal behavior reproduced: the moved file remains cataloged at its old path "
+                "with no durable recovery record"
+            )
+
+        fresh_result = await taxonomy.reclassify_misplaced_personal_photos(
+            db.DB_PATH, library, confirm=False, dry_run=True,
+        )
+        self.assertEqual(fresh_result["recovery"], {"redone": 1, "undone": 0, "ambiguous": 0, "lost": 0})
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            rows = await (
+                await conn.execute(
+                    "SELECT filename, filepath FROM images WHERE filename LIKE 'PXL_crash_%' ORDER BY filename"
+                )
+            ).fetchall()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        by_name = {row["filename"]: row["filepath"] for row in rows}
+        for path, moved_path in zip(stranded[:2], moved_paths):
+            self.assertEqual(by_name[path.name], str(moved_path))
+
+
+class MoveJournalRecoveryTests(BackendTestCase):
+    async def _pending_move(self, *, old_exists: bool, new_exists: bool):
+        journal = importlib.import_module("features.imports.move_journal")
+        root = Path(self.tempdir.name)
+        old_path = root / "RAWS" / "Personal Photos" / "old.jpg"
+        new_path = root / "Personal Photos" / "new.jpg"
+        if old_exists:
+            old_path.parent.mkdir(parents=True, exist_ok=True)
+            old_path.write_bytes(b"old")
+        if new_exists:
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            new_path.write_bytes(b"new")
+        old_source = await db.add_or_restore_source(str(root / "RAWS"))
+        new_source = await db.add_or_restore_source(str(root / "Personal Photos"))
+        await db.insert_images_batch(
+            [("old.jpg", str(old_path), ".jpg", 1, 0)], source_id=old_source["id"],
+        )
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            image = await (
+                await conn.execute("SELECT id FROM images WHERE filepath = ?", (str(old_path),))
+            ).fetchone()
+            await journal.ensure_table(conn)
+            await conn.execute(
+                """INSERT INTO taxonomy_move_journal
+                   (image_id, old_path, new_path, new_source_id, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (image["id"], str(old_path), str(new_path), new_source["id"], "2026-07-16T00:00:00+00:00"),
+            )
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        return journal, image["id"], old_path, new_path, new_source["id"]
+
+    async def _journal_count(self) -> int:
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            row = await (await conn.execute("SELECT COUNT(*) AS count FROM taxonomy_move_journal")).fetchone()
+            return row["count"]
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+
+    async def test_recover_redoes_completed_disk_move(self):
+        journal, image_id, _old_path, new_path, new_source_id = await self._pending_move(
+            old_exists=False, new_exists=True,
+        )
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            result = await journal.recover(conn)
+            image = await (await conn.execute("SELECT filepath, source_id FROM images WHERE id = ?", (image_id,))).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(result, {"redone": 1, "undone": 0, "ambiguous": 0, "lost": 0})
+        self.assertEqual((image["filepath"], image["source_id"]), (str(new_path), new_source_id))
+        self.assertEqual(await self._journal_count(), 0)
+
+    async def test_recover_undoes_move_that_never_started(self):
+        journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
+            old_exists=True, new_exists=False,
+        )
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            result = await journal.recover(conn)
+            image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(result, {"redone": 0, "undone": 1, "ambiguous": 0, "lost": 0})
+        self.assertEqual(image["filepath"], str(old_path))
+        self.assertEqual(await self._journal_count(), 0)
+
+    async def test_recover_leaves_collision_for_manual_resolution(self):
+        journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
+            old_exists=True, new_exists=True,
+        )
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            result = await journal.recover(conn)
+            image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(result, {"redone": 0, "undone": 0, "ambiguous": 1, "lost": 0})
+        self.assertEqual(image["filepath"], str(old_path))
+        self.assertEqual(await self._journal_count(), 1)
+
+    async def test_recover_reports_lost_file_without_changing_catalog(self):
+        journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
+            old_exists=False, new_exists=False,
+        )
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            result = await journal.recover(conn)
+            image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(result, {"redone": 0, "undone": 0, "ambiguous": 0, "lost": 1})
+        self.assertEqual(image["filepath"], str(old_path))
+        self.assertEqual(await self._journal_count(), 0)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,13 @@ export const TONE_EV_SHADOWS_CENTER = -3.5;
 export const TONE_EV_BLACKS_CENTER = -6.0;
 export const TONE_HIGHLIGHTS_POS_SCALE = 0.55;
 export const CONTRAST_FACTOR = 0.85;
+// Scene-referred sigmoid view transform for HDR-merged bases (twin of ops_constants.py).
+export const SIGMOID_FILM_POWER = 1.5;
+export const SIGMOID_PAPER_POWER = 1.0;
+export const SIGMOID_PAPER_EXP = 0.354355;
+export const SIGMOID_FILM_FOG = 0.001426;
+// Bounded S-curve contrast strength (max that provably never clips at |Contrast|=100).
+export const CONTRAST_S_STRENGTH = 1.0;
 export const SOFT_CLAMP_FACTOR = 4.0;
 export const TONE_EPSILON = 1e-6;
 export const DEHAZE_AIRLIGHT_FACTOR = 0.12;

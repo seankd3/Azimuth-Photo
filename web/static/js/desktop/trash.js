@@ -19,6 +19,7 @@ let root = null;
 let open = false;
 let images = [];
 let total = 0;
+let editedCopies = 0;
 let totalBytes = 0;
 let pendingHub = 0;
 let loading = false;
@@ -314,6 +315,7 @@ async function loadTrash() {
     images = (data && data.images || []).map((img) => ({ ...img, id: Number(img.id) })).filter((img) => img.id);
     trashFocusIndex = Math.max(0, Math.min(images.length - 1, trashFocusIndex));
     total = Number(data?.total) || images.length;
+    editedCopies = Number(data?.edited_copy_count) || 0;
     totalBytes = Number(data?.total_bytes) || 0;
     pendingHub = Number(data?.pending_hub_count) || images.filter((image) => image.pending_hub).length;
     for (const img of images) byId.set(Number(img.id), img);
@@ -429,7 +431,7 @@ async function emptyTrashWithConfirm() {
     if (!total) return;
     const ok = await confirmTypedCount({
         title: 'Empty trash',
-        message: `Trash ${fmt(total)} photos permanently? ${bytesLabel(totalBytes)} will be freed. Type ${fmt(total).replace(/,/g, '')} to confirm.`,
+        message: `Trash ${fmt(total)} photos permanently? ${bytesLabel(totalBytes)} will be freed.${editedCopies > 0 ? ` This also destroys ${fmt(editedCopies)} edited ${editedCopies === 1 ? 'copy' : 'copies'} — their edits die with their masters.` : ''} Type ${fmt(total).replace(/,/g, '')} to confirm.`,
         count: total,
         confirmLabel: 'Empty trash',
     });

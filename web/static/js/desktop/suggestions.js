@@ -2,6 +2,7 @@ import { createCollection, getCollectionSuggestions, thumbUrl } from './api.js';
 import { setActiveLens } from './state.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
 
 const DISMISSED_KEY = 'pa_d_dismissed_suggestions';
 
@@ -289,23 +290,7 @@ function handleKeydown(event) {
 }
 
 function foregroundLayerOpen() {
-    return Boolean(
-        document.querySelector('.typed-confirm')
-        || document.querySelector('#scopebox.open')
-        || document.querySelector('#help:not([hidden])')
-        || document.querySelector('#filter-popover:not([hidden])')
-        || document.querySelector('#import-scrim:not([hidden])')
-        || document.querySelector('#collection-picker')
-        || document.querySelector('#collection-pop-menu:not([hidden])')
-        || document.querySelector('#grid-pop-menu:not([hidden])')
-        || document.querySelector('#export-pop-menu:not([hidden])')
-        || document.querySelector('#folder-pop-menu:not([hidden])')
-        || document.querySelector('#source-pop-menu:not([hidden])')
-                || document.querySelector('#deliver-overlay:not([hidden])')
-        || document.querySelector('#drawer-scrim:not([hidden])')
-        || document.querySelector('.person-card.menu-open')
-        || document.querySelector('#people-merge-pop'),
-    );
+    return registeredForegroundLayerOpen('suggestions');
 }
 
 export function mountSuggestions() {

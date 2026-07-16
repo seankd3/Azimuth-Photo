@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core.path_groups import safe_commonpath
 from core.runtime_paths import resolve_runtime_paths
 from core.source_files import inspect_source_file
 from data import connection
@@ -259,6 +260,35 @@ async def _confirmed_candidates(
     return confirmed
 
 
+def _path_under_root(path: str, root: str) -> bool:
+    try:
+        real_root = os.path.realpath(root)
+        return safe_commonpath((real_root, os.path.realpath(path))) == real_root
+    except (OSError, ValueError):
+        return False
+
+
+async def _catalog_source_root(db_path: str, image_id: int, content_hash: str) -> str:
+    """Resolve the source root for a journal line that predates source_path journaling."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (
+            await conn.execute(
+                """
+                SELECT s.path AS source_path
+                FROM images i
+                JOIN catalog_sources s ON s.id = i.source_id
+                WHERE i.id = ? AND i.content_hash = ?
+                """,
+                (image_id, content_hash),
+            )
+        ).fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    return str(row["source_path"] or "") if row else ""
+
+
 async def recover_incomplete_deletions(db_path: str, *, log_path: Path | None = None) -> int:
     path = log_path or deletion_log_path()
     if not path.is_file():
@@ -290,8 +320,19 @@ async def recover_incomplete_deletions(db_path: str, *, log_path: Path | None = 
         # deletion. If the source root itself is absent (unplugged card/drive), the
         # file's absence is meaningless and must never be marked remote -- that would
         # hide a photo still physically on disk once the volume returns.
+        # Legacy journal lines predate source_path journaling; resolve the root from
+        # the catalog so they get the same protection instead of silently skipping it.
         source_path = str(event.get("source_path") or "")
-        if source_path and not await run_sync_work(os.path.isdir, source_path):
+        if not source_path:
+            source_path = await _catalog_source_root(db_path, image_id, content_hash)
+        # No resolvable root, or an offline root, means the file's absence proves
+        # nothing -- leave the line pending in the journal for a later, online run.
+        if not source_path or not await run_sync_work(os.path.isdir, source_path):
+            continue
+        # A root can only vouch for paths inside it: if the source was remapped
+        # elsewhere since the journal line was written, the old path's absence is
+        # equally meaningless -- refuse rather than hide a photo.
+        if not await run_sync_work(_path_under_root, filepath, source_path):
             continue
         state, _file_stat = await run_sync_work(inspect_source_file, filepath, source_path)
         if state != "missing":

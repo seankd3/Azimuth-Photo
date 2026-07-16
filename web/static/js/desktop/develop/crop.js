@@ -7,6 +7,16 @@ const HANDLES = [
 ];
 
 const clamp = (value, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+const ASPECTS = {
+    Original: null,
+    '1:1': 1,
+    '4:5': 4 / 5,
+    '5:7': 5 / 7,
+    '2:3': 2 / 3,
+    '16:9': 16 / 9,
+    Free: null,
+};
+const OVERLAYS = ['thirds', 'golden', 'diagonal'];
 
 export class CropController {
     constructor({ stage, canvas, overlay, controls, onChange }) {
@@ -18,12 +28,13 @@ export class CropController {
         this.settings = {};
         this.active = false;
         this.straightening = false;
+        this.overlayMode = 0;
         this.overlay.innerHTML = '<div class="develop-crop-shade"></div><div class="develop-crop-frame">'
             + '<i class="crop-grid-v one"></i><i class="crop-grid-v two"></i><i class="crop-grid-h one"></i><i class="crop-grid-h two"></i>'
             + HANDLES.map(([name, tip]) => `<button class="crop-handle ${name}" data-handle="${name}" data-tip="${tip}" aria-label="${tip}"></button>`).join('')
             + '</div><div class="develop-straight-line" hidden></div>';
         this.controls.innerHTML = '<button class="develop-crop-toggle" data-tip="Open crop overlay" aria-pressed="false">Crop & Straighten</button>'
-            + '<label class="develop-crop-control"><span>Aspect</span><select data-crop-aspect data-tip="Crop aspect ratio" aria-label="Crop aspect ratio"><option>Original</option><option>1:1</option><option>4:5</option><option>16:9</option><option>Free</option></select></label>'
+            + '<label class="develop-crop-control"><span>Aspect</span><select data-crop-aspect data-tip="Crop aspect ratio; hold Shift while dragging for freeform" aria-label="Crop aspect ratio"><option>Original</option><option>1:1</option><option>4:5</option><option>5:7</option><option>2:3</option><option>16:9</option><option>Free</option></select></label>'
             + '<label class="develop-crop-control"><span>Angle</span><input data-crop-angle type="range" min="-45" max="45" step="0.1" value="0" data-tip="Crop angle" aria-label="Crop angle"><output>0.0°</output></label>'
             + '<button data-straighten data-tip="Drag a horizon line on the photo" aria-pressed="false">Straighten line</button>'
             + '<button data-crop-reset data-tip="Reset crop and angle">Reset Crop</button>';
@@ -67,7 +78,7 @@ export class CropController {
         this.overlay.hidden = !this.active;
         this.stage.classList.toggle('crop-active', this.active);
         this.controls.querySelector('.develop-crop-toggle').setAttribute('aria-pressed', String(this.active));
-        if (this.active) requestAnimationFrame(() => this.syncOverlay());
+        if (this.active) requestAnimationFrame(() => { this.updateOverlayGrid(); this.syncOverlay(); });
     }
 
     setSettings(settings) {
@@ -104,6 +115,33 @@ export class CropController {
         frame.style.transform = `rotate(${numberSetting(this.settings, 'CropAngle')}deg)`;
     }
 
+    cycleOverlay() {
+        this.overlayMode = (this.overlayMode + 1) % OVERLAYS.length;
+        this.updateOverlayGrid();
+    }
+
+    updateOverlayGrid() {
+        const frame = this.overlay.querySelector('.develop-crop-frame');
+        const mode = OVERLAYS[this.overlayMode];
+        frame.classList.remove(...OVERLAYS.map((name) => `crop-overlay-${name}`));
+        frame.classList.add(`crop-overlay-${mode}`);
+        frame.style.backgroundImage = '';
+        const lines = [...frame.querySelectorAll('.crop-grid-v, .crop-grid-h')];
+        for (const line of lines) {
+            line.hidden = false;
+            line.style.cssText = '';
+        }
+        if (mode === 'golden') {
+            frame.querySelector('.crop-grid-v.one').style.left = '38.2%';
+            frame.querySelector('.crop-grid-v.two').style.left = '61.8%';
+            frame.querySelector('.crop-grid-h.one').style.top = '38.2%';
+            frame.querySelector('.crop-grid-h.two').style.top = '61.8%';
+        } else if (mode === 'diagonal') {
+            for (const line of lines) line.hidden = true;
+            frame.style.backgroundImage = 'linear-gradient(to bottom right, transparent calc(50% - .5px), rgba(255,255,255,.48) 50%, transparent calc(50% + .5px)), linear-gradient(to bottom left, transparent calc(50% - .5px), rgba(255,255,255,.48) 50%, transparent calc(50% + .5px))';
+        }
+    }
+
     beginHandle(event, handle) {
         event.preventDefault();
         event.stopPropagation();
@@ -120,7 +158,7 @@ export class CropController {
             if (handle.includes('e')) result.right = clamp(start.right + dx, result.left + .02, 1);
             if (handle.includes('n')) result.top = clamp(start.top + dy, 0, result.bottom - .02);
             if (handle.includes('s')) result.bottom = clamp(start.bottom + dy, result.top + .02, 1);
-            this.commitCrop(result, 'Crop');
+            this.commitCrop(next.shiftKey ? result : this.lockAspect(result, handle, dx, dy), 'Crop');
         };
         const up = () => {
             event.currentTarget.removeEventListener('pointermove', move);
@@ -139,12 +177,52 @@ export class CropController {
         this.syncOverlay();
     }
 
+    aspectRatio() {
+        const preset = this.controls.querySelector('[data-crop-aspect]').value;
+        if (preset === 'Free') return null;
+        return ASPECTS[preset] || this.canvasBox().width / Math.max(1, this.canvasBox().height);
+    }
+
+    lockAspect(crop, handle, dx, dy) {
+        const target = this.aspectRatio();
+        if (!target) return crop;
+        const box = this.canvasBox();
+        const ratio = target / (box.width / Math.max(1, box.height));
+        const rawWidth = crop.right - crop.left;
+        const rawHeight = crop.bottom - crop.top;
+        const horizontal = handle === 'e' || handle === 'w'
+            || (handle.length === 2 && Math.abs(dx) >= Math.abs(dy * ratio));
+        let width = horizontal ? rawWidth : rawHeight * ratio;
+        let height = horizontal ? width / ratio : rawHeight;
+        const xAnchor = handle.includes('w') ? 'end' : (handle.includes('e') ? 'start' : 'center');
+        const yAnchor = handle.includes('n') ? 'end' : (handle.includes('s') ? 'start' : 'center');
+        const maxWidth = this.maxDimension(crop.left, crop.right, xAnchor);
+        const maxHeight = this.maxDimension(crop.top, crop.bottom, yAnchor);
+        const scale = Math.min(1, maxWidth / width, maxHeight / height);
+        width *= scale; height *= scale;
+        const [left, right] = this.placeDimension(crop.left, crop.right, width, xAnchor);
+        const [top, bottom] = this.placeDimension(crop.top, crop.bottom, height, yAnchor);
+        return { left, right, top, bottom };
+    }
+
+    maxDimension(start, end, anchor) {
+        if (anchor === 'start') return 1 - start;
+        if (anchor === 'end') return end;
+        return 2 * Math.min((start + end) / 2, 1 - (start + end) / 2);
+    }
+
+    placeDimension(start, end, size, anchor) {
+        if (anchor === 'start') return [start, start + size];
+        if (anchor === 'end') return [end - size, end];
+        const center = (start + end) / 2;
+        return [center - size / 2, center + size / 2];
+    }
+
     applyAspect(preset) {
         if (preset === 'Free') return;
         const box = this.canvasBox();
         const sourceRatio = box.width / Math.max(1, box.height);
-        const targets = { Original: sourceRatio, '1:1': 1, '4:5': .8, '16:9': 16 / 9 };
-        const target = targets[preset] || sourceRatio;
+        const target = ASPECTS[preset] || sourceRatio;
         const current = this.crop();
         const cx = (current.left + current.right) / 2;
         const cy = (current.top + current.bottom) / 2;

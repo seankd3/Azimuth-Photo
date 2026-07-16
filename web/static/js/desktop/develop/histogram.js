@@ -4,22 +4,103 @@ const CHANNELS = [
     { key: 2, color: '#5aa9ff' },
 ];
 
+const TONE_ZONES = [
+    { key: 'Blacks2012', label: 'Blacks', start: 0, end: .06, min: -100, max: 100 },
+    { key: 'Shadows2012', label: 'Shadows', start: .06, end: .25, min: -100, max: 100 },
+    { key: 'Exposure2012', label: 'Exposure', start: .25, end: .75, min: -5, max: 5 },
+    { key: 'Highlights2012', label: 'Highlights', start: .75, end: .94, min: -100, max: 100 },
+    { key: 'Whites2012', label: 'Whites', start: .94, end: 1, min: -100, max: 100 },
+];
+
+export function histogramZoneAtPosition(position) {
+    const normalized = Math.max(0, Math.min(1, position));
+    return TONE_ZONES.find((zone) => normalized < zone.end) || TONE_ZONES.at(-1);
+}
+
 export class DevelopHistogram {
-    constructor(host) {
+    constructor(host, { onClipToggle, onAdjust } = {}) {
         this.host = host;
+        this.onClipToggle = onClipToggle;
+        this.onAdjust = onAdjust || ((key, delta) => this.host.dispatchEvent(new CustomEvent('histogram:adjust', {
+            bubbles: true,
+            detail: { key, delta },
+        })));
         this.host.innerHTML = '<div class="develop-hist-wrap">'
             + '<button class="develop-clip develop-clip-shadow" data-tip="Shadow clipping" aria-label="Shadow clipping">◢</button>'
             + '<canvas class="develop-hist" width="288" height="112" aria-label="RGB histogram"></canvas>'
             + '<button class="develop-clip develop-clip-highlight" data-tip="Highlight clipping" aria-label="Highlight clipping">◣</button>'
             + '</div>';
+        for (const side of ['shadow', 'highlight']) {
+            const button = this.host.querySelector(`.develop-clip-${side}`);
+            button.addEventListener('click', () => {
+                const active = button.classList.toggle('active');
+                button.setAttribute('aria-pressed', String(active));
+                this.onClipToggle?.(side, active);
+            });
+        }
         this.canvas = this.host.querySelector('canvas');
         this.context = this.canvas.getContext('2d');
         this.sampleCanvas = document.createElement('canvas');
         this.sampleContext = this.sampleCanvas.getContext('2d', { willReadFrequently: true });
         this.lastUpdate = 0;
+        this.activeZone = null;
+        this.drag = null;
+        this.bindToneDrag();
+    }
+
+    bindToneDrag() {
+        this.canvas.addEventListener('pointermove', (event) => {
+            if (this.drag) this.adjustFromPointer(event);
+            else this.setActiveZone(this.zoneForEvent(event));
+        });
+        this.canvas.addEventListener('pointerleave', () => {
+            if (!this.drag) this.setActiveZone(null);
+        });
+        this.canvas.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            const zone = this.zoneForEvent(event);
+            event.preventDefault();
+            this.drag = { pointerId: event.pointerId, startX: event.clientX, zone };
+            this.canvas.setPointerCapture(event.pointerId);
+            this.setActiveZone(zone);
+        });
+        const finishDrag = (event) => {
+            if (!this.drag || event.pointerId !== this.drag.pointerId) return;
+            this.drag = null;
+            this.setActiveZone(this.zoneForEvent(event));
+        };
+        this.canvas.addEventListener('pointerup', finishDrag);
+        this.canvas.addEventListener('pointercancel', finishDrag);
+    }
+
+    zoneForEvent(event) {
+        const rect = this.canvas.getBoundingClientRect();
+        return histogramZoneAtPosition((event.clientX - rect.left) / Math.max(1, rect.width));
+    }
+
+    setActiveZone(zone) {
+        if (this.activeZone === zone) return;
+        this.activeZone = zone;
+        this.canvas.dataset.zone = zone?.key || '';
+        this.canvas.title = zone ? `${zone.label} — drag horizontally to adjust` : '';
+        this.canvas.setAttribute('aria-label', zone ? `${zone.label} histogram region — drag horizontally to adjust` : 'RGB histogram');
+        this.draw();
+    }
+
+    adjustFromPointer(event) {
+        const { zone, startX } = this.drag;
+        const width = Math.max(1, this.canvas.getBoundingClientRect().width);
+        const sensitivity = event.shiftKey ? .1 : 1;
+        const delta = (event.clientX - startX) / width * (zone.max - zone.min) * sensitivity;
+        this.onAdjust(zone.key, delta);
+    }
+
+    interactionActive() {
+        return Boolean(this.drag || this.host.ownerDocument.querySelector('.develop-slider.dragging'));
     }
 
     updateFromRenderer(renderer) {
+        if (this.interactionActive()) return;
         const now = performance.now();
         if (now - this.lastUpdate < 120) return;
         this.lastUpdate = now;
@@ -34,6 +115,14 @@ export class DevelopHistogram {
         this.update(this.sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data);
     }
 
+    setClipState(shadow, highlight) {
+        for (const [side, active] of [['shadow', shadow], ['highlight', highlight]]) {
+            const button = this.host.querySelector(`.develop-clip-${side}`);
+            button.classList.toggle('active', Boolean(active));
+            button.setAttribute('aria-pressed', String(Boolean(active)));
+        }
+    }
+
     setLoading(loading) {
         this.host.dataset.loading = String(Boolean(loading));
     }
@@ -45,7 +134,15 @@ export class DevelopHistogram {
             bins[1][bytes[i + 1]] += 1;
             bins[2][bytes[i + 2]] += 1;
         }
-        const peak = Math.max(1, ...bins.flatMap((values) => [...values.slice(1, 255)]));
+        this.bins = bins;
+        this.peak = Math.max(1, ...bins.flatMap((values) => [...values.slice(1, 255)]));
+        this.updateClipIndicators(bins, bytes.length / 4);
+        this.draw();
+    }
+
+    draw() {
+        const bins = this.bins || CHANNELS.map(() => new Uint32Array(256));
+        const peak = this.peak || 1;
         const ctx = this.context;
         const { width, height } = this.canvas;
         ctx.clearRect(0, 0, width, height);
@@ -68,8 +165,20 @@ export class DevelopHistogram {
         }
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
-        const total = Math.max(1, bytes.length / 4);
-        this.host.querySelector('.develop-clip-shadow').classList.toggle('clipped', bins.some((b) => b[0] / total > .01));
-        this.host.querySelector('.develop-clip-highlight').classList.toggle('clipped', bins.some((b) => b[255] / total > .01));
+        if (this.activeZone) {
+            const { start, end, label } = this.activeZone;
+            ctx.fillStyle = 'rgba(255,255,255,.14)';
+            ctx.fillRect(start * width, 0, (end - start) * width, height);
+            ctx.fillStyle = 'rgba(255,255,255,.82)';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, (start + end) / 2 * width, 15);
+        }
+    }
+
+    updateClipIndicators(bins, total) {
+        const sampleCount = Math.max(1, total);
+        this.host.querySelector('.develop-clip-shadow').classList.toggle('clipped', bins.some((b) => b[0] / sampleCount > .01));
+        this.host.querySelector('.develop-clip-highlight').classList.toggle('clipped', bins.some((b) => b[255] / sampleCount > .01));
     }
 }

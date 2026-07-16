@@ -1,7 +1,8 @@
 {
   "baseline_exposure": 0.39,
+  "baseline_exposure_offset": -0.05,
   "camera_model": "Canon EOS R5",
-  "content_hash": "e532803f87a4f8f2181f1b08c95771aace7296a0eb5ac71fc953dcf920f7aae0",
+  "content_hash": "b400ca8fabd320a72d42ed8b241c02588167b15a02c6acdde9919f81cab57ef2",
   "illuminants": {
     "calibration_illuminant1": 17,
     "calibration_illuminant2": 21
