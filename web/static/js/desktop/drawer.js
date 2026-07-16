@@ -171,7 +171,7 @@ function normalizeSettingValue(field, value) {
     return String(value == null ? '' : value);
 }
 
-async function applySetting(field, value, { patch = null, undoPatch = null } = {}) {
+async function applySetting(field, value, { patch = null, undoPatch = null, control = null } = {}) {
     const next = normalizeSettingValue(field, value);
     const previous = savedSettings[field];
     const payload = patch || { [field]: next };
@@ -194,7 +194,8 @@ async function applySetting(field, value, { patch = null, undoPatch = null } = {
         },
     });
     renderActivity();
-    renderCurrentSystemSurface();
+    if (control && document.activeElement === control) patchSettingSurface(field);
+    else renderCurrentSystemSurface();
     if (field === 'publish_dir' && publishReturn && String(next).trim()) {
         showToast('Publishing folder saved');
         returnToPublish();
@@ -843,9 +844,16 @@ function renderMetadataSettings() {
 function publishingStatusNote() {
     const folder = String(settingValue('publish_dir') || '').trim();
     if (!folder) {
-        return '<div class="setting-status warn">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
+        return '<div class="setting-status warn" data-setting-status="publishing">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
     }
-    return `<div class="setting-status">Writing galleries to <code>${esc(folder)}</code></div>`;
+    return `<div class="setting-status" data-setting-status="publishing">Writing galleries to <code>${esc(folder)}</code></div>`;
+}
+
+function publishingStatusLine() {
+    const folder = String(settingValue('publish_dir') || '').trim();
+    return folder
+        ? `Writing galleries to ${folder}`
+        : 'Publishing is off until a Gallery folder is set. Empty folder disables Publish.';
 }
 
 function updateDrawerContext() {
@@ -1056,6 +1064,16 @@ function patchDrawerStatus(workerGenerations = null) {
     if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
 }
 
+function patchSettingSurface(field) {
+    patchDrawerStatus();
+    if (field === 'publish_dir') {
+        const body = systemSurfaceRender
+            ? document.getElementById('system-lens-content')
+            : document.getElementById('drawer-body');
+        if (body) patchNodeText(body, '[data-setting-status="publishing"]', publishingStatusLine());
+    }
+}
+
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
     const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices] = await Promise.all([
@@ -1209,9 +1227,9 @@ function bindSettingInputs(body) {
                 return;
             }
             const patch = field === 'caption_model_preset' ? captionPresetConfig(value) : null;
-            return applySetting(field, value, { patch });
+            return applySetting(field, value, { patch, control: input });
         };
-        if (input.type === 'text') {
+        if (input.type === 'text' || input.type === 'number') {
             input.addEventListener('input', () => {
                 const pending = settingTimers.get(input);
                 if (pending) clearTimeout(pending.timer);
