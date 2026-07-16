@@ -552,8 +552,10 @@ class LibraryTests(BackendTestCase):
         self.assertEqual([img["id"] for img in result["images"]], [visible_high, visible_low])
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 3)
+        self.assertEqual(result["pending_thumbnails"], 1)
         self.assertEqual(result["hidden_pending_thumbnails"], 1)
         self.assertNotIn(hidden, [img["id"] for img in result["images"]])
+        self.assertTrue(all(img["preview_ready"] for img in result["images"]))
 
         with unittest.mock.patch.dict(
             os.environ,
@@ -571,7 +573,9 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(satellite_result["hidden_pending_thumbnails"], 0)
         satellite_cards = {card["id"]: card for card in satellite_result["images"]}
         self.assertIn("thumb_url", satellite_cards[visible_high])
+        self.assertTrue(satellite_cards[visible_high]["preview_ready"])
         self.assertNotIn("thumb_url", satellite_cards[hidden])
+        self.assertFalse(satellite_cards[hidden]["preview_ready"])
 
     async def test_all_photos_includes_stale_hub_mirror_rows_across_dates(self):
         """All Photos must surface hub:// mirror rows even when denormalized counts drifted to 0.

@@ -439,18 +439,23 @@ async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> l
     return cards
 
 
-async def _satellite_thumb_placeholders(cards: list[dict]) -> list[dict]:
-    if not satellite.is_satellite_mode() or not cards:
+async def _attach_preview_state(cards: list[dict]) -> list[dict]:
+    if not cards:
         return cards
     cached_ids = await _configured(_get_cached_image_ids)(
         [int(card["id"]) for card in cards],
         "sm",
         _configured_cache_root(),
     )
-    return [
-        dict(card) if int(card["id"]) in cached_ids else {key: value for key, value in card.items() if key != "thumb_url"}
-        for card in cards
-    ]
+    result = []
+    for card in cards:
+        ready = int(card["id"]) in cached_ids
+        data = dict(card)
+        data["preview_ready"] = ready
+        if not ready:
+            data.pop("thumb_url", None)
+        result.append(data)
+    return result
 
 
 def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
@@ -908,7 +913,7 @@ async def api_rankings_impl(
         )
         page = all_results[offset:offset + limit]
         page = await _attach_stack_counts(page, stacks_mode)
-        page = await _satellite_thumb_placeholders(page)
+        page = await _attach_preview_state(page)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -970,7 +975,7 @@ async def api_rankings_impl(
         all_results.sort(key=lambda x: x["similarity"], reverse=(sort == "similarity"))
         page = all_results[offset:offset + limit]
         page = await _attach_stack_counts(page, stacks_mode)
-        page = await _satellite_thumb_placeholders(page)
+        page = await _attach_preview_state(page)
         if page:
             _configured_schedule_thumbnail_prefetch(
                 [{"id": row["id"], "filepath": ""} for row in page],
@@ -1250,7 +1255,7 @@ async def api_rankings_impl(
             kwargs["date_group"] = app_helpers.date_group_for_image(data)
         result.append(app_helpers.image_card(data, "sm", **kwargs))
     result = await _attach_stack_counts(result, stacks_mode)
-    result = await _satellite_thumb_placeholders(result)
+    result = await _attach_preview_state(result)
     response = {
         "images": result,
         **response_helpers.visibility_counts(total_images, visible_images),

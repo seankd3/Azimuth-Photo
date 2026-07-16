@@ -96,10 +96,13 @@ def image_card(
 def visibility_counts(total_images: int, visible_images: int) -> dict:
     total = max(0, int(total_images or 0))
     visible = max(0, int(visible_images or 0))
+    pending = max(total - visible, 0)
     return {
         "visible_images": visible,
         "total_images": total,
-        "hidden_pending_thumbnails": max(total - visible, 0),
+        "pending_thumbnails": pending,
+        # Compatibility for clients polling before the placeholder-card rollout.
+        "hidden_pending_thumbnails": pending,
     }
 
 

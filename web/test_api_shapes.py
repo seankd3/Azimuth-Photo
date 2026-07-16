@@ -32,6 +32,7 @@ CARD_KEYS = {
     "status",
     "flag",
     "aspect_ratio",
+    "preview_ready",
     "date_taken",
     "date_source",
     "camera_make",
@@ -45,7 +46,6 @@ CARD_KEYS = {
     "latitude",
     "longitude",
     "created_at",
-    "thumb_url",
 }
 EXPORT_FIELD_NAMES = [
     "rank",
@@ -290,7 +290,10 @@ class ApiShapeTests(unittest.TestCase):
 
     def assertCardShape(self, card, thumb_size="sm", *, contextual=()):
         self.assertTrue(CARD_KEYS.issubset(card.keys()))
-        self.assertEqual(card["thumb_url"], f"/api/thumb/{thumb_size}/{card['id']}")
+        if card["preview_ready"]:
+            self.assertEqual(card["thumb_url"], f"/api/thumb/{thumb_size}/{card['id']}")
+        else:
+            self.assertNotIn("thumb_url", card)
         for key in ("similarity", "date_group"):
             if key in contextual:
                 self.assertIn(key, card)
@@ -304,7 +307,9 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(data["visible_images"], 3)
         self.assertEqual(data["total_images"], 4)
+        self.assertEqual(data["pending_thumbnails"], 1)
         self.assertEqual(data["hidden_pending_thumbnails"], 1)
+        self.assertTrue(all(card["preview_ready"] for card in data["images"]))
         for card in data["images"]:
             self.assertCardShape(card)
 
@@ -318,6 +323,7 @@ class ApiShapeTests(unittest.TestCase):
 
         self.assertEqual(satellite["visible_images"], 4)
         self.assertEqual(satellite["total_images"], 4)
+        self.assertEqual(satellite["pending_thumbnails"], 0)
         self.assertEqual(satellite["hidden_pending_thumbnails"], 0)
         self.assertEqual(len(satellite["images"]), 4)
 
