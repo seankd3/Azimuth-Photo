@@ -28,6 +28,11 @@
     html, body { min-height: 100%; margin: 0; background: var(--bg); color: var(--text); }
     body { padding: max(28px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(32px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
     .shell { width: min(1420px, 100%); margin: 0 auto; }
+    .tree-back { display: inline-block; margin: 0 0 16px; color: var(--accent); text-decoration: none; font-size: 14px; }
+    .child-strip { display: flex; gap: 10px; overflow-x: auto; padding: 16px 0 2px; }
+    .child-card { flex: 0 0 180px; color: var(--text); text-decoration: none; border: 1px solid var(--line); background: rgba(255,255,255,.03); }
+    .child-card img { display: block; width: 100%; aspect-ratio: 1.6; object-fit: cover; background: var(--photo-bg); }
+    .child-card span { display: block; padding: 9px; font-size: 13px; }
     .cover-hero { position: relative; min-height: min(52vw, 520px); margin-bottom: 20px; display: grid; align-items: end; overflow: hidden; background: var(--photo-bg); }
     .cover-hero img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .cover-hero::after { content: ""; position: absolute; inset: 40% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.82)); }
@@ -147,6 +152,7 @@
         </div>
       </section>
     {% else %}
+      {% if parent_gallery %}<a class="tree-back" href="{{ parent_gallery.url }}">↑ back to {{ parent_gallery.name }}</a>{% endif %}
       {% if cover_image %}
       <section class="cover-hero">
         <img src="{{ cover_image }}" alt="">
@@ -182,6 +188,7 @@
         <div class="hint-chip" id="fav-hint" hidden>Tap ♡ to pick your favorites</div>
         {% endif %}
       </header>
+      {% if child_galleries %}<nav class="child-strip" aria-label="Child galleries">{% for child in child_galleries %}<a class="child-card" href="{{ child.url }}">{% if child.cover %}<img src="{{ child.cover }}" alt="">{% endif %}<span>{{ child.name }} · {{ child.count }} photo{% if child.count != 1 %}s{% endif %}</span></a>{% endfor %}</nav>{% endif %}
       {% if favorites_enabled|default(not public_static|default(false)) %}
       <section class="client-panel" aria-label="Favorites status">
         <div class="pick-status" id="pick-status">Pick favorites as you browse.</div>

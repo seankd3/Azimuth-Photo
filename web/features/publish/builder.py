@@ -68,6 +68,7 @@ async def build_public_gallery_bundle(
     collection_image_ids=None,
     resolve_smart_image_ids=None,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     collection = await get_collection(int(collection_id), limit=1, offset=0)
     if collection is None:
@@ -167,6 +168,8 @@ async def build_public_gallery_bundle(
             brand=brand,
             gallery_json=gallery_json,
             og_image=(f"{str(settings.get_settings().get('publish_site_base_url') or '').rstrip('/')}/g/{slug}/img/{gallery_images[0]['id']}.jpg" if gallery_images else ""),
+            parent_gallery=(navigation or {}).get("parent"),
+            child_galleries=(navigation or {}).get("children", []),
         )
         await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
         bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)
@@ -193,6 +196,7 @@ async def build_published_node_bundle(
     destination: str | Path,
     templates: Jinja2Templates,
     thumbnails: Any,
+    navigation: dict | None = None,
 ) -> BundleSummary:
     """Build one destination node with the legacy gallery renderer."""
 
@@ -218,6 +222,7 @@ async def build_published_node_bundle(
         get_images_by_ids=get_images_by_ids,
         collection_image_ids=collection_image_ids,
         thumbnails=thumbnails,
+        navigation=navigation,
     )
 
 
@@ -246,12 +251,19 @@ async def export_website_tree(
         images_by_node[node_id] = images
         node_path = parent_path / node["slug"]
         expected_paths.add(node_path.relative_to(root))
+        child_cards = []
+        for child in children.get(node_id, []):
+            child_images = await published_nodes.node_images(db_path, int(child["id"])) or []
+            cover_id = int(child_images[0]["id"]) if child_images else None
+            child_cards.append({"name": child["title"], "count": len(child_images), "url": f"./{child['slug']}/", "cover": f"./{child['slug']}/thumb/sm/{cover_id}.jpg" if cover_id else ""})
+        parent = next((item for item in tree["nodes"] if item["id"] == node.get("parent_id")), None)
         await build_published_node_bundle(
             node=node,
             images=images,
             destination=node_path,
             templates=templates,
             thumbnails=thumbnails,
+            navigation={"parent": {"name": parent["title"], "url": "../"} if parent else None, "children": child_cards},
         )
         for child in children.get(node_id, []):
             await write_subtree(child, node_path)
