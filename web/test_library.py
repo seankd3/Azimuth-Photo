@@ -1706,11 +1706,14 @@ class LibraryTests(BackendTestCase):
         restored = await self._image_row(rows[1]["id"])
         self.assertIsNone(restored["missing_at"])
 
-    async def test_rescan_leaves_virtual_copy_file_metadata_untouched(self):
+    async def test_rescan_cascades_master_availability_to_virtual_copy_only(self):
         source = await self._source("scan-vc-source")
         filepath = os.path.join(source["path"], "master.jpg")
+        anchor_path = os.path.join(source["path"], "anchor.jpg")
         with open(filepath, "wb") as handle:
             handle.write(b"master")
+        with open(anchor_path, "wb") as handle:
+            handle.write(b"anchor")
         await scanner.scan_folder(source["path"], source_id=source["id"])
 
         conn = await db.get_db()
@@ -1722,7 +1725,7 @@ class LibraryTests(BackendTestCase):
             cursor = await conn.execute(
                 "INSERT INTO images "
                 "(source_id, filename, filepath, status, file_ext, file_size, file_modified_at, missing_at, vc_of) "
-                "VALUES (?, 'copy-name.jpg', ?, 'kept', '.copy', 999, 1, 42, ?)",
+                "VALUES (?, 'copy-name.jpg', ?, 'kept', '.copy', 999, 1, NULL, ?)",
                 (source["id"], filepath, master["id"]),
             )
             copy_id = cursor.lastrowid
@@ -1730,14 +1733,29 @@ class LibraryTests(BackendTestCase):
         finally:
             await conn.close()
 
+        os.remove(filepath)
         await scanner.scan_folder(source["path"], source_id=source["id"])
 
+        missing_master = await self._image_row(master["id"])
         copy = await self._image_row(copy_id)
+        self.assertIsNotNone(missing_master["missing_at"])
+        self.assertEqual(copy["missing_at"], missing_master["missing_at"])
         self.assertEqual(copy["filename"], "copy-name.jpg")
         self.assertEqual(copy["file_ext"], ".copy")
         self.assertEqual(copy["file_size"], 999)
         self.assertEqual(copy["file_modified_at"], 1.0)
-        self.assertEqual(copy["missing_at"], 42.0)
+
+        with open(filepath, "wb") as handle:
+            handle.write(b"master")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        restored_copy = await self._image_row(copy_id)
+        self.assertIsNone((await self._image_row(master["id"]))["missing_at"])
+        self.assertIsNone(restored_copy["missing_at"])
+        self.assertEqual(restored_copy["filename"], "copy-name.jpg")
+        self.assertEqual(restored_copy["file_ext"], ".copy")
+        self.assertEqual(restored_copy["file_size"], 999)
+        self.assertEqual(restored_copy["file_modified_at"], 1.0)
 
     async def test_rescan_hashes_all_rematch_candidates_before_writing(self):
         source = await self._source("scan-rematch-lock-source")

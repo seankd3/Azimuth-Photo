@@ -528,6 +528,14 @@ async def mark_source_missing_files_on_conn(
         ")",
         (missing_at, source_id),
     )
+    await conn.execute(
+        "UPDATE images SET missing_at = ("
+        "  SELECT master.missing_at FROM images AS master WHERE master.id = images.vc_of"
+        ") WHERE vc_of IN ("
+        "  SELECT id FROM images WHERE source_id = ? AND vc_of IS NULL"
+        ")",
+        (source_id,),
+    )
     await conn.execute("DELETE FROM source_scan_seen")
     await conn.execute("DELETE FROM source_scan_excluded")
 
