@@ -1330,6 +1330,7 @@ class LibraryTests(BackendTestCase):
                     ("2025-03-01 22:00:00", march),
                 ],
             )
+            await conn.execute("UPDATE images SET elo = ? WHERE id = ?", (1700, january_first))
             await conn.commit()
         finally:
             await conn.close()
@@ -1338,9 +1339,9 @@ class LibraryTests(BackendTestCase):
         response = await library_routes.api_date_histogram()
 
         self.assertEqual(response["months"], [
-            {"month": "2025-03", "count": 1},
-            {"month": "2025-02", "count": 1},
-            {"month": "2025-01", "count": 2},
+            {"month": "2025-03", "count": 1, "cover_id": march},
+            {"month": "2025-02", "count": 1, "cover_id": february},
+            {"month": "2025-01", "count": 2, "cover_id": january_first},
         ])
         self.assertEqual(response["undated"], 1)
         self.assertEqual(response["total"], 5)
@@ -1361,7 +1362,7 @@ class LibraryTests(BackendTestCase):
 
         response = await library_routes.api_date_histogram(stacks="expanded")
 
-        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
+        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1, "cover_id": image_id}])
         self.assertEqual(response["total"], 1)
 
     async def test_date_histogram_caches_and_clears_with_facet_invalidation(self):

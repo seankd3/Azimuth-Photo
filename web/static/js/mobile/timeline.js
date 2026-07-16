@@ -448,7 +448,12 @@ function renderMonths() {
         const card = document.createElement('button');
         card.className = 'm-month-card';
         card.setAttribute('aria-label', `${monthLabel(entry.key)}, ${entry.count} photos`);
-        card.innerHTML = `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
+        const coverId = Number(entry.coverId) || 0;
+        if (coverId) card.classList.add('has-cover');
+        card.innerHTML = (coverId
+            ? `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`
+            : '')
+            + `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
             + `<span class="num">${fmtInt(entry.count)} photos</span>`;
         card.addEventListener('click', () => {
             setZoom(0);
@@ -612,7 +617,7 @@ async function loadHistogram() {
     monthOffsets = [];
     let offset = 0;
     for (const m of data.months || []) {
-        monthOffsets.push({ key: m.month, offset, count: m.count });
+        monthOffsets.push({ key: m.month, offset, count: m.count, coverId: m.cover_id });
         offset += m.count;
     }
     if (data.undated > 0) {

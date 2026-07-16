@@ -1394,21 +1394,26 @@ async def date_histogram(
             month_index_available=month_index_available,
         )
         select = (
-            "SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count "
-            f"FROM {image_source} "
-            "JOIN catalog_sources s ON s.id = i.source_id WHERE "
+            "SELECT month, COUNT(*) AS count, "
+            "MAX(CASE WHEN month_rank = 1 THEN id END) AS cover_id FROM ("
+            "SELECT i.id, substr(i.date_taken, 1, 7) AS month, "
+            "ROW_NUMBER() OVER (PARTITION BY substr(i.date_taken, 1, 7) "
+            "ORDER BY i.elo DESC, i.id DESC) AS month_rank "
+            f"FROM {image_source} JOIN catalog_sources s ON s.id = i.source_id WHERE "
         )
-        buckets: dict[str, int] = {}
+        buckets: dict[str, dict] = {}
         undated = 0
 
         async def accumulate(where: str, query_params: list) -> None:
             nonlocal undated
-            cursor = await conn.execute(select + where + " GROUP BY month", query_params)
+            cursor = await conn.execute(select + where + ") GROUP BY month", query_params)
             for row in await cursor.fetchall():
                 month = row["month"]
                 count = int(row["count"] or 0)
                 if month and len(month) == 7:
-                    buckets[month] = buckets.get(month, 0) + count
+                    bucket = buckets.setdefault(month, {"count": 0, "cover_id": None})
+                    bucket["count"] += count
+                    bucket["cover_id"] = bucket["cover_id"] or row["cover_id"]
                 else:
                     undated += count
 
@@ -1424,13 +1429,13 @@ async def date_histogram(
             await accumulate(" AND ".join(conditions), list(params))
 
         months = [
-            {"month": month, "count": count}
-            for month, count in sorted(buckets.items(), reverse=True)
+            {"month": month, "count": bucket["count"], "cover_id": bucket["cover_id"]}
+            for month, bucket in sorted(buckets.items(), reverse=True)
         ]
         return {
             "months": months,
             "undated": undated,
-            "total": sum(buckets.values()) + undated,
+            "total": sum(bucket["count"] for bucket in buckets.values()) + undated,
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
