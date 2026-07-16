@@ -177,12 +177,10 @@ export function initSelection() {
     });
     document.getElementById('sel-reject').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'rejected');
     });
     document.getElementById('sel-clear-flags').addEventListener('click', () => {
         const imageIds = ids();
-        clearSelection();
         applyFlags(imageIds, 'unflagged');
     });
     document.getElementById('sel-collection').addEventListener('click', () => {
