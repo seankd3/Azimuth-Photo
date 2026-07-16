@@ -20,6 +20,7 @@ from features.publish.builder import BundleSummary, build_public_gallery_bundle
 from features.publish.deployer import (
     CommandResult,
     GalleryDeployer,
+    HookStatus,
     PublishConfig,
     PublishDeployError,
     default_command_runner,
@@ -518,11 +519,54 @@ class FakeDeployer:
         return SimpleNamespace(summary=None, last_commit=None, push_error=None, hook=None)
 
 
+class HookRetryDeployer:
+    def __init__(self, retry_hooks=()):
+        self.retry_hooks = list(retry_hooks)
+        self.retry_calls = 0
+        self.failed_hook = HookStatus(
+            configured=True,
+            command="deploy",
+            returncode=7,
+            output="site unavailable",
+            ran_at=time.time(),
+        )
+
+    async def publish(
+        self,
+        *,
+        slug,
+        title,
+        collection_id,
+        published_rows,
+        write_bundle,
+        persist_publish=None,
+        progress=None,
+    ):
+        if progress:
+            progress("hook")
+        summary = BundleSummary(slug, title, 1, "", "", 1, 1)
+        row = await asyncio.to_thread(persist_publish, summary, self.failed_hook)
+        return SimpleNamespace(summary=summary, last_commit=None, push_error=None, hook=self.failed_hook, publish_row=row)
+
+    async def revoke(self, *, slug, collection_id, published_rows, persist_revoke=None, progress=None):
+        if progress:
+            progress("hook")
+        hook = HookStatus(configured=True, command="deploy", returncode=0, ran_at=time.time())
+        if persist_revoke:
+            await asyncio.to_thread(persist_revoke, hook)
+        return SimpleNamespace(summary=None, last_commit=None, push_error=None, hook=hook)
+
+    async def retry_hook(self):
+        self.retry_calls += 1
+        return self.retry_hooks.pop(0)
+
+
 class PublishRouteTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.tasks = []
         publish_routes._jobs.clear()
+        publish_routes._scheduled_hook_retries.clear()
         templates = app_module.app.state.photoarchive_shell.templates
         self.cache = Path(self.tempdir.name) / "cache"
         self.cache.mkdir()
@@ -546,6 +590,20 @@ class PublishRouteTests(BackendTestCase):
             deployer=FakeDeployer(),
             track_background_task=lambda coro: self.tasks.append(coro),
         )
+
+    async def asyncTearDown(self):
+        for coro in self.tasks:
+            coro.close()
+        publish_routes._scheduled_hook_retries.clear()
+        await super().asyncTearDown()
+
+    async def _published_collection(self, name="Retry gallery"):
+        source = await self._source()
+        image_id = await self._image(source["id"], f"{name}.jpg")
+        return await db.create_collection(name=name, image_ids=[image_id])
+
+    async def _no_sleep(self, _seconds):
+        return None
 
     async def test_publish_routes_contract(self):
         source = await self._source()
@@ -649,3 +707,111 @@ class PublishRouteTests(BackendTestCase):
         self.assertNotIn(secret, job["error"])
         self.assertIn("Check the server log", job["error"])
         error_log.assert_called_once()
+
+    async def test_hook_failure_reports_retrying_with_exponential_backoff(self):
+        collection = await self._published_collection()
+        publish_routes._deployer = HookRetryDeployer()
+        publish_routes._start_job(collection["id"], "publishing", slug="retry-gallery", title="Retry gallery")
+
+        await publish_routes._run_publish_job(collection["id"], "retry-gallery", "Retry gallery")
+
+        job = publish_routes._jobs[collection["id"]]
+        row = await db.get_collection_publish(collection["id"])
+        self.assertEqual(job["state"], "hook_retrying")
+        self.assertEqual(job["legacy_state"], "hook_failed")
+        self.assertEqual(job["hook_failure_state"], "hook_failed")
+        self.assertTrue(job["retrying"])
+        self.assertEqual(job["attempts"], 1)
+        self.assertGreaterEqual(job["next_retry_at"] - time.time(), 29)
+        self.assertTrue(row["hook_pending"])
+        self.assertEqual(row["hook_attempts"], 1)
+        self.assertEqual(row["hook_pending_operation"], "publish")
+        self.assertTrue(job["publish"]["retrying"])
+        self.assertEqual(job["publish"]["next_retry_at"], job["next_retry_at"])
+
+    async def test_hook_retry_success_finalizes_and_clears_pending_flag(self):
+        collection = await self._published_collection()
+        deployer = HookRetryDeployer([
+            HookStatus(configured=True, command="deploy", returncode=0, ran_at=time.time()),
+        ])
+        publish_routes._deployer = deployer
+        publish_routes._start_job(collection["id"], "publishing", slug="retry-gallery", title="Retry gallery")
+
+        await publish_routes._run_publish_job(collection["id"], "retry-gallery", "Retry gallery")
+        retry = self.tasks.pop()
+        with unittest.mock.patch.object(publish_routes.asyncio, "sleep", self._no_sleep):
+            await retry
+
+        job = publish_routes._jobs[collection["id"]]
+        row = await db.get_collection_publish(collection["id"])
+        self.assertEqual(deployer.retry_calls, 1)
+        self.assertEqual(job["state"], "live")
+        self.assertFalse(job["retrying"])
+        self.assertFalse(row["hook_pending"])
+        self.assertEqual(row["hook_attempts"], 0)
+        self.assertEqual(row["hook_pending_operation"], "")
+
+    async def test_restart_resumes_pending_hook_retry_from_database(self):
+        collection = await self._published_collection("Restart retry")
+        await db.upsert_collection_publish(
+            collection_id=collection["id"],
+            slug="restart-retry",
+            title="Restart retry",
+            image_count=1,
+            bundle_bytes=1,
+            last_commit=None,
+            hook_exit_code=7,
+            hook_output="site unavailable",
+            hook_ran_at=time.time(),
+            hook_pending=True,
+            hook_attempts=2,
+            hook_next_retry_at=time.time() - 1,
+            hook_pending_operation="publish",
+        )
+        deployer = HookRetryDeployer([
+            HookStatus(configured=True, command="deploy", returncode=0, ran_at=time.time()),
+        ])
+        publish_routes._jobs.clear()
+        publish_routes._scheduled_hook_retries.clear()
+        publish_routes._deployer = deployer
+
+        await publish_routes.resume_pending_hook_retries()
+        retry = self.tasks.pop()
+        with unittest.mock.patch.object(publish_routes.asyncio, "sleep", self._no_sleep):
+            await retry
+
+        row = await db.get_collection_publish(collection["id"])
+        self.assertEqual(deployer.retry_calls, 1)
+        self.assertEqual(publish_routes._jobs[collection["id"]]["state"], "live")
+        self.assertFalse(row["hook_pending"])
+
+    async def test_user_revoke_supersedes_queued_publish_hook_retry(self):
+        collection = await self._published_collection("Supersede retry")
+        await db.upsert_collection_publish(
+            collection_id=collection["id"],
+            slug="supersede-retry",
+            title="Supersede retry",
+            image_count=1,
+            bundle_bytes=1,
+            last_commit=None,
+            hook_exit_code=7,
+            hook_output="site unavailable",
+            hook_ran_at=time.time(),
+            hook_pending=True,
+            hook_attempts=1,
+            hook_next_retry_at=time.time() + 30,
+            hook_pending_operation="publish",
+        )
+        deployer = HookRetryDeployer()
+        publish_routes._deployer = deployer
+        row = await db.get_collection_publish(collection["id"])
+        publish_routes._queue_hook_retry(row, legacy_state="hook_failed")
+
+        response = await publish_routes.api_revoke_collection_publish(collection["id"])
+        self.assertEqual(response.status_code, 202)
+        queued_retry, revoke = self.tasks
+        with unittest.mock.patch.object(publish_routes.asyncio, "sleep", self._no_sleep):
+            await asyncio.gather(queued_retry, revoke)
+
+        self.assertEqual(deployer.retry_calls, 0)
+        self.assertIsNone(await db.get_collection_publish(collection["id"]))
