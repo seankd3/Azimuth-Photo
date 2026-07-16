@@ -53,6 +53,7 @@ let images = [];
 let startOffset = 0;
 let histogram = { months: [], undated: 0, total: 0 };
 let monthOffsets = [];
+let daySectionOffsets = [];
 let zoomIdx = 0;                 // 0 = 3-col · 1 = 5-col dense · 2 = month list
 let generation = 0;
 let loadingNext = false;
@@ -325,6 +326,7 @@ function appendImages(batch) {
     timeline.appendChild(frag);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
 }
 
 function firstVisibleCell() {
@@ -358,6 +360,7 @@ function trimWindowFromStart() {
         if (!remaining) break;
     }
     reindexCells();
+    cacheDaySectionOffsets();
     const nextAnchor = anchorId && timeline.querySelector(`.mcell[data-id="${anchorId}"]`);
     if (nextAnchor) pane.scrollTop += nextAnchor.getBoundingClientRect().top - oldTop;
 }
@@ -378,6 +381,7 @@ function renderFixedImages(batch) {
     timeline.appendChild(sec);
     timeline.classList.toggle('selmode', selState.mode);
     updateDayChecks();
+    cacheDaySectionOffsets();
 }
 
 function prependImages(batch) {
@@ -411,6 +415,14 @@ function prependImages(batch) {
     pane.scrollTop += pane.scrollHeight - prevHeight;
     reindexCells();
     updateDayChecks();
+    cacheDaySectionOffsets();
+}
+
+function cacheDaySectionOffsets() {
+    daySectionOffsets = [...timeline.querySelectorAll('.m-day')].map((section) => ({
+        top: section.offsetTop,
+        month: section.dataset.month,
+    }));
 }
 
 /* ---------- month (zoomed-out) view ---------- */
@@ -447,6 +459,7 @@ function renderMonths() {
         wrap.innerHTML = '<div class="ms-empty" style="grid-column:span 2">No photos yet. Add a source in the desktop app.</div>';
     }
     timeline.appendChild(wrap);
+    daySectionOffsets = [];
 }
 
 /* ---------- zoom levels ---------- */
@@ -561,18 +574,19 @@ export function updateMonthPill(show) {
         pill.classList.remove('on');
         return;
     }
-    const secs = timeline.querySelectorAll('.m-day');
-    if (!secs.length) {
+    if (!daySectionOffsets.length) {
         pill.classList.remove('on');
         return;
     }
     const top = pane.scrollTop + 70;
-    let cur = secs[0];
-    for (const s of secs) {
-        if (s.offsetTop <= top) cur = s;
-        else break;
+    let low = 0;
+    let high = daySectionOffsets.length - 1;
+    while (low < high) {
+        const mid = Math.ceil((low + high) / 2);
+        if (daySectionOffsets[mid].top <= top) low = mid;
+        else high = mid - 1;
     }
-    pill.textContent = monthLabel(cur.dataset.month);
+    pill.textContent = monthLabel(daySectionOffsets[low].month);
     if (show) {
         pill.classList.add('on');
         clearTimeout(pillTimer);
