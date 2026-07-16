@@ -403,20 +403,7 @@ async function hydrateFirstRunEmpty(request) {
             else hydrateFirstRunEmpty(request);
         }, 1500);
     } else if (pendingThumbs > 0) {
-        // Photos exist but previews are still building — never present that as
-        // an empty or broken library.
-        flow.innerHTML = emptyStateHtml({
-            title: 'Preparing your photos',
-            detail: `Building previews for ${pendingThumbs.toLocaleString('en-US')} photo${pendingThumbs === 1 ? '' : 's'} — they’ll appear here as they’re ready.`,
-            actions: [],
-            iconName: 'loader',
-        });
-        emptyScanTimer = window.setTimeout(async () => {
-            if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
-            const page = await loadScopePage({ limit: 1, offset: 0 });
-            if (page && (page.images || []).length) loadFirstPage();
-            else hydrateFirstRunEmpty(request);
-        }, 2000);
+        renderPreparingState(pendingThumbs);
     } else {
         flow.innerHTML = emptyStateHtml({
             title: 'No photos found',
@@ -430,6 +417,19 @@ async function hydrateFirstRunEmpty(request) {
     }
     flow.querySelector('[data-empty-action="add-source"]')?.addEventListener('click', () => document.getElementById('system-btn')?.click());
     flow.querySelector('[data-empty-action="import"]')?.addEventListener('click', () => emit('import:open'));
+}
+
+function renderPreparingState(pending) {
+    // Photos exist in this scope but previews are still building — say so and
+    // keep polling instead of presenting an empty or broken view.
+    const flow = document.getElementById('grid-flow');
+    flow.innerHTML = emptyStateHtml({
+        title: 'Preparing your photos',
+        detail: `Building previews for ${pending.toLocaleString('en-US')} photo${pending === 1 ? '' : 's'} — they’ll appear here as they’re ready.`,
+        actions: [],
+        iconName: 'loader',
+    });
+    updateThumbnailPoll(pending);
 }
 
 function renderEmptyState() {
@@ -570,7 +570,9 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     }
     document.getElementById('grid-error').innerHTML = '';
     document.getElementById('grid-end').hidden = !done || next.length === 0;
-    if (next.length === 0 && done) renderEmptyState();
+    const pendingPreviewCount = Number(data.hidden_pending_thumbnails) || 0;
+    if (next.length === 0 && done && pendingPreviewCount > 0) renderPreparingState(pendingPreviewCount);
+    else if (next.length === 0 && done) renderEmptyState();
     else {
         updateThumbnailPoll(data.hidden_pending_thumbnails);
         const chunkEl = direction === 'before'
