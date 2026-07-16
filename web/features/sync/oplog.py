@@ -12,6 +12,7 @@ from typing import Any
 
 from data import connection
 from features.sync import family_clock
+from features.sync.develop_merge import preserve_local_rating
 from features.sync.validation import validate_content_hash
 
 
@@ -258,16 +259,10 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
         settings_value = payload.get("settings")
         if not isinstance(settings_value, dict):
             raise ValueError("develop payload must contain full settings")
-        settings_value = dict(settings_value)
         row = await (await conn.execute(
             "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
         )).fetchone()
-        try:
-            current_settings = json.loads(row["settings"]) if row else {}
-        except (TypeError, ValueError, json.JSONDecodeError):
-            current_settings = {}
-        if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
-            settings_value["_lr_rating"] = current_settings["_lr_rating"]
+        settings_value = preserve_local_rating(settings_value, row["settings"] if row else None)
         updated_at = str(payload.get("updated_at") or _iso_timestamp(float(entry["ts"])))
         await conn.execute(
             "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, ?, ?) "
