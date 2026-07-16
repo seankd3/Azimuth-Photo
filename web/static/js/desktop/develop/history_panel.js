@@ -56,6 +56,7 @@ export function mountHistoryPanel(host, api) {
     const historyEmpty = root.querySelector('[data-history-empty]');
     let history = [];
     let addPopover = null;
+    const reloadTokens = new Map();
 
     function closeAddPopover() {
         addPopover?.remove();
@@ -135,6 +136,8 @@ export function mountHistoryPanel(host, api) {
         async reload() {
             const imageId = api.getImageId?.();
             if (!imageId) return;
+            const token = (reloadTokens.get(Number(imageId)) || 0) + 1;
+            reloadTokens.set(Number(imageId), token);
             try {
                 // A just-saved edit must replace the empty initial rail rather than
                 // reusing the browser's cached pre-save history response.
@@ -143,7 +146,10 @@ export function mountHistoryPanel(host, api) {
                 });
                 if (!response.ok) throw new Error('history failed');
                 const fresh = await response.json();
-                if (Number(api.getImageId?.()) !== Number(imageId)) return;
+                if (
+                    reloadTokens.get(Number(imageId)) !== token
+                    || Number(api.getImageId?.()) !== Number(imageId)
+                ) return;
                 controller.setHistory(fresh);
                 const entry = api.getEntry?.();
                 // Keep the per-image cache in sync so revisiting shows this history.
