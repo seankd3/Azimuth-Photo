@@ -105,3 +105,13 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn(r"Couldn\'t load cull suggestions.", cull_brief)
         self.assertIn("data-cull-retry", cull_brief)
         self.assertIn("setTimeout(refreshCullBriefWithErrorState, 3000);", cull_brief)
+
+    def test_filter_source_failures_are_not_presented_as_empty_results(self):
+        filters = read("filters.js")
+
+        self.assertIn("let foldersLoadError = false;", filters)
+        self.assertIn("let tagsLoadError = false;", filters)
+        self.assertIn("Couldn't load folders.", filters)
+        self.assertIn("Couldn't load tags.", filters)
+        self.assertIn("data-filter-retry", filters)
+        self.assertIn("loadOptions({ force: true })", filters)
