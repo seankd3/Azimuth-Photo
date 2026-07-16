@@ -20,6 +20,7 @@ from typing import Literal
 
 import numpy as np
 from PIL import Image
+from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
 from core.runtime_paths import resolve_runtime_paths
 

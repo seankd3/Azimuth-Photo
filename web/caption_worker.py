@@ -328,6 +328,7 @@ def parse_caption_response(text: str) -> dict[str, Any]:
 
 def _caption_cached_preview(cache_path: str, config: dict[str, Any]) -> dict[str, Any]:
     from PIL import Image, ImageOps
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
     model, processor = _load_model(config)
     with Image.open(cache_path) as opened:

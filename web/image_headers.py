@@ -295,6 +295,7 @@ def read_header_dimensions(
                 geometry = _parse_header_geometry(data)
         if geometry is None and budget_seconds is None:
             from PIL import Image as PILImage
+            from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
             with PILImage.open(filepath) as image:
                 orientation = int(image.getexif().get(274, 1) or 1)
