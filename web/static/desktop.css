@@ -2101,3 +2101,14 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 /* Smart collection drops */
 .coll-row.not-allowed { cursor: not-allowed; outline: 1px dashed var(--text-4); outline-offset: -1px; }
 .coll-row.not-allowed > * { cursor: not-allowed; }
+
+/* Shared export surface */
+.develop-export-dialog { width: max-content; min-width: 268px; max-width: min(360px, calc(100vw - 24px)); }
+.export-dialog-tabs { display: flex; gap: 3px; padding: 3px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--card); }
+.export-dialog-tabs button { flex: 1; min-width: 0; border: 0; border-radius: calc(var(--r-ctl) - 2px); color: var(--text-3); background: transparent; }
+.export-dialog-tabs button[aria-selected="true"] { color: var(--text); background: var(--card-hi); }
+.export-dialog-panel { display: grid; gap: 9px; }
+.export-dialog-panel[hidden] { display: none; }
+.export-dialog-hint { margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.4; }
+.export-dialog-actions { display: flex; gap: 6px; }
+.export-dialog-actions button { flex: 1; }
