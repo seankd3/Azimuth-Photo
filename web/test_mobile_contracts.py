@@ -76,7 +76,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
 
         self.assertIn("['running', 'waiting'].includes(cachePregen.state)", library)
 
-    def test_pending_previews_render_preparing_state_in_mobile_timeline_and_months(self):
+    def test_pending_previews_only_replace_an_empty_mobile_month_view(self):
         timeline = self.read("static", "js", "mobile", "timeline.js")
         preparing = timeline[
             timeline.index("function renderPreparingState"):
@@ -92,7 +92,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("updateThumbnailPoll(pending)", preparing)
         self.assertIn("if (hiddenPendingThumbnails > 0)", preparing)
         self.assertIn("renderPreparingState(hiddenPendingThumbnails)", preparing)
-        self.assertIn("if (hiddenPendingThumbnails > 0)", months)
+        self.assertIn("if (hiddenPendingThumbnails > 0 && !monthOffsets.length && !images.length)", months)
         self.assertIn("renderPreparingState(hiddenPendingThumbnails)", months)
 
     def test_smart_collection_scopes_hide_membership_actions(self):
