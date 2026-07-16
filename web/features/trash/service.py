@@ -332,6 +332,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 # the single move stays with the master row that owns the bytes.
                 plans.append({
                     "id": image_id,
+                    "family_id": int(row["vc_of"]),
                     "filepath": row.get("filepath") or "",
                     "trash_path": None,
                     "size": 0,
@@ -352,6 +353,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 continue
             plans.append({
                 "id": image_id,
+                "family_id": image_id,
                 "filepath": filepath,
                 "trash_path": dest,
                 "size": moved_bytes,
@@ -388,12 +390,24 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                     errors.append(_error(plan["id"], reason))
                     failed.append(plan)
                     continue
+                plan["moved_bytes"] = moved_bytes
                 successful.append(plan)
-                trashed.append(plan["id"])
-                freed_estimate_bytes += moved_bytes
             if failed:
+                failed_family_ids = {int(plan["family_id"]) for plan in failed}
+                failed = [
+                    plan for plan in plans
+                    if int(plan["family_id"]) in failed_family_ids
+                ]
+                successful = [
+                    plan for plan in successful
+                    if int(plan["family_id"]) not in failed_family_ids
+                ]
                 await _revert_failed_trash_moves(conn, failed, rows)
             if successful:
+                trashed.extend(int(plan["id"]) for plan in successful)
+                freed_estimate_bytes += sum(
+                    int(plan.get("moved_bytes") or 0) for plan in successful
+                )
                 await conn.execute("BEGIN")
                 successful_ids = [plan["id"] for plan in successful]
                 await _repair_stacks_after_trash(conn, successful_ids)

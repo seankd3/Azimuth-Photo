@@ -712,6 +712,35 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertIsNone(by_id[copy_id]["trash_path"])
         self.assertFalse(os.path.exists(filepath))
 
+    async def test_master_trash_failure_reverts_entire_virtual_copy_family(self):
+        master_id, copy_id, filepath = await self._master_with_copy()
+        observed_statuses = []
+
+        def fail_master_after_family_commit(_filepath, dest, _token):
+            if dest is None:
+                return 0, ""
+            conn = sqlite3.connect(db.DB_PATH)
+            try:
+                observed_statuses.append(dict(conn.execute(
+                    "SELECT id, status FROM images WHERE id IN (?, ?)",
+                    (master_id, copy_id),
+                ).fetchall()))
+            finally:
+                conn.close()
+            return 0, "injected trash failure"
+
+        with patch.object(trash_service, "_move_to_trash", fail_master_after_family_commit):
+            result = await trash_service.trash_images(db.DB_PATH, [master_id])
+
+        self.assertEqual(observed_statuses, [{master_id: "trashed", copy_id: "trashed"}])
+        self.assertEqual(result["trashed"], [])
+        self.assertEqual(result["errors"], [{"id": master_id, "reason": "injected trash failure"}])
+        master = await self._image_row(master_id)
+        copy = await self._image_row(copy_id)
+        self.assertEqual(master["status"], "kept")
+        self.assertEqual(copy["status"], "kept")
+        self.assertTrue(os.path.exists(filepath))
+
     async def test_trashing_a_virtual_copy_keeps_the_master_file(self):
         master_id, copy_id, filepath = await self._master_with_copy()
         result = await trash_service.trash_images(db.DB_PATH, [copy_id])
