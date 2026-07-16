@@ -319,6 +319,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     try:
         ids = await _expand_trash_family_ids(conn, ids)
         rows = await _image_rows_by_id(conn, ids)
+        failed_prepare_family_ids: set[int] = set()
         for image_id in ids:
             row = rows.get(image_id)
             if row is None:
@@ -346,10 +347,12 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
             filepath = row.get("filepath") or ""
             if not source_root or not filepath:
                 errors.append(_error(image_id, "source path missing"))
+                failed_prepare_family_ids.add(image_id)
                 continue
             dest, moved_bytes, expected_token, reason = await __to_thread_prepare_trash_move(filepath, source_root)
             if reason:
                 errors.append(_error(image_id, reason))
+                failed_prepare_family_ids.add(image_id)
                 continue
             plans.append({
                 "id": image_id,
@@ -362,6 +365,12 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 "previous_trashed_at": row.get("trashed_at"),
                 "previous_trash_path": row.get("trash_path"),
             })
+
+        if failed_prepare_family_ids:
+            plans = [
+                plan for plan in plans
+                if int(plan["family_id"]) not in failed_prepare_family_ids
+            ]
 
         if plans:
             await conn.execute("BEGIN")

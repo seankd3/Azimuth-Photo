@@ -741,6 +741,24 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertEqual(copy["status"], "kept")
         self.assertTrue(os.path.exists(filepath))
 
+    async def test_master_prepare_failure_leaves_virtual_copy_family_untouched(self):
+        # If the master can't be prepared for trash (missing source path), its
+        # auto-expanded virtual copies must NOT be committed to trash alone —
+        # that would split the family and leave a purgeable VC over live bytes.
+        master_id, copy_id, filepath = await self._master_with_copy()
+        conn = await db.get_db()
+        await conn.execute("UPDATE images SET filepath = '' WHERE id = ?", (master_id,))
+        await conn.commit()
+
+        result = await trash_service.trash_images(db.DB_PATH, [master_id])
+
+        self.assertEqual(result["trashed"], [])
+        master = await self._image_row(master_id)
+        copy = await self._image_row(copy_id)
+        self.assertEqual(master["status"], "kept")
+        self.assertEqual(copy["status"], "kept")
+        self.assertTrue(os.path.exists(filepath))
+
     async def test_trashing_a_virtual_copy_keeps_the_master_file(self):
         master_id, copy_id, filepath = await self._master_with_copy()
         result = await trash_service.trash_images(db.DB_PATH, [copy_id])
