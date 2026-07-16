@@ -42,11 +42,13 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -54,6 +56,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -77,6 +80,7 @@ import app.azimuthphoto.mobile.data.TimelineEntry
 import app.azimuthphoto.mobile.data.UnifiedTimeline
 import app.azimuthphoto.mobile.data.ViewerMedia
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private sealed class Scope {
@@ -92,6 +96,7 @@ private const val HUB_PAGE = 120
  * not already on the device. Scope chips focus on a single source (a shelf) or the
  * not-yet-backed-up tail. Device cells select/share/trash; hub cells just open.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimelineScreen(
     onOpenSettings: () -> Unit,
@@ -99,6 +104,8 @@ fun TimelineScreen(
     onImmersive: (Boolean) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val uiScope = rememberCoroutineScope()
+    var refreshing by remember { mutableStateOf(false) }
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     val progress by BackupWorker.progress.collectAsState()
     val api = remember(settings?.serverUrl) { settings?.serverUrl?.let { ArchiveApi(it) } }
@@ -215,42 +222,63 @@ fun TimelineScreen(
     }
 
     Box(Modifier.fillMaxSize()) {
-        if (entries.isEmpty()) {
-            Column(
-                modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Icon(
-                    Icons.Outlined.PhotoLibrary,
-                    contentDescription = null,
-                    tint = TextSecondary.copy(alpha = 0.5f),
-                    modifier = Modifier.size(56.dp),
-                )
-                Spacer(Modifier.height(16.dp))
-                Text(
-                    emptyMessage(activeScope, hubOffline),
-                    color = TextSecondary,
-                    style = MaterialTheme.typography.bodyLarge,
-                    textAlign = TextAlign.Center,
+        // Swipe down to re-pull device + archive on demand (Google-Photos parity).
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = {
+                uiScope.launch {
+                    refreshing = true
+                    runCatching {
+                        val all = DeviceMedia.queryAll(context)
+                        rawTwins = rawTwinsByShotKey(all)
+                        deviceKeys = UnifiedTimeline.deviceKeys(all)
+                        device = DeviceMedia.collapseRawPairs(all)
+                        backupStates = withContext(Dispatchers.IO) { BackupDb.get(context).allStates() }
+                        if (api != null) shelves = runCatching { api.shelves() }.getOrDefault(shelves)
+                    }
+                    loadTick++ // re-arms the hub-page effect for the active scope
+                    refreshing = false
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            if (entries.isEmpty()) {
+                Column(
+                    modifier = Modifier.align(Alignment.Center).padding(horizontal = 40.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Icon(
+                        Icons.Outlined.PhotoLibrary,
+                        contentDescription = null,
+                        tint = TextSecondary.copy(alpha = 0.5f),
+                        modifier = Modifier.size(56.dp),
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        emptyMessage(activeScope, hubOffline),
+                        color = TextSecondary,
+                        style = MaterialTheme.typography.bodyLarge,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            } else {
+                UnifiedGrid(
+                    entries = entries,
+                    api = api ?: ArchiveApi(SettingsStore.DEFAULT_SERVER_URL),
+                    selectedIds = selectedIds,
+                    onTapEntry = { entry ->
+                        if (entry is TimelineEntry.Device && selectedIds.isNotEmpty()) {
+                            selectedIds = selectedIds.toggle(entry.item.id)
+                        } else {
+                            entryIndex[entry.gridKey]?.let { viewerSession = viewerMedia to it }
+                        }
+                    },
+                    onLongPressDevice = { item -> selectedIds = selectedIds + item.id },
+                    onNearEnd = { wantMore = true },
+                    contentPadding = PaddingValues(top = 108.dp),
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
-        } else {
-            UnifiedGrid(
-                entries = entries,
-                api = api ?: ArchiveApi(SettingsStore.DEFAULT_SERVER_URL),
-                selectedIds = selectedIds,
-                onTapEntry = { entry ->
-                    if (entry is TimelineEntry.Device && selectedIds.isNotEmpty()) {
-                        selectedIds = selectedIds.toggle(entry.item.id)
-                    } else {
-                        entryIndex[entry.gridKey]?.let { viewerSession = viewerMedia to it }
-                    }
-                },
-                onLongPressDevice = { item -> selectedIds = selectedIds + item.id },
-                onNearEnd = { wantMore = true },
-                contentPadding = PaddingValues(top = 108.dp),
-                modifier = Modifier.fillMaxSize(),
-            )
         }
 
         // One in-flight page at a time: load the next when the grid asks, then disarm.
