@@ -66,7 +66,7 @@ class PublishBuilderTests(BackendTestCase):
         self.assertTrue((root / "linked-outside").is_symlink())
         self.assertTrue(sentinel.exists())
 
-    async def test_bundle_uses_sm_md_stable_names_and_static_relative_urls(self):
+    async def test_bundle_uses_sm_md_lg_stable_names_and_static_relative_urls(self):
         settings.save_settings({
             "share_brand_name": "Northstar Studio",
             "publish_site_base_url": "https://photos.example.test",
@@ -123,15 +123,16 @@ class PublishBuilderTests(BackendTestCase):
         self.assertTrue((dest / "index.html").exists())
         self.assertEqual((dest / "thumb" / "sm" / "101.jpg").read_bytes(), b"sm-a")
         self.assertEqual((dest / "img" / "101.jpg").read_bytes(), b"md-a")
+        self.assertEqual((dest / "lg" / "101.jpg").read_bytes(), b"lg-101")
         self.assertEqual((dest / "thumb" / "sm" / "202.jpg").read_bytes(), b"sm-202")
         self.assertEqual((dest / "img" / "202.jpg").read_bytes(), b"md-202")
-        self.assertFalse((dest / "lg").exists())
+        self.assertEqual((dest / "lg" / "202.jpg").read_bytes(), b"lg-202")
         html = (dest / "index.html").read_text(encoding="utf-8")
         self.assertIn("./thumb/sm/101.jpg", html)
         self.assertIn("./img/101.jpg", html)
+        self.assertIn("./lg/101.jpg", html)
         self.assertIn("Northstar Studio", html)
         self.assertIn("https://photos.example.test", html)
-        self.assertIn("Download all", html)
         self.assertIn("Download photo", html)
         self.assertIn("Photo 1 of 2", html)
         self.assertIn("gallery-size copy", html)
@@ -141,8 +142,8 @@ class PublishBuilderTests(BackendTestCase):
         self.assertEqual(summary.photo_count, 2)
         self.assertEqual(summary.cover, "/g/selected-landscapes/thumb/sm/101.jpg")
         self.assertGreater(summary.bundle_bytes, 0)
-        self.assertGreaterEqual(summary.file_count, 5)
-        self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md"})
+        self.assertGreaterEqual(summary.file_count, 7)
+        self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md", "lg"})
 
     async def test_bundle_skips_one_unreadable_member_instead_of_aborting_publish(self):
         templates = app_module.app.state.photoarchive_shell.templates

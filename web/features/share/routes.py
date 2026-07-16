@@ -211,7 +211,7 @@ def _gallery_payload(token: str, collection: dict | None, *, base_url: str = "")
         "photo_count": len(images),
         "date_range": _date_subtitle(collection),
         "brand": _brand_payload(),
-        "download_size_label": "full-size gallery copy",
+        "download_size_label": "web-size copy",
         "images": images,
         "og_image": f"{base_url.rstrip('/')}{images[0]['preview']}" if images and base_url else "",
     }

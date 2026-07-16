@@ -89,12 +89,14 @@ async def build_public_gallery_bundle(
     try:
         await asyncio.to_thread((work_target / "thumb" / "sm").mkdir, parents=True, exist_ok=True)
         await asyncio.to_thread((work_target / "img").mkdir, parents=True, exist_ok=True)
+        await asyncio.to_thread((work_target / "lg").mkdir, parents=True, exist_ok=True)
 
         gallery_images = []
         for image in images:
             image_id = int(image["id"])
             thumb_path = work_target / "thumb" / "sm" / f"{image_id}.jpg"
             preview_path = work_target / "img" / f"{image_id}.jpg"
+            download_path = work_target / "lg" / f"{image_id}.jpg"
             try:
                 await _write_cached_jpeg(
                     thumbnails=thumbnails,
@@ -108,10 +110,17 @@ async def build_public_gallery_bundle(
                     size="md",
                     output_path=preview_path,
                 )
+                await _write_cached_jpeg(
+                    thumbnails=thumbnails,
+                    image=image,
+                    size="lg",
+                    output_path=download_path,
+                )
             except GalleryImageUnavailable as exc:
                 await asyncio.gather(
                     asyncio.to_thread(thumb_path.unlink, missing_ok=True),
                     asyncio.to_thread(preview_path.unlink, missing_ok=True),
+                    asyncio.to_thread(download_path.unlink, missing_ok=True),
                 )
                 log.warning(
                     "worker=publish image_id=%s skipped unavailable image: %s",
@@ -127,8 +136,8 @@ async def build_public_gallery_bundle(
                     "date_taken": image.get("date_taken"),
                     "thumb": f"./thumb/sm/{image_id}.jpg",
                     "preview": f"./img/{image_id}.jpg",
-                    "full": f"./img/{image_id}.jpg",
-                    "download": f"./img/{image_id}.jpg",
+                    "full": f"./lg/{image_id}.jpg",
+                    "download": f"./lg/{image_id}.jpg",
                     "download_name": _download_name(image_id, image.get("filename") or ""),
                 }
             )
