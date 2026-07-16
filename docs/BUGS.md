@@ -85,3 +85,6 @@ Immersive Dialog (no tab-bar leak), metadata header (back·date/time·favorite·
 
 ## OPEN (latent)
 - mobile `writeRating()` → `/api/image/{id}/rating` has no backend route; never called from UI.
+
+**Classic-share "Download all" (2026-07-16, Codex lane + Fable security review)**
+- Classic public shares (`/s/{token}`) had a "Download all" that looped one browser download per photo — Chromium blocks after the first, so clients could not get the full set. Added `GET /s/{token}/download-all` streaming a server-side ZIP (mirrors the client-gallery zip), with the SAME auth gate as every other share endpoint (`_resolve_token` + `auth.is_unlocked` → 404 on unknown/locked shares BEFORE any image is read). Path-safe + de-duplicated arcnames, `lg` download tier (no full-res leak beyond per-photo download), temp-file cleanup on success and error. Two acceptance tests incl. a security test proving a password-protected share is 404 until unlocked. (features/share/routes.py, share_gallery.html; prod restarted 27a6b40e)
