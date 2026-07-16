@@ -466,6 +466,15 @@ class TrashTests(BackendTestCase):
         self.assertFalse(await self._image_exists(mirror_id))
         self.assertEqual(worker.status()["pending_hub_trash"], 0)
 
+    async def test_pending_hub_trash_cache_invalidates_after_emptying(self):
+        mirror_id = await self._mirrored_trash(hub_image_id=779)
+        await trash_service.mark_hub_trash_pending(db.DB_PATH, [mirror_id])
+        self.assertEqual((await trash_service.pending_hub_trash_refs(db.DB_PATH))["count"], 1)
+
+        await trash_service.empty_trash(db.DB_PATH, image_ids=[mirror_id])
+
+        self.assertEqual((await trash_service.pending_hub_trash_refs(db.DB_PATH))["count"], 0)
+
     async def test_pending_hub_trash_retry_skips_old_hub(self):
         mirror_id = await self._mirrored_trash(hub_image_id=778)
         await trash_service.mark_hub_trash_pending(db.DB_PATH, [mirror_id])

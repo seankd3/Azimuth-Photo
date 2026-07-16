@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
@@ -25,6 +27,14 @@ FAMILIES = frozenset({
     "collection_meta", "collection_membership",
 })
 JsonRequest = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+# The schema is defensive-called from every public operation. Remember the
+# physical database so steady-state calls avoid opening SQLite solely for DDL.
+_schema_ready: dict[str, tuple[int, int]] = {}
+_schema_locks: dict[str, asyncio.Lock] = {}
+_pending_entry_counts: dict[str, int] = {}
+_pending_entry_count_versions: dict[str, int] = {}
 
 OPLOG_DDL = """
 CREATE TABLE IF NOT EXISTS oplog (
@@ -102,14 +112,52 @@ def _iso_timestamp(value: float) -> str:
     return datetime.fromtimestamp(value, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-async def ensure_schema(db_path: str) -> None:
-    conn = await connection.open_async(db_path)
+def _database_identity(db_path: str) -> tuple[int, int] | None:
+    if db_path == ":memory:":
+        return None
     try:
-        await conn.executescript(OPLOG_DDL)
-        await family_clock.migrate_legacy_states(conn)
-        await conn.commit()
-    finally:
-        await connection.close_async(conn, db_path=db_path)
+        stat_result = os.stat(db_path)
+    except OSError:
+        return None
+    return (int(stat_result.st_dev), int(stat_result.st_ino))
+
+
+def _invalidate_pending_entry_count(db_path: str) -> None:
+    _pending_entry_counts.pop(db_path, None)
+    _pending_entry_count_versions[db_path] = _pending_entry_count_versions.get(db_path, 0) + 1
+
+
+async def ensure_schema(db_path: str) -> None:
+    identity = _database_identity(db_path)
+    if identity is not None and _schema_ready.get(db_path) == identity:
+        return
+    if identity is not None:
+        _invalidate_pending_entry_count(db_path)
+    if db_path == ":memory:":
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.executescript(OPLOG_DDL)
+            await family_clock.migrate_legacy_states(conn)
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+        return
+
+    lock = _schema_locks.setdefault(db_path, asyncio.Lock())
+    async with lock:
+        identity = _database_identity(db_path)
+        if identity is not None and _schema_ready.get(db_path) == identity:
+            return
+        conn = await connection.open_async(db_path)
+        try:
+            await conn.executescript(OPLOG_DDL)
+            await family_clock.migrate_legacy_states(conn)
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+        identity = _database_identity(db_path)
+        if identity is not None:
+            _schema_ready[db_path] = identity
 
 
 async def _device_id_on_conn(conn) -> str:
@@ -502,17 +550,26 @@ async def retry_pending_entries(db_path: str) -> dict[str, int]:
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
+    if retried:
+        _invalidate_pending_entry_count(db_path)
     return {"retried": retried, "applied": applied, "still_pending": still_pending}
 
 
 async def pending_entry_count(db_path: str) -> int:
     await ensure_schema(db_path)
+    cached = _pending_entry_counts.get(db_path)
+    if cached is not None:
+        return cached
+    version = _pending_entry_count_versions.get(db_path, 0)
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute("SELECT COUNT(*) AS count FROM oplog_pending")).fetchone()
-        return int(row["count"])
+        count = int(row["count"])
     finally:
         await connection.close_async(conn, db_path=db_path)
+    if version == _pending_entry_count_versions.get(db_path, 0):
+        _pending_entry_counts[db_path] = count
+    return count
 
 
 async def apply_entries(
@@ -557,6 +614,8 @@ async def apply_entries(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
+    if normalized:
+        _invalidate_pending_entry_count(db_path)
     if any(item["result"] == "applied" for item in results):
         await retry_pending_entries(db_path)
     return {
@@ -611,6 +670,7 @@ async def append_entry(
         )
         await _apply_entry_on_conn(conn, entry)
         await conn.commit()
+        _invalidate_pending_entry_count(db_path)
         return entry
     except Exception:
         await conn.rollback()

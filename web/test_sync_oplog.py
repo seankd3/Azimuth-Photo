@@ -564,6 +564,22 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(self._pending_count(path), 1)
 
+    async def test_pending_count_cache_invalidates_after_retry(self):
+        path = self._catalog()
+        entry = {
+            "origin": "alpha", "origin_seq": 1, "content_hash": HASH_C,
+            "family": "flag", "payload": {"value": "picked"}, "ts": 100.0,
+        }
+        await oplog.apply_entries(path, [entry], applied_from="hub", receive_time=500.0)
+        self.assertEqual(await oplog.pending_entry_count(path), 1)
+
+        with sqlite3.connect(path) as conn:
+            conn.execute("INSERT INTO images(id, content_hash) VALUES (3, ?)", (HASH_C,))
+            conn.commit()
+        await oplog.retry_pending_entries(path)
+
+        self.assertEqual(await oplog.pending_entry_count(path), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

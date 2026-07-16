@@ -18,6 +18,7 @@ from data.repositories import catalog as catalog_repository
 from features.sync import satellite
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.executor import run_sync_work
+from features.trash import service as trash_service
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -138,6 +139,7 @@ class MirrorPuller:
 
         if applied > 0:
             cache_events.invalidate_stats_cache()
+            trash_service.invalidate_pending_hub_trash_refs(self.db_path)
 
         self._status.update(
             cursor=new_cursor,
