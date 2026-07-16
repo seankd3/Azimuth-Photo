@@ -3,6 +3,38 @@ from features.catalog import metadata as catalog_metadata
 
 
 class SettingsStatusTests(BackendTestCase):
+    def test_restored_source_clears_all_orientation_poison_entries(self):
+        old_ledger = dict(catalog_metadata._orientation_retry_ledger)
+        catalog_metadata._orientation_retry_ledger.clear()
+        source_root = os.path.join(self.tempdir.name, "restored-source")
+        try:
+            for image_id in (1, 2):
+                for attempt in range(catalog_metadata.ORIENTATION_POISON_THRESHOLD):
+                    catalog_metadata._note_orientation_failure(
+                        image_id,
+                        "FileNotFoundError",
+                        now=float(attempt),
+                        source_root=source_root,
+                    )
+
+            offline_ready, _cooled, _retry_at = catalog_metadata._ready_orientation_rows(
+                [{"id": 1, "source_root": source_root}],
+                now=10_000.0,
+            )
+            self.assertEqual(offline_ready, [])
+
+            os.makedirs(source_root)
+            online_ready, _cooled, _retry_at = catalog_metadata._ready_orientation_rows(
+                [{"id": 1, "source_root": source_root}],
+                now=10_000.0,
+            )
+
+            self.assertEqual([row["id"] for row in online_ready], [1])
+            self.assertEqual(catalog_metadata._orientation_retry_ledger, {})
+        finally:
+            catalog_metadata._orientation_retry_ledger.clear()
+            catalog_metadata._orientation_retry_ledger.update(old_ledger)
+
     def test_orientation_retry_ledger_cools_then_poisons_unreadable_images(self):
         old_ledger = dict(catalog_metadata._orientation_retry_ledger)
         catalog_metadata._orientation_retry_ledger.clear()

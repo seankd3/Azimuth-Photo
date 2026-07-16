@@ -117,6 +117,7 @@ def _note_orientation_failure(
     error: str,
     *,
     now: float | None = None,
+    source_root: str = "",
 ) -> float:
     now = time.time() if now is None else float(now)
     image_id = int(image_id)
@@ -129,12 +130,30 @@ def _note_orientation_failure(
         "retry_at": retry_at,
         "error": str(error or ""),
         "poisoned": poisoned,
+        "source_root": str(source_root or ""),
     }
     return retry_at
 
 
+def _clear_restored_source_failures(rows) -> None:
+    restored_roots = set()
+    for row in rows:
+        try:
+            source_root = str(row["source_root"] or "")
+        except (KeyError, TypeError):
+            continue
+        if source_root and os.path.isdir(source_root):
+            restored_roots.add(source_root)
+    if not restored_roots:
+        return
+    for image_id, record in list(_orientation_retry_ledger.items()):
+        if str(record.get("source_root") or "") in restored_roots:
+            _orientation_retry_ledger.pop(image_id, None)
+
+
 def _ready_orientation_rows(rows, *, now: float | None = None):
     now = time.time() if now is None else float(now)
+    _clear_restored_source_failures(rows)
     ready = []
     cooled_down = 0
     next_retry_at = None
@@ -189,6 +208,7 @@ async def classify_orientations_background():
                         int(row["id"]),
                         str(row["filepath"]),
                         type(exc).__name__,
+                        str(row["source_root"] or ""),
                         os.path.isdir(str(row["source_root"] or "")),
                     )
                 )
@@ -235,9 +255,13 @@ async def classify_orientations_background():
             _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
             with work_coordination.manual_bulk("catalog_metadata"):
                 results, failures = await loop.run_in_executor(None, _classify_batch, rows)
-            for image_id, filepath, reason, source_online in failures:
+            for image_id, filepath, reason, source_root, source_online in failures:
                 if not source_online:
-                    _note_orientation_failure(image_id, reason)
+                    _note_orientation_failure(
+                        image_id,
+                        reason,
+                        source_root=source_root,
+                    )
                     continue
                 _orientation_retry_ledger.pop(image_id, None)
                 changed = await image_repository.mark_image_missing(
