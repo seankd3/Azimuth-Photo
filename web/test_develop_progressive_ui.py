@@ -33,7 +33,10 @@ def test_gl_preview_is_display_referred_and_swaps_to_linear_source():
     assert "if (u_orientation == 6) return vec2(uv.y, 1.0 - uv.x);" in source
     assert "if (u_orientation == 8) return vec2(1.0 - uv.y, uv.x);" in source
     assert "uploadDisplayPreview(image, orientation = 1)" in source
-    assert "X-Develop-Orientation" in (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    loader = (WEB / "static/js/desktop/develop/develop.js").read_text(encoding="utf-8")
+    assert "paintPlaceholder(image.id, token, displayOrientation(entry))" in loader
+    assert "orientation: Number(payload.orientation) || 1" in loader
+    assert "X-Develop-Orientation" not in loader
     assert "this.displayPreview = true" in source
     assert "this.displayPreview = false" in source
     assert "gl.useProgram(this.displayPreviewProgram)" in source

@@ -8,6 +8,7 @@ import os
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
+from functools import lru_cache
 from typing import Any
 
 from fastapi import APIRouter, Query
@@ -19,6 +20,7 @@ from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import rawproc, transform, virtual_copies
 from features.sync import oplog, readthrough
+from thumbnails import generation as thumbnail_generation
 
 
 router = APIRouter()
@@ -340,13 +342,37 @@ async def _load_settings(image_id: int) -> dict[str, Any] | None:
         await connection.close_async(conn, db_path=_configured_db_path())
 
 
-async def _preview_orientation(image_id: int) -> int:
-    """Return the discrete orientation the full Develop geometry pass will use."""
-    row = await _load_settings(image_id)
+@lru_cache(maxsize=4096)
+def _cached_source_orientation(db_path: str, image_id: int, filepath: str, mtime_ns: int) -> int:
+    """Cache source metadata reads by library, image, and source-file revision."""
+    del db_path, image_id, mtime_ns
+    return thumbnail_generation.read_source_orientation(filepath, raw_extensions=rawproc.RAW_EXTENSIONS)
+
+
+async def _preview_orientation(image_id: int, image: dict[str, Any], row: dict[str, Any] | None) -> int:
+    """Return a saved rotation, falling back to the source EXIF orientation."""
+    settings = _json_settings(row["settings"]) if row else {}
     try:
-        orientation = int(_json_settings(row["settings"] if row else "{}").get("Orientation", 1))
+        orientation = int(settings["Orientation"])
+        if orientation in (1, 3, 6, 8):
+            return orientation
+    except KeyError:
+        pass
     except (TypeError, ValueError):
+        pass
+
+    filepath = str(image.get("filepath") or "")
+    try:
+        mtime_ns = (await asyncio.to_thread(os.stat, filepath)).st_mtime_ns
+    except OSError:
         return 1
+    orientation = await asyncio.to_thread(
+        _cached_source_orientation,
+        _configured_db_path(),
+        image_id,
+        filepath,
+        mtime_ns,
+    )
     return orientation if orientation in (3, 6, 8) else 1
 
 
@@ -610,14 +636,10 @@ async def api_develop_base_jpg(image_id: int):
             return _base_error_response(failure)
         _start_base_generation(image_id, image)
         return _base_generating_response(image_id)
-    orientation = await _preview_orientation(image_id)
     return FileResponse(
         paths.preview,
         media_type="image/jpeg",
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "X-Develop-Orientation": str(orientation),
-        },
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
 
@@ -777,6 +799,7 @@ async def api_get_develop(image_id: int):
     return {
         "settings": _json_settings(row["settings"]) if row else {},
         "origin": row["origin"] if row else "user",
+        "orientation": await _preview_orientation(image_id, image, row),
         "meta": meta,
         "history": await _history(image_id),
     }
