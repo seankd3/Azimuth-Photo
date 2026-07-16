@@ -12,6 +12,82 @@ from thumbnails import pregen as thumbnail_pregen
 
 
 class LibraryTests(BackendTestCase):
+    async def test_rankings_accepts_large_resolved_smart_scope(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-smart-member.jpg")
+        resolved_ids = set(range(1, 33_011))
+
+        rows = await rankings.rankings(
+            db.DB_PATH,
+            catalog_counts=await db.get_catalog_image_counts(),
+            limit=10,
+            sort="filename",
+            id_filter=resolved_ids,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [member])
+
+    async def test_priority_pregen_accepts_large_resolved_smart_scope(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-smart-pending.jpg")
+        resolved_ids = set(range(1, 33_011))
+        processed_ids = set(range(100_000, 133_010))
+
+        async def resolve_smart_scope(_current_ids, collection_id):
+            self.assertEqual(collection_id, 99)
+            return resolved_ids, 0
+
+        rows = await thumbnail_pregen.priority_candidate_batch(
+            db.get_db,
+            {"collection_id": 99},
+            processed_ids,
+            10,
+            cache_root=thumbnails.SSD_CACHE_DIR,
+            preview_size="sm",
+            resolve_collection_scope=resolve_smart_scope,
+        )
+
+        self.assertEqual([row["id"] for row in rows], [member])
+
+    async def test_scope_facets_accept_large_resolved_id_set(self):
+        source = await self._source()
+        member = await self._image(source["id"], "large-scope-facet.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET date_taken = '2024-07-16', latitude = 40.0, "
+                "longitude = -90.0, camera_make = 'Test', camera_model = 'Camera' "
+                "WHERE id = ?",
+                (member,),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        resolved_ids = set(range(1, 33_011))
+        catalog_counts = await db.get_catalog_image_counts()
+
+        groups = await rankings.date_groups(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            id_filter=resolved_ids,
+        )
+        markers = await rankings.map_markers(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            total_count=1,
+            visible_total_count=1,
+            id_filter=resolved_ids,
+        )
+        filters = await filter_options_repository.filter_options(
+            db.DB_PATH,
+            catalog_counts=catalog_counts,
+            id_filter=resolved_ids,
+        )
+
+        self.assertEqual(groups, [{"date": "2024-07", "label": "July 2024", "count": 1}])
+        self.assertEqual([marker["id"] for marker in markers["markers"]], [member])
+        self.assertEqual(filters["years"], [{"year": "2024", "count": 1}])
+
     async def test_smart_collection_view_prioritizes_pending_previews(self):
         preview_priority.clear_scopes()
         self.addCleanup(preview_priority.clear_scopes)

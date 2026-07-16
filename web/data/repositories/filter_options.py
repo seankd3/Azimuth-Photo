@@ -5,6 +5,7 @@ from collections import Counter
 import time as _time
 
 from data import connection
+from data.repositories.common import stage_temp_ids_sync
 from data.repositories.rankings import ranking_filter_parts
 
 _filter_options_cache = {"data": None, "expires": 0}
@@ -23,9 +24,11 @@ def empty_filter_options() -> dict:
     }
 
 
-def _filter_rows(db_path: str, sql: str, params=()):
+def _filter_rows(db_path: str, sql: str, params=(), staged_ids=None):
     conn = connection.open_sync(db_path)
     try:
+        if staged_ids is not None:
+            stage_temp_ids_sync(conn, "temp_filter_scope_ids", staged_ids)
         return conn.execute(sql, params).fetchall()
     finally:
         connection.close_sync(conn, db_path=db_path)
@@ -169,13 +172,16 @@ async def filter_options(
         conditions.append(f"i.source_id IN ({source_placeholders})")
         params.extend(int(source_id) for source_id in active_source_ids)
 
+    staged_id_filter = None
     if id_filter is not None:
         ids = [int(image_id) for image_id in id_filter]
         if not ids:
             return empty_filter_options()
-        id_placeholders = ",".join("?" for _ in ids)
-        conditions.append(f"i.id IN ({id_placeholders})")
-        params.extend(ids)
+        staged_id_filter = ids
+        conditions.append(
+            "EXISTS (SELECT 1 FROM temp_filter_scope_ids scope_ids "
+            "WHERE scope_ids.image_id = i.id)"
+        )
     base_where = " AND ".join(conditions)
     (
         year_rows,
@@ -193,6 +199,7 @@ async def filter_options(
             "AND date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 "
             "GROUP BY value",
             params,
+            staged_id_filter,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -201,6 +208,7 @@ async def filter_options(
             f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
             "AND (date_taken IS NULL OR LENGTH(date_taken) < 4)",
             params,
+            staged_id_filter,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -210,6 +218,7 @@ async def filter_options(
             "AND file_ext IS NOT NULL AND file_ext != '' "
             "GROUP BY value",
             params,
+            staged_id_filter,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -220,6 +229,7 @@ async def filter_options(
             "AND (camera_make IS NOT NULL OR camera_model IS NOT NULL) "
             "GROUP BY value HAVING value != ''",
             params,
+            staged_id_filter,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -229,6 +239,7 @@ async def filter_options(
             "AND lens IS NOT NULL AND lens != '' "
             "GROUP BY value",
             params,
+            staged_id_filter,
         ),
         asyncio.to_thread(
             _filter_rows,
@@ -246,6 +257,7 @@ async def filter_options(
             "ORDER BY count DESC, LOWER(COALESCE(NULLIF(p.name, ''), 'Person ' || p.id)) ASC, p.id ASC "
             "LIMIT 200",
             params,
+            staged_id_filter,
         ),
     )
 
