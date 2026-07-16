@@ -560,6 +560,23 @@ function resolveImageWaiters() {
     imageWaiters = remaining;
 }
 
+function discardTrashedImages(imageIds) {
+    if (!open || !imageIds?.length) return;
+    const trashed = new Set(imageIds.map(Number));
+    const currentId = Number(current()?.id);
+    viewState.images = viewState.images.filter((image) => !image || !trashed.has(Number(image.id)));
+    if (sessionImages) sessionImages = sessionImages.filter((image) => !trashed.has(Number(image?.id)));
+    const remaining = images();
+    if (!remaining.length) {
+        closeLoupe();
+        return;
+    }
+    const currentIndex = remaining.findIndex((image) => Number(image?.id) === currentId);
+    index = currentIndex >= 0 ? currentIndex : index % remaining.length;
+    navDirection = 1;
+    render();
+}
+
 function waitForImage(targetIndex) {
     if (images().length > targetIndex && images()[targetIndex]) return Promise.resolve(true);
     return new Promise((resolve) => {
@@ -992,6 +1009,7 @@ export function initLoupe() {
             if (img && current() && Number(img.id) === Number(current().id)) updateChrome();
         }
     });
+    on('trash:changed', ({ imageIds } = {}) => discardTrashedImages(imageIds));
     on('images', () => {
         resolveImageWaiters();
         if (!open || !isGridScope()) return;

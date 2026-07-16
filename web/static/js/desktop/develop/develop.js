@@ -995,6 +995,10 @@ function unmount() {
     presetsPanel?.endPreview();
 }
 
+export function closeDevelop() {
+    unmount();
+}
+
 export function developOpen() {
     return mounted;
 }

@@ -762,7 +762,13 @@ export function initGrid() {
     on('scope', () => {
         if (mounted) loadFirstPage();
     });
-    on('flags', ({ imageIds } = {}) => patchCells(imageIds));
+    on('flags', ({ imageIds, committed } = {}) => {
+        patchCells(imageIds);
+        const changedIds = new Set((imageIds || []).map(Number));
+        if (committed && scope.flag && viewState.images.some((image) => (
+            image && changedIds.has(Number(image.id)) && (image.flag || 'unflagged') !== scope.flag
+        ))) loadFirstPage();
+    });
     document.addEventListener('photoarchive:cull-applied', () => {
         if (mounted) loadFirstPage();
     });

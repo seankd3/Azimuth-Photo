@@ -313,6 +313,7 @@ async function applyKeepBest(changes, label) {
         undo: async () => {
             setFlagsLocally(previous);
             const undone = await writeGrouped(previous);
+            if (!undone) setFlagsLocally(normalized);
             showToast(undone ? 'Undone' : 'Couldn’t undo');
         },
     });

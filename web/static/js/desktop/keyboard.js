@@ -29,7 +29,7 @@ import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedIma
 import { showToast, undoLatestToast } from './toast.js';
 import {
     applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
+    closeDevelop, developOpen, holdDevelopReference, openDevelop, pasteDevelopSettingsToGrid, toggleDevelopCompare,
 } from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 
@@ -241,7 +241,7 @@ function escapeOneLayer() {
         return true;
     }
     if (developOpen()) {
-        switchLens('grid');
+        closeDevelop();
         return true;
     }
     if (systemDrawerOpen()) {
@@ -332,7 +332,7 @@ export function initKeyboard() {
             if (key === 'z') {
                 // Develop owns its edit-history undo at capture phase; other lenses use
                 // the global toast stack for undoable library actions.
-                if (activeLens() === 'develop') return;
+                if (developOpen()) return;
                 if (undoLatestToast()) event.preventDefault();
                 return;
             }
@@ -362,7 +362,7 @@ export function initKeyboard() {
         }
         if (event.key.toLowerCase() === 'd' && !foregroundLayerOpen()) {
             event.preventDefault();
-            if (developOpen()) switchLens('grid');
+            if (developOpen()) closeDevelop();
             else openDevelop();
             return;
         }
