@@ -115,3 +115,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("Couldn't load tags.", filters)
         self.assertIn("data-filter-retry", filters)
         self.assertIn("loadOptions({ force: true })", filters)
+
+    def test_sync_refresh_cannot_overwrite_an_in_flight_control_result(self):
+        sync_chip = read("sync_chip.js")
+
+        self.assertIn("let controlInFlight = 0;", sync_chip)
+        self.assertIn("let statusGeneration = 0;", sync_chip)
+        self.assertIn("if (controlInFlight || generation !== statusGeneration) return;", sync_chip)
+        self.assertIn("const generation = ++statusGeneration;", sync_chip)
