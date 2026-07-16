@@ -50,6 +50,7 @@ let resetConfirmArmed = false;
 let publishReturn = null;
 let publishingFocusPending = false;
 let thumbnailCachePolicy = 'keep';
+let systemSurfaceRender = null;
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
@@ -902,6 +903,42 @@ function renderDrawer() {
     }
 }
 
+function renderCurrentSystemSurface() {
+    if (systemSurfaceRender) {
+        systemSurfaceRender();
+        return;
+    }
+    renderDrawer();
+}
+
+export function renderSystemSections() {
+    return {
+        library: renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
+        performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
+        import: renderImportSettings(),
+        publishing: renderPublishingSettings(),
+        connectivity: renderDevices() + renderConnectServer() + renderRemote(),
+        preferences: renderPrefs(),
+    };
+}
+
+export function mountSystemSurface(render) {
+    systemSurfaceRender = render;
+}
+
+export function unmountSystemSurface() {
+    systemSurfaceRender = null;
+}
+
+export function bindSystemSurface(body) {
+    bindDrawerActions(body);
+}
+
+export async function refreshSystemSurface() {
+    await refreshDrawer({ initial: false });
+}
+
 function patchNodeText(root, selector, value) {
     const node = root.querySelector(selector);
     const text = String(value);
@@ -1529,11 +1566,15 @@ export function openPublishingSettings({ returnTo = null } = {}) {
     publishReturn = returnTo;
     publishingFocusPending = true;
     openSettingSections.add('Publishing');
-    if (open) {
-        renderDrawer();
-        return;
-    }
-    openSystemDrawer();
+    localStorage.setItem('pa_d_system_section', 'publishing');
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
+}
+
+export function openSystemSettings(section = 'library') {
+    localStorage.setItem('pa_d_system_section', section);
+    if (open) closeSystemDrawer();
+    setActiveLens('system');
 }
 
 export function openSystemDrawer() {
@@ -1577,7 +1618,7 @@ export function systemDrawerOpen() {
 }
 
 export function initDrawer() {
-    document.getElementById('system-btn').addEventListener('click', openSystemDrawer);
+    document.getElementById('system-btn').addEventListener('click', () => openSystemSettings());
     document.getElementById('activity-widget').addEventListener('click', openSystemDrawer);
     document.getElementById('drawer-close').addEventListener('click', closeSystemDrawer);
     document.getElementById('drawer-scrim').addEventListener('click', closeSystemDrawer);
