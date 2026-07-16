@@ -97,3 +97,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
         self.assertEqual(poll.count("showToast?.('Export status unknown — check Exports later');"), 3)
         self.assertLess(poll.index("if (!response.ok)"), poll.index("const status = await response.json();"))
+
+    def test_cull_brief_startup_failure_keeps_a_retry_state_visible(self):
+        cull_brief = read("cull_brief.js")
+
+        self.assertIn("loadError: false", cull_brief)
+        self.assertIn(r"Couldn\'t load cull suggestions.", cull_brief)
+        self.assertIn("data-cull-retry", cull_brief)
+        self.assertIn("setTimeout(refreshCullBriefWithErrorState, 3000);", cull_brief)

@@ -12,7 +12,7 @@ function emptyState() {
     return {
         suggestions: [], index: 0, loaded: false, busy: false,
         initialCount: 0, picked: 0, rejected: 0, skipped: 0,
-        scopeKind: '', lastAccept: null,
+        scopeKind: '', lastAccept: null, loadError: false,
     };
 }
 
@@ -41,6 +41,11 @@ function scopeDescription() {
 function updateBanner() {
     const el = banner();
     if (!el) return;
+    if (state.loadError) {
+        el.hidden = false;
+        el.innerHTML = '<span>Couldn\'t load cull suggestions.</span><button class="btn" type="button" data-cull-retry>Try again</button>';
+        return;
+    }
     const count = state.suggestions.length;
     el.hidden = count === 0;
     const copy = el.querySelector('span');
@@ -278,10 +283,23 @@ export async function refreshCullBrief() {
     return payload;
 }
 
+async function refreshCullBriefWithErrorState() {
+    try {
+        await refreshCullBrief();
+    } catch {
+        state = { ...emptyState(), loaded: true, loadError: true };
+        updateBanner();
+    }
+}
+
 export function initCullBrief() {
     if (initialized) return;
     initialized = true;
     banner()?.addEventListener('click', (event) => {
+        if (event.target.closest('[data-cull-retry]')) {
+            refreshCullBriefWithErrorState();
+            return;
+        }
         if (!event.target.closest('[data-cull-review]')) return;
         state.index = 0;
         renderReview();
@@ -303,8 +321,8 @@ export function initCullBrief() {
         else if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); undoAccept(); }
         else if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeReview(); }
     });
-    document.addEventListener('photoarchive:import-complete', () => { refreshCullBrief(); });
-    setTimeout(() => { refreshCullBrief().catch(() => {}); }, 3000);
+    document.addEventListener('photoarchive:import-complete', refreshCullBriefWithErrorState);
+    setTimeout(refreshCullBriefWithErrorState, 3000);
 }
 
 window.__photoArchiveCullBrief = { init: initCullBrief, refresh: refreshCullBrief };
