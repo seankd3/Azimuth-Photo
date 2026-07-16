@@ -33,7 +33,11 @@ CAPTION_PROMPT = (
     "scene, style, lighting, and colors."
 )
 
-_caption_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+def _new_caption_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="caption-gpu")
+
+
+_caption_executor = _new_caption_executor()
 _oom_circuit = CaptionOomCircuit(threshold=3)
 _model = None
 _processor = None
@@ -220,6 +224,13 @@ def _unload_model() -> None:
     _loaded_key = None
     _clear_cuda_cache()
     work_coordination.release_gpu_owner("captions")
+
+
+def shutdown_caption_worker() -> None:
+    global _caption_executor
+    _release_worker_owners()
+    _caption_executor.shutdown(wait=False, cancel_futures=True)
+    _caption_executor = _new_caption_executor()
 
 
 def _load_model(config: dict[str, Any]):

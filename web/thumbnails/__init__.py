@@ -1528,3 +1528,7 @@ def stop_prefetch():
     _prefetching = False
     _flush_write_queue()
     thumbnail_cache_entries.close_persistent_conn()
+
+
+async def cancel_background_tasks() -> None:
+    await full_cache.cancel_inflight_tasks(_inflight)

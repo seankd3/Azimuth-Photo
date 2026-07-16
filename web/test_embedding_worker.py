@@ -35,6 +35,40 @@ class FakeModel:
 
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_embedding_shutdown_cancels_search_load_and_gpu_executors(self):
+        old_embed_executor = embedding_worker._embed_executor
+        old_preload_executor = embedding_worker._preload_executor
+        fake_embed_executor = unittest.mock.Mock()
+        fake_preload_executor = unittest.mock.Mock()
+        embedding_worker._embed_executor = fake_embed_executor
+        embedding_worker._preload_executor = fake_preload_executor
+        load_task = asyncio.create_task(asyncio.Event().wait())
+        embedding_worker._search_model_load_task = load_task
+        try:
+            await embedding_worker.shutdown_embedding_worker()
+
+            self.assertTrue(load_task.cancelled())
+            self.assertIsNone(embedding_worker._search_model_load_task)
+            fake_embed_executor.shutdown.assert_called_once_with(
+                wait=False,
+                cancel_futures=True,
+            )
+            fake_preload_executor.shutdown.assert_called_once_with(
+                wait=False,
+                cancel_futures=True,
+            )
+        finally:
+            embedding_worker._embed_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+            embedding_worker._preload_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+            embedding_worker._embed_executor = old_embed_executor
+            embedding_worker._preload_executor = old_preload_executor
+
     async def test_embedding_reports_waiting_before_gpu_owner_wait(self):
         observed_states = []
 

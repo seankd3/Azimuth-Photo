@@ -12,6 +12,24 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    def test_caption_shutdown_stops_gpu_executor(self):
+        old_executor = caption_worker._caption_executor
+        fake_executor = unittest.mock.Mock()
+        caption_worker._caption_executor = fake_executor
+        try:
+            caption_worker.shutdown_caption_worker()
+
+            fake_executor.shutdown.assert_called_once_with(
+                wait=False,
+                cancel_futures=True,
+            )
+        finally:
+            caption_worker._caption_executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+            caption_worker._caption_executor = old_executor
+
     async def test_caption_reports_waiting_before_gpu_owner_wait(self):
         old_dependencies = (
             caption_worker._count_images_needing_captions,

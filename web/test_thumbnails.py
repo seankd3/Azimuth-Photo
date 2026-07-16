@@ -497,6 +497,18 @@ class ThumbnailJobsFacadeTests(unittest.TestCase):
 
 
 class ThumbnailPregenFacadeTests(unittest.TestCase):
+    def test_full_cache_shutdown_cancels_inflight_tasks(self):
+        async def scenario():
+            task = asyncio.create_task(asyncio.Event().wait())
+            inflight = {("full", 1, "sig"): task}
+
+            await thumbnail_full_cache.cancel_inflight_tasks(inflight)
+
+            self.assertTrue(task.cancelled())
+            self.assertEqual(inflight, {})
+
+        asyncio.run(scenario())
+
     def test_pregen_state_mutation_remains_facaded_from_pregen_module(self):
         base_status = {
             "enabled": True,

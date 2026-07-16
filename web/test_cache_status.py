@@ -4,6 +4,30 @@ import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
+    async def test_shutdown_cancels_media_warm_tasks(self):
+        started = asyncio.Event()
+
+        async def block_prefetch(*_args, **_kwargs):
+            started.set()
+            await asyncio.Event().wait()
+
+        old_prefetch = thumbnails.prefetch_images
+        thumbnails.prefetch_images = block_prefetch
+        try:
+            media_warm.schedule_thumbnail_prefetch(
+                [{"id": 1}],
+                "sm",
+                limit=1,
+            )
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+            await media_warm.cancel_background_tasks()
+
+            self.assertEqual(media_warm._background_tasks, set())
+            self.assertEqual(media_warm._thumbnail_prefetch_inflight, set())
+        finally:
+            thumbnails.prefetch_images = old_prefetch
+
     async def test_stale_work_owners_are_stolen_after_lease_expires(self):
         work_coordination.release_manual_owner("captions")
         work_coordination.release_gpu_owner("captions")

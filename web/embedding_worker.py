@@ -17,9 +17,17 @@ from typing import Any
 
 import numpy as np
 
+def _new_embed_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
+
+
+def _new_preload_executor() -> ThreadPoolExecutor:
+    return ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+
+
 # Dedicated executors — separate CPU prep from GPU encode
-_embed_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-gpu")
-_preload_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="embed-preload")
+_embed_executor = _new_embed_executor()
+_preload_executor = _new_preload_executor()
 
 import ai_models
 import embed_cache
@@ -244,6 +252,21 @@ def _unload_model() -> None:
     _loaded_model_revision = None
     _clear_cuda_cache()
     work_coordination.release_gpu_owner("embeddings")
+
+
+async def shutdown_embedding_worker() -> None:
+    global _embed_executor, _preload_executor, _search_model_load_task
+    task = _search_model_load_task
+    if task is not None and not task.done():
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    _search_model_load_task = None
+    work_coordination.release_manual_owner("embeddings")
+    _unload_model()
+    _embed_executor.shutdown(wait=False, cancel_futures=True)
+    _preload_executor.shutdown(wait=False, cancel_futures=True)
+    _embed_executor = _new_embed_executor()
+    _preload_executor = _new_preload_executor()
 
 
 def _set_worker_status(
