@@ -268,25 +268,54 @@ async def poison_embedding_image(
     image_id: int,
     embedding_config: dict,
     error: str,
-) -> None:
+    force: bool = False,
+) -> bool:
     conn = await connection.open_async(db_path)
     try:
         await ensure_embedding_model_row(conn, embedding_config)
         await conn.execute(
             "INSERT INTO embedding_scan_images "
             "(model_key, image_id, status, error, attempts, scanned_at) "
-            "VALUES (?, ?, 'poisoned', ?, 1, ?) "
+            "VALUES (?, ?, ?, ?, 1, ?) "
             "ON CONFLICT(model_key, image_id) DO UPDATE SET "
-            "status = 'poisoned', error = excluded.error, "
+            "status = CASE "
+            "  WHEN excluded.status = 'poisoned' "
+            "    OR embedding_scan_images.attempts + 1 >= 3 "
+            "  THEN 'poisoned' ELSE 'retrying' END, "
+            "error = excluded.error, "
             "attempts = embedding_scan_images.attempts + 1, scanned_at = excluded.scanned_at",
             (
                 embedding_config["model_key"],
                 int(image_id),
+                "poisoned" if force else "retrying",
                 str(error or "")[:2000],
                 _time.time(),
             ),
         )
+        cursor = await conn.execute(
+            "SELECT status FROM embedding_scan_images WHERE model_key = ? AND image_id = ?",
+            (embedding_config["model_key"], int(image_id)),
+        )
+        poisoned = (await cursor.fetchone())["status"] == "poisoned"
         await conn.commit()
+        return poisoned
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def clear_embedding_poison_ledger(
+    db_path: str,
+    *,
+    embedding_config: dict,
+) -> int:
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            "DELETE FROM embedding_scan_images WHERE model_key = ?",
+            (embedding_config["model_key"],),
+        )
+        await conn.commit()
+        return max(0, int(cursor.rowcount or 0))
     finally:
         await connection.close_async(conn, db_path=db_path)
 

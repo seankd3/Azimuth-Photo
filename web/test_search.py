@@ -3,7 +3,7 @@ import unittest.mock
 
 
 class SearchTests(BackendTestCase):
-    async def test_poisoned_embedding_image_stays_out_of_candidate_queue(self):
+    async def test_embedding_image_is_poisoned_only_after_three_ooms(self):
         source = await self._source("embedding-poison")
         image_id = await self._image(source["id"], "oom.jpg")
         config = settings.active_embedding_config()
@@ -20,11 +20,27 @@ class SearchTests(BackendTestCase):
             error="CUDA out of memory",
         )
 
-        after = await db.get_unembedded_images(
+        after_first = await db.get_unembedded_images(
             limit=10,
             embedding_config=config,
         )
-        self.assertEqual(after, [])
+        self.assertEqual([row["id"] for row in after_first], [image_id])
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+
+        after_third = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual(after_third, [])
         conn = await db.get_db()
         try:
             row = await (
@@ -36,7 +52,58 @@ class SearchTests(BackendTestCase):
             ).fetchone()
         finally:
             await conn.close()
-        self.assertEqual(dict(row), {"status": "poisoned", "attempts": 1})
+        self.assertEqual(dict(row), {"status": "poisoned", "attempts": 3})
+
+    async def test_resume_embeddings_clears_only_active_model_poison(self):
+        source = await self._source("embedding-resume")
+        image_id = await self._image(source["id"], "resume-oom.jpg")
+        active_config = settings.active_embedding_config()
+        other_config = {
+            **active_config,
+            "model_key": "other-model@main:4",
+            "model_id": "other-model",
+            "dimension": 4,
+        }
+        for config in (active_config, other_config):
+            await db.poison_embedding_image(
+                image_id=image_id,
+                embedding_config=config,
+                error="CUDA out of memory",
+                force=True,
+            )
+
+        with (
+            unittest.mock.patch.object(
+                ai_routes.capabilities,
+                "capability_status",
+                return_value={"available": True, "optional_missing": []},
+            ),
+            unittest.mock.patch.object(
+                ai_routes,
+                "embedding_runtime_status",
+                return_value={"ready": True},
+            ),
+            unittest.mock.patch.object(
+                ai_routes,
+                "build_ai_status",
+                new=unittest.mock.AsyncMock(return_value={}),
+            ),
+            unittest.mock.patch.object(thumbnails, "start_pregeneration"),
+            unittest.mock.patch.object(embedding_worker, "resume_embedding_worker"),
+        ):
+            response = await ai_routes.api_resume_embeddings()
+
+        self.assertEqual(response["ok"], True)
+        conn = await db.get_db()
+        try:
+            rows = await (
+                await conn.execute(
+                    "SELECT model_key FROM embedding_scan_images ORDER BY model_key"
+                )
+            ).fetchall()
+        finally:
+            await conn.close()
+        self.assertEqual([row["model_key"] for row in rows], [other_config["model_key"]])
 
     async def test_exif_failures_log_image_context_without_failing_request(self):
         source = await self._source("exif-errors")

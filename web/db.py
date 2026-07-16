@@ -1415,12 +1415,23 @@ async def poison_embedding_image(
     image_id: int,
     embedding_config: dict | None = None,
     error: str,
-) -> None:
-    await embedding_repository.poison_embedding_image(
+    force: bool = False,
+) -> bool:
+    return await embedding_repository.poison_embedding_image(
         DB_PATH,
         image_id=image_id,
         embedding_config=embedding_config or active_embedding_config(),
         error=error,
+        force=force,
+    )
+
+
+async def clear_embedding_poison_ledger(
+    embedding_config: dict | None = None,
+) -> int:
+    return await embedding_repository.clear_embedding_poison_ledger(
+        DB_PATH,
+        embedding_config=embedding_config or active_embedding_config(),
     )
 
 

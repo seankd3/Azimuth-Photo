@@ -280,6 +280,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         async def fake_poison(**kwargs):
             self.poisoned.append(kwargs)
+            return bool(kwargs.get("force"))
 
         async def fake_empty_dict(*_args, **_kwargs):
             return {}
@@ -548,7 +549,8 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stored"], 0)
         self.assertEqual(result["failed"], 3)
         self.assertEqual([item["image_id"] for item in self.poisoned], [1, 2, 3])
-        self.assertEqual(embedding_worker._embed_retry_after, {})
+        self.assertEqual([item["force"] for item in self.poisoned], [False, False, True])
+        self.assertEqual(sorted(embedding_worker._embed_retry_after), [1, 2])
         self.assertTrue(embedding_worker._embedding_manual_pause)
         self.assertIn("out-of-memory", embedding_worker.get_worker_status()["message"])
 

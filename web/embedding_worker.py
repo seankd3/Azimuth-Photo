@@ -919,19 +919,24 @@ async def _process_embedding_candidates(
                 failure = f"{type(e).__name__}: {e}"
                 first_failure_error = first_failure_error or failure
                 failed_total += chunk_len
+                circuit_open = _embedding_oom_circuit.record_failure()
                 for row in chunk_rows:
                     image_id = int(row["id"])
-                    await _configured(
+                    poisoned = await _configured(
                         _poison_embedding_image,
                         "poison_embedding_image",
                     )(
                         image_id=image_id,
                         embedding_config=embedding_config,
                         error=failure,
+                        force=circuit_open,
                     )
-                    _embed_retry_after.pop(image_id, None)
+                    if poisoned:
+                        _embed_retry_after.pop(image_id, None)
+                    else:
+                        _schedule_embed_retry(image_id, failure)
                 index = next_index
-                if _embedding_oom_circuit.record_failure():
+                if circuit_open:
                     pause_embedding_worker(
                         "Search paused after repeated GPU out-of-memory failures. "
                         "Free GPU memory, then start Search again."
