@@ -8,7 +8,7 @@ import {
     getFoldersTree, getPeopleStatus, listCollections,
     renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
-import { nav, on, setScope, clearScope } from './state.js';
+import { applySmartScopeSort, nav, on, setScope, clearScope, scopePatchFromSmartQuery } from './state.js';
 import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
@@ -681,9 +681,18 @@ function newCollectionSheet() {
 
 /* ---------- collection drill-in ---------- */
 function openCollectionView(coll) {
+    if (coll.smart) {
+        setScope({
+            ...scopePatchFromSmartQuery(coll.query || {}),
+            smartName: coll.name || 'Smart collection',
+            smartQuery: coll.query || {},
+        });
+        applySmartScopeSort(coll.query && coll.query.sort);
+        nav.setTab('photos');
+        return;
+    }
     setScope({
         collectionId: String(coll.id),
-        collectionSmart: Boolean(coll.smart),
         label: coll.name || 'Collection',
     });
     nav.setTab('photos');

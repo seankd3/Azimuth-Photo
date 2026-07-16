@@ -8,6 +8,20 @@ const VIEW_PREF_DEFAULTS = {
     collapseStacks: false,
 };
 const VIEW_SORTS = new Set(['date_taken', 'date_taken_asc', 'elo', 'elo_asc', 'taste']);
+const SMART_QUERY_FIELDS = {
+    q: 'q',
+    people: 'people',
+    flag: 'flag',
+    folder: 'folder',
+    date_taken: 'dateTaken',
+    file_type: 'fileType',
+    camera: 'camera',
+    lens: 'lens',
+    tag: 'tag',
+    orientation: 'orientation',
+    compared: 'compared',
+    min_stars: 'minStars',
+};
 
 function savedViewPrefs() {
     try {
@@ -51,8 +65,12 @@ export const scope = {
     folder: '',
     compared: '',
     minStars: '',
+    dateTaken: '',
     collectionId: '',
     collectionSmart: false,
+    smartName: '',
+    smartQuery: {},
+    smartPreviousSort: '',
     similarId: '',
     similarImages: null,
     label: '',
@@ -66,7 +84,7 @@ export function scopeActive() {
     return Boolean(
         scope.q || scope.people || scope.flag || scope.fileType || scope.camera
         || scope.lens || scope.tag || scope.orientation || scope.folder || scope.compared
-        || scope.minStars || scope.collectionId || scope.similarId
+        || scope.minStars || scope.dateTaken || scope.collectionId || scope.smartName || scope.similarId
     );
 }
 
@@ -83,8 +101,9 @@ export function scopeParams(extra = {}) {
     if (scope.folder) params.set('folder', scope.folder);
     if (scope.compared) params.set('compared', scope.compared);
     if (scope.minStars) params.set('min_stars', scope.minStars);
+    if (scope.dateTaken) params.set('date_taken', scope.dateTaken);
     if (scope.collectionId) params.set('collection_id', scope.collectionId);
-    params.set('stacks', viewPrefs.collapseStacks ? 'collapsed' : 'expanded');
+    params.set('stacks', (scope.smartName || !viewPrefs.collapseStacks) ? 'expanded' : 'collapsed');
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
@@ -92,6 +111,9 @@ export function scopeParams(extra = {}) {
 }
 
 export function setScope(patch) {
+    const previousSmartSort = scope.smartPreviousSort;
+    const carriesSmartSort = Boolean(patch.smartName && previousSmartSort);
+    if (previousSmartSort && !patch.smartName) setViewPrefs({ sort: previousSmartSort });
     scope.q = '';
     scope.people = '';
     scope.flag = '';
@@ -103,8 +125,12 @@ export function setScope(patch) {
     scope.folder = '';
     scope.compared = '';
     scope.minStars = '';
+    scope.dateTaken = '';
     scope.collectionId = '';
     scope.collectionSmart = false;
+    scope.smartName = '';
+    scope.smartQuery = {};
+    scope.smartPreviousSort = carriesSmartSort ? previousSmartSort : '';
     scope.similarId = '';
     scope.similarImages = null;
     scope.label = '';
@@ -119,18 +145,35 @@ export function patchScope(patch) {
     emit('scope', scope);
 }
 
-export function setViewPrefs(patch) {
+export function setViewPrefs(patch, { persist = true } = {}) {
     Object.assign(viewPrefs, patch);
-    try {
-        localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(viewPrefs));
-    } catch {
-        // Preferences are best-effort when storage is unavailable.
+    if (persist) {
+        try {
+            localStorage.setItem(VIEW_PREFS_KEY, JSON.stringify(viewPrefs));
+        } catch {
+            // Preferences are best-effort when storage is unavailable.
+        }
     }
     emit('view-prefs', viewPrefs);
 }
 
 export function clearScope() {
     setScope({});
+}
+
+export function scopePatchFromSmartQuery(query = {}) {
+    const patch = {};
+    for (const [queryKey, scopeKey] of Object.entries(SMART_QUERY_FIELDS)) {
+        const value = query[queryKey];
+        if (value !== undefined && value !== null) patch[scopeKey] = String(value);
+    }
+    return patch;
+}
+
+export function applySmartScopeSort(sort) {
+    if (!sort) return;
+    if (!scope.smartPreviousSort) scope.smartPreviousSort = viewPrefs.sort;
+    setViewPrefs({ sort: String(sort) }, { persist: false });
 }
 
 // Selection (corner-check model, long-press to enter).

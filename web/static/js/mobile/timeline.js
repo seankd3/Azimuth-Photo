@@ -863,20 +863,29 @@ function renderScopeBar() {
     const chip = (kind, label, clear, img = '') =>
         `<span class="chip">${img}<span class="chip-kind">${esc(kind)}</span><b>${esc(label)}</b>`
         + `<span class="chip-x" role="button" aria-label="Clear ${esc(kind)}" data-clear="${clear}">${icon('x')}</span></span>`;
-    if (scope.people) {
+    const smartQuery = scope.smartQuery || {};
+    const smartSets = (key) => Boolean(
+        scope.smartName && smartQuery[key] !== undefined && smartQuery[key] !== null && smartQuery[key] !== '',
+    );
+    if (scope.smartName) {
+        chips.push(`<span class="chip smart"><span class="g">${icon('sparkles')}</span><b>${esc(scope.smartName)}</b>`
+            + `<span class="chip-x" role="button" aria-label="Clear smart collection" data-clear="smartName">${icon('x')}</span></span>`);
+    }
+    if (scope.people && !smartSets('people')) {
         const face = scope.thumb ? `<img src="${esc(scope.thumb)}" alt="">` : '';
         chips.push(chip('person', personLabel({ label: scope.peopleLabel }), 'people', face));
     }
-    if (scope.q) chips.push(chip('search', scope.q, 'q'));
-    if (scope.flag) chips.push(chip('flag', scope.flag === 'picked' ? 'Favorited' : 'Rejected', 'flag'));
-    if (scope.fileType) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
-    if (scope.camera) chips.push(chip('camera', scope.camera, 'camera'));
-    if (scope.lens) chips.push(chip('lens', scope.lens, 'lens'));
-    if (scope.tag) chips.push(chip('tag', scope.tag, 'tag'));
-    if (scope.orientation) chips.push(chip('orientation', scope.orientation === 'landscape' ? 'Landscape' : 'Portrait', 'orientation'));
-    if (scope.folder) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
-    if (scope.compared) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
-    if (scope.minStars) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
+    if (scope.q && !smartSets('q')) chips.push(chip('search', scope.q, 'q'));
+    if (scope.flag && !smartSets('flag')) chips.push(chip('flag', scope.flag === 'picked' ? 'Favorited' : 'Rejected', 'flag'));
+    if (scope.dateTaken && !smartSets('date_taken')) chips.push(chip('date', scope.dateTaken, 'dateTaken'));
+    if (scope.fileType && !smartSets('file_type')) chips.push(chip('type', scope.fileType.toUpperCase(), 'fileType'));
+    if (scope.camera && !smartSets('camera')) chips.push(chip('camera', scope.camera, 'camera'));
+    if (scope.lens && !smartSets('lens')) chips.push(chip('lens', scope.lens, 'lens'));
+    if (scope.tag && !smartSets('tag')) chips.push(chip('tag', scope.tag, 'tag'));
+    if (scope.orientation && !smartSets('orientation')) chips.push(chip('orientation', scope.orientation === 'landscape' ? 'Landscape' : 'Portrait', 'orientation'));
+    if (scope.folder && !smartSets('folder')) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
+    if (scope.compared && !smartSets('compared')) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
+    if (scope.minStars && !smartSets('min_stars')) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
     if (scope.collectionId) chips.push(chip('collection', scope.label || 'Collection', 'collectionId'));
     if (scope.similarId) chips.push(chip('similar', scope.label || 'Similar', 'similarId'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
@@ -925,7 +934,7 @@ function renderScopeBar() {
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;
-            if (field === 'collectionId') {
+            if (field === 'collectionId' || field === 'smartName') {
                 clearScope();
                 nav.setTab('library');
                 return;
