@@ -258,7 +258,7 @@ function activeProgress() {
     const caption = captionWorker.progress_pct != null
         ? pct(captionWorker.progress_pct)
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
-    const metadata = metadataStatus && metadataStatus.manual_pause ? 0 : (metadataStatus && metadataStatus.active ? 50 : 0);
+    const metadata = workerStateIsActive(metadataStatus) ? 50 : 0;
     return { ai, cache, people, captions: caption, metadata };
 }
 
@@ -314,7 +314,8 @@ function captionLine() {
 
 function metadataLine() {
     if (!metadataStatus) return 'Status unknown';
-    const state = metadataStatus.manual_pause ? 'paused' : metadataStatus.active ? 'running' : 'idle';
+    const worker = metadataStatus.worker || {};
+    const state = metadataStatus.manual_pause ? 'paused' : worker.state || (metadataStatus.active ? 'running' : 'idle');
     const count = Number(metadataStatus.pending || metadataStatus.remaining || 0);
     return `${state}${count ? ` · ${fmt(count)} pending` : ''}`;
 }
@@ -357,7 +358,8 @@ function renderActivity() {
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     const workerActive = workerStateIsActive(aiStatus)
         || workerStateIsActive(peopleStatus)
-        || workerStateIsActive(captionStatus);
+        || workerStateIsActive(captionStatus)
+        || workerStateIsActive(metadataStatus);
     widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
     widget.classList.toggle('active', workerActive || Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
@@ -467,12 +469,13 @@ function workItems() {
         ? pct(captionWorker.progress_pct)
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    const metadataActive = workerStateIsActive(metadataStatus);
     return [
         ['ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.'],
         ['cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.'],
         ['people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.'],
         ['captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active],
-        ['metadata', 'Metadata', metadataPaused ? 0 : 50, metadataLine(), metadataPaused],
+        ['metadata', 'Metadata', metadataActive ? 50 : 0, metadataLine(), metadataPaused],
     ].map(([key, label, value, detail, paused, actionLabel, note = '']) => ({
         key, label, value, detail, paused: Boolean(paused), actionLabel, note,
     }));
