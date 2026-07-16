@@ -192,7 +192,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("workerStateIsActive(peopleStatus)", drawer)
         self.assertIn("workerStateIsActive(captionStatus)", drawer)
 
-    def test_metadata_activity_uses_worker_state(self):
+    def test_metadata_activity_uses_metadata_worker_states_and_pause(self):
         drawer = read("drawer.js")
         metadata_line = drawer[
             drawer.index("function metadataLine"):
@@ -200,7 +200,12 @@ class DesktopCorrectnessTests(unittest.TestCase):
         ]
 
         self.assertIn("worker.state", metadata_line)
-        self.assertGreaterEqual(drawer.count("workerStateIsActive(metadataStatus)"), 3)
+        for state in ("running", "waiting", "waiting_retry"):
+            self.assertIn(f"'{state}'", drawer)
+        self.assertIn("!status?.manual_pause", drawer)
+        self.assertIn("Boolean(status?.active)", drawer)
+        self.assertEqual(drawer.count("metadataStateIsActive(metadataStatus)"), 3)
+        self.assertNotIn("workerStateIsActive(metadataStatus)", drawer)
 
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")

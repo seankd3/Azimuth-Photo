@@ -61,6 +61,7 @@ const ACTIVE_WORKER_STATES = new Set([
     'waiting_for_turn',
     'waiting_retry',
 ]);
+const METADATA_ACTIVE_WORKER_STATES = new Set(['running', 'waiting', 'waiting_retry']);
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
 const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
@@ -128,6 +129,12 @@ function workerStateIsActive(status) {
     const index = (status && status.embedding_index) || {};
     const state = index.worker_state || (status && status.worker_state) || worker.state || '';
     return ACTIVE_WORKER_STATES.has(state);
+}
+
+function metadataStateIsActive(status) {
+    const state = status?.worker?.state || '';
+    return !status?.manual_pause
+        && (METADATA_ACTIVE_WORKER_STATES.has(state) || Boolean(status?.active));
 }
 
 function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
@@ -258,7 +265,7 @@ function activeProgress() {
     const caption = captionWorker.progress_pct != null
         ? pct(captionWorker.progress_pct)
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
-    const metadata = workerStateIsActive(metadataStatus) ? 50 : 0;
+    const metadata = metadataStateIsActive(metadataStatus) ? 50 : 0;
     return { ai, cache, people, captions: caption, metadata };
 }
 
@@ -359,7 +366,7 @@ function renderActivity() {
     const workerActive = workerStateIsActive(aiStatus)
         || workerStateIsActive(peopleStatus)
         || workerStateIsActive(captionStatus)
-        || workerStateIsActive(metadataStatus);
+        || metadataStateIsActive(metadataStatus);
     widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
     widget.classList.toggle('active', workerActive || Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
@@ -469,7 +476,7 @@ function workItems() {
         ? pct(captionWorker.progress_pct)
         : progress(captionCounts.captioned || 0, (captionCounts.captioned || 0) + (captionCounts.pending_cached_images || 0));
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
-    const metadataActive = workerStateIsActive(metadataStatus);
+    const metadataActive = metadataStateIsActive(metadataStatus);
     return [
         ['ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.'],
         ['cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.'],
