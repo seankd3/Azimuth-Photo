@@ -16,6 +16,10 @@ export function writeFailureMessage() {
         : 'Couldn’t save — try again';
 }
 
+export function loadFailureMessage() {
+    return isOffline() ? 'Offline — couldn’t load' : 'Couldn’t load — try again';
+}
+
 export async function postJson(url, body) {
     if (isOffline()) {
         lastWriteFailure = 'offline';

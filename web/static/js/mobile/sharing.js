@@ -11,6 +11,7 @@ import {
     listSharedSurfaces,
     previewThumbUrl,
     revokeCollectionShare,
+    loadFailureMessage,
     writeFailureMessage,
 } from './api.js';
 import { applyFlags } from './flags.js';
@@ -128,7 +129,7 @@ async function applyClientFavorites(collection, ids) {
     try {
         data = await getCollection(collection.id, 1000);
     } catch {
-        showToast(writeFailureMessage());
+        showToast(loadFailureMessage());
         return;
     }
     rememberImages((data && data.collection && data.collection.images) || []);
@@ -227,14 +228,20 @@ async function renderCollectionShare(collection, share) {
 }
 
 export async function openCollectionShareSheet(collection) {
-    openSheet(`<h3>Share ${esc(collection.name)}</h3><div class="ms-empty">Loading…</div>`);
+    const sheet = openSheet(`<h3>Share ${esc(collection.name)}</h3><div class="ms-empty" data-share-loading>Loading…</div>`);
+    // The single #m-sheet is shared: only act on the result if OUR loading
+    // state is still showing — the user may have closed it or opened another
+    // sheet while the request was in flight.
+    const stillMine = () => Boolean(sheet.querySelector('[data-share-loading]'));
     try {
         const data = await getCollectionShare(collection.id);
+        if (!stillMine()) return;
         await renderCollectionShare(collection, data && data.share);
     } catch {
+        if (!stillMine()) return;
         // A sheet stuck on "Loading…" is a lie — close it and say what happened.
         dismissSheetThen();
-        showToast(writeFailureMessage());
+        showToast(loadFailureMessage());
     }
 }
 
