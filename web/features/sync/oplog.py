@@ -264,13 +264,23 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
                 "CASE WHEN json_valid(develop_settings.settings) THEN "
                 "  CASE WHEN json_type(develop_settings.settings) = 'object' "
                 "    THEN develop_settings.settings ELSE '{}' END "
-                "ELSE '{}' END, '$._lr_rating', ?)",
+                "ELSE '{}' END, '$._lr_rating', ?), updated_at=excluded.updated_at",
                 (image_id, settings, _iso_timestamp(float(entry["ts"])), value),
             )
     elif family == "develop":
         settings_value = payload.get("settings")
         if not isinstance(settings_value, dict):
             raise ValueError("develop payload must contain full settings")
+        settings_value = dict(settings_value)
+        row = await (await conn.execute(
+            "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+        )).fetchone()
+        try:
+            current_settings = json.loads(row["settings"]) if row else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            current_settings = {}
+        if isinstance(current_settings, dict) and "_lr_rating" in current_settings:
+            settings_value["_lr_rating"] = current_settings["_lr_rating"]
         updated_at = str(payload.get("updated_at") or _iso_timestamp(float(entry["ts"])))
         await conn.execute(
             "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, ?, ?) "
