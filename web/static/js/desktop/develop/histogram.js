@@ -5,13 +5,22 @@ const CHANNELS = [
 ];
 
 export class DevelopHistogram {
-    constructor(host) {
+    constructor(host, { onClipToggle } = {}) {
         this.host = host;
+        this.onClipToggle = onClipToggle;
         this.host.innerHTML = '<div class="develop-hist-wrap">'
             + '<button class="develop-clip develop-clip-shadow" data-tip="Shadow clipping" aria-label="Shadow clipping">◢</button>'
             + '<canvas class="develop-hist" width="288" height="112" aria-label="RGB histogram"></canvas>'
             + '<button class="develop-clip develop-clip-highlight" data-tip="Highlight clipping" aria-label="Highlight clipping">◣</button>'
             + '</div>';
+        for (const side of ['shadow', 'highlight']) {
+            const button = this.host.querySelector(`.develop-clip-${side}`);
+            button.addEventListener('click', () => {
+                const active = button.classList.toggle('active');
+                button.setAttribute('aria-pressed', String(active));
+                this.onClipToggle?.(side, active);
+            });
+        }
         this.canvas = this.host.querySelector('canvas');
         this.context = this.canvas.getContext('2d');
         this.sampleCanvas = document.createElement('canvas');
@@ -32,6 +41,14 @@ export class DevelopHistogram {
         this.sampleCanvas.height = sampleHeight;
         this.sampleContext.drawImage(renderer.canvas, 0, 0, sampleWidth, sampleHeight);
         this.update(this.sampleContext.getImageData(0, 0, sampleWidth, sampleHeight).data);
+    }
+
+    setClipState(shadow, highlight) {
+        for (const [side, active] of [['shadow', shadow], ['highlight', highlight]]) {
+            const button = this.host.querySelector(`.develop-clip-${side}`);
+            button.classList.toggle('active', Boolean(active));
+            button.setAttribute('aria-pressed', String(Boolean(active)));
+        }
     }
 
     setLoading(loading) {

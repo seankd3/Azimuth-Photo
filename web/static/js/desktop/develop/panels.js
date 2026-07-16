@@ -186,13 +186,14 @@ class CurveEditor {
 }
 
 export class DevelopPanels {
-    constructor(host, { histogramHost, cropHost, transformHost, onChange, onAutoTone, masking, heal, transform }) {
+    constructor(host, { histogramHost, cropHost, transformHost, onChange, onAutoTone, onWbPick, masking, heal, transform }) {
         this.onAutoTone = onAutoTone;
+        this.onWbPick = onWbPick;
         this.host = host;
         this.onChange = onChange;
         this.settings = {};
         host.innerHTML = section('Histogram', 'histogram', '<div id="develop-histogram-slot"></div>')
-            + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
+            + section('Basic', 'basic', '<small data-adobe-profile hidden style="display:block;margin:-3px 0 8px;color:var(--text-3);font-size:var(--fs-caption)"></small><div class="develop-wb-row"><select id="develop-wb" data-tip="White balance mode" aria-label="White balance"><option>As Shot</option><option>Custom</option><option>Daylight</option><option>Cloudy</option><option>Shade</option><option>Tungsten</option><option>Fluorescent</option><option>Flash</option></select><button data-wb-pick data-tip="White balance eyedropper — click a neutral area (W)" aria-label="White balance eyedropper" aria-pressed="false">⌖</button><button data-wb-reset data-tip="Reset white balance to As Shot">As Shot</button><button data-auto-tone data-tip="Auto tone — deterministic histogram fit">Auto</button></div>' + slidersHtml(BASIC))
             + section('Tone', 'tone', slidersHtml(TONE))
             + section('Presence', 'presence', slidersHtml(PRESENCE))
             + section('Tone Curve', 'curve', '<div class="develop-curve-tools"><select data-tip="Tone curve channel" aria-label="Tone curve channel"><option value="ToneCurvePV2012">RGB</option><option value="ToneCurvePV2012Red">Red</option><option value="ToneCurvePV2012Green">Green</option><option value="ToneCurvePV2012Blue">Blue</option></select><button data-curve-reset data-tip="Reset selected curve">Reset</button></div><canvas class="develop-curve" width="288" height="180" tabindex="0" data-tip="Drag points; double-click to add" aria-label="Tone curve editor"></canvas>')
@@ -268,19 +269,47 @@ export class DevelopPanels {
                 if (Number.isFinite(value)) this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
                 this.syncSlider(row);
             });
-            input.addEventListener('focus', () => input.select());
+            input.addEventListener('focus', () => { input.dataset.revert = input.value; input.select(); });
+            input.addEventListener('keydown', (event) => {
+                const step = Number(row.dataset.step) || 1;
+                const nudge = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+                if (nudge) {
+                    event.preventDefault();
+                    const size = event.shiftKey ? step * 10 : step;
+                    const current = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                    const value = Math.max(Number(row.dataset.min), Math.min(Number(row.dataset.max), Math.round((current + nudge * size) / step) * step));
+                    this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                    this.syncSlider(row);
+                } else if (event.key === 'Escape') {
+                    input.value = input.dataset.revert ?? input.value;
+                    input.blur();
+                } else if (event.key === 'Enter') {
+                    input.blur();
+                }
+            });
+            row.addEventListener('wheel', (event) => {
+                event.preventDefault();
+                const step = Number(row.dataset.step) || 1;
+                const direction = event.deltaY < 0 ? 1 : -1;
+                const size = event.shiftKey ? step * 10 : step;
+                const current = numberSetting(this.settings, row.dataset.setting, Number(row.dataset.default));
+                const value = Math.max(Number(row.dataset.min), Math.min(Number(row.dataset.max), Math.round((current + direction * size) / step) * step));
+                this.change(row.dataset.setting, value, row.querySelector('.develop-slider-label').textContent);
+                this.syncSlider(row);
+            }, { passive: false });
         }
     }
 
     bindOtherControls() {
+        this.host.querySelector('[data-wb-pick]')?.addEventListener('click', () => this.onWbPick?.());
         const wb = this.host.querySelector('#develop-wb');
         wb.addEventListener('change', () => this.change('WhiteBalance', wb.value, 'White Balance'));
-        this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
-        this.root.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
+        this.host.querySelector('[data-auto-tone]')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
             button.disabled = true;
             try { await this.onAutoTone?.(); } finally { button.disabled = false; }
         });
+        this.host.querySelector('[data-wb-reset]').addEventListener('click', () => {
             this.change('WhiteBalance', 'As Shot', 'White Balance');
             delete this.settings.Temperature;
             delete this.settings.Tint;

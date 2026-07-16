@@ -1009,6 +1009,8 @@ void main() {
     if (u_softProofProfile > 0) c = linearToSrgb(u_xyzToSrgb * (u_proofToXyz * clamp(proof, 0.0, 1.0)));
     if (u_softProofProfile == 4) c = vec3(${f(SOFT_PROOF_PAPER_BLACK)}) + c * ${f(SOFT_PROOF_PAPER_WHITE - SOFT_PROOF_PAPER_BLACK)};
     if (u_gamutWarning && outsideProof) c = mix(c, vec3(1.0, .08, .48), .42);
+    if (u_clipHighlight && any(greaterThanEqual(c, vec3(254.5 / 255.0)))) c = vec3(1.0, .12, .12);
+    if (u_clipShadow && all(lessThanEqual(c, vec3(0.5 / 255.0)))) c = vec3(.16, .35, 1.0);
     outColor = vec4(clamp(c, 0.0, 1.0), 1.0);
 }`;
 
@@ -1021,6 +1023,8 @@ uniform int u_retouchActive[${RETOUCH_RENDER_CAP}];
 uniform vec4 u_retouchSourceData[${RETOUCH_RENDER_CAP}];
 uniform vec4 u_retouchDestinationData[${RETOUCH_RENDER_CAP}];
 uniform bool u_healOverlay;
+uniform bool u_clipShadow;
+uniform bool u_clipHighlight;
 
 vec3 ringMean(vec2 center, float radius) {
     vec3 total = vec3(0.0);
@@ -1559,6 +1563,12 @@ export class DevelopRenderer {
         this.requestRender();
     }
 
+    setClipOverlay(shadow, highlight) {
+        this.clipShadow = Boolean(shadow);
+        this.clipHighlight = Boolean(highlight);
+        this.requestRender();
+    }
+
     setHealOverlay(show) {
         this.healOverlay = Boolean(show);
         this.requestRender();
@@ -1801,6 +1811,8 @@ export class DevelopRenderer {
         gl.uniform4fv(uniform('u_retouchSourceData[0]'), sourceData);
         gl.uniform4fv(uniform('u_retouchDestinationData[0]'), destinationData);
         gl.uniform1i(uniform('u_healOverlay'), this.healOverlay ? 1 : 0);
+        gl.uniform1i(uniform('u_clipShadow'), this.clipShadow ? 1 : 0);
+        gl.uniform1i(uniform('u_clipHighlight'), this.clipHighlight ? 1 : 0);
     }
 
     drawColorTarget() {

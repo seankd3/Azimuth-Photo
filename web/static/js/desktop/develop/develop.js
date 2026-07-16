@@ -4,6 +4,7 @@ import { showToast } from '../toast.js';
 import { CropController } from './crop.js';
 import { DevelopRenderer } from './gl.js';
 import { DevelopHistogram } from './histogram.js';
+import { sampleBasePatch, solveWhiteBalance } from './wb_picker.js';
 import { DevelopPanels } from './panels.js';
 import { mountPresetsPanel } from './presets.js';
 import { mountHistoryPanel } from './history_panel.js';
@@ -24,6 +25,8 @@ let renderer = null;
 let panels = null;
 let crop = null;
 let histogram = null;
+let wbPickActive = false;
+const clipOverlay = { shadow: false, highlight: false };
 let masking = null;
 let heal = null;
 let loadingToken = 0;
@@ -580,7 +583,42 @@ function wheelZoom(event) {
     else setZoomLevel(levels[next], event);
 }
 
+function setClipOverlay(shadow, highlight) {
+    clipOverlay.shadow = Boolean(shadow);
+    clipOverlay.highlight = Boolean(highlight);
+    renderer?.setClipOverlay(clipOverlay.shadow, clipOverlay.highlight);
+    histogram?.setClipState(clipOverlay.shadow, clipOverlay.highlight);
+}
+
+function setWbPick(active) {
+    wbPickActive = Boolean(active) && Boolean(currentImage);
+    stage.classList.toggle('wb-picking', wbPickActive);
+    stage.style.cursor = wbPickActive ? 'crosshair' : '';
+    const button = document.querySelector('[data-wb-pick]');
+    button?.classList.toggle('active', wbPickActive);
+    button?.setAttribute('aria-pressed', String(wbPickActive));
+}
+
+function pickWhiteBalance(event) {
+    window.__wbDebug = { active: wbPickActive, button: event.button, ready: !!renderer?.ready, img: !!currentImage, base: !!(currentImage && stateCache.get(Number(currentImage.id))?.base) };
+    if (!wbPickActive || event.button !== 0 || !renderer?.ready || !currentImage) return false;
+    const entry = stateCache.get(Number(currentImage.id));
+    if (!entry?.base) { showToast('The image is still loading'); return true; }
+    const point = renderer.canvasToImage(event.clientX, event.clientY);
+    if (point.u < 0 || point.u > 1 || point.v < 0 || point.v > 1) return true;
+    const sample = sampleBasePatch(entry.base, point.u, point.v);
+    const asShot = entry.meta?.as_shot || {};
+    const solved = sample && solveWhiteBalance(sample, entry.meta?.color, Number(asShot.temperature) || 5500, Number(asShot.tint) || 0);
+    if (!solved) { showToast('Could not sample that spot'); return true; }
+    applySettingsPatch({ WhiteBalance: 'Custom', Temperature: solved.temperature, Tint: solved.tint }, 'White balance picker');
+    panels?.setSettings(stateCache.get(Number(currentImage.id))?.settings || {});
+    setWbPick(false);
+    showToast(`White balance: ${solved.temperature}K, tint ${solved.tint > 0 ? '+' : ''}${solved.tint}`);
+    return true;
+}
+
 function beginPan(event) {
+    if (pickWhiteBalance(event)) { event.preventDefault(); event.stopPropagation(); return; }
     if (event.button !== 0 || !renderer?.ready || proofTile?.held) return;
     const scale = zoomScale();
     if (scale <= 1 || (crop?.active || masking?.mode || heal?.active) && !spaceHeld) return;
@@ -978,6 +1016,14 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation(); nav(event.key === 'ArrowLeft' ? -1 : 1);
     } else if (event.key === '\\') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) showBefore(true);
+    } else if (key === 'w') {
+        event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) setWbPick(!wbPickActive);
+    } else if (key === 'j') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) {
+            const active = !(clipOverlay.shadow || clipOverlay.highlight);
+            setClipOverlay(active, active);
+        }
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
     } else if (key === 'p') {
@@ -990,6 +1036,7 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!spaceHeld) { spaceHeld = true; if (zoomScale() > 1) stage.style.cursor = 'grab'; }
     } else if (event.key === 'Escape') {
+        if (wbPickActive) { setWbPick(false); return; }
         closePopover(); crop.setActive(false);
     }
 }
@@ -1010,13 +1057,19 @@ function handleKeyUp(event) {
 function init() {
     const histogramSlot = document.createElement('div');
     histogramSlot.id = 'develop-histogram';
-    histogram = new DevelopHistogram(histogramSlot);
+    histogram = new DevelopHistogram(histogramSlot, {
+        onClipToggle: (side, active) => setClipOverlay(
+            side === 'shadow' ? active : clipOverlay.shadow,
+            side === 'highlight' ? active : clipOverlay.highlight,
+        ),
+    });
     const cropSlot = document.createElement('div');
     cropSlot.id = 'develop-crop-controls';
     const transformSlot = document.createElement('div');
     transformSlot.id = 'develop-transform-controls';
     panels = new DevelopPanels(panelHost, {
         histogramHost: histogramSlot, cropHost: cropSlot, transformHost: transformSlot, onChange: settingsChanged, onAutoTone: requestAutoTone,
+        onWbPick: () => setWbPick(!wbPickActive),
         transform: {
             stage, canvas,
             onAutoLevel: async () => {
