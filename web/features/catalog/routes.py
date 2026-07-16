@@ -153,7 +153,21 @@ async def scan_prefetch_on_batch(count):
         )
 
 
-async def _run_scan(folder: str, source_id: int) -> None:
+async def _is_first_run_import() -> bool:
+    if settings.get_settings().get("setup_completed"):
+        return False
+    catalog = await _configured(_get_catalog_summary)()
+    return not catalog.get("sources") and int(catalog.get("stats", {}).get("total_images") or 0) == 0
+
+
+def _start_first_run_pipeline() -> None:
+    thumbnails.start_pregeneration()
+    catalog_metadata.resume_catalog_metadata()
+
+
+async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> None:
+    if first_run:
+        _start_first_run_pipeline()
     await scanner.scan_folder(folder, source_id=source_id, on_batch=scan_prefetch_on_batch)
     # Invalidate read caches at COMPLETION too — _catalog_changed at scan start
     # is not enough: a grid query during the scan re-primes a stale empty
@@ -186,11 +200,12 @@ async def start_scan(request: Request):
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
     try:
+        first_run = await _is_first_run_import()
         source = await _configured(_add_or_restore_source)(folder)
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(_run_scan(source["path"], int(source["id"])))
+    asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {"status": "started", "folder": source["path"], "source_id": source["id"]}
 
@@ -476,13 +491,14 @@ async def api_add_catalog_source(request: Request):
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
     try:
+        first_run = await _is_first_run_import()
         source = await _configured(_add_or_restore_source)(folder)
     except Exception:
         if scan:
             scanner.release_scan_claim()
         raise
     if scan:
-        asyncio.create_task(_run_scan(source["path"], int(source["id"])))
+        asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {
         "ok": True,
