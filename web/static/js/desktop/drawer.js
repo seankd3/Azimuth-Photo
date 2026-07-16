@@ -53,6 +53,14 @@ let thumbnailCachePolicy = 'keep';
 const busyActions = new Set();
 const workerActionGenerations = new Map();
 const workerActionsInFlight = new Set();
+const ACTIVE_WORKER_STATES = new Set([
+    'embedding',
+    'loading_model',
+    'waiting_for_model',
+    'waiting_for_gpu',
+    'waiting_for_turn',
+    'waiting_retry',
+]);
 
 const MODEL_SAVE_FIELDS = ['embed_model_preset', 'embed_model_id', 'embed_model_revision', 'embed_model_dir', 'embed_model_dim'];
 const CAPTION_MODEL_FIELDS = ['caption_model_preset', 'caption_model_id', 'caption_model_revision', 'caption_model_dir', 'caption_model_quantization', 'caption_prompt_version'];
@@ -113,6 +121,13 @@ function progress(done, total) {
     const d = Number(done) || 0;
     const t = Number(total) || 0;
     return t > 0 ? pct((d / t) * 100) : 0;
+}
+
+function workerStateIsActive(status) {
+    const worker = (status && status.worker) || {};
+    const index = (status && status.embedding_index) || {};
+    const state = index.worker_state || (status && status.worker_state) || worker.state || '';
+    return ACTIVE_WORKER_STATES.has(state);
 }
 
 function applySettingsData(data, { preserveDirtyExcept = null } = {}) {
@@ -340,8 +355,11 @@ function renderActivity() {
     const peoplePaused = peopleStatus && peopleStatus.worker && peopleStatus.worker.manual_pause;
     const captionsPaused = captionStatus && !captionStatus.active;
     const metadataPaused = metadataStatus && metadataStatus.manual_pause;
+    const workerActive = workerStateIsActive(aiStatus)
+        || workerStateIsActive(peopleStatus)
+        || workerStateIsActive(captionStatus);
     widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
-    widget.classList.toggle('active', Object.values(values).some((value) => value > 0 && value < 100));
+    widget.classList.toggle('active', workerActive || Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
         ['AI', values.ai, aiStatus || {}],
         ['Cache', values.cache, cacheStatus || {}],
