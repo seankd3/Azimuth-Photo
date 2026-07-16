@@ -4,17 +4,15 @@
 // each member's ranking signals.
 
 import {
-    createCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    deleteCollection, getFoldersTree, getPeopleStatus, listCollections,
+    createCollection, deleteCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
+    getFoldersTree, getPeopleStatus, listCollections,
     renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
-import { nav, on, rememberImages, setScope, clearScope } from './state.js';
+import { nav, on, setScope, clearScope } from './state.js';
 import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
-import { openViewer } from './viewer.js';
 import { applyFlags } from './flags.js';
-import { dismissLayer, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 import { openCollectionShareSheet, renderSharedView } from './sharing.js';
 import { offlineSummary, openOfflineStatusSheet } from './offline.js';
@@ -37,8 +35,6 @@ let suggestionsLoading = false;
 let suggestionsLoaded = false;
 let showingCollection = false;
 let loadError = false;
-let collectionListScroll = 0;
-let collectionToken = 0;
 let workStatus = null;
 let workPollTimer = null;
 let workLoading = false;
@@ -669,74 +665,17 @@ function newCollectionSheet() {
 }
 
 /* ---------- collection drill-in ---------- */
-async function openCollectionView(coll) {
-    const pane = document.getElementById('tab-library');
-    if (!showingCollection && pane) collectionListScroll = pane.scrollTop;
-    const token = ++collectionToken;
-    showingCollection = true;
-    root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-        + `<div class="ml-coll-grid">${'<div class="skel-cell"></div>'.repeat(9)}</div>`;
-    if (pane) pane.scrollTop = 0;
-    pushLayer('collection');
-    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
-
-    let data = null;
-    try {
-        data = await getCollection(coll.id, 1000);
-    } catch {
-        if (token !== collectionToken || !showingCollection) return;
-        root.innerHTML =
-            `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-            + '<div class="ms-empty">Couldn\'t load this collection.</div>'
-            + '<button class="sheet-btn" id="ml-coll-retry" type="button">Try again</button>';
-        root.querySelector('#ml-back')?.addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-        root.querySelector('#ml-more')?.addEventListener('click', () => openCollectionActionsSheet(coll));
-        root.querySelector('#ml-coll-retry')?.addEventListener('click', () => openCollectionView(coll));
-        return;
-    }
-    if (token !== collectionToken || !showingCollection) return;
-    const images = (data && data.collection && data.collection.images) || [];
-    rememberImages(images);
-    const pct = sortedPctCache.get(coll.id);
-    const grid = images.map((img, i) =>
-        `<figure class="mcell" data-i="${i}" role="button" aria-label="${esc(img.filename || img.id)}">`
-        + `<img loading="lazy" decoding="async" src="${esc(thumbUrl('sm', img.id))}" onload="this.classList.add('ld')" alt="">`
-        + '</figure>'
-    ).join('');
-    root.innerHTML =
-        `<div class="ml-head"><button class="ml-back" id="ml-back">${icon('chevron-left')} Library</button><h3>${esc(coll.name)}</h3><button class="ml-more" id="ml-more" aria-label="Collection actions">${icon('ellipsis')}</button></div>`
-        + `<div class="ms-empty">${fmtInt(images.length)} photos${pct == null ? '' : ` · ${pct}% sorted`}</div>`
-        + `<div class="ml-coll-grid">${grid || '<div class="ms-empty" style="grid-column:span 3">No photos in this collection.</div>'}</div>`;
-    root.querySelector('#ml-back').addEventListener('click', () => dismissLayer('collection', closeCollectionView));
-    root.querySelector('#ml-more').addEventListener('click', () => openCollectionActionsSheet(coll));
-    root.querySelector('.ml-coll-grid').addEventListener('click', (e) => {
-        const cell = e.target.closest('.mcell[data-i]');
-        if (cell) openViewer(images, Number(cell.dataset.i));
-    });
-}
-
-function closeCollectionView({ fromHistory = false } = {}) {
-    if (!showingCollection) return;
-    collectionToken += 1;
-    showingCollection = false;
-    render();
-    requestAnimationFrame(() => {
-        const pane = document.getElementById('tab-library');
-        if (pane) pane.scrollTop = collectionListScroll;
-    });
-    loadAll();
-    if (!fromHistory) syncLayerClosed('collection');
+function openCollectionView(coll) {
+    setScope({ collectionId: String(coll.id), label: coll.name || 'Collection' });
+    nav.setTab('photos');
 }
 
 export function popCollectionView() {
-    if (!showingCollection) return false;
-    dismissLayer('collection', closeCollectionView);
-    return true;
+    return false;
 }
 
-function openCollectionActionsSheet(coll) {
+/** Rename / share / delete for the collection currently open as a timeline scope. */
+export function openCollectionActionsSheet(coll) {
     const sheet = openSheet(
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
@@ -747,17 +686,16 @@ function openCollectionActionsSheet(coll) {
     );
     const input = sheet.querySelector('#ml-rename-name');
     input.value = coll.name || '';
-    sheet.querySelector('#ml-rename-save').addEventListener('click', async () => {
+    sheet.querySelector('#ml-rename-save').addEventListener('click', () => {
         const next = input.value.trim();
         if (!next || next === coll.name) return;
         dismissSheetThen(async () => {
             const result = await renameCollection(coll.id, next);
             if (result && result.ok) {
-                showToast(`Renamed to “${next}”`);
+                showToast(`Renamed to \u201c${next}\u201d`);
                 collections = null;
-                coll.name = next;
-                await loadAll();
-                openCollectionView(coll);
+                setScope({ collectionId: String(coll.id), label: next });
+                document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());
             }
@@ -775,26 +713,23 @@ function openCollectionActionsSheet(coll) {
         confirm.hidden = true;
         deleteButton.hidden = false;
     });
-    confirm.querySelector('[data-yes]')?.addEventListener('click', async () => {
+    confirm.querySelector('[data-yes]')?.addEventListener('click', () => {
         dismissSheetThen(async () => {
             const result = await deleteCollection(coll.id);
             if (result && result.ok) {
-                showToast(`Deleted “${coll.name}”`);
+                showToast('Collection deleted \u2014 photos stay in your library');
                 collections = null;
-                counts = null;
-                dismissLayer('collection', closeCollectionView);
-                await loadAll();
+                clearScope();
+                nav.setTab('library');
+                document.dispatchEvent(new CustomEvent('collections-changed'));
             } else {
                 showToast(writeFailureMessage());
             }
         });
     });
-    input.focus();
-    input.select();
 }
 
 export function initLibrary() {
-    registerLayer('collection', { close: closeCollectionView });
     on('installable', () => {
         if (!showingCollection && built) render();
     });

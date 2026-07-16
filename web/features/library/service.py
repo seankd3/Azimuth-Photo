@@ -381,6 +381,26 @@ async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
     return set(int(image_id) for image_id in current_ids).intersection(batch_ids)
 
 
+def _id_scope(value: str = "") -> set[int] | None:
+    values = set()
+    for raw in (value or "").split(","):
+        try:
+            image_id = int(raw.strip())
+        except (TypeError, ValueError):
+            continue
+        if image_id > 0:
+            values.add(image_id)
+    return values or None
+
+
+def _combine_id_scopes(current_ids, requested_ids: set[int] | None):
+    if requested_ids is None:
+        return current_ids
+    if current_ids is None:
+        return requested_ids
+    return set(int(image_id) for image_id in current_ids).intersection(requested_ids)
+
+
 def _normalize_stacks_mode(value: str = "") -> str:
     return "collapsed" if (value or "").strip().lower() == "collapsed" else "expanded"
 
@@ -546,6 +566,7 @@ async def date_histogram_payload(
     deep: bool = False,
     import_batch: int = 0,
     stacks: str = "expanded",
+    collection_id: int = 0,
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -562,6 +583,7 @@ async def date_histogram_payload(
         lens=lens,
         tag=tag,
         id_filter=search_ids,
+        collection_id=collection_id,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
     )
@@ -650,12 +672,14 @@ async def api_rankings_impl(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, stacks: str = "expanded", request=None,
+    import_batch: int = 0, stacks: str = "expanded", ids: str = "", collection_id: int = 0,
+    request=None,
 ):
     limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
     offset = _configured_clamp_int(offset, 0, 0, 1_000_000)
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
+    search_ids = _combine_id_scopes(search_ids, _id_scope(ids))
     stacks_mode = _normalize_stacks_mode(stacks)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks_mode)
     search_scores = search["scores"]
@@ -680,7 +704,7 @@ async def api_rankings_impl(
     db_sort = "elo" if sort == "similarity" and not search_scores else sort
     blend_context = (
         await _ranking_taste_blend_context(db_sort)
-        if sort != "taste" and not (sort == "similarity" and search_scores)
+        if sort != "taste" and not collection_id and not (sort == "similarity" and search_scores)
         else {"active": False, "cache_key": ("taste_blend", "bypassed")}
     )
     rankings_cache_key = None
@@ -692,7 +716,7 @@ async def api_rankings_impl(
     cacheable_embedding_search = search_mode in ("embedding", "fused", "captions")
     cacheable_search = cacheable_metadata_search or cacheable_embedding_search
     normalized_search_query = _configured_normalize_search_query(q) if search["active"] else ""
-    if not search["active"] or cacheable_search:
+    if (not search["active"] or cacheable_search) and not collection_id and not _id_scope(ids):
         rankings_cache_key = (
             _configured_db_signature(),
             _configured_cache_root(),
@@ -716,6 +740,7 @@ async def api_rankings_impl(
             bool(search["ai_unavailable"]) if cacheable_search else False,
             str(search.get("fallback_reason") or ""),
             _normalized_import_batch_id(import_batch),
+            int(collection_id or 0),
             visible_thumb_size,
             stacks_mode,
             blend_context.get("cache_key"),
@@ -762,7 +787,8 @@ async def api_rankings_impl(
             _configured(_count_rankings)(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                camera=camera, lens=lens, tag=tag, id_filter=search_ids, text_query=text_query,
+                camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
+                text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
@@ -771,6 +797,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
+            collection_id=collection_id,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -796,6 +823,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
+            collection_id=collection_id,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -852,7 +880,8 @@ async def api_rankings_impl(
             _configured(_count_rankings)(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                camera=camera, lens=lens, tag=tag, id_filter=search_ids, text_query=text_query,
+                camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
+                text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
             )
         )
@@ -861,6 +890,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
+            collection_id=collection_id,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -872,6 +902,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
+            collection_id=collection_id,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -960,6 +991,7 @@ async def api_rankings_impl(
             search.get("people_active"),
             text_query,
             _normalized_import_batch_id(import_batch),
+            int(collection_id or 0),
             exclude_collapsed_stack_members,
         )
     )
@@ -978,6 +1010,7 @@ async def api_rankings_impl(
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
                     id_filter=search_ids,
+                    collection_id=collection_id,
                     text_query=text_query,
                     exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                 )
@@ -988,13 +1021,14 @@ async def api_rankings_impl(
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
                     id_filter=search_ids,
+                    collection_id=collection_id,
                     visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                     text_query=text_query,
                     exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                 )
             )
     quality_task = None
-    if offset == 0 and _get_rank_quality is not None:
+    if offset == 0 and _get_rank_quality is not None and not collection_id:
         quality_task = asyncio.create_task(
             _get_rank_quality(
                 orientation=orientation, compared=compared, min_stars=min_stars,
@@ -1058,6 +1092,7 @@ async def api_rankings_impl(
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens, tag=tag,
                 id_filter=search_ids,
+                collection_id=collection_id,
                 visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -1098,6 +1133,7 @@ async def api_rankings_impl(
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
             id_filter=search_ids,
+            collection_id=collection_id,
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
@@ -1122,6 +1158,7 @@ async def api_rankings_impl(
                             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                             camera=camera, lens=lens, tag=tag,
                             id_filter=search_ids,
+                            collection_id=collection_id,
                             text_query=text_query,
                             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                         )
@@ -1133,6 +1170,7 @@ async def api_rankings_impl(
                             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                             camera=camera, lens=lens, tag=tag,
                             id_filter=search_ids,
+                            collection_id=collection_id,
                             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                             text_query=text_query,
                             exclude_collapsed_stack_members=exclude_collapsed_stack_members,

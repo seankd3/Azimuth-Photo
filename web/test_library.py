@@ -1282,6 +1282,36 @@ class LibraryTests(BackendTestCase):
         await db.batch_set_image_flags([second], "picked")
         self.assertEqual(await db.count_rankings(flag="picked"), 2)
 
+    async def test_collection_scoped_rankings_sort_and_compose_with_flag(self):
+        source = await self._source()
+        lower = await self._image(source["id"], "collection-lower.jpg", elo=1200)
+        picked = await self._image(source["id"], "collection-picked.jpg", elo=1500)
+        outside = await self._image(source["id"], "outside.jpg", elo=1800)
+        await db.set_image_flag(picked, "picked")
+        await db.set_image_flag(outside, "picked")
+        collection = await db.create_collection(name="Timeline scope", image_ids=[lower, picked])
+        await self._cache_entry(lower, "sm")
+        await self._cache_entry(picked, "sm")
+
+        scoped = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            collection_id=collection["id"],
+        )
+        self.assertEqual([image["id"] for image in scoped["images"]], [picked, lower])
+        self.assertEqual(scoped["total_images"], 2)
+        self.assertEqual(await db.count_rankings(collection_id=collection["id"]), 2)
+
+        picked_only = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            flag="picked",
+            collection_id=collection["id"],
+        )
+        self.assertEqual([image["id"] for image in picked_only["images"]], [picked])
+        self.assertEqual(picked_only["total_images"], 1)
+        self.assertEqual(await db.count_rankings(flag="picked", collection_id=collection["id"]), 1)
+
     async def test_date_histogram_route_counts_months_undated_and_total(self):
         source = await self._source()
         january_first = await self._image(source["id"], "january-first.jpg")
@@ -1300,6 +1330,7 @@ class LibraryTests(BackendTestCase):
                     ("2025-03-01 22:00:00", march),
                 ],
             )
+            await conn.execute("UPDATE images SET elo = ? WHERE id = ?", (1700, january_first))
             await conn.commit()
         finally:
             await conn.close()
@@ -1308,9 +1339,9 @@ class LibraryTests(BackendTestCase):
         response = await library_routes.api_date_histogram()
 
         self.assertEqual(response["months"], [
-            {"month": "2025-03", "count": 1},
-            {"month": "2025-02", "count": 1},
-            {"month": "2025-01", "count": 2},
+            {"month": "2025-03", "count": 1, "cover_id": march},
+            {"month": "2025-02", "count": 1, "cover_id": february},
+            {"month": "2025-01", "count": 2, "cover_id": january_first},
         ])
         self.assertEqual(response["undated"], 1)
         self.assertEqual(response["total"], 5)
@@ -1331,7 +1362,7 @@ class LibraryTests(BackendTestCase):
 
         response = await library_routes.api_date_histogram(stacks="expanded")
 
-        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1}])
+        self.assertEqual(response["months"], [{"month": "2025-01", "count": 1, "cover_id": image_id}])
         self.assertEqual(response["total"], 1)
 
     async def test_date_histogram_caches_and_clears_with_facet_invalidation(self):

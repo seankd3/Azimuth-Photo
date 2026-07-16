@@ -6,7 +6,7 @@
 
 import { getDateHistogram, getRankings, getStack, thumbUrl } from './api.js';
 import {
-    byId, clearScope, clearSelection, emit, on, rememberImages,
+    byId, clearScope, clearSelection, emit, nav, on, rememberImages,
     isOffline, scope, scopeActive, scopeParams, selState, selection, selectionChanged,
     setViewPrefs, viewPrefs,
 } from './state.js';
@@ -18,6 +18,7 @@ import { tick } from './haptics.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 import { openPersonSheet } from './search.js';
+import { openCollectionActionsSheet } from './library.js';
 
 const PAGE = 120;
 const MAX_WINDOW = PAGE * 3;
@@ -448,7 +449,12 @@ function renderMonths() {
         const card = document.createElement('button');
         card.className = 'm-month-card';
         card.setAttribute('aria-label', `${monthLabel(entry.key)}, ${entry.count} photos`);
-        card.innerHTML = `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
+        const coverId = Number(entry.coverId) || 0;
+        if (coverId) card.classList.add('has-cover');
+        card.innerHTML = (coverId
+            ? `<img src="${esc(thumbUrl('sm', coverId))}" alt="" loading="lazy" decoding="async">`
+            : '')
+            + `<b>${esc(entry.key === 'undated' ? 'Undated' : FULL_MONTHS[Number(entry.key.slice(5)) - 1])}</b>`
             + `<span class="num">${fmtInt(entry.count)} photos</span>`;
         card.addEventListener('click', () => {
             setZoom(0);
@@ -612,7 +618,7 @@ async function loadHistogram() {
     monthOffsets = [];
     let offset = 0;
     for (const m of data.months || []) {
-        monthOffsets.push({ key: m.month, offset, count: m.count });
+        monthOffsets.push({ key: m.month, offset, count: m.count, coverId: m.cover_id });
         offset += m.count;
     }
     if (data.undated > 0) {
@@ -818,6 +824,7 @@ function renderScopeBar() {
     if (scope.folder) chips.push(chip('folder', scope.label || scope.folder.split('/').filter(Boolean).pop() || scope.folder, 'folder'));
     if (scope.compared) chips.push(chip('ranking', COMPARED_LABELS[scope.compared] || scope.compared, 'compared'));
     if (scope.minStars) chips.push(chip('rating', `${scope.minStars}+ stars`, 'minStars'));
+    if (scope.collectionId) chips.push(chip('collection', scope.label || 'Collection', 'collectionId'));
     if (scope.similarId) chips.push(chip('similar', scope.label || 'Similar', 'similarId'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     let html = chips.join('');
@@ -826,6 +833,22 @@ function renderScopeBar() {
         html += `<span class="m-scope-quality num">${fmtInt(currentSortQuality.percent)}% sorted</span>`;
     }
     bar.innerHTML = html;
+    const collectionChip = bar.querySelector('.chip-x[data-clear="collectionId"]')?.closest('.chip');
+    if (collectionChip) {
+        collectionChip.setAttribute('role', 'button');
+        collectionChip.tabIndex = 0;
+        const openCollectionActions = (event) => {
+            if (event.target.closest('.chip-x')) return;
+            openCollectionActionsSheet({ id: scope.collectionId, name: scope.label || 'Collection' });
+        };
+        collectionChip.addEventListener('click', openCollectionActions);
+        collectionChip.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                openCollectionActions(event);
+            }
+        });
+    }
     const personChip = bar.querySelector('.chip-x[data-clear="people"]')?.closest('.chip');
     if (personChip) {
         personChip.setAttribute('role', 'button');
@@ -845,6 +868,11 @@ function renderScopeBar() {
     for (const x of bar.querySelectorAll('.chip-x')) {
         x.addEventListener('click', () => {
             const field = x.dataset.clear;
+            if (field === 'collectionId') {
+                clearScope();
+                nav.setTab('library');
+                return;
+            }
             scope[field] = '';
             if (field === 'similarId') {
                 scope.similarImages = null;
