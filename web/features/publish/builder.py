@@ -157,6 +157,7 @@ async def build_public_gallery_bundle(
             date_range=date_range,
             brand=brand,
             gallery_json=gallery_json,
+            og_image=(f"{str(settings.get_settings().get('publish_site_base_url') or '').rstrip('/')}/g/{slug}/img/{gallery_images[0]['id']}.jpg" if gallery_images else ""),
         )
         await asyncio.to_thread((work_target / "index.html").write_text, html, "utf-8")
         bundle_bytes, file_count = await asyncio.to_thread(_bundle_size, work_target)

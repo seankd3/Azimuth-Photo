@@ -7,6 +7,7 @@
   <meta name="theme-color" content="#141517">
   <meta property="og:title" content="{{ collection_name }}">
   <meta property="og:description" content="{% if brand and brand.name %}A photo gallery from {{ brand.name }}{% else %}A private photo gallery{% endif %}">
+  {% if og_image %}<meta property="og:image" content="{{ og_image }}">{% endif %}
   {% if brand and brand.site_url %}<meta property="og:site_name" content="{{ brand.name }}">{% endif %}
   <title>{{ collection_name }}</title>
   <style>

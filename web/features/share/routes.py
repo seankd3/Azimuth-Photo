@@ -184,7 +184,7 @@ def _date_subtitle(collection: dict | None) -> str:
     return start or end
 
 
-def _gallery_payload(token: str, collection: dict | None) -> dict:
+def _gallery_payload(token: str, collection: dict | None, *, base_url: str = "") -> dict:
     images = []
     if collection:
         for row in collection.get("images") or []:
@@ -213,6 +213,7 @@ def _gallery_payload(token: str, collection: dict | None) -> dict:
         "brand": _brand_payload(),
         "download_size_label": "full-size gallery copy",
         "images": images,
+        "og_image": f"{base_url.rstrip('/')}{images[0]['preview']}" if images and base_url else "",
     }
 
 
@@ -387,7 +388,7 @@ async def public_share_gallery(token: str, request: Request):
             status_code=status_code,
         )
 
-    page = _gallery_payload(token, collection)
+    page = _gallery_payload(token, collection, base_url=str(request.base_url))
     response = _templates.TemplateResponse(
         request,
         "share_gallery.html",
@@ -400,6 +401,7 @@ async def public_share_gallery(token: str, request: Request):
             "date_range": page["date_range"],
             "gallery_json": page,
             "brand": page["brand"],
+            "og_image": page["og_image"],
         },
         status_code=status_code,
     )

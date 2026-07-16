@@ -259,6 +259,7 @@ class ShareTests(BackendTestCase):
         self.assertIn("Download photo", ok.text)
         self.assertIn("Photo 1 of 2", ok.text)
         self.assertIn("your photographer sees these", ok.text)
+        self.assertIn('property="og:image"', ok.text)
         self.assertEqual(ok.headers.get("referrer-policy"), "no-referrer")
         self.assertEqual(missing.status_code, 404)
         self.assertIn("Share unavailable", missing.text)

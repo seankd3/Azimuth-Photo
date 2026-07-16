@@ -108,6 +108,8 @@ class GalleryTests(BackendTestCase):
         self.assertIn("Password gallery", unlocked.text)
         self.assertIn('id="gallery-data"', unlocked.text)
         self.assertIn("brand-line", unlocked.text)
+        self.assertIn('property="og:image"', unlocked.text)
+        self.assertNotIn('property="og:image"', locked.text)
         self.assertNotIn('id="download-all"', unlocked.text)
         self.assertEqual(thumb.status_code, 200)
         self.assertEqual(good_download.status_code, 200)

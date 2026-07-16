@@ -169,6 +169,7 @@ def _public_page_payload(gallery: dict) -> dict:
             "aspect_ratio": max(0.45, min(2.4, float(image.get("width") or 1) / max(1, float(image.get("height") or 1)))),
             "thumb": f"/s/gallery/{token}/thumb/sm/{image_id}",
             "preview": f"/s/gallery/{token}/thumb/lg/{image_id}",
+            "og_thumb": f"/s/gallery/{token}/thumb/md/{image_id}",
             "download": f"/s/gallery/{token}/download/{download_size}/{image_id}",
             "download_name": _attachment_name(image_id, filename, suffix=".jpg"),
         })
@@ -236,6 +237,7 @@ def _gallery_response(request: Request, gallery: dict) -> Response:
         "not_found": False, "locked": False, "token": page["token"],
         "collection_name": page["name"], "photo_count": page["photo_count"],
         "date_range": "", "brand": _brand_payload(), "gallery_json": page,
+        "og_image": f"{str(request.base_url).rstrip('/')}{page['images'][0]['og_thumb']}" if page["images"] else "",
         "favorites_enabled": False,
     })
 
