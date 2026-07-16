@@ -192,17 +192,6 @@ fun TimelineScreen(
     }
     LaunchedEffect(viewerSession != null) { onImmersive(viewerSession != null) }
     DisposableEffect(Unit) { onDispose { onImmersive(false) } }
-    viewerSession?.let { (items, index) ->
-        ViewerScreen(
-            items = items,
-            startIndex = index,
-            onClose = { viewerSession = null },
-            api = api,
-            onChanged = { loadTick++ },
-        )
-        return
-    }
-
     BackHandler(enabled = selectedIds.isNotEmpty()) { selectedIds = emptySet() }
     val trashLocal = rememberMediaTrash(onTrashed = { loadTick++; selectedIds = emptySet() })
 
@@ -282,6 +271,16 @@ fun TimelineScreen(
                     onRetry = { loadTick++ },
                 )
             }
+        }
+
+        viewerSession?.let { (items, index) ->
+            ViewerScreen(
+                items = items,
+                startIndex = index,
+                onClose = { viewerSession = null },
+                api = api,
+                onChanged = { loadTick++ },
+            )
         }
     }
 

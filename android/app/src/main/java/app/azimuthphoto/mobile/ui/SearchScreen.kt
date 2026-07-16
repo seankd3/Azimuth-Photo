@@ -176,36 +176,6 @@ fun SearchScreen(
         onImmersive(archiveViewerIndex != null || localViewerIndex != null)
     }
     DisposableEffect(Unit) { onDispose { onImmersive(false) } }
-    archiveViewerIndex?.let { index ->
-        ViewerScreen(
-            items = archiveImages.map { ViewerMedia.Remote(it) },
-            startIndex = index,
-            onClose = { archiveViewerIndex = null },
-            api = api,
-            onAddToCollection = { id -> addToCollection = listOf(id) },
-            onFindSimilar = { image ->
-                archiveViewerIndex = null
-                onFindSimilar(image)
-            },
-        )
-        addToCollection?.let { ids ->
-            AddToCollectionSheet(
-                api = libraryApi,
-                imageIds = ids,
-                onDismiss = { addToCollection = null },
-            )
-        }
-        return
-    }
-    localViewerIndex?.let { index ->
-        ViewerScreen(
-            items = localItems,
-            startIndex = index,
-            onClose = { localViewerIndex = null },
-            onChanged = { requestGeneration++ },
-        )
-        return
-    }
 
     BackHandler(enabled = hasResults || query.isNotBlank()) {
         if (hasResults) {
@@ -216,7 +186,8 @@ fun SearchScreen(
         } else query = ""
     }
 
-    Column(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize()) {
+        Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
@@ -237,7 +208,7 @@ fun SearchScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
 
-        if (!hasResults) {
+            if (!hasResults) {
             SearchHome(
                 recentSearches = currentSettings.recentSearches,
                 shelves = shelves,
@@ -258,7 +229,7 @@ fun SearchScreen(
                     requestGeneration++
                 },
             )
-        } else {
+            } else {
             LazyVerticalGrid(
                 state = gridState,
                 columns = GridCells.Fixed(columns),
@@ -304,6 +275,36 @@ fun SearchScreen(
                     }
                 }
             }
+            }
+        }
+
+        archiveViewerIndex?.let { index ->
+            ViewerScreen(
+                items = archiveImages.map { ViewerMedia.Remote(it) },
+                startIndex = index,
+                onClose = { archiveViewerIndex = null },
+                api = api,
+                onAddToCollection = { id -> addToCollection = listOf(id) },
+                onFindSimilar = { image ->
+                    archiveViewerIndex = null
+                    onFindSimilar(image)
+                },
+            )
+        }
+        localViewerIndex?.let { index ->
+            ViewerScreen(
+                items = localItems,
+                startIndex = index,
+                onClose = { localViewerIndex = null },
+                onChanged = { requestGeneration++ },
+            )
+        }
+        addToCollection?.let { ids ->
+            AddToCollectionSheet(
+                api = libraryApi,
+                imageIds = ids,
+                onDismiss = { addToCollection = null },
+            )
         }
     }
 }
