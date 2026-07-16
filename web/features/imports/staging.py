@@ -213,6 +213,11 @@ def _enumerate_scan(scan: Scan) -> None:
         try:
             if not path.is_file() or path.suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
+            relative = path.relative_to(root)
+            if scanner.is_junk_file(path.name) or any(
+                scanner.is_junk_directory(part) for part in relative.parts[:-1]
+            ):
+                continue
             stat = path.stat()
             metadata = geodata.extract_file_metadata(str(path)) if path.suffix.lower() not in card.VIDEO_EXTENSIONS else {}
             modified = safe_datetime_fromtimestamp(stat.st_mtime)

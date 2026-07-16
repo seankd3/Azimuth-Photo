@@ -50,10 +50,29 @@ def _configured(provider, name: str):
     return provider
 
 
+# Derivative/app-data directories that must never enter the library: timelapse
+# and editor caches, preset packs, macOS zip litter, and any dot-directory.
+JUNK_DIRECTORY_NAMES = {
+    "previewcache", "backups", "__macosx", "presets",
+    "luminar", "luminar neo catalog", "lightroom catalog",
+}
+
+
+def is_junk_directory(name: str) -> bool:
+    return name.startswith(".") or name.lower() in JUNK_DIRECTORY_NAMES
+
+
+def is_junk_file(name: str) -> bool:
+    return name.startswith("._")  # AppleDouble sidecars
+
+
 def walk_images(folder: str):
     """Yield image rows with cheap filesystem metadata."""
     for root, _dirs, files in os.walk(folder):
+        _dirs[:] = [d for d in _dirs if not is_junk_directory(d)]
         for f in files:
+            if is_junk_file(f):
+                continue
             file_ext = os.path.splitext(f)[1].lower()
             if file_ext in SUPPORTED_EXTENSIONS:
                 filepath = os.path.join(root, f)

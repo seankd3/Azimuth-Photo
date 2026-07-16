@@ -157,6 +157,23 @@ class StagedImportTests(BackendTestCase):
             else:
                 os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
 
+    async def test_junk_directories_and_appledouble_files_are_fenced_out(self):
+        from PIL import Image
+
+        root = Path(self.tempdir.name) / "messy"
+        (root / ".lrt" / "previews").mkdir(parents=True)
+        (root / "PreviewCache").mkdir()
+        (root / "__MACOSX").mkdir()
+        Image.new("RGB", (16, 12)).save(root / "keeper.jpg")
+        Image.new("RGB", (16, 12)).save(root / ".lrt" / "previews" / "cache0001.jpg")
+        Image.new("RGB", (16, 12)).save(root / "PreviewCache" / "cache0002.jpg")
+        Image.new("RGB", (16, 12)).save(root / "__MACOSX" / "._keeper.jpg")
+        Image.new("RGB", (16, 12)).save(root / "._sidecar.jpg")
+
+        scan = staging.Scan(id="scan-junk", path=str(root), include_subfolders=True, card_source=False, status="done")
+        staging._enumerate_scan(scan)
+        self.assertEqual([entry["name"] for entry in scan.entries], ["keeper.jpg"])
+
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
