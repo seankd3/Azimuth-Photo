@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from core import runtime_paths
+from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.develop import rawproc
@@ -173,6 +174,42 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
             if content_hash in known_by_hash
         ],
     }
+
+
+async def have_content_hashes(db_path: str, content_hashes: Iterable[str]) -> list[str]:
+    """Return requested identities backed by an active original on this hub now."""
+
+    hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
+    if not hashes:
+        return []
+    conn = await connection.open_async(db_path)
+    try:
+        placeholders = ",".join("?" for _ in hashes)
+        rows = await (
+            await conn.execute(
+                f"SELECT i.content_hash, i.filepath, s.path AS source_path "
+                f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                f"WHERE i.content_hash IN ({placeholders}) "
+                "AND COALESCE(i.hub_remote, 0) = 0 "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                hashes,
+            )
+        ).fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    def physically_present() -> set[str]:
+        present: set[str] = set()
+        for row in rows:
+            state, _file_stat = inspect_source_file(
+                str(row["filepath"] or ""), str(row["source_path"] or "")
+            )
+            if state == "available":
+                present.add(str(row["content_hash"]))
+        return present
+
+    present = await asyncio.to_thread(physically_present)
+    return [content_hash for content_hash in hashes if content_hash in present]
 
 
 def upload_part_path(intake_root: Path, content_hash: str) -> Path:

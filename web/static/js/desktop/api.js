@@ -285,6 +285,23 @@ export async function getSyncStatus() {
     return fetchJson('/api/sync/status', { defaultValue: null });
 }
 
+export async function getFreeable(olderThanDays = 30) {
+    const days = Math.max(0, Number(olderThanDays) || 0);
+    return fetchJson(`/api/sync/freeable?older_than_days=${encodeURIComponent(days)}`, { defaultValue: null });
+}
+
+export async function startFreeUpSpace(olderThanDays = 30) {
+    return postJson('/api/sync/freeup', { older_than_days: Math.max(0, Number(olderThanDays) || 0) });
+}
+
+export async function getFreeUpJob(jobId) {
+    return fetchJson(`/api/sync/freeup/${encodeURIComponent(jobId)}`, { defaultValue: null });
+}
+
+export async function cancelFreeUpJob(jobId) {
+    return postJson(`/api/sync/freeup/${encodeURIComponent(jobId)}/cancel`, {});
+}
+
 export async function listDevices() {
     return fetchJson('/api/devices', { defaultValue: null });
 }
