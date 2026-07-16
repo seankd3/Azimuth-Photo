@@ -3,21 +3,19 @@ import json
 import os
 import tempfile
 import time
-import tempfile
 import zipfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 import settings
+from features.publishing.downloads import _attachment_name
 from features.share import auth
-from pathlib import Path
-from starlette.background import BackgroundTask
 
 
 router = APIRouter()
@@ -242,14 +240,13 @@ def _download_name(image_id: int, filename: str) -> str:
 
 
 def _zip_arcname(image_id: int, filename: str, used_names: set[str]) -> str:
-    basename = str(filename or "").replace("\\", "/").rsplit("/", 1)[-1]
-    stem = Path(basename).stem
-    safe_stem = "".join(char if char.isalnum() or char in "._- " else "_" for char in stem)
-    safe_stem = safe_stem.strip(" .")[:180] or f"photo-{image_id}"
-    candidate = f"{safe_stem}.jpg"
+    """Unique zip entry name via publishing's zip-slip-safe attachment sanitizer."""
+    candidate = _attachment_name(image_id, filename, suffix=".jpg")
+    stem = Path(candidate).stem
+    extension = Path(candidate).suffix or ".jpg"
     suffix = 2
     while candidate.casefold() in used_names:
-        candidate = f"{safe_stem}-{suffix}.jpg"
+        candidate = f"{stem}-{suffix}{extension}"
         suffix += 1
     used_names.add(candidate.casefold())
     return candidate
@@ -552,29 +549,6 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
     if existing_visitor_id is None:
         auth.set_visitor_cookie(response, token, visitor_id, request=request)
     return _public_response(response)
-
-
-@router.get("/s/{token}/download-all")
-async def public_share_download_all(token: str, request: Request):
-    _configured()
-    from features.publishing.downloads import zip_gallery  # deferred: keeps remote preview pixel libraries off boot until a gallery download is requested
-
-    collection = await _resolve_token(token)
-    if collection is None or not auth.is_unlocked(request, collection):
-        return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    handle = tempfile.NamedTemporaryFile(prefix="photoarchive-share-", suffix=".zip", delete=False)
-    handle.close()
-    try:
-        result = await asyncio.to_thread(zip_gallery, {"download_size": "lg", "images": collection["images"]}, handle.name)
-    except Exception:
-        Path(handle.name).unlink(missing_ok=True)
-        return _public_response(JSONResponse({"error": "Could not prepare share download"}, status_code=422))
-    return _public_response(FileResponse(
-        handle.name,
-        filename=f"{collection['name']}.zip",
-        headers={"X-Azimuth-Skipped-Count": str(len(result["skipped"]))},
-        background=BackgroundTask(lambda: Path(handle.name).unlink(missing_ok=True)),
-    ))
 
 
 @router.post("/s/{token}/unlock")
