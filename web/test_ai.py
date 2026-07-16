@@ -1,5 +1,6 @@
 """HTTP behavior gates for AI control mutations."""
 
+from core import capabilities as _capabilities
 from unittest import mock
 from copy import deepcopy
 
@@ -13,6 +14,8 @@ from test_support import BackendTestCase
 
 class AiModelRouteTests(BackendTestCase):
     async def test_install_existing_model_keeps_active_embedding_pointer(self):
+        if not _capabilities.capability_status("search")["available"]:
+            self.skipTest("AI search capability unavailable — matches AI-optional installs")
         before = dict(settings.active_embedding_config())
         installed = deepcopy(ai_models.get_model_status(before))
         installed["installed"] = True

@@ -1,3 +1,4 @@
+from core import capabilities as _capabilities
 from test_support import *  # noqa: F401,F403
 import contextlib
 import unittest.mock
@@ -69,7 +70,9 @@ class CacheStatusTests(BackendTestCase):
                 gpu=True,
                 interval_seconds=0.001,
             ):
-                await asyncio.sleep(0.01)
+                # Windows event-loop timers tick at ~15ms; give the heartbeat
+                # a window it can actually fire in.
+                await asyncio.sleep(0.05)
 
             self.assertGreater(work_coordination._manual_owner_updated_at, manual_before)
             self.assertGreater(work_coordination._gpu_owner_updated_at, gpu_before)
@@ -140,6 +143,8 @@ class CacheStatusTests(BackendTestCase):
         self.assertIsNone((await self._image_row(image_id))["missing_at"])
 
     async def test_search_and_people_start_previews_dependency(self):
+        if not _capabilities.capability_status("search")["available"]:
+            self.skipTest("AI search capability unavailable — matches AI-optional installs")
         old_manual_mode = thumbnails._pregen_manual_mode
         old_manual_pause = thumbnails._pregen_manual_pause
         try:
