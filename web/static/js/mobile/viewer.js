@@ -15,6 +15,7 @@ import { icon } from '../icons.js';
 import { createMomentum } from './viewer_momentum.js';
 import { openPhotoShareSheet } from './sharing.js';
 import { isAvailableOffline, toggleOfflineAvailability } from './offline.js';
+import { cacheCaptionRequest } from './caption_cache.js';
 
 let root = null;
 let stage = null;
@@ -142,14 +143,7 @@ function preload(offset) {
 function preloadCaption(imageId) {
     const id = Number(imageId);
     if (!id) return Promise.resolve(null);
-    if (!captionCache.has(id)) {
-        const request = getImageCaption(id).catch(() => {
-            captionCache.delete(id);
-            return null;
-        });
-        captionCache.set(id, request);
-    }
-    return captionCache.get(id);
+    return cacheCaptionRequest(captionCache, id, () => getImageCaption(id));
 }
 
 function upgradeToMedium(image, token) {

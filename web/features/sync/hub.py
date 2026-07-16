@@ -490,12 +490,10 @@ async def _merge_rating(conn, image_id: int, item: dict[str, Any]) -> tuple[bool
 async def _merge_develop(conn, image_id: int, item: dict[str, Any]) -> tuple[bool, str]:
     incoming = _family_timestamp(item, "develop")
     row = await (await conn.execute(
-        "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
+        "SELECT settings, updated_at FROM develop_settings WHERE image_id = ?", (image_id,)
     )).fetchone()
     row_updated_at = str(row["updated_at"] or "") if row else ""
-    if row and row["origin"] == "user" and row_updated_at >= incoming:
-        return False, "hub-user-newer"
-    existing = await _state_timestamp(conn, image_id, "develop")
+    existing = max(row_updated_at, await _state_timestamp(conn, image_id, "develop"))
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
     settings = dict(item["develop_settings"])

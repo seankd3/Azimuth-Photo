@@ -163,6 +163,7 @@ async function control(url) {
     } catch (error) {
         if (generation === statusGeneration) patchOffline();
     } finally {
+        if (generation === statusGeneration) statusGeneration += 1;
         controlInFlight -= 1;
     }
 }

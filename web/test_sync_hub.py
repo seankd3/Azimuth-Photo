@@ -421,6 +421,54 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(settings, {"Exposure2012": 1.5, "_lr_rating": 4})
 
+    def test_older_sync_does_not_rewind_imported_develop_without_family_clock(self):
+        payload = self.image_bytes("lrcat-develop-order.jpg", (35, 45, 55))
+        content_hash = self.declare("lrcat-develop-order.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'lrcat', ?)",
+                (
+                    image_id,
+                    json.dumps({"Exposure2012": 2.0}),
+                    "2026-07-16T05:00:00Z",
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        response = self.client.post("/api/sync/metadata", json={"items": [{
+            "content_hash": content_hash,
+            "develop_settings": {"Exposure2012": -2.0},
+            "develop_updated_at": "2026-07-16T04:00:00Z",
+        }]})
+
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()["items"][0]
+        self.assertIn(
+            {"family": "develop", "reason": "hub-newer-or-equal"},
+            result["skipped"],
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = ?",
+                (image_id,),
+            ).fetchone()
+            family_clock = conn.execute(
+                "SELECT updated_at FROM sync_metadata_state "
+                "WHERE image_id = ? AND family = 'develop'",
+                (image_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(json.loads(row[0]), {"Exposure2012": 2.0})
+        self.assertEqual(row[1:], ("lrcat", "2026-07-16T05:00:00Z"))
+        self.assertIsNone(family_clock)
+
     def test_first_synced_rating_seeds_a_neutral_develop_clock(self):
         payload = self.image_bytes("first-rating.jpg", (55, 65, 75))
         content_hash = self.declare("first-rating.jpg", payload)
