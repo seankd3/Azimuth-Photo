@@ -50,6 +50,22 @@ class FakeThumbnails:
 
 
 class PublishBuilderTests(BackendTestCase):
+    async def test_export_pruning_skips_symlinked_directories(self):
+        root = Path(self.tempdir.name) / "export-root"
+        stale = root / "stale"
+        outside = Path(self.tempdir.name) / "outside"
+        stale.mkdir(parents=True)
+        outside.mkdir()
+        sentinel = outside / "keep.txt"
+        sentinel.write_text("outside", encoding="utf-8")
+        (root / "linked-outside").symlink_to(outside, target_is_directory=True)
+
+        await asyncio.to_thread(publish_builder._prune_orphaned_export_dirs, root, set())
+
+        self.assertFalse(stale.exists())
+        self.assertTrue((root / "linked-outside").is_symlink())
+        self.assertTrue(sentinel.exists())
+
     async def test_bundle_uses_sm_md_stable_names_and_static_relative_urls(self):
         settings.save_settings({
             "share_brand_name": "Northstar Studio",
@@ -493,6 +509,7 @@ class PublishRouteTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.tasks = []
+        publish_routes._jobs.clear()
         templates = app_module.app.state.photoarchive_shell.templates
         self.cache = Path(self.tempdir.name) / "cache"
         self.cache.mkdir()
@@ -560,6 +577,48 @@ class PublishRouteTests(BackendTestCase):
         self.assertEqual(revoke.status_code, 202)
         await asyncio.gather(*self.tasks)
         self.assertIsNone(await db.get_collection_publish(collection["id"]))
+
+    async def test_publish_and_revoke_reject_conflicting_queued_job(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "queued.jpg")
+        collection = await db.create_collection(name="Queued gallery", image_ids=[image_id])
+        await db.upsert_collection_publish(
+            collection_id=collection["id"],
+            slug="queued-gallery",
+            title="Queued gallery",
+            image_count=1,
+            bundle_bytes=0,
+            last_commit=None,
+        )
+
+        def publish_then_revoke():
+            with TestClient(app_module.app) as client:
+                publish = client.post(
+                    f"/api/user-collections/{collection['id']}/publish",
+                    json={"slug": "queued-gallery", "title": "Queued gallery"},
+                )
+                revoke = client.post(f"/api/user-collections/{collection['id']}/publish/revoke")
+                return publish, revoke
+
+        publish, blocked_revoke = await asyncio.to_thread(publish_then_revoke)
+        self.assertEqual(publish.status_code, 202)
+        self.assertEqual(blocked_revoke.status_code, 409)
+        await asyncio.gather(*self.tasks)
+        self.tasks.clear()
+
+        def revoke_then_publish():
+            with TestClient(app_module.app) as client:
+                revoke = client.post(f"/api/user-collections/{collection['id']}/publish/revoke")
+                publish = client.post(
+                    f"/api/user-collections/{collection['id']}/publish",
+                    json={"slug": "queued-gallery", "title": "Queued gallery"},
+                )
+                return revoke, publish
+
+        revoke, blocked_publish = await asyncio.to_thread(revoke_then_publish)
+        self.assertEqual(revoke.status_code, 202)
+        self.assertEqual(blocked_publish.status_code, 409)
+        await asyncio.gather(*self.tasks)
 
     async def test_unexpected_publish_failure_is_logged_without_leaking_internal_path(self):
         publish_routes._start_job(77, "publishing", slug="private", title="Private")

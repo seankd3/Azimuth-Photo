@@ -39,7 +39,7 @@ function galleryForm(collection, gallery, images) {
       <label>Photo download size<select data-gallery-size>${[['sm', 'Small'], ['md', 'Medium'], ['lg', 'Large'], ['original', 'Original']].map(([x, label]) => `<option value="${x}"${current.download_size === x ? ' selected' : ''}>${label}</option>`).join('')}</select></label>
       <label class="gallery-download-all"><input data-gallery-download-all type="checkbox"${current.allow_download_all ? ' checked' : ''}> Let client download all as ZIP</label>
       <label>Password (optional)<input data-gallery-password type="password" placeholder="Leave unchanged"></label>
-      <button class="primary" data-gallery-save>${gallery ? 'Save gallery' : 'Create gallery'}</button>`;
+      <button class="primary" data-gallery-save>${gallery ? 'Save gallery' : 'Create gallery'}</button>${gallery ? '<button class="btn-danger" data-gallery-revoke>Revoke link</button>' : ''}`;
 }
 
 function formPayload(popover) {
@@ -87,6 +87,21 @@ export async function openGalleryEditor({ button, collection, anchoredPopover, c
                 showToast?.(url ? 'Client gallery ready · link copied' : 'Client gallery saved');
             } catch (error) {
                 showToast?.(error.message || 'Could not save client gallery');
+            }
+        });
+        popover.querySelector('[data-gallery-revoke]')?.addEventListener('click', async (event) => {
+            const revokeButton = event.currentTarget;
+            if (revokeButton.dataset.confirm !== '1') {
+                revokeButton.dataset.confirm = '1';
+                revokeButton.textContent = 'Confirm revoke';
+                return;
+            }
+            try {
+                await requestJson(`/api/user-collections/${collection.id}/galleries/${gallery.id}`, { method: 'DELETE' });
+                (closePopover || (() => popover.remove()))();
+                showToast?.('Client gallery link revoked');
+            } catch (error) {
+                showToast?.(error.message || 'Could not revoke client gallery link');
             }
         });
         return popover;

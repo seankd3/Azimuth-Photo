@@ -312,6 +312,8 @@ async def api_export_published_area(area: str):
 @router.post("/api/user-collections/{collection_id}/publish")
 async def api_publish_collection(collection_id: int, payload: PublishBody):
     _configured()
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     if not _publish_enabled():
         return JSONResponse({"error": "Choose a publishing folder before publishing this gallery."}, status_code=409)
     collection = await _get_collection(collection_id, limit=1, offset=0)
@@ -328,6 +330,8 @@ async def api_publish_collection(collection_id: int, payload: PublishBody):
         title = collection["name"] or slug
     if not await _slug_available(slug, collection_id=collection_id):
         return JSONResponse({"error": "Slug is already published"}, status_code=409)
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     _start_job(collection_id, "publishing", slug=slug, title=title)
     _schedule(_run_publish_job(collection_id, slug, title))
     return JSONResponse({"job": "publishing", "slug": slug, "title": title}, status_code=202)
@@ -350,9 +354,13 @@ async def api_get_collection_publish(collection_id: int):
 @router.post("/api/user-collections/{collection_id}/publish/revoke")
 async def api_revoke_collection_publish(collection_id: int):
     _configured()
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     publish = await _get_publish(collection_id)
     if publish is None:
         return JSONResponse({"error": "Publish not found"}, status_code=404)
+    if _job_in_progress(collection_id):
+        return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     _start_job(collection_id, "revoking", slug=publish["slug"], title=publish["title"])
     _schedule(_run_revoke_job(collection_id, publish["slug"]))
     return JSONResponse({"job": "revoking", "slug": publish["slug"]}, status_code=202)
@@ -475,6 +483,11 @@ def _start_job(collection_id: int, state: str, *, slug: str, title: str) -> None
         "status_code": None,
         "hook": None,
     }
+
+
+def _job_in_progress(collection_id: int) -> bool:
+    job = _jobs.get(int(collection_id))
+    return bool(job and job.get("state") in {"publishing", "revoking"})
 
 
 def _update_job(collection_id: int, **fields) -> None:

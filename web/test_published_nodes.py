@@ -470,6 +470,47 @@ class PublishedNodeTests(BackendTestCase):
         self.assertTrue(os.path.exists(os.path.join(destination, "portfolio", "index.html")))
         self.assertTrue(os.path.exists(os.path.join(destination, "manifest.json")))
 
+    async def test_website_export_prunes_deleted_node_directory(self):
+        first = await db.create_collection(name="First publish")
+        second = await db.create_collection(name="Second publish")
+        first_node = await published_nodes.create_snapshot_tree(
+            db.DB_PATH,
+            area="website",
+            parent_id=None,
+            source_collection_id=first["id"],
+            slug="first",
+            title=None,
+            resolve_smart_image_ids=self._resolve_smart,
+        )
+        second_node = await published_nodes.create_snapshot_tree(
+            db.DB_PATH,
+            area="website",
+            parent_id=None,
+            source_collection_id=second["id"],
+            slug="second",
+            title=None,
+            resolve_smart_image_ids=self._resolve_smart,
+        )
+        destination = os.path.join(self.tempdir.name, "published")
+        settings.save_settings({"publish_dir": destination})
+
+        def export():
+            with TestClient(app_module.app) as client:
+                return client.post("/api/published/export?area=website")
+
+        first_export = await asyncio.to_thread(export)
+        self.assertEqual(first_export.status_code, 200)
+        self.assertTrue(os.path.isdir(os.path.join(destination, "first")))
+        self.assertTrue(os.path.isdir(os.path.join(destination, "second")))
+
+        self.assertTrue(await published_nodes.delete_node(db.DB_PATH, second_node["id"]))
+        second_export = await asyncio.to_thread(export)
+
+        self.assertEqual(second_export.status_code, 200)
+        self.assertTrue(os.path.isdir(os.path.join(destination, "first")))
+        self.assertFalse(os.path.exists(os.path.join(destination, "second")))
+        self.assertEqual(first_node["slug"], "first")
+
     async def test_website_manifest_walks_nested_nodes_with_photo_fields(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")

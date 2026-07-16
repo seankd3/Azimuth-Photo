@@ -205,6 +205,18 @@ async def update_gallery(
     return await get_gallery(db_path, gallery_id)
 
 
+async def delete_gallery(db_path: str, gallery_id: int) -> bool:
+    """Delete a gallery and its frozen membership, permanently invalidating its token."""
+    conn = await connection.open_async(db_path)
+    try:
+        await ensure_tables(conn)
+        cursor = await conn.execute("DELETE FROM client_galleries WHERE id = ?", (int(gallery_id),))
+        await conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def gallery_allows_image(db_path: str, token: str, image_id: int) -> bool:
     conn = await connection.open_async(db_path)
     try:

@@ -93,6 +93,23 @@ class ShareTests(BackendTestCase):
         self.assertFalse(await db.share_token_allows_image(share["token"], first))
         self.assertTrue(await db.share_token_allows_image(share["token"], second))
 
+    async def test_tokened_share_media_never_enters_shared_caches(self):
+        collection, first, _second, _third = await self._collection_with_images()
+        share = await db.create_or_rotate_share(collection["id"])
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                thumb = client.get(f"/s/{share['token']}/thumb/sm/{first}")
+                image = client.get(f"/s/{share['token']}/img/{first}")
+                return thumb, image
+
+        thumb, image = await asyncio.to_thread(probe)
+
+        self.assertEqual(thumb.status_code, 200)
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(thumb.headers.get("cache-control"), "private, no-store")
+        self.assertEqual(image.headers.get("cache-control"), "private, no-store")
+
     async def test_unicode_filename_roundtrips_through_private_share(self):
         source = await self._source("share-unicode")
         image_id = await self._image(source["id"], "été 📸.jpg")

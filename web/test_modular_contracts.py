@@ -267,6 +267,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/user-collections/{collection_id}/galleries"),
     ("POST", "/api/user-collections/{collection_id}/galleries"),
     ("PATCH", "/api/user-collections/{collection_id}/galleries/{gallery_id}"),
+    ("DELETE", "/api/user-collections/{collection_id}/galleries/{gallery_id}"),
     ("GET", "/s/gallery/{token}"),
     ("POST", "/s/gallery/{token}/unlock"),
     ("GET", "/s/gallery/{token}/thumb/{size}/{image_id}"),
