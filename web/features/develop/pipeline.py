@@ -42,7 +42,7 @@ def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
 
 def _gaussian_ev(ev: np.ndarray, center: float, sigma: float = C.TONE_EV_SIGMA) -> np.ndarray:
     z = (ev - center) / max(sigma, C.TONE_EPSILON)
-    return np.exp(-0.5 * z * z).astype(np.float32)
+    return np.exp(-0.5 * z * z).astype(np.float32, copy=False)
 
 
 def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
@@ -52,7 +52,7 @@ def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
         linear <= C.SRGB_LINEAR_THRESHOLD,
         linear * C.SRGB_ENCODE_SCALE,
         C.SRGB_ENCODE_A * np.power(linear, C.SRGB_ENCODE_GAMMA) - C.SRGB_ENCODE_B,
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
@@ -62,7 +62,7 @@ def srgb_to_linear(srgb: np.ndarray) -> np.ndarray:
         srgb <= C.SRGB_DECODE_THRESHOLD,
         srgb * C.SRGB_DECODE_SCALE,
         np.power((srgb + C.SRGB_DECODE_A) / C.SRGB_ENCODE_A, C.SRGB_DECODE_GAMMA),
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def luma(rgb: np.ndarray) -> np.ndarray:
@@ -70,7 +70,7 @@ def luma(rgb: np.ndarray) -> np.ndarray:
         rgb[..., 0] * C.LUMA_RED
         + rgb[..., 1] * C.LUMA_GREEN
         + rgb[..., 2] * C.LUMA_BLUE
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
 def _as_shot_temperature(settings: Mapping[str, object], explicit: float | None) -> float:
@@ -230,10 +230,10 @@ def _soft_clamp(value: np.ndarray) -> np.ndarray:
         value < 0.0,
         0.0,
         np.where(above, 1.0 + (value - 1.0) / (1.0 + C.SOFT_CLAMP_FACTOR * (value - 1.0)), value),
-    ).astype(np.float32)
+    ).astype(np.float32, copy=False)
 
 
-def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndarray:
+def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object], *, preserve_headroom: bool = False) -> np.ndarray:
     y = luma(rgb)
     ev = np.log2(np.maximum(y, C.TONE_EPSILON))
     highlights = _slider(settings, "Highlights2012")
@@ -251,13 +251,17 @@ def _region_tone_map(rgb: np.ndarray, settings: Mapping[str, object]) -> np.ndar
         + C.TONE_WHITES_FACTOR * whites * ww
         + C.TONE_BLACKS_FACTOR * blacks * wb
     )
-    rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32)
+    rgb = (rgb * np.exp2(delta_ev)[..., None]).astype(np.float32, copy=False)
     y2 = luma(rgb)
     t = np.power(np.clip(y2, 0.0, 1.0), 1.0 / C.TONE_GAMMA)
-    t3 = 0.5 + (t - 0.5) * (1.0 + C.CONTRAST_FACTOR * _slider(settings, "Contrast2012"))
-    t3 = _soft_clamp(t3)
-    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(y2, C.TONE_EPSILON)
-    return (rgb * gain[..., None]).astype(np.float32)
+    contrast = _slider(settings, "Contrast2012")
+    t_s = t * t * (3.0 - 2.0 * t)  # smoothstep S: steepens midtones, vanishes at 0/1
+    t3 = _soft_clamp(t + np.sign(contrast) * C.CONTRAST_S_STRENGTH * np.abs(contrast) * (t_s - t))
+    # HDR bases keep luma above 1.0 untouched (the sigmoid view transform
+    # owns the rolloff); SDR keeps the historical normalize-to-1 behavior.
+    reference = np.minimum(y2, 1.0) if preserve_headroom else y2
+    gain = np.power(t3, C.TONE_GAMMA) / np.maximum(reference, C.TONE_EPSILON)
+    return (rgb * gain[..., None]).astype(np.float32, copy=False)
 
 
 def _curve_points(raw_points: object) -> list[tuple[float, float]]:
@@ -356,13 +360,13 @@ def soft_proof_transform(srgb: np.ndarray, profile: str = "srgb") -> tuple[np.nd
 def linear_to_oklab(linear: np.ndarray) -> np.ndarray:
     lms = _matmul_rows(linear, C.OKLAB_M1)
     lms = np.sign(lms) * np.power(np.abs(lms), 1.0 / 3.0)
-    return _matmul_rows(lms, C.OKLAB_M2).astype(np.float32)
+    return _matmul_rows(lms, C.OKLAB_M2).astype(np.float32, copy=False)
 
 
 def oklab_to_linear(lab: np.ndarray) -> np.ndarray:
     lms = _matmul_rows(lab, C.OKLAB_M2_INV)
     lms = lms * lms * lms
-    return _matmul_rows(lms, C.OKLAB_M1_INV).astype(np.float32)
+    return _matmul_rows(lms, C.OKLAB_M1_INV).astype(np.float32, copy=False)
 
 
 def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
@@ -397,7 +401,7 @@ def _gamut_clip_desaturate(linear: np.ndarray) -> np.ndarray:
     if np.any(still):
         clipped = np.where(still[:, None], achromatic, clipped)
     result[outside] = clipped
-    return np.clip(result, 0.0, 1.0).astype(np.float32)
+    return np.clip(result, 0.0, 1.0).astype(np.float32, copy=False)
 
 
 def scale_oklab_chroma(
@@ -481,15 +485,23 @@ def _apply_tone_curves(
         result[..., index] = _apply_lut(c[..., index], base_lut)
     if not display_base and camera_profile is None:
         result = scale_oklab_chroma(result, multiply=C.BASE_PROFILE_SAT)
-    main_lut = build_monotone_cubic_lut(settings.get("ToneCurvePV2012"))
-    # A main curve is RGB-linked; component curves are applied after it.
-    curved = result.copy()
-    for index in range(3):
-        curved[..., index] = _apply_lut(result[..., index], main_lut)
+    # Missing/invalid user curves resolve to identity LUTs. Preserve that exact
+    # result without resampling every full-resolution channel through np.interp.
+    curved = result
+    main_curve = settings.get("ToneCurvePV2012")
+    if len(_curve_points(main_curve)) >= 2:
+        main_lut = build_monotone_cubic_lut(main_curve)
+        # A main curve is RGB-linked; component curves are applied after it.
+        curved = result.copy()
+        for index in range(3):
+            curved[..., index] = _apply_lut(result[..., index], main_lut)
     for index, suffix in enumerate(("Red", "Green", "Blue")):
-        curved[..., index] = _apply_lut(
-            curved[..., index], build_monotone_cubic_lut(settings.get(f"ToneCurvePV2012{suffix}"))
-        )
+        component_curve = settings.get(f"ToneCurvePV2012{suffix}")
+        if len(_curve_points(component_curve)) < 2:
+            continue
+        if curved is result:
+            curved = result.copy()
+        curved[..., index] = _apply_lut(curved[..., index], build_monotone_cubic_lut(component_curve))
     return curved
 
 
@@ -514,7 +526,7 @@ def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | No
         - C.CAMERA_PROFILE_BIN_CENTER
     )
     hue_floor = np.floor(hue_position)
-    hue_mix = (hue_position - hue_floor).astype(np.float32)
+    hue_mix = (hue_position - hue_floor).astype(np.float32, copy=False)
     hue0 = np.mod(hue_floor.astype(np.intp), C.CAMERA_PROFILE_HUE_BINS)
     hue1 = (hue0 + 1) % C.CAMERA_PROFILE_HUE_BINS
 
@@ -539,10 +551,11 @@ def apply_camera_profile_ab(srgb: np.ndarray, profile: Mapping[str, object] | No
     chroma_mix = np.clip(chroma_mix, 0.0, 1.0)
     delta0 = table[hue0, chroma0] * (1.0 - hue_mix[..., None]) + table[hue1, chroma0] * hue_mix[..., None]
     delta1 = table[hue0, chroma1] * (1.0 - hue_mix[..., None]) + table[hue1, chroma1] * hue_mix[..., None]
-    delta = delta0 * (1.0 - chroma_mix[..., None]) + delta1 * chroma_mix[..., None]
-    adjusted = lab.copy()
-    adjusted[..., 1:3] += delta
-    return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(adjusted)))
+    np.multiply(delta0, 1.0 - chroma_mix[..., None], out=delta0)
+    np.multiply(delta1, chroma_mix[..., None], out=delta1)
+    np.add(delta0, delta1, out=delta0)
+    lab[..., 1:3] += delta0
+    return linear_to_srgb(_gamut_clip_desaturate(oklab_to_linear(lab)))
 
 
 def lens_radial_scale(
@@ -731,7 +744,11 @@ def rgb_to_hsv(rgb: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     hue[blue_max] = (red[blue_max] - green[blue_max]) / delta[blue_max] + 4.0
     hue = np.mod(hue * 60.0, 360.0)
     saturation = np.divide(delta, maximum, out=np.zeros_like(delta), where=maximum > 0.0)
-    return hue.astype(np.float32), saturation.astype(np.float32), maximum.astype(np.float32)
+    return (
+        hue.astype(np.float32, copy=False),
+        saturation.astype(np.float32, copy=False),
+        maximum.astype(np.float32, copy=False),
+    )
 
 
 def hsv_to_rgb(hue: np.ndarray, saturation: np.ndarray, value: np.ndarray) -> np.ndarray:
@@ -747,7 +764,7 @@ def hsv_to_rgb(hue: np.ndarray, saturation: np.ndarray, value: np.ndarray) -> np
         ),
         axis=-1,
     )
-    return (rgb_prime + (value - chroma)[..., None]).astype(np.float32)
+    return (rgb_prime + (value - chroma)[..., None]).astype(np.float32, copy=False)
 
 
 def hsl_band_weights(hue: np.ndarray) -> np.ndarray:
@@ -1048,7 +1065,7 @@ def _grain(c: np.ndarray, settings: Mapping[str, object], *, pixel_offset: tuple
     return c + noise[..., None] * amount * C.GRAIN_FACTOR
 
 
-def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> tuple[np.ndarray, float]:
+def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object], *, preserve_headroom: bool = False) -> tuple[np.ndarray, float]:
     """Apply the scene-linear Basic operations shared by generic and DNG renders.
 
     For an Adobe-profiled render §30.2 places this block after HueSatMap and
@@ -1056,12 +1073,12 @@ def _scene_linear_user_ops(rgb: np.ndarray, settings: Mapping[str, object]) -> t
     from the post-BaselineExposure tap and replaces stages 5-7 entirely.
     """
     result = np.asarray(rgb, dtype=np.float32) * np.float32(np.exp2(_number(settings, "Exposure2012")))
-    result = _region_tone_map(result, settings)
+    result = _region_tone_map(result, settings, preserve_headroom=preserve_headroom)
     dehaze = _slider(settings, "Dehaze")
     if dehaze != 0.0:
         result = (result - C.DEHAZE_AIRLIGHT_FACTOR * dehaze) / (1.0 - C.DEHAZE_AIRLIGHT_FACTOR * dehaze)
         result = np.maximum(result, 0.0)
-    return result.astype(np.float32), float(dehaze)
+    return result.astype(np.float32, copy=False), float(dehaze)
 
 
 def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mapping[str, object] | None:
@@ -1070,6 +1087,11 @@ def _resolved_adobe_profile(color_profile: Mapping[str, object] | None) -> Mappi
     embedded = color_profile.get("adobe_profile")
     if isinstance(embedded, Mapping):
         return dng_pipeline.normalize_adobe_profile(embedded)
+    if not any(
+        color_profile.get(key)
+        for key in ("filepath", "path", "camera_model", "UniqueCameraModel")
+    ):
+        return None
     return dng_pipeline.resolve_adobe_profile(color_profile)
 
 
@@ -1141,6 +1163,21 @@ def apply_pipeline(
             grain_size_scale=np.clip(_number(settings, "pa_FilmGrainSize", 100.0), 0.0, 100.0) / 100.0,
             min_dimension=blur_min_dimension,
         )
+    elif isinstance(color_profile, Mapping) and color_profile.get("hdr"):
+        # HDR-merged bases carry scene values above 1.0; the Adobe SDR curve
+        # would hard-clip that headroom to white. Route through the sigmoid
+        # view transform (darktable port) for an asymptotic highlight rolloff.
+        from features.develop import sigmoid_view
+
+        if adobe_profile is not None:
+            # prepare_scene_linear left us in linear ProPhoto; return to sRGB
+            # primaries (scene-linear) before user ops + view transform.
+            shape = scene_linear.shape
+            scene_linear = np.maximum(
+                (scene_linear.reshape(-1, 3) @ dng_pipeline.PROPHOTO_TO_LINEAR_SRGB.T).reshape(shape), 0.0
+            ).astype(np.float32)
+        rgb, dehaze = _scene_linear_user_ops(scene_linear, settings, preserve_headroom=True)
+        c = linear_to_srgb(sigmoid_view.sigmoid_view(rgb))
     elif adobe_profile is not None:
         def apply_user_ops(value: np.ndarray) -> np.ndarray:
             return _scene_linear_user_ops(value, settings)[0]
@@ -1156,11 +1193,13 @@ def apply_pipeline(
         rgb, dehaze = _scene_linear_user_ops(scene_linear, settings)
         c = linear_to_srgb(rgb)
     base_kind = str(color_profile.get("base_kind") or "raw") if isinstance(color_profile, Mapping) else "raw"
-    fitted_profile = None if base_kind == "display" or adobe_profile is not None else _camera_profile(color_profile)
+    is_hdr_base = isinstance(color_profile, Mapping) and bool(color_profile.get("hdr"))
+    fitted_profile = None if base_kind == "display" or adobe_profile is not None or is_hdr_base else _camera_profile(color_profile)
     if not film_stock:
         # Adobe's profile curve replaces the generic base curve and base
-        # saturation. Imported/user curves remain relative adjustments.
-        tone_base_kind = "display" if adobe_profile is not None else base_kind
+        # saturation; the HDR sigmoid view transform owns tone the same way.
+        # Imported/user curves remain relative adjustments.
+        tone_base_kind = "display" if adobe_profile is not None or is_hdr_base else base_kind
         c = _apply_tone_curves(c, settings, fitted_profile, base_kind=tone_base_kind)
     c = _hsl_and_black_white(c, settings, dehaze)
     if not _bool(settings, "ConvertToGrayscale"):
@@ -1212,7 +1251,7 @@ def apply_pipeline(
     # §23 must be the final pixel operation, after locals and global effects.
     from .heal import apply_retouch_spots
     c = apply_retouch_spots(c, settings)
-    return np.clip(c, 0.0, 1.0).astype(np.float32)
+    return np.clip(c, 0.0, 1.0).astype(np.float32, copy=False)
 
 
 # Intentional explicit alias for route/render callers.

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 import os
 import subprocess
 from functools import lru_cache
@@ -16,7 +17,7 @@ from typing import Any, Mapping
 from . import ops_constants as C
 
 
-EXIFTOOL = "/usr/bin/vendor_perl/exiftool"
+EXIFTOOL = shutil.which("exiftool") or "/usr/bin/vendor_perl/exiftool"
 EXIF_FIELDS = (
     "UniqueCameraModel",
     "Model",
@@ -27,6 +28,7 @@ EXIF_FIELDS = (
     "FNumber",
     "Aperture",
     "FocusDistance",
+    "ISO",
 )
 
 
@@ -80,9 +82,15 @@ def _number(value: object, default: float | None = None) -> float | None:
 
 @lru_cache(maxsize=256)
 def read_exif(path: str) -> dict[str, Any]:
-    """Read only the source metadata required for camera/lens resolution."""
+    """Read only the source metadata required for camera/lens resolution.
+
+    Prefers ExifTool when installed; otherwise falls back to the dependency-free
+    native reader so camera identification (and therefore Adobe profile
+    resolution) never silently degrades on machines without ExifTool.
+    """
     if not os.path.exists(EXIFTOOL):
-        return {}
+        from features.develop.native_exif import read_native_exif
+        return read_native_exif(path)
     try:
         result = subprocess.run(
             [EXIFTOOL, "-j", "-n", *[f"-{field}" for field in EXIF_FIELDS], path],
@@ -111,6 +119,12 @@ def normalized_source_metadata(metadata: Mapping[str, object] | None) -> dict[st
         "camera_model": camera_model,
         "camera_make": camera_make,
         "lens_model": lens_model,
+        "iso": _number(
+            source.get("iso")
+            or source.get("ISO")
+            or source.get("PhotographicSensitivity")
+            or source.get("ISOSpeedRatings")
+        ),
         "focal_length": _number(source.get("focal_length") or source.get("FocalLength")),
         "aperture": _number(source.get("aperture") or source.get("FNumber") or source.get("Aperture")),
         "focus_distance": _number(source.get("focus_distance") or source.get("FocusDistance"), 1000.0),

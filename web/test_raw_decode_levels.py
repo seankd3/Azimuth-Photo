@@ -48,6 +48,20 @@ def test_libraw_decode_restores_common_camera_wb_gain(tmp_path, monkeypatch):
     assert raw.postprocess.call_args.kwargs["adjust_maximum_thr"] == 0.0
 
 
+def test_libraw_common_gain_scaling_preserves_rounding_and_saturation():
+    decoded = np.array(
+        [0, 1, 2, 10_000, 31_375, 31_376, 65_534, 65_535],
+        dtype=np.uint16,
+    )
+    scale = np.float32(2.08984375)
+    expected = np.asarray(
+        np.clip(np.rint(np.asarray(decoded, dtype=np.float32) * scale), 0, 65_535),
+        dtype=np.uint16,
+    )
+
+    np.testing.assert_array_equal(rawproc._scale_linear_uint16(decoded, scale), expected)
+
+
 def test_native_cache_v4_does_not_move_display_or_jxl_bases(tmp_path, monkeypatch):
     monkeypatch.setattr(rawproc, "BASE_CACHE_ROOT", tmp_path)
     monkeypatch.setattr(rawproc, "BASE_CACHE_DIR", tmp_path / "base" / "v3")

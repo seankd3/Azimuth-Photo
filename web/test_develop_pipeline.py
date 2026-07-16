@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -13,6 +14,14 @@ from features.develop import camera_profile, pipeline  # noqa: E402
 
 
 class DevelopPipelineTests(unittest.TestCase):
+    def test_fitted_only_color_payload_skips_adobe_library_resolution(self):
+        color = {"camera_profile": {"model": "Canon EOS R5"}}
+
+        with mock.patch.object(pipeline.dng_pipeline, "resolve_adobe_profile") as resolve:
+            self.assertIsNone(pipeline._resolved_adobe_profile(color))
+
+        resolve.assert_not_called()
+
     def test_fitted_profile_replaces_base_curve_and_skips_generic_saturation(self):
         source = np.full((2, 2, 3), 0.25, dtype=np.float32)
         identity_profile = {
@@ -91,6 +100,14 @@ class DevelopPipelineTests(unittest.TestCase):
         lut = pipeline.build_monotone_cubic_lut(["0, 0", "64, 32", "128, 160", "255, 255"])
         np.testing.assert_allclose(lut[[0, 64, 128, 255]], [0.0, 32 / 255, 160 / 255, 1.0], atol=2e-6)
         self.assertTrue(np.all(np.diff(lut) >= -1e-7))
+
+    def test_missing_user_curves_do_not_resample_identity_luts(self):
+        source = np.linspace(0.0, 1.0, 18, dtype=np.float32).reshape(2, 3, 3)
+
+        with mock.patch.object(pipeline, "_apply_lut", wraps=pipeline._apply_lut) as apply_lut:
+            pipeline._apply_tone_curves(source, {})
+
+        self.assertEqual(apply_lut.call_count, 3)  # Base curve only; four user curves are absent.
 
     def test_hsl_band_weights_sum_and_neutral_protect(self):
         weights = pipeline.hsl_band_weights(np.array([0, 30, 260, 350], dtype=np.float32))

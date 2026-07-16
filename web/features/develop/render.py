@@ -679,6 +679,17 @@ def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | No
         paths, meta = rawproc.ensure_base_cache(int(image_id), raw_path)
         linear16, _width, _height = rawproc.parse_base_payload(_gzip.decompress(paths.binary.read_bytes()))
         linear = linear16.astype(np.float32) / 65535.0
+        # HDR-merged bases are stored normalized; restore the scene headroom the
+        # same way develop.js parseBase does so the sigmoid view transform sees
+        # real >1 values (twin contract).
+        hdr_info = meta.get("hdr") if isinstance(meta, dict) else None
+        if isinstance(hdr_info, dict):
+            try:
+                hdr_scale = float(hdr_info.get("scale") or 1.0)
+            except (TypeError, ValueError):
+                hdr_scale = 1.0
+            if hdr_scale > 1.0:
+                linear *= np.float32(hdr_scale)
         settings: dict[str, object] = {}
         try:
             from core import db as _db
@@ -694,7 +705,9 @@ def render_display_preview(image_id: int, raw_path: str | Path, max_px: int | No
                 settings = _json.loads(row[0]) or {}
         except Exception:
             settings = {}
-        developed = develop_default_render(linear, meta, settings)
+        from features.develop.noise_profiles import resolve_file_defaults
+
+        developed = develop_default_render(linear, meta, resolve_file_defaults(settings, meta, raw_path))
         developed = apply_geometry(developed, settings, max_px=max_px)
         encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
         return Image.fromarray(encoded, mode="RGB")

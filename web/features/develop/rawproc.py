@@ -49,7 +49,9 @@ BASE_MAGIC = b"PABASE1\0"
 BASE_HEADER = struct.Struct("<8sII")
 MAX_BASE_EDGE = 2048
 MEMORY_BASE_LIMIT = 2
-SOURCE_META_VERSION = 1
+# v2: native EXIF fallback fills camera_model on machines without ExifTool.
+# v3: cached metadata carries ISO so NR defaults never shell out per request.
+SOURCE_META_VERSION = 3
 
 
 class RawDecodeError(RuntimeError):
@@ -358,6 +360,15 @@ def _resize_linear_uint16(rgb: np.ndarray, max_edge: int | None = MAX_BASE_EDGE)
     return np.ascontiguousarray(np.clip(np.rint(resized), 0, np.iinfo(np.uint16).max), dtype=np.uint16)
 
 
+def _scale_linear_uint16(rgb: np.ndarray, scale: np.float32) -> np.ndarray:
+    """Scale and round a LibRaw frame without chaining full-frame temporaries."""
+    scaled = np.asarray(rgb, dtype=np.float32)
+    np.multiply(scaled, scale, out=scaled)
+    np.rint(scaled, out=scaled)
+    np.clip(scaled, 0, np.iinfo(np.uint16).max, out=scaled)
+    return scaled.astype(np.uint16)
+
+
 def _rawpy_color_matrix(raw: Any) -> list[float] | None:
     for attr in ("color_matrix", "rgb_xyz_matrix"):
         matrix = _matrix_3x3(getattr(raw, attr, None))
@@ -427,6 +438,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
     color_matrix = None
     color_matrix2 = None
     forward_matrix = None
+    iso = None
     from features.develop import lossydng
 
     if source.suffix.lower() == ".dng" and lossydng.is_linear_dng(str(source)):
@@ -440,12 +452,14 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         color_matrix = lossy_meta.get("color_matrix1")
         color_matrix2 = lossy_meta.get("color_matrix2")
         forward_matrix = lossy_meta.get("forward_matrix")
+        iso = _finite_positive(lossy_meta.get("iso"))
     else:
         try:
             with rawpy.imread(str(source)) as raw:
                 camera_wb = list(raw.camera_whitebalance or [])
                 daylight_wb = list(raw.daylight_whitebalance or [])
                 color_matrix = _rawpy_color_matrix(raw)
+                iso = _finite_positive(getattr(getattr(raw, "metadata", None), "iso_speed", None))
                 postprocess_args = {
                     "use_camera_wb": True,
                     "output_bps": 16,
@@ -470,10 +484,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
                     # common gain at the linear decode boundary.
                     green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
                     wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
-                    rgb = np.asarray(
-                        np.clip(np.rint(np.asarray(rgb, dtype=np.float32) * wb_scale), 0, 65535),
-                        dtype=np.uint16,
-                    )
+                    rgb = _scale_linear_uint16(rgb, wb_scale)
         except Exception as exc:
             raise RawDecodeError(f"RAW decode failed: {exc}") from exc
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
@@ -491,6 +502,8 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         "linear": True,
         "base_kind": "raw",
     }
+    if iso is not None:
+        meta["iso"] = iso
     if as_shot_neutral and forward_matrix and (color_matrix or color_matrix2):
         meta["color"] = {
             "as_shot_neutral": [float(v) for v in as_shot_neutral],
