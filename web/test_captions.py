@@ -13,6 +13,14 @@ from workers.caption_health import CaptionOomCircuit
 
 class CaptionTests(BackendTestCase):
     async def test_caption_ownership_loss_unloads_before_reentering_waits(self):
+        wait_order = []
+
+        async def wait_for_gpu_owner(*_args, **_kwargs):
+            wait_order.append("gpu")
+
+        async def wait_for_manual_owner(*_args, **_kwargs):
+            wait_order.append("manual")
+
         with (
             unittest.mock.patch.object(
                 work_coordination,
@@ -23,19 +31,45 @@ class CaptionTests(BackendTestCase):
             unittest.mock.patch.object(
                 work_coordination,
                 "wait_for_gpu_turn",
-                new=unittest.mock.AsyncMock(),
+                side_effect=wait_for_gpu_owner,
             ) as wait_for_gpu,
             unittest.mock.patch.object(
                 work_coordination,
                 "wait_for_manual_turn",
-                new=unittest.mock.AsyncMock(),
+                side_effect=wait_for_manual_owner,
             ) as wait_for_manual,
         ):
             await caption_worker._renew_caption_turn()
 
         unload_model.assert_called_once_with()
+        self.assertEqual(wait_order, ["manual", "gpu"])
         wait_for_gpu.assert_awaited_once_with("captions")
         wait_for_manual.assert_awaited_once_with("captions")
+
+    async def test_caption_retained_ownership_renews_both_leases(self):
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "lost_ownership",
+                return_value=False,
+            ),
+            unittest.mock.patch.object(caption_worker, "_unload_model") as unload_model,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_manual,
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                new=unittest.mock.AsyncMock(),
+            ) as wait_for_gpu,
+        ):
+            await caption_worker._renew_caption_turn()
+
+        unload_model.assert_not_called()
+        wait_for_manual.assert_awaited_once_with("captions")
+        wait_for_gpu.assert_awaited_once_with("captions")
 
     def test_caption_shutdown_stops_gpu_executor(self):
         old_executor = caption_worker._caption_executor
@@ -55,7 +89,7 @@ class CaptionTests(BackendTestCase):
             )
             caption_worker._caption_executor = old_executor
 
-    async def test_caption_reports_waiting_before_gpu_owner_wait(self):
+    async def test_caption_acquires_manual_before_gpu_owner(self):
         old_dependencies = (
             caption_worker._count_images_needing_captions,
             caption_worker._get_images_needing_captions,
@@ -106,7 +140,7 @@ class CaptionTests(BackendTestCase):
                 with self.assertRaises(asyncio.CancelledError):
                     await caption_worker.run_caption_worker()
 
-            self.assertEqual(observed_states, ["waiting_for_gpu"])
+            self.assertEqual(observed_states, ["waiting_for_turn"])
         finally:
             (
                 caption_worker._count_images_needing_captions,

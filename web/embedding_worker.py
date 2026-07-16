@@ -255,12 +255,12 @@ def _unload_model() -> None:
 
 
 async def _renew_embedding_turn() -> bool:
-    if not work_coordination.lost_ownership("embeddings", gpu=True):
-        return True
-    _unload_model()
-    await work_coordination.wait_for_gpu_turn("embeddings")
+    retained = not work_coordination.lost_ownership("embeddings", gpu=True)
+    if not retained:
+        _unload_model()
     await work_coordination.wait_for_manual_turn("embeddings")
-    return False
+    await work_coordination.wait_for_gpu_turn("embeddings")
+    return retained
 
 
 async def shutdown_embedding_worker() -> None:
@@ -1090,13 +1090,13 @@ async def _run_embedding_worker_loop():
                                 "Search is waiting for the GPU.",
                                 ready=False,
                             )
-                            await work_coordination.wait_for_gpu_turn("embeddings")
                             _set_worker_status(
                                 "waiting_for_turn",
                                 "Search is waiting for other background work.",
                                 ready=False,
                             )
                             await work_coordination.wait_for_manual_turn("embeddings")
+                            await work_coordination.wait_for_gpu_turn("embeddings")
                             _set_worker_status(
                                 "loading_model",
                                 f"Loading {model_id} from disk…",
@@ -1149,13 +1149,13 @@ async def _run_embedding_worker_loop():
                     "Search is waiting for the GPU.",
                     ready=False,
                 )
-                await work_coordination.wait_for_gpu_turn("embeddings")
                 _set_worker_status(
                     "waiting_for_turn",
                     "Search is waiting for other background work.",
                     ready=False,
                 )
                 await work_coordination.wait_for_manual_turn("embeddings")
+                await work_coordination.wait_for_gpu_turn("embeddings")
                 _set_worker_status(
                     "embedding",
                     f"Embedding {len(unembedded)} images in batches up to {governed_batch_size}…",

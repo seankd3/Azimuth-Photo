@@ -230,9 +230,8 @@ def _unload_face_app() -> None:
 
 
 async def _renew_face_turn() -> None:
-    if not work_coordination.lost_ownership("people"):
-        return
-    _unload_face_app()
+    if work_coordination.lost_ownership("people"):
+        _unload_face_app()
     await work_coordination.wait_for_manual_turn("people")
 
 

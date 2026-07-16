@@ -227,11 +227,10 @@ def _unload_model() -> None:
 
 
 async def _renew_caption_turn() -> None:
-    if not work_coordination.lost_ownership("captions", gpu=True):
-        return
-    _unload_model()
-    await work_coordination.wait_for_gpu_turn("captions")
+    if work_coordination.lost_ownership("captions", gpu=True):
+        _unload_model()
     await work_coordination.wait_for_manual_turn("captions")
+    await work_coordination.wait_for_gpu_turn("captions")
 
 
 def shutdown_caption_worker() -> None:
@@ -437,13 +436,13 @@ async def _run_caption_worker_loop() -> None:
                 ready=False,
                 message="Captions are waiting for the GPU.",
             )
-            await work_coordination.wait_for_gpu_turn("captions")
             _set_status(
                 state="waiting_for_turn",
                 ready=False,
                 message="Captions are waiting for other background work.",
             )
             await work_coordination.wait_for_manual_turn("captions")
+            await work_coordination.wait_for_gpu_turn("captions")
             loop = asyncio.get_running_loop()
             _set_status(
                 state="captioning",

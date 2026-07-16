@@ -36,6 +36,14 @@ class FakeModel:
 
 class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_embedding_ownership_loss_unloads_before_reentering_waits(self):
+        wait_order = []
+
+        async def wait_for_gpu_owner(*_args, **_kwargs):
+            wait_order.append("gpu")
+
+        async def wait_for_manual_owner(*_args, **_kwargs):
+            wait_order.append("manual")
+
         with (
             unittest.mock.patch.object(
                 work_coordination,
@@ -46,18 +54,19 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             unittest.mock.patch.object(
                 work_coordination,
                 "wait_for_gpu_turn",
-                new=unittest.mock.AsyncMock(),
+                side_effect=wait_for_gpu_owner,
             ) as wait_for_gpu,
             unittest.mock.patch.object(
                 work_coordination,
                 "wait_for_manual_turn",
-                new=unittest.mock.AsyncMock(),
+                side_effect=wait_for_manual_owner,
             ) as wait_for_manual,
         ):
             retained = await embedding_worker._renew_embedding_turn()
 
         self.assertFalse(retained)
         unload_model.assert_called_once_with()
+        self.assertEqual(wait_order, ["manual", "gpu"])
         wait_for_gpu.assert_awaited_once_with("embeddings")
         wait_for_manual.assert_awaited_once_with("embeddings")
 
@@ -95,7 +104,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             embedding_worker._embed_executor = old_embed_executor
             embedding_worker._preload_executor = old_preload_executor
 
-    async def test_embedding_reports_waiting_before_gpu_owner_wait(self):
+    async def test_embedding_acquires_manual_before_gpu_owner(self):
         observed_states = []
 
         async def candidates(**_kwargs):
@@ -119,7 +128,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError):
                 await embedding_worker.run_embedding_worker()
 
-        self.assertEqual(observed_states, ["waiting_for_gpu"])
+        self.assertEqual(observed_states, ["waiting_for_turn"])
 
     async def test_embedding_cooldown_sleep_reports_waiting_retry(self):
         observed_states = []
@@ -426,6 +435,32 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.stored_ids(), list(range(1, 11)))
         self.assertEqual(len(set(self.stored_ids())), 10)
         self.assertEqual([len(call) for call in model.calls], [4, 4, 2])
+
+    async def test_candidate_chunks_renew_manual_then_gpu_leases(self):
+        wait_order = []
+
+        async def wait_for_manual_owner(*_args, **_kwargs):
+            wait_order.append("manual")
+
+        async def wait_for_gpu_owner(*_args, **_kwargs):
+            wait_order.append("gpu")
+
+        with (
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_manual_turn",
+                side_effect=wait_for_manual_owner,
+            ),
+            unittest.mock.patch.object(
+                work_coordination,
+                "wait_for_gpu_turn",
+                side_effect=wait_for_gpu_owner,
+            ),
+        ):
+            result = await self.process(self.rows(10))
+
+        self.assertEqual(result["chunks"], 3)
+        self.assertEqual(wait_order, ["manual", "gpu"] * 3)
 
     async def test_preload_encode_pipeline_preserves_result_ordering(self):
         result = await self.process(self.rows(6))
