@@ -814,28 +814,28 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
                 candidates.append(candidate)
 
         if len(top_tags) > 1:
-            cursor = await conn.execute(
-                "SELECT a.tag AS tag_a, b.tag AS tag_b, COUNT(DISTINCT a.image_id) AS count "
-                "FROM image_tags a "
-                "JOIN image_tags b ON b.model_key = a.model_key "
-                "AND b.image_id = a.image_id AND b.tag > a.tag "
-                "JOIN images i ON i.id = a.image_id "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                f"WHERE a.model_key = ? AND a.tag IN ({placeholders}) "
-                f"AND b.tag IN ({placeholders}) AND s.included = 1 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-                "GROUP BY a.tag, b.tag HAVING count >= ? "
-                "ORDER BY count DESC, a.tag ASC, b.tag ASC LIMIT ?",
-                (model_key, *top_tags, *top_tags, threshold, THEME_MAX_CANDIDATES),
-            )
-            pair_rows = [dict(row) for row in await cursor.fetchall()]
-            for row in pair_rows:
-                tag_a = str(row["tag_a"])
-                tag_b = str(row["tag_b"])
-                tag_b_ids = {int(item["id"]) for item in members_by_tag[tag_b]}
+            # Tag-pair co-occurrence from the already-loaded per-tag member sets.
+            # The equivalent SQL self-join over image_tags was ~10.5s on the real
+            # catalog; these are in-memory set intersections of data already fetched.
+            tag_id_sets = {
+                tag: {int(item["id"]) for item in members_by_tag[tag]}
+                for tag in top_tags
+            }
+            pairs: list[tuple[str, str, set]] = []
+            for index, tag_a in enumerate(top_tags):
+                ids_a = tag_id_sets[tag_a]
+                if not ids_a:
+                    continue
+                for tag_b in top_tags[index + 1:]:
+                    shared = ids_a & tag_id_sets[tag_b]
+                    if len(shared) >= threshold:
+                        low, high = (tag_a, tag_b) if tag_a < tag_b else (tag_b, tag_a)
+                        pairs.append((low, high, shared))
+            pairs.sort(key=lambda pair: (-len(pair[2]), pair[0], pair[1]))
+            for tag_a, tag_b, shared in pairs[:THEME_MAX_CANDIDATES]:
                 candidate = _theme_candidate_from_rows(
                     tags=(tag_a, tag_b),
-                    rows=[item for item in members_by_tag[tag_a] if int(item["id"]) in tag_b_ids],
+                    rows=[item for item in members_by_tag[tag_a] if int(item["id"]) in shared],
                     captioned_count=stats["captioned"],
                     total_count=stats["total"],
                 )
