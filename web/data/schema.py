@@ -420,6 +420,19 @@ CREATE TABLE IF NOT EXISTS embeddings_by_model (
 CREATE INDEX IF NOT EXISTS idx_embeddings_by_model_image_id
 ON embeddings_by_model(image_id);
 
+CREATE TABLE IF NOT EXISTS embedding_scan_images (
+    model_key TEXT NOT NULL REFERENCES embedding_models(model_key) ON DELETE CASCADE,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    status TEXT NOT NULL,
+    error TEXT NOT NULL DEFAULT '',
+    attempts INTEGER NOT NULL DEFAULT 1,
+    scanned_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (model_key, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_embedding_scan_images_status
+ON embedding_scan_images(model_key, status, scanned_at);
+
 CREATE TABLE IF NOT EXISTS search_query_embeddings (
     model_key TEXT NOT NULL REFERENCES embedding_models(model_key),
     query_key TEXT NOT NULL,

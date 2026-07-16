@@ -43,6 +43,7 @@ def configure_database_backed_providers() -> None:
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
         get_unembedded_images=lambda **kwargs: db.get_unembedded_images(**kwargs),
         store_embeddings_batch=lambda rows, **kwargs: db.store_embeddings_batch(rows, **kwargs),
+        poison_embedding_image=lambda **kwargs: db.poison_embedding_image(**kwargs),
         get_embedding_count=lambda: db.get_embedding_count(),
     )
     caption_worker.configure(

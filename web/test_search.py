@@ -3,6 +3,41 @@ import unittest.mock
 
 
 class SearchTests(BackendTestCase):
+    async def test_poisoned_embedding_image_stays_out_of_candidate_queue(self):
+        source = await self._source("embedding-poison")
+        image_id = await self._image(source["id"], "oom.jpg")
+        config = settings.active_embedding_config()
+
+        before = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual([row["id"] for row in before], [image_id])
+
+        await db.poison_embedding_image(
+            image_id=image_id,
+            embedding_config=config,
+            error="CUDA out of memory",
+        )
+
+        after = await db.get_unembedded_images(
+            limit=10,
+            embedding_config=config,
+        )
+        self.assertEqual(after, [])
+        conn = await db.get_db()
+        try:
+            row = await (
+                await conn.execute(
+                    "SELECT status, attempts FROM embedding_scan_images "
+                    "WHERE model_key = ? AND image_id = ?",
+                    (config["model_key"], image_id),
+                )
+            ).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(dict(row), {"status": "poisoned", "attempts": 1})
+
     async def test_exif_failures_log_image_context_without_failing_request(self):
         source = await self._source("exif-errors")
         image_id = await self._image(source["id"], "broken.jpg")

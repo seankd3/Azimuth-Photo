@@ -55,6 +55,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
                 "_count_embeddings_for_model",
                 "_get_unembedded_images",
                 "_store_embeddings_batch",
+                "_poison_embedding_image",
                 "_get_embedding_count",
             )
         }
@@ -88,6 +89,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.cached_model_keys = []
         self.preload_calls = []
         self.missing_ids = set()
+        self.poisoned = []
 
         def fake_preload(image_refs):
             self.preload_calls.append([image_id for image_id, _path in image_refs])
@@ -109,6 +111,9 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         async def fake_count(*_args, **_kwargs):
             return len(self.stored)
 
+        async def fake_poison(**kwargs):
+            self.poisoned.append(kwargs)
+
         async def fake_empty_dict(*_args, **_kwargs):
             return {}
 
@@ -128,6 +133,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             count_embeddings_for_model=fake_count,
             get_unembedded_images=fake_empty_list,
             store_embeddings_batch=fake_store,
+            poison_embedding_image=fake_poison,
             get_embedding_count=fake_count,
         )
         embedding_worker.embed_cache.add_vectors = fake_add_vectors
@@ -150,6 +156,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
 
         embedding_worker._embedding_history.clear()
         embedding_worker._embed_retry_after.clear()
+        embedding_worker._embedding_oom_circuit.reset()
         embedding_worker._embedding_manual_pause = False
         embedding_worker._model = None
         embedding_worker._loaded_model_dir = None
@@ -218,6 +225,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         embedding_worker._search_model_load_task = self.old_search_model_load_task
         embedding_worker._model_load_retry_after = self.old_model_load_retry_after
         embedding_worker._model_load_error_key = self.old_model_load_error_key
+        embedding_worker._embedding_oom_circuit.reset()
 
     def rows(self, count):
         return [
@@ -326,6 +334,18 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status["active_batch_size"], 2)
         self.assertEqual(status["oom_backoffs"], 1)
         self.assertIsNotNone(status["batch_growth_paused_until"])
+
+    async def test_repeated_single_image_ooms_poison_images_and_open_circuit(self):
+        model = FakeModel(oom_above=0)
+
+        result = await self.process(self.rows(3), model)
+
+        self.assertEqual(result["stored"], 0)
+        self.assertEqual(result["failed"], 3)
+        self.assertEqual([item["image_id"] for item in self.poisoned], [1, 2, 3])
+        self.assertEqual(embedding_worker._embed_retry_after, {})
+        self.assertTrue(embedding_worker._embedding_manual_pause)
+        self.assertIn("out-of-memory", embedding_worker.get_worker_status()["message"])
 
     async def test_failed_image_retry_cooldown_still_works(self):
         self.missing_ids = {2}

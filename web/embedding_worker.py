@@ -26,6 +26,7 @@ import embed_cache
 import settings
 import thumbnails
 from core import work_coordination
+from workers.caption_health import CaptionOomCircuit
 
 log = logging.getLogger("embedding_worker")
 log.setLevel(logging.INFO)
@@ -91,6 +92,7 @@ _worker_status = {
 }
 _embedding_history = deque()
 _embed_retry_after: dict[int, float] = {}
+_embedding_oom_circuit = CaptionOomCircuit(threshold=3)
 _embedding_manual_pause = True
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
 _embedding_pause_reason = ""
@@ -112,6 +114,7 @@ _get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
 _get_unembedded_images: AsyncListProvider | None = None
 _store_embeddings_batch: AsyncNoneProvider | None = None
+_poison_embedding_image: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
@@ -121,11 +124,12 @@ def configure(
     count_embeddings_for_model: AsyncIntProvider | None = None,
     get_unembedded_images: AsyncListProvider | None = None,
     store_embeddings_batch: AsyncNoneProvider | None = None,
+    poison_embedding_image: AsyncNoneProvider | None = None,
     get_embedding_count: AsyncIntProvider | None = None,
 ) -> None:
     global _get_catalog_image_counts
     global _count_embeddings_for_model, _get_unembedded_images
-    global _store_embeddings_batch, _get_embedding_count
+    global _store_embeddings_batch, _poison_embedding_image, _get_embedding_count
     if get_catalog_image_counts is not None:
         _get_catalog_image_counts = get_catalog_image_counts
     if count_embeddings_for_model is not None:
@@ -134,6 +138,8 @@ def configure(
         _get_unembedded_images = get_unembedded_images
     if store_embeddings_batch is not None:
         _store_embeddings_batch = store_embeddings_batch
+    if poison_embedding_image is not None:
+        _poison_embedding_image = poison_embedding_image
     if get_embedding_count is not None:
         _get_embedding_count = get_embedding_count
 
@@ -391,6 +397,7 @@ def resume_embedding_worker() -> dict:
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""
     _embedding_pause_reason = ""
+    _embedding_oom_circuit.reset()
     work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
     _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
@@ -875,11 +882,27 @@ async def _process_embedding_candidates(
                 first_failure_error = first_failure_error or failure
                 failed_total += chunk_len
                 for row in chunk_rows:
-                    _schedule_embed_retry(int(row["id"]), failure)
+                    image_id = int(row["id"])
+                    await _configured(
+                        _poison_embedding_image,
+                        "poison_embedding_image",
+                    )(
+                        image_id=image_id,
+                        embedding_config=embedding_config,
+                        error=failure,
+                    )
+                    _embed_retry_after.pop(image_id, None)
                 index = next_index
+                if _embedding_oom_circuit.record_failure():
+                    pause_embedding_worker(
+                        "Search paused after repeated GPU out-of-memory failures. "
+                        "Free GPU memory, then start Search again."
+                    )
 
             preload_future = None
             preload_rows = None
+            if _embedding_manual_pause:
+                break
             await asyncio.sleep(0)
             continue
 
@@ -912,6 +935,7 @@ async def _process_embedding_candidates(
                 log.warning(f"Warm embedding cache update skipped: {exc}")
             await _log_stored_embedding_batch(len(batch), embedding_config)
             _note_successful_embedding_batch(embedding_config)
+            _embedding_oom_circuit.reset()
         store_seconds = time.perf_counter() - store_started
 
         if batch_pause_seconds:
