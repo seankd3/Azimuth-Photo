@@ -834,19 +834,6 @@ async def undo_last_comparison(db_path: str) -> dict | None:
             )
             propagation_rows = await cursor.fetchall()
 
-        # Subtract the recorded delta instead of restoring the absolute
-        # elo_before snapshot, so ratings written by other actions between
-        # propagation and undo are preserved.
-        if propagation_rows:
-            await conn.executemany(
-                "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
-                "propagated_updates = MAX(COALESCE(propagated_updates, 1) - 1, 0) WHERE id = ?",
-                [
-                    (float(row["delta"]), int(row["image_id"]))
-                    for row in propagation_rows
-                ],
-            )
-
         direct_deltas: dict[int, float] = {}
         relative_expected_elo: dict[int, float] = {}
         legacy_restore_elo: dict[int, float] = {}
@@ -895,6 +882,18 @@ async def undo_last_comparison(db_path: str) -> dict | None:
                 if current_elo.get(image_id) == relative_expected_elo[image_id]
             }
             skipped_drift = sorted(set(relative_updates) - set(applicable_updates))
+            if skipped_drift:
+                await conn.rollback()
+                last_row = rows[-1]
+                return {
+                    "winner_id": last_row["winner_id"],
+                    "loser_id": last_row["loser_id"],
+                    "comparisons_undone": 0,
+                    "propagations_undone": 0,
+                    "action_id": action_id,
+                    "skipped_drift": skipped_drift,
+                    "partial": True,
+                }
             if applicable_updates:
                 await conn.executemany(
                     "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
@@ -904,6 +903,20 @@ async def undo_last_comparison(db_path: str) -> dict | None:
                         for image_id, delta in applicable_updates.items()
                     ],
                 )
+
+        # Subtract the recorded delta instead of restoring the absolute
+        # elo_before snapshot, so ratings written by other actions between
+        # propagation and undo are preserved. This runs only after every
+        # direct side passed the drift check above.
+        if propagation_rows:
+            await conn.executemany(
+                "UPDATE images SET elo = COALESCE(elo, 0) - ?, "
+                "propagated_updates = MAX(COALESCE(propagated_updates, 1) - 1, 0) WHERE id = ?",
+                [
+                    (float(row["delta"]), int(row["image_id"]))
+                    for row in propagation_rows
+                ],
+            )
         if legacy_restore_elo:
             await conn.executemany(
                 "UPDATE images SET elo = ?, comparisons = MAX(COALESCE(comparisons, 0) - ?, 0) WHERE id = ?",

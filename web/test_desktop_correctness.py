@@ -81,6 +81,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertEqual(mobile_selection.count("if (removed?.ok) showToast('Removed from collection');"), 2)
         self.assertEqual(mobile_selection.count("new CustomEvent('collections-changed')"), 2)
 
+    def test_refine_undo_surfaces_ranking_drift_on_desktop_and_mobile(self):
+        desktop_refine = read("refine.js")
+        mobile_refine = read_mobile("refine.js")
+
+        for refine in (desktop_refine, mobile_refine):
+            self.assertIn("result?.partial", refine)
+            self.assertIn("Undo partial — ranking drifted", refine)
+
     def test_keep_covers_button_is_reenabled_if_stack_reload_fails(self):
         duplicates = read("duplicates.js")
         action_start = duplicates.index("async function keepCoversEverywhere()")

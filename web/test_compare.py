@@ -252,7 +252,7 @@ class CompareTests(BackendTestCase):
             await conn.close()
         self.assertEqual(remaining["c"], 0)
 
-    async def test_direct_undo_skips_only_side_with_rating_drift(self):
+    async def test_direct_undo_keeps_action_retryable_when_a_rating_drifted(self):
         source = await self._source()
         winner = await self._image(source["id"], "relative-undo-winner.jpg")
         loser = await self._image(source["id"], "relative-undo-loser.jpg")
@@ -276,16 +276,33 @@ class CompareTests(BackendTestCase):
         finally:
             await conn.close()
 
-        undo = await db.undo_last_comparison()
+        undo = await compare_routes.compare_undo()
 
-        self.assertEqual(undo["comparisons_undone"], 1)
+        self.assertFalse(undo["ok"])
+        self.assertTrue(undo["partial"])
+        self.assertEqual(undo["comparisons_undone"], 0)
         self.assertEqual(undo["skipped_drift"], [winner])
-        restored_winner = await self._image_row(winner)
-        restored_loser = await self._image_row(loser)
-        self.assertAlmostEqual(restored_winner["elo"], 1217.0)
-        self.assertEqual(restored_winner["comparisons"], 1)
-        self.assertAlmostEqual(restored_loser["elo"], 1200.0)
-        self.assertEqual(restored_loser["comparisons"], 0)
+        unchanged_winner = await self._image_row(winner)
+        unchanged_loser = await self._image_row(loser)
+        self.assertAlmostEqual(unchanged_winner["elo"], 1217.0)
+        self.assertEqual(unchanged_winner["comparisons"], 1)
+        self.assertAlmostEqual(unchanged_loser["elo"], 1190.0)
+        self.assertEqual(unchanged_loser["comparisons"], 1)
+
+        conn = await db.get_db()
+        try:
+            comparison_count = await (await conn.execute("SELECT COUNT(*) AS c FROM comparisons")).fetchone()
+            await conn.execute("UPDATE images SET elo = 1210 WHERE id = ?", (winner,))
+            await conn.commit()
+        finally:
+            await conn.close()
+        self.assertEqual(comparison_count["c"], 1)
+
+        retry = await compare_routes.compare_undo()
+
+        self.assertTrue(retry["ok"])
+        self.assertEqual((await self._image_row(winner))["elo"], 1200.0)
+        self.assertEqual((await self._image_row(loser))["elo"], 1200.0)
 
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
         compare_service._pairing_cache.update({

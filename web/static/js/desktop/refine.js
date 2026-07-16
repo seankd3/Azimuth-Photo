@@ -574,7 +574,7 @@ export async function undoRefine() {
     if (!result || !result.ok) {
         history.push(entry);
         renderUndoState();
-        showToast('Nothing to undo');
+        showToast(result?.partial ? 'Undo partial — ranking drifted' : 'Nothing to undo');
         return;
     }
     picks = Math.max(0, picks - 1);
