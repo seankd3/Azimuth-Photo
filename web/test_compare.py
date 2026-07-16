@@ -477,6 +477,55 @@ class CompareTests(BackendTestCase):
         self.assertEqual(await db.count_rankings(), 2)
         self.assertEqual(await db.count_rankings(compared="compared"), 2)
 
+    async def test_concurrent_comparisons_compute_from_serialized_ratings(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "concurrent-winner.jpg")
+        loser = await self._image(source["id"], "concurrent-loser.jpg")
+        counts = await db.get_catalog_image_counts()
+
+        await asyncio.gather(
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-1",
+                catalog_counts=counts,
+            ),
+            ratings.record_active_comparison(
+                db.DB_PATH,
+                winner_id=winner,
+                loser_id=loser,
+                mode="swiss",
+                action_id="concurrent-2",
+                catalog_counts=counts,
+            ),
+        )
+
+        conn = await db.get_db()
+        try:
+            image_rows = await (await conn.execute(
+                "SELECT id, elo, comparisons FROM images WHERE id IN (?, ?) ORDER BY id",
+                (winner, loser),
+            )).fetchall()
+            comparisons = await (await conn.execute(
+                "SELECT elo_before_winner, elo_before_loser FROM comparisons "
+                "WHERE action_id IN ('concurrent-1', 'concurrent-2') ORDER BY id",
+            )).fetchall()
+        finally:
+            await conn.close()
+
+        self.assertEqual([row["comparisons"] for row in image_rows], [2, 2])
+        self.assertEqual(len(comparisons), 2)
+        self.assertNotEqual(
+            comparisons[0]["elo_before_winner"],
+            comparisons[1]["elo_before_winner"],
+        )
+        self.assertNotEqual(
+            comparisons[0]["elo_before_loser"],
+            comparisons[1]["elo_before_loser"],
+        )
+
     async def test_past_matchups_cache_reuses_until_rating_write(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")

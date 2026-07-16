@@ -554,6 +554,7 @@ async def record_comparison(
 ) -> None:
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         await conn.execute(
             "INSERT INTO comparisons "
             "(winner_id, loser_id, mode, elo_before_winner, elo_before_loser, action_id) "
@@ -569,6 +570,9 @@ async def record_comparison(
             (new_loser_elo, loser_id),
         )
         await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -589,6 +593,7 @@ async def record_active_comparison(
 
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         if _all_catalog_images_active(catalog_counts):
             cursor = await conn.execute(
                 "SELECT i.id, i.elo, COALESCE(i.comparisons, 0) AS comparisons, "
@@ -614,6 +619,7 @@ async def record_active_comparison(
         winner = rows.get(winner_id)
         loser = rows.get(loser_id)
         if not winner or not loser:
+            await conn.rollback()
             return None
 
         k = pairing.get_k_factor(min(winner["comparisons"], loser["comparisons"]), mode)
@@ -641,6 +647,9 @@ async def record_active_comparison(
             "k": k,
             "_rated_delta": rated_delta,
         }
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -662,6 +671,7 @@ async def record_active_mosaic_pick(
 
     conn = await connection.open_async(db_path)
     try:
+        await conn.execute("BEGIN IMMEDIATE")
         placeholders = ",".join("?" for _ in unique_ids)
         if _all_catalog_images_active(catalog_counts):
             cursor = await conn.execute(
@@ -688,6 +698,7 @@ async def record_active_mosaic_pick(
         images = {row["id"]: dict(row) for row in await cursor.fetchall()}
         missing_ids = [image_id for image_id in all_ids if image_id not in images]
         if missing_ids:
+            await conn.rollback()
             return {"ok": False, "missing_ids": missing_ids}
 
         picked_elo = images[picked_id]["elo"]
@@ -742,6 +753,9 @@ async def record_active_mosaic_pick(
             "loser_updates": loser_updates,
             "_rated_delta": rated_delta,
         }
+    except Exception:
+        await conn.rollback()
+        raise
     finally:
         await connection.close_async(conn, db_path=db_path)
 
