@@ -209,6 +209,8 @@ CREATE TABLE IF NOT EXISTS comparisons (
     mode TEXT,
     elo_before_winner REAL,
     elo_before_loser REAL,
+    elo_delta_winner REAL DEFAULT NULL,
+    elo_delta_loser REAL DEFAULT NULL,
     action_id TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -908,6 +910,12 @@ IMAGE_COMPAT_COLUMNS = (
     ("vc_of", "INTEGER REFERENCES images(id) ON DELETE CASCADE"),
 )
 
+COMPARISON_COMPAT_COLUMNS = (
+    ("action_id", "TEXT DEFAULT NULL"),
+    ("elo_delta_winner", "REAL DEFAULT NULL"),
+    ("elo_delta_loser", "REAL DEFAULT NULL"),
+)
+
 CATALOG_SOURCE_COMPAT_COLUMNS = (
     ("display_name", "TEXT DEFAULT ''"),
     ("included", "INTEGER NOT NULL DEFAULT 1"),
@@ -1230,7 +1238,7 @@ REQUIRED_COLUMNS = {
         "last_seen_at",
         "removed_at",
     },
-    "comparisons": {"action_id"},
+    "comparisons": {"action_id", "elo_delta_winner", "elo_delta_loser"},
     "cache_metadata": {"replace_stale_thumbnails"},
     "stacks": {"kind", "representative_image_id", "auto", "created_at", "updated_at"},
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
@@ -1416,7 +1424,7 @@ async def prepare_existing_database_for_schema(conn) -> None:
     """
     await conn.execute(PRE_SCHEMA_CATALOG_SOURCES_DDL)
     await _add_columns_if_missing(conn, "images", IMAGE_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
+    await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
@@ -1681,7 +1689,7 @@ async def ensure_compatibility_columns(conn) -> None:
         "cache_metadata",
         (("replace_stale_thumbnails", "INTEGER NOT NULL DEFAULT 0"),),
     )
-    await _add_columns_if_missing(conn, "comparisons", (("action_id", "TEXT DEFAULT NULL"),))
+    await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)

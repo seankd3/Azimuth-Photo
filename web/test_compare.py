@@ -252,6 +252,36 @@ class CompareTests(BackendTestCase):
             await conn.close()
         self.assertEqual(remaining["c"], 0)
 
+    async def test_direct_undo_subtracts_delta_without_clobbering_later_rating_change(self):
+        source = await self._source()
+        winner = await self._image(source["id"], "relative-undo-winner.jpg")
+        loser = await self._image(source["id"], "relative-undo-loser.jpg")
+        await db.record_comparison(
+            winner,
+            loser,
+            "swiss",
+            1200.0,
+            1200.0,
+            1210.0,
+            1190.0,
+            action_id="relative-direct-undo",
+        )
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET elo = elo + 7 WHERE id IN (?, ?)",
+                (winner, loser),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        undo = await db.undo_last_comparison()
+
+        self.assertEqual(undo["comparisons_undone"], 1)
+        self.assertAlmostEqual((await self._image_row(winner))["elo"], 1207.0)
+        self.assertAlmostEqual((await self._image_row(loser))["elo"], 1207.0)
+
     async def test_pairing_cache_patch_keeps_immediate_candidate_cache_hot(self):
         compare_service._pairing_cache.update({
             "valid": True,
