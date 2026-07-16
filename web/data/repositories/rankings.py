@@ -762,6 +762,7 @@ async def rankings_cached(
     get_catalog_image_counts,
     cache_entry_count,
     get_cached_image_id_set,
+    get_cached_image_ids,
     limit: int = 100,
     offset: int = 0,
     sort: str = "elo",
@@ -805,9 +806,12 @@ async def rankings_cached(
         and not use_cache_first_visible
     )
     if visible_thumb_size and cache_root and (id_filter is not None or use_sparse_visible_id_filter):
-        cached_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
         if id_filter is not None:
-            cached_ids.intersection_update(int(image_id) for image_id in id_filter)
+            # Visibility for just the filtered ids (e.g. ~789 FTS matches), not
+            # the whole ~87k cached set — cold search spent 1.6s materializing it.
+            cached_ids = set(await get_cached_image_ids(list(id_filter), visible_thumb_size, cache_root))
+        else:
+            cached_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
         if not cached_ids:
             return []
         if len(cached_ids) <= RANKING_VISIBLE_ID_FILTER_LIMIT:
@@ -1052,6 +1056,7 @@ async def count_rankings_uncached_with_visible_cache(
     *,
     get_catalog_image_counts,
     get_cached_image_id_set,
+    get_cached_image_ids,
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -1071,7 +1076,7 @@ async def count_rankings_uncached_with_visible_cache(
 ) -> int:
     cached_visible_ids = None
     if visible_thumb_size and cache_root and id_filter is not None:
-        cached_visible_ids = set(await get_cached_image_id_set(visible_thumb_size, cache_root))
+        cached_visible_ids = set(await get_cached_image_ids(list(id_filter), visible_thumb_size, cache_root))
     return await count_rankings_uncached(
         db_path,
         catalog_counts=await get_catalog_image_counts(),
@@ -1100,6 +1105,7 @@ async def count_rankings_cached(
     *,
     get_catalog_image_counts,
     get_cached_image_id_set,
+    get_cached_image_ids,
     orientation: str = "",
     compared: str = "",
     min_stars: int = 0,
@@ -1146,6 +1152,7 @@ async def count_rankings_cached(
         db_path,
         get_catalog_image_counts=get_catalog_image_counts,
         get_cached_image_id_set=get_cached_image_id_set,
+        get_cached_image_ids=get_cached_image_ids,
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
