@@ -36,6 +36,7 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const OPTIONS_MAX_AGE_MS = 60000;
+const SEARCHABLE_SECTION_MIN = 10;
 
 function countLabel(item, fallback = '') {
     const count = item.count ?? item.image_count ?? item.face_count;
@@ -86,6 +87,28 @@ function optionRows(items, key, valueOf, labelOf) {
     }).join('');
 }
 
+function sectionSearchQuery(section) {
+    return (popover?.querySelector(`#filter-${section}-search`)?.value || '').trim().toLowerCase();
+}
+
+function searchableItems(section, items, labelOf) {
+    const query = sectionSearchQuery(section);
+    return !query ? items : items.filter((item) => String(labelOf(item) || '').toLowerCase().includes(query));
+}
+
+function sectionSearchInput(section, count, placeholder) {
+    if (count <= SEARCHABLE_SECTION_MIN) return '';
+    const query = sectionSearchQuery(section);
+    return `<input class="filter-search" id="filter-${section}-search" value="${esc(query)}" placeholder="${esc(placeholder)}" autocomplete="off">`;
+}
+
+function searchableOptionBlock(title, section, items, key, valueOf, labelOf, { placeholder, empty, loading: isLoading = false, glyph = 'search' } = {}) {
+    const filtered = searchableItems(section, items, labelOf);
+    const rows = optionRows(filtered, key, valueOf, labelOf);
+    const body = rows || (isLoading ? loadingOption(`Loading ${title.toLowerCase()}…`) : emptyOption(empty, glyph));
+    return `<section class="filter-sec" data-filter-section="${esc(section)}"><h3>${esc(title)}</h3>${sectionSearchInput(section, items.length, placeholder)}<div class="filter-list">${body}</div></section>`;
+}
+
 function emptyOption(copy, glyph = 'search') {
     return '<div class="filter-empty chrome-empty">'
         + `<span class="chrome-empty-glyph">${icon(glyph)}</span>`
@@ -122,19 +145,32 @@ function renderFlag() {
 }
 
 function renderPeople() {
-    const rows = optionRows(
-        options.people.filter((person) => {
-            const query = (popover?.querySelector('#filter-people-search')?.value || '').trim().toLowerCase();
-            return !query || personLabel(person).toLowerCase().includes(query);
-        }),
-        'people',
-        (person) => person.id,
-        personLabel,
-    );
-    const body = rows || (loading ? loadingOption('Loading people…') : emptyOption('No people found.', 'users'));
-    return `<section class="filter-sec" data-filter-section="people"><h3>People</h3>`
-        + '<input class="filter-search" id="filter-people-search" placeholder="Search people" autocomplete="off">'
-        + `<div class="filter-list">${body}</div></section>`;
+    return searchableOptionBlock('People', 'people', options.people, 'people', (person) => person.id, personLabel, {
+        placeholder: 'Search people', empty: 'No people found.', loading, glyph: 'users',
+    });
+}
+
+function folderName(path) {
+    return String(path || '').split('/').filter(Boolean).pop() || path || '';
+}
+
+function folderRows(items) {
+    return (items || []).map((item) => {
+        const value = String(item.path || '');
+        if (!value) return '';
+        const active = folderValues().includes(value);
+        const label = folderName(value);
+        const unavailable = Number(item.count) === 0;
+        return `<button class="filter-row filter-folder-row ${active ? 'active' : ''} ${unavailable ? 'unavailable' : ''}" data-key="folder" data-value="${esc(value)}" title="${esc(value)}">`
+            + `<span class="filter-folder-copy"><span title="${esc(label)}">${esc(label)}</span><small title="${esc(value)}">${esc(value)}</small></span><span class="num">${fmt(item.count)}</span></button>`;
+    }).join('');
+}
+
+function renderFolders() {
+    const filtered = searchableItems('folder', options.folders, (item) => item.path);
+    const rows = folderRows(filtered);
+    const body = rows || (foldersLoading ? loadingOption('Loading folders…') : emptyOption('No folders found.', 'folder'));
+    return `<section class="filter-sec" data-filter-section="folder"><h3>Folder</h3>${sectionSearchInput('folder', options.folders.length, 'Search folders')}<div class="filter-list">${body}</div></section>`;
 }
 
 function renderDate() {
@@ -298,24 +334,25 @@ function renderStars() {
 
 function render() {
     if (!popover) return;
-    const keepPeopleFocus = document.activeElement?.id === 'filter-people-search';
-    const peopleSearch = popover.querySelector('#filter-people-search')?.value || '';
+    const focusedSearch = document.activeElement?.classList.contains('filter-search') ? document.activeElement.id : '';
     popover.innerHTML = `<div class="filter-pop-head"><b>Filter</b><button class="icon-btn" id="filter-close" data-tip="Close (Esc)" aria-label="Close">${icon('x')}</button></div>`
         + [
             renderReadOnlyScope(),
             renderFlag(),
             renderPeople(),
-            selectBlock('Folder', optionRows(options.folders, 'folder', (item) => item.path, (item) => item.path)
-                || (foldersLoading ? loadingOption('Loading folders…') : emptyOption('No folders found.', 'folder')), 'data-filter-section="folder"'),
+            renderFolders(),
             renderDate(),
             selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase())
                 || (loading ? loadingOption('Loading file types…') : emptyOption('No file types found.', 'file-type')), 'data-filter-section="filetype"'),
-            selectBlock('Camera', optionRows(options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value)
-                || (loading ? loadingOption('Loading cameras…') : emptyOption('No cameras found.', 'camera')), 'data-filter-section="camera"'),
-            selectBlock('Lens', optionRows(options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value)
-                || (loading ? loadingOption('Loading lenses…') : emptyOption('No lenses found.', 'aperture')), 'data-filter-section="lens"'),
-            selectBlock('Tags', optionRows(options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value)
-                || (tagsLoading ? loadingOption('Loading tags…') : emptyOption('No caption tags yet.', 'tag')), 'data-filter-section="tags"'),
+            searchableOptionBlock('Camera', 'camera', options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value, {
+                placeholder: 'Search cameras', empty: 'No cameras found.', loading, glyph: 'camera',
+            }),
+            searchableOptionBlock('Lens', 'lens', options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value, {
+                placeholder: 'Search lenses', empty: 'No lenses found.', loading, glyph: 'aperture',
+            }),
+            searchableOptionBlock('Tags', 'tags', options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value, {
+                placeholder: 'Search tags', empty: 'No caption tags yet.', loading: tagsLoading, glyph: 'tag',
+            }),
             selectBlock('Orientation', [
                 ['landscape', 'Landscape'],
                 ['portrait', 'Portrait'],
@@ -325,11 +362,9 @@ function render() {
             renderRanked(),
             renderStars(),
         ].join('');
-    const search = popover.querySelector('#filter-people-search');
-    if (search) {
-        search.value = peopleSearch;
+    for (const search of popover.querySelectorAll('.filter-search')) {
         search.addEventListener('input', render);
-        if (keepPeopleFocus) {
+        if (search.id === focusedSearch) {
             search.focus({ preventScroll: true });
             search.setSelectionRange(search.value.length, search.value.length);
         }

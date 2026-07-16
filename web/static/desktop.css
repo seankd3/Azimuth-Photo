@@ -2084,3 +2084,6 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .filter-scope-row { width: 100%; min-height: 30px; display: flex; align-items: center; gap: var(--s2); padding: 6px 8px; color: var(--text-3); font-size: 13px; }
 .filter-scope-row span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-operator-footer { position: sticky; bottom: calc(var(--s2) * -1); z-index: 1; padding: 8px 14px 2px; border-top: 1px solid var(--line-soft); background: var(--surface-popover); color: var(--text-3); font-size: var(--fs-caption); white-space: nowrap; }
+.filter-folder-copy { min-width: 0; display: grid; gap: 1px; }
+.filter-folder-copy > span, .filter-folder-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filter-folder-copy small { color: var(--text-3); font-size: var(--fs-caption); }
