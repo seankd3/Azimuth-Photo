@@ -682,7 +682,7 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
     for directory, count in directory_counts.items():
         add_folder_counts(folder_counts, root, directory, count, max_depth=max_depth)
 
-    folders = [{"path": k, "count": v, "depth": k.count(os.sep)}
+    folders = [{"path": k, "count": v, "depth": k.count("/")}
                for k, v in sorted(folder_counts.items())]
     return {"folders": folders, "root": root}
 
@@ -740,7 +740,8 @@ def serialize_folder_node(node: dict) -> dict | None:
         if serialized is not None:
             children.append(serialized)
     return {
-        "path": node["path"],
+        # API folder keys are '/' on every platform (reveal handles both).
+        "path": str(node["path"]).replace("\\", "/"),
         "name": node["name"],
         "source_id": int(node.get("source_id") or 0),
         "reveal_available": bool(node.get("reveal_available", True)),

@@ -90,7 +90,11 @@ class GeoDataTests(unittest.TestCase):
             _, changes = asyncio.run(geodata.backfill_batch(db_path))
             self.assertEqual(changes["gps"], 1)
             import sqlite3
-            row = sqlite3.connect(db_path).execute("SELECT latitude, longitude, location_source, camera_make, camera_model FROM images").fetchone()
+            probe = sqlite3.connect(db_path)
+            try:
+                row = probe.execute("SELECT latitude, longitude, location_source, camera_make, camera_model FROM images").fetchone()
+            finally:
+                probe.close()
             self.assertEqual(row, (41.0, -87.0, "exif", "Nikon", "Zf"))
 
     @staticmethod

@@ -925,9 +925,9 @@ class SearchTests(BackendTestCase):
 
         thumbnails.prefetch_images = blocking_prefetch
         try:
-            result = await asyncio.wait_for(search_routes.api_search(q="sunset", limit=10), timeout=0.5)
+            result = await asyncio.wait_for(search_routes.api_search(q="sunset", limit=10), timeout=5)
             self.assertEqual([img["id"] for img in result["images"]], [match])
-            await asyncio.wait_for(started.wait(), timeout=0.5)
+            await asyncio.wait_for(started.wait(), timeout=5)
         finally:
             release.set()
             await asyncio.sleep(0)

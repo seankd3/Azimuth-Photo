@@ -19,7 +19,8 @@ from starlette.responses import Response
 sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
 import ai_models  # noqa: E402
-import db  # noqa: E402
+import db
+from data import connection as data_connection  # noqa: E402
 import embedding_worker  # noqa: E402
 import elo_propagation  # noqa: E402
 import face_worker  # noqa: E402
@@ -76,6 +77,19 @@ class HeaderRequest:
 class BackendTestCase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
+        # Every aiosqlite connection keeps a worker thread holding the DB file
+        # open; on Windows one leaked handle blocks tempdir cleanup forever.
+        # Track opens so teardown can close what a test (or a background code
+        # path) forgot.
+        self._tracked_conns = set()
+        self._orig_open_async = data_connection.open_async
+
+        async def _tracked_open(db_path, **kwargs):
+            conn = await self._orig_open_async(db_path, **kwargs)
+            self._tracked_conns.add(conn)
+            return conn
+
+        data_connection.open_async = _tracked_open
         self.old_db_path = db.DB_PATH
         self.old_schedule_pairing_propagation = compare_routes._schedule_pairing_propagation
         self.old_get_matrix = elo_propagation.embed_cache.get_matrix
@@ -174,6 +188,25 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         """
         import asyncio as _asyncio
         import gc as _gc
+
+        # Let in-flight background tasks (post-response prefetch, cache priming)
+        # finish their finally blocks NOW, while the loop is alive — a task
+        # cancelled by loop close mid-aiosqlite-close leaks its worker thread
+        # and the DB file stays locked on Windows forever.
+        # (Cancelling instead of waiting guts aiosqlite mid-operation and
+        # orphans its worker thread — the opposite of the goal.)
+        current = _asyncio.current_task()
+        pending = [t for t in _asyncio.all_tasks() if t is not current and not t.done()]
+        if pending:
+            await _asyncio.wait(pending, timeout=8)
+
+        data_connection.open_async = self._orig_open_async
+        for conn in list(self._tracked_conns):
+            try:
+                await conn.close()
+            except Exception:
+                pass
+        self._tracked_conns.clear()
 
         for attempt in range(20):
             try:
