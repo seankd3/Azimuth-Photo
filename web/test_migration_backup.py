@@ -120,6 +120,43 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await data_connection.close_async(conn, db_path=self.db)
 
+    async def test_populated_version_zero_catalog_is_backed_up(self):
+        version_zero_db = os.path.join(self.tmp.name, "version-zero.db")
+        _make_db(version_zero_db, 0)
+        with sqlite3.connect(version_zero_db) as conn:
+            conn.execute("INSERT INTO images DEFAULT VALUES")
+        conn = await data_connection.open_async(version_zero_db)
+        try:
+            with mock.patch.object(app_db, "DB_PATH", version_zero_db), mock.patch.object(
+                backups,
+                "backup_before_migration",
+                return_value={"ok": True},
+            ) as backup:
+                await app_db._backup_before_migration(conn)
+        finally:
+            await data_connection.close_async(conn, db_path=version_zero_db)
+
+        backup.assert_called_once_with(version_zero_db, 0, app_db.SCHEMA_VERSION)
+
+    async def test_populated_version_zero_catalog_refuses_failed_backup(self):
+        version_zero_db = os.path.join(self.tmp.name, "version-zero-failed.db")
+        _make_db(version_zero_db, 0)
+        with sqlite3.connect(version_zero_db) as conn:
+            conn.execute("INSERT INTO images DEFAULT VALUES")
+        with (
+            mock.patch.object(app_db, "DB_PATH", version_zero_db),
+            mock.patch.object(
+                backups,
+                "backup_before_migration",
+                return_value=None,
+            ),
+            mock.patch.object(app_db, "_schema_is_current", return_value=False) as schema_probe,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "backup"):
+                await app_db.init_db()
+
+        schema_probe.assert_not_awaited()
+
     async def test_stack_rebuild_creates_immediate_local_backup(self):
         stack_db = os.path.join(self.tmp.name, "legacy-stacks.db")
         conn = await data_connection.open_async(stack_db)
