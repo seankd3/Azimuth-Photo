@@ -302,6 +302,13 @@ def _unique_destination(path: Path) -> Path:
     raise RuntimeError("Could not create a unique upload destination")
 
 
+def _discard_upload_temp(intake_root: Path, content_hash: str) -> None:
+    """Drop a failed intake part so the satellite can re-upload cleanly."""
+
+    upload_part_path(intake_root, content_hash).unlink(missing_ok=True)
+    upload_offset_path(intake_root, content_hash).unlink(missing_ok=True)
+
+
 async def _manifest_item(db_path: str, content_hash: str) -> dict[str, Any] | None:
     conn = await connection.open_async(db_path)
     try:
@@ -385,8 +392,7 @@ async def _append_upload_chunk_locked(
     await ensure_sync_schema(db_path)
     known = await _known_image_id(db_path, content_hash)
     if known is not None:
-        upload_part_path(intake_root, content_hash).unlink(missing_ok=True)
-        upload_offset_path(intake_root, content_hash).unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         return {"image_id": known}
     item = await _manifest_item(db_path, content_hash)
     if item is None:
@@ -413,15 +419,16 @@ async def _append_upload_chunk_locked(
     if current < total_bytes:
         return {"offset": current}
 
+    # Byte-verify BEFORE any library placement or catalog write. A full-size
+    # .part with corrupt bytes (the satellite→hub timeout failure mode) must
+    # never become an original.
     actual_hash = await asyncio.to_thread(compute_content_hash, part)
     if actual_hash != content_hash:
-        part.unlink(missing_ok=True)
-        offset_path.unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed content hash verification")
     actual_full_hash = await asyncio.to_thread(compute_full_hash, part)
     if actual_full_hash != item["full_hash"]:
-        part.unlink(missing_ok=True)
-        offset_path.unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed full-file hash verification")
 
     extracted = await asyncio.to_thread(geodata.extract_file_metadata, str(part))
@@ -456,6 +463,12 @@ async def _append_upload_chunk_locked(
             await asyncio.to_thread(shutil.copy2, part, destination)
             with destination.open("rb") as handle:
                 os.fsync(handle.fileno())
+            # Copy can silently diverge; prove the placed bytes before catalog commit.
+            placed_full = await asyncio.to_thread(compute_full_hash, destination)
+            if placed_full != item["full_hash"]:
+                destination.unlink(missing_ok=True)
+                _discard_upload_temp(intake_root, content_hash)
+                raise ArithmeticError("Placed upload failed full-file hash verification")
         created_destination = True
     try:
         image_id = await _register_original(db_path, destination_root, destination, content_hash)
@@ -463,8 +476,7 @@ async def _append_upload_chunk_locked(
         if created_destination:
             destination.unlink(missing_ok=True)
         raise
-    part.unlink(missing_ok=True)
-    offset_path.unlink(missing_ok=True)
+    _discard_upload_temp(intake_root, content_hash)
     return {"image_id": image_id}
 
 

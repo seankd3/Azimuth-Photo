@@ -635,6 +635,51 @@ class SyncHubTests(unittest.TestCase):
         destination = self.raws / "2024" / "2024-06-07" / "legacy.jpg"
         self.assertEqual(destination.read_bytes(), payload)
 
+    def test_finalize_rejects_corrupt_bytes_then_accepts_good_retry(self):
+        """P0-A: declared hashes must match received bytes before any placement."""
+
+        good = b"GOOD-BYTES-" + (b"A" * 4096)
+        corrupt = b"BAD!-BYTES-" + (b"B" * 4096)
+        self.assertEqual(len(good), len(corrupt))
+        content_hash = self.digest(good)
+        response = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(good),
+                "bytes": len(good),
+                "filename": "000018240006.tif",
+                "date_taken": "2026-07-16",
+            }]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        failed = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(corrupt))},
+            content=corrupt,
+        )
+        self.assertEqual(failed.status_code, 422, failed.text)
+        self.assertFalse(hub.upload_part_path(self.intake, content_hash).exists())
+        placed = list(self.root.rglob("000018240006.tif"))
+        self.assertEqual(placed, [])
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM images WHERE content_hash = ?", (content_hash,)
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            conn.close()
+
+        image_id = self.upload(content_hash, good)
+        destination = self.root / "Film Scans" / "2026" / "2026-07-16" / "000018240006.tif"
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), good)
+        self.assertGreater(image_id, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
