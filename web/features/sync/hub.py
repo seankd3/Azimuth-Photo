@@ -150,6 +150,57 @@ def compute_placed_relpath(
     return f"{destination_name}/{year}/{day}/{os.path.basename(filename)}"
 
 
+def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
+    """Existence + size is the floor for "hub has the bytes" without a full re-hash."""
+
+    state, file_stat = inspect_source_file(filepath, source_path)
+    if state != "available" or file_stat is None:
+        return False
+    if expected_size is None:
+        return True
+    return int(file_stat.st_size) == int(expected_size)
+
+
+async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) -> dict[str, int]:
+    """Map content_hash → image_id only when an active original exists at expected size."""
+
+    hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
+    if not hashes:
+        return {}
+    conn = await connection.open_async(db_path)
+    try:
+        placeholders = ",".join("?" for _ in hashes)
+        rows = await (
+            await conn.execute(
+                f"SELECT i.id, i.content_hash, i.filepath, i.file_size, s.path AS source_path "
+                f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                f"WHERE i.content_hash IN ({placeholders}) "
+                "AND COALESCE(i.hub_remote, 0) = 0 "
+                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                "ORDER BY i.id",
+                hashes,
+            )
+        ).fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    def proven() -> dict[str, int]:
+        found: dict[str, int] = {}
+        for row in rows:
+            content_hash = str(row["content_hash"])
+            if content_hash in found:
+                continue
+            if _byte_proof_ok(
+                str(row["filepath"] or ""),
+                str(row["source_path"] or ""),
+                row["file_size"],
+            ):
+                found[content_hash] = int(row["id"])
+        return found
+
+    return await asyncio.to_thread(proven)
+
+
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
     normalized: list[tuple[str, str | None, int, str, str | None, str | None, str]] = []
@@ -183,20 +234,12 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
                 "placed_relpath=COALESCE(sync_manifest_items.placed_relpath, excluded.placed_relpath)",
                 normalized,
             )
-        hashes = [row[0] for row in normalized]
-        known_by_hash: dict[str, int] = {}
-        if hashes:
-            placeholders = ",".join("?" for _ in hashes)
-            rows = await (await conn.execute(
-                f"SELECT content_hash, MIN(id) AS image_id FROM images "
-                f"WHERE content_hash IN ({placeholders}) GROUP BY content_hash",
-                hashes,
-            )).fetchall()
-            known_by_hash = {str(row["content_hash"]): int(row["image_id"]) for row in rows}
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
+    hashes = [row[0] for row in normalized]
+    known_by_hash = await images_with_byte_proof(db_path, hashes)
     return {
         "missing": [content_hash for content_hash in hashes if content_hash not in known_by_hash],
         "known": [
@@ -366,7 +409,9 @@ async def _persist_placed_relpath(db_path: str, content_hash: str, placed_relpat
     return str(row["placed_relpath"])
 
 
-async def _known_image_id(db_path: str, content_hash: str) -> int | None:
+async def _catalog_image_id(db_path: str, content_hash: str) -> int | None:
+    """Any catalog row for this identity — used by metadata merge, not upload gates."""
+
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute(
@@ -375,6 +420,13 @@ async def _known_image_id(db_path: str, content_hash: str) -> int | None:
         return int(row["id"]) if row else None
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def _known_image_id(db_path: str, content_hash: str) -> int | None:
+    """Upload short-circuit: only when the original exists on disk at expected size."""
+
+    proven = await images_with_byte_proof(db_path, [content_hash])
+    return proven.get(validate_content_hash(content_hash))
 
 
 def _resolve_library_destination(
@@ -662,7 +714,7 @@ async def merge_metadata(db_path: str, items: Iterable[dict[str, Any]]) -> dict[
     results: list[dict[str, Any]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
-        image_id = await _known_image_id(db_path, content_hash)
+        image_id = await _catalog_image_id(db_path, content_hash)
         if image_id is None:
             results.append({"content_hash": content_hash, "applied": [], "skipped": [{"family": "item", "reason": "unknown-content-hash"}]})
             continue

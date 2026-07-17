@@ -786,6 +786,68 @@ class SyncHubTests(unittest.TestCase):
         self.assertEqual(rows[0][0], image_id)
         self.assertEqual(rows[0][1], content_hash)
 
+    def test_manifest_known_requires_original_bytes_on_disk(self):
+        """P1-C: a catalog row without byte proof must report as needed, not known."""
+
+        payload = self.image_bytes("ghost.jpg", (70, 80, 90))
+        content_hash = self.declare("ghost.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "ghost.jpg"
+        self.assertTrue(destination.is_file())
+
+        destination.unlink()
+        missing = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(missing.status_code, 200, missing.text)
+        self.assertEqual(missing.json(), {"missing": [content_hash], "known": []})
+
+        # Size mismatch is also not proof.
+        destination.write_bytes(payload + b"x")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE images SET missing_at = NULL, file_size = ? WHERE id = ?",
+                (len(payload), image_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        mismatched = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(mismatched.json(), {"missing": [content_hash], "known": []})
+
+        destination.write_bytes(payload)
+        restored = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(
+            restored.json(),
+            {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
