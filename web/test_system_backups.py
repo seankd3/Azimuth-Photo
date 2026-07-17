@@ -179,6 +179,124 @@ class BackupUnitTests(unittest.TestCase):
         delay2 = backups.seconds_until_local_hour(4, now=later)
         self.assertGreater(delay2, 20 * 3600)
 
+    def test_snapshot_survives_concurrent_writes(self):
+        """Backup while writers are in flight must still verify and restore."""
+        import threading
+
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA journal_mode=WAL")
+        for index in range(40):
+            conn.execute(
+                "INSERT INTO images (filename, filepath, status) VALUES (?, ?, 'kept')",
+                (f"seed-{index}.jpg", f"/tmp/seed-{index}.jpg"),
+            )
+        conn.commit()
+        conn.close()
+
+        stop = threading.Event()
+
+        def writer():
+            live = sqlite3.connect(self.db_path, timeout=30.0)
+            live.execute("PRAGMA journal_mode=WAL")
+            counter = 0
+            while not stop.is_set():
+                counter += 1
+                live.execute(
+                    "INSERT INTO images (filename, filepath, status) VALUES (?, ?, 'kept')",
+                    (f"hot-{counter}.jpg", f"/tmp/hot-{counter}-{time.time_ns()}.jpg"),
+                )
+                live.commit()
+            live.close()
+
+        thread = threading.Thread(target=writer, daemon=True)
+        thread.start()
+        time.sleep(0.05)
+        try:
+            created = backups.create_snapshot(str(self.db_path))
+        finally:
+            stop.set()
+            thread.join(timeout=5)
+
+        self.assertTrue(created["ok"])
+        self.assertGreater(created["images"], 0)
+        artifact = self.root / created["name"]
+        self.assertTrue(artifact.is_file())
+
+        restored_db = Path(self.tempdir.name) / "from-backup.db"
+        with gzip.open(artifact, "rb") as gz, open(restored_db, "wb") as out:
+            out.write(gz.read())
+        check = sqlite3.connect(restored_db)
+        try:
+            self.assertEqual(check.execute("PRAGMA quick_check").fetchone()[0], "ok")
+            self.assertEqual(
+                int(check.execute("SELECT COUNT(*) FROM images").fetchone()[0]),
+                created["images"],
+            )
+        finally:
+            check.close()
+
+    def test_verification_failure_publishes_nothing(self):
+        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        real_verify = backups._verify_backup_artifact
+
+        def corrupt_then_verify(dest_db, source_db, *, snapshot_images):
+            Path(dest_db).write_bytes(b"not-a-database-anymore")
+            return real_verify(dest_db, source_db, snapshot_images=snapshot_images)
+
+        with mock.patch.object(backups, "_verify_backup_artifact", side_effect=corrupt_then_verify):
+            with self.assertRaises(backups.BackupVerificationError):
+                backups.create_snapshot(str(self.db_path))
+
+        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        self.assertEqual(after, before)
+        self.assertFalse(list(self.root.glob(".*.tmp.db")))
+        self.assertFalse(list(self.root.glob(".*.tmp.gz")))
+        status = backups.backup_run_status()
+        self.assertTrue(status["last_error"])
+        summary = backups.integrity_summary(str(self.db_path))
+        self.assertIn("Catalog backup failed", summary.get("alert") or "")
+
+    def test_empty_catalog_refuses_shared_historical_backup_dir(self):
+        historical = self.root / "photoarchive-20260101-040000.db.gz"
+        historical.write_bytes(b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1))
+        # Empty catalog: _make_catalog inserts sources but zero images.
+        with self.assertRaisesRegex(backups.BackupMisconfigurationError, "misconfigured"):
+            backups.create_snapshot(str(self.db_path))
+        published = [
+            path
+            for path in self.root.glob("photoarchive-*.db.gz")
+            if path.name != historical.name
+        ]
+        self.assertEqual(published, [])
+
+
+class BackupIsolationTests(unittest.TestCase):
+    def test_custom_home_ignores_foreign_backup_dir_override(self):
+        from core.runtime_paths import resolve_runtime_paths
+
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "scratch-home"
+            foreign = Path(tmp) / "prod-backups"
+            foreign.mkdir()
+            (foreign / "photoarchive-20260101-040000.db.gz").write_bytes(
+                b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1)
+            )
+            web = Path(tmp) / "web"
+            web.mkdir()
+            paths = resolve_runtime_paths(
+                web,
+                {
+                    "HOME": str(Path(tmp) / "user"),
+                    "PHOTOARCHIVE_HOME": str(home),
+                    "PHOTOARCHIVE_BACKUP_DIR": str(foreign),
+                    "PHOTOARCHIVE_SMOKE_MODE": "1",
+                },
+                "linux",
+                str(Path(tmp) / "user"),
+            )
+            self.assertTrue(str(paths.backup_dir).startswith(str(home)))
+            self.assertNotEqual(Path(paths.backup_dir).resolve(), foreign.resolve())
+
 
 class IntegrityUnitTests(unittest.TestCase):
     def setUp(self):
