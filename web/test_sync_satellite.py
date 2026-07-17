@@ -158,6 +158,31 @@ class SatelliteSyncTests(BackendTestCase):
         # One photo finalized before the failure: the queue must already show 1.
         self.assertEqual(worker.status()["queue_depth"], 1)
 
+    async def test_pause_and_unknown_snapshot_states_tell_the_truth(self):
+        async def request(method, url, *, body=None, headers=None):
+            raise TimeoutError("timed out")
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+        worker.pause()
+        self.assertEqual(worker.status()["state"], "paused")
+        worker.resume()
+        self.assertEqual(worker.status()["state"], "idle")
+
+        # If even the durable snapshot fails after a bad cycle, unknown must
+        # read as recovering — never as done.
+        from features.sync import satellite as satellite_module
+        original = satellite_module.pending_upload_snapshot
+
+        async def broken(db_path):
+            raise RuntimeError("db unavailable")
+
+        satellite_module.pending_upload_snapshot = broken
+        try:
+            await worker._reconcile_status_after_failure()
+        finally:
+            satellite_module.pending_upload_snapshot = original
+        self.assertEqual(worker.status()["state"], "recovering")
+
     async def test_timeout_failures_backoff_instead_of_hot_loop(self):
         async def request(method, url, *, body=None, headers=None):
             raise TimeoutError("satellite sync failed: timed out")
