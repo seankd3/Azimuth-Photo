@@ -62,6 +62,7 @@ class SyncWorker:
         self._status: dict[str, Any] = {
             "mode": "satellite",
             "paused": False,
+            "state": "idle",  # idle | syncing | recovering | paused — recovering means work is owed and the last cycle failed
             "queue_depth": 0,
             "bytes_remaining": 0,
             "throughput_bps": 0,
@@ -83,10 +84,12 @@ class SyncWorker:
 
     def pause(self) -> None:
         self._paused = True
+        self._status["state"] = "paused"
         self._wake.set()
 
     def resume(self) -> None:
         self._paused = False
+        self._status["state"] = "syncing" if self._status["queue_depth"] else "idle"
         self._wake.set()
 
     def sync_now(self) -> None:
@@ -109,12 +112,29 @@ class SyncWorker:
                 except Exception as error:
                     self._error(error)
                     self._note_failure(error)
+                    await self._reconcile_status_after_failure()
             self._wake.clear()
             idle = self._next_idle_seconds if not self._paused else 3600.0
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=idle)
             except asyncio.TimeoutError:
                 pass
+
+    async def _reconcile_status_after_failure(self) -> None:
+        # A failed cycle skips sync_once's end-of-cycle bookkeeping. Without
+        # this, the status freezes at whatever the cycle start showed (or worse,
+        # a stale zero) and "queue 0 + old error" reads as done while files are
+        # still owed — the 2026-07-16 Holland ingest incident. Re-read the
+        # durable pending snapshot; if even that fails, we don't know — and
+        # unknown must read as recovering, never as done.
+        self._status["current_file"] = None  # the failed upload is not active
+        try:
+            self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
+        except Exception:
+            self._status["state"] = "paused" if self._paused else "recovering"
+            return
+        owed = bool(self._status["queue_depth"] or self._status["bytes_remaining"])
+        self._status["state"] = "paused" if self._paused else ("recovering" if owed else "idle")
 
     def _clear_backoff(self) -> None:
         self._failure_streak = 0
@@ -144,7 +164,12 @@ class SyncWorker:
         self._force_contract_refresh = False
         await self._retry_pending_hub_trash()
         items = await satellite.record_local_images(self.db_path)
-        self._refresh_queue(items)
+        # A transient empty scan pass must not zero an owed queue mid-cycle;
+        # zero is only authoritative from the end-of-cycle durable snapshot.
+        if items:
+            self._refresh_queue(items)
+        if not self._paused and self._status["queue_depth"]:
+            self._status["state"] = "syncing"
         pushed = False
         if items and not self._paused:
             manifest = {
@@ -176,6 +201,7 @@ class SyncWorker:
         self._status["last_sync_at"] = time.time()
         self._status["current_file"] = None
         self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
+        self._status["state"] = "paused" if self._paused else ("syncing" if self._status["queue_depth"] else "idle")
 
     async def _retry_pending_hub_trash(self) -> None:
         """Drain durable satellite Trash work without turning it into a hot loop."""
@@ -258,6 +284,9 @@ class SyncWorker:
                 f"{body.decode(errors='replace')[:300]}"
             )
         await self._set_uploaded({content_hash})
+        # Live count-down: the queue must shrink as photos land, not only at
+        # cycle boundaries (bytes_remaining already decrements per chunk).
+        self._status["queue_depth"] = max(0, int(self._status["queue_depth"]) - 1)
 
     async def _cap_bandwidth(self, sent_bytes: int, elapsed: float) -> None:
         mbps = float(settings.get_settings().get("sync_bandwidth_mbps", 0) or 0)
