@@ -21,7 +21,7 @@ from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.imports import taxonomy
-from features.library import geodata, keywords
+from features.library import keywords
 from features.sync import family_clock
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.hashing import compute_content_hash, compute_full_hash
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS sync_manifest_items (
     bytes INTEGER NOT NULL,
     filename TEXT NOT NULL,
     date_taken TEXT,
-    folder TEXT
+    folder TEXT,
+    placed_relpath TEXT
 );
 """
 
@@ -97,6 +98,8 @@ async def ensure_sync_schema(db_path: str) -> None:
             await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN full_hash TEXT")
         if "folder" not in column_names:
             await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN folder TEXT")
+        if "placed_relpath" not in column_names:
+            await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN placed_relpath TEXT")
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -124,9 +127,32 @@ def _normalize_filename(value: Any) -> str:
     return filename
 
 
+def compute_placed_relpath(
+    *,
+    filename: str,
+    date_taken: str | None,
+    folder: str | None,
+) -> str:
+    """Deterministic library-relative destination for one sync identity.
+
+    Computed once on first manifest sighting and reused for every retry so a
+    mid-transfer timeout cannot place the same bytes under a second path.
+    """
+
+    year, day = _date_parts(date_taken) or (str(date.today().year), date.today().isoformat())
+    folder_hint = str(folder).strip() if folder else None
+    source_kind = "phone" if folder_hint == taxonomy.DEST_PERSONAL else None
+    destination_name = taxonomy.route_destination(
+        filename=filename,
+        source_kind=source_kind,
+        folder_hint=folder_hint,
+    )
+    return f"{destination_name}/{year}/{day}/{os.path.basename(filename)}"
+
+
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
-    normalized: list[tuple[str, str | None, int, str, str | None, str | None]] = []
+    normalized: list[tuple[str, str | None, int, str, str | None, str | None, str]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
         supplied_full_hash = item.get("full_hash")
@@ -136,17 +162,25 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         if byte_count < 0 or not filename:
             raise ValueError("manifest items require non-negative bytes and a filename")
         folder = _normalize_folder(item.get("folder"))
-        normalized.append((content_hash, full_hash, byte_count, filename, item.get("date_taken"), folder))
+        date_taken = item.get("date_taken")
+        placed_relpath = compute_placed_relpath(
+            filename=filename, date_taken=date_taken, folder=folder
+        )
+        normalized.append(
+            (content_hash, full_hash, byte_count, filename, date_taken, folder, placed_relpath)
+        )
 
     conn = await connection.open_async(db_path)
     try:
         if normalized:
             await conn.executemany(
-                "INSERT INTO sync_manifest_items(content_hash, full_hash, bytes, filename, date_taken, folder) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
+                "INSERT INTO sync_manifest_items("
+                "content_hash, full_hash, bytes, filename, date_taken, folder, placed_relpath) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
                 "full_hash=COALESCE(excluded.full_hash, sync_manifest_items.full_hash), "
                 "bytes=excluded.bytes, filename=excluded.filename, date_taken=excluded.date_taken, "
-                "folder=excluded.folder",
+                "folder=excluded.folder, "
+                "placed_relpath=COALESCE(sync_manifest_items.placed_relpath, excluded.placed_relpath)",
                 normalized,
             )
         hashes = [row[0] for row in normalized]
@@ -292,19 +326,7 @@ def _date_parts(value: str | None) -> tuple[str, str] | None:
     return None
 
 
-def _unique_destination(path: Path) -> Path:
-    if not path.exists():
-        return path
-    for index in range(2, 10_000):
-        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise RuntimeError("Could not create a unique upload destination")
-
-
 def _discard_upload_temp(intake_root: Path, content_hash: str) -> None:
-    """Drop a failed intake part so the satellite can re-upload cleanly."""
-
     upload_part_path(intake_root, content_hash).unlink(missing_ok=True)
     upload_offset_path(intake_root, content_hash).unlink(missing_ok=True)
 
@@ -313,13 +335,35 @@ async def _manifest_item(db_path: str, content_hash: str) -> dict[str, Any] | No
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute(
-            "SELECT content_hash, full_hash, bytes, filename, date_taken, folder "
+            "SELECT content_hash, full_hash, bytes, filename, date_taken, folder, placed_relpath "
             "FROM sync_manifest_items WHERE content_hash = ?",
             (content_hash,),
         )).fetchone()
         return dict(row) if row else None
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def _persist_placed_relpath(db_path: str, content_hash: str, placed_relpath: str) -> str:
+    """Lock the first placement decision; later calls keep the original path."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute(
+            "UPDATE sync_manifest_items SET placed_relpath = COALESCE(placed_relpath, ?) "
+            "WHERE content_hash = ?",
+            (placed_relpath, content_hash),
+        )
+        row = await (await conn.execute(
+            "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+            (content_hash,),
+        )).fetchone()
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if row is None or not row["placed_relpath"]:
+        raise RuntimeError("Could not persist upload placement path")
+    return str(row["placed_relpath"])
 
 
 async def _known_image_id(db_path: str, content_hash: str) -> int | None:
@@ -331,6 +375,29 @@ async def _known_image_id(db_path: str, content_hash: str) -> int | None:
         return int(row["id"]) if row else None
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+def _resolve_library_destination(
+    raws_root: Path,
+    placed_relpath: str,
+) -> tuple[Path, Path]:
+    """Return (absolute destination file, catalog source root) for a locked relpath."""
+
+    library_root = taxonomy.library_root_from_raws(raws_root).resolve()
+    relative = Path(str(placed_relpath).replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise ValueError("placed_relpath must be a safe library-relative path")
+    destination = (library_root / relative).resolve()
+    try:
+        destination.relative_to(library_root)
+    except ValueError as exc:
+        raise ValueError("placed_relpath escapes the library root") from exc
+    top = relative.parts[0]
+    if top == taxonomy.DEST_RAWS:
+        source_root = Path(raws_root)
+    else:
+        source_root = taxonomy.destination_source_root(library_root, top)
+    return destination, source_root
 
 
 async def _register_original(db_path: str, source_root: Path, path: Path, content_hash: str) -> int:
@@ -431,32 +498,27 @@ async def _append_upload_chunk_locked(
         _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed full-file hash verification")
 
-    extracted = await asyncio.to_thread(geodata.extract_file_metadata, str(part))
-    taken = extracted.get("date_taken") or item.get("date_taken")
-    year, day = _date_parts(taken) or (str(date.today().year), date.today().isoformat())
-    folder = str(item["folder"]).strip() if item.get("folder") else None
-    # Named folders (e.g. Android PHONE_FOLDER="Personal Photos") are siblings of
-    # the configured RAWS tree under the library root — never nested inside RAWS.
-    # RAWS itself always lands in the configured raws_root (legacy date tree).
-    library_root = taxonomy.library_root_from_raws(raws_root)
-    source_kind = "phone" if folder == taxonomy.DEST_PERSONAL else None
-    destination_name = taxonomy.route_destination(
-        filename=str(item["filename"]),
-        source_kind=source_kind,
-        folder_hint=folder,
-    )
-    if destination_name == taxonomy.DEST_RAWS:
-        destination_root = Path(raws_root)
+    placed_relpath = str(item.get("placed_relpath") or "").strip()
+    if not placed_relpath:
+        placed_relpath = compute_placed_relpath(
+            filename=str(item["filename"]),
+            date_taken=item.get("date_taken"),
+            folder=item.get("folder"),
+        )
+        placed_relpath = await _persist_placed_relpath(db_path, content_hash, placed_relpath)
+    destination, destination_root = _resolve_library_destination(raws_root, placed_relpath)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    created_destination = False
+    if destination.exists():
+        existing_full = await asyncio.to_thread(compute_full_hash, destination)
+        if existing_full != item["full_hash"]:
+            _discard_upload_temp(intake_root, content_hash)
+            raise ArithmeticError(
+                "Upload destination already exists with different content; refusing to overwrite"
+            )
+        # Identical bytes already at the locked path — idempotent success.
     else:
-        destination_root = taxonomy.destination_source_root(library_root, destination_name)
-    destination_dir = destination_root / year / day
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    preferred = destination_dir / os.path.basename(str(item["filename"]))
-    if preferred.exists() and await asyncio.to_thread(compute_full_hash, preferred) == item["full_hash"]:
-        destination = preferred
-        created_destination = False
-    else:
-        destination = _unique_destination(preferred)
         try:
             await asyncio.to_thread(os.link, part, destination)
         except OSError:

@@ -680,6 +680,112 @@ class SyncHubTests(unittest.TestCase):
         self.assertEqual(destination.read_bytes(), good)
         self.assertGreater(image_id, 0)
 
+    def test_placement_is_persisted_and_collision_safe_across_retries(self):
+        """P0-B: first placement decision sticks; identical is idempotent; different errors."""
+
+        payload = b"ROLL-ORIGINAL-" + (b"C" * 2048)
+        content_hash = self.digest(payload)
+        first = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "roll.jpg",
+                "date_taken": "2026-07-16",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            locked = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(locked, "Film Scans/2026/2026-07-16/roll.jpg")
+
+        # A later manifest with a different date must not move the locked path.
+        second = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "roll.jpg",
+                "date_taken": "2026-01-01",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            still = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(still, locked)
+
+        destination = self.root / Path(locked)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+        image_id = self.upload(content_hash, payload)
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
+        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
+
+        # Different bytes already at the locked path → error, original untouched.
+        other = b"ROLL-COLLISION-" + (b"D" * 2047)
+        self.assertEqual(len(other), len(payload))
+        other_hash = self.digest(other)
+        declare_other = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": other_hash,
+                "full_hash": self.full_digest(other),
+                "bytes": len(other),
+                "filename": "collision.jpg",
+                "date_taken": "2026-07-16",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(declare_other.status_code, 200, declare_other.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE sync_manifest_items SET placed_relpath = ? WHERE content_hash = ?",
+                (locked, other_hash),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        conflict = self.client.post(
+            f"/api/sync/upload/{other_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(other))},
+            content=other,
+        )
+        self.assertEqual(conflict.status_code, 422, conflict.text)
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((destination.parent / "collision.jpg").exists())
+        self.assertFalse((destination.parent / "roll-2.jpg").exists())
+        # Original catalog row for the first upload remains the only one at that path.
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT id, content_hash FROM images WHERE filepath = ?",
+                (str(destination),),
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], image_id)
+        self.assertEqual(rows[0][1], content_hash)
+
 
 if __name__ == "__main__":
     unittest.main()
