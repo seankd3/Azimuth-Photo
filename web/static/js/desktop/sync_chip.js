@@ -118,11 +118,18 @@ function patch(status) {
     root.classList.toggle('hub-unreachable', unreachable);
     button.classList.remove('offline');
     button.title = needsUpdate ? contractMessage : unreachable ? 'Hub unavailable — sync will retry.' : mirrorTooltip(status);
-    patchText('.sync-chip-arrow', needsUpdate ? '!' : status.paused ? 'Ⅱ' : depth || pendingOps ? '↑' : '✓');
+    const recovering = status.state === 'recovering' && depth > 0;
+    const backoff = Math.round(Number(status.backoff_seconds) || 0);
+    patchText('.sync-chip-arrow', needsUpdate ? '!' : status.paused ? 'Ⅱ' : recovering ? '↻' : depth || pendingOps ? '↑' : '✓');
     patchText('[data-sync-count]', count);
     patchText('[data-sync-bytes]', `${formatBytes(status.bytes_remaining)} left`);
-    patchText('[data-sync-rate]', status.paused ? 'Paused' : formatRate(status.throughput_bps));
-    patchText('[data-sync-current]', needsUpdate ? 'Some actions are paused until the hub updates.' : status.current_file ? `Uploading ${status.current_file}` : depth ? 'Waiting to upload' : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub` : pendingOps ? 'Sync needs attention' : 'Everything is synced');
+    patchText('[data-sync-rate]', status.paused ? 'Paused' : recovering ? 'Retrying' : formatRate(status.throughput_bps));
+    patchText('[data-sync-current]', needsUpdate ? 'Some actions are paused until the hub updates.'
+        : recovering ? `Backup interrupted — retrying${backoff ? ` in ${backoff}s` : ''} · ${depth} still to back up`
+        : status.current_file ? `Uploading ${status.current_file}`
+        : depth ? 'Waiting to upload'
+        : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub`
+        : pendingOps ? 'Sync needs attention' : 'Everything is synced');
     const contract = root.querySelector('[data-sync-contract]');
     if (contract) {
         patchText('[data-sync-contract]', contractMessage);

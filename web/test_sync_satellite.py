@@ -108,6 +108,56 @@ class SatelliteSyncTests(BackendTestCase):
         self.assertEqual(self.hub_files, uploads)
         self.assertEqual(len(self.hub_metadata), metadata_count)
 
+    async def test_failed_cycle_reports_recovering_and_keeps_owed_count(self):
+        # 2026-07-16 Holland incident: a mid-sync timeout must never read as
+        # "done" — status has to say recovering and keep the owed numbers.
+        from features.sync import satellite
+
+        source = await self._source("field")
+        for index in range(2):
+            await self._image(source["id"], f"owe-{index}.raw")
+            with open(os.path.join(source["path"], f"owe-{index}.raw"), "wb") as file:
+                file.write(f"owed original {index}".encode())
+        await satellite.record_local_images(__import__("db").DB_PATH)
+
+        async def request(method, url, *, body=None, headers=None):
+            raise TimeoutError("timed out")
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+        with self.assertRaises(Exception):
+            await worker.sync_once()
+        worker._error(TimeoutError("timed out"))
+        worker._note_failure(TimeoutError("timed out"))
+        await worker._reconcile_status_after_failure()
+        status = worker.status()
+        self.assertEqual(status["state"], "recovering")
+        self.assertEqual(status["queue_depth"], 2)
+
+    async def test_upload_progress_counts_down_live_not_only_at_cycle_end(self):
+        source = await self._source("field")
+        for index in range(2):
+            await self._image(source["id"], f"live-{index}.raw")
+            with open(os.path.join(source["path"], f"live-{index}.raw"), "wb") as file:
+                file.write(f"live original {index}".encode())
+
+        seen: list[str] = []
+
+        async def request(method, url, *, body=None, headers=None):
+            if method == "POST" and "/api/sync/upload/" in url and not url.endswith("/status"):
+                content_hash = url.rsplit("/", 1)[1]
+                if content_hash not in seen:
+                    seen.append(content_hash)
+                if len(seen) == 2:
+                    raise TimeoutError("timed out")
+            response = self.hub.request(method, url.removeprefix("http://hub"), content=body, headers=headers)
+            return response.status_code, dict(response.headers), response.content
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+        with self.assertRaises(TimeoutError):
+            await worker.sync_once()
+        # One photo finalized before the failure: the queue must already show 1.
+        self.assertEqual(worker.status()["queue_depth"], 1)
+
     async def test_timeout_failures_backoff_instead_of_hot_loop(self):
         async def request(method, url, *, body=None, headers=None):
             raise TimeoutError("satellite sync failed: timed out")
