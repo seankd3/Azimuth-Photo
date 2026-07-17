@@ -12,7 +12,13 @@ export async function findSimilar(imageId, limit = 100) {
     if (!id) return;
     const depth = [100, 250, 500].includes(Number(limit)) ? Number(limit) : 100;
     const source = byId.get(id) || { id };
-    const data = await getSimilar(id, depth);
+    let data = null;
+    try {
+        data = await getSimilar(id, depth);
+    } catch {
+        showToast('Couldn’t find similar photos');
+        return;
+    }
     if (!data || data.error || data.ok === false) {
         showToast('Couldn’t find similar photos');
         return;

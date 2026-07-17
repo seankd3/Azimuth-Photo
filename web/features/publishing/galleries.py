@@ -190,13 +190,23 @@ async def update_gallery(
         if current is None:
             return None
         member_ids = {image["id"] for image in await _gallery_images(conn, int(gallery_id))}
-        cover_image_id = clean["cover_image_id"] if clean["cover_image_id"] in member_ids else current["cover_image_id"]
+        # PATCH always sends cover_image_id; null means "First photo", not "unchanged".
+        requested_cover = clean["cover_image_id"]
+        if requested_cover is None:
+            cover_image_id = None
+        elif requested_cover in member_ids:
+            cover_image_id = requested_cover
+        else:
+            cover_image_id = current["cover_image_id"]
         clean_title = (title or current["title"] or "Client gallery").strip() or current["title"]
         fields = ["title = ?", "layout = ?", "theme = ?", "cover_image_id = ?", "allow_download_all = ?", "download_size = ?", "updated_at = ?"]
         values: list[Any] = [clean_title, clean["layout"], clean["theme"], cover_image_id, int(clean["allow_download_all"]), clean["download_size"], time.time()]
         if password_hash is not ...:
             fields.append("password_hash = ?")
             values.append(password_hash)
+        if title:
+            fields.append("title = ?")
+            values.append(title)
         values.append(int(gallery_id))
         await conn.execute(f"UPDATE client_galleries SET {', '.join(fields)} WHERE id = ?", values)
         await conn.commit()

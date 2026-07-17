@@ -163,6 +163,11 @@ async def run_shutdown(
     if caption_worker is not None:
         caption_worker.shutdown_caption_worker()
 
+    # Last act: earn the next boot its instant start.
+    from features.system import backups
+    import db
+    await asyncio.to_thread(backups.mark_clean_shutdown, db.DB_PATH)
+
 
 async def run_startup(
     *,
@@ -209,11 +214,25 @@ async def run_startup(
     from features.system import backups
     import db
 
-    catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
-    if not catalog["ok"]:
-        log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
-        await asyncio.to_thread(warm_templates)
-        return
+    # PRAGMA quick_check costs ~1s/GB and used to block every boot (~64s on a
+    # 139k catalog). fsck pattern: a clean shutdown earns an instant boot with a
+    # background verification; anything else (crash, kill, power loss) still
+    # pays the full blocking check before serving.
+    if backups.consume_clean_shutdown(db.DB_PATH):
+        async def _verify_catalog_in_background():
+            result = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+            if not result["ok"]:
+                log.error(
+                    "background catalog check FAILED after clean-shutdown boot "
+                    "state=%s error=%s", result["state"], result.get("error"),
+                )
+        track_background_task(_verify_catalog_in_background())
+    else:
+        catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+        if not catalog["ok"]:
+            log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
+            await asyncio.to_thread(warm_templates)
+            return
     await init_db()
     thumbnails.configure(settings.load_settings())
 
@@ -330,6 +349,19 @@ async def run_startup(
         await compare_next(n=5)
 
     track_background_task(_warm_priority_interaction_caches())
+
+    async def _warm_collection_suggestions():
+        # Populate the suggestions cache off the request path so the first user
+        # after a boot gets it instantly instead of paying the multi-second build.
+        await asyncio.sleep(2.0)
+        try:
+            import db as _db
+            from features.collections import suggestions as _suggestions
+            await _suggestions.collection_suggestions(_db.DB_PATH)
+        except Exception:
+            log.debug("collection suggestions warmup skipped", exc_info=True)
+
+    track_background_task(_warm_collection_suggestions())
 
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))

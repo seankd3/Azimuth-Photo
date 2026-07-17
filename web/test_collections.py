@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 import json
+from unittest.mock import patch
 
 from test_support import *  # noqa: F401,F403
 from features.collections import smart as smart_collections
@@ -592,6 +593,52 @@ class CollectionTests(BackendTestCase):
         response = await collection_routes.api_collection_suggestions()
 
         self.assertEqual(response, {"suggestions": []})
+
+    async def test_shoot_suggestions_parse_only_unhinted_images(self):
+        source = await self._source()
+        image_ids = [
+            await self._image(
+                source["id"],
+                f"Summer Picnic-{index:04d}.jpg",
+                elo=1200 + index,
+            )
+            for index in range(9)
+        ]
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET date_taken = ? WHERE id = ?",
+                [(f"2025-06-01 12:{index:02d}:00", image_id) for index, image_id in enumerate(image_ids)],
+            )
+            hinted = []
+            for image_id in image_ids[:-1]:
+                row = await (await conn.execute(
+                    "SELECT filepath, filename FROM images WHERE id = ?", (image_id,)
+                )).fetchone()
+                hint = collection_suggestions.shoot_hint_from_path(row["filepath"], row["filename"])
+                hinted.append((
+                    image_id,
+                    hint.get("key") if hint else None,
+                    hint.get("title") if hint else None,
+                    hint.get("source") if hint else None,
+                    collection_suggestions._parse_path_date(row["filepath"]),
+                    collection_suggestions.SHOOT_HINT_PARSER_VERSION,
+                ))
+            await conn.executemany(
+                "INSERT INTO image_shoot_hints "
+                "(image_id, key, title, source, path_date, parser_version) VALUES (?, ?, ?, ?, ?, ?)",
+                hinted,
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        original_parser = collection_suggestions.shoot_hint_from_path
+        with patch.object(collection_suggestions, "shoot_hint_from_path", wraps=original_parser) as parser:
+            suggestions = await collection_suggestions._shoot_suggestions(db.DB_PATH)
+
+        self.assertEqual(parser.call_count, 1)
+        self.assertTrue(any(item["kind"] == "shoot" and item["count"] == 9 for item in suggestions))
 
     async def test_theme_suggestions_from_active_caption_tags_and_pairs(self):
         source = await self._source()

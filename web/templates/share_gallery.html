@@ -178,7 +178,11 @@
           <div class="count">{{ photo_count }} photo{% if photo_count != 1 %}s{% endif %}</div>
           <div class="download-note" id="download-note">Downloads use the gallery-ready files.</div>
           {% if gallery_json.download_all_url %}<div class="header-actions">
+            {% if public_static|default(false) %}
             <button class="action-btn" id="download-all" type="button">Download all</button>
+            {% else %}
+            <a class="action-btn" id="download-all" href="/s/{{ token }}/download-all">Download all</a>
+            {% endif %}
           </div>{% endif %}
           {% if favorites_enabled|default(not public_static|default(false)) %}
           <div class="pick-count" id="pick-count">0 picked</div>
@@ -482,7 +486,9 @@
       document.getElementById('close').addEventListener('click', close);
       document.getElementById('prev').addEventListener('click', () => move(-1));
       document.getElementById('next').addEventListener('click', () => move(1));
+      {% if public_static|default(false) %}
       downloadAll?.addEventListener('click', downloadGallery);
+      {% endif %}
       {% if favorites_enabled|default(not public_static|default(false)) %}
       lightboxFav?.addEventListener('click', () => {
         if (images[index]) toggleFavorite(Number(images[index].id));

@@ -63,9 +63,14 @@ class _Session:
         return status, payload, elapsed
 
 
-def _timed_gets(session: _Session, path: str, iterations: int) -> tuple[dict[str, float], dict]:
+def _timed_gets(
+    session: _Session, path: str, iterations: int, *, warm: bool = False
+) -> tuple[dict[str, float], dict]:
     samples: list[float] = []
     payload: dict = {}
+    if warm:
+        # Discard one cold hit so the recorded p50/p95 is steady-state latency.
+        session.json_fetch(path)
     for _ in range(iterations):
         status, payload, elapsed = session.json_fetch(path)
         if status != 200:
@@ -184,7 +189,12 @@ def _fixture_metrics(*, scratch: Path, iterations: int) -> tuple[dict[str, float
                 )
 
             develop_ms, develop_statuses = _develop_open(session, int(manifest["raw_image_id"]))
-            suggestions_cold, suggestions_cached, suggestion_count = _suggestions(session)
+            # Prime persisted suggestion inputs before the measured fresh
+            # process.  This keeps the KPI about an ordinary cold response,
+            # not a once-per-parser-version migration backfill.
+            status, _payload, _elapsed = session.json_fetch("/api/collections/suggestions")
+            if status != 200:
+                raise RuntimeError(f"collection suggestions priming returned {status}")
             sync_status, _payload = _timed_gets(
                 session, "/api/sync/status", max(3, min(iterations, 5))
             )
@@ -194,6 +204,12 @@ def _fixture_metrics(*, scratch: Path, iterations: int) -> tuple[dict[str, float
             session.fetch("/")
             session.fetch("/api/rankings?limit=100&offset=100&sort=date_taken")
             peak_rss_mb = _peak_rss_mb(server.process.pid)
+
+    # A process restart clears the response TTL without discarding the fixture
+    # database, so this is a true cold request after lazy derived-data backfill.
+    with type(probe_server)(log_path=scratch / "bench-server.log") as suggestion_server:
+        with _Session(suggestion_server.base_url) as session:
+            suggestions_cold, suggestions_cached, suggestion_count = _suggestions(session)
 
     metrics = {
         "server_boot_first_200_ms": boot_ms,
@@ -229,7 +245,7 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
 
     base_url = base_url.rstrip("/")
     with _Session(base_url) as session:
-        images, first_page = _timed_gets(session, "/api/rankings?limit=100&sort=elo", iterations)
+        images, first_page = _timed_gets(session, "/api/rankings?limit=100&sort=elo", iterations, warm=True)
         image_ids = [int(image["id"]) for image in first_page.get("images") or []]
         thumb_samples = []
         for image_id in image_ids[:iterations]:
@@ -237,7 +253,7 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
             if status not in (200, 204):
                 raise RuntimeError(f"read-only cached thumbnail probe returned {status}")
             thumb_samples.append(elapsed)
-        text_search, payload = _timed_gets(session, "/api/search?q=photo&limit=50", min(iterations, 5))
+        text_search, payload = _timed_gets(session, "/api/search?q=photo&limit=50", min(iterations, 5), warm=True)
         sources = {str(source).lower() for source in payload.get("search_sources") or []}
         semantic_search: dict[str, float] | None = None
         if "semantic" in sources or "embedding" in sources:
@@ -246,8 +262,14 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
                 "/api/search?q=photo&limit=50&deep=true",
                 min(iterations, 5),
             )
-        suggestions, _payload = _timed_gets(session, "/api/collections/suggestions", 2)
-        sync, _payload = _timed_gets(session, "/api/sync/status", min(iterations, 5))
+        suggestions, _payload = _timed_gets(session, "/api/collections/suggestions", 2, warm=True)
+        sync, _payload = _timed_gets(session, "/api/sync/status", min(iterations, 5), warm=True)
+        # Heavy catalog surfaces — the interactions that must feel instant.
+        counts, _payload = _timed_gets(session, "/api/counts", min(iterations, 5), warm=True)
+        histogram, _payload = _timed_gets(session, "/api/date-histogram", min(iterations, 5), warm=True)
+        filter_options, _payload = _timed_gets(session, "/api/filter-options", min(iterations, 5), warm=True)
+        people, _payload = _timed_gets(session, "/api/people?limit=24", 2, warm=True)
+        map_markers, _payload = _timed_gets(session, "/api/map/markers", 2, warm=True)
     metrics = {
         "images_first_page_p50_ms": images["p50_ms"],
         "images_first_page_p95_ms": images["p95_ms"],
@@ -256,6 +278,11 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
         "search_text_p50_ms": text_search["p50_ms"],
         "collection_suggestions_cached_ms": suggestions["p50_ms"],
         "sync_status_p50_ms": sync["p50_ms"],
+        "counts_p50_ms": counts["p50_ms"],
+        "date_histogram_p50_ms": histogram["p50_ms"],
+        "filter_options_p50_ms": filter_options["p50_ms"],
+        "people_p50_ms": people["p50_ms"],
+        "map_markers_p50_ms": map_markers["p50_ms"],
     }
     if semantic_search is not None:
         metrics["search_semantic_p50_ms"] = semantic_search["p50_ms"]

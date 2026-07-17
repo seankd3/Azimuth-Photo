@@ -154,7 +154,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         return "Original file was missing when trashed", ""
     trash_stat, reason = _regular_file_lstat(trash_path)
     if reason == "missing":
-        return "Trash file is missing; restored catalog row only", ""
+        return None, "trash file is missing"
     if trash_stat is None:
         return None, reason
     if os.path.lexists(filepath):
@@ -163,7 +163,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         final_stat, reason = _regular_file_lstat(trash_path)
         if reason == "missing":
-            return "Trash file is missing; restored catalog row only", ""
+            return None, "trash file is missing"
         if final_stat is None:
             return None, reason
         if not _same_stat_token(final_stat, _stat_token(trash_stat)):
@@ -174,7 +174,7 @@ def _restore_from_trash(trash_path: str | None, filepath: str) -> tuple[str | No
         # platforms where Python cannot express a no-follow rename.
         final_stat, reason = _regular_file_lstat(trash_path)
         if final_stat is None:
-            return (("Trash file is missing; restored catalog row only", "") if reason == "missing" else (None, reason))
+            return (None, "trash file is missing" if reason == "missing" else reason)
         if not _same_stat_token(final_stat, _stat_token(trash_stat)):
             return None, "trash path changed before restore"
         os.rename(trash_path, filepath)

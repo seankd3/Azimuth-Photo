@@ -48,6 +48,7 @@ class TrashTests(BackendTestCase):
         source, _root = await self._source_root()
         image_id, _filepath = await self._file_image(source, "locked-delete.jpg", data=b"locked")
         await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
         writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
         try:
             writer.execute("BEGIN IMMEDIATE")
@@ -61,7 +62,36 @@ class TrashTests(BackendTestCase):
         self.assertEqual(result["deleted_count"], 0)
         self.assertIn("deferred", result["errors"][0]["reason"])
         self.assertLess(elapsed, 2.0)
+        self.assertTrue(os.path.exists(trash_path))
         self.assertTrue(await self._image_exists(image_id))
+
+    async def test_purge_lock_failure_keeps_files_and_rows(self):
+        source, _root = await self._source_root()
+        image_id, filepath = await self._file_image(source, "retryable.jpg", data=b"retryable")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+        deferred = {"id": image_id, "reason": "catalog row deletion deferred: locked"}
+
+        with patch.object(
+            trash_service,
+            "_delete_emptied_catalog_rows",
+            new_callable=AsyncMock,
+            return_value=([], [deferred]),
+        ):
+            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+
+        row = await self._image_row(image_id)
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["errors"], [deferred])
+        self.assertTrue(os.path.exists(trash_path))
+        self.assertEqual(row["status"], "trashed")
+        self.assertEqual(row["trash_path"], trash_path)
+
+        restored = await trash_service.restore_images(db.DB_PATH, [image_id])
+        self.assertEqual(restored["restored"], [image_id])
+        self.assertEqual(open(filepath, "rb").read(), b"retryable")
+
     async def _mirrored_trash(self, *, name="mirrored.jpg", hub_image_id=92):
         conn = await db.get_db()
         try:
@@ -241,6 +271,28 @@ class TrashTests(BackendTestCase):
         self.assertEqual(open(filepath, "rb").read(), b"new file")
         self.assertEqual(row["status"], "trashed")
 
+    async def test_restore_missing_file_returns_error_and_keeps_trashed_row(self):
+        source, _root = await self._source_root()
+        image_id, filepath = await self._file_image(source, "missing.jpg", data=b"missing")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+        os.remove(trash_path)
+
+        def probe():
+            with TestClient(app_module.app) as client:
+                return client.post("/api/images/restore", json={"ids": [image_id]})
+
+        response = await asyncio.to_thread(probe)
+        row = await self._image_row(image_id)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["restored"], [])
+        self.assertEqual(response.json()["errors"], [{"id": image_id, "reason": "trash file is missing"}])
+        self.assertEqual(response.json()["warnings"], [])
+        self.assertEqual(row["status"], "trashed")
+        self.assertEqual(row["trash_path"], trash_path)
+        self.assertFalse(os.path.exists(filepath))
+
     async def test_empty_trash_deletes_files_rows_and_reports_freed_bytes(self):
         source, _root = await self._source_root()
         first_id, _ = await self._file_image(source, "first.jpg", data=b"12345")
@@ -305,6 +357,42 @@ class TrashTests(BackendTestCase):
         self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected unlink failure"}])
         self.assertTrue(os.path.exists(trash_path))
         self.assertFalse(await self._image_exists(image_id))
+
+    async def test_empty_trash_happy_path_prunes_removed_file_tree(self):
+        source, root = await self._source_root()
+        image_id, _filepath = await self._file_image(source, "trip/day/photo.jpg", data=b"seven77")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+        nested_trash_dir = os.path.dirname(trash_path)
+
+        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+
+        self.assertEqual(result["deleted_count"], 1)
+        self.assertEqual(result["freed_bytes"], 7)
+        self.assertEqual(result["errors"], [])
+        self.assertFalse(await self._image_exists(image_id))
+        self.assertFalse(os.path.lexists(trash_path))
+        self.assertFalse(os.path.exists(nested_trash_dir))
+        self.assertFalse(os.path.exists(os.path.join(root, ".trash")))
+
+    async def test_empty_trash_does_not_follow_or_remove_symlink(self):
+        source, root = await self._source_root()
+        image_id, _filepath = await self._file_image(source, "linked.jpg", data=b"linked")
+        await trash_service.trash_images(db.DB_PATH, [image_id])
+        trash_path = (await self._image_row(image_id))["trash_path"]
+        target_path = os.path.join(root, ".trash", "target.jpg")
+        with open(target_path, "wb") as handle:
+            handle.write(b"must remain")
+        os.remove(trash_path)
+        os.symlink(target_path, trash_path)
+
+        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+
+        self.assertEqual(result["deleted_count"], 0)
+        self.assertEqual(result["errors"], [{"id": image_id, "reason": "trash path is a symlink"}])
+        self.assertTrue(os.path.islink(trash_path))
+        self.assertEqual(open(target_path, "rb").read(), b"must remain")
+        self.assertEqual((await self._image_row(image_id))["status"], "trashed")
 
     async def test_empty_trash_deletes_offline_catalog_only_hub_mirror_rows(self):
         conn = await db.get_db()

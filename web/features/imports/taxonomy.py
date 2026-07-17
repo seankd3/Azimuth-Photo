@@ -465,12 +465,18 @@ async def reclassify_misplaced_personal_photos(
                             new_source_id=source_id,
                         )
                         await _to_thread_move(old_path, new_path)
-                        await move_journal.apply_and_clear(
-                            conn,
-                            image_id=int(row["id"]),
-                            new_path=new_path,
-                            new_source_id=source_id,
-                        )
+                        try:
+                            # Commit per file so prior moves stay durable if a
+                            # later catalog commit fails mid-run.
+                            await move_journal.apply_and_clear(
+                                conn,
+                                image_id=int(row["id"]),
+                                new_path=new_path,
+                                new_source_id=source_id,
+                            )
+                        except Exception as exc:
+                            errors.append({"id": int(row["id"]), "message": str(exc)})
+                            break
                         moved += 1
                         updated += 1
                         continue
@@ -483,20 +489,24 @@ async def reclassify_misplaced_personal_photos(
                 except OSError as exc:
                     errors.append({"id": int(row["id"]), "message": str(exc)})
                     continue
-            await conn.execute(
-                "UPDATE images SET filepath = ?, source_id = ? WHERE id = ?",
-                (str(new_path), source_id, int(row["id"])),
-            )
+            try:
+                await conn.execute(
+                    "UPDATE images SET filepath = ?, source_id = ? WHERE id = ?",
+                    (str(new_path), source_id, int(row["id"])),
+                )
+                await conn.commit()
+            except Exception as exc:
+                errors.append({"id": int(row["id"]), "message": str(exc)})
+                break
             updated += 1
-        await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
     return {
         "action": "reclassify",
         "dry_run": False,
-        "moved": moved,
-        "updated": updated,
+        "moved": moved + int(recovery.get("redone") or 0),
+        "updated": updated + int(recovery.get("redone") or 0),
         "errors": errors,
         "recovery": recovery,
         "prefix": preview["prefix"],

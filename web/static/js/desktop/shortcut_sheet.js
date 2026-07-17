@@ -82,6 +82,10 @@ export function initShortcutSheet() {
     if (!root) return;
     root.innerHTML = `<div id="help-card" class="shortcut-sheet-card" role="document">
         <button id="help-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close">×</button>
+        <div class="help-guide-intro">
+            <div><h3>New here?</h3><p>Learn the library through four quick actions in your own photos.</p></div>
+            <button class="btn" id="help-restart-guide" type="button">Restart quick guide</button>
+        </div>
         <p class="shortcut-sheet-eyebrow">Keyboard-first photo flow</p>
         <h2>Shortcuts</h2>
         <p class="shortcut-sheet-intro">The keys you need while sorting, selecting, and editing.</p>

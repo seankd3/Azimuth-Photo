@@ -30,6 +30,10 @@ _SWISS_PAIR_WINDOW = 512
 _FILTERED_SWISS_PAIR_WINDOW = 256
 _FILTERED_MOSAIC_WINDOW = 192
 _MOSAIC_EXPLORE_WINDOW = 768
+# Scoped Refine (explicit ids / collection / import batch) samples from the whole
+# selection, bounded so huge collections stay cheap; the shuffled tie-break covers
+# any remainder statistically.
+_SCOPED_MOSAIC_WINDOW_MAX = 5000
 _MOSAIC_DIVERSE_WINDOW = 1536
 _DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
@@ -1349,7 +1353,7 @@ async def mosaic_next_impl(
         candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
             "sm",
             limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
-            sort="least_compared" if strategy == "explore" else "elo",
+            sort="least_compared_shuffled" if strategy == "explore" else "elo",
             orientation=orientation,
             compared=compared,
             min_stars=min_stars,
@@ -1384,11 +1388,17 @@ async def mosaic_next_impl(
     elif query_constraints.search_constraint_active(search):
         candidate_source = "search_reservoir" if search.get("active") else "scoped_reservoir"
         stats = None
+        scoped_id_filter = search.get("id_filter")
+        scoped_window = max(_FILTERED_MOSAIC_WINDOW, n * 40)
+        if scoped_id_filter:
+            # The user asked to refine THIS set — the pool must span all of it,
+            # not a fixed head of the ranking order.
+            scoped_window = max(scoped_window, min(len(scoped_id_filter), _SCOPED_MOSAIC_WINDOW_MAX))
         candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
             "sm",
-            limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
+            limit=scoped_window,
             search=search,
-            sort="least_compared" if strategy == "explore" else "elo",
+            sort="least_compared_shuffled" if strategy == "explore" else "elo",
             exclude_ids=exclude_ids,
             force_exact_counts=strategy == "diverse",
             orientation=orientation,

@@ -288,6 +288,16 @@ class PeopleTests(BackendTestCase):
         )
         self.assertEqual(pending, 0)
 
+        await db.store_face_scan_result(
+            image_id=image_id,
+            model_id=model_id,
+            cache_path=os.path.join(self.tempdir.name, "md-face-preview.jpg"),
+            faces=[],
+            status="scanned",
+        )
+        review = await db.get_people_review(limit=4)
+        self.assertEqual(review["counts"]["scan"]["scanned"], 1)
+
     def test_people_scan_decision_is_manual_bulk_work(self):
         decision = face_worker._people_background_decision({})
 

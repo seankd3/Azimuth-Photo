@@ -78,7 +78,14 @@ export function initLenses() {
     initMap();
     initDateScrubber();
     for (const button of document.querySelectorAll('#view-switch button[data-view]')) {
-        button.addEventListener('click', () => switchLens(button.dataset.view));
+        button.addEventListener('click', async () => {
+            if (button.dataset.view === 'develop') {
+                const { openDevelop } = await import('./develop/develop.js');
+                openDevelop();
+                return;
+            }
+            switchLens(button.dataset.view);
+        });
     }
     const gap = document.getElementById('event-gap');
     gap.value = String(eventGap());

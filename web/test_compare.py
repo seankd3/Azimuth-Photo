@@ -1625,3 +1625,31 @@ class CompareTests(BackendTestCase):
         self.assertLess(compare_service._FILTERED_MOSAIC_WINDOW, compare_service._MOSAIC_EXPLORE_WINDOW)
         self.assertGreaterEqual(compare_service._FILTERED_MOSAIC_WINDOW, 128)
         self.assertGreaterEqual(compare_service._MOSAIC_EXPLORE_WINDOW, 768)
+
+    async def test_scoped_mosaic_window_covers_the_full_selection(self):
+        """Refine on an explicit set samples from ALL of it — the pool window
+        must span the selection and explore ties must shuffle, or a fixed head
+        of the ordering monopolizes the duels."""
+        from unittest import mock
+
+        source = await self._source()
+        first = await self._image(source["id"], "scope1.jpg", elo=1500)
+        second = await self._image(source["id"], "scope2.jpg", elo=1400)
+        for image_id in (first, second):
+            await self._cache_entry(image_id, "sm")
+        scoped = [first, second] + list(range(900000, 900000 + 600))
+        captured = {}
+        real = compare_service.search_visible_ranked_candidates
+
+        async def spy(size, **kwargs):
+            captured["limit"] = kwargs.get("limit")
+            captured["sort"] = kwargs.get("sort")
+            return await real(size, **kwargs)
+
+        with mock.patch.object(compare_service, "search_visible_ranked_candidates", spy):
+            result = await compare_routes.mosaic_next(
+                n=2, strategy="explore", ids=",".join(str(i) for i in scoped)
+            )
+        self.assertGreaterEqual(captured["limit"], len(scoped))
+        self.assertEqual(captured["sort"], "least_compared_shuffled")
+        self.assertTrue({image["id"] for image in result["images"]} <= {first, second})

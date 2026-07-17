@@ -151,6 +151,33 @@ def catalog_quick_check(db_path: str) -> dict[str, Any]:
     return dict(result)
 
 
+def _clean_shutdown_sentinel(db_path: str) -> str:
+    return f"{os.path.abspath(db_path)}.clean-shutdown"
+
+
+def mark_clean_shutdown(db_path: str) -> None:
+    """Written as the last act of a graceful shutdown."""
+    try:
+        with open(_clean_shutdown_sentinel(db_path), "w", encoding="utf-8") as handle:
+            json.dump({"ts": time.time(), "pid": os.getpid()}, handle)
+    except OSError:
+        log.warning("could not write clean-shutdown sentinel", exc_info=True)
+
+
+def consume_clean_shutdown(db_path: str) -> bool:
+    """True exactly once after a graceful shutdown; deleting the sentinel means
+    a crash before the next graceful shutdown forces the full startup check."""
+    sentinel = _clean_shutdown_sentinel(db_path)
+    try:
+        os.unlink(sentinel)
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        log.warning("could not consume clean-shutdown sentinel", exc_info=True)
+        return False
+
+
 def catalog_health(db_path: str) -> dict[str, Any]:
     """Return the startup check result, checking lazily for status-only callers."""
     path = os.path.abspath(db_path)

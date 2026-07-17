@@ -740,6 +740,7 @@ async function editRawFromLoupe() {
     const stack = await versionStackForCurrent();
     const raw = (stack?.members || []).find(isRaw);
     if (!raw) return;
+    await import('./develop/develop.js');
     emit('develop:open-image', { image: raw });
 }
 
@@ -880,6 +881,7 @@ function ensureLoupeChrome() {
         zoom.className = 'num';
         zoom.dataset.tip = 'Fit / 100% · Space';
         zoom.textContent = 'Fit';
+        zoom.addEventListener('click', () => toggleFitOneToOne());
         bar.insertBefore(zoom, actions);
     } else {
         document.getElementById('loupe-zoom').dataset.tip = 'Fit / 100% · Space';
