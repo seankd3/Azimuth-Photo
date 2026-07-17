@@ -191,9 +191,14 @@ def resolve_runtime_paths(
     backup_default = paths.join(data_dir, "backups")
     if legacy_cache and Path(LEGACY_DEVELOP_DIR).is_dir():
         develop_default = LEGACY_DEVELOP_DIR
-    if legacy_data and Path(LEGACY_BACKUP_DIR).is_dir():
+    # Scratch/smoke/custom homes must never inherit the shared Expansion backup
+    # folder — that is what produced the 311-byte premigrate stubs in prod.
+    isolated_home = has_app_home or (
+        str(environment.get("PHOTOARCHIVE_SMOKE_MODE") or "").strip().lower() in {"1", "true", "yes"}
+    )
+    if legacy_data and not isolated_home and Path(LEGACY_BACKUP_DIR).is_dir():
         backup_default = LEGACY_BACKUP_DIR
-    elif legacy_data:
+    elif legacy_data and not isolated_home:
         old_fallback = Path(resolved_home) / ".cache" / "photoarchive" / "backups"
         if old_fallback.is_dir():
             backup_default = str(old_fallback)
@@ -227,7 +232,19 @@ def resolve_runtime_paths(
         library_default,
         family=family,
     )
-    backup_dir = _first(environment, "PHOTOARCHIVE_BACKUP_DIR", backup_default, family=family)
+    backup_override = _clean_path(environment.get("PHOTOARCHIVE_BACKUP_DIR"), family=family)
+    if backup_override and isolated_home:
+        # Only honor an explicit backup override when it stays inside the same home.
+        anchor = app_home or data_dir
+        try:
+            Path(backup_override).resolve().relative_to(Path(anchor).resolve())
+            backup_dir = backup_override
+        except (ValueError, OSError):
+            backup_dir = backup_default
+    elif backup_override:
+        backup_dir = backup_override
+    else:
+        backup_dir = backup_default
     run_dir = _first(environment, "PHOTOARCHIVE_RUN_DIR", run_default, family=family)
     log_dir = _first(environment, "PHOTOARCHIVE_LOG_DIR", default_logs, family=family)
 

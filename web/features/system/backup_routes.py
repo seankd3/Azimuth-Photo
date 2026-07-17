@@ -49,8 +49,14 @@ def _restore_error_status(status: dict[str, Any]) -> dict[str, Any]:
 async def api_backup_now():
     try:
         return await asyncio.to_thread(backups.create_snapshot, _configured_db_path())
+    except backups.BackupMisconfigurationError as exc:
+        return JSONResponse({"error": str(exc), "ok": False}, status_code=409)
+    except backups.BackupVerificationError as exc:
+        return JSONResponse({"error": str(exc), "ok": False}, status_code=500)
+    except FileNotFoundError as exc:
+        return JSONResponse({"error": str(exc), "ok": False}, status_code=404)
     except (OSError, backups.RestoreStorageError) as exc:
-        return JSONResponse({"error": f"Could not back up the catalog: {exc}"}, status_code=507)
+        return JSONResponse({"error": f"Could not back up the catalog: {exc}", "ok": False}, status_code=507)
 
 
 @router.get("/api/system/backup/list")
