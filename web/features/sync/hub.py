@@ -433,21 +433,32 @@ def _resolve_library_destination(
     raws_root: Path,
     placed_relpath: str,
 ) -> tuple[Path, Path]:
-    """Return (absolute destination file, catalog source root) for a locked relpath."""
+    """Return (absolute destination file, catalog source root) for a locked relpath.
+
+    ``RAWS/...`` always resolves through the configured raws_root (which may not
+    literally be named ``RAWS`` in tests/standalone layouts). Other tops stay
+    siblings under the library root.
+    """
 
     library_root = taxonomy.library_root_from_raws(raws_root).resolve()
     relative = Path(str(placed_relpath).replace("\\", "/"))
     if relative.is_absolute() or ".." in relative.parts or not relative.parts:
         raise ValueError("placed_relpath must be a safe library-relative path")
-    destination = (library_root / relative).resolve()
-    try:
-        destination.relative_to(library_root)
-    except ValueError as exc:
-        raise ValueError("placed_relpath escapes the library root") from exc
     top = relative.parts[0]
+    rest = Path(*relative.parts[1:]) if len(relative.parts) > 1 else Path()
     if top == taxonomy.DEST_RAWS:
-        source_root = Path(raws_root)
+        source_root = Path(raws_root).resolve()
+        destination = (source_root / rest).resolve()
+        try:
+            destination.relative_to(source_root)
+        except ValueError as exc:
+            raise ValueError("placed_relpath escapes the RAWS root") from exc
     else:
+        destination = (library_root / relative).resolve()
+        try:
+            destination.relative_to(library_root)
+        except ValueError as exc:
+            raise ValueError("placed_relpath escapes the library root") from exc
         source_root = taxonomy.destination_source_root(library_root, top)
     return destination, source_root
 
