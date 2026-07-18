@@ -18,11 +18,36 @@ export function fetchOptionsWithTimeout(fetchOptions, timeoutMs) {
     return fetchOptions;
 }
 
-export async function fetchJson(url, {
-    defaultValue = null,
-    fetchOptions = undefined,
-    timeoutMs = 15000,
-} = {}) {
+function requestMethod(fetchOptions) {
+    return String(fetchOptions?.method || 'GET').toUpperCase();
+}
+
+function isIdempotentGet(fetchOptions) {
+    return requestMethod(fetchOptions) === 'GET';
+}
+
+function isTransientFailure(error, status) {
+    if (status === 502 || status === 503 || status === 504) return true;
+    if (status) return false;
+    const cause = error?.cause || error;
+    const name = cause?.name || error?.name || '';
+    return name === 'AbortError'
+        || name === 'TimeoutError'
+        || name === 'TypeError'
+        || /network|failed to fetch|load failed/i.test(String(cause?.message || error?.message || ''));
+}
+
+function retryDelayMs(attempt) {
+    const base = attempt <= 1 ? 1000 : 3000;
+    const jitter = Math.floor(Math.random() * 250);
+    return base + jitter;
+}
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchOnce(url, fetchOptions, timeoutMs) {
     let response = null;
     try {
         response = await fetch(url, fetchOptionsWithTimeout(fetchOptions, timeoutMs));
@@ -35,16 +60,40 @@ export async function fetchJson(url, {
             status: response.status,
         });
     }
-    if (response.status === 204) return defaultValue;
-    const text = await response.text();
-    if (!text.trim()) return defaultValue;
-    try {
-        return JSON.parse(text);
-    } catch (error) {
-        throw new FetchJsonError(`Response was not JSON: ${url}`, {
-            url,
-            status: response.status,
-            cause: error,
-        });
+    return response;
+}
+
+export async function fetchJson(url, {
+    defaultValue = null,
+    fetchOptions = undefined,
+    timeoutMs = 15000,
+} = {}) {
+    const maxAttempts = isIdempotentGet(fetchOptions) ? 3 : 1;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+        try {
+            const response = await fetchOnce(url, fetchOptions, timeoutMs);
+            if (response.status === 204) return defaultValue;
+            const text = await response.text();
+            if (!text.trim()) return defaultValue;
+            try {
+                return JSON.parse(text);
+            } catch (error) {
+                throw new FetchJsonError(`Response was not JSON: ${url}`, {
+                    url,
+                    status: response.status,
+                    cause: error,
+                });
+            }
+        } catch (error) {
+            lastError = error;
+            const status = error?.status || 0;
+            const canRetry = attempt < maxAttempts && isTransientFailure(error, status);
+            if (!canRetry) throw error;
+            await sleep(retryDelayMs(attempt));
+        }
     }
+
+    throw lastError;
 }
