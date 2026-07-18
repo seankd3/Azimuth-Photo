@@ -1,9 +1,12 @@
 """Async background thumbnail/full-original pregeneration batch runners."""
 
 import asyncio
+import os
 from functools import partial
 
 from core import work_coordination
+from thumbnails.config import RAW_EXTENSIONS
+from thumbnails.decode_budget import bulk_decode_budget, estimate_decode_bytes
 
 
 PREGEN_YIELDED = -2
@@ -150,26 +153,38 @@ async def run_pregen_bulk_batch(
     wave_size = 1
     for start in range(0, len(pending), wave_size):
         wave = pending[start:start + wave_size]
-        tasks = [
-            loop.run_in_executor(
-                prefetch_executor,
-                partial(
-                    generate_thumbnail_set_sync,
-                    item["filepath"],
-                    item["id"],
-                    item["signatures"],
-                    source_bytes=item["source_size"],
-                    full_item=item.get("full"),
-                    hot=False,
-                ),
-            )
-            for item in wave
-        ]
-        for task in asyncio.as_completed(tasks):
-            idx += 1
-            completed += record_pregen_result(await task)
-            if idx % 8 == 0 and not should_pause_for_priority():
-                await asyncio.to_thread(flush_write_queue)
+        held_weights: list[int] = []
+        try:
+            for item in wave:
+                ext = os.path.splitext(str(item.get("filepath") or ""))[1].lower()
+                estimate = estimate_decode_bytes(
+                    item.get("source_size"),
+                    raw=ext in RAW_EXTENSIONS,
+                )
+                held_weights.append(await bulk_decode_budget.acquire(estimate))
+            tasks = [
+                loop.run_in_executor(
+                    prefetch_executor,
+                    partial(
+                        generate_thumbnail_set_sync,
+                        item["filepath"],
+                        item["id"],
+                        item["signatures"],
+                        source_bytes=item["source_size"],
+                        full_item=item.get("full"),
+                        hot=False,
+                    ),
+                )
+                for item in wave
+            ]
+            for task in asyncio.as_completed(tasks):
+                idx += 1
+                completed += record_pregen_result(await task)
+                if idx % 8 == 0 and not should_pause_for_priority():
+                    await asyncio.to_thread(flush_write_queue)
+        finally:
+            for weight in held_weights:
+                await bulk_decode_budget.release(weight)
         if (
             should_pause_for_priority()
             and idx >= max(1, int(activity_burst_items))
