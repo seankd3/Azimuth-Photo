@@ -17,7 +17,7 @@ import time
 from typing import Any
 
 import settings
-from core import work_coordination
+from core import memory_pressure, work_coordination
 
 
 FACE_MODEL_LICENSE_TEXT = (
@@ -170,16 +170,18 @@ def resume_face_worker() -> None:
 
 def _people_background_decision(config: dict[str, Any]) -> PeopleBackgroundDecision:
     del config
-    return PeopleBackgroundDecision(
-        mode="normal",
-        pause=False,
-        sleep_seconds=0.0,
-        thumbnail_batch_size=16,
-        thumbnail_pause_seconds=0.0,
-        embedding_pause_seconds=0.0,
-        reason="people scan enabled",
-        idle_policy="manual_people_scan",
-        checked_at=time.time(),
+    return memory_pressure.apply_to_decision(
+        PeopleBackgroundDecision(
+            mode="normal",
+            pause=False,
+            sleep_seconds=0.0,
+            thumbnail_batch_size=16,
+            thumbnail_pause_seconds=0.0,
+            embedding_pause_seconds=0.0,
+            reason="people scan enabled",
+            idle_policy="manual_people_scan",
+            checked_at=time.time(),
+        )
     )
 
 
@@ -313,6 +315,21 @@ async def _run_face_worker_loop() -> None:
                 continue
 
             decision = _people_background_decision(config)
+            decision_payload = decision.to_dict() if decision is not None else {}
+            if decision.pause:
+                work_coordination.release_manual_owner("people")
+                _set_status(
+                    state="paused",
+                    ready=False,
+                    message=memory_pressure.PAUSE_MESSAGE
+                    if decision.reason == memory_pressure.PAUSE_REASON
+                    else f"People paused: {decision.reason}.",
+                    background_decision=decision_payload,
+                    last_error="",
+                )
+                await asyncio.sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
+                continue
+
             pending = await _configured(
                 _count_images_needing_faces,
                 "count_images_needing_faces",
@@ -320,7 +337,6 @@ async def _run_face_worker_loop() -> None:
                 model_id=model_id,
                 cache_root=str(config.get("ssd_cache_dir") or ""),
             )
-            decision_payload = decision.to_dict() if decision is not None else {}
             _set_status(
                 pending_cached_images=pending,
                 background_decision=decision_payload,

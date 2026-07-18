@@ -32,7 +32,7 @@ import ai_models
 import embed_cache
 import settings
 import thumbnails
-from core import work_coordination
+from core import memory_pressure, work_coordination
 from workers.caption_health import CaptionOomCircuit
 
 log = logging.getLogger("embedding_worker")
@@ -324,8 +324,22 @@ def _start_search_model_residency_task() -> bool:
 
 def _retain_search_model_residency(config: dict, model_id: str) -> bool:
     if work_coordination.lost_ownership("embeddings", gpu=True):
+        _set_worker_status(
+            "waiting_for_turn",
+            "Search model released for other background work.",
+            ready=False,
+            config=config,
+        )
         return False
     if not _start_search_model_residency_task():
+        message = "Could not start search model residency heartbeat"
+        _set_worker_status(
+            "error",
+            message,
+            ready=False,
+            last_error=message,
+            config=config,
+        )
         return False
     _set_worker_status(
         "resident",
@@ -1169,6 +1183,16 @@ async def _run_embedding_worker_loop():
                 _unload_model()
                 _set_worker_status("paused", _manual_pause_message(), ready=_model is not None)
                 await asyncio.sleep(1)
+                continue
+
+            pressure = memory_pressure.gate_bulk_work()
+            if pressure.pause_bulk:
+                _set_worker_status(
+                    "paused",
+                    pressure.message or memory_pressure.PAUSE_MESSAGE,
+                    ready=_model is not None,
+                )
+                await asyncio.sleep(2)
                 continue
 
             if not model_installed:
