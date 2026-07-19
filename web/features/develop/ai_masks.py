@@ -155,9 +155,35 @@ def _load_base_preview(base_preview: Path) -> np.ndarray:
         raise AiMaskError(f"Base preview is unreadable: {exc}") from exc
 
 
-def _subject_session_for_model():
+def _drop_subject_session() -> None:
+    """Clear the rembg session. Called by ModelPool on unload/evict."""
     global _subject_session
-    if _subject_session is None:
+    _subject_session = None
+    try:
+        from core.ml_device import empty_cuda_cache
+
+        empty_cuda_cache()
+    except Exception:
+        pass
+
+
+def unload_subject_session() -> None:
+    """Public unload for memory pressure / ModelPool straggler audits."""
+    from core.model_pool import get_model_pool
+
+    if not get_model_pool().unload("subject_mask"):
+        _drop_subject_session()
+
+
+def _subject_session_for_model():
+    from core.model_pool import (
+        COST_SUBJECT_MASK_RAM,
+        COST_SUBJECT_MASK_VRAM,
+        get_model_pool,
+    )
+
+    def _load():
+        global _subject_session
         from core.ml_device import onnx_providers
 
         model = ensure_subject_model()
@@ -169,7 +195,18 @@ def _subject_session_for_model():
         _subject_session = onnxruntime.InferenceSession(
             str(model), sess_options=options, providers=providers
         )
-    return _subject_session
+        return _subject_session
+
+    # Develop canvas is interactive — pin-while-hot so a bulk face sweep
+    # cannot bounce the mask session mid-brush.
+    return get_model_pool().acquire(
+        "subject_mask",
+        load_fn=_load,
+        unload_fn=_drop_subject_session,
+        vram_bytes=COST_SUBJECT_MASK_VRAM,
+        ram_bytes=COST_SUBJECT_MASK_RAM,
+        interactive=True,
+    )
 
 
 def _subject_mask(rgb: np.ndarray) -> np.ndarray:

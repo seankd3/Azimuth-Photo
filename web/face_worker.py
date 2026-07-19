@@ -197,45 +197,65 @@ def _missing_face_dependencies() -> list[str]:
     ]
 
 
-def _load_face_app(config: dict[str, Any]):
-    global _face_app, _face_app_key
-    model_id = str(config.get("face_model_id") or "buffalo_l").strip() or "buffalo_l"
-    model_dir = str(config.get("face_model_dir") or "").strip()
-    det_size = int(config.get("face_detection_size") or 640)
-    from core.ml_device import insightface_ctx_id, onnx_providers, preferred_device
-
-    providers = tuple(onnx_providers())
-    ctx_id = insightface_ctx_id()
-    key = (model_id, model_dir, det_size, preferred_device(), providers, ctx_id)
-    if _face_app is not None and _face_app_key == key:
-        return _face_app
-
-    missing = _missing_face_dependencies()
-    if missing:
-        raise RuntimeError(
-            "People recognition optional pack is not installed: "
-            + ", ".join(missing)
-            + ". Run python -m pip install -r requirements-ai-people.txt. "
-            "Runtime package installation is disabled."
-        )
-
-    from insightface.app import FaceAnalysis
-
-    os.makedirs(model_dir, exist_ok=True)
-    app = FaceAnalysis(name=model_id, root=model_dir, providers=list(providers))
-    app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
-    _face_app = app
-    _face_app_key = key
-    return app
-
-
-def _unload_face_app() -> None:
+def _drop_face_residency() -> None:
+    """Clear face globals. Called by ModelPool on unload/evict."""
     global _face_app, _face_app_key
     _face_app = None
     _face_app_key = None
     from core.ml_device import empty_cuda_cache
 
     empty_cuda_cache()
+
+
+def _load_face_app(config: dict[str, Any], interactive: bool = False):
+    global _face_app, _face_app_key
+    from core.model_pool import COST_PEOPLE_RAM, COST_PEOPLE_VRAM, get_model_pool
+    from core.ml_device import insightface_ctx_id, onnx_providers, preferred_device
+
+    model_id = str(config.get("face_model_id") or "buffalo_l").strip() or "buffalo_l"
+    model_dir = str(config.get("face_model_dir") or "").strip()
+    det_size = int(config.get("face_detection_size") or 640)
+    providers = tuple(onnx_providers())
+    ctx_id = insightface_ctx_id()
+    key = (model_id, model_dir, det_size, preferred_device(), providers, ctx_id)
+    if _face_app_key is not None and _face_app_key != key:
+        _unload_face_app()
+
+    def _load():
+        global _face_app, _face_app_key
+        missing = _missing_face_dependencies()
+        if missing:
+            raise RuntimeError(
+                "People recognition optional pack is not installed: "
+                + ", ".join(missing)
+                + ". Run python -m pip install -r requirements-ai-people.txt. "
+                "Runtime package installation is disabled."
+            )
+
+        from insightface.app import FaceAnalysis
+
+        os.makedirs(model_dir, exist_ok=True)
+        app = FaceAnalysis(name=model_id, root=model_dir, providers=list(providers))
+        app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
+        _face_app = app
+        _face_app_key = key
+        return app
+
+    return get_model_pool().acquire(
+        "people",
+        load_fn=_load,
+        unload_fn=_drop_face_residency,
+        vram_bytes=COST_PEOPLE_VRAM,
+        ram_bytes=COST_PEOPLE_RAM,
+        interactive=interactive,
+    )
+
+
+def _unload_face_app() -> None:
+    from core.model_pool import get_model_pool
+
+    if not get_model_pool().unload("people"):
+        _drop_face_residency()
 
 
 async def _wait_for_face_turn() -> None:
