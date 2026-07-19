@@ -18,7 +18,7 @@ from features.publish import routes as publish_routes
 from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
-from features.system import backup_routes, version_routes
+from features.system import backup_routes, health_routes, version_routes
 from features.sync import hub_routes, lr_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
 from features.sync.contract import ApiRevisionMismatch
 from features.sync.sync_worker import SyncWorker, configure_worker
@@ -44,6 +44,7 @@ wiring.configure_develop_hdr_routes()
 wiring.configure_develop_pano_routes()
 wiring.configure_develop_xmp_write_routes()
 wiring.configure_system_backup_routes()
+wiring.configure_system_health_routes()
 # PATCH: quality lane — register technical quality scorer routes
 import db as _db
 quality_routes.configure(db_path=lambda: _db.DB_PATH)
@@ -67,6 +68,7 @@ app.include_router(geo_routes.router)
 app.include_router(keyword_routes.router)
 app.include_router(gallery_routes.router)
 app.include_router(backup_routes.router)
+app.include_router(health_routes.router)
 app.include_router(version_routes.router)
 app.include_router(quality_routes.router)
 app.include_router(watched_routes.router)
