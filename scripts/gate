@@ -142,6 +142,16 @@ echo "gate xdist_workers=$WORKERS load=$(cut -d' ' -f1 /proc/loadavg)" | tee -a 
 
 case "$MODE" in
   quick)
+    # Lint first: seconds, and a red file never reaches pytest.
+    if [[ -x "$ROOT/scripts/lint" ]]; then
+      echo "==> lint" | tee -a "$LOG"
+      set +e
+      "$ROOT/scripts/lint" >>"$LOG" 2>&1
+      lint_rc=$?
+      set -e
+      echo "==> lint exit=$lint_rc" | tee -a "$LOG"
+      if [[ $lint_rc -ne 0 ]]; then RC=$lint_rc; cp -f "$LOG" "$LAST" 2>/dev/null || true; echo "gate finished mode=$MODE exit=$RC log=$LOG" | tee -a "$LOG"; exit "$RC"; fi
+    fi
     # Partition assert lives on full; quick stays under the 90s wall.
     # Limit contract collection to known files so import cost stays tiny.
     run_pytest "contract" -q --tb=short --disable-warnings -m contract "${CONTRACT_FILES[@]}" || RC=$?
