@@ -9,7 +9,7 @@ import {
     stopMetadataScan, startFreeUpSpace, cancelFreeUpJob, getStorageOverview, revealFolder,
 } from './api.js';
 import {
-    emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
+    emit, on, patchPrefs, setActiveLens, setThumbSize, viewState,
 } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { afterMotion } from './motion.js';
@@ -32,7 +32,7 @@ import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js
 
 let open = false;
 let drawerTimer = null;
-let activityTimer = null;
+let _activityTimer = null;
 let installTimer = null;
 let scanTimer = null;
 let scanSourceId = null;
@@ -251,10 +251,6 @@ function captionPresetConfig(key = settingValue('caption_model_preset')) {
 
 function collectModelSettings() {
     return embeddingPresetConfig(settingValue('embed_model_preset'));
-}
-
-function collectCaptionSettings() {
-    return captionPresetConfig(settingValue('caption_model_preset'));
 }
 
 function recommendedMemoryGb(settings = {}) {
@@ -490,14 +486,6 @@ function patchArchiveOverview(body) {
     if (!next || card.innerHTML === next.innerHTML) return;
     card.innerHTML = next.innerHTML;
     bindArchiveOpen(card);
-}
-
-function dateTime(value) {
-    const raw = Number(value || 0);
-    if (!raw) return 'not published';
-    const date = new Date(raw * 1000);
-    if (Number.isNaN(date.getTime())) return 'not published';
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function renderSources() {
@@ -1016,20 +1004,6 @@ function renderPublishingSettings() {
         }));
 }
 
-function renderSettingsSections() {
-    if (!settingsPageData) {
-        return '<section class="dr-sec"><h3>Settings</h3><div class="muted">Loading settings…</div></section>';
-    }
-    return renderPublishingSettings()
-        + renderAiSettings()
-        + renderImageCacheSettings()
-        + renderThumbnailSettings()
-        + renderImportSettings()
-        + renderPeopleSettings()
-        + renderCaptionSettings()
-        + renderMetadataSettings();
-}
-
 function checkbox(key, label) {
     return `<div class="pref-row"><label for="pref-${key}">${esc(label)}</label><input id="pref-${key}" type="checkbox" data-pref="${key}" ${viewState.prefs[key] ? 'checked' : ''}></div>`;
 }
@@ -1055,21 +1029,6 @@ function renderAbout() {
     return '<section class="dr-sec"><h3>About</h3>'
         + '<div class="setting-status"><b>Azimuth Photo</b><span> · Version ' + esc(version) + '</span></div>'
         + '</section>';
-}
-
-function focusPublishingSection() {
-    const drawer = document.getElementById('drawer');
-    const section = drawer?.querySelector('.dr-details[data-settings-section="Publishing"]');
-    if (!section) return;
-    section.open = true;
-    openSettingSections.add('Publishing');
-    section.classList.add('focus-target');
-    const field = section.querySelector('#drawer-setting-publish_dir');
-    requestAnimationFrame(() => {
-        section.scrollIntoView({ block: 'start', behavior: 'smooth' });
-        field?.focus();
-        window.setTimeout(() => section.classList.remove('focus-target'), 2400);
-    });
 }
 
 function renderDrawer() {
@@ -2026,7 +1985,7 @@ export function initDrawer() {
         if (open) renderCurrentSystemSurface();
     });
     refreshActivity();
-    activityTimer = setInterval(refreshActivity, 10000);
+    _activityTimer = setInterval(refreshActivity, 10000);
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) refreshActivity();
     });

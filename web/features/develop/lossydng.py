@@ -67,7 +67,6 @@ def _map_polynomials(page) -> list[tuple[float, ...]] | None:
 
 
 def _poly_eval(coefs, x):
-    result = 0.0 if not hasattr(x, "shape") else None
     acc = None
     for c in reversed(coefs):
         if acc is None:

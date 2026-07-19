@@ -650,7 +650,7 @@ export function openLoupe(target = 0) {
     if (!root.hidden) render();
 }
 
-export function closeLoupe(options = {}) {
+export function closeLoupe(_options = {}) {
     if (!open) return;
     setLightMode('normal');
     centerFit({ animate: false });

@@ -22,7 +22,6 @@ from typing import Any, Mapping
 
 import numpy as np
 
-from . import ops_constants as C
 
 STOCKS_DIR = Path(__file__).parent / "film_stocks"
 
@@ -97,7 +96,7 @@ def build_film_tables(stock: Mapping[str, Any]) -> dict[str, Any]:
     paper = stock.get("print_paper") or {}
     paper_gamma = float(paper.get("gamma", 2.6))
     paper_shoulder = float(paper.get("shoulder", 0.92))
-    fog = float(base.get("base_fog_density", 0.1))
+    _fog = float(base.get("base_fog_density", 0.1))  # intentionally unused; H&D already includes base+fog
     mask = np.asarray(base.get("orange_mask_rgb") or [0.0, 0.0, 0.0], dtype=np.float64)
 
     # Per-channel print calibration: the printer/scanner neutralizes the orange

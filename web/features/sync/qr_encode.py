@@ -6,7 +6,6 @@ No third-party QR dependency — renders a PNG via Pillow (already required).
 from __future__ import annotations
 
 import io
-from typing import Iterable
 
 from PIL import Image
 
@@ -87,7 +86,6 @@ def _encode_data(payload: bytes, version: int) -> list[int]:
     nsym = _ECC_CW[version]
     b1, d1, b2, d2 = _BLOCK_INFO[version]
     total_data = b1 * d1 + b2 * d2
-    char_bits = 8 if version >= 10 else 8
     bits: list[int] = []
     bits += [0, 1, 0, 0]  # byte mode
     bits += _bits(len(payload), 16 if version >= 10 else 8)
@@ -185,7 +183,6 @@ def _place_alignments(matrix: list[list[int]], reserved: list[list[int]], versio
     positions = _ALIGNMENT.get(version)
     if not positions:
         return
-    size = len(matrix)
     for r0 in positions:
         for c0 in positions:
             if reserved[r0][c0]:

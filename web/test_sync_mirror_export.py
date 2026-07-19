@@ -171,7 +171,7 @@ class SyncMirrorExportTests(unittest.TestCase):
             return ("signature", str(cached)) if image_id == first_id else None
 
         with mock.patch.object(mirror_export.thumbnails, "fast_disk_path_entry", side_effect=disk_index):
-            response = self.client.get(f"/api/sync/thumbs/pack?size=sm&after_id=0&limit=500")
+            response = self.client.get("/api/sync/thumbs/pack?size=sm&after_id=0&limit=500")
         self.assertEqual(response.status_code, 200, response.text)
         with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:") as archive:
             self.assertEqual(archive.getnames(), [f"{first_id}.jpg", ".photoarchive-trailer.json"])

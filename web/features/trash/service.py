@@ -10,7 +10,6 @@ from pathlib import Path
 import helpers as app_helpers
 from data import connection as data_connection
 from data.repositories import catalog as catalog_repository
-from data.repositories import stacks as stack_repository
 from features.stacks import builders as stack_builders
 
 

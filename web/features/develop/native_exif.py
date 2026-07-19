@@ -92,7 +92,8 @@ def read_native_exif(path: str, head_bytes: int = 4 << 20) -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    import sys, glob
+    import sys
+    import glob
     for pattern in sys.argv[1:]:
         for p in glob.glob(pattern):
             print(p, "->", read_native_exif(p))

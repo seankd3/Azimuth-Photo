@@ -1,7 +1,6 @@
 // Small, frame-driven inertial pan helper for the mobile viewer. Keeping this
 // separate from gesture recognition makes the gesture grammar easier to tune.
 
-const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 export function createMomentum({ read, write, constrain }) {
     const samples = [];

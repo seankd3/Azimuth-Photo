@@ -1,0 +1,15 @@
+==> ruff
+[1;32mAll checks passed![0m
+==> eslint
+==> luacheck
+Checking clients/lightroom/azimuth-sync.lrplugin/AzimuthSyncCore.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/AzimuthSyncDialog.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/AzimuthSyncInit.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/AzimuthSyncService.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/AzimuthSyncShutdown.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/Info.lua OK
+Checking clients/lightroom/azimuth-sync.lrplugin/tests/test_core.lua OK
+
+Total: 0 warnings / 0 errors in 7 files
+lint: ok
+EXIT:0

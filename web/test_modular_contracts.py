@@ -9,8 +9,6 @@ import unittest
 from fastapi.routing import APIRoute
 
 import app as app_module
-import db
-import thumbnails
 from core import app_factory
 
 pytestmark = pytest.mark.contract

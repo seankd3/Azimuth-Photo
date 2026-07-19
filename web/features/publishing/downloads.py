@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
-import tempfile
 import zipfile
 from http.client import IncompleteRead
 from pathlib import Path

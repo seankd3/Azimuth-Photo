@@ -5,7 +5,6 @@ from __future__ import annotations
 import pytest
 import gzip
 import json
-import os
 import sqlite3
 import tempfile
 import time
@@ -62,7 +61,6 @@ def _make_catalog(path: Path, *, files: list[tuple[str, bytes]] | None = None) -
         for index, (filepath, payload) in enumerate(files, start=1):
             Path(filepath).parent.mkdir(parents=True, exist_ok=True)
             Path(filepath).write_bytes(payload)
-            source_id = 1 if index % 2 else 2
             # First half online, but we assign explicitly below for clarity.
             conn.execute(
                 "INSERT INTO images (id, source_id, filename, filepath, status) VALUES (?, ?, ?, ?, 'kept')",

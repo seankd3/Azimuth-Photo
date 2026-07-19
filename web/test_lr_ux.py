@@ -14,7 +14,6 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import db
 from features.sync import elo_stars, export_relation, lr_connect, lr_routes, lr_status
 
 

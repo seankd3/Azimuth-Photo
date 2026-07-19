@@ -39,8 +39,8 @@ usage() {
     cat <<'USAGE'
 Usage: photoarchive-check [--quick|--unit|--full] [--area AREA] [--list-areas]
 
-  --quick   Run diff whitespace checks, Python compile, and JS syntax.
-  --unit    Run quick checks plus the unit suite. This is the default.
+  --quick   Run scripts/lint, diff whitespace checks, Python compile, and JS syntax.
+  --unit    Run quick checks (incl. lint) plus the unit suite. This is the default.
   --full    Run unit checks plus the opt-in browser smoke test against PHOTOARCHIVE_SMOKE_URL.
   --area    After quick checks, run a focused unit subset for one subsystem.
   --list-areas
@@ -120,6 +120,9 @@ unit_targets_for_area() {
 }
 
 run_quick_checks() {
+    if [[ -x "$ROOT/scripts/lint" ]]; then
+        "$ROOT/scripts/lint"
+    fi
     git -C "$ROOT" diff --check
     git -C "$ROOT" diff --cached --check
 

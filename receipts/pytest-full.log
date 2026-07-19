@@ -1,0 +1,151 @@
+.....F....................................................s............. [  5%]
+........................................................................ [ 10%]
+........................................................................ [ 15%]
+........................................................................ [ 21%]
+.................................................................. [ 25%]
+.................................................... [ 29%]
+........................................................................ [ 34%]
+........................................................................ [ 40%]
+........................................................................ [ 45%]
+........................................................................ [ 50%]
+.............................................................F.......... [ 56%]
+........................................................................ [ 61%]
+.................................F...................................... [ 66%]
+..................................................s.................. [ 71%]
+........................................................................ [ 76%]
+........................................................................ [ 82%]
+.................................................................... [ 87%]
+........................................................................ [ 92%]
+........................................................................ [ 97%]
+...............................                                          [100%]
+=================================== FAILURES ===================================
+E   assert 0 == 27
+---------------------------- Captured stdout setup -----------------------------
+seeded 27
+/home/sean/Projects/pa-lint/web/test_allphotos_playwright.py:180: assert 0 == 27
+E   playwright._impl._errors.TimeoutError: Page.wait_for_selector: Timeout 15000ms exceeded.
+    Call log:
+      - waiting for locator("#connect-lightroom-panel #lr-connect-btn") to be visible
+----------------------------- Captured stdout call -----------------------------
+seeded 1 2 True
+/home/sean/Projects/pa-lint/web/.venv/lib/python3.13/site-packages/playwright/_impl/_connection.py:559: playwright._impl._errors.TimeoutError: Page.wait_for_selector: Timeout 15000ms exceeded.
+E   AssertionError: date_histogram median was 78.3 ms; budget is 50 ms
+    assert 78.334447927773 <= 50
+----------------------------- Captured stdout call -----------------------------
+perf date histogram: 78.3 ms (runs: 91.3, 51.1, 78.3)
+/home/sean/Projects/pa-lint/web/test_perf_budgets.py:65: AssertionError: date_histogram median was 78.3 ms; budget is 50 ms
+=============================== warnings summary ===============================
+app.py:134
+  /home/sean/Projects/pa-lint/web/app.py:134: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+.venv/lib/python3.13/site-packages/fastapi/applications.py:4598
+.venv/lib/python3.13/site-packages/fastapi/applications.py:4598
+.venv/lib/python3.13/site-packages/fastapi/applications.py:4598
+.venv/lib/python3.13/site-packages/fastapi/applications.py:4598
+test_system_backups.py::CatalogRecoveryTests::test_corrupt_catalog_at_boot_is_reported_without_reinitializing_it
+  /home/sean/Projects/pa-lint/web/.venv/lib/python3.13/site-packages/fastapi/applications.py:4598: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+app.py:152
+  /home/sean/Projects/pa-lint/web/app.py:152: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+app.py:169
+  /home/sean/Projects/pa-lint/web/app.py:169: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+app.py:174
+  /home/sean/Projects/pa-lint/web/app.py:174: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("shutdown")
+
+test_cloud_backup_playwright.py:107
+  /home/sean/Projects/pa-lint/web/test_cloud_backup_playwright.py:107: PytestUnknownMarkWarning: Unknown pytest.mark.playwright - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.playwright
+
+test_lr_ux_playwright.py:111
+  /home/sean/Projects/pa-lint/web/test_lr_ux_playwright.py:111: PytestUnknownMarkWarning: Unknown pytest.mark.playwright - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.playwright
+
+test_quiet_sources_playwright.py:110
+  /home/sean/Projects/pa-lint/web/test_quiet_sources_playwright.py:110: PytestUnknownMarkWarning: Unknown pytest.mark.playwright - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    @pytest.mark.playwright
+
+test_develop_backend.py::DevelopBackendTests::test_export_honors_resize_quality_and_sharpen_byte_sizes
+  /home/sean/Projects/pa-lint/web/.venv/lib/python3.13/site-packages/_pytest/threadexception.py:58: PytestUnhandledThreadExceptionWarning: Exception in thread Thread-2046 (_connection_worker_thread)
+  
+  Traceback (most recent call last):
+    File "/home/sean/Projects/pa-lint/web/.venv/lib/python3.13/site-packages/aiosqlite/core.py", line 66, in _connection_worker_thread
+      future.get_loop().call_soon_threadsafe(set_result, future, result)
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/asyncio/base_events.py", line 878, in call_soon_threadsafe
+      self._check_closed()
+      ~~~~~~~~~~~~~~~~~~^^
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/asyncio/base_events.py", line 556, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  During handling of the above exception, another exception occurred:
+  
+  Traceback (most recent call last):
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/threading.py", line 1043, in _bootstrap_inner
+      self.run()
+      ~~~~~~~~^^
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/threading.py", line 994, in run
+      self._target(*self._args, **self._kwargs)
+      ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/home/sean/Projects/pa-lint/web/.venv/lib/python3.13/site-packages/aiosqlite/core.py", line 75, in _connection_worker_thread
+      future.get_loop().call_soon_threadsafe(set_exception, future, e)
+      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/asyncio/base_events.py", line 878, in call_soon_threadsafe
+      self._check_closed()
+      ~~~~~~~~~~~~~~~~~~^^
+    File "/home/sean/.local/share/uv/python/cpython-3.13.5-linux-x86_64-gnu/lib/python3.13/asyncio/base_events.py", line 556, in _check_closed
+      raise RuntimeError('Event loop is closed')
+  RuntimeError: Event loop is closed
+  
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+    warnings.warn(pytest.PytestUnhandledThreadExceptionWarning(msg))
+
+test_system_backups.py::CatalogRecoveryTests::test_corrupt_catalog_at_boot_is_reported_without_reinitializing_it
+  /home/sean/Projects/pa-lint/web/test_system_backups.py:602: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @server.on_event("startup")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED test_allphotos_playwright.py::test_all_photos_grid_matches_catalog_total
+FAILED test_lr_ux_playwright.py::test_lr_ux_connect_and_ranking_chip_screenshots
+FAILED test_perf_budgets.py::test_date_histogram_budget - AssertionError: dat...
+3 failed, 1361 passed, 3 skipped, 1 deselected, 14 warnings, 393 subtests passed in 472.52s (0:07:52)
+PYTEST_EXIT:1

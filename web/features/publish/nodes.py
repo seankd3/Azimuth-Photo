@@ -10,7 +10,6 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 
 from data import connection as data_connection
-from features.collections import graph as collection_graph
 
 
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]

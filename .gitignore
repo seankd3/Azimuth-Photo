@@ -48,3 +48,5 @@ desktop/src-tauri/target/
 desktop/src-tauri/gen/
 
 android/local.properties
+
+node_modules/

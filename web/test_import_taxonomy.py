@@ -18,7 +18,7 @@ from PIL import Image
 from test_support import *  # noqa: F401,F403
 from features.imports import card, staging, taxonomy
 from data import connection
-from features.sync import hub, hub_routes
+from features.sync import hub_routes
 
 
 class TaxonomyRoutingTableTests(unittest.TestCase):

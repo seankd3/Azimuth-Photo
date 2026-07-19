@@ -11,7 +11,6 @@ import types
 import unittest
 from unittest.mock import Mock, patch
 
-import caption_worker
 from core import capabilities
 from core import background
 import embedding_worker

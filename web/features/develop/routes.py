@@ -8,7 +8,10 @@ import os
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from features.develop import rawproc
 
 from fastapi import APIRouter, Query
 from fastapi.responses import FileResponse, JSONResponse, Response
