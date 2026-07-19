@@ -61,8 +61,12 @@ async def api_backup_now():
 
 @router.get("/api/system/backup/list")
 async def api_backup_list() -> dict[str, Any]:
-    items = await asyncio.to_thread(backups.list_backups)
-    return {"backups": items, "count": len(items)}
+    items = await asyncio.to_thread(backups.list_backups, _configured_db_path())
+    payload: dict[str, Any] = {"backups": items, "count": len(items)}
+    warning = next((item.get("owner_warning") for item in items if item.get("owner_warning")), None)
+    if warning:
+        payload["owner_warning"] = warning
+    return payload
 
 
 @router.post("/api/system/backup/restore")
@@ -73,6 +77,8 @@ async def api_backup_restore(body: RestoreBody):
         return JSONResponse({"error": str(exc)}, status_code=404)
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
+    except backups.BackupMisconfigurationError as exc:
+        return JSONResponse({"error": str(exc), "ok": False}, status_code=409)
     except backups.RestoreStageExistsError as exc:
         return JSONResponse(
             {

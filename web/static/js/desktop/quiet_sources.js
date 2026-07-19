@@ -60,10 +60,11 @@ export function quietRevealActive(query) {
 /**
  * Source IDs to exclude for the current library request.
  * Direct navigation into a quiet source (folder under its path) bypasses that source.
+ * ``reveal`` is opt-in (grid search results only) — never implied by an active query.
  */
-export function effectiveExcludeSources(sources = [], folderValues = [], { q = '', reveal = false } = {}) {
+export function effectiveExcludeSources(sources = [], folderValues = [], { reveal = false } = {}) {
     if (!quietIds.size) return [];
-    if (reveal || quietRevealActive(q)) return [];
+    if (reveal) return [];
     const folders = (Array.isArray(folderValues) ? folderValues : [folderValues])
         .map((value) => String(value || ''))
         .filter(Boolean);
@@ -82,8 +83,8 @@ export function rememberSources(sources = []) {
     knownSources = Array.isArray(sources) ? sources : [];
 }
 
-export function applyExcludeSources(params, sources = knownSources, folderValues = [], { q = '' } = {}) {
-    const excluded = effectiveExcludeSources(sources, folderValues, { q });
+export function applyExcludeSources(params, sources = knownSources, folderValues = [], { reveal = false } = {}) {
+    const excluded = effectiveExcludeSources(sources, folderValues, { reveal });
     if (excluded.length) params.set('exclude_sources', excluded.join(','));
     else params.delete('exclude_sources');
     return params;

@@ -50,6 +50,39 @@ do
   Core.ledger_remember(ledger, "/c.dng", "elo_stars", 5, 1)
   check("matching last projection allows update", Core.may_apply_elo_stars(ledger, "/c.dng", 5, 4))
   check("user override blocks projection", not Core.may_apply_elo_stars(ledger, "/c.dng", 3, 5))
+  check("demotion to zero allowed when matching", Core.may_apply_elo_stars(ledger, "/c.dng", 5, 0))
+end
+
+-- Ledger survives serialize/deserialize (plugin restart).
+do
+  local ledger = Core.new_ledger()
+  Core.ledger_remember(ledger, "/photos/a.dng", "elo_stars", 5, 42)
+  Core.ledger_remember(ledger, "C:\\Photos\\b.dng", "flag", "picked", 7)
+  local blob = Core.ledger_serialize(ledger)
+  local restored = Core.ledger_deserialize(blob)
+  check("serialize round-trip elo", Core.is_echo(restored, "/photos/a.dng", "elo_stars", 5))
+  check("serialize round-trip flag", Core.is_echo(restored, "C:\\Photos\\b.dng", "flag", "picked"))
+  check("deserialize preserves clock", Core.ledger_get(restored, "/photos/a.dng", "elo_stars").clock == 42)
+  check("may_apply after restart", Core.may_apply_elo_stars(restored, "/photos/a.dng", 5, 4))
+end
+
+-- Pending/unmatched entries are not remembered.
+do
+  local ledger = Core.new_ledger()
+  Core.ledger_remember_confirmed(ledger, {
+    { filepath = "/ok.dng", family = "flag", value = "picked", ts = 1 },
+  })
+  Core.ledger_remember_confirmed(ledger, {
+    { filepath = nil, family = "flag", value = "rejected", ts = 2 },
+    { family = "lr_rating", value = 3, ts = 3 },
+  })
+  check("confirmed entry remembered", Core.is_echo(ledger, "/ok.dng", "flag", "picked"))
+  check("pending-shaped entries skipped", Core.ledger_get(ledger, "/missing.dng", "flag") == nil)
+  local count = 0
+  for _ in pairs(ledger.applied) do
+    count = count + 1
+  end
+  check("only confirmed rows land in ledger", count == 1)
 end
 
 -- Batching

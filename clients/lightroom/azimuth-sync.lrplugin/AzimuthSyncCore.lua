@@ -9,6 +9,37 @@ local function key(filepath, family)
   return tostring(filepath or "") .. "\0" .. tostring(family or "")
 end
 
+local function encode_scalar(value)
+  local t = type(value)
+  if t == "nil" then
+    return "n"
+  elseif t == "boolean" then
+    return value and "b1" or "b0"
+  elseif t == "number" then
+    return "d" .. tostring(value)
+  end
+  local text = tostring(value or "")
+  text = text:gsub("\\", "\\\\"):gsub("\n", "\\n"):gsub("\r", "\\r"):gsub("\t", "\\t"):gsub("\0", "\\0")
+  return "s" .. text
+end
+
+local function decode_scalar(token)
+  if token == nil or token == "n" then
+    return nil
+  end
+  local prefix = token:sub(1, 1)
+  if prefix == "b" then
+    return token == "b1"
+  elseif prefix == "d" then
+    return tonumber(token:sub(2))
+  elseif prefix == "s" then
+    local text = token:sub(2)
+    text = text:gsub("\\0", "\0"):gsub("\\t", "\t"):gsub("\\r", "\r"):gsub("\\n", "\n"):gsub("\\\\", "\\")
+    return text
+  end
+  return token
+end
+
 function Core.new_ledger()
   return { applied = {} }
 end
@@ -55,6 +86,79 @@ function Core.may_apply_elo_stars(ledger, filepath, current_lr_stars, projected)
   end
   return (tonumber(current_lr_stars) or 0) == (tonumber(entry.value) or 0)
       and (tonumber(projected) or 0) ~= (tonumber(entry.value) or 0)
+end
+
+--- Persistable snapshot of the echo ledger (survives LR/plugin restart).
+function Core.ledger_serialize(ledger)
+  local rows = {}
+  for k, entry in pairs((ledger and ledger.applied) or {}) do
+    local filepath, family = k:match("^(.-)\0(.*)$")
+    if filepath and family then
+      rows[#rows + 1] = {
+        filepath = filepath,
+        family = family,
+        value = entry.value,
+        clock = tonumber(entry.clock) or 0,
+      }
+    end
+  end
+  table.sort(rows, function(a, b)
+    if a.filepath == b.filepath then
+      return a.family < b.family
+    end
+    return a.filepath < b.filepath
+  end)
+  local lines = {}
+  for _, row in ipairs(rows) do
+    lines[#lines + 1] = table.concat({
+      encode_scalar(row.filepath),
+      encode_scalar(row.family),
+      encode_scalar(row.value),
+      encode_scalar(row.clock),
+    }, "\t")
+  end
+  return table.concat(lines, "\n")
+end
+
+function Core.ledger_deserialize(text)
+  local ledger = Core.new_ledger()
+  if type(text) ~= "string" or #text == 0 then
+    return ledger
+  end
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    if #line > 0 then
+      local parts = {}
+      local start = 1
+      while true do
+        local stop = line:find("\t", start, true)
+        if not stop then
+          parts[#parts + 1] = line:sub(start)
+          break
+        end
+        parts[#parts + 1] = line:sub(start, stop - 1)
+        start = stop + 1
+      end
+      if #parts >= 4 then
+        local filepath = decode_scalar(parts[1])
+        local family = decode_scalar(parts[2])
+        local value = decode_scalar(parts[3])
+        local clock = decode_scalar(parts[4])
+        if filepath and family then
+          Core.ledger_remember(ledger, filepath, family, value, clock)
+        end
+      end
+    end
+  end
+  return ledger
+end
+
+--- Remember only server-confirmed applied entries (never pending/unmatched).
+function Core.ledger_remember_confirmed(ledger, confirmed_entries)
+  for _, entry in ipairs(confirmed_entries or {}) do
+    if entry and entry.filepath and entry.family then
+      Core.ledger_remember(ledger, entry.filepath, entry.family, entry.value, entry.ts or entry.clock)
+    end
+  end
 end
 
 --- Split a list into batches of at most ``size`` (for withWriteAccessDo).

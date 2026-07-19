@@ -588,6 +588,112 @@ async def apply_entries(
     await ensure_schema(db_path)
     received_at = float(receive_time or time.time())
     normalized = [_normalize_entry(entry, receive_time=received_at) for entry in entries]
+    return await _apply_normalized_entries(
+        db_path, normalized, applied_from=applied_from, received_at=received_at
+    )
+
+
+async def apply_origin_batch(
+    db_path: str,
+    drafts: Iterable[Mapping[str, Any]],
+    *,
+    origin: str,
+    applied_from: str | None,
+    receive_time: float | None = None,
+) -> dict[str, Any]:
+    """Apply drafts for one origin, allocating contiguous origin_seq inside the insert txn.
+
+    Mirrors ``append_entry``: MAX(origin_seq)+1 happens under BEGIN IMMEDIATE so
+    concurrent batches cannot collide on the same (origin, origin_seq) identity.
+    """
+
+    await ensure_schema(db_path)
+    received_at = float(receive_time or time.time())
+    origin_name = str(origin or "").strip()
+    if not origin_name:
+        raise ValueError("oplog origin is required")
+    draft_list = list(drafts)
+    if not draft_list:
+        return {"received": 0, "inserted": 0, "skipped_unhashed": 0, "entries": []}
+
+    conn = await connection.open_async(db_path)
+    inserted = 0
+    results: list[dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
+    try:
+        await conn.execute("BEGIN IMMEDIATE")
+        row = await (
+            await conn.execute(
+                "SELECT COALESCE(MAX(origin_seq), 0) AS max_seq FROM oplog WHERE origin = ?",
+                (origin_name,),
+            )
+        ).fetchone()
+        next_seq = int(row["max_seq"]) + 1
+        for offset, draft in enumerate(draft_list):
+            entry = _normalize_entry(
+                {
+                    "origin": origin_name,
+                    "origin_seq": next_seq + offset,
+                    "content_hash": draft["content_hash"],
+                    "family": draft["family"],
+                    "payload": draft["payload"],
+                    "ts": draft["ts"],
+                },
+                receive_time=received_at,
+            )
+            normalized.append(entry)
+            cursor = await conn.execute(
+                "INSERT OR IGNORE INTO oplog(origin, origin_seq, content_hash, family, payload, ts, applied_from) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    entry["origin"],
+                    entry["origin_seq"],
+                    entry["content_hash"],
+                    entry["family"],
+                    _json_payload(entry["payload"]),
+                    entry["ts"],
+                    applied_from,
+                ),
+            )
+            inserted += max(int(cursor.rowcount or 0), 0)
+            stored = await (
+                await conn.execute(
+                    "SELECT origin, origin_seq, content_hash, family, payload, ts, applied_from "
+                    "FROM oplog WHERE origin = ? AND origin_seq = ?",
+                    (entry["origin"], entry["origin_seq"]),
+                )
+            ).fetchone()
+            canonical = _entry_dict(stored)
+            result = await _apply_entry_on_conn(conn, canonical)
+            await _record_apply_result(conn, canonical, result, recorded_at=received_at)
+            results.append(
+                {"origin": canonical["origin"], "origin_seq": canonical["origin_seq"], "result": result}
+            )
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if normalized:
+        _invalidate_pending_entry_count(db_path)
+    if any(item["result"] == "applied" for item in results):
+        await retry_pending_entries(db_path)
+    return {
+        "received": len(normalized),
+        "inserted": inserted,
+        "skipped_unhashed": sum(item["result"] == "unknown-content-hash" for item in results),
+        "entries": results,
+    }
+
+
+async def _apply_normalized_entries(
+    db_path: str,
+    normalized: list[dict[str, Any]],
+    *,
+    applied_from: str | None,
+    received_at: float,
+) -> dict[str, Any]:
     conn = await connection.open_async(db_path)
     inserted = 0
     results: list[dict[str, Any]] = []

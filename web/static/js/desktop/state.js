@@ -1,5 +1,5 @@
 import { MONTH_NAMES } from './dom.js';
-import { applyExcludeSources, clearQuietReveal } from './quiet_sources.js';
+import { applyExcludeSources, clearQuietReveal, quietRevealActive } from './quiet_sources.js';
 
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
@@ -249,7 +249,7 @@ export function nonSearchFacetCount() {
     ].filter(Boolean).length;
 }
 
-export function scopeParams(extra = {}) {
+export function scopeParams(extra = {}, options = {}) {
     const params = new URLSearchParams();
     if (scope.q) params.set('q', scope.q);
     if (scope.q && scope.deep) params.set('deep', '1');
@@ -268,7 +268,9 @@ export function scopeParams(extra = {}) {
     if (scope.collectionId) params.set('collection_id', scope.collectionId);
     if (scope.sort) params.set('sort', scope.sort);
     params.set('stacks', viewState.prefs.collapseStacks ? 'collapsed' : 'expanded');
-    applyExcludeSources(params, undefined, folderValues(), { q: scope.q });
+    // Reveal is grid-results-only — map/histogram/refine/export keep excludes.
+    const reveal = Boolean(options.forGridResults) && quietRevealActive(scope.q);
+    applyExcludeSources(params, undefined, folderValues(), { reveal });
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }

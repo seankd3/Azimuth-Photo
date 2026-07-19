@@ -140,6 +140,98 @@ class DepsHashReuseTests(unittest.TestCase):
             self.assertEqual(again.name, new_digest)
             build.assert_not_called()
 
+    def test_partial_venv_without_marker_is_rebuilt_not_reused(self):
+        """Mid-pip crash leaves python but no .deps_hash → must rebuild, never reuse."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            version = root / "versions" / "abc"
+            (version / "web").mkdir(parents=True)
+            (version / "web" / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+            digest = client_update.deps_hash(version / "web" / "requirements.txt")
+            partial = root / "venvs" / digest
+            partial.mkdir(parents=True)
+            python = client_update._venv_python(partial)
+            python.parent.mkdir(parents=True, exist_ok=True)
+            python.write_text("", encoding="utf-8")
+            # No .deps_hash marker — looks reusable to the old python-only check.
+            self.assertFalse(
+                client_update.should_reuse_venv(
+                    partial, version / "web" / "requirements.txt", expected_hash=digest
+                )
+            )
+
+            builds: list[str] = []
+
+            def fake_build(path, requirements):
+                builds.append(path.name)
+                path.mkdir(parents=True, exist_ok=True)
+                py = client_update._venv_python(path)
+                py.parent.mkdir(parents=True, exist_ok=True)
+                py.write_text("rebuilt", encoding="utf-8")
+                (path / ".deps_hash").write_text(path.name + "\n", encoding="utf-8")
+                return path
+
+            updater = client_update.ClientUpdater(install_root=root, hub="http://hub", local_sha="old")
+            with mock.patch.object(client_update, "build_venv", side_effect=fake_build):
+                chosen = updater._ensure_venv_for_version("abc")
+            self.assertEqual(chosen.name, digest)
+            self.assertEqual(builds, [digest])
+            self.assertTrue((chosen / ".deps_hash").is_file())
+
+    def test_build_venv_stages_into_building_then_replaces(self):
+        """Crash-safe build: work in <hash>.building, flip only after python + marker."""
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "venvs" / "deadbeef"
+            building = target.with_name(target.name + ".building")
+            created: list[str] = []
+            replaced: list[tuple[str, str]] = []
+
+            def fake_create(path, with_pip=True):
+                created.append(path)
+                Path(path).mkdir(parents=True, exist_ok=True)
+                py = client_update._venv_python(Path(path))
+                py.parent.mkdir(parents=True, exist_ok=True)
+                py.write_text("", encoding="utf-8")
+
+            real_replace = os.replace
+
+            def tracking_replace(src, dst):
+                replaced.append((str(src), str(dst)))
+                return real_replace(src, dst)
+
+            with mock.patch("venv.create", side_effect=fake_create):
+                with mock.patch("features.sync.client_update.os.replace", side_effect=tracking_replace):
+                    result = client_update.build_venv(target, None)
+            self.assertEqual(result, target)
+            self.assertEqual(created, [os.fspath(building)])
+            self.assertEqual(replaced, [(str(building), str(target))])
+            self.assertTrue(target.is_dir())
+            self.assertFalse(building.exists())
+            self.assertTrue((target / ".deps_hash").is_file())
+            self.assertEqual((target / ".deps_hash").read_text(encoding="utf-8").strip(), "deadbeef")
+
+
+class SafeExtractTests(unittest.TestCase):
+    def test_safe_extract_refuses_path_traversal_and_links_without_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "staging"
+            dest.mkdir()
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+                evil = tarfile.TarInfo(name="../escape.txt")
+                payload = b"nope"
+                evil.size = len(payload)
+                archive.addfile(evil, io.BytesIO(payload))
+            buffer.seek(0)
+            with tarfile.open(fileobj=buffer, mode="r:gz") as handle:
+                with mock.patch.object(handle, "extractall", side_effect=TypeError("no filter")):
+                    with self.assertRaisesRegex(RuntimeError, "unsafe tar member"):
+                        client_update.safe_extractall(handle, dest)
+            self.assertFalse((Path(tmp) / "escape.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -28,8 +28,23 @@ BOOT_ATTEMPTS_FILE = "boot_attempts.txt"
 ROLLBACK_NOTICE_FILE = "rollback_notice.txt"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8010
-READY_TIMEOUT_SECONDS = 45.0
 READY_POLL_SECONDS = 0.5
+
+
+def ready_timeout_seconds(environ: dict[str, str] | None = None) -> float:
+    """Configurable ready wait; default 120s. Slow-but-alive boots keep waiting."""
+
+    env = os.environ if environ is None else environ
+    raw = (env.get("PHOTOARCHIVE_READY_TIMEOUT") or "").strip()
+    if not raw:
+        return 120.0
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return 120.0
+
+
+READY_TIMEOUT_SECONDS = ready_timeout_seconds()
 
 
 def pointer_path(install_root: Path) -> Path:
@@ -159,18 +174,28 @@ def wait_until_ready(
     *,
     base_url: str,
     process: subprocess.Popen,
-    timeout: float = READY_TIMEOUT_SECONDS,
+    timeout: float | None = None,
     poll: float = READY_POLL_SECONDS,
 ) -> bool:
-    deadline = time.monotonic() + timeout
+    """Wait until /api/version answers, or the process crashes.
+
+    A process still running past ``timeout`` is treated as still starting —
+    keep waiting, never count that as a failed boot.
+    """
+
+    limit = ready_timeout_seconds() if timeout is None else float(timeout)
+    deadline = time.monotonic() + limit
+    logged_slow = False
     version_url = base_url.rstrip("/") + "/api/version"
-    while time.monotonic() < deadline:
+    while True:
         if process.poll() is not None:
             return False
         if version_ready(version_url):
             return True
+        if not logged_slow and time.monotonic() >= deadline:
+            logged_slow = True
+            # Still alive past timeout → keep waiting; do not fail the boot.
         time.sleep(poll)
-    return False
 
 
 def apply_two_failed_boots_rule(install_root: Path, attempts: int) -> bool:
@@ -231,7 +256,6 @@ def run_supervised(
     while True:
         version_dir = resolve_version_dir(root)
         sha = version_dir.name
-        attempts = record_boot_attempt(root, sha)
         web_dir = version_web_dir(version_dir)
         python = resolve_python(root, version_dir)
         env = {
@@ -248,13 +272,14 @@ def run_supervised(
         )
         ready = wait_ready(base_url=base_url, process=process, timeout=ready_timeout)
         if not ready:
+            # Only crash-exits count as failed boots. Slow-but-alive never lands here.
             if process.poll() is None:
                 process.terminate()
                 try:
                     process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     process.kill()
-            # Two consecutive crash-before-ready boots → flip pointer back.
+            attempts = record_boot_attempt(root, sha)
             apply_two_failed_boots_rule(root, attempts)
             continue
 
@@ -273,7 +298,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=int(os.environ.get("PHOTOARCHIVE_PORT") or DEFAULT_PORT))
     args = parser.parse_args(argv)
     root = resolve_install_root(args.install_root or None)
-    return run_supervised(install_root=root, host=args.host, port=args.port)
+    return run_supervised(
+        install_root=root,
+        host=args.host,
+        port=args.port,
+        ready_timeout=ready_timeout_seconds(),
+    )
 
 
 if __name__ == "__main__":

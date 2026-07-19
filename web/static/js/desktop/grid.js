@@ -319,7 +319,7 @@ async function refreshPendingPreviews() {
 }
 
 async function refreshFirstPagePreviews() {
-    const data = await loadScopePage({ limit: 100, offset: 0 }).catch(() => null);
+    const data = await loadScopePage({ limit: 100, offset: 0, forGridResults: true }).catch(() => null);
     if (!mounted || !data || !Array.isArray(data.images)) return;
     const current = viewState.images.slice(0, data.images.length);
     const sameRows = current.length === data.images.length
@@ -503,7 +503,7 @@ async function hydrateFirstRunEmpty(request) {
         renderPreparingState();
         emptyScanTimer = window.setTimeout(async () => {
             if (request !== emptyStateRequest || !mounted || viewState.images.length) return;
-            const page = await loadScopePage({ limit: 1, offset: 0 });
+            const page = await loadScopePage({ limit: 1, offset: 0, forGridResults: true });
             if (page && (page.images || []).length) loadFirstPage();
             else hydrateFirstRunEmpty(request);
         }, 1500);
@@ -642,7 +642,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     loadController = controller;
     let data = null;
     try {
-        data = await loadScopePage({ limit, offset: requestStart, signal: controller.signal });
+        data = await loadScopePage({ limit, offset: requestStart, signal: controller.signal, forGridResults: true });
     } catch {
         if (controller.signal.aborted || seq !== generation || token !== loadToken) return false;
         renderError('Retry when the local service is ready.', jump ? () => jumpToOffset(requestStart) : loadFirstPage);

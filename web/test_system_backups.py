@@ -329,6 +329,28 @@ class BackupUnitTests(unittest.TestCase):
             str(self.db_path.resolve()),
         )
 
+    def test_foreign_dir_restore_hard_refuses(self):
+        """Restore must assert_backup_owner — listing may soften to a warning."""
+
+        first = backups.create_snapshot(
+            str(self.db_path),
+            when=datetime(2026, 7, 1, 4, 0, 0),
+        )
+        self.assertTrue(first["ok"])
+        other_db = Path(self.tempdir.name) / "other-instance.db"
+        _make_catalog(other_db, files=[(str(Path(self.tempdir.name) / "other.bin"), b"other-bytes")])
+
+        with mock.patch.object(backups, "backup_root", return_value=self.root):
+            with mock.patch.object(backups, "backup_root_for", return_value=self.root):
+                listed = backups.list_backups(str(other_db))
+                self.assertTrue(listed)
+                self.assertIn("owner_warning", listed[0])
+                with self.assertRaises(backups.BackupMisconfigurationError):
+                    backups.restore_backup(str(other_db), first["name"])
+        # No staging artifacts beside the foreign catalog.
+        staging = other_db.with_name("photoarchive.restored.db")
+        self.assertFalse(staging.exists())
+
 
 class BackupIsolationTests(unittest.TestCase):
     def test_custom_home_ignores_foreign_backup_dir_override(self):

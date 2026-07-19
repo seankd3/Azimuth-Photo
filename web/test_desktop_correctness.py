@@ -346,13 +346,17 @@ class DesktopCorrectnessTests(unittest.TestCase):
         timeline = read("timeline.js")
         filters = read("filters.js")
 
-        self.assertIn("applyExcludeSources(params, undefined, folderValues(), { q: scope.q });", state)
+        self.assertIn("applyExcludeSources(params, undefined, folderValues(), { reveal });", state)
+        self.assertIn("forGridResults", state)
         self.assertIn("export function applyExcludeSources", quiet)
         self.assertIn("data-quiet-toggle", panel)
         self.assertIn("pa_d_quiet_sources", quiet)
         self.assertIn("await getMapMarkers(scopeParams())", map_module)
         self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)
         self.assertIn("getFilterOptions(scopeParams())", filters)
+        # Reveal must not clear excludes for non-grid consumers.
+        self.assertNotIn("quietRevealActive(q)", quiet)
+        self.assertIn("if (reveal) return [];", quiet)
         # Never reimplement exclude_sources outside the shared scopeParams path.
         for path_name, source in (
             ("map.js", map_module),
@@ -365,6 +369,23 @@ class DesktopCorrectnessTests(unittest.TestCase):
                 source,
                 f"{path_name} must inherit quiet exclusion from scopeParams, not set it locally",
             )
+
+    def test_reveal_quiet_stays_grid_results_only(self):
+        state = read("state.js")
+        quiet = read("quiet_sources.js")
+        grid = read("grid.js")
+        export_menu = read("export_menu.js")
+        map_module = read("map.js")
+        self.assertIn("options.forGridResults", state)
+        self.assertIn("forGridResults: true", grid)
+        self.assertIn("getMapMarkers(scopeParams())", map_module)
+        self.assertNotIn("forGridResults", map_module)
+        self.assertIn("if (similarIds.length) extra.ids = similarIds.join(',');", export_menu)
+        self.assertNotIn(
+            "if (scope.similarIds.length) return scope.similarIds",
+            export_menu,
+        )
+        self.assertIn("revealQuietForQuery", quiet)
 
     def test_collection_scope_export_uses_server_composition(self):
         panel = read("panel.js")
@@ -384,7 +405,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         # (export_menu.js), which exportCurrentScope now delegates to.
         self.assertIn("exportScope({ format", export_scope)
         self.assertIn("Preparing ${exportCount} file", export_menu)
-        self.assertIn("getRankings(scopeParams({", shared_dialog_scope)
+        self.assertIn("getRankings(scopeParams(extra))", shared_dialog_scope)
         self.assertIn("while (offset < maxIds)", shared_dialog_scope)
         self.assertIn("SCOPE_EXPORT_PAGE_SIZE", shared_dialog_scope)
         self.assertIn("SCOPE_EXPORT_PROGRESS_DELAY_MS", shared_dialog_scope)

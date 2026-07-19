@@ -25,12 +25,28 @@ def _normalize_path(filepath: str) -> str:
     return os.path.normpath(raw)
 
 
+def _canonicalize_path(filepath: str) -> str:
+    """Casefold + unify separators for Windows-style LR path identity."""
+
+    normalized = _normalize_path(filepath)
+    if not normalized:
+        return ""
+    return normalized.replace("\\", "/").casefold()
+
+
 async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None:
-    """Map an absolute LR filepath to the satellite's local-image identity."""
+    """Map an absolute LR filepath to the satellite's local-image identity.
+
+    Fast path: exact ``filepath = ?`` (uses existing filepath indexes).
+    On miss: compare ``LOWER(REPLACE(filepath, '\\', '/'))`` to a Python-
+    canonicalized probe. LR delta batches are small; the fallback only runs
+    on case/separator drift, so indexed exact match stays the common case.
+    """
 
     path = _normalize_path(filepath)
     if not path:
         return None
+    canon = _canonicalize_path(filepath)
     conn = await connection.open_async(db_path)
     try:
         row = await (
@@ -41,6 +57,16 @@ async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None
                 (path,),
             )
         ).fetchone()
+        if row is None:
+            row = await (
+                await conn.execute(
+                    "SELECT id, content_hash, filepath, flag FROM images "
+                    "WHERE content_hash IS NOT NULL "
+                    "AND LOWER(REPLACE(filepath, '\\', '/')) = ? "
+                    "ORDER BY id LIMIT 1",
+                    (canon,),
+                )
+            ).fetchone()
         if row is None or not row["content_hash"]:
             return None
         return {
@@ -49,23 +75,6 @@ async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None
             "filepath": str(row["filepath"] or path),
             "flag": str(row["flag"] or "unflagged"),
         }
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def _next_lr_seq(db_path: str, count: int) -> int:
-    """Allocate the first of ``count`` contiguous origin_seq values for lr."""
-
-    await oplog.ensure_schema(db_path)
-    conn = await connection.open_async(db_path)
-    try:
-        row = await (
-            await conn.execute(
-                "SELECT COALESCE(MAX(origin_seq), 0) AS max_seq FROM oplog WHERE origin = ?",
-                (LR_ORIGIN,),
-            )
-        ).fetchone()
-        return int(row["max_seq"]) + 1
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -86,7 +95,6 @@ async def apply_inbound_deltas(
     """Apply a batch of LR-observed flag/rating deltas through the shared oplog path."""
 
     pending: list[dict[str, Any]] = []
-    entries: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     prepared: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
@@ -132,37 +140,54 @@ async def apply_inbound_deltas(
             errors.append({"index": index, "filepath": filepath, "error": str(error)})
 
     if prepared:
-        first_seq = await _next_lr_seq(db_path, len(prepared))
-        for offset, (_identity, draft) in enumerate(prepared):
-            entries.append(
+        drafts = [
+            {
+                "content_hash": draft["content_hash"],
+                "family": draft["family"],
+                "payload": draft["payload"],
+                "ts": draft["ts"],
+                "filepath": draft["filepath"],
+                "inbound_family": draft["inbound_family"],
+                "value": draft["payload"].get("value"),
+            }
+            for _identity, draft in prepared
+        ]
+        applied = await oplog.apply_origin_batch(
+            db_path,
+            [
                 {
-                    "origin": LR_ORIGIN,
-                    "origin_seq": first_seq + offset,
                     "content_hash": draft["content_hash"],
                     "family": draft["family"],
                     "payload": draft["payload"],
                     "ts": draft["ts"],
                 }
-            )
-        applied = await oplog.apply_entries(db_path, entries, applied_from="lr-bridge")
+                for draft in drafts
+            ],
+            origin=LR_ORIGIN,
+            applied_from="lr-bridge",
+        )
+        entries = [
+            {
+                "origin": item["origin"],
+                "origin_seq": item["origin_seq"],
+                "content_hash": drafts[index]["content_hash"],
+                "family": drafts[index]["inbound_family"],
+                "filepath": drafts[index]["filepath"],
+                "value": drafts[index]["value"],
+                "ts": drafts[index]["ts"],
+            }
+            for index, item in enumerate(applied.get("entries") or [])
+        ]
     else:
         applied = {"received": 0, "inserted": 0, "skipped_unhashed": 0, "entries": []}
+        entries = []
 
     return {
         "applied": applied,
         "pending": pending,
         "pending_count": len(pending),
         "errors": errors,
-        "entries": [
-            {
-                "origin": entry["origin"],
-                "origin_seq": entry["origin_seq"],
-                "content_hash": entry["content_hash"],
-                "family": entry["family"],
-                "ts": entry["ts"],
-            }
-            for entry in entries
-        ],
+        "entries": entries,
     }
 
 

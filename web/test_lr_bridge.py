@@ -148,6 +148,69 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["pending_count"], 1)
         self.assertEqual(result["applied"]["received"], 0)
 
+    async def test_resolve_filepath_canonicalizes_windows_case_and_separators(self):
+        path = self._catalog()
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET filepath = ? WHERE id = 1",
+                (r"D:\Photos\IMG_1.dng",),
+            )
+            conn.commit()
+        identity = await lr_bridge.resolve_filepath(path, r"d:/photos/img_1.dng")
+        self.assertIsNotNone(identity)
+        self.assertEqual(identity["image_id"], 1)
+        self.assertEqual(identity["content_hash"], HASH_A)
+
+    async def test_inbound_entries_expose_filepath_and_inbound_family(self):
+        """Plugin ledger_remember_confirmed needs filepath + inbound family + value."""
+
+        path = self._catalog()
+        mixed = await lr_bridge.apply_inbound_deltas(
+            path,
+            [
+                {"filepath": "/photos/IMG_1.dng", "family": "lr_rating", "value": 4, "observed_at": 5.0},
+                {"filepath": "/missing.dng", "family": "flag", "value": "picked"},
+            ],
+        )
+        self.assertEqual(mixed["pending_count"], 1)
+        self.assertEqual(len(mixed["entries"]), 1)
+        entry = mixed["entries"][0]
+        self.assertEqual(entry["filepath"], "/photos/IMG_1.dng")
+        self.assertEqual(entry["family"], "lr_rating")
+        self.assertEqual(entry["value"], 4)
+        self.assertNotIn("/missing.dng", {item.get("filepath") for item in mixed["entries"]})
+
+    async def test_concurrent_inbound_posts_get_distinct_seqs_and_both_apply(self):
+        """origin_seq must be allocated inside the insert txn — no silent collision."""
+
+        import asyncio
+
+        path = self._catalog()
+        first, second = await asyncio.gather(
+            lr_bridge.apply_inbound_deltas(
+                path,
+                [{"filepath": "/photos/IMG_1.dng", "family": "flag", "value": "picked", "observed_at": 10.0}],
+            ),
+            lr_bridge.apply_inbound_deltas(
+                path,
+                [{"filepath": "/photos/IMG_2.dng", "family": "flag", "value": "rejected", "observed_at": 11.0}],
+            ),
+        )
+        self.assertEqual(first["applied"]["inserted"], 1)
+        self.assertEqual(second["applied"]["inserted"], 1)
+        seqs = {first["entries"][0]["origin_seq"], second["entries"][0]["origin_seq"]}
+        self.assertEqual(len(seqs), 2)
+        with closing(sqlite3.connect(path)) as conn:
+            flags = dict(conn.execute("SELECT id, flag FROM images WHERE id IN (1, 2)").fetchall())
+            rows = conn.execute(
+                "SELECT origin_seq, content_hash, family FROM oplog WHERE origin = 'lr' ORDER BY origin_seq"
+            ).fetchall()
+        self.assertEqual(flags[1], "picked")
+        self.assertEqual(flags[2], "rejected")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row[0] for row in rows}, seqs)
+        self.assertEqual({row[1] for row in rows}, {HASH_A, HASH_B})
+
     async def test_outbound_flags_exclude_lr_origin(self):
         path = self._catalog()
         await oplog.apply_entries(
@@ -197,6 +260,41 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         by_hash = await elo_stars.elo_stars_for_hashes(path)
         self.assertNotIn(HASH_C, by_hash)
 
+    async def test_elo_stars_demotion_emits_clear_to_zero(self):
+        """Previously projected photo dropping below threshold must emit stars=0."""
+
+        path = self._catalog()
+        elo_stars.invalidate_elo_stars_cache()
+        with closing(sqlite3.connect(path)) as conn:
+            for index in range(4, 14):
+                content_hash = f"{index:032x}"
+                conn.execute(
+                    "INSERT INTO images(id, filename, filepath, content_hash, elo, comparisons, file_ext) "
+                    "VALUES (?, ?, ?, ?, ?, 5, 'dng')",
+                    (index, f"x{index}.dng", f"/photos/x{index}.dng", content_hash, 1000 - index),
+                )
+            conn.commit()
+        elo_stars.invalidate_elo_stars_cache()
+        first = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        by_path = {item["filepath"]: item["value"] for item in first}
+        self.assertEqual(by_path.get("/photos/IMG_1.dng"), 5)
+        # Demote HASH_A below the projecting band via comparisons=0.
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET comparisons = 0, elo = 0 WHERE content_hash = ?",
+                (HASH_A,),
+            )
+            conn.commit()
+        elo_stars.invalidate_elo_stars_cache()
+        second = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        clears = [item for item in second if item["filepath"] == "/photos/IMG_1.dng"]
+        self.assertEqual(len(clears), 1)
+        self.assertEqual(clears[0]["value"], 0)
+        self.assertEqual(clears[0]["family"], "elo_stars")
+        # Second poll must not re-emit the same clear.
+        third = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        self.assertFalse(any(item["filepath"] == "/photos/IMG_1.dng" for item in third))
+
     def test_project_stars_thresholds(self):
         thresholds = (0.02, 0.10, 0.30)
         self.assertEqual(elo_stars.project_stars(0, 100, thresholds), 5)
@@ -243,6 +341,52 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(matched)
         self.assertEqual(matched["source_image_id"], 1)
         self.assertEqual(matched["match"], "stem")
+
+    async def test_export_ambiguous_fallback_stays_unmatched(self):
+        """Blind raw_ids[0] must not link when stem does not confidently match."""
+
+        path = self._catalog()
+        capture = "2026-01-01T12:00:00"
+        camera = "Canon EOS R5"
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET date_taken = ?, camera_model = ? WHERE id IN (1, 2)",
+                (capture, camera),
+            )
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext, date_taken, camera_model) "
+                "VALUES (20, 'EXPORT_OTHER.jpg', '/photos/EXPORT_OTHER.jpg', ?, 'jpg', ?, ?)",
+                ("f" * 32, capture, camera),
+            )
+            conn.commit()
+        matched = export_relation.match_export_fallback(path, 20)
+        self.assertIsNone(matched)
+        ensured = await export_relation.ensure_export_link(path, 20)
+        self.assertFalse(ensured["linked"])
+        self.assertEqual(ensured["reason"], "unmatched")
+        with closing(sqlite3.connect(path)) as conn:
+            stacks = conn.execute("SELECT COUNT(*) FROM stacks").fetchone()[0]
+            members = conn.execute("SELECT COUNT(*) FROM stack_members").fetchone()[0]
+        self.assertEqual(stacks, 0)
+        self.assertEqual(members, 0)
+
+    async def test_link_export_refuses_non_raw_source(self):
+        path = self._catalog()
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext) "
+                "VALUES (21, 'a.jpg', '/photos/a.jpg', ?, 'jpg')",
+                ("1" * 32,),
+            )
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext) "
+                "VALUES (22, 'b.jpg', '/photos/b.jpg', ?, 'jpg')",
+                ("2" * 32,),
+            )
+            conn.commit()
+        linked = await export_relation.link_export(path, source_image_id=21, export_image_id=22)
+        self.assertFalse(linked["linked"])
+        self.assertEqual(linked["reason"], "source_not_raw")
 
 
 class LrBridgeRouteTests(unittest.IsolatedAsyncioTestCase):
