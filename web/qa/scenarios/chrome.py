@@ -12,29 +12,36 @@ EXPECTED_SCOPE_MENU_ITEMS = (
     "Export view",
 )
 
+EXPECTED_SOURCE_MENU_ITEMS = EXPECTED_SCOPE_MENU_ITEMS + (
+    "Rescan",
+)
 
-def _assert_scope_menu(qa, anchor, *, reveal_available: bool) -> None:
+
+def _assert_scope_menu(qa, anchor, *, reveal_available: bool, expect_rescan: bool = False) -> None:
     anchor.click(button="right")
     menu = qa.page.locator("[role='menu']:visible").last
     menu.wait_for(state="visible", timeout=scaled_timeout_ms(5_000))
     text = menu.inner_text()
-    missing = [item for item in EXPECTED_SCOPE_MENU_ITEMS if item not in text]
+    expected = EXPECTED_SOURCE_MENU_ITEMS if expect_rescan else EXPECTED_SCOPE_MENU_ITEMS
+    missing = [item for item in expected if item not in text]
     assert not missing, f"context menu missing {missing}; rendered items were: {text!r}"
     assert ("Open in Explorer" in text) is reveal_available, f"unexpected reveal action: {text!r}"
+    if expect_rescan:
+        assert "Rescan" in text
 
 
 def source_context_menu(qa) -> None:
     qa.goto_desktop()
-    qa.mark("right-click local and hub sources; only local folders offer Explorer")
-    _assert_scope_menu(qa, qa.page.locator("#source-list [data-source='hub://']"), reveal_available=False)
-    _assert_scope_menu(qa, qa.page.locator("#source-list [data-source]").filter(has_text="QA Primary"), reveal_available=True)
+    qa.mark("right-click local and hub folder roots; only local folders offer Explorer; sources offer Rescan")
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False, expect_rescan=True)
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True, expect_rescan=True)
 
 
 def folder_context_menu(qa) -> None:
     qa.goto_desktop()
     qa.mark("right-click local and hub folder roots; only local folders offer Explorer")
-    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False)
-    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True)
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False, expect_rescan=True)
+    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True, expect_rescan=True)
 
 
 def settings_panel(qa) -> None:

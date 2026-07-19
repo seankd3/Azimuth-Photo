@@ -1,10 +1,12 @@
-import { getFolderTree, revealFolder } from './api.js';
+import { getFolderTree, revealFolder, rescanCatalogSource } from './api.js';
 import { exportScope, openExportMenu } from './export_menu.js';
-import { emit, folderActive, folderValues, navigateToScope, on, scopeParams } from './state.js';
+import { emit, folderActive, folderValues, navigateToScope, on, scope, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { fileManagerMenuLabel } from './file_manager.js';
 import { openSourceAddFlow } from './drawer.js';
+import { initLibraryManage } from './library_manage.js';
+import { isSourceQuiet, rememberSources, toggleSourceQuiet } from './quiet_sources.js';
 import { icon } from '../icons.js';
 
 const EXPANDED_KEY = 'pa_d_folder_expanded';
@@ -58,6 +60,7 @@ function normalizeSource(source) {
         path: source?.path || '',
         display_name: source?.display_name || leafName(source?.path),
         online: Boolean(source?.online),
+        reveal_available: source?.reveal_available !== false,
         total_count: Number(source?.total_count || 0),
         folders: Array.isArray(source?.folders) ? source.folders : [],
     };
@@ -177,9 +180,17 @@ function openFolderMenu(node, anchor) {
     ensureMenu();
     releaseFocus(menu);
     menuReturn = anchor;
+    const isSourceRoot = Boolean(node.id) && sources.some((item) => item.path === node.path);
+    const quiet = isSourceRoot && isSourceQuiet(node.id);
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + (isSourceRoot
+            ? `<button data-act="quiet">${icon('eye')} ${quiet ? 'Show in library views' : 'Hide from library views'}</button>`
+            : '')
+        + (isSourceRoot
+            ? `<button data-act="rescan"${node.online === false ? ' disabled aria-disabled="true"' : ''}>${icon('refresh-cw')} Rescan</button>`
+            : '')
         + (node.reveal_available !== false ? `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
@@ -188,6 +199,7 @@ function openFolderMenu(node, anchor) {
     for (const button of menu.querySelectorAll('[data-act]')) {
         button.setAttribute('role', 'menuitem');
         button.addEventListener('click', () => {
+            if (button.disabled) return;
             const action = button.dataset.act;
             closeFolderMenu();
             if (action === 'scope') applyFolderScope(node.path);
@@ -195,11 +207,29 @@ function openFolderMenu(node, anchor) {
                 applyFolderScope(node.path);
                 emit('refine:open');
             }
-            if (action === 'reveal') revealFolderPath(node.path, node.source_id);
+            if (action === 'quiet') applyQuietToggle(node.id);
+            if (action === 'rescan') startSourceRescan(node.id);
+            if (action === 'reveal') revealFolderPath(node.path, node.source_id || node.id);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }
-    trapFocus(menu, menu.querySelector('button'));
+    trapFocus(menu, menu.querySelector('button:not([disabled])'));
+}
+
+function applyQuietToggle(sourceId) {
+    const quiet = toggleSourceQuiet(sourceId);
+    renderTree();
+    emit('quiet:changed');
+    emit('scope', scope);
+    showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
+}
+
+async function startSourceRescan(sourceId) {
+    const id = Number(sourceId) || 0;
+    if (!id) return;
+    const result = await rescanCatalogSource(id);
+    if (result && result.ok) showToast('Rescan started');
+    else showToast('Couldn’t start rescan');
 }
 
 function closeFolderMenu() {
@@ -244,13 +274,17 @@ function renderSource(source, query = '') {
     if (query && !sourceMatches && !folders.length) return '';
     const isOpen = Boolean(query) || expandedByDefault(source.path, true);
     const active = folderActive(source.path) ? ' active' : '';
-    return `<div class="folder-source" data-folder-source="${esc(source.path)}">`
-        + `<div class="folder-source-row${active}${isOpen ? ' open' : ''}" role="treeitem" aria-selected="${active ? 'true' : 'false'}" aria-expanded="${isOpen ? 'true' : 'false'}" data-folder-source-path="${esc(source.path)}" title="${esc(source.display_name)}">`
+    const quiet = isSourceQuiet(source.id);
+    const countLabel = quiet ? `(${fmt(source.total_count)})` : fmt(source.total_count);
+    return `<div class="folder-source" data-folder-source="${esc(source.path)}" data-source-id="${Number(source.id) || 0}">`
+        + `<div class="folder-source-row${active}${isOpen ? ' open' : ''}${quiet ? ' is-quiet' : ''}" role="treeitem" aria-selected="${active ? 'true' : 'false'}" aria-expanded="${isOpen ? 'true' : 'false'}" data-folder-source-path="${esc(source.path)}" data-source-id="${Number(source.id) || 0}" title="${esc(source.display_name)}">`
         + `<button class="folder-expander" type="button" data-folder-source-toggle="${esc(source.path)}" aria-label="Toggle ${esc(source.display_name)}" aria-expanded="${isOpen ? 'true' : 'false'}">${icon('chevron-right')}</button>`
         + `<button class="folder-main" type="button" data-folder-select="${esc(source.path)}" title="${esc(source.display_name)}">`
         + `<span class="nr-dot ${source.online ? 'on' : 'off'}"></span>`
         + `<span class="folder-label" title="${esc(source.display_name)}">${esc(source.display_name)}</span>`
-        + `<span class="folder-count">${fmt(source.total_count)}</span></button></div>`
+        + `<span class="folder-count">${countLabel}</span></button>`
+        + `<button type="button" class="source-quiet-toggle" data-quiet-toggle aria-pressed="${quiet ? 'true' : 'false'}" aria-label="${quiet ? 'Show in library views' : 'Hide from library views'}" title="${quiet ? 'Show in library views' : 'Hide from library views'}">${icon('eye')}</button>`
+        + '</div>'
         + `<div class="folder-children source-children" data-folder-source-children="${esc(source.path)}"${isOpen ? '' : ' hidden'}>`
         + (isOpen ? folders.map((folder) => renderFolderNode(folder, 0, query)).join('') : '')
         + '</div></div>';
@@ -371,6 +405,16 @@ function bindTreeEvents(root, query = '') {
             container.hidden = !nextOpen;
         });
     }
+    for (const button of root.querySelectorAll('[data-quiet-toggle]')) {
+        button.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const row = button.closest('[data-source-id]');
+            const sourceId = Number(row?.dataset.sourceId) || 0;
+            if (!sourceId) return;
+            applyQuietToggle(sourceId);
+        });
+    }
 }
 
 function syncActiveRows() {
@@ -391,10 +435,12 @@ export async function refreshFoldersPanel({ toastEmpty = false } = {}) {
         const data = await getFolderTree();
         if (seq !== refreshGeneration) return;
         sources = ((data && data.sources) || []).map(normalizeSource);
+        rememberSources(sources);
         if (toastEmpty && !sources.length) showToast('No folder tree yet');
     } catch {
         if (seq !== refreshGeneration) return;
         sources = [];
+        rememberSources([]);
         loadError = true;
     } finally {
         if (seq !== refreshGeneration) return;
@@ -412,6 +458,7 @@ export async function initFoldersPanel(options = {}) {
     closeDrawer = options.closeDrawer || closeDrawer;
     ensureMenu();
     renderTree();
+    initLibraryManage({ onSourcesChanged: () => refreshFoldersPanel() });
     const filter = document.getElementById('folder-filter');
     filter?.addEventListener('input', () => {
         window.clearTimeout(filterTimer);

@@ -17,10 +17,8 @@ import { confirmAction } from './trash.js';
 import { exportScope, openExportMenu, savedOriginalsExportSize } from './export_menu.js';
 import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
-import { openSourceAddFlow } from './drawer.js';
-import { openSourceRevealMenu } from './source_reveal_menu.js';
 import {
-    isSourceQuiet, rememberSources, toggleSourceQuiet, applyExcludeSources,
+    rememberSources, applyExcludeSources,
 } from './quiet_sources.js';
 import { icon } from '../icons.js';
 import { esc, slugifyName } from './dom.js';
@@ -33,9 +31,7 @@ let catalog = null;
 let libraryCounts = null;
 let trashTotal = null;
 let collectionsLoading = true;
-let sourcesLoading = true;
 let collectionsLoadError = false;
-let sourcesLoadError = false;
 let drawerOpen = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
@@ -1065,69 +1061,6 @@ async function loadLibraryCounts() {
     renderLibrary();
 }
 
-function renderSources() {
-    const host = document.getElementById('source-list');
-    const sources = (catalog && catalog.sources) || [];
-    if (sourcesLoading) {
-        host.innerHTML = skeletonRows(3);
-        return;
-    }
-    if (sourcesLoadError) {
-        host.innerHTML = emptyState('hard-drive', "Couldn't load sources.", '<button type="button" data-retry-sources>Retry</button>');
-        host.querySelector('[data-retry-sources]')?.addEventListener('click', loadCatalogChrome);
-        return;
-    }
-    host.innerHTML = sources.length ? sources.map((s) => {
-        const online = Number(s.online) === 1;
-        const count = s.active_image_count != null ? s.active_image_count : s.image_count;
-        const label = s.display_name || s.path;
-        const quiet = isSourceQuiet(s.id);
-        const countLabel = quiet ? `(${fmt(count)})` : fmt(count);
-        return `<div class="nav-row source-row${quiet ? ' is-quiet' : ''}${folderActive(s.path) ? ' active' : ''}" data-source="${esc(s.path)}" data-source-id="${Number(s.id) || 0}" title="${esc(label)}">`
-            + `<button type="button" class="source-main">`
-            + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
-            + `<span class="nr-count">${countLabel}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`
-            + `<button type="button" class="source-quiet-toggle" data-quiet-toggle aria-pressed="${quiet ? 'true' : 'false'}" aria-label="${quiet ? 'Show in library views' : 'Hide from library views'}" title="${quiet ? 'Show in library views' : 'Hide from library views'}">${icon('eye')}</button>`
-            + '</div>';
-    }).join('') : emptyState('hard-drive', 'No sources yet.', '<button type="button" data-add-source>Add a source</button>');
-    host.querySelector('[data-add-source]')?.addEventListener('click', () => {
-        openSourceAddFlow({ onSuccess: loadCatalogChrome });
-    });
-    for (const row of host.querySelectorAll('[data-source]')) {
-        const sourceId = Number(row.dataset.sourceId) || 0;
-        row.querySelector('.source-main')?.addEventListener('click', () => {
-            navigateToScope({ folder: [row.dataset.source] });
-            closeLeftDrawer();
-        });
-        row.querySelector('[data-quiet-toggle]')?.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const quiet = toggleSourceQuiet(sourceId);
-            renderSources();
-            loadLibraryCounts();
-            emit('scope', scope);
-            showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
-        });
-        row.addEventListener('contextmenu', (event) => {
-            event.preventDefault();
-            const source = sources.find((item) => item.path === row.dataset.source);
-            const count = source?.active_image_count != null ? source.active_image_count : source?.image_count;
-            openSourceRevealMenu(row.dataset.source, row, count, {
-                sourceId: source?.id,
-                quiet: isSourceQuiet(source?.id),
-                revealAvailable: source ? !String(source.path || '').toLowerCase().startsWith('hub:') : true,
-                onQuietToggle: () => {
-                    const quiet = toggleSourceQuiet(sourceId);
-                    renderSources();
-                    loadLibraryCounts();
-                    emit('scope', scope);
-                    showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
-                },
-            });
-        });
-    }
-}
-
 async function loadCollections() {
     collectionsLoading = true;
     collectionsLoadError = false;
@@ -1207,18 +1140,11 @@ export function requestSaveCurrentView() {
 }
 
 async function loadCatalogChrome() {
-    sourcesLoading = true;
-    sourcesLoadError = false;
-    renderSources();
     try {
         catalog = await getCatalog();
         rememberSources((catalog && catalog.sources) || []);
     } catch {
         catalog = null;
-        sourcesLoadError = true;
-    } finally {
-        sourcesLoading = false;
-        renderSources();
     }
 }
 
@@ -1622,9 +1548,12 @@ export async function initPanel() {
     on('trash:changed', scheduleChromeRefresh);
     on('import:changed', scheduleChromeRefresh);
     on('collections:refresh', scheduleChromeRefresh);
+    on('quiet:changed', loadLibraryCounts);
     on('scope', () => {
         renderNewCollectionForm();
-        for (const row of document.querySelectorAll('[data-source]')) row.classList.toggle('active', folderActive(row.dataset.source));
+        for (const row of document.querySelectorAll('[data-folder-source-path]')) {
+            row.classList.toggle('active', folderActive(row.dataset.folderSourcePath));
+        }
         for (const row of document.querySelectorAll('[data-coll-id]')) row.classList.toggle('active', row.dataset.collId === String(scope.collectionId || ''));
         for (const row of document.querySelectorAll('[data-lib]')) {
             const key = row.dataset.lib;
@@ -1641,7 +1570,6 @@ export async function initPanel() {
     });
     renderLibrary();
     renderCollections();
-    renderSources();
     loadLibraryCounts();
     await loadCollections();
     await loadSavedViews();
