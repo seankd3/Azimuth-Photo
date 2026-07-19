@@ -53,23 +53,6 @@ async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None
         await connection.close_async(conn, db_path=db_path)
 
 
-async def _next_lr_seq(db_path: str, count: int) -> int:
-    """Allocate the first of ``count`` contiguous origin_seq values for lr."""
-
-    await oplog.ensure_schema(db_path)
-    conn = await connection.open_async(db_path)
-    try:
-        row = await (
-            await conn.execute(
-                "SELECT COALESCE(MAX(origin_seq), 0) AS max_seq FROM oplog WHERE origin = ?",
-                (LR_ORIGIN,),
-            )
-        ).fetchone()
-        return int(row["max_seq"]) + 1
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
 def _rating_value(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)) or int(value) != value:
         raise ValueError("lr_rating must be an integer 0-5")
@@ -86,7 +69,6 @@ async def apply_inbound_deltas(
     """Apply a batch of LR-observed flag/rating deltas through the shared oplog path."""
 
     pending: list[dict[str, Any]] = []
-    entries: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     prepared: list[tuple[dict[str, Any], dict[str, Any]]] = []
 
@@ -132,37 +114,38 @@ async def apply_inbound_deltas(
             errors.append({"index": index, "filepath": filepath, "error": str(error)})
 
     if prepared:
-        first_seq = await _next_lr_seq(db_path, len(prepared))
-        for offset, (_identity, draft) in enumerate(prepared):
-            entries.append(
-                {
-                    "origin": LR_ORIGIN,
-                    "origin_seq": first_seq + offset,
-                    "content_hash": draft["content_hash"],
-                    "family": draft["family"],
-                    "payload": draft["payload"],
-                    "ts": draft["ts"],
-                }
-            )
-        applied = await oplog.apply_entries(db_path, entries, applied_from="lr-bridge")
+        drafts = [
+            {
+                "content_hash": draft["content_hash"],
+                "family": draft["family"],
+                "payload": draft["payload"],
+                "ts": draft["ts"],
+            }
+            for _identity, draft in prepared
+        ]
+        applied = await oplog.apply_origin_batch(
+            db_path, drafts, origin=LR_ORIGIN, applied_from="lr-bridge"
+        )
+        entries = [
+            {
+                "origin": item["origin"],
+                "origin_seq": item["origin_seq"],
+                "content_hash": drafts[index]["content_hash"],
+                "family": drafts[index]["family"],
+                "ts": drafts[index]["ts"],
+            }
+            for index, item in enumerate(applied.get("entries") or [])
+        ]
     else:
         applied = {"received": 0, "inserted": 0, "skipped_unhashed": 0, "entries": []}
+        entries = []
 
     return {
         "applied": applied,
         "pending": pending,
         "pending_count": len(pending),
         "errors": errors,
-        "entries": [
-            {
-                "origin": entry["origin"],
-                "origin_seq": entry["origin_seq"],
-                "content_hash": entry["content_hash"],
-                "family": entry["family"],
-                "ts": entry["ts"],
-            }
-            for entry in entries
-        ],
+        "entries": entries,
     }
 
 

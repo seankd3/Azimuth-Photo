@@ -148,6 +148,37 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["pending_count"], 1)
         self.assertEqual(result["applied"]["received"], 0)
 
+    async def test_concurrent_inbound_posts_get_distinct_seqs_and_both_apply(self):
+        """origin_seq must be allocated inside the insert txn — no silent collision."""
+
+        import asyncio
+
+        path = self._catalog()
+        first, second = await asyncio.gather(
+            lr_bridge.apply_inbound_deltas(
+                path,
+                [{"filepath": "/photos/IMG_1.dng", "family": "flag", "value": "picked", "observed_at": 10.0}],
+            ),
+            lr_bridge.apply_inbound_deltas(
+                path,
+                [{"filepath": "/photos/IMG_2.dng", "family": "flag", "value": "rejected", "observed_at": 11.0}],
+            ),
+        )
+        self.assertEqual(first["applied"]["inserted"], 1)
+        self.assertEqual(second["applied"]["inserted"], 1)
+        seqs = {first["entries"][0]["origin_seq"], second["entries"][0]["origin_seq"]}
+        self.assertEqual(len(seqs), 2)
+        with closing(sqlite3.connect(path)) as conn:
+            flags = dict(conn.execute("SELECT id, flag FROM images WHERE id IN (1, 2)").fetchall())
+            rows = conn.execute(
+                "SELECT origin_seq, content_hash, family FROM oplog WHERE origin = 'lr' ORDER BY origin_seq"
+            ).fetchall()
+        self.assertEqual(flags[1], "picked")
+        self.assertEqual(flags[2], "rejected")
+        self.assertEqual(len(rows), 2)
+        self.assertEqual({row[0] for row in rows}, seqs)
+        self.assertEqual({row[1] for row in rows}, {HASH_A, HASH_B})
+
     async def test_outbound_flags_exclude_lr_origin(self):
         path = self._catalog()
         await oplog.apply_entries(
