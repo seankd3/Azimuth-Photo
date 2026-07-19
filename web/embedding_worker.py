@@ -235,13 +235,9 @@ def _is_sqlite_locked_error(error) -> bool:
 
 
 def _clear_cuda_cache():
-    try:
-        import torch
+    from core.ml_device import empty_cuda_cache
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+    empty_cuda_cache()
 
 
 def _cancel_search_model_residency_task() -> asyncio.Task | None:
@@ -554,6 +550,8 @@ def _load_model(model_dir: str, model_id: str):
     import torch
     from sentence_transformers import SentenceTransformer
 
+    from core.ml_device import sentence_transformers_device
+
     processor_kwargs = None
     if model_id == "Qwen/Qwen3-VL-Embedding-8B":
         processor_kwargs = {
@@ -581,14 +579,16 @@ def _load_model(model_dir: str, model_id: str):
             "The configured 8B search model needs bitsandbytes. "
             "Install the search pack on Linux x86-64 or select the compact 2B search model."
         )
+    device = sentence_transformers_device()
     model = SentenceTransformer(
         model_dir,
+        device=device,
         model_kwargs=model_kwargs,
         processor_kwargs=processor_kwargs,
         trust_remote_code=True,
         local_files_only=True,
     )
-    log.info(f"{model_id} loaded from {model_dir}")
+    log.info(f"{model_id} loaded from {model_dir} device={device}")
     return model
 
 

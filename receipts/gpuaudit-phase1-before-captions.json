@@ -1,0 +1,53 @@
+{
+  "model": "Qwen/Qwen2.5-VL-3B-Instruct bnb-4bit",
+  "device_logic": "device_map={'' : 0} for bnb-4bit",
+  "observed_device": "cuda:0",
+  "hf_device_map": "None",
+  "load_seconds": 20.184,
+  "batch_images": 2,
+  "per_image": [
+    {
+      "seconds": 20.94,
+      "parsed": true,
+      "caption_len": 314
+    },
+    {
+      "seconds": 25.708,
+      "parsed": true,
+      "caption_len": 347
+    }
+  ],
+  "images_per_sec": 0.043,
+  "nvidia_smi_peak_mem_mib": 6055.0,
+  "nvidia_smi_peak_util_pct": 67.0,
+  "nvidia_smi_during": [
+    {
+      "mem_used_mib": 2695.0,
+      "util_pct": 0.0
+    },
+    {
+      "mem_used_mib": 2695.0,
+      "util_pct": 0.0
+    },
+    {
+      "mem_used_mib": 4947.0,
+      "util_pct": 3.0
+    },
+    {
+      "mem_used_mib": 5203.0,
+      "util_pct": 19.0
+    },
+    {
+      "mem_used_mib": 5207.0,
+      "util_pct": 20.0
+    },
+    {
+      "mem_used_mib": 6045.0,
+      "util_pct": 0.0
+    },
+    {
+      "mem_used_mib": 6051.0,
+      "util_pct": 23.0
+    }
+  ]
+}

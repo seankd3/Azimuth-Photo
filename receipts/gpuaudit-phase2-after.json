@@ -1,0 +1,150 @@
+{
+  "phase": "after",
+  "workloads": {
+    "faces": {
+      "observed_providers": [
+        "CPUExecutionProvider"
+      ],
+      "ctx_id": -1,
+      "load_seconds": 4.984,
+      "batch_images": 4,
+      "infer_seconds": 3.077,
+      "images_per_sec": 1.3,
+      "faces_found": [
+        1,
+        1,
+        1,
+        1
+      ],
+      "nvidia_smi_peak_mem_mib": 2477.0,
+      "nvidia_smi_peak_util_pct": 0.0
+    },
+    "ai_masks_subject": {
+      "observed_providers": [
+        "CPUExecutionProvider"
+      ],
+      "status_detail": "rembg u2net CPU (prefer=cuda)",
+      "load_seconds": 9.357,
+      "batch_images": 2,
+      "per_image_seconds": [
+        1.077,
+        0.523
+      ],
+      "images_per_sec": 1.251,
+      "nvidia_smi_peak_mem_mib": 2477.0,
+      "nvidia_smi_peak_util_pct": 0.0
+    },
+    "embeddings": {
+      "observed": {
+        "model.device": "cuda:0",
+        "cuda_mem_allocated_mib": 4911.9
+      },
+      "load_seconds": 48.186,
+      "batch_images": 4,
+      "infer_seconds": 2.145,
+      "images_per_sec": 1.865,
+      "nvidia_smi_peak_mem_mib": 7683.0,
+      "nvidia_smi_peak_util_pct": 18.0,
+      "nvidia_smi_during": [
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 2477.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 0.0
+        },
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 2387.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 0.0
+        },
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 7309.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 6.0
+        },
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 7337.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 2.0
+        },
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 7351.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 3.0
+        },
+        {
+          "name": "NVIDIA GeForce RTX 2060 SUPER",
+          "mem_used_mib": 7387.0,
+          "mem_total_mib": 8192.0,
+          "util_pct": 4.0
+        }
+      ]
+    },
+    "captions": {
+      "preferred_device": "cuda",
+      "observed_device": "cuda:0",
+      "device_map": {
+        "": 0
+      },
+      "load_seconds": 25.101,
+      "batch_images": 2,
+      "per_image": [
+        {
+          "seconds": 17.444,
+          "parsed": true
+        },
+        {
+          "seconds": 23.448,
+          "parsed": true
+        }
+      ],
+      "images_per_sec": 0.049,
+      "nvidia_smi_peak_mem_mib": 6053.0,
+      "nvidia_smi_peak_util_pct": 49.0,
+      "nvidia_smi_during": [
+        {
+          "mem_used_mib": 2487.0,
+          "util_pct": 1.0
+        },
+        {
+          "mem_used_mib": 2489.0,
+          "util_pct": 0.0
+        },
+        {
+          "mem_used_mib": 4873.0,
+          "util_pct": 4.0
+        },
+        {
+          "mem_used_mib": 5293.0,
+          "util_pct": 20.0
+        },
+        {
+          "mem_used_mib": 5297.0,
+          "util_pct": 20.0
+        },
+        {
+          "mem_used_mib": 6045.0,
+          "util_pct": 24.0
+        },
+        {
+          "mem_used_mib": 6053.0,
+          "util_pct": 22.0
+        }
+      ]
+    }
+  },
+  "helper": {
+    "preferred_device": "cuda",
+    "onnx_providers": [
+      "CPUExecutionProvider"
+    ],
+    "insightface_ctx_id": -1,
+    "transformers_device_map_bnb": {
+      "": 0
+    }
+  }
+}

@@ -119,7 +119,15 @@ def subject_model_status() -> dict[str, str | bool]:
         return {"ready": False, "status": "MODEL_MISSING", "detail": "pinned u2net.onnx is not installed"}
     if _sha256(U2NET_MODEL_PATH) != U2NET_MODEL_SHA256:
         return {"ready": False, "status": "MODEL_MISSING", "detail": "u2net.onnx checksum does not match pinned release"}
-    return {"ready": True, "status": "READY", "detail": "rembg u2net CPU"}
+    from core.ml_device import onnx_providers, preferred_device
+
+    providers = onnx_providers()
+    backend = "CUDA" if providers and providers[0] == "CUDAExecutionProvider" else "CPU"
+    return {
+        "ready": True,
+        "status": "READY",
+        "detail": f"rembg u2net {backend} (prefer={preferred_device()})",
+    }
 
 
 def _mask_cache_key(base_preview: Path, kind: MaskKind) -> str:
@@ -150,12 +158,17 @@ def _load_base_preview(base_preview: Path) -> np.ndarray:
 def _subject_session_for_model():
     global _subject_session
     if _subject_session is None:
+        from core.ml_device import onnx_providers
+
         model = ensure_subject_model()
         onnxruntime = _get_onnxruntime()
         options = onnxruntime.SessionOptions()
         options.intra_op_num_threads = 1
         options.inter_op_num_threads = 1
-        _subject_session = onnxruntime.InferenceSession(str(model), sess_options=options, providers=["CPUExecutionProvider"])
+        providers = onnx_providers()
+        _subject_session = onnxruntime.InferenceSession(
+            str(model), sess_options=options, providers=providers
+        )
     return _subject_session
 
 

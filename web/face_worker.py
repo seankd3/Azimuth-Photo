@@ -202,7 +202,11 @@ def _load_face_app(config: dict[str, Any]):
     model_id = str(config.get("face_model_id") or "buffalo_l").strip() or "buffalo_l"
     model_dir = str(config.get("face_model_dir") or "").strip()
     det_size = int(config.get("face_detection_size") or 640)
-    key = (model_id, model_dir, det_size)
+    from core.ml_device import insightface_ctx_id, onnx_providers, preferred_device
+
+    providers = tuple(onnx_providers())
+    ctx_id = insightface_ctx_id()
+    key = (model_id, model_dir, det_size, preferred_device(), providers, ctx_id)
     if _face_app is not None and _face_app_key == key:
         return _face_app
 
@@ -218,8 +222,8 @@ def _load_face_app(config: dict[str, Any]):
     from insightface.app import FaceAnalysis
 
     os.makedirs(model_dir, exist_ok=True)
-    app = FaceAnalysis(name=model_id, root=model_dir, providers=["CPUExecutionProvider"])
-    app.prepare(ctx_id=-1, det_size=(det_size, det_size))
+    app = FaceAnalysis(name=model_id, root=model_dir, providers=list(providers))
+    app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
     _face_app = app
     _face_app_key = key
     return app
@@ -229,6 +233,9 @@ def _unload_face_app() -> None:
     global _face_app, _face_app_key
     _face_app = None
     _face_app_key = None
+    from core.ml_device import empty_cuda_cache
+
+    empty_cuda_cache()
 
 
 async def _wait_for_face_turn() -> None:
