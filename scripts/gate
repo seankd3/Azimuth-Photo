@@ -78,10 +78,20 @@ raise SystemExit(1)'
 
 assert_slow_partition() {
   # -m "not slow" + -m slow == full set (excluding bench which is always out of addopts).
-  local not_slow slow all
-  not_slow="$(collect_count 'not slow and not bench')" || true
-  slow="$(collect_count 'slow and not bench')" || true
-  all="$(collect_count 'not bench')" || true
+  # Fan the three collects so quick stays under the 90s wall.
+  local dir not_slow slow all
+  dir="$(mktemp -d)"
+  collect_count 'not slow and not bench' >"$dir/not_slow" &
+  local p1=$!
+  collect_count 'slow and not bench' >"$dir/slow" &
+  local p2=$!
+  collect_count 'not bench' >"$dir/all" &
+  local p3=$!
+  wait "$p1" "$p2" "$p3" || true
+  not_slow="$(cat "$dir/not_slow" 2>/dev/null || true)"
+  slow="$(cat "$dir/slow" 2>/dev/null || true)"
+  all="$(cat "$dir/all" 2>/dev/null || true)"
+  rm -rf "$dir"
   if [[ -z "$not_slow" || -z "$slow" || -z "$all" ]]; then
     echo "gate: could not collect marker counts (not_slow=$not_slow slow=$slow all=$all)" | tee -a "$LOG"
     return 2
@@ -106,7 +116,8 @@ case "$MODE" in
       run_pytest "contract" -q --tb=short -m contract || RC=$?
     fi
     if [[ $RC -eq 0 ]]; then
-      run_pytest "quick-parallel" -n auto -q --tb=line -m "not slow and not serial and not bench" || RC=$?
+      # Contracts already proved above — don't pay for them twice in the wave.
+      run_pytest "quick-parallel" -n auto -q --tb=line -m "not slow and not serial and not bench and not contract" || RC=$?
     fi
     ;;
   changed)

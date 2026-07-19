@@ -33,6 +33,7 @@ outputs/
 dist/
 build/
 *.spec
+receipts/
 
 # Server packaging scratch (never the shared web/.venv)
 .pkg-venv/

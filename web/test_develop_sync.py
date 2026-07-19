@@ -19,13 +19,19 @@ from features.develop import rawproc, routes as develop_routes  # noqa: E402
 
 class DevelopSyncTests(unittest.TestCase):
     def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
+        # Per-worker prefix avoids /tmp collisions under xdist + aggressive cleaners.
+        worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+        self.tempdir = tempfile.TemporaryDirectory(prefix=f"pa-develop-sync-{worker}-")
         self.old_db_path = db.DB_PATH
         self.old_cache_dir = rawproc.BASE_CACHE_DIR
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
+        self.old_smoke = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
+        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
         db.DB_PATH = os.path.join(self.tempdir.name, "develop-sync.db")
+        os.makedirs(self.tempdir.name, exist_ok=True)
         rawproc.BASE_CACHE_ROOT = __import__("pathlib").Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
+        rawproc.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
         rawproc._recent_decodes.clear()
         asyncio.run(db.init_db())
         source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
@@ -36,12 +42,24 @@ class DevelopSyncTests(unittest.TestCase):
         self.client = TestClient(app_module.app)
 
     def tearDown(self):
-        self.client.close()
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        # Restore globals before deleting the catalog directory so any late
+        # TestClient/app callback cannot reopen the just-removed path.
         db.DB_PATH = self.old_db_path
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
-        self.tempdir.cleanup()
+        if self.old_smoke is None:
+            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+        else:
+            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke
+        try:
+            self.tempdir.cleanup()
+        except Exception:
+            pass
 
     def _image(self, name):
         path = __import__("pathlib").Path(self.tempdir.name) / "raws" / name
