@@ -461,6 +461,27 @@ def catalog_health(db_path: str) -> dict[str, Any]:
     return dict(result) if result is not None else catalog_quick_check(path)
 
 
+ORPHANED_TMP_MAX_AGE_SECONDS = 6 * 3600
+
+
+def _sweep_orphaned_tmp(root: Path) -> None:
+    """Remove tmp artifacts left by a killed snapshot process.
+
+    SIGKILL skips the finally-cleanup, so a crashed run can strand a
+    multi-GB ``.tmp.db`` (and its WAL/SHM sidecars) forever. Anything
+    tmp-named and older than the age floor is dead by definition — a live
+    snapshot finishes in minutes.
+    """
+    cutoff = time.time() - ORPHANED_TMP_MAX_AGE_SECONDS
+    for path in root.glob(".*.tmp.*"):
+        try:
+            if path.is_file() and path.stat().st_mtime < cutoff:
+                path.unlink()
+                log.info("catalog_backup swept orphaned tmp %s", path.name)
+        except OSError:
+            pass
+
+
 def create_snapshot(
     db_path: str, *, when: datetime | None = None, label: str | None = None
 ) -> dict[str, Any]:
@@ -479,16 +500,15 @@ def create_snapshot(
     root = backup_root_for(db_path)
     name = _timestamp_name(when, label)
     final_path = root / name
-    tmp_db = root / f".{name}.tmp.db"
-    tmp_gz = root / f".{name}.tmp.gz"
+    # Per-process tmp names: two instances snapshotting in the same second
+    # (e.g. both schedulers firing at 04:00:00) must never contend on one
+    # tmp file — the in-process _backup_lock cannot see the other process.
+    tmp_db = root / f".{name}.{os.getpid()}.tmp.db"
+    tmp_gz = root / f".{name}.{os.getpid()}.tmp.gz"
 
     with _backup_lock:
         try:
-            if tmp_db.exists():
-                tmp_db.unlink()
-            if tmp_gz.exists():
-                tmp_gz.unlink()
-            _unlink_sqlite_sidecars(tmp_db)
+            _sweep_orphaned_tmp(root)
 
             log.info("catalog_backup start db=%s -> %s", db_path, final_path)
             probe = data_connection.open_sync(db_path, timeout=60.0)
