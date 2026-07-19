@@ -1,3 +1,4 @@
+from core.requests import parse_exclude_sources
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -290,11 +291,19 @@ async def api_create_collection(payload: CreateCollectionBody):
 
 
 @router.get("/api/collections/suggestions")
-async def api_collection_suggestions():
+async def api_collection_suggestions(exclude_sources: str = ""):
     _configured()
     if _get_suggestions is None:
         return {"suggestions": []}
-    return await _get_suggestions()
+    payload = await _get_suggestions()
+    excluded = parse_exclude_sources(exclude_sources)
+    if not excluded or _db_path is None:
+        return payload
+    return await collection_suggestions.filter_suggestions_excluding_sources(
+        _db_path(),
+        payload,
+        excluded,
+    )
 
 
 @router.post("/api/collections/{collection_id}/links")

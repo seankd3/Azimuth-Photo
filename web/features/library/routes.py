@@ -3,7 +3,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from core.requests import repeated_query_values
+from core.requests import parse_exclude_sources, repeated_query_values
 from data import connection as data_connection
 
 
@@ -34,11 +34,13 @@ async def api_rankings(
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
     import_batch: int = 0, stacks: str = "expanded", ids: str = "", collection_id: int = 0,
+    exclude_sources: str = "",
     request: Request = None,
 ):
     if _rankings_handler is None:
         raise RuntimeError("Library routes are not configured")
     folder_scope = repeated_query_values(request, "folder", folder)
+    excluded = parse_exclude_sources(exclude_sources)
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -63,6 +65,7 @@ async def api_rankings(
                 stacks=stacks,
                 ids=ids,
                 collection_id=collection_id,
+                exclude_sources=excluded,
                 request=request,
             )
     except Exception as exc:
@@ -91,11 +94,13 @@ async def api_date_groups(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, exclude_sources: str = "",
+    request: Request = None,
 ):
     """Return date groups with counts for the scrubber, respecting active filters."""
     from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
 
+    excluded = parse_exclude_sources(exclude_sources)
     return await library_service.date_groups_payload(
         orientation=orientation,
         compared=compared,
@@ -113,7 +118,7 @@ async def api_date_groups(
         deep=deep,
         stacks=stacks,
         collection_id=collection_id,
-    )
+        exclude_sources=excluded,)
 
 
 @router.get("/api/date-histogram")
@@ -122,11 +127,13 @@ async def api_date_histogram(
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
     import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0,
+    exclude_sources: str = "",
     request: Request = None,
 ):
     """Return whole-scope month counts for the timeline scrubber and month view."""
     from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
 
+    excluded = parse_exclude_sources(exclude_sources)
     return await library_service.date_histogram_payload(
         orientation=orientation,
         compared=compared,
@@ -144,7 +151,7 @@ async def api_date_histogram(
         deep=deep,
         stacks=stacks,
         collection_id=collection_id,
-    )
+        exclude_sources=excluded,)
 
 
 @router.get("/api/counts")
@@ -152,11 +159,13 @@ async def api_counts(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", exclude_sources: str = "",
+    request: Request = None,
 ):
     """Return cheap total/picked/rejected counts for the scope in one call."""
     from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
 
+    excluded = parse_exclude_sources(exclude_sources)
     return await library_service.scope_counts_payload(
         orientation=orientation,
         compared=compared,
@@ -172,7 +181,7 @@ async def api_counts(
         import_batch=import_batch,
         deep=deep,
         stacks=stacks,
-    )
+        exclude_sources=excluded,)
 
 
 @router.get("/api/map/markers")
@@ -180,11 +189,13 @@ async def api_map_markers(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, collection_id: int = 0, request: Request = None,
+    import_batch: int = 0, collection_id: int = 0, exclude_sources: str = "",
+    request: Request = None,
 ):
     """Return images with GPS data for map display."""
     from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
 
+    excluded = parse_exclude_sources(exclude_sources)
     return await library_service.map_markers_payload(
         orientation=orientation,
         compared=compared,
@@ -201,7 +212,7 @@ async def api_map_markers(
         import_batch=import_batch,
         deep=deep,
         collection_id=collection_id,
-    )
+        exclude_sources=excluded,)
 
 
 @router.get("/api/filter-options")
@@ -209,11 +220,13 @@ async def api_filter_options(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", people: str = "", q: str = "", deep: bool = False,
-    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, request: Request = None,
+    import_batch: int = 0, stacks: str = "expanded", collection_id: int = 0, exclude_sources: str = "",
+    request: Request = None,
 ):
     """Return metadata-backed filter choices for the bottom bar."""
     from features.library import service as library_service  # deferred: keeps numpy off boot until a Library metadata request
 
+    excluded = parse_exclude_sources(exclude_sources)
     return await library_service.filter_options_payload(
         orientation=orientation,
         compared=compared,
@@ -231,7 +244,7 @@ async def api_filter_options(
         import_batch=import_batch,
         stacks=stacks,
         collection_id=collection_id,
-    )
+        exclude_sources=excluded,)
 
 
 @router.get("/api/stats")

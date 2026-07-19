@@ -267,6 +267,7 @@ def _blended_order_cache_key(
     text_query: str,
     visible_thumb_size: str,
     exclude_collapsed_stack_members: bool,
+    exclude_sources=(),
 ) -> tuple | None:
     if not blend_context.get("active") or search_ids is not None or text_query:
         return None
@@ -286,6 +287,7 @@ def _blended_order_cache_key(
         tag,
         visible_thumb_size,
         bool(exclude_collapsed_stack_members),
+        tuple(exclude_sources or ()),
         blend_context.get("cache_key"),
     )
 
@@ -520,6 +522,7 @@ async def date_groups_payload(
     import_batch: int = 0,
     stacks: str = "expanded",
     collection_id: int = 0,
+    exclude_sources=(),
 ) -> dict:
     if collection_id:
         histogram = await date_histogram_payload(
@@ -539,6 +542,7 @@ async def date_groups_payload(
             import_batch=import_batch,
             stacks=stacks,
             collection_id=collection_id,
+            exclude_sources=exclude_sources,
         )
         groups = [
             {
@@ -571,6 +575,7 @@ async def date_groups_payload(
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
     )
     return {"groups": groups}
 
@@ -592,6 +597,7 @@ async def map_markers_payload(
     deep: bool = False,
     import_batch: int = 0,
     collection_id: int = 0,
+    exclude_sources=(),
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -613,6 +619,7 @@ async def map_markers_payload(
         id_filter=search_ids,
         collection_id=collection_id,
         text_query=search.get("text_query") or "",
+        exclude_sources=exclude_sources,
     )
     if not satellite.is_satellite_mode() or not payload.get("markers"):
         return payload
@@ -648,6 +655,7 @@ async def date_histogram_payload(
     import_batch: int = 0,
     stacks: str = "expanded",
     collection_id: int = 0,
+    exclude_sources=(),
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -670,6 +678,7 @@ async def date_histogram_payload(
         visible_thumb_size=_preview_thumb_size_for_scope(),
         cache_root=_configured_cache_root(),
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
     )
 
 
@@ -689,6 +698,7 @@ async def scope_counts_payload(
     deep: bool = False,
     import_batch: int = 0,
     stacks: str = "expanded",
+    exclude_sources=(),
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -706,6 +716,7 @@ async def scope_counts_payload(
         id_filter=search_ids,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
     )
 
 
@@ -727,6 +738,7 @@ async def filter_options_payload(
     import_batch: int = 0,
     stacks: str = "expanded",
     collection_id: int = 0,
+    exclude_sources=(),
 ) -> dict:
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
@@ -747,11 +759,75 @@ async def filter_options_payload(
         collection_id=collection_id,
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=_exclude_collapsed_stack_members(stacks),
+        exclude_sources=exclude_sources,
     )
 
 
 async def stats_payload() -> dict:
     return await _configured(_get_stats)()
+
+
+
+async def _hidden_in_quiet_sources_count(
+    *,
+    exclude_sources,
+    search_active: bool,
+    orientation: str,
+    compared: str,
+    min_stars: int,
+    folder,
+    flag: str,
+    date_taken: str,
+    file_type: str,
+    camera: str,
+    lens: str,
+    tag: str,
+    search_ids,
+    collection_id: int,
+    text_query: str,
+    exclude_collapsed_stack_members: bool,
+    visible_total: int | None = None,
+) -> int:
+    """How many matches live only in quiet sources for an active search."""
+    excluded = tuple(int(source_id) for source_id in (exclude_sources or ()) if int(source_id) > 0)
+    if not excluded or not search_active:
+        return 0
+    full_total = await _configured(_count_rankings)(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        id_filter=search_ids,
+        collection_id=collection_id,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+    )
+    quiet_total = visible_total
+    if quiet_total is None:
+        quiet_total = await _configured(_count_rankings)(
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            id_filter=search_ids,
+            collection_id=collection_id,
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=excluded,
+        )
+    return max(0, int(full_total) - int(quiet_total))
 
 
 async def api_rankings_impl(
@@ -760,6 +836,7 @@ async def api_rankings_impl(
     folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
     import_batch: int = 0, stacks: str = "expanded", ids: str = "", collection_id: int = 0,
+    exclude_sources=(),
     request=None,
 ):
     limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
@@ -833,6 +910,7 @@ async def api_rankings_impl(
             visible_thumb_size,
             stacks_mode,
             blend_context.get("cache_key"),
+            tuple(exclude_sources or ()),
         )
         cached = _rankings_response_cache.get(rankings_cache_key)
         if cached and cached["expires"] > time.monotonic():
@@ -885,7 +963,7 @@ async def api_rankings_impl(
                 camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-            )
+                exclude_sources=exclude_sources,)
         )
         visible_images = await _configured(_count_rankings)(
             orientation=orientation, compared=compared, min_stars=min_stars,
@@ -896,7 +974,8 @@ async def api_rankings_impl(
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,
+    )
         total_images = await total_task
         if total_images <= 0:
             response = {
@@ -921,7 +1000,8 @@ async def api_rankings_impl(
             collection_id=collection_id,
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,
+    )
         # Deferred: keeps numpy's ~120 ms import off the boot path; the embed
         # matrix that reaches this branch is itself numpy, so this never misses.
         import numpy as np
@@ -982,7 +1062,7 @@ async def api_rankings_impl(
                 camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-            )
+                exclude_sources=exclude_sources,)
         )
         visible_images = await _configured(_count_rankings)(
             orientation=orientation, compared=compared, min_stars=min_stars,
@@ -993,7 +1073,8 @@ async def api_rankings_impl(
             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,
+    )
         total_images = await total_task
         images = await _configured(_get_rankings)(
             limit=total_images, offset=0, sort="elo",
@@ -1004,7 +1085,8 @@ async def api_rankings_impl(
             collection_id=collection_id,
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,
+    )
         all_results = []
         for img in images:
             data = dict(img)
@@ -1068,6 +1150,7 @@ async def api_rankings_impl(
         text_query=text_query,
         visible_thumb_size=visible_thumb_size,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
     )
     cached_blended_order = (
         _blended_rankings_order_cache.get(blended_order_key)
@@ -1092,6 +1175,7 @@ async def api_rankings_impl(
             _normalized_import_batch_id(import_batch),
             int(collection_id or 0),
             exclude_collapsed_stack_members,
+            exclude_sources,
         )
     )
     if unfiltered_rankings and cached_blended_order is None:
@@ -1112,7 +1196,7 @@ async def api_rankings_impl(
                     collection_id=collection_id,
                     text_query=text_query,
                     exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                )
+                    exclude_sources=exclude_sources,)
             )
             visible_task = asyncio.create_task(
                 _configured(_count_rankings)(
@@ -1124,7 +1208,7 @@ async def api_rankings_impl(
                     visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                     text_query=text_query,
                     exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                )
+                    exclude_sources=exclude_sources,)
             )
     quality_task = None
     if offset == 0 and _get_rank_quality is not None and not requested_collection_id:
@@ -1165,7 +1249,7 @@ async def api_rankings_impl(
                         id_filter=search_ids,
                         text_query=text_query,
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                    )
+                        exclude_sources=exclude_sources,)
                 )
             if visible_task is None:
                 visible_task = asyncio.create_task(
@@ -1177,7 +1261,7 @@ async def api_rankings_impl(
                         visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                         text_query=text_query,
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                    )
+                        exclude_sources=exclude_sources,)
                 )
             visible_images = await visible_task
             total_images = await total_task
@@ -1193,7 +1277,8 @@ async def api_rankings_impl(
                 collection_id=collection_id,
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-            )
+        exclude_sources=exclude_sources,
+    )
         blended_rows = _sort_blended_rankings(_with_blended_rank_data(all_rows, blend_context), db_sort)
         if int(min_stars or 0) > 0:
             blended_rows = [
@@ -1218,7 +1303,8 @@ async def api_rankings_impl(
             collection_id=collection_id,
             text_query=text_query,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,
+    )
         if unfiltered_rankings:
             counts = await counts_task
             total_images = int(counts.get("active_images") or 0)
@@ -1242,7 +1328,7 @@ async def api_rankings_impl(
                             collection_id=collection_id,
                             text_query=text_query,
                             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                        )
+                            exclude_sources=exclude_sources,)
                     )
                 if visible_task is None:
                     visible_task = asyncio.create_task(
@@ -1255,7 +1341,7 @@ async def api_rankings_impl(
                             visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
                             text_query=text_query,
                             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                        )
+                            exclude_sources=exclude_sources,)
                     )
                 visible_images = await visible_task
                 total_images = await total_task
@@ -1287,6 +1373,26 @@ async def api_rankings_impl(
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
     }
+    if exclude_sources and search.get("active"):
+        response["hidden_in_quiet_sources"] = await _hidden_in_quiet_sources_count(
+            exclude_sources=exclude_sources,
+            search_active=True,
+            orientation=orientation,
+            compared=compared,
+            min_stars=ranking_filter_min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            search_ids=search_ids,
+            collection_id=collection_id,
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            visible_total=total_images,
+        )
     if quality_task is not None:
         try:
             response["sort_quality"] = await quality_task

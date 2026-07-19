@@ -14,6 +14,27 @@ def positive_int(value) -> int | None:
     return parsed if parsed > 0 else None
 
 
+def parse_exclude_sources(value) -> tuple[int, ...]:
+    """Parse optional exclude_sources query values into stable positive IDs."""
+    if value is None or value == "" or value == ():
+        return ()
+    if isinstance(value, (list, tuple)):
+        raw_parts = []
+        for item in value:
+            raw_parts.extend(str(item or "").replace(";", ",").split(","))
+    else:
+        raw_parts = str(value).replace(";", ",").split(",")
+    out: list[int] = []
+    seen: set[int] = set()
+    for part in raw_parts:
+        source_id = positive_int(part.strip()) if isinstance(part, str) else positive_int(part)
+        if source_id is None or source_id in seen:
+            continue
+        seen.add(source_id)
+        out.append(source_id)
+    return tuple(out)
+
+
 def clamp_int(value, default: int, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)

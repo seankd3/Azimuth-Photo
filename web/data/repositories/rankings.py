@@ -221,6 +221,31 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     return f"({' OR '.join(parts)})", params
 
 
+
+def normalized_exclude_sources(exclude_sources) -> tuple[int, ...]:
+    """Client quiet-source IDs: optional, order-stable, deduped positive ints."""
+    if not exclude_sources:
+        return ()
+    if isinstance(exclude_sources, str):
+        raw = exclude_sources.replace(';', ',').split(',')
+    elif isinstance(exclude_sources, (list, tuple, set, frozenset)):
+        raw = exclude_sources
+    else:
+        raw = [exclude_sources]
+    out: list[int] = []
+    seen: set[int] = set()
+    for value in raw:
+        try:
+            source_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if source_id <= 0 or source_id in seen:
+            continue
+        seen.add(source_id)
+        out.append(source_id)
+    return tuple(out)
+
+
 def has_absolute_folder_range(folder) -> bool:
     """Return whether every requested folder can use the filepath range indexes."""
     values = normalized_folder_values(folder)
@@ -247,6 +272,7 @@ def ranking_count_cache_key(
     text_query: str = "",
     collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ):
     if id_filter is not None or collection_id:
         return None
@@ -266,6 +292,7 @@ def ranking_count_cache_key(
         cache_root or "",
         text_query or "",
         bool(exclude_collapsed_stack_members),
+        normalized_exclude_sources(exclude_sources),
     )
 
 
@@ -287,6 +314,7 @@ def facet_cache_key(
     text_query: str = "",
     collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> tuple | None:
     if id_filter is not None or text_query or collection_id:
         return None
@@ -305,6 +333,7 @@ def facet_cache_key(
         visible_thumb_size or "",
         cache_root or "",
         bool(exclude_collapsed_stack_members),
+        normalized_exclude_sources(exclude_sources),
     )
 
 
@@ -386,6 +415,7 @@ def ranking_filter_parts(
     collection_id: int = 0,
     include_source: bool = True,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> tuple[list[str], list]:
     conditions = [
         "i.status IN ('kept', 'maybe')",
@@ -395,6 +425,12 @@ def ranking_filter_parts(
     if include_source:
         conditions[:0] = ["s.included = 1"]
     params = []
+
+    excluded = normalized_exclude_sources(exclude_sources)
+    if excluded:
+        placeholders = ",".join("?" for _ in excluded)
+        conditions.append(f"i.source_id NOT IN ({placeholders})")
+        params.extend(excluded)
 
     if exclude_collapsed_stack_members:
         conditions.append(
@@ -676,6 +712,7 @@ async def rankings(
     text_query: str = "",
     use_cache_first_visible: bool = False,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ):
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -706,7 +743,7 @@ async def rankings(
         collection_id=collection_id,
         include_source=not all_catalog_images_active,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
 
     staged_id_filter = None
     if id_filter is not None:
@@ -748,7 +785,7 @@ async def rankings(
                 collection_id=collection_id,
                 include_source=False,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-            )
+        exclude_sources=exclude_sources,)
             cursor = await conn.execute(
                 f"SELECT {IMAGE_ROW_SELECT} "
                 "FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
@@ -829,6 +866,7 @@ async def rankings_cached(
     cache_root: str = "",
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ):
     catalog_counts = await get_catalog_image_counts()
     active_images = int(catalog_counts.get("active_images") or 0)
@@ -891,7 +929,7 @@ async def rankings_cached(
         text_query=text_query,
         use_cache_first_visible=use_cache_first_visible,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
 
 
 def has_ranking_count_filters(
@@ -909,11 +947,13 @@ def has_ranking_count_filters(
     text_query: str = "",
     collection_id: int = 0,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> bool:
     return bool(
         orientation or compared or min_stars > 0 or folder or flag or date_taken
         or file_type or camera or lens or tag or id_filter is not None or text_query or collection_id
         or exclude_collapsed_stack_members
+        or normalized_exclude_sources(exclude_sources)
     )
 
 
@@ -939,6 +979,7 @@ async def count_rankings_uncached(
     text_query: str = "",
     cached_visible_ids: set | None = None,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> int:
     active_images = int(catalog_counts.get("active_images") or 0)
     if not has_ranking_count_filters(
@@ -956,6 +997,7 @@ async def count_rankings_uncached(
         text_query,
         collection_id,
         exclude_collapsed_stack_members,
+        exclude_sources,
     ):
         if not visible_thumb_size or not cache_root:
             return active_images
@@ -1007,7 +1049,7 @@ async def count_rankings_uncached(
                 text_query=text_query,
                 include_source=not all_sources_available,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-            )
+        exclude_sources=exclude_sources,)
             if has_absolute_folder_range(folder):
                 source_join = (
                     "JOIN catalog_sources s ON s.id = i.source_id "
@@ -1065,7 +1107,7 @@ async def count_rankings_uncached(
             collection_id=collection_id,
             include_source=not all_sources_available,
             exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        )
+        exclude_sources=exclude_sources,)
 
         if cached_id_filter is not None:
             if id_filter is not None:
@@ -1127,6 +1169,7 @@ async def count_rankings_uncached_with_visible_cache(
     cache_root: str = "",
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> int:
     cached_visible_ids = None
     if visible_thumb_size and cache_root and id_filter is not None:
@@ -1152,7 +1195,7 @@ async def count_rankings_uncached_with_visible_cache(
         text_query=text_query,
         cached_visible_ids=cached_visible_ids,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
 
 
 async def count_rankings_cached(
@@ -1179,6 +1222,7 @@ async def count_rankings_cached(
     text_query: str = "",
     ttl_seconds: float = RANKING_COUNT_CACHE_TTL_SECONDS,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> int:
     cache_key = ranking_count_cache_key(
         orientation=orientation,
@@ -1198,7 +1242,7 @@ async def count_rankings_cached(
         text_query=text_query,
         collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     if cache_key is not None:
         now = _time.time()
         cached = _ranking_count_cache.get(cache_key)
@@ -1227,7 +1271,7 @@ async def count_rankings_cached(
         cache_root=cache_root,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     if cache_key is not None:
         _ranking_count_cache[cache_key] = {
             "value": int(value),
@@ -1318,6 +1362,7 @@ async def rank_quality(
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> dict:
     """Summarize how well the filtered set is ranked.
 
@@ -1338,7 +1383,7 @@ async def rank_quality(
         caption_model_key=caption_model_key,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     signals = "COALESCE(i.comparisons, 0) + COALESCE(i.propagated_updates, 0)"
     image_source = ranking_count_image_source(
         folder=folder,
@@ -1409,6 +1454,7 @@ async def date_histogram(
     visible_thumb_size: str = "",
     cache_root: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> dict:
     """Month histogram for the whole filtered scope.
 
@@ -1430,7 +1476,7 @@ async def date_histogram(
         text_query=text_query,
         collection_id=collection_id,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     conn = await connection.open_async(db_path)
     try:
         month_index_available = await _month_source_index_available(conn)
@@ -1533,6 +1579,7 @@ async def date_histogram_cached(
     force_refresh: bool = False,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> dict:
     cache_key = facet_cache_key(
         orientation=orientation,
@@ -1552,7 +1599,7 @@ async def date_histogram_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     now = _time.time()
     cached = _date_histogram_cache.get(cache_key) if cache_key is not None else None
     if cached and not force_refresh:
@@ -1585,6 +1632,7 @@ async def date_histogram_cached(
                         force_refresh=True,
                         ttl_seconds=ttl_seconds,
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                        exclude_sources=exclude_sources,
                     )
                 finally:
                     _date_histogram_refreshing.discard(cache_key)
@@ -1612,7 +1660,7 @@ async def date_histogram_cached(
         visible_thumb_size=visible_thumb_size,
         cache_root=cache_root,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
         _date_histogram_cache[cache_key] = {
             "data": histogram,
@@ -1637,6 +1685,7 @@ async def scope_counts(
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> dict:
     """Cheap total/picked/rejected counts for a scope in one query."""
     conditions, params = ranking_filter_parts(
@@ -1652,7 +1701,7 @@ async def scope_counts(
         caption_model_key=caption_model_key,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     image_source = ranking_count_image_source(
         folder=folder,
         id_filter=id_filter,
@@ -1723,6 +1772,7 @@ async def date_groups(
     id_filter: set | None = None,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> list[dict]:
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -1739,7 +1789,7 @@ async def date_groups(
         text_query=text_query,
         include_source=not all_sources_available,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
@@ -1859,6 +1909,7 @@ async def date_groups_cached(
     force_refresh: bool = False,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ):
     cache_key = facet_cache_key(
         orientation=orientation,
@@ -1877,7 +1928,7 @@ async def date_groups_cached(
         id_filter=id_filter,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     now = _time.time()
     cached = _date_groups_cache.get(cache_key) if cache_key is not None else None
     if cached and not force_refresh:
@@ -1909,6 +1960,7 @@ async def date_groups_cached(
                         force_refresh=True,
                         ttl_seconds=ttl_seconds,
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                        exclude_sources=exclude_sources,
                     )
                 finally:
                     _date_groups_refreshing.discard(cache_key)
@@ -1936,7 +1988,7 @@ async def date_groups_cached(
         id_filter=id_filter,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-    )
+        exclude_sources=exclude_sources,)
     if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
         _date_groups_cache[cache_key] = {
             "data": groups,
@@ -1978,6 +2030,7 @@ async def map_markers(
     id_filter: set | None = None,
     text_query: str = "",
     collection_id: int = 0,
+    exclude_sources=(),
 ) -> dict:
     if int(catalog_counts.get("active_images") or 0) <= 0:
         return empty_map_markers()
@@ -1998,7 +2051,7 @@ async def map_markers(
         text_query=text_query,
         collection_id=collection_id,
         include_source=not all_sources_available,
-    )
+        exclude_sources=exclude_sources,)
     staged_id_filter = None
     if id_filter is not None:
         if not id_filter:
@@ -2113,6 +2166,7 @@ async def map_markers_cached(
     text_query: str = "",
     collection_id: int = 0,
     ttl_seconds: float = FACET_CACHE_TTL_SECONDS,
+    exclude_sources=(),
 ):
     cache_key = facet_cache_key(
         orientation=orientation,
@@ -2131,7 +2185,7 @@ async def map_markers_cached(
         id_filter=id_filter,
         text_query=text_query,
         collection_id=collection_id,
-    )
+        exclude_sources=exclude_sources,)
     now = _time.time()
     cached = _map_markers_cache.get(cache_key) if cache_key is not None else None
     if cached and cached["expires"] > now:
@@ -2161,6 +2215,7 @@ async def map_markers_cached(
         id_filter=id_filter,
         text_query=text_query,
         collection_id=collection_id,
+        exclude_sources=exclude_sources,
     )
     if not has_filters:
         total_count = active_images
@@ -2179,6 +2234,7 @@ async def map_markers_cached(
             id_filter=id_filter,
             text_query=text_query,
             collection_id=collection_id,
+            exclude_sources=exclude_sources,
         )
 
     visible_total_count = total_count
@@ -2203,6 +2259,7 @@ async def map_markers_cached(
                 cache_root=cache_root,
                 text_query=text_query,
                 collection_id=collection_id,
+                exclude_sources=exclude_sources,
             )
 
     result = await map_markers(
@@ -2226,7 +2283,7 @@ async def map_markers_cached(
         id_filter=id_filter,
         text_query=text_query,
         collection_id=collection_id,
-    )
+        exclude_sources=exclude_sources,)
     if cache_key is not None:
         _map_markers_cache[cache_key] = {
             "data": result,
