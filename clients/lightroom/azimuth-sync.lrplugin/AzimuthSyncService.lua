@@ -1,0 +1,287 @@
+--[[
+  Background poll + catalog observe service (LrHttp / LrTasks / LrCatalog).
+  Targets Lightroom Classic SDK 13 API surface.
+]]
+
+local LrTasks = import("LrTasks")
+local LrHttp = import("LrHttp")
+local LrApplication = import("LrApplication")
+local LrPathUtils = import("LrPathUtils")
+local LrPrefs = import("LrPrefs")
+
+-- One instance across Init / Dialog / Shutdown (each dofile would otherwise fork state).
+if _G.AzimuthSyncService then
+  return _G.AzimuthSyncService
+end
+
+local Core = dofile(LrPathUtils.child(_PLUGIN.path, "AzimuthSyncCore.lua"))
+
+local Service = {
+  running = false,
+  ledger = Core.new_ledger(),
+  last_scan = {},
+  clock = 0,
+  status = {
+    connected = false,
+    synced = 0,
+    pending = 0,
+    last_error = nil,
+    satellite_url = nil,
+  },
+}
+
+local POLL_SECONDS = 10
+local WRITE_BATCH = 25
+
+local function prefs()
+  return LrPrefs.prefsForPlugin()
+end
+
+local function satellite_url()
+  local p = prefs()
+  local url = p.satelliteUrl
+  if type(url) == "string" and #url > 0 then
+    return url:gsub("/+$", "")
+  end
+  return "http://127.0.0.1:8000"
+end
+
+local function json_encode(value)
+  -- Minimal encoder for our closed payload shapes (tables/arrays/strings/numbers/bools).
+  local t = type(value)
+  if t == "nil" then
+    return "null"
+  elseif t == "boolean" then
+    return value and "true" or "false"
+  elseif t == "number" then
+    return tostring(value)
+  elseif t == "string" then
+    return '"' .. value:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r") .. '"'
+  elseif t == "table" then
+    local is_array = #value > 0 or next(value) == nil
+    if is_array then
+      for k, _ in pairs(value) do
+        if type(k) ~= "number" then
+          is_array = false
+          break
+        end
+      end
+    end
+    if is_array then
+      local parts = {}
+      for i, v in ipairs(value) do
+        parts[i] = json_encode(v)
+      end
+      return "[" .. table.concat(parts, ",") .. "]"
+    end
+    local parts = {}
+    for k, v in pairs(value) do
+      parts[#parts + 1] = json_encode(tostring(k)) .. ":" .. json_encode(v)
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+  end
+  return "null"
+end
+
+local function json_decode(text)
+  if type(text) ~= "string" or #text == 0 then
+    return nil
+  end
+  local ok, LrJson = pcall(import, "LrJson")
+  if ok and LrJson and LrJson.decode then
+    local success, value = pcall(LrJson.decode, text)
+    if success then
+      return value
+    end
+  end
+  Service.status.last_error = "JSON decode failed (LrJson required)"
+  return nil
+end
+
+local function http_json(method, path, body)
+  local url = satellite_url() .. path
+  Service.status.satellite_url = satellite_url()
+  local headers = { { field = "Content-Type", value = "application/json" } }
+  local result, hdrs
+  if method == "GET" then
+    result, hdrs = LrHttp.get(url, headers)
+  else
+    result, hdrs = LrHttp.post(url, json_encode(body or {}), headers, method)
+  end
+  if not result then
+    Service.status.connected = false
+    Service.status.last_error = "no response from satellite"
+    return nil
+  end
+  local status = 0
+  if type(hdrs) == "table" then
+    status = tonumber(hdrs.status) or tonumber(hdrs.statusCode) or 0
+  end
+  if status >= 400 then
+    Service.status.connected = false
+    Service.status.last_error = "HTTP " .. tostring(status)
+    return nil
+  end
+  Service.status.connected = true
+  Service.status.last_error = nil
+  return json_decode(result)
+end
+
+local function photo_filepath(photo)
+  local path = photo:getRawMetadata("path")
+  if type(path) == "string" and #path > 0 then
+    return path
+  end
+  return nil
+end
+
+local function scan_catalog()
+  local catalog = LrApplication.activeCatalog()
+  local snapshot = {}
+  local photos = catalog:getAllPhotos()
+  local now = os.time()
+  for _, photo in ipairs(photos) do
+    local filepath = photo_filepath(photo)
+    if filepath then
+      local pick = photo:getRawMetadata("pickStatus")
+      local rating = photo:getRawMetadata("rating") or 0
+      snapshot[filepath] = {
+        flag = Core.lr_flag_to_azimuth(pick),
+        rating = tonumber(rating) or 0,
+        observed_at = now,
+        photo = photo,
+      }
+    end
+  end
+  return snapshot
+end
+
+local function push_outbound(observations)
+  if not observations or #observations == 0 then
+    return
+  end
+  local filtered = Core.filter_outbound(Service.ledger, observations)
+  Service.status.pending = #filtered
+  for _, batch in ipairs(Core.batches(filtered, WRITE_BATCH)) do
+    local items = {}
+    for _, obs in ipairs(batch) do
+      items[#items + 1] = {
+        filepath = obs.filepath,
+        family = obs.family,
+        value = obs.value,
+        observed_at = obs.observed_at,
+      }
+    end
+    local response = http_json("POST", "/api/lr/deltas", { items = items })
+    if response then
+      Service.status.pending = tonumber(response.pending_count) or 0
+      Service.status.synced = Service.status.synced + #(response.entries or {})
+      for _, obs in ipairs(batch) do
+        Core.ledger_remember(Service.ledger, obs.filepath, obs.family, obs.value, obs.observed_at)
+      end
+    end
+  end
+end
+
+local function apply_inbound(items)
+  if not items or #items == 0 then
+    return
+  end
+  local catalog = LrApplication.activeCatalog()
+  local snapshot = scan_catalog()
+  local merged = Core.merge_inbound(items)
+  for _, batch in ipairs(Core.batches(merged, WRITE_BATCH)) do
+    catalog:withWriteAccessDo("Azimuth Sync", function()
+      for _, item in ipairs(batch) do
+        local state = snapshot[item.filepath]
+        if state and state.photo then
+          local photo = state.photo
+          if item.family == "flag" then
+            if not Core.is_echo(Service.ledger, item.filepath, "flag", item.value) then
+              photo:setRawMetadata("pickStatus", Core.azimuth_flag_to_lr(item.value))
+              Core.ledger_remember(Service.ledger, item.filepath, "flag", item.value, item.ts)
+              Service.status.synced = Service.status.synced + 1
+            end
+          elseif item.family == "elo_stars" then
+            local current = tonumber(photo:getRawMetadata("rating")) or 0
+            if Core.may_apply_elo_stars(Service.ledger, item.filepath, current, item.value) then
+              photo:setRawMetadata("rating", tonumber(item.value) or 0)
+              Core.ledger_remember(Service.ledger, item.filepath, "elo_stars", item.value, item.ts)
+              Service.status.synced = Service.status.synced + 1
+            end
+          end
+        end
+      end
+    end)
+  end
+end
+
+local function poll_once()
+  local inbound = http_json("GET", "/api/lr/deltas?since=" .. tostring(Service.clock))
+  if inbound and inbound.items then
+    apply_inbound(inbound.items)
+    if inbound.clock then
+      Service.clock = math.max(Service.clock, tonumber(inbound.clock) or 0)
+    end
+  end
+
+  local current = scan_catalog()
+  local observations = Core.diff_catalog(Service.last_scan, current)
+  -- First scan seeds the baseline without flooding the satellite.
+  if next(Service.last_scan) ~= nil then
+    push_outbound(observations)
+  else
+    for filepath, state in pairs(current) do
+      Core.ledger_remember(Service.ledger, filepath, "flag", state.flag, state.observed_at)
+      if (tonumber(state.rating) or 0) > 0 then
+        Core.ledger_remember(Service.ledger, filepath, "lr_rating", state.rating, state.observed_at)
+      end
+    end
+  end
+  Service.last_scan = current
+end
+
+function Service.start()
+  if Service.running then
+    return
+  end
+  Service.running = true
+  LrTasks.startAsyncTask(function()
+    while Service.running do
+      local ok, err = pcall(poll_once)
+      if not ok then
+        Service.status.last_error = tostring(err)
+        Service.status.connected = false
+      end
+      LrTasks.sleep(POLL_SECONDS)
+    end
+  end)
+end
+
+function Service.stop()
+  Service.running = false
+end
+
+function Service.get_status()
+  Service.status.satellite_url = satellite_url()
+  return Service.status
+end
+
+function Service.set_satellite_url(url)
+  prefs().satelliteUrl = tostring(url or ""):gsub("/+$", "")
+  Service.status.satellite_url = prefs().satelliteUrl
+end
+
+-- Export observed RAW→render via LrExportSession hooks when available.
+function Service.report_export(source_path, export_path)
+  if not source_path or not export_path then
+    return
+  end
+  http_json("POST", "/api/lr/exports", {
+    source_filepath = source_path,
+    export_filepath = export_path,
+  })
+end
+
+_G.AzimuthSyncService = Service
+return Service
