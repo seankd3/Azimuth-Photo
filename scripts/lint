@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Fast programmatic lint: ruff + eslint + luacheck (fail-fast).
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+export PATH="/usr/bin:/usr/local/bin:${PATH}"
+
+if [[ -x "$ROOT/web/.venv/bin/ruff" ]]; then
+  RUFF="$ROOT/web/.venv/bin/ruff"
+elif command -v ruff >/dev/null 2>&1; then
+  RUFF="$(command -v ruff)"
+else
+  echo "lint: ruff not found (install web/requirements-dev.txt into web/.venv)" >&2
+  exit 2
+fi
+
+if [[ -x "$ROOT/node_modules/.bin/eslint" ]]; then
+  ESLINT="$ROOT/node_modules/.bin/eslint"
+elif command -v eslint >/dev/null 2>&1; then
+  ESLINT="$(command -v eslint)"
+else
+  echo "lint: eslint not found (run npm install at repo root)" >&2
+  exit 2
+fi
+
+if ! command -v luacheck >/dev/null 2>&1; then
+  echo "lint: luacheck not found (pacman -S luacheck)" >&2
+  exit 2
+fi
+
+echo "==> ruff"
+(cd "$ROOT/web" && "$RUFF" check .)
+
+echo "==> eslint"
+"$ESLINT" web/static/js web/static/sw.js
+
+echo "==> luacheck"
+luacheck clients/lightroom
+
+echo "lint: ok"
