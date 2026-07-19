@@ -105,10 +105,13 @@ def load_source_image(
         import rawpy
 
         try:
-            # half_size when the caller only needs browse-tier long edges — full
-            # demosaic of a 40–60MP RAW is the bulk of the overnight RSS spike.
-            half_size = max_target <= 1920
+            # half_size only when a half-resolution demosaic still covers the
+            # largest requested tier — full demosaic of a 40–60MP RAW is the
+            # bulk of the overnight RSS spike, but small RAWs must never be
+            # half-decoded below the target and upscaled.
             with rawpy.imread(filepath) as raw:
+                sizes = raw.sizes
+                half_size = max(sizes.width, sizes.height) >= 2 * max_target
                 rgb = raw.postprocess(
                     use_camera_wb=True,
                     no_auto_bright=True,
