@@ -146,4 +146,67 @@ function Core.diff_catalog(previous, current)
   return observations
 end
 
+-- ── Morning collection (pure-core) ──────────────────────────────────────────
+
+local function _date_label(epoch)
+  -- YYYY-MM-DD in local time; epoch defaults to now.
+  local t = tonumber(epoch) or os.time()
+  return os.date("%Y-%m-%d", t)
+end
+
+--- Collection title: "From Azimuth — <N> picks · <date>"
+function Core.morning_collection_title(pick_count, epoch)
+  local n = math.max(0, tonumber(pick_count) or 0)
+  local noun = (n == 1) and "pick" or "picks"
+  return string.format("From Azimuth — %d %s · %s", n, noun, _date_label(epoch))
+end
+
+--- Picks present in ``current`` that were not in ``previous_session`` (last LR session).
+--- ``current`` / ``previous_session`` are filepath → { flag = ... } maps (or flag strings).
+function Core.new_picks_since(previous_session, current)
+  previous_session = previous_session or {}
+  local fresh = {}
+  for filepath, state in pairs(current or {}) do
+    local flag = type(state) == "table" and state.flag or state
+    if flag == "picked" then
+      local prior = previous_session[filepath]
+      local prior_flag = type(prior) == "table" and prior.flag or prior
+      if prior_flag ~= "picked" then
+        fresh[#fresh + 1] = filepath
+      end
+    end
+  end
+  table.sort(fresh)
+  return fresh
+end
+
+--- Decide which dated morning collections to remove.
+--- ``collections`` is a list of { name=, photo_count=, date= "YYYY-MM-DD", empty= bool }.
+--- Empty collections whose date is older than today are aged out.
+function Core.aged_empty_collections(collections, today_epoch)
+  local today = _date_label(today_epoch)
+  local remove = {}
+  for _, coll in ipairs(collections or {}) do
+    local count = tonumber(coll.photo_count)
+    local empty = coll.empty
+    if empty == nil then
+      empty = (count or 0) == 0
+    end
+    local date = tostring(coll.date or "")
+    if empty and date ~= "" and date < today then
+      remove[#remove + 1] = coll
+    end
+  end
+  return remove
+end
+
+--- Parse "From Azimuth — N picks · YYYY-MM-DD" → { count, date } or nil.
+function Core.parse_morning_collection_name(name)
+  local count, date = tostring(name or ""):match("^From Azimuth — (%d+) picks? · (%d%d%d%d%-%d%d%-%d%d)$")
+  if not count then
+    return nil
+  end
+  return { count = tonumber(count), date = date }
+end
+
 return Core

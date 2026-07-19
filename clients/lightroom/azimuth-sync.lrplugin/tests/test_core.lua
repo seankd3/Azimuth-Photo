@@ -82,6 +82,53 @@ do
   check("diff emits lr_rating", families.lr_rating == 3)
 end
 
+-- Morning collection title
+do
+  local title = Core.morning_collection_title(3, os.time({ year = 2026, month = 7, day = 19, hour = 12 }))
+  check("morning title shape", title == "From Azimuth — 3 picks · 2026-07-19")
+  local singular = Core.morning_collection_title(1, os.time({ year = 2026, month = 7, day = 19, hour = 12 }))
+  check("morning title singular", singular == "From Azimuth — 1 pick · 2026-07-19")
+end
+
+-- New picks since last session
+do
+  local previous = {
+    ["/a.dng"] = { flag = "picked" },
+    ["/b.dng"] = { flag = "unflagged" },
+  }
+  local current = {
+    ["/a.dng"] = { flag = "picked" },
+    ["/b.dng"] = { flag = "picked" },
+    ["/c.dng"] = { flag = "picked" },
+    ["/d.dng"] = { flag = "rejected" },
+  }
+  local fresh = Core.new_picks_since(previous, current)
+  check("new picks count", #fresh == 2)
+  check("new picks include b", fresh[1] == "/b.dng" or fresh[2] == "/b.dng")
+  check("new picks include c", fresh[1] == "/c.dng" or fresh[2] == "/c.dng")
+  check("new picks exclude prior pick", true)
+end
+
+-- Aging empty collections
+do
+  local today = os.time({ year = 2026, month = 7, day = 19, hour = 12 })
+  local aged = Core.aged_empty_collections({
+    { name = "From Azimuth — 2 picks · 2026-07-18", date = "2026-07-18", photo_count = 0 },
+    { name = "From Azimuth — 1 pick · 2026-07-19", date = "2026-07-19", photo_count = 0 },
+    { name = "From Azimuth — 3 picks · 2026-07-17", date = "2026-07-17", photo_count = 2 },
+  }, today)
+  check("ages empty yesterday", #aged == 1 and aged[1].date == "2026-07-18")
+  check("keeps empty today", true)
+  check("keeps non-empty old", true)
+end
+
+-- Parse morning name
+do
+  local parsed = Core.parse_morning_collection_name("From Azimuth — 4 picks · 2026-07-19")
+  check("parse morning name", parsed and parsed.count == 4 and parsed.date == "2026-07-19")
+  check("parse rejects other", Core.parse_morning_collection_name("Other") == nil)
+end
+
 if failures > 0 then
   print(string.format("%d failure(s)", failures))
   os.exit(1)
