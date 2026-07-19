@@ -1259,6 +1259,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         generate_thumbnail_set_sync=_generate_thumbnail_set_sync,
         record_pregen_result=_record_pregen_result,
         activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
+        prefetch_workers=_prefetch_workers_count,
     )
 
 
