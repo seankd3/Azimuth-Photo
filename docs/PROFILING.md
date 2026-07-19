@@ -13,6 +13,10 @@ From the repository root:
 ./scripts/bench.py --check
 ```
 
+Interactive browse-under-bulk (GET-only, prod-safe) lives in
+`./scripts/bench_interactive.py` — budgets and load policy in
+[`PERF_BUDGETS.md`](PERF_BUDGETS.md).
+
 Runs are written to `bench-runs/<timestamp>-<sha>.json`. The command prints
 deltas against both the previous run and committed `baseline.json`. Set
 `PHOTOARCHIVE_BENCH_URL` to make a GET-only pass against another instance;
