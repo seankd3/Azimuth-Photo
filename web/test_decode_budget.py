@@ -48,6 +48,17 @@ class DecodeBudgetTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order[3], order[2].replace(":start", ":end"))
         self.assertEqual(budget.used_bytes, 0)
 
+    def test_estimate_embedded_raw_is_cheaper_than_demosaic(self):
+        demosaic = estimate_decode_bytes(raw=True, width=9504, height=6336)
+        embedded = estimate_decode_bytes(
+            raw=True,
+            embedded_preview=True,
+            width=9504,
+            height=6336,
+        )
+        self.assertGreaterEqual(demosaic, 500 * 1024 * 1024)
+        self.assertLessEqual(embedded, demosaic // 8)
+
     async def test_sixty_mp_refuses_concurrent_second_at_768mib(self):
         budget = DecodeByteBudget(max_bytes=768 * 1024 * 1024)
         weight = estimate_decode_bytes(raw=True, width=9504, height=6336)

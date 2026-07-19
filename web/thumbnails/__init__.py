@@ -1510,6 +1510,9 @@ def start_pregeneration() -> dict:
     global _pregen_manual_mode, _pregen_manual_pause
     _pregen_manual_mode = True
     _pregen_manual_pause = False
+    # Drop any wedged demosaic threads left from a prior wave so the fresh
+    # start can schedule immediately (stop alone cannot cancel OS threads).
+    _reset_prefetch_executor()
     _reset_pregen_bulk_cursor()
     _reset_pregen_full_cursor()
     _pregen_status["started_at"] = _current_time()
@@ -1521,6 +1524,7 @@ def stop_pregeneration() -> dict:
     global _pregen_manual_mode, _pregen_manual_pause
     _pregen_manual_mode = False
     _pregen_manual_pause = True
+    _reset_prefetch_executor()
     _set_pregen_state("paused", "Pre-generation paused by user.")
     return dict(_pregen_status)
 
@@ -1554,6 +1558,16 @@ def _pregen_should_pause_for_priority() -> bool:
     )
 
 
+def _reset_prefetch_executor() -> None:
+    """Replace the prefetch pool so wedged demosaic threads stop blocking waves."""
+    global _prefetch_executor
+    _prefetch_executor = _replace_executor(
+        _prefetch_executor,
+        _prefetch_workers_count,
+        "thumb-prefetch",
+    )
+
+
 async def run_prefetch_worker():
     global _prefetching
     _prefetching = True
@@ -1580,6 +1594,7 @@ async def run_prefetch_worker():
         get_pregen_status=lambda target_total: get_pregen_status(target_total),
         no_progress_scan_limit=lambda: PREGENERATE_NO_PROGRESS_SCAN_LIMIT,
         batch_pause_seconds=lambda: PREGENERATE_BATCH_PAUSE_SECONDS,
+        reset_prefetch_executor=_reset_prefetch_executor,
     )
 
 

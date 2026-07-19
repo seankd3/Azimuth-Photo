@@ -30,6 +30,11 @@ PREGENERATE_ACTIVITY_BURST_ITEMS = 2
 PREGENERATE_NO_PROGRESS_SCAN_LIMIT = 12
 PREGENERATE_BATCH_PAUSE_SECONDS = 0.25
 MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS = 5.0
+# Cap concurrent user-facing cold decodes so a grid of cold thumbs queues
+# instead of saturating the pool and starving status/health probes.
+ON_DEMAND_HEAVY_DECODE_LIMIT = int(
+    os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")
+)
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
 BROWSER_CACHE_MAX_AGE = 86400
 BROWSER_CACHE_STALE_WHILE_REVALIDATE = 604800
@@ -49,6 +54,19 @@ RAW_EXTENSIONS = {
     ".raf",
     ".rw2",
 }
+# RAW types whose embedded JPEG is reliably large enough for lg (3840).
+# .dng often has a tiny preview — load_raw_preview returns None and we demosaic.
+EMBEDDED_PREVIEW_EXTENSIONS = frozenset(
+    {
+        ".arw",
+        ".cr2",
+        ".cr3",
+        ".nef",
+        ".orf",
+        ".raf",
+        ".rw2",
+    }
+)
 
 DEFAULT_EXPORT_NAMES = (
     "THUMB_TIERS",
@@ -70,6 +88,7 @@ DEFAULT_EXPORT_NAMES = (
     "PREGENERATE_NO_PROGRESS_SCAN_LIMIT",
     "PREGENERATE_BATCH_PAUSE_SECONDS",
     "MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS",
+    "ON_DEMAND_HEAVY_DECODE_LIMIT",
     "THUMBNAIL_RETRY_SECONDS",
     "BROWSER_CACHE_MAX_AGE",
     "BROWSER_CACHE_STALE_WHILE_REVALIDATE",
@@ -80,6 +99,7 @@ DEFAULT_EXPORT_NAMES = (
     "JPEG_EXTENSIONS",
     "BROWSER_ORIGINAL_EXTENSIONS",
     "RAW_EXTENSIONS",
+    "EMBEDDED_PREVIEW_EXTENSIONS",
 )
 
 SSD_REMAINDER_PROFILES = {

@@ -4,8 +4,37 @@ import asyncio
 from collections.abc import Callable
 from functools import partial
 import inspect
+import os
 
 from core import work_coordination
+
+
+# Cap concurrent user-facing cold decodes (heavy TIFF/RAW demosaic). Queues
+# excess work on an async semaphore so status/health stay responsive.
+_ON_DEMAND_LIMIT = max(
+    1,
+    int(os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")),
+)
+_on_demand_decode_sem: asyncio.Semaphore | None = None
+
+
+def on_demand_decode_limit() -> int:
+    return _ON_DEMAND_LIMIT
+
+
+def _on_demand_semaphore() -> asyncio.Semaphore:
+    global _on_demand_decode_sem
+    if _on_demand_decode_sem is None:
+        _on_demand_decode_sem = asyncio.Semaphore(_ON_DEMAND_LIMIT)
+    return _on_demand_decode_sem
+
+
+def reset_on_demand_semaphore_for_tests(limit: int | None = None) -> None:
+    """Test helper — rebuild the semaphore after monkeypatching the limit."""
+    global _on_demand_decode_sem, _ON_DEMAND_LIMIT
+    if limit is not None:
+        _ON_DEMAND_LIMIT = max(1, int(limit))
+    _on_demand_decode_sem = asyncio.Semaphore(_ON_DEMAND_LIMIT)
 
 
 def has_cached(
@@ -157,8 +186,22 @@ async def ensure_thumbnail_with_executor(
     inflight_key = ("thumb", image_id, source_signature)
     task = inflight.get(inflight_key)
     if task is None:
-        task = create_task(
-            run_thumbnail_job(
+
+        async def _decode_job():
+            # User-facing cold decodes share a bounded semaphore so a burst of
+            # cold TIFFs queues instead of saturating the pool.
+            if note_activity:
+                async with _on_demand_semaphore():
+                    return await run_thumbnail_job(
+                        filepath,
+                        size,
+                        image_id,
+                        executor,
+                        include_smaller_tiers,
+                        note_activity,
+                        allow_stale_fallback,
+                    )
+            return await run_thumbnail_job(
                 filepath,
                 size,
                 image_id,
@@ -167,7 +210,8 @@ async def ensure_thumbnail_with_executor(
                 note_activity,
                 allow_stale_fallback,
             )
-        )
+
+        task = create_task(_decode_job())
         inflight[inflight_key] = task
 
     try:
