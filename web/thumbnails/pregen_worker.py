@@ -11,6 +11,11 @@ from core import memory_pressure, work_coordination
 from thumbnails.config import EMBEDDED_PREVIEW_EXTENSIONS, RAW_EXTENSIONS
 from thumbnails.decode_budget import bulk_decode_budget, estimate_decode_bytes
 
+try:
+    from photo_metadata import METADATA_EXTRACTOR_VERSION
+except Exception:  # pragma: no cover
+    METADATA_EXTRACTOR_VERSION = 3
+
 
 log = logging.getLogger("thumbnails.pregen")
 
@@ -116,6 +121,19 @@ async def run_pregen_bulk_batch(
             )
             if not size_signatures and full_item is None:
                 continue
+            try:
+                need_hash = not row["content_hash"]
+            except (KeyError, IndexError, TypeError):
+                need_hash = False
+            try:
+                meta_version = row["metadata_version"]
+                need_metadata = (
+                    row["metadata_scanned_at"] is None
+                    or meta_version is None
+                    or int(meta_version) < int(METADATA_EXTRACTOR_VERSION)
+                )
+            except (KeyError, IndexError, TypeError, ValueError):
+                need_metadata = False
             pending.append({
                 "id": int(row["id"]),
                 "filepath": row["filepath"],
@@ -124,6 +142,8 @@ async def run_pregen_bulk_batch(
                 "source_size": source_size,
                 "width": _row_dimension(row, "width"),
                 "height": _row_dimension(row, "height"),
+                "need_hash": need_hash,
+                "need_metadata": need_metadata,
             })
             if len(pending) >= generate_batch:
                 break
@@ -245,6 +265,8 @@ async def run_pregen_bulk_batch(
                         source_bytes=item["source_size"],
                         full_item=item.get("full"),
                         hot=False,
+                        need_hash=bool(item.get("need_hash")),
+                        need_metadata=bool(item.get("need_metadata")),
                     ),
                 )
                 for item in wave

@@ -192,11 +192,7 @@ def _dms_to_decimal(dms_tuple, ref: str = ""):
         return None
 
 
-def extract_image_metadata(filepath: str) -> dict:
-    """Return normalized display/query metadata for an image path."""
-    from PIL import Image as PILImage  # deferred: keeps Pillow off boot until image metadata is parsed
-    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
-
+def _base_file_metadata(filepath: str) -> dict:
     filename = os.path.basename(filepath)
     file_ext = os.path.splitext(filename)[1].lower()
     metadata = {
@@ -205,7 +201,6 @@ def extract_image_metadata(filepath: str) -> dict:
         "folder": os.path.dirname(filepath),
         "file_ext": file_ext,
     }
-
     try:
         stat = os.stat(filepath)
         metadata["file_size"] = int(stat.st_size)
@@ -216,20 +211,15 @@ def extract_image_metadata(filepath: str) -> dict:
             metadata["file_modified"] = modified.strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         pass
-
     _apply_sidecar_metadata(metadata, filepath)
-    if file_ext not in PILLOW_METADATA_EXTENSIONS:
-        return metadata
+    return metadata
 
-    try:
-        with PILImage.open(filepath) as img:
-            metadata["width"] = int(img.width)
-            metadata["height"] = int(img.height)
-            metadata["dimensions"] = f"{img.width} x {img.height}"
-            exif_raw = img.getexif()
-            all_tags = _merge_exif_tags(exif_raw)
-    except Exception:
-        return metadata
+
+def _apply_pillow_tags(metadata: dict, all_tags: dict, *, width: int | None = None, height: int | None = None) -> dict:
+    if width is not None and height is not None:
+        metadata["width"] = int(width)
+        metadata["height"] = int(height)
+        metadata["dimensions"] = f"{int(width)} x {int(height)}"
 
     make = _clean_text(all_tags.get("Make"))
     model = _clean_text(all_tags.get("Model"))
@@ -314,17 +304,16 @@ def extract_image_metadata(filepath: str) -> dict:
             metadata["date_taken"] = parsed
             metadata["date_source"] = "exif"
 
-    width = all_tags.get("ExifImageWidth") or all_tags.get("ImageWidth")
-    height = all_tags.get("ExifImageHeight") or all_tags.get("ImageLength")
-    if width and height:
+    tag_width = all_tags.get("ExifImageWidth") or all_tags.get("ImageWidth")
+    tag_height = all_tags.get("ExifImageHeight") or all_tags.get("ImageLength")
+    if tag_width and tag_height:
         try:
-            metadata["width"] = int(width)
-            metadata["height"] = int(height)
-            metadata["dimensions"] = f"{int(width)} x {int(height)}"
+            metadata["width"] = int(tag_width)
+            metadata["height"] = int(tag_height)
+            metadata["dimensions"] = f"{int(tag_width)} x {int(tag_height)}"
         except Exception:
             pass
 
-    # GPS coordinates
     gps_lat = all_tags.get("GPSLatitude")
     gps_lat_ref = all_tags.get("GPSLatitudeRef")
     gps_lng = all_tags.get("GPSLongitude")
@@ -337,3 +326,64 @@ def extract_image_metadata(filepath: str) -> dict:
             metadata["longitude"] = lng
 
     return metadata
+
+
+def extract_image_metadata(filepath: str) -> dict:
+    """Return normalized display/query metadata for an image path."""
+    from PIL import Image as PILImage  # deferred: keeps Pillow off boot until image metadata is parsed
+    from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
+
+    metadata = _base_file_metadata(filepath)
+    if metadata["file_ext"] not in PILLOW_METADATA_EXTENSIONS:
+        return metadata
+
+    try:
+        with PILImage.open(filepath) as img:
+            return _apply_pillow_tags(
+                metadata,
+                _merge_exif_tags(img.getexif()),
+                width=img.width,
+                height=img.height,
+            )
+    except Exception:
+        return metadata
+
+
+def extract_image_metadata_from_image(filepath: str, img) -> dict:
+    """Extract metadata from an already-decoded PIL image (no second open)."""
+    metadata = _base_file_metadata(filepath)
+    try:
+        return _apply_pillow_tags(
+            metadata,
+            _merge_exif_tags(img.getexif()),
+            width=img.width,
+            height=img.height,
+        )
+    except Exception:
+        return metadata
+
+
+def extract_image_metadata_from_bytes(filepath: str, data: bytes) -> dict:
+    """Same as extract_image_metadata, but reuse already-read original bytes."""
+    import io
+
+    from PIL import Image as PILImage  # deferred
+    from core import pil_limits  # noqa: F401
+
+    metadata = _base_file_metadata(filepath)
+    if data and "file_size" not in metadata:
+        metadata["file_size"] = len(data)
+        metadata["filesize"] = f"{len(data) / (1024 * 1024):.1f} MB"
+    if metadata["file_ext"] not in PILLOW_METADATA_EXTENSIONS:
+        return metadata
+
+    try:
+        with PILImage.open(io.BytesIO(data)) as img:
+            return _apply_pillow_tags(
+                metadata,
+                _merge_exif_tags(img.getexif()),
+                width=img.width,
+                height=img.height,
+            )
+    except Exception:
+        return metadata

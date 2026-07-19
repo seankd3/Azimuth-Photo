@@ -11,6 +11,14 @@ HASH_PREFIX_BYTES = 8 * 1024 * 1024
 HASH_DIGEST_BYTES = 16
 
 
+def compute_content_hash_from_prefix(prefix: bytes, file_size: int) -> str:
+    """FIELD_SPEC digest from an already-read prefix (read-once harvest path)."""
+    digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
+    digest.update(prefix[:HASH_PREFIX_BYTES])
+    digest.update(int(file_size).to_bytes(8, byteorder="little", signed=False))
+    return digest.hexdigest()
+
+
 def compute_content_hash(path: str | os.PathLike[str]) -> str:
     """Return the exact FIELD_SPEC identity digest.
 
@@ -21,11 +29,9 @@ def compute_content_hash(path: str | os.PathLike[str]) -> str:
 
     candidate = Path(path)
     file_size = candidate.stat().st_size
-    digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
     with candidate.open("rb") as handle:
-        digest.update(handle.read(HASH_PREFIX_BYTES))
-    digest.update(int(file_size).to_bytes(8, byteorder="little", signed=False))
-    return digest.hexdigest()
+        prefix = handle.read(HASH_PREFIX_BYTES)
+    return compute_content_hash_from_prefix(prefix, file_size)
 
 
 def compute_full_hash(path: str | os.PathLike[str]) -> str:

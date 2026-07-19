@@ -784,6 +784,27 @@ def _planned_thumbnail_sizes(
     )
 
 
+def _persist_harvest_hash(image_id: int, digest: str) -> bool:
+    from . import harvest
+
+    try:
+        return harvest.persist_content_hash_sync(data_providers.db_path(), image_id, digest)
+    except Exception:
+        return False
+
+
+def _persist_harvest_metadata(image_id: int, metadata: dict) -> bool:
+    from features.catalog import metadata as catalog_metadata
+    from . import harvest
+
+    try:
+        update = catalog_metadata.metadata_update_tuple(image_id, metadata)
+        harvest.persist_metadata_sync(data_providers.db_path(), update)
+        return True
+    except Exception:
+        return False
+
+
 def _generate_missing_thumbnails_sync(
     filepath: str,
     requested_size: str,
@@ -794,25 +815,55 @@ def _generate_missing_thumbnails_sync(
     allow_stale_fallback: bool = True,
 ):
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+    from . import harvest
+    import photo_metadata
 
-    return generation.generate_missing_thumbnails(
+    def _generate(*_args, on_source_loaded=None, **_ignored):
+        return generation.generate_missing_thumbnails(
+            filepath,
+            requested_size,
+            image_id,
+            include_smaller_tiers=include_smaller_tiers,
+            hot=hot,
+            allow_stale_fallback=allow_stale_fallback,
+            planned_thumbnail_sizes=_planned_thumbnail_sizes,
+            sizes=SIZES,
+            load_source_image=_load_source_image,
+            queue_orientation=_queue_orientation,
+            resize_to_long_side=_resize_to_long_side,
+            build_source_signature=_build_source_signature,
+            encode_and_cache_thumbnail=_encode_and_cache_thumbnail,
+            mark_source_missing_from_error=_mark_source_missing_from_error,
+            thumbnail_retry_after=_thumbnail_retry_after,
+            thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
+            on_source_loaded=on_source_loaded,
+        )
+
+    need_hash, need_metadata = False, False
+    try:
+        need_hash, need_metadata = harvest.image_side_needs(
+            data_providers.db_path(),
+            image_id,
+            metadata_version=photo_metadata.METADATA_EXTRACTOR_VERSION,
+        )
+    except Exception:
+        pass
+
+    result = harvest.harvest_original(
         filepath,
-        requested_size,
         image_id,
+        bulk=False,
+        requested_size=requested_size,
         include_smaller_tiers=include_smaller_tiers,
-        hot=hot,
         allow_stale_fallback=allow_stale_fallback,
-        planned_thumbnail_sizes=_planned_thumbnail_sizes,
-        sizes=SIZES,
-        load_source_image=_load_source_image,
-        queue_orientation=_queue_orientation,
-        resize_to_long_side=_resize_to_long_side,
-        build_source_signature=_build_source_signature,
-        encode_and_cache_thumbnail=_encode_and_cache_thumbnail,
-        mark_source_missing_from_error=_mark_source_missing_from_error,
-        thumbnail_retry_after=_thumbnail_retry_after,
-        thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
+        hot=hot,
+        need_hash=need_hash,
+        need_metadata=need_metadata,
+        generate_missing_thumbnails=_generate,
+        persist_hash=_persist_harvest_hash,
+        persist_metadata=_persist_harvest_metadata,
     )
+    return result.requested_thumb
 
 
 def _generate_thumbnail_set_sync(
@@ -823,35 +874,68 @@ def _generate_thumbnail_set_sync(
     source_bytes: int | None = None,
     full_item: dict | None = None,
     hot: bool = False,
+    need_hash: bool = False,
+    need_metadata: bool = False,
 ) -> dict:
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
+    from . import harvest
 
-    return generation.generate_thumbnail_set(
+    def _generate(fp, iid, sigs, **kwargs):
+        return generation.generate_thumbnail_set(
+            fp,
+            iid,
+            sigs,
+            source_bytes=kwargs.get("source_bytes", source_bytes),
+            full_item=kwargs.get("full_item", full_item),
+            hot=kwargs.get("hot", hot),
+            sizes=SIZES,
+            thumb_tiers=THUMB_TIERS,
+            full_tier=FULL_TIER,
+            load_source_image=_load_source_image,
+            load_source_image_from_bytes=_load_source_image_from_bytes,
+            queue_orientation=_queue_orientation,
+            resize_to_long_side=_resize_to_long_side,
+            encode_and_cache_thumbnail=_encode_and_cache_thumbnail,
+            cache_full_image_sync=_cache_full_image_sync,
+            cache_full_image_bytes_sync=_cache_full_image_bytes_sync,
+            mark_source_missing_from_error=_mark_source_missing_from_error,
+            fast_disk_has=fast_disk_has,
+            is_browser_displayable_original=is_browser_displayable_original,
+            thumbnail_retry_after=_thumbnail_retry_after,
+            thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
+            now_provider=time.time,
+            monotonic_provider=time.monotonic,
+            log=print,
+            on_source_loaded=kwargs.get("on_source_loaded"),
+        )
+
+    if not need_hash and not need_metadata:
+        try:
+            import photo_metadata
+
+            need_hash, need_metadata = harvest.image_side_needs(
+                data_providers.db_path(),
+                image_id,
+                metadata_version=photo_metadata.METADATA_EXTRACTOR_VERSION,
+            )
+        except Exception:
+            need_hash, need_metadata = False, False
+
+    result = harvest.harvest_original(
         filepath,
         image_id,
-        size_signatures,
-        source_bytes=source_bytes,
+        bulk=True,
+        size_signatures=size_signatures,
         full_item=full_item,
+        source_bytes=source_bytes,
         hot=hot,
-        sizes=SIZES,
-        thumb_tiers=THUMB_TIERS,
-        full_tier=FULL_TIER,
-        load_source_image=_load_source_image,
-        load_source_image_from_bytes=_load_source_image_from_bytes,
-        queue_orientation=_queue_orientation,
-        resize_to_long_side=_resize_to_long_side,
-        encode_and_cache_thumbnail=_encode_and_cache_thumbnail,
-        cache_full_image_sync=_cache_full_image_sync,
-        cache_full_image_bytes_sync=_cache_full_image_bytes_sync,
-        mark_source_missing_from_error=_mark_source_missing_from_error,
-        fast_disk_has=fast_disk_has,
-        is_browser_displayable_original=is_browser_displayable_original,
-        thumbnail_retry_after=_thumbnail_retry_after,
-        thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
-        now_provider=time.time,
-        monotonic_provider=time.monotonic,
-        log=print,
+        need_hash=need_hash,
+        need_metadata=need_metadata,
+        generate_thumbnail_set=_generate,
+        persist_hash=_persist_harvest_hash,
+        persist_metadata=_persist_harvest_metadata,
     )
+    return result.as_thumb_metrics()
 
 
 def has_cached(size: str, filepath: str, image_id: int) -> bool:
