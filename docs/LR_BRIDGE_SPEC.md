@@ -43,3 +43,13 @@ An Azimuth Lua plugin inside LR Classic (official SDK = the only sanctioned writ
 3. lr_rating flows into the taste blend exactly as LR-import ratings do today (regression against existing tests).
 4. Export observed → relation stored → visible on both images' payloads (unit + API test).
 5. Full sync suites green (the family-clock contract tests must pass untouched — rating/LR-import never advances develop clocks, per closed class).
+
+## UX layer (frozen addendum, Sean-approved 2026-07-19: "super simple, effortless UX")
+
+Build order: after the plumbing milestones merge. Grok/GPT implement from this frozen design; no redesigns.
+
+1. **One-click connect.** Azimuth settings offers "Connect Lightroom": the satellite writes the plugin into LR's auto-load Modules folder (per-OS path; Windows first). Next LR launch, the bridge exists. Same button disconnects (removes it). No Plug-in Manager instructions, no config screen. Detect LR installed → only then show the button.
+2. **The morning collection.** The plugin maintains a dated LR collection "From Azimuth — <N> picks · <date>" containing photos picked in Azimuth since the last LR session. New picks append to today's collection; a collection whose photos are all edited/unpicked ages out (plugin removes empty ones). This is the feature's landmark moment — the edit queue is assembled before the user sits down.
+3. **The ranking chip.** When newly-linked exports arrive, Azimuth desktop shows one quiet chip: "N new edits from Lightroom — rank them" → opens a focused compare session scoped to just those exports (reuse compare; scope = the new arrivals). Dismissable, never re-nags for the same batch; ignored edits just join the library.
+4. **Stars need no legend.** elo_stars render identically to any stars; hovering the stars in Azimuth whispers the projection ("top 2% of your ranked photos"). A user-set star shows a subtle "yours" marker in both apps (LR side: color label or keyword is NOT acceptable — use nothing in LR; the honored value IS the marker there).
+5. **Zero ceremony.** No sync windows, spinners, timestamps, or conflict dialogs anywhere. The bridge is silent while working. Sole error surface: after >24h of persistent failure, one calm line in the existing Library Health panel ("Lightroom bridge hasn't synced since <date>"). The plugin's Library-menu status dialog (plumbing milestone) remains for debugging but is never surfaced proactively.
