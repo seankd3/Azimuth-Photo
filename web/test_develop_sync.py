@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 import json
 import os
@@ -17,51 +19,7 @@ import db  # noqa: E402
 from features.develop import rawproc, routes as develop_routes  # noqa: E402
 
 
-class DevelopSyncTests(unittest.TestCase):
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.old_db_path = db.DB_PATH
-        self.old_cache_dir = rawproc.BASE_CACHE_DIR
-        self.old_cache_root = rawproc.BASE_CACHE_ROOT
-        db.DB_PATH = os.path.join(self.tempdir.name, "develop-sync.db")
-        rawproc.BASE_CACHE_ROOT = __import__("pathlib").Path(self.tempdir.name) / "develop-cache"
-        rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
-        rawproc._recent_decodes.clear()
-        asyncio.run(db.init_db())
-        source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
-        self.source_id = source["id"]
-        self.raw_a = self._image("source.dng")
-        self.raw_b = self._image("target-a.dng")
-        self.raw_c = self._image("target-b.dng")
-        self.client = TestClient(app_module.app)
-
-    def tearDown(self):
-        self.client.close()
-        db.DB_PATH = self.old_db_path
-        rawproc.BASE_CACHE_DIR = self.old_cache_dir
-        rawproc.BASE_CACHE_ROOT = self.old_cache_root
-        rawproc._recent_decodes.clear()
-        self.tempdir.cleanup()
-
-    def _image(self, name):
-        path = __import__("pathlib").Path(self.tempdir.name) / "raws" / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"not decoded")
-
-        async def insert():
-            conn = await db.get_db()
-            try:
-                cursor = await conn.execute(
-                    "INSERT INTO images (source_id, filename, filepath, status) VALUES (?, ?, ?, 'kept')",
-                    (self.source_id, path.name, str(path)),
-                )
-                await conn.commit()
-                return cursor.lastrowid
-            finally:
-                await conn.close()
-
-        return asyncio.run(insert())
-
+class DevelopSyncUnitTests(unittest.TestCase):
     def test_extract_sync_slice_masks_wholesale_and_named_groups(self):
         settings = {
             "Temperature": 6200,
@@ -100,6 +58,69 @@ class DevelopSyncTests(unittest.TestCase):
         self.assertEqual(slice_["LuminanceDetail"], 73)
         self.assertEqual(slice_["LuminanceContrast"], 28)
         self.assertNotIn("LuminanceNoiseReductionDetail", slice_)
+
+
+@pytest.mark.serial
+class DevelopSyncHttpTests(unittest.TestCase):
+    """HTTP develop-sync paths share the global app — keep them off the xdist wave."""
+
+    def setUp(self):
+        worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+        self.tempdir = tempfile.TemporaryDirectory(prefix=f"pa-develop-sync-{worker}-")
+        self.old_db_path = db.DB_PATH
+        self.old_cache_dir = rawproc.BASE_CACHE_DIR
+        self.old_cache_root = rawproc.BASE_CACHE_ROOT
+        self.old_smoke = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
+        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        db.DB_PATH = os.path.join(self.tempdir.name, "develop-sync.db")
+        rawproc.BASE_CACHE_ROOT = __import__("pathlib").Path(self.tempdir.name) / "develop-cache"
+        rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
+        rawproc.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        rawproc._recent_decodes.clear()
+        asyncio.run(db.init_db())
+        source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
+        self.source_id = source["id"]
+        self.raw_a = self._image("source.dng")
+        self.raw_b = self._image("target-a.dng")
+        self.raw_c = self._image("target-b.dng")
+        self.client = TestClient(app_module.app)
+
+    def tearDown(self):
+        try:
+            self.client.close()
+        except Exception:
+            pass
+        db.DB_PATH = self.old_db_path
+        rawproc.BASE_CACHE_DIR = self.old_cache_dir
+        rawproc.BASE_CACHE_ROOT = self.old_cache_root
+        rawproc._recent_decodes.clear()
+        if self.old_smoke is None:
+            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+        else:
+            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke
+        try:
+            self.tempdir.cleanup()
+        except Exception:
+            pass
+
+    def _image(self, name):
+        path = __import__("pathlib").Path(self.tempdir.name) / "raws" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"not decoded")
+
+        async def insert():
+            conn = await db.get_db()
+            try:
+                cursor = await conn.execute(
+                    "INSERT INTO images (source_id, filename, filepath, status) VALUES (?, ?, ?, 'kept')",
+                    (self.source_id, path.name, str(path)),
+                )
+                await conn.commit()
+                return cursor.lastrowid
+            finally:
+                await conn.close()
+
+        return asyncio.run(insert())
 
     def test_sync_writes_settings_and_history_label(self):
         put = self.client.put(

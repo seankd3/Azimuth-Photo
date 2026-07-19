@@ -13,31 +13,36 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="uses POSIX process groups for its isolated Playwright server",
-)
+from conftest import free_port, worker_scratch
+
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="uses POSIX process groups for its isolated Playwright server",
+    ),
+    pytest.mark.slow,
+    pytest.mark.playwright,
+    # Seeds ~139k rows — too heavy/contention-prone to share an xdist wave.
+    pytest.mark.serial,
+]
 
 
 WEB_ROOT = Path(__file__).resolve().parent
-SCRATCH = Path("/mnt/expansion/tmp/navhang")
-DB_PATH = SCRATCH / "catalog.db"
-PORT = 8148
-BASE_URL = f"http://127.0.0.1:{PORT}"
 ACTIVE_IMAGES = 139_000
 TRASHED_IMAGES = 12
 
 
-def _seed_catalog() -> None:
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    (SCRATCH / "source").mkdir(exist_ok=True)
+def _seed_catalog(db_path: Path, source_dir: Path) -> None:
+    scratch = db_path.parent
+    scratch.mkdir(parents=True, exist_ok=True)
+    source_dir.mkdir(exist_ok=True)
     for suffix in ("", "-wal", "-shm"):
-        Path(f"{DB_PATH}{suffix}").unlink(missing_ok=True)
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
     env = os.environ.copy()
     env.update(
         {
             "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
+            "PHOTOARCHIVE_DB_PATH": str(db_path),
             "PHOTOARCHIVE_MODE": "satellite",
             "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
             "PYTHONPATH": str(WEB_ROOT),
@@ -102,56 +107,63 @@ ACTIVE = %d
 TRASHED = %d
 SOURCE = %r
 asyncio.run(main())
-""" % (ACTIVE_IMAGES, TRASHED_IMAGES, str(SCRATCH / "source"))
+""" % (ACTIVE_IMAGES, TRASHED_IMAGES, str(source_dir))
     subprocess.run(
-        [str(WEB_ROOT / ".venv/bin/python"), "-c", script],
+        [sys.executable, "-c", script],
         check=True,
         cwd=str(WEB_ROOT),
         env=env,
     )
 
 
-def _wait_healthy(timeout: float = 30.0) -> None:
+def _wait_healthy(base_url: str, timeout: float = 30.0) -> None:
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
         try:
-            with urllib.request.urlopen(f"{BASE_URL}/api/dev/status", timeout=1) as response:
+            with urllib.request.urlopen(f"{base_url}/api/dev/status", timeout=1) as response:
                 if response.status == 200:
                     return
         except (urllib.error.URLError, TimeoutError) as exc:
             last_error = str(exc)
         time.sleep(0.25)
-    raise RuntimeError(f"server on {BASE_URL} did not become healthy: {last_error}")
+    raise RuntimeError(f"server on {base_url} did not become healthy: {last_error}")
 
 
 @pytest.fixture(scope="module")
 def satellite_server():
-    _seed_catalog()
+    scratch = worker_scratch("navhang")
+    db_path = scratch / "catalog.db"
+    source_dir = scratch / "source"
+    port = free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    _seed_catalog(db_path, source_dir)
     env = os.environ.copy()
     env.update(
         {
             "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
+            "PHOTOARCHIVE_DB_PATH": str(db_path),
             "PHOTOARCHIVE_MODE": "satellite",
             "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
-            "PHOTOARCHIVE_PORT": str(PORT),
+            "PHOTOARCHIVE_PORT": str(port),
             "PHOTOARCHIVE_HOST": "127.0.0.1",
             "PHOTOARCHIVE_ACCESS": "local",
-            "TMPDIR": "/mnt/expansion/tmp",
+            "TMPDIR": str(scratch),
             "PYTHONPATH": str(WEB_ROOT),
         }
     )
-    log_path = SCRATCH / "server.log"
+    log_path = scratch / "server.log"
     with log_path.open("w", encoding="utf-8") as log_file:
         proc = subprocess.Popen(
             [
-                str(WEB_ROOT / ".venv/bin/uvicorn"),
+                sys.executable,
+                "-m",
+                "uvicorn",
                 "app:app",
                 "--host",
                 "127.0.0.1",
                 "--port",
-                str(PORT),
+                str(port),
             ],
             cwd=str(WEB_ROOT),
             env=env,
@@ -160,8 +172,8 @@ def satellite_server():
             start_new_session=True,
         )
         try:
-            _wait_healthy()
-            yield BASE_URL
+            _wait_healthy(base_url)
+            yield base_url
         finally:
             try:
                 os.killpg(proc.pid, signal.SIGTERM)

@@ -6,6 +6,7 @@ The smoke suite skips this intentionally expensive, corpus-dependent gate. Run:
 
 from __future__ import annotations
 
+
 import io
 import os
 import sqlite3
@@ -23,6 +24,7 @@ if os.environ.get("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE") != "1":
 
 from features.develop import adobe_profiles, dng_pipeline, importer, lossydng, pipeline, rawproc, xmp_write
 
+pytestmark = pytest.mark.slow
 
 PROD_DB = Path(os.environ.get("PHOTOARCHIVE_ACCEPTANCE_DB", "/home/sean/Projects/photo-archive/web/photoarchive.db"))
 EVIDENCE_DIR = Path(os.environ.get("PHOTOARCHIVE_DNG_EVIDENCE_DIR", "/mnt/expansion/tmp-lanes/color/evidence"))

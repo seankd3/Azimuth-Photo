@@ -1,8 +1,10 @@
+import pytest
 import asyncio
 import importlib
 import os
 from types import SimpleNamespace
 import unittest
+
 
 from fastapi.routing import APIRoute
 
@@ -11,6 +13,7 @@ import db
 import thumbnails
 from core import app_factory
 
+pytestmark = pytest.mark.contract
 
 PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/"),

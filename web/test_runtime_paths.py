@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import os
 from pathlib import Path
 import posixpath
@@ -259,6 +260,7 @@ class RuntimePathTests(unittest.TestCase):
         )
         self.assertEqual(normalized["face_model_dir"], os.path.normpath("/deploy/models/insightface"))
 
+    @pytest.mark.contract
     def test_photoarchive_home_rejects_foreign_backup_override(self):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "app-home"

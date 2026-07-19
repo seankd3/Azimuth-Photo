@@ -1,3 +1,4 @@
+import pytest
 import json
 import os
 import sqlite3
@@ -127,6 +128,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['develop_settings_updated'], 1)
         self.assertEqual(result['develop_settings_skipped'], 2)
 
+    @pytest.mark.contract
     def test_rating_import_does_not_advance_the_develop_clock(self):
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(

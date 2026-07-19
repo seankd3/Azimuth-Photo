@@ -1,5 +1,6 @@
 """HTTP behavior gates for settings and batch cull mutations."""
 
+import pytest
 import asyncio
 import json
 from unittest.mock import patch
@@ -101,6 +102,7 @@ class SettingsRouteTests(BackendTestCase):
         fetched = await self._request("GET", f"/api/image/{image_id}/rating")
         self.assertEqual(fetched.json()["rating"], 3)
 
+    @pytest.mark.contract
     async def test_set_rating_does_not_advance_the_develop_clock(self):
         source = await self._source()
         edited_id = await self._image(source["id"], "rated-edit.jpg")

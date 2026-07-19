@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import json
 import os
 import sqlite3
@@ -113,6 +114,7 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(clock[0], "lr")
         self.assertEqual(clock[1], 100.0)
 
+    @pytest.mark.contract
     async def test_inbound_lr_rating_does_not_advance_develop_clock(self):
         path = self._catalog()
         with closing(sqlite3.connect(path)) as conn:

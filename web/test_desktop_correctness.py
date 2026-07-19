@@ -1,5 +1,6 @@
 """Regression gates for desktop interaction correctness fixes."""
 
+import pytest
 from pathlib import Path
 import json
 import re
@@ -54,6 +55,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("viewState.images.some((image) =>", grid)
         self.assertIn("loadFirstPage();", grid[grid.index("if (committed && scope.flag"):])
 
+    @pytest.mark.contract
     def test_pending_previews_refresh_idle_desktop_and_mobile_photo_views(self):
         grid = read("grid.js")
         timeline = read_mobile("timeline.js")
@@ -73,6 +75,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("scrollTop <= 160", timeline)
         self.assertIn("on('tab', (tab) =>", timeline)
 
+    @pytest.mark.contract
     def test_similar_pending_previews_poll_by_id_and_sharpen_on_both_shells(self):
         grid = read("grid.js")
         timeline = read_mobile("timeline.js")
@@ -97,6 +100,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
             timeline,
         )
 
+    @pytest.mark.contract
     def test_events_keep_pending_previews_off_the_thumbnail_decode_path(self):
         events = read("events.js")
         cell_html = events[events.index("function cellHtml"):events.index("function patchCells")]
@@ -111,6 +115,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("params.set('ids', ids.join(','));", events)
         self.assertIn("stopThumbnailPoll();", events[events.index("export function unmountEvents"):])
 
+    @pytest.mark.contract
     def test_pending_preview_thumb_fallbacks_are_centralized_and_guarded(self):
         allowed_progressive_exceptions = {
             "desktop/loupe.js": {
@@ -340,6 +345,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("loadCollectionImages", scope_data)
         self.assertNotIn("loadCollectionImageIds", scope_data)
 
+    @pytest.mark.contract
     def test_quiet_sources_compose_through_scope_params_once(self):
         state = read("state.js")
         panel = read("panel.js")
@@ -505,6 +511,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         completion_bump = worker_action.rindex(generation_bump)
         self.assertLess(completion_bump, worker_action.index("workerActionsInFlight.delete(key);"))
 
+    @pytest.mark.contract
     def test_background_workers_default_new_productive_states_to_active(self):
         drawer = read("drawer.js")
 
@@ -532,6 +539,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("Math.max(5, countProgress)", people_progress)
         self.assertEqual(drawer.count("peopleProgress(peopleStatus)"), 2)
 
+    @pytest.mark.contract
     def test_metadata_activity_uses_metadata_worker_states_and_pause(self):
         drawer = read("drawer.js")
         metadata_line = drawer[

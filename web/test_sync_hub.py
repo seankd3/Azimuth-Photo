@@ -1,3 +1,4 @@
+import pytest
 import asyncio
 from datetime import datetime
 import gzip
@@ -221,6 +222,7 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(repeat.json(), {"image_id": image_id})
 
+    @pytest.mark.contract
     def test_manifest_known_requires_live_original(self):
         """Trashed, missing, or mirror rows must not count as backed up —
         Free-up-space on the phone deletes local copies of "known" hashes."""
@@ -581,6 +583,7 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(row, ("Imported title", "2026-07-16T05:00:00Z"))
 
+    @pytest.mark.contract
     def test_first_synced_rating_seeds_a_neutral_develop_clock(self):
         payload = self.image_bytes("first-rating.jpg", (55, 65, 75))
         content_hash = self.declare("first-rating.jpg", payload)
@@ -942,6 +945,7 @@ class SyncHubTests(unittest.TestCase):
         self.assertTrue(preferred.is_file())
         self.assertIn(preferred.read_bytes(), (first, second))
 
+    @pytest.mark.contract
     def test_manifest_known_requires_original_bytes_on_disk(self):
         """P1-C: a catalog row without byte proof must report as needed, not known."""
 
