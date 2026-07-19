@@ -350,6 +350,21 @@ def ui_session_busy() -> bool:
     return False
 
 
+def consume_rollback_notice_into_status(updater: ClientUpdater | None, install_root: Path | None = None) -> None:
+    """If the launcher rolled back, surface the notice on the sync status line."""
+
+    if updater is None:
+        return
+    root = Path(install_root) if install_root else updater.install_root
+    notice_path = root / "rollback_notice.txt"
+    if not notice_path.is_file():
+        return
+    text = notice_path.read_text(encoding="utf-8").strip() or UI_ROLLED_BACK
+    notice_path.unlink(missing_ok=True)
+    updater.status.state = STATUS_ROLLED_BACK
+    updater.status.message = text
+
+
 def request_process_restart() -> None:
     """Exit so the launcher respawns from current.txt (Windows-safe)."""
 

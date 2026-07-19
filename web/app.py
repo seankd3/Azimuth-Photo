@@ -106,6 +106,9 @@ if satellite.is_satellite_mode():
             if updater is not None:
                 updater.request = worker._hub_request
                 updater.hub = worker.hub
+                from features.sync.client_update import consume_rollback_notice_into_status
+
+                consume_rollback_notice_into_status(updater)
             configure_worker(worker)
             app.state.photoarchive_sync_worker = worker
             app.state.photoarchive_shell.track_background_task(worker.run())
