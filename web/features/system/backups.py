@@ -326,6 +326,30 @@ def assert_backup_owner(root: Path, db_path: str) -> None:
     snapshots) means this instance must not publish or prune here.
     """
 
+    warning = backup_owner_warning(root, db_path)
+    if warning:
+        raise BackupMisconfigurationError(warning)
+
+
+def assert_backup_owner_for_restore(root: Path, db_path: str) -> None:
+    """Hard-refuse restore only when the dir is owned by another catalog.
+
+    Pre-marker directories (snapshots present, no marker yet) may still restore an
+    explicitly named file — publish/prune stay gated by ``assert_backup_owner``.
+    """
+
+    root = Path(root)
+    marker = _owner_marker_path(root)
+    if not marker.is_file():
+        return
+    warning = backup_owner_warning(root, db_path)
+    if warning:
+        raise BackupMisconfigurationError(warning)
+
+
+def backup_owner_warning(root: Path, db_path: str) -> str | None:
+    """Return a soft warning when the backup dir is foreign; None when ok."""
+
     root = Path(root)
     marker = _owner_marker_path(root)
     catalog = _catalog_identity(db_path)
@@ -333,26 +357,25 @@ def assert_backup_owner(root: Path, db_path: str) -> None:
         try:
             payload = json.loads(marker.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            raise BackupMisconfigurationError(
-                f"Refusing backup: owner marker '{marker}' is unreadable ({exc})"
-            ) from exc
+            return f"Refusing backup: owner marker '{marker}' is unreadable ({exc})"
         owned = str(payload.get("catalog_path") or "").strip()
         if owned != catalog:
-            raise BackupMisconfigurationError(
+            return (
                 "Refusing backup: backup destination "
                 f"'{root}' belongs to catalog '{owned or '<unknown>'}', "
                 f"not this instance's catalog '{catalog}'."
             )
-        return
+        return None
 
     existing = sorted(root.glob("photoarchive-*.db.gz"))
     if existing:
-        raise BackupMisconfigurationError(
+        return (
             "Refusing backup: backup destination "
             f"'{root}' already holds snapshots but has no owner marker. "
             "That shape is a pre-marker or foreign directory; refusing to "
             "publish or prune until ownership is explicit."
         )
+    return None
 
 
 def write_backup_owner_marker(root: Path, db_path: str) -> None:
@@ -579,8 +602,11 @@ def backup_before_migration(
         raise
 
 
-def list_backups() -> list[dict[str, Any]]:
+def list_backups(db_path: str | None = None) -> list[dict[str, Any]]:
+    """List snapshots. Foreign dirs soften to an ``owner_warning`` field."""
+
     root = backup_root()
+    owner_warning = backup_owner_warning(root, db_path) if db_path else None
     items: list[dict[str, Any]] = []
     for path in sorted(root.glob("photoarchive-*.db.gz"), reverse=True):
         parsed = _parse_backup_name(path.name)
@@ -590,14 +616,15 @@ def list_backups() -> list[dict[str, Any]]:
             size = path.stat().st_size
         except OSError:
             continue
-        items.append(
-            {
-                "name": path.name,
-                "path": str(path),
-                "bytes": size,
-                "created_at": parsed.isoformat(),
-            }
-        )
+        item: dict[str, Any] = {
+            "name": path.name,
+            "path": str(path),
+            "bytes": size,
+            "created_at": parsed.isoformat(),
+        }
+        if owner_warning:
+            item["owner_warning"] = owner_warning
+        items.append(item)
     return items
 
 
@@ -744,7 +771,9 @@ def restore_backup(db_path: str, name: str) -> dict[str, Any]:
     """Validate and stage a named backup beside the live db; never replace it."""
     if not BACKUP_NAME_RE.match(name):
         raise ValueError(f"Invalid backup name: {name}")
-    source = backup_root() / name
+    root = backup_root_for(db_path)
+    assert_backup_owner_for_restore(root, db_path)
+    source = root / name
     if not source.is_file():
         raise FileNotFoundError(f"Backup not found: {name}")
 
