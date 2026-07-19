@@ -19,7 +19,7 @@ from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.system import backup_routes, version_routes
-from features.sync import hub_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
+from features.sync import hub_routes, lr_routes, mdns, oplog_routes, pair_routes, pairing, satellite, satellite_routes
 from features.sync.contract import ApiRevisionMismatch
 from features.sync.sync_worker import SyncWorker, configure_worker
 
@@ -73,6 +73,7 @@ app.include_router(watched_routes.router)
 app.include_router(hub_routes.router)
 app.include_router(oplog_routes.router)
 app.include_router(satellite_routes.router)
+app.include_router(lr_routes.router)
 app.include_router(pair_routes.router)
 
 # Keep the worker out of hub processes entirely. Standalone (satellite with no
