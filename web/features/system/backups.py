@@ -29,6 +29,7 @@ from data import connection as data_connection
 log = logging.getLogger(__name__)
 
 BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
+OWNER_MARKER_NAME = ".photoarchive-backup-owner"
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 # Pre-migration snapshots are the rollback safety net for a schema upgrade; they
@@ -309,6 +310,70 @@ def _assert_destination_matches_catalog(db_path: str, root: Path, *, source_imag
     )
 
 
+def _owner_marker_path(root: Path) -> Path:
+    return Path(root) / OWNER_MARKER_NAME
+
+
+def _catalog_identity(db_path: str) -> str:
+    return str(Path(db_path).resolve())
+
+
+def assert_backup_owner(root: Path, db_path: str) -> None:
+    """Refuse when this backup dir belongs to a different catalog instance.
+
+    The owner marker records the configured catalog path on first successful
+    snapshot. A mismatched marker (or pre-marker directory that already holds
+    snapshots) means this instance must not publish or prune here.
+    """
+
+    root = Path(root)
+    marker = _owner_marker_path(root)
+    catalog = _catalog_identity(db_path)
+    if marker.is_file():
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise BackupMisconfigurationError(
+                f"Refusing backup: owner marker '{marker}' is unreadable ({exc})"
+            ) from exc
+        owned = str(payload.get("catalog_path") or "").strip()
+        if owned != catalog:
+            raise BackupMisconfigurationError(
+                "Refusing backup: backup destination "
+                f"'{root}' belongs to catalog '{owned or '<unknown>'}', "
+                f"not this instance's catalog '{catalog}'."
+            )
+        return
+
+    existing = sorted(root.glob("photoarchive-*.db.gz"))
+    if existing:
+        raise BackupMisconfigurationError(
+            "Refusing backup: backup destination "
+            f"'{root}' already holds snapshots but has no owner marker. "
+            "That shape is a pre-marker or foreign directory; refusing to "
+            "publish or prune until ownership is explicit."
+        )
+
+
+def write_backup_owner_marker(root: Path, db_path: str) -> None:
+    """Persist catalog ownership after the first successful snapshot."""
+
+    root = Path(root)
+    marker = _owner_marker_path(root)
+    if marker.exists():
+        assert_backup_owner(root, db_path)
+        return
+    payload = {
+        "catalog_path": _catalog_identity(db_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _fsync_file(temporary)
+    os.replace(temporary, marker)
+    _fsync_directory(root)
+
+
 def catalog_quick_check(db_path: str) -> dict[str, Any]:
     """Read-only SQLite health check used before catalog startup work begins."""
     path = os.path.abspath(db_path)
@@ -409,6 +474,8 @@ def create_snapshot(
             finally:
                 data_connection.close_sync(probe, db_path=db_path)
             _assert_destination_matches_catalog(db_path, root, source_images=source_images)
+            # Cross-instance guard: must pass before any publish or retention.
+            assert_backup_owner(root, db_path)
             copied_images = _sqlite_backup_to_path(db_path, str(tmp_db))
             _verify_backup_artifact(str(tmp_db), db_path, snapshot_images=copied_images)
 
@@ -426,6 +493,7 @@ def create_snapshot(
             os.replace(tmp_gz, final_path)
             _fsync_file(final_path)
             _fsync_directory(root)
+            write_backup_owner_marker(root, db_path)
             size = final_path.stat().st_size
             pruned = apply_retention(root)
             created_at = (when or datetime.now().astimezone()).isoformat()

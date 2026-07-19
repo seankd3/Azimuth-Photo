@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import sqlite3
 import tempfile
@@ -289,6 +290,44 @@ class BackupUnitTests(unittest.TestCase):
             if path.name != historical.name
         ]
         self.assertEqual(published, [])
+
+    def test_second_instance_refuses_foreign_backup_dir_without_pruning(self):
+        """B3/B4: owner marker blocks a foreign catalog; retention must not run."""
+
+        first = backups.create_snapshot(
+            str(self.db_path),
+            when=datetime(2026, 7, 1, 4, 0, 0),
+        )
+        self.assertTrue(first["ok"])
+        marker = self.root / backups.OWNER_MARKER_NAME
+        self.assertTrue(marker.is_file())
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(payload["catalog_path"], str(self.db_path.resolve()))
+
+        # Plant an extra same-day older snapshot that a successful second run would prune.
+        vulnerable = self.root / "photoarchive-20260701-030000.db.gz"
+        vulnerable.write_bytes(b"keep-me" * 64)
+        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+
+        other_db = Path(self.tempdir.name) / "other-instance.db"
+        _make_catalog(other_db, files=[(str(Path(self.tempdir.name) / "other.bin"), b"other-bytes")])
+
+        with mock.patch.object(backups, "backup_root_for", return_value=self.root):
+            with self.assertRaisesRegex(backups.BackupMisconfigurationError, "belongs to catalog"):
+                backups.create_snapshot(
+                    str(other_db),
+                    when=datetime(2026, 7, 1, 5, 0, 0),
+                )
+
+        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        self.assertEqual(after, before)
+        self.assertTrue(vulnerable.is_file())
+        self.assertEqual(vulnerable.read_bytes(), b"keep-me" * 64)
+        # Marker still names the original owner.
+        self.assertEqual(
+            json.loads(marker.read_text(encoding="utf-8"))["catalog_path"],
+            str(self.db_path.resolve()),
+        )
 
 
 class BackupIsolationTests(unittest.TestCase):
