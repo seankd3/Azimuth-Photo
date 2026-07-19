@@ -19,6 +19,7 @@ import { gridLoadingHtml } from './loading_state.js';
 import { escapeHtml as esc, photoAspect as aspect } from './dom.js';
 import { openSystemSettings } from './drawer.js';
 import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
+import { revealQuietForQuery, quietRevealActive } from './quiet_sources.js';
 
 let offset = 0;
 let loading = false;
@@ -532,6 +533,19 @@ function renderPreparingState() {
     });
 }
 
+function quietSearchNoteHtml(count) {
+    const n = Math.max(0, Number(count) || 0);
+    if (!n || quietRevealActive(scope.q)) return '';
+    return `<p class="quiet-search-note" role="status">${n.toLocaleString('en-US')} more in hidden sources — <button type="button" data-reveal-quiet>show</button></p>`;
+}
+
+function bindQuietSearchNote(host) {
+    host.querySelector('[data-reveal-quiet]')?.addEventListener('click', () => {
+        revealQuietForQuery(scope.q);
+        emit('scope', scope);
+    });
+}
+
 function renderEmptyState() {
     stopThumbnailPoll();
     updateThumbnailPoll(0);
@@ -557,6 +571,11 @@ function renderEmptyState() {
             ],
             iconName: 'search',
         });
+        const quietNote = quietSearchNoteHtml(viewState.hiddenInQuietSources);
+        if (quietNote) {
+            flow.querySelector('.empty-state p')?.insertAdjacentHTML('afterend', quietNote);
+            bindQuietSearchNote(flow);
+        }
         bindScopeEmptyActions(flow);
         return;
     }
@@ -671,6 +690,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
             sortQuality: data.sort_quality,
             searchMode: data.search_mode,
             searchSources: data.search_sources,
+            hiddenInQuietSources: data.hidden_in_quiet_sources,
         });
     }
     document.getElementById('grid-error').innerHTML = '';
@@ -678,6 +698,18 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     if (next.length === 0 && done) renderEmptyState();
     else {
         updateThumbnailPoll(data.source === 'similar' ? pendingPreviewCount(next) : pendingCount(data));
+        const quietNote = quietSearchNoteHtml(data.hidden_in_quiet_sources ?? viewState.hiddenInQuietSources);
+        const existingQuiet = document.getElementById('quiet-search-note');
+        if (quietNote) {
+            if (existingQuiet) existingQuiet.outerHTML = quietNote.replace('class="quiet-search-note"', 'id="quiet-search-note" class="quiet-search-note"');
+            else {
+                const host = document.getElementById('grid-flow');
+                host.insertAdjacentHTML('afterbegin', quietNote.replace('class="quiet-search-note"', 'id="quiet-search-note" class="quiet-search-note"'));
+            }
+            bindQuietSearchNote(document.getElementById('grid-flow'));
+        } else {
+            existingQuiet?.remove();
+        }
         const chunkEl = direction === 'before'
             ? prependChunk(requestStart, incoming)
             : (render({ append: !wasEmpty, start: requestStart, images: incoming }), ensureChunkLive(requestStart));

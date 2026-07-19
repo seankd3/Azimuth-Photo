@@ -19,6 +19,9 @@ import { pollJob } from './jobs.js';
 import { initFoldersPanel } from './folders.js';
 import { openSourceAddFlow } from './drawer.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
+import {
+    isSourceQuiet, rememberSources, toggleSourceQuiet, applyExcludeSources,
+} from './quiet_sources.js';
 import { icon } from '../icons.js';
 import { esc, slugifyName } from './dom.js';
 import {
@@ -1054,7 +1057,9 @@ function renderLibrary() {
 }
 
 async function loadLibraryCounts() {
-    const [data, trash] = await Promise.all([getCounts(new URLSearchParams()), getTrash({ limit: 1, offset: 0 })]);
+    const params = new URLSearchParams();
+    applyExcludeSources(params);
+    const [data, trash] = await Promise.all([getCounts(params), getTrash({ limit: 1, offset: 0 })]);
     libraryCounts = data || {};
     trashTotal = trash && trash.total != null ? Number(trash.total) || 0 : null;
     renderLibrary();
@@ -1076,17 +1081,32 @@ function renderSources() {
         const online = Number(s.online) === 1;
         const count = s.active_image_count != null ? s.active_image_count : s.image_count;
         const label = s.display_name || s.path;
-        return `<button class="nav-row" data-source="${esc(s.path)}" data-source-id="${Number(s.id) || 0}" title="${esc(label)}">`
+        const quiet = isSourceQuiet(s.id);
+        const countLabel = quiet ? `(${fmt(count)})` : fmt(count);
+        return `<div class="nav-row source-row${quiet ? ' is-quiet' : ''}${folderActive(s.path) ? ' active' : ''}" data-source="${esc(s.path)}" data-source-id="${Number(s.id) || 0}" title="${esc(label)}">`
+            + `<button type="button" class="source-main">`
             + `<span class="nr-dot ${online ? 'on' : 'off'}"></span><span class="nr-label" title="${esc(label)}">${esc(label)}</span>`
-            + `<span class="nr-count">${fmt(count)}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`;
+            + `<span class="nr-count">${countLabel}</span>${online ? '' : '<span class="nr-tag">offline</span>'}</button>`
+            + `<button type="button" class="source-quiet-toggle" data-quiet-toggle aria-pressed="${quiet ? 'true' : 'false'}" aria-label="${quiet ? 'Show in library views' : 'Hide from library views'}" title="${quiet ? 'Show in library views' : 'Hide from library views'}">${icon('eye')}</button>`
+            + '</div>';
     }).join('') : emptyState('hard-drive', 'No sources yet.', '<button type="button" data-add-source>Add a source</button>');
     host.querySelector('[data-add-source]')?.addEventListener('click', () => {
         openSourceAddFlow({ onSuccess: loadCatalogChrome });
     });
     for (const row of host.querySelectorAll('[data-source]')) {
-        row.addEventListener('click', () => {
+        const sourceId = Number(row.dataset.sourceId) || 0;
+        row.querySelector('.source-main')?.addEventListener('click', () => {
             navigateToScope({ folder: [row.dataset.source] });
             closeLeftDrawer();
+        });
+        row.querySelector('[data-quiet-toggle]')?.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const quiet = toggleSourceQuiet(sourceId);
+            renderSources();
+            loadLibraryCounts();
+            emit('scope', scope);
+            showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
         });
         row.addEventListener('contextmenu', (event) => {
             event.preventDefault();
@@ -1094,7 +1114,15 @@ function renderSources() {
             const count = source?.active_image_count != null ? source.active_image_count : source?.image_count;
             openSourceRevealMenu(row.dataset.source, row, count, {
                 sourceId: source?.id,
+                quiet: isSourceQuiet(source?.id),
                 revealAvailable: source ? !String(source.path || '').toLowerCase().startsWith('hub:') : true,
+                onQuietToggle: () => {
+                    const quiet = toggleSourceQuiet(sourceId);
+                    renderSources();
+                    loadLibraryCounts();
+                    emit('scope', scope);
+                    showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
+                },
             });
         });
     }
@@ -1184,6 +1212,7 @@ async function loadCatalogChrome() {
     renderSources();
     try {
         catalog = await getCatalog();
+        rememberSources((catalog && catalog.sources) || []);
     } catch {
         catalog = null;
         sourcesLoadError = true;

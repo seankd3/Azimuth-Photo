@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core.requests import json_object, positive_int
+from core.requests import json_object, parse_exclude_sources, positive_int
 from data import connection as data_connection
 
 
@@ -126,12 +126,14 @@ async def mosaic_next(
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
     collection_id: int = 0, import_batch: int = 0,
+    exclude_sources: str = "",
 ):
     if _mosaic_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
     scoped_ids, id_error = _parse_scoped_ids(ids)
     if id_error is not None:
         return id_error
+    excluded = parse_exclude_sources(exclude_sources)
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -156,6 +158,7 @@ async def mosaic_next(
                 ids=scoped_ids,
                 collection_id=collection_id,
                 import_batch=import_batch,
+                exclude_sources=excluded,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):
@@ -291,12 +294,14 @@ async def compare_next(
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
     collection_id: int = 0, import_batch: int = 0,
+    exclude_sources: str = "",
 ):
     if _compare_next_handler is None:
         raise RuntimeError("Compare routes are not configured")
     scoped_ids, id_error = _parse_scoped_ids(ids)
     if id_error is not None:
         return id_error
+    excluded = parse_exclude_sources(exclude_sources)
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
@@ -319,6 +324,7 @@ async def compare_next(
                 ids=scoped_ids,
                 collection_id=collection_id,
                 import_batch=import_batch,
+                exclude_sources=excluded,
             )
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):

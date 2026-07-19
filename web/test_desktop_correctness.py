@@ -338,6 +338,34 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertNotIn("loadCollectionImages", scope_data)
         self.assertNotIn("loadCollectionImageIds", scope_data)
 
+    def test_quiet_sources_compose_through_scope_params_once(self):
+        state = read("state.js")
+        panel = read("panel.js")
+        quiet = read("quiet_sources.js")
+        map_module = read("map.js")
+        timeline = read("timeline.js")
+        filters = read("filters.js")
+
+        self.assertIn("applyExcludeSources(params, undefined, folderValues(), { q: scope.q });", state)
+        self.assertIn("export function applyExcludeSources", quiet)
+        self.assertIn("data-quiet-toggle", panel)
+        self.assertIn("pa_d_quiet_sources", quiet)
+        self.assertIn("await getMapMarkers(scopeParams())", map_module)
+        self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)
+        self.assertIn("getFilterOptions(scopeParams())", filters)
+        # Never reimplement exclude_sources outside the shared scopeParams path.
+        for path_name, source in (
+            ("map.js", map_module),
+            ("timeline.js", timeline),
+            ("filters.js", filters),
+            ("scope_data.js", read("scope_data.js")),
+        ):
+            self.assertNotIn(
+                "exclude_sources",
+                source,
+                f"{path_name} must inherit quiet exclusion from scopeParams, not set it locally",
+            )
+
     def test_collection_scope_export_uses_server_composition(self):
         panel = read("panel.js")
         export_menu = read("export_menu.js")

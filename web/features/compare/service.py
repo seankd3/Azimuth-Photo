@@ -433,12 +433,13 @@ async def filtered_visible_ranked_candidates(
     camera: str = "",
     lens: str = "",
     tag: str = "",
+    exclude_sources=(),
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     cache_key = (
         f"filtered:{_configured_db_signature()}:{cache_root}:{size}:{max(1, int(limit))}:"
         f"{sort}:{orientation}:{compared}:{int(min_stars or 0)}:{folder_cache_value(folder)}:{flag}:"
-        f"{date_taken}:{file_type}:{camera}:{lens}:{tag}"
+        f"{date_taken}:{file_type}:{camera}:{lens}:{tag}:{tuple(exclude_sources or ())}"
     )
     now = time.monotonic()
     cached = _visible_pairing_candidates_cache.get(cache_key)
@@ -470,7 +471,7 @@ async def filtered_visible_ranked_candidates(
                             camera=camera,
                             lens=lens,
                             tag=tag,
-                        )
+            exclude_sources=exclude_sources,)
                     )
                     if refresh_generation != _visible_pairing_candidates_generation:
                         return
@@ -507,7 +508,7 @@ async def filtered_visible_ranked_candidates(
         camera=camera,
         lens=lens,
         tag=tag,
-    )
+            exclude_sources=exclude_sources,)
     _visible_pairing_candidates_cache[cache_key] = {
         "data": result_rows,
         "id_set": {int(row["id"]) for row in result_rows},
@@ -533,6 +534,7 @@ async def load_filtered_visible_ranked_candidates(
     camera: str = "",
     lens: str = "",
     tag: str = "",
+    exclude_sources=(),
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     normalized_limit = max(1, int(limit))
@@ -547,6 +549,7 @@ async def load_filtered_visible_ranked_candidates(
             camera,
             lens,
             tag,
+            exclude_sources,
         )
     )
     if orientation_only:
@@ -566,7 +569,7 @@ async def load_filtered_visible_ranked_candidates(
                 camera=camera,
                 lens=lens,
                 tag=tag,
-            )
+                exclude_sources=exclude_sources,)
         )
         visible_count_task = asyncio.create_task(
             _configured(_count_rankings)(
@@ -582,7 +585,7 @@ async def load_filtered_visible_ranked_candidates(
                 tag=tag,
                 visible_thumb_size=size,
                 cache_root=cache_root,
-            )
+                exclude_sources=exclude_sources,)
         )
     rows = await _configured(_get_rankings)(
         limit=normalized_limit,
@@ -600,7 +603,7 @@ async def load_filtered_visible_ranked_candidates(
         tag=tag,
         visible_thumb_size=size,
         cache_root=cache_root,
-    )
+        exclude_sources=exclude_sources,)
     result_rows = [dict(row) for row in rows]
     if orientation_only:
         counts = await counts_task
@@ -630,6 +633,7 @@ async def search_visible_ranked_candidates(
     camera: str = "",
     lens: str = "",
     tag: str = "",
+    exclude_sources=(),
 ) -> tuple[list[dict], int, int]:
     cache_root = _configured_cache_root()
     exclude_ids = exclude_ids or set()
@@ -646,7 +650,7 @@ async def search_visible_ranked_candidates(
                 tag=tag,
                 id_filter=id_filter,
                 text_query=text_query,
-            )
+                exclude_sources=exclude_sources,)
         )
         visible_task = asyncio.create_task(
             _configured(_count_rankings)(
@@ -658,7 +662,7 @@ async def search_visible_ranked_candidates(
                 visible_thumb_size=size,
                 cache_root=cache_root,
                 text_query=text_query,
-            )
+                exclude_sources=exclude_sources,)
         )
     else:
         total_task = None
@@ -681,7 +685,7 @@ async def search_visible_ranked_candidates(
         visible_thumb_size=size,
         cache_root=cache_root,
         text_query=text_query,
-    )
+        exclude_sources=exclude_sources,)
     result_rows = [
         dict(row)
         for row in rows
@@ -861,6 +865,7 @@ def has_candidate_filters(
     lens: str = "",
     tag: str = "",
     search: dict | None = None,
+    exclude_sources=(),
 ) -> bool:
     return bool(
         exclude_ids
@@ -874,6 +879,7 @@ def has_candidate_filters(
         or camera
         or lens
         or tag
+        or exclude_sources
         or query_constraints.search_constraint_active(search)
     )
 
@@ -1274,7 +1280,7 @@ async def mosaic_next_impl(
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None,
-    collection_id: int = 0, import_batch: int = 0,
+    collection_id: int = 0, import_batch: int = 0, exclude_sources=(),
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
     candidate_source = "mosaic_window"
@@ -1297,7 +1303,7 @@ async def mosaic_next_impl(
         lens=lens,
         tag=tag,
         search=search,
-    )
+            exclude_sources=exclude_sources,)
     response_cache_key = None
     if default_pool_only and not exclude_ids and strategy == "explore" and int(n) != 2:
         response_cache_key = (
@@ -1364,7 +1370,7 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-        )
+            exclude_sources=exclude_sources,)
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "filtered_diverse_universe"
             candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
@@ -1380,7 +1386,7 @@ async def mosaic_next_impl(
                 camera=camera,
                 lens=lens,
                 tag=tag,
-            )
+            exclude_sources=exclude_sources,)
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
             filtered_total = max(0, int(filtered_total) - len(exclude_ids))
@@ -1411,7 +1417,7 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-        )
+            exclude_sources=exclude_sources,)
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "search_diverse_universe" if search.get("active") else "scoped_diverse_universe"
             candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
@@ -1430,7 +1436,7 @@ async def mosaic_next_impl(
                 camera=camera,
                 lens=lens,
                 tag=tag,
-            )
+            exclude_sources=exclude_sources,)
     else:
         candidate_source = "full_candidate_scan"
         stats = None
@@ -1575,7 +1581,7 @@ async def compare_next_impl(
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: list[int] | None = None,
-    collection_id: int = 0, import_batch: int = 0,
+    collection_id: int = 0, import_batch: int = 0, exclude_sources=(),
 ):
     candidate_source = "compare_window"
     cache_hit = False
@@ -1596,7 +1602,7 @@ async def compare_next_impl(
         lens=lens,
         tag=tag,
         search=search,
-    )
+            exclude_sources=exclude_sources,)
     response_cache_key = None
     if not has_filters and mode != "topn":
         response_cache_key = (
@@ -1649,7 +1655,7 @@ async def compare_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-        )
+            exclude_sources=exclude_sources,)
         past_task = asyncio.create_task(
             get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
         )
@@ -1671,7 +1677,7 @@ async def compare_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-        )
+            exclude_sources=exclude_sources,)
         past_task = asyncio.create_task(
             get_past_matchups_for_candidate_ids("md", [row["id"] for row in image_dicts])
         )
@@ -1761,7 +1767,7 @@ async def compare_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-        )
+            exclude_sources=exclude_sources,)
         past = await get_visible_past_matchups("md")
         pairs = pairing.swiss_pair(image_dicts, past, max_pairs=n, presorted=True)
 

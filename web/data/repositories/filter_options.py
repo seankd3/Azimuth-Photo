@@ -139,6 +139,7 @@ async def filter_options(
     collection_id: int = 0,
     text_query: str = "",
     exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
 ) -> dict:
     active_images = int(catalog_counts.get("active_images") or 0)
     if active_images <= 0:
@@ -166,6 +167,7 @@ async def filter_options(
         collection_id=collection_id,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
     )
     if not (all_catalog_images_active or all_sources_available):
         source_placeholders = ",".join("?" for _ in active_source_ids)

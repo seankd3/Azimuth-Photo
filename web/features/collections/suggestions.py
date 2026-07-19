@@ -1121,3 +1121,49 @@ async def _suggestion_cursor(db_path: str, model_key: str) -> tuple[int, tuple[i
         )
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+async def filter_suggestions_excluding_sources(db_path: str, payload: dict, exclude_sources) -> dict:
+    """Drop suggestion members that live in quiet sources; omit emptied suggestions."""
+    excluded = {int(source_id) for source_id in (exclude_sources or ()) if int(source_id) > 0}
+    suggestions = list((payload or {}).get("suggestions") or [])
+    if not excluded or not suggestions:
+        return payload
+    wanted = sorted({
+        int(image_id)
+        for suggestion in suggestions
+        for image_id in (suggestion.get("image_ids") or [])
+        if int(image_id or 0) > 0
+    })
+    if not wanted:
+        return payload
+    blocked: set[int] = set()
+    conn = await connection.open_async(db_path)
+    try:
+        for start in range(0, len(wanted), 900):
+            chunk = wanted[start:start + 900]
+            placeholders = ",".join("?" for _ in chunk)
+            source_placeholders = ",".join("?" for _ in excluded)
+            cursor = await conn.execute(
+                f"SELECT id FROM images WHERE id IN ({placeholders}) "
+                f"AND source_id IN ({source_placeholders})",
+                [*chunk, *sorted(excluded)],
+            )
+            blocked.update(int(row["id"]) for row in await cursor.fetchall())
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if not blocked:
+        return payload
+    filtered = []
+    for suggestion in suggestions:
+        ids = [int(image_id) for image_id in (suggestion.get("image_ids") or []) if int(image_id) not in blocked]
+        if len(ids) < 2:
+            continue
+        next_suggestion = dict(suggestion)
+        next_suggestion["image_ids"] = ids
+        next_suggestion["count"] = len(ids)
+        cover = int(suggestion.get("cover_image_id") or 0)
+        if cover in blocked or cover not in ids:
+            next_suggestion["cover_image_id"] = ids[0]
+        filtered.append(next_suggestion)
+    return {**(payload or {}), "suggestions": filtered}
+

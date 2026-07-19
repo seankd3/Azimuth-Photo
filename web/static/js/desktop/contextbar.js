@@ -1,6 +1,6 @@
 import {
     clearFacet, describeScope, emit, folderChip, nonSearchFacetCount, on, scope, setBestOf, setScope, setSortBase,
-    setThumbSize, sortAscending, sortBase, toggleBestOf, toggleSortDirection, viewState,
+    setThumbSize, sortAscending, sortBase, toggleBestOf, toggleSortDirection, viewState, folderValues,
 } from './state.js';
 import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
@@ -8,6 +8,7 @@ import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel } from '../people_labels.js';
 import { getRankings } from './api.js';
 import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
+import { effectiveExcludeSources, quietSourceIds } from './quiet_sources.js';
 
 let thumbInputTimer = 0;
 let tasteAvailable = false;
@@ -15,6 +16,15 @@ let tasteAvailable = false;
 function searchSourceLabel(source) {
     return ({ embedding: 'vision', caption: 'captions', captions: 'captions', metadata: 'metadata' })[source]
         || String(source || '').replaceAll('_', ' ');
+}
+
+function browsingQuietSource() {
+    const quiet = quietSourceIds();
+    if (!quiet.length) return false;
+    const folders = folderValues();
+    if (!folders.length) return false;
+    const excluded = effectiveExcludeSources(undefined, folders, { q: scope.q });
+    return excluded.length < quiet.length;
 }
 
 function renderSearchModeChip() {
@@ -88,6 +98,9 @@ function renderChips() {
     if (scope.flag) chips.push(chipHtml('flag', scope.flag === 'picked' ? 'Picked' : scope.flag === 'rejected' ? 'Rejected' : 'Unflagged'));
     const folderScope = folderChip();
     if (folderScope) chips.push(chipHtml('folder', folderScope.label, '', '', folderScope.title));
+    if (browsingQuietSource()) {
+        chips.push('<span class="chip quiet-source-note" title="This source stays managed; it is only hidden from default library views.">Hidden from library views</span>');
+    }
     if (scope.date_taken) chips.push(chipHtml('date_taken', dateLabel(scope.date_taken)));
     if (scope.file_type) chips.push(chipHtml('file_type', String(scope.file_type).toUpperCase()));
     if (scope.camera) chips.push(chipHtml('camera', `Camera · ${scope.camera}`));

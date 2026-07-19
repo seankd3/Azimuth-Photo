@@ -1112,7 +1112,8 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
                        collection_id: int = 0,
                        visible_thumb_size: str = "", cache_root: str = "",
                        text_query: str = "",
-                       exclude_collapsed_stack_members: bool = False):
+                       exclude_collapsed_stack_members: bool = False,
+                       exclude_sources=()):
     rows = await ranking_repository.rankings_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1138,6 +1139,7 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
         cache_root=cache_root,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
         caption_model_key=active_caption_model_key(),
     )
     return await _annotate_caption_presence(rows)
@@ -1152,7 +1154,8 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
                        file_type: str = "", camera: str = "", lens: str = "",
                        tag: str = "",
                        id_filter: set = None, text_query: str = "",
-                       exclude_collapsed_stack_members: bool = False) -> dict:
+                       exclude_collapsed_stack_members: bool = False,
+                       exclude_sources=()) -> dict:
     return await ranking_repository.rank_quality(
         DB_PATH,
         orientation=orientation,
@@ -1168,6 +1171,7 @@ async def rank_quality(orientation: str = "", compared: str = "", min_stars: int
         id_filter=id_filter,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
         caption_model_key=active_caption_model_key(),
     )
 
@@ -1229,7 +1233,8 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
                          collection_id: int = 0,
                          visible_thumb_size: str = "", cache_root: str = "",
                          text_query: str = "",
-                         exclude_collapsed_stack_members: bool = False) -> int:
+                         exclude_collapsed_stack_members: bool = False,
+                         exclude_sources=()) -> int:
     return await ranking_repository.count_rankings_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1251,6 +1256,7 @@ async def count_rankings(orientation: str = "", compared: str = "", min_stars: i
         cache_root=cache_root,
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
         caption_model_key=active_caption_model_key(),
         ttl_seconds=RANKING_COUNT_CACHE_TTL_SECONDS,
     )
@@ -1263,7 +1269,8 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
                           visible_thumb_size: str = "", cache_root: str = "",
                           id_filter: set | None = None, text_query: str = "",
                           _force_refresh: bool = False,
-                          exclude_collapsed_stack_members: bool = False):
+                          exclude_collapsed_stack_members: bool = False,
+                          exclude_sources=()):
     return await ranking_repository.date_groups_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1275,6 +1282,7 @@ async def get_date_groups(orientation: str = "", compared: str = "", min_stars: 
         force_refresh=_force_refresh,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
         caption_model_key=active_caption_model_key(),
     )
 
@@ -1284,7 +1292,8 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
                           file_type: str = "", camera: str = "", lens: str = "",
                           tag: str = "",
                           visible_thumb_size: str = "", cache_root: str = "",
-                          id_filter: set | None = None, text_query: str = "", collection_id: int = 0):
+                          id_filter: set | None = None, text_query: str = "", collection_id: int = 0,
+                          exclude_sources=()):
     return await ranking_repository.map_markers_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
@@ -1305,6 +1314,7 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
         id_filter=id_filter,
         text_query=text_query,
         collection_id=collection_id,
+        exclude_sources=exclude_sources,
         ttl_seconds=FACET_CACHE_TTL_SECONDS,
         caption_model_key=active_caption_model_key(),
     )

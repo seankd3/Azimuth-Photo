@@ -1,4 +1,5 @@
 import { MONTH_NAMES } from './dom.js';
+import { applyExcludeSources, clearQuietReveal } from './quiet_sources.js';
 
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
@@ -109,6 +110,7 @@ export const viewState = {
     searchPreviousSort: null,
     searchMode: '',
     searchSources: [],
+    hiddenInQuietSources: 0,
     thumbSize: Number(localStorage.getItem(THUMB_KEY) || 176),
     leftCollapsed: localStorage.getItem(PANEL_KEY) === '1',
     rightCollapsed: localStorage.getItem(RIGHT_PANEL_KEY) === '1',
@@ -266,6 +268,7 @@ export function scopeParams(extra = {}) {
     if (scope.collectionId) params.set('collection_id', scope.collectionId);
     if (scope.sort) params.set('sort', scope.sort);
     params.set('stacks', viewState.prefs.collapseStacks ? 'collapsed' : 'expanded');
+    applyExcludeSources(params, undefined, folderValues(), { q: scope.q });
     for (const [key, value] of Object.entries(extra)) {
         if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
     }
@@ -292,6 +295,7 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
     next.similarLimit = [100, 250, 500].includes(Number(next.similarLimit)) ? Number(next.similarLimit) : 100;
     next.deep = Boolean(next.deep && next.q);
     next.folder = normalizeFolderValue(next.folder);
+    if (String(next.q || '') !== String(scope.q || '')) clearQuietReveal();
     Object.assign(scope, next);
     clearBestOfState();
     viewState.focusIndex = 0;
@@ -312,6 +316,9 @@ export function patchScope(patch, { pushHash = true } = {}) {
     if (Object.prototype.hasOwnProperty.call(patch, 'folder')) patch.folder = normalizeFolderValue(patch.folder);
     if (Object.prototype.hasOwnProperty.call(patch, 'deep')) patch.deep = Boolean(patch.deep);
     if (Object.prototype.hasOwnProperty.call(patch, 'q') && !patch.q) patch.deep = false;
+    if (Object.prototype.hasOwnProperty.call(patch, 'q') && String(patch.q || '') !== String(scope.q || '')) {
+        clearQuietReveal();
+    }
     preserveSearchSort(patch, { merge: true });
     Object.assign(scope, patch);
     emit('scope', scope);
@@ -433,12 +440,14 @@ export function setRankingsMeta({
     sortQuality,
     searchMode = '',
     searchSources = [],
+    hiddenInQuietSources = 0,
 }) {
     viewState.visibleImages = Number(visibleImages) || 0;
     viewState.hiddenPendingThumbnails = Math.max(0, Number(hiddenPendingThumbnails) || 0);
     viewState.sortQuality = sortQuality || null;
     viewState.searchMode = String(searchMode || '');
     viewState.searchSources = Array.isArray(searchSources) ? searchSources.filter(Boolean).map(String) : [];
+    viewState.hiddenInQuietSources = Math.max(0, Number(hiddenInQuietSources) || 0);
     emit('meta', viewState);
 }
 

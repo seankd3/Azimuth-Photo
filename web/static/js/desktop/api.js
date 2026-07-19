@@ -478,8 +478,10 @@ export async function exportPublishedWebsite() {
     return publishingMutation('POST', '/api/published/export?area=website');
 }
 
-export async function getCollectionSuggestions() {
-    return fetchJson('/api/collections/suggestions', { defaultValue: null });
+export async function getCollectionSuggestions(params = new URLSearchParams()) {
+    const query = params instanceof URLSearchParams ? params : new URLSearchParams(params || {});
+    const suffix = query.toString() ? `?${query.toString()}` : '';
+    return fetchJson(`/api/collections/suggestions${suffix}`, { defaultValue: null });
 }
 
 export async function getSimilar(imageId, limit = 100) {
