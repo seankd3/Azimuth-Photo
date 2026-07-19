@@ -236,6 +236,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("GET", "/api/sync/catalog/export"),
     ("GET", "/api/sync/thumbs/pack"),
     ("POST", "/api/sync/manifest"),
+    ("GET", "/api/client/bundle"),
     ("POST", "/api/sync/have"),
     ("POST", "/api/sync/upload/{content_hash}"),
     ("GET", "/api/sync/upload/{content_hash}/status"),
