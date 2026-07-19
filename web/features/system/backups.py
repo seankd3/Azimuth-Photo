@@ -50,6 +50,20 @@ class RestoreValidationError(RuntimeError):
 class RestoreStorageError(RuntimeError):
     """The restore could not be staged because local storage failed."""
 
+
+class BackupVerificationError(RuntimeError):
+    """The produced backup artifact failed in-pipeline verification."""
+
+
+class BackupMisconfigurationError(RuntimeError):
+    """Backup destination does not belong to this catalog instance."""
+
+
+# Empty/near-empty catalogs must never publish into a directory that already
+# holds real historical snapshots — that shape is always the wrong instance.
+NEAR_EMPTY_IMAGE_CEILING = 0
+LARGE_HISTORICAL_BACKUP_BYTES = 10 * 1024 * 1024
+
 _IMAGE_CHECKSUMS_DDL = """
 CREATE TABLE IF NOT EXISTS image_checksums (
     image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
@@ -81,13 +95,72 @@ _integrity_state: dict[str, Any] = {
 _scheduler_started = False
 _catalog_health_lock = threading.Lock()
 _catalog_health: dict[str, dict[str, Any]] = {}
+_backup_run_lock = threading.Lock()
+_backup_run_state: dict[str, Any] = {
+    "last_ok_at": None,
+    "last_error": None,
+    "last_error_at": None,
+    "last_name": None,
+}
+
+
+def _set_backup_run(**kwargs: Any) -> None:
+    with _backup_run_lock:
+        _backup_run_state.update(kwargs)
+
+
+def backup_run_status() -> dict[str, Any]:
+    with _backup_run_lock:
+        return dict(_backup_run_state)
+
+
+def _smoke_or_custom_home(environ: dict[str, str] | None = None) -> bool:
+    env = os.environ if environ is None else environ
+    if (env.get("PHOTOARCHIVE_SMOKE_MODE") or "").strip() in {"1", "true", "yes"}:
+        return True
+    return bool((env.get("PHOTOARCHIVE_HOME") or "").strip())
+
+
+def backup_root_for(db_path: str | None = None) -> Path:
+    """Backup dir for this catalog — never another instance's shared folder.
+
+    Destination is always taken from the same runtime resolution as the live
+    catalog. Scratch/smoke homes stay inside their own data tree even when a
+    process-level PHOTOARCHIVE_BACKUP_DIR points at production.
+    """
+    paths = resolve_runtime_paths()
+    root = Path(paths.backup_dir)
+    if db_path:
+        catalog = Path(paths.catalog_db).resolve()
+        target = Path(db_path).resolve()
+        if target != catalog:
+            # Backing up a non-configured catalog file: keep artifacts beside it.
+            root = target.parent / "backups"
+    if _smoke_or_custom_home():
+        home = (os.environ.get("PHOTOARCHIVE_HOME") or "").strip()
+        if home:
+            home_root = Path(home).resolve()
+            try:
+                root.resolve().relative_to(home_root)
+            except ValueError:
+                root = Path(paths.data_dir) / "backups"
+        else:
+            # Smoke without an explicit home: stay under this catalog's data tree.
+            data_root = Path(paths.data_dir).resolve()
+            try:
+                root.resolve().relative_to(data_root)
+            except ValueError:
+                if db_path:
+                    root = Path(db_path).resolve().parent / "backups"
+                else:
+                    root = data_root / "backups"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def backup_root() -> Path:
     """Return the selected backup root without relocating old snapshots."""
-    root = Path(resolve_runtime_paths().backup_dir)
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return backup_root_for(None)
 
 
 def _timestamp_name(when: datetime | None = None, label: str | None = None) -> str:
@@ -108,18 +181,128 @@ def _parse_backup_name(name: str) -> datetime | None:
         return None
 
 
-def _sqlite_backup_to_path(source_db: str, dest_db: str) -> None:
-    """Copy a live SQLite database via the BACKUP API (not a file copy)."""
+def _image_count(conn: sqlite3.Connection) -> int:
+    try:
+        row = conn.execute("SELECT COUNT(*) FROM images").fetchone()
+    except sqlite3.Error:
+        return 0
+    return int(row[0] if row else 0)
+
+
+def _seal_backup_destination(conn: sqlite3.Connection) -> None:
+    """Collapse any WAL sidecars into a single restorable database file."""
+    try:
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except sqlite3.Error:
+        pass
+    try:
+        conn.execute("PRAGMA journal_mode=DELETE")
+    except sqlite3.Error:
+        pass
+    conn.commit()
+
+
+def _unlink_sqlite_sidecars(db_path: str | Path) -> None:
+    base = Path(db_path)
+    for sidecar in (Path(str(base) + "-wal"), Path(str(base) + "-shm")):
+        try:
+            if sidecar.exists():
+                sidecar.unlink()
+        except OSError:
+            pass
+
+
+def _sqlite_backup_to_path(source_db: str, dest_db: str) -> int:
+    """Copy a live SQLite database via the BACKUP API (never a raw file copy).
+
+    Returns the sealed destination's ``images`` row count for verify-before-trust.
+    The destination is sealed to a single file (no WAL) before this returns.
+    """
     src = data_connection.open_sync(source_db, timeout=60.0)
     try:
         dst = data_connection.open_sync(dest_db, timeout=60.0)
         try:
             src.backup(dst)
             dst.commit()
+            _seal_backup_destination(dst)
+            snapshot_images = _image_count(dst)
         finally:
             data_connection.close_sync(dst, db_path=dest_db)
+        _unlink_sqlite_sidecars(dest_db)
     finally:
         data_connection.close_sync(src, db_path=source_db)
+    return snapshot_images
+
+
+def _verify_backup_artifact(dest_db: str, source_db: str, *, snapshot_images: int) -> None:
+    """Open the produced copy; require quick_check and image-count agreement."""
+    try:
+        conn = sqlite3.connect(f"{Path(dest_db).as_uri()}?mode=ro", uri=True, timeout=30.0)
+    except sqlite3.Error as exc:
+        raise BackupVerificationError(f"Backup artifact is not a readable SQLite catalog: {exc}") from exc
+    try:
+        try:
+            row = conn.execute("PRAGMA quick_check").fetchone()
+        except sqlite3.Error as exc:
+            raise BackupVerificationError(f"Backup artifact failed quick_check: {exc}") from exc
+        if not row or str(row[0]).lower() != "ok":
+            detail = str(row[0]) if row else "SQLite quick_check returned no result"
+            raise BackupVerificationError(f"Backup artifact failed quick_check: {detail}")
+        actual = _image_count(conn)
+    finally:
+        conn.close()
+
+    if actual != int(snapshot_images):
+        raise BackupVerificationError(
+            f"Backup artifact image count mismatch: expected={snapshot_images} backup={actual}"
+        )
+
+    try:
+        src = sqlite3.connect(f"{Path(source_db).as_uri()}?mode=ro", uri=True, timeout=30.0)
+    except sqlite3.Error as exc:
+        raise BackupVerificationError(f"Could not re-open source catalog for verify: {exc}") from exc
+    try:
+        source_count = _image_count(src)
+    finally:
+        src.close()
+
+    if actual != source_count:
+        # Concurrent writers may commit after the snapshot was taken. Allow the
+        # artifact to lag the live catalog, but never the other way around, and
+        # never publish an empty copy of a non-empty source.
+        if actual > source_count:
+            raise BackupVerificationError(
+                f"Backup artifact image count mismatch: source={source_count} backup={actual}"
+            )
+        if source_count > 0 and actual <= 0:
+            raise BackupVerificationError(
+                f"Backup artifact image count mismatch: source={source_count} backup={actual}"
+            )
+
+
+def _assert_destination_matches_catalog(db_path: str, root: Path, *, source_images: int) -> None:
+    """Refuse empty scratch catalogs writing into a folder of real backups."""
+    if source_images > NEAR_EMPTY_IMAGE_CEILING:
+        return
+    try:
+        large = [
+            path
+            for path in root.glob("photoarchive-*.db.gz")
+            if path.is_file() and path.stat().st_size >= LARGE_HISTORICAL_BACKUP_BYTES
+        ]
+    except OSError as exc:
+        raise BackupMisconfigurationError(
+            f"Could not inspect backup destination '{root}': {exc}"
+        ) from exc
+    if not large:
+        return
+    raise BackupMisconfigurationError(
+        "Refusing backup: this catalog is empty/near-empty but the backup "
+        f"destination '{root}' already holds large historical snapshots "
+        f"({large[0].name} is {large[0].stat().st_size} bytes). "
+        "That shape is a misconfigured scratch/smoke instance pointing at "
+        "another instance's backups directory."
+    )
 
 
 def catalog_quick_check(db_path: str) -> dict[str, Any]:
@@ -193,11 +376,15 @@ def create_snapshot(
 
     ``label`` tags the snapshot (e.g. ``premigrate``); labeled pre-migration
     snapshots are protected from routine pruning by :func:`apply_retention`.
+
+    Every path (scheduled, API, premigrate) goes through the SQLite backup API,
+    seals the copy to a single file, verifies quick_check + image count, then
+    publishes the gzip. A failed verification deletes the artifact and raises.
     """
     if not os.path.isfile(db_path):
         raise FileNotFoundError(f"Catalog database not found: {db_path}")
 
-    root = backup_root()
+    root = backup_root_for(db_path)
     name = _timestamp_name(when, label)
     final_path = root / name
     tmp_db = root / f".{name}.tmp.db"
@@ -209,9 +396,17 @@ def create_snapshot(
                 tmp_db.unlink()
             if tmp_gz.exists():
                 tmp_gz.unlink()
+            _unlink_sqlite_sidecars(tmp_db)
 
             log.info("catalog_backup start db=%s -> %s", db_path, final_path)
-            _sqlite_backup_to_path(db_path, str(tmp_db))
+            probe = data_connection.open_sync(db_path, timeout=60.0)
+            try:
+                source_images = _image_count(probe)
+            finally:
+                data_connection.close_sync(probe, db_path=db_path)
+            _assert_destination_matches_catalog(db_path, root, source_images=source_images)
+            copied_images = _sqlite_backup_to_path(db_path, str(tmp_db))
+            _verify_backup_artifact(str(tmp_db), db_path, snapshot_images=copied_images)
 
             with open(tmp_db, "rb") as raw, gzip.open(tmp_gz, "wb", compresslevel=6) as gz:
                 shutil.copyfileobj(raw, gz, length=1024 * 1024)
@@ -219,21 +414,50 @@ def create_snapshot(
             os.replace(tmp_gz, final_path)
             size = final_path.stat().st_size
             pruned = apply_retention(root)
+            created_at = (when or datetime.now().astimezone()).isoformat()
             log.info(
-                "catalog_backup done name=%s bytes=%s pruned=%s",
+                "catalog_backup done name=%s bytes=%s images=%s pruned=%s",
                 name,
                 size,
+                copied_images,
                 pruned,
+            )
+            _set_backup_run(
+                last_ok_at=created_at,
+                last_error=None,
+                last_error_at=None,
+                last_name=name,
             )
             return {
                 "ok": True,
                 "name": name,
                 "path": str(final_path),
                 "bytes": size,
-                "created_at": (when or datetime.now().astimezone()).isoformat(),
+                "images": copied_images,
+                "created_at": created_at,
                 "label": label,
                 "pruned": pruned,
             }
+        except Exception as exc:
+            failed_at = datetime.now().astimezone().isoformat()
+            _set_backup_run(
+                last_error=str(exc),
+                last_error_at=failed_at,
+                last_name=name,
+            )
+            if final_path.exists():
+                try:
+                    final_path.unlink()
+                except OSError:
+                    pass
+            log.error(
+                "catalog_backup FAILED name=%s db=%s err=%s",
+                name,
+                db_path,
+                exc,
+                exc_info=True,
+            )
+            raise
         finally:
             for leftover in (tmp_db, tmp_gz):
                 try:
@@ -241,6 +465,7 @@ def create_snapshot(
                         leftover.unlink()
                 except OSError:
                     pass
+            _unlink_sqlite_sidecars(tmp_db)
 
 
 def backup_before_migration(
@@ -737,6 +962,7 @@ def integrity_summary(db_path: str) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "catalog": catalog_health(db_path),
         "scan": status,
+        "backup": backup_run_status(),
         "checksummed": 0,
         "mismatch_count": len(status.get("mismatch_ids") or []),
         "mismatches": list(status.get("mismatch_ids") or []),
@@ -759,4 +985,7 @@ def integrity_summary(db_path: str) -> dict[str, Any]:
             f"BIT ROT DETECTED: {summary['mismatch_count']} original(s) changed "
             f"since last checksum — ids={summary['mismatches']}"
         )
+    backup_error = (summary.get("backup") or {}).get("last_error")
+    if backup_error and not summary.get("alert"):
+        summary["alert"] = f"Catalog backup failed: {backup_error}"
     return summary

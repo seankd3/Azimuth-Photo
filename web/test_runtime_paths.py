@@ -259,6 +259,25 @@ class RuntimePathTests(unittest.TestCase):
         )
         self.assertEqual(normalized["face_model_dir"], os.path.normpath("/deploy/models/insightface"))
 
+    def test_photoarchive_home_rejects_foreign_backup_override(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "app-home"
+            foreign = Path(tmp) / "other-backups"
+            foreign.mkdir()
+            web = Path(tmp) / "web"
+            web.mkdir()
+            paths = resolve_runtime_paths(
+                web,
+                {
+                    "HOME": str(Path(tmp) / "user"),
+                    "PHOTOARCHIVE_HOME": str(home),
+                    "PHOTOARCHIVE_BACKUP_DIR": str(foreign),
+                },
+                "linux",
+                str(Path(tmp) / "user"),
+            )
+        self.assertEqual(paths.backup_dir, str(home / "data" / "backups"))
+
 
 if __name__ == "__main__":
     unittest.main()

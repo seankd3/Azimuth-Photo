@@ -46,6 +46,10 @@ function bytes(value) {
 }
 
 function backupState() {
+    const failure = integrity && integrity.backup && integrity.backup.last_error;
+    if (failure) {
+        return { tone: 'bad', label: 'Backup failed', detail: String(failure) };
+    }
     const items = (backups && backups.backups) || [];
     if (!items.length) return { tone: 'bad', label: 'Needs attention', detail: 'No catalog snapshots yet' };
     const newest = dateValue(items[0].created_at);
