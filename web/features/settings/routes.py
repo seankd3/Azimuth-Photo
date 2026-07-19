@@ -202,7 +202,23 @@ async def api_get_image_rating(image_id: int):
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
     rating = await image_repository.get_image_rating(_configured_db_path(), image_id)
-    return {"ok": True, "id": image_id, "rating": rating}
+    from features.sync import elo_stars as elo_stars_mod
+
+    content_hash = str(image.get("content_hash") or "")
+    projected = 0
+    if content_hash:
+        by_hash = await elo_stars_mod.elo_stars_for_hashes(_configured_db_path(), [content_hash])
+        projected = int(by_hash.get(content_hash) or 0)
+    whisper = elo_stars_mod.whisper_for_stars(projected) if projected else None
+    return {
+        "ok": True,
+        "id": image_id,
+        "rating": rating,
+        "lr_rating": rating,
+        "elo_stars": projected,
+        "elo_stars_whisper": whisper,
+        "yours": bool(rating and int(rating) > 0),
+    }
 
 
 @router.post("/api/image/{image_id}/rating")
