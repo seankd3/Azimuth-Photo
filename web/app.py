@@ -89,7 +89,26 @@ if satellite.is_satellite_mode():
             if getattr(app.state, "photoarchive_sync_worker", None) is not None:
                 return True
             await satellite.ensure_sync_state(_db.DB_PATH)
-            worker = SyncWorker(db_path=_db.DB_PATH)
+            updater = None
+            install_root = os.environ.get("PHOTOARCHIVE_INSTALL_ROOT", "").strip()
+            if install_root:
+                from features.sync import client_update
+
+                root = client_update.resolve_install_root(install_root)
+                updater = client_update.ClientUpdater(
+                    install_root=root,
+                    hub=satellite.hub_url(),
+                    local_sha=client_update.resolve_local_sha(install_root=root),
+                    restart=client_update.request_process_restart,
+                    ui_busy=client_update.ui_session_busy,
+                )
+            worker = SyncWorker(db_path=_db.DB_PATH, updater=updater)
+            if updater is not None:
+                updater.request = worker._hub_request
+                updater.hub = worker.hub
+                from features.sync.client_update import consume_rollback_notice_into_status
+
+                consume_rollback_notice_into_status(updater)
             configure_worker(worker)
             app.state.photoarchive_sync_worker = worker
             app.state.photoarchive_shell.track_background_task(worker.run())
@@ -106,6 +125,24 @@ if satellite.is_satellite_mode():
         worker = getattr(app.state, "photoarchive_sync_worker", None)
         if worker is not None:
             worker.stop()
+
+
+@app.on_event("startup")
+async def _init_hub_client_bundle_identity():
+    """Cache /api/version identity + git-archive once at hub boot (not per request)."""
+
+    if satellite.is_satellite_mode():
+        return
+    from features.system import client_bundle
+
+    try:
+        await asyncio.to_thread(client_bundle.init_hub_client_identity)
+    except Exception:
+        # A missing git checkout must not take the hub down; /api/version still
+        # answers with sha=unknown and the bundle route returns 503.
+        import logging
+
+        logging.getLogger(__name__).exception("hub client bundle identity init failed")
 
 
 @app.on_event("startup")

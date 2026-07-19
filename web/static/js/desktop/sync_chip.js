@@ -113,6 +113,8 @@ function patch(status) {
     const hubHealth = status.hub_health || 'ok';
     const needsUpdate = hubHealth === 'needs_update';
     const unreachable = hubHealth === 'unreachable';
+    const updateMessage = String(status.update_message || '');
+    const updateState = String(status.update_state || '');
     const contractMessage = 'The hub is running an older version — some actions are paused until it updates.';
     root.classList.toggle('needs-update', needsUpdate);
     root.classList.toggle('hub-unreachable', unreachable);
@@ -124,7 +126,8 @@ function patch(status) {
     patchText('[data-sync-count]', count);
     patchText('[data-sync-bytes]', `${formatBytes(status.bytes_remaining)} left`);
     patchText('[data-sync-rate]', status.paused ? 'Paused' : recovering ? 'Retrying' : formatRate(status.throughput_bps));
-    patchText('[data-sync-current]', needsUpdate ? 'Some actions are paused until the hub updates.'
+    patchText('[data-sync-current]', updateMessage ? updateMessage
+        : needsUpdate ? 'Some actions are paused until the hub updates.'
         : recovering ? `Backup interrupted — retrying${backoff ? ` in ${backoff}s` : ''}${depth ? ` · ${depth} still to back up` : ''}`
         : status.current_file ? `Uploading ${status.current_file}`
         : depth ? 'Waiting to upload'
@@ -132,8 +135,8 @@ function patch(status) {
         : pendingOps ? 'Sync needs attention' : 'Everything is synced');
     const contract = root.querySelector('[data-sync-contract]');
     if (contract) {
-        patchText('[data-sync-contract]', contractMessage);
-        contract.hidden = !needsUpdate;
+        patchText('[data-sync-contract]', updateMessage && updateState !== 'idle' ? updateMessage : contractMessage);
+        contract.hidden = !(needsUpdate || (updateMessage && updateState !== 'idle'));
     }
     const pending = root.querySelector('[data-sync-pending]');
     if (pending) {

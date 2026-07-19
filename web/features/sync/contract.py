@@ -27,6 +27,9 @@ class HubContract:
     app_version: str | None
     capabilities: frozenset[str]
     checked_at: float | None
+    sha: str | None = None
+    bundle_sha256: str | None = None
+    schema_version: int | None = None
 
 
 _contracts: dict[str, HubContract] = {}
@@ -65,12 +68,18 @@ def _parse_contract(payload: object, *, checked_at: float) -> HubContract:
     capabilities = payload.get("capabilities")
     if not isinstance(api_rev, int) or isinstance(api_rev, bool) or not isinstance(capabilities, list):
         return _legacy_contract(checked_at=checked_at)
+    sha = payload.get("sha")
+    bundle_sha256 = payload.get("bundle_sha256")
+    schema_version = payload.get("schema_version")
     return HubContract(
         reachable=True,
         api_rev=api_rev,
         app_version=str(app_version) if app_version else None,
         capabilities=frozenset(str(value) for value in capabilities if isinstance(value, str)),
         checked_at=checked_at,
+        sha=str(sha) if sha else None,
+        bundle_sha256=str(bundle_sha256) if bundle_sha256 else None,
+        schema_version=int(schema_version) if isinstance(schema_version, int) and not isinstance(schema_version, bool) else None,
     )
 
 

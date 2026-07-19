@@ -15,6 +15,7 @@ from core.requests import RequestBodyTooLarge, read_body_limited
 from core.source_files import source_file_is_safe
 from data.repositories import images as image_repository
 from features.sync import device_auth, hub, mirror_export
+from features.system import client_bundle
 
 
 router = APIRouter(tags=["sync"], dependencies=[Depends(device_auth.enforce_device_token)])
@@ -228,3 +229,28 @@ async def api_sync_hash_backfill():
     _backfill_status.update(state="queued", counts={}, error="")
     _backfill_task = asyncio.create_task(hub.run_hash_backfill(_configured_db_path(), _backfill_status))
     return {"ok": True, "started": True, "backfill": dict(_backfill_status)}
+
+
+@router.get("/api/client/bundle")
+async def api_client_bundle():
+    """Serve the hub's cached git-archive tar.gz (same device auth as /api/sync/*)."""
+
+    identity = client_bundle.get_hub_client_identity()
+    if identity is None:
+        try:
+            identity = client_bundle.init_hub_client_identity()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+    path = client_bundle.cached_bundle_path()
+    if path is None:
+        raise HTTPException(status_code=503, detail="client bundle is not available")
+    return FileResponse(
+        path,
+        media_type="application/gzip",
+        filename=f"photoarchive-{identity.sha[:12]}.tar.gz",
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-SHA256": identity.bundle_sha256,
+            "X-Content-SHA": identity.sha,
+        },
+    )

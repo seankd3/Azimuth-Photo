@@ -100,14 +100,16 @@ class VersionEndpointTests(unittest.TestCase):
         with TestClient(app_module.app) as client:
             response = client.get("/api/version")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json(),
-            {
-                "app_version": app_version(),
-                "api_rev": API_REV,
-                "capabilities": sorted(CAPABILITIES),
-            },
-        )
+        payload = response.json()
+        self.assertEqual(payload["app_version"], app_version())
+        self.assertEqual(payload["api_rev"], API_REV)
+        self.assertEqual(payload["capabilities"], sorted(CAPABILITIES))
+        self.assertIn("sha", payload)
+        self.assertIn("bundle_sha256", payload)
+        self.assertIn("schema_version", payload)
+        self.assertIsInstance(payload["sha"], str)
+        self.assertIsInstance(payload["bundle_sha256"], str)
+        self.assertIsInstance(payload["schema_version"], int)
 
     def test_newer_peer_is_refused_on_scoped_empty_trash(self):
         with TestClient(app_module.app) as client:
