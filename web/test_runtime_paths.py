@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest import mock
 
-from core.runtime_paths import RuntimePaths, ensure_runtime_dirs, resolve_runtime_paths
+from core.runtime_paths import ensure_runtime_dirs, resolve_runtime_paths
 import settings
 
 

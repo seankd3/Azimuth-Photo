@@ -9,7 +9,6 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from core.dates import safe_datetime_fromtimestamp
 import db
@@ -273,7 +272,6 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
     if entry["kind"] == "video":
         from PIL import Image
         from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
-        import io
         image = Image.new("RGB", (320, 180), (45, 45, 45))
     else:
         image = thumbnails.generation.load_source_image(

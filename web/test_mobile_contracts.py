@@ -1,9 +1,7 @@
 import os
 import unittest
 
-from fastapi.testclient import TestClient
 
-import app as app_module
 
 class MobileOfflineContractsTests(unittest.TestCase):
     def setUp(self):

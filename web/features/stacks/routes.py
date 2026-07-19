@@ -91,7 +91,7 @@ async def _run_rebuild_task(kinds: list[str]) -> None:
             "error": "",
         })
         _invalidate()
-    except Exception as exc:
+    except Exception:
         log.exception("worker=stack_rebuild kinds=%s failed", ",".join(kinds))
         _rebuild_status.update({
             "state": "error",

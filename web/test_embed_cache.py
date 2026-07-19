@@ -8,7 +8,6 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import embed_cache  # noqa: E402
-from data.repositories import embeddings as embedding_repository  # noqa: E402
 
 
 class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):

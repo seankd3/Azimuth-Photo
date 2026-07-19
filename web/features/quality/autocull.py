@@ -8,7 +8,6 @@ changed.
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from collections import defaultdict

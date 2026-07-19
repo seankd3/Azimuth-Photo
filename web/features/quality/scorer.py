@@ -35,7 +35,10 @@ Components stored as 0–1 floats:
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 IMAGE_QUALITY_DDL = """

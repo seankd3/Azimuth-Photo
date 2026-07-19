@@ -286,7 +286,7 @@ def estimate_temp_tint_from_neutral(
     d = -2.0 * x + 12.0 * y + 3.0
     if abs(d) < 1e-9:
         return None
-    up, vp = 4.0 * x / d, 9.0 * y / d
+    _up, vp = 4.0 * x / d, 9.0 * y / d
     up_p, vp_p = _planckian_uv_prime(cct)
     # Positive tint = greener = above the locus in v' (Lightroom convention).
     tint = float(np.clip((vp - vp_p) * C.TINT_UV_SCALE, -150.0, 150.0))

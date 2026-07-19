@@ -13,7 +13,6 @@ from features.sync import contract
 from features.sync.sync_worker import SyncWorker
 from features.develop import virtual_copies
 from features.trash import service as trash_service
-from features.trash import remote as trash_remote
 
 
 class TrashTests(BackendTestCase):

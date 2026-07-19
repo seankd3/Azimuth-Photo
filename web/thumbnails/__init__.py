@@ -13,7 +13,6 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-from core import work_coordination
 from data import connection as data_connection
 from features.library import preview_priority
 from . import budget as thumbnail_budget
@@ -28,7 +27,6 @@ from . import maintenance as thumbnail_maintenance
 from . import pregen
 from . import pregen_candidates
 from . import pregen_worker
-from . import runtime
 from . import source_identity
 from . import status as thumbnail_status
 from .memory_store import MemoryThumbnailStore

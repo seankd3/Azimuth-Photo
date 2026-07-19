@@ -22,3 +22,5 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # Compatibility facade binds config constants via globals() from DEFAULT_EXPORT_NAMES.
 "thumbnails/__init__.py" = ["F821"]
+# Star-import test harness: imports exist to re-export into test_* modules.
+"test_support.py" = ["F401"]

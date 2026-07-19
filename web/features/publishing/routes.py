@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import os
-import shutil
 import tempfile
 import time
-import zipfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 

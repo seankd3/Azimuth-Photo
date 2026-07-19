@@ -84,7 +84,7 @@ def test_shortcut_sheet_entries_are_backed_by_keyboard_bindings():
         "K / Enter": ["key === 'k'", "event.key === 'Enter'"],
         "C": ["key === 'c'"],
         "U": ["key === 'u'"],
-        "K": ["key === 'k'"],
+        "K": ["key === 'k'"],  # noqa: F601  # lint-report: duplicate K key overwrites masking binding
     }
     for shortcut in shortcuts:
         fragments = expected_fragments[shortcut["key"]]

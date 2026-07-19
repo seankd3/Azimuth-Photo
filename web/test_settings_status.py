@@ -542,7 +542,7 @@ class SettingsStatusTests(BackendTestCase):
         self.assertNotEqual(second["thumb_quality"], 40)
 
     async def test_api_settings_cache_returns_independent_responses_and_invalidates(self):
-        first = await settings_routes.api_settings()
+        await settings_routes.api_settings()
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
         second = await settings_routes.api_settings()
@@ -557,7 +557,7 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(refreshed["settings"]["thumb_quality"], target_quality)
 
     async def test_api_settings_cache_protects_nested_responses(self):
-        first = await settings_routes.api_settings()
+        await settings_routes.api_settings()
         self.assertIsNotNone(settings_status._settings_response_cache["data"])
 
         first["settings"]["thumb_quality"] = 40

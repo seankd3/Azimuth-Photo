@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import os
 import signal
-import sqlite3
 import subprocess
-import sys
 import time
 import urllib.error
 import urllib.request

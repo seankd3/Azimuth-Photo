@@ -223,7 +223,7 @@ async def list_active_shares(db_path: str) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            f"""
+            """
             SELECT
                 s.collection_id,
                 s.published_node_id,

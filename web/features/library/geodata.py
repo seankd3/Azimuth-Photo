@@ -6,7 +6,7 @@ import asyncio
 import math
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from fractions import Fraction
 from typing import Any
 

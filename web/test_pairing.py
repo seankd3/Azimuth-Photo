@@ -19,7 +19,7 @@ from PIL import Image
 
 import db
 import settings
-from features.sync import device_auth, hub_routes, mdns, pairing, pair_routes, satellite
+from features.sync import hub_routes, mdns, pairing, pair_routes, satellite
 
 
 class PairingTests(unittest.TestCase):

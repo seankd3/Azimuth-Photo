@@ -11,7 +11,6 @@ from fastapi import FastAPI, Response
 from fastapi.testclient import TestClient
 
 import db
-from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from test_support import BackendTestCase

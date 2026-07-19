@@ -1,9 +1,9 @@
 from collections.abc import Awaitable, Callable
 
 from core.responses import (
-    METADATA_FIELDS,
-    image_card,
-    metadata_payload,
+    METADATA_FIELDS as METADATA_FIELDS,
+    image_card as image_card,
+    metadata_payload as metadata_payload,
 )
 from data.repositories import rankings as ranking_repository
 

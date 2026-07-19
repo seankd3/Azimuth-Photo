@@ -14,7 +14,10 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterable
 from datetime import date, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from features.develop import rawproc
 
 from core import runtime_paths
 from core.source_files import inspect_source_file
