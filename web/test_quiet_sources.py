@@ -1,10 +1,13 @@
 """Quiet sources: per-client exclude_sources for library browsing."""
 
+import pytest
 from test_support import *  # noqa: F401,F403
+
 
 from core.requests import parse_exclude_sources
 from data.repositories import rankings as ranking_repository
 
+pytestmark = pytest.mark.contract
 
 class QuietSourcesTests(BackendTestCase):
     async def test_parse_exclude_sources_is_optional_and_stable(self):

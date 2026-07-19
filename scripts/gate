@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# photo-archive test gates — parallel by default, honest exits, no pipe swallowing.
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+WEB="$ROOT/web"
+RESULTS_DIR="${PHOTOARCHIVE_GATE_RESULTS:-$ROOT/receipts/gate}"
+mkdir -p "$RESULTS_DIR"
+
+# System Node first (Cursor's bundled node rejects --experimental-default-type).
+# Local tmpfs/tmp for symlink + atomic-rename tests (expansion FS forbids symlinks).
+export PATH="/usr/bin:/usr/local/bin:${PATH}"
+export TMPDIR="${TMPDIR:-/tmp}"
+export TMP="${TMP:-$TMPDIR}"
+export TEMP="${TEMP:-$TMPDIR}"
+# Keep QA scratch off the no-symlink expansion volume when TMPDIR is local.
+if [[ -z "${PHOTOARCHIVE_QA_SCRATCH:-}" ]]; then
+  export PHOTOARCHIVE_QA_SCRATCH="$TMPDIR/azimuth-photo/qa-harness"
+fi
+mkdir -p "$TMPDIR" "$PHOTOARCHIVE_QA_SCRATCH"
+
+if [[ -x "$WEB/.venv/bin/python" ]]; then
+  PYTHON="$WEB/.venv/bin/python"
+elif [[ -x "$ROOT/../photo-archive/web/.venv/bin/python" ]]; then
+  PYTHON="$ROOT/../photo-archive/web/.venv/bin/python"
+else
+  echo "gate: need web/.venv (or shared photo-archive/web/.venv)" >&2
+  exit 2
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: gate <quick|changed|full> [expr]
+
+  quick    contract tier, then -n auto -m "not slow and not serial and not bench"
+  changed  contract tier, then -k <expr> (expr required)
+  full     everything -n auto (not serial/bench), then serial group -n0
+
+Results land in receipts/gate/*.log — never rely on a piped exit code.
+EOF
+}
+
+if [[ $# -lt 1 ]]; then
+  usage >&2
+  exit 2
+fi
+
+MODE="$1"
+shift || true
+STAMP="$(date +%Y%m%d-%H%M%S)"
+LOG="$RESULTS_DIR/${MODE}-${STAMP}.log"
+LAST="$RESULTS_DIR/last-${MODE}.log"
+
+run_pytest() {
+  local label="$1"
+  shift
+  echo "==> $label" | tee -a "$LOG"
+  echo "+ $PYTHON -m pytest $*" | tee -a "$LOG"
+  set +e
+  "$PYTHON" -m pytest "$@" >>"$LOG" 2>&1
+  local rc=$?
+  set -e
+  echo "==> $label exit=$rc" | tee -a "$LOG"
+  return "$rc"
+}
+
+collect_count() {
+  local expr="$1"
+  "$PYTHON" -m pytest --collect-only -q -m "$expr" 2>/dev/null \
+    | python3 -c 'import re,sys
+text=sys.stdin.read()
+for line in reversed(text.splitlines()):
+    m=re.search(r"(\d+)(?:/\d+)? tests? collected", line)
+    if m:
+        print(m.group(1)); raise SystemExit(0)
+raise SystemExit(1)'
+}
+
+assert_slow_partition() {
+  # -m "not slow" + -m slow == full set (excluding bench which is always out of addopts).
+  local not_slow slow all
+  not_slow="$(collect_count 'not slow and not bench')" || true
+  slow="$(collect_count 'slow and not bench')" || true
+  all="$(collect_count 'not bench')" || true
+  if [[ -z "$not_slow" || -z "$slow" || -z "$all" ]]; then
+    echo "gate: could not collect marker counts (not_slow=$not_slow slow=$slow all=$all)" | tee -a "$LOG"
+    return 2
+  fi
+  local sum=$((not_slow + slow))
+  echo "gate: collect not_slow=$not_slow slow=$slow all=$all sum=$sum" | tee -a "$LOG"
+  if [[ "$sum" -ne "$all" ]]; then
+    echo "gate: slow partition broken: not_slow+slow ($sum) != all ($all)" | tee -a "$LOG"
+    return 2
+  fi
+}
+
+cd "$WEB"
+: >"$LOG"
+echo "gate mode=$MODE log=$LOG python=$PYTHON node=$(command -v node) TMPDIR=$TMPDIR" | tee -a "$LOG"
+
+RC=0
+case "$MODE" in
+  quick)
+    assert_slow_partition || RC=$?
+    if [[ $RC -eq 0 ]]; then
+      run_pytest "contract" -q --tb=short -m contract || RC=$?
+    fi
+    if [[ $RC -eq 0 ]]; then
+      run_pytest "quick-parallel" -n auto -q --tb=line -m "not slow and not serial and not bench" || RC=$?
+    fi
+    ;;
+  changed)
+    if [[ $# -lt 1 || -z "${1:-}" ]]; then
+      echo "gate changed requires a -k expression" >&2
+      usage >&2
+      exit 2
+    fi
+    EXPR="$1"
+    run_pytest "contract" -q --tb=short -m contract || RC=$?
+    if [[ $RC -eq 0 ]]; then
+      run_pytest "changed" -q --tb=short -k "$EXPR" || RC=$?
+    fi
+    ;;
+  full)
+    assert_slow_partition || RC=$?
+    if [[ $RC -eq 0 ]]; then
+      run_pytest "full-parallel" -n auto -q --tb=line -m "not serial and not bench" || RC=$?
+    fi
+    if [[ $RC -eq 0 ]]; then
+      # Serial group after parallel wave — never silently skipped.
+      SERIAL_COUNT="$(collect_count 'serial and not bench' || true)"
+      echo "gate: serial collected=$SERIAL_COUNT" | tee -a "$LOG"
+      if [[ -n "${SERIAL_COUNT:-}" && "$SERIAL_COUNT" -gt 0 ]]; then
+        run_pytest "full-serial" -n0 -q --tb=line -m "serial and not bench" || RC=$?
+      fi
+    else
+      echo "gate: skipping serial group because parallel failed (exit=$RC)" | tee -a "$LOG"
+    fi
+    ;;
+  *)
+    usage >&2
+    exit 2
+    ;;
+esac
+
+cp -f "$LOG" "$LAST"
+echo "gate finished mode=$MODE exit=$RC log=$LOG" | tee -a "$LOG"
+exit "$RC"

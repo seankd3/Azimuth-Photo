@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+
+import pytest
 import asyncio
 import hashlib
 import io
@@ -25,6 +27,7 @@ from features.sync.client_update import UI_RETRY, UI_ROLLED_BACK, UI_UPDATING, a
 from features.sync.sync_worker import SyncWorker
 from features.system import client_bundle
 
+pytestmark = pytest.mark.slow
 
 def _tar_gz(files: dict[str, bytes]) -> bytes:
     buffer = io.BytesIO()

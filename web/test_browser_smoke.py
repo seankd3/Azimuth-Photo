@@ -1,9 +1,11 @@
+import pytest
 import os
 import shutil
 import subprocess
 import unittest
 from pathlib import Path
 
+pytestmark = pytest.mark.slow
 
 @unittest.skipUnless(
     os.environ.get("PHOTOARCHIVE_BROWSER_SMOKE") == "1",

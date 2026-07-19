@@ -1,3 +1,4 @@
+import pytest
 import os
 import sqlite3
 import threading
@@ -809,6 +810,7 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertIsNone(by_id[copy_id]["trash_path"])
         self.assertFalse(os.path.exists(filepath))
 
+    @pytest.mark.contract
     async def test_master_trash_failure_reverts_entire_virtual_copy_family(self):
         master_id, copy_id, filepath = await self._master_with_copy()
         observed_statuses = []
@@ -838,6 +840,7 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertEqual(copy["status"], "kept")
         self.assertTrue(os.path.exists(filepath))
 
+    @pytest.mark.contract
     async def test_master_prepare_failure_leaves_virtual_copy_family_untouched(self):
         # If the master can't be prepared for trash (missing source path), its
         # auto-expanded virtual copies must NOT be committed to trash alone —
@@ -901,6 +904,7 @@ class VirtualCopyTrashTests(BackendTestCase):
             copy_id: "kept",
         })
 
+    @pytest.mark.contract
     async def test_master_restore_failure_reverts_entire_virtual_copy_family(self):
         master_id, copy_id, _filepath = await self._master_with_copy()
         await trash_service.trash_images(db.DB_PATH, [master_id])

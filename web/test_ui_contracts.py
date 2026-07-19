@@ -1,3 +1,4 @@
+import pytest
 from test_support import *  # noqa: F401,F403
 
 
@@ -153,6 +154,7 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("scopeParams({ limit: SCOPE_PAGE_LIMIT", cull_brief)
         self.assertIn("getFilterOptions(scopeParams())", filters)
 
+    @pytest.mark.contract
     async def test_map_uses_the_server_resolved_scope(self):
         base_dir = os.path.dirname(__file__)
         with open(os.path.join(base_dir, "static", "js", "desktop", "map.js"), encoding="utf-8") as fh:

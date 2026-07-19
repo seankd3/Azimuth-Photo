@@ -1,3 +1,4 @@
+import pytest
 import os
 import unittest
 
@@ -69,6 +70,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("sections.named_people", search)
         self.assertIn("people = { people: flattenPeople(data) }", search)
 
+    @pytest.mark.contract
     def test_background_workers_default_new_productive_states_to_running_on_mobile(self):
         library = self.read("static", "js", "mobile", "library.js")
 

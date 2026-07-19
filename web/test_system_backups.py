@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import gzip
 import json
 import os
@@ -236,6 +237,7 @@ class BackupUnitTests(unittest.TestCase):
         finally:
             check.close()
 
+    @pytest.mark.contract
     def test_verification_failure_publishes_nothing(self):
         before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
         real_verify = backups._verify_backup_artifact
@@ -257,6 +259,7 @@ class BackupUnitTests(unittest.TestCase):
         summary = backups.integrity_summary(str(self.db_path))
         self.assertIn("Catalog backup failed", summary.get("alert") or "")
 
+    @pytest.mark.contract
     def test_corrupt_gzip_before_publish_is_refused(self):
         """B1: decompress-verify the .gz against the verified tmp DB before os.replace."""
 
@@ -278,6 +281,7 @@ class BackupUnitTests(unittest.TestCase):
         self.assertFalse(list(self.root.glob(".*.tmp.db")))
         self.assertFalse(list(self.root.glob(".*.tmp.gz")))
 
+    @pytest.mark.contract
     def test_empty_catalog_refuses_shared_historical_backup_dir(self):
         historical = self.root / "photoarchive-20260101-040000.db.gz"
         historical.write_bytes(b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1))
@@ -291,6 +295,7 @@ class BackupUnitTests(unittest.TestCase):
         ]
         self.assertEqual(published, [])
 
+    @pytest.mark.contract
     def test_second_instance_refuses_foreign_backup_dir_without_pruning(self):
         """B3/B4: owner marker blocks a foreign catalog; retention must not run."""
 
@@ -331,6 +336,7 @@ class BackupUnitTests(unittest.TestCase):
 
 
 class BackupIsolationTests(unittest.TestCase):
+    @pytest.mark.contract
     def test_custom_home_ignores_foreign_backup_dir_override(self):
         from core.runtime_paths import resolve_runtime_paths
 
