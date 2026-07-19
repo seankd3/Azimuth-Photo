@@ -208,7 +208,7 @@ class CaptionTests(BackendTestCase):
         async def store_result(**_kwargs):
             return None
 
-        def blocking_load(_config):
+        def blocking_load(_config, _interactive=False):
             load_started.set()
             allow_load_finish.wait(timeout=2)
 

@@ -671,10 +671,10 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
     async def test_search_model_loader_waits_for_fresh_caption_lease(self):
         load_started = threading.Event()
 
-        def fake_load(_model_dir, _model_id):
+        def fake_load(_model_dir, _model_id, _interactive=False):
             load_started.set()
             return object()
-
+    
         embedding_worker._load_model = fake_load
         current_manual_owner = work_coordination.manual_owner()
         if current_manual_owner:
@@ -801,12 +801,12 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         model = object()
 
-        def fake_load(model_dir, model_id):
+        def fake_load(model_dir, model_id, _interactive=False):
             calls.append((model_dir, model_id))
             return model
-
+    
         embedding_worker._load_model = fake_load
-
+    
         self.assertTrue(embedding_worker.start_search_model_load())
         task = embedding_worker._search_model_load_task
         self.assertIsNotNone(task)

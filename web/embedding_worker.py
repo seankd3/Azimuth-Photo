@@ -261,15 +261,33 @@ def _release_embedding_owners() -> None:
     work_coordination.release_gpu_owner("embeddings")
 
 
-def _unload_model() -> asyncio.Task | None:
+def _drop_embedding_residency() -> None:
+    """Clear embedding globals. Called by ModelPool on unload/evict."""
     global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
-    residency_task = _cancel_search_model_residency_task()
+    _cancel_search_model_residency_task()
     _model = None
     _loaded_model_dir = None
     _loaded_model_id = None
     _loaded_model_revision = None
     _clear_cuda_cache()
     _release_embedding_owners()
+
+
+def _unload_model() -> asyncio.Task | None:
+    from core.model_pool import get_model_pool
+
+    # Cancel first so we can return the task to callers that await it;
+    # pool unload also cancels via _drop, but the task handle is needed here.
+    residency_task = _cancel_search_model_residency_task()
+    if not get_model_pool().unload("embeddings"):
+        # Drop without a second cancel — residency already cancelled above.
+        global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
+        _model = None
+        _loaded_model_dir = None
+        _loaded_model_id = None
+        _loaded_model_revision = None
+        _clear_cuda_cache()
+        _release_embedding_owners()
     return residency_task
 
 
@@ -545,51 +563,67 @@ def resume_embedding_worker() -> dict:
     return get_worker_status()
 
 
-def _load_model(model_dir: str, model_id: str):
-    """Load the embedding model strictly from the local filesystem."""
-    import torch
-    from sentence_transformers import SentenceTransformer
-
-    from core.ml_device import sentence_transformers_device
-
-    processor_kwargs = None
-    if model_id == "Qwen/Qwen3-VL-Embedding-8B":
-        processor_kwargs = {
-            "min_pixels": 4096,
-            "max_pixels": 65536,
-        }
-    model_kwargs = {}
-    if importlib.util.find_spec("bitsandbytes") is not None:
-        model_kwargs = {
-            "quantization_config": {
-                "load_in_4bit": True,
-                "bnb_4bit_compute_dtype": torch.float16,
-                "bnb_4bit_use_double_quant": True,
-                "bnb_4bit_quant_type": "nf4",
-            },
-            "torch_dtype": torch.float16,
-        }
-    elif model_id == settings.EMBED_MODEL_PRESETS[settings.LEGACY_2B_PRESET_KEY]["model_id"]:
-        # The compact model has a deliberate CPU-compatible path on platforms
-        # where bitsandbytes is unavailable. Do not attempt the 8B model at
-        # full precision: that can exhaust ordinary workstation memory.
-        model_kwargs = {"torch_dtype": torch.float32}
-    else:
-        raise RuntimeError(
-            "The configured 8B search model needs bitsandbytes. "
-            "Install the search pack on Linux x86-64 or select the compact 2B search model."
-        )
-    device = sentence_transformers_device()
-    model = SentenceTransformer(
-        model_dir,
-        device=device,
-        model_kwargs=model_kwargs,
-        processor_kwargs=processor_kwargs,
-        trust_remote_code=True,
-        local_files_only=True,
+def _load_model(model_dir: str, model_id: str, interactive: bool = False):
+    """Load the embedding model strictly from the local filesystem via ModelPool."""
+    from core.model_pool import (
+        COST_EMBEDDINGS_RAM,
+        COST_EMBEDDINGS_VRAM,
+        get_model_pool,
     )
-    log.info(f"{model_id} loaded from {model_dir} device={device}")
-    return model
+
+    def _load():
+        import torch
+        from sentence_transformers import SentenceTransformer
+
+        from core.ml_device import sentence_transformers_device
+
+        processor_kwargs = None
+        if model_id == "Qwen/Qwen3-VL-Embedding-8B":
+            processor_kwargs = {
+                "min_pixels": 4096,
+                "max_pixels": 65536,
+            }
+        model_kwargs = {}
+        if importlib.util.find_spec("bitsandbytes") is not None:
+            model_kwargs = {
+                "quantization_config": {
+                    "load_in_4bit": True,
+                    "bnb_4bit_compute_dtype": torch.float16,
+                    "bnb_4bit_use_double_quant": True,
+                    "bnb_4bit_quant_type": "nf4",
+                },
+                "torch_dtype": torch.float16,
+            }
+        elif model_id == settings.EMBED_MODEL_PRESETS[settings.LEGACY_2B_PRESET_KEY]["model_id"]:
+            # The compact model has a deliberate CPU-compatible path on platforms
+            # where bitsandbytes is unavailable. Do not attempt the 8B model at
+            # full precision: that can exhaust ordinary workstation memory.
+            model_kwargs = {"torch_dtype": torch.float32}
+        else:
+            raise RuntimeError(
+                "The configured 8B search model needs bitsandbytes. "
+                "Install the search pack on Linux x86-64 or select the compact 2B search model."
+            )
+        device = sentence_transformers_device()
+        model = SentenceTransformer(
+            model_dir,
+            device=device,
+            model_kwargs=model_kwargs,
+            processor_kwargs=processor_kwargs,
+            trust_remote_code=True,
+            local_files_only=True,
+        )
+        log.info(f"{model_id} loaded from {model_dir} device={device}")
+        return model
+
+    return get_model_pool().acquire(
+        "embeddings",
+        load_fn=_load,
+        unload_fn=_drop_embedding_residency,
+        vram_bytes=COST_EMBEDDINGS_VRAM,
+        ram_bytes=COST_EMBEDDINGS_RAM,
+        interactive=interactive,
+    )
 
 
 def _target_embedding_dim() -> int:
@@ -757,7 +791,15 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
             _set_worker_status("loading_model", f"Loading {model_id} for {reason}…", ready=False, config=config)
             with work_coordination.manual_bulk("embeddings"):
                 async with work_coordination.lease_heartbeat("embeddings", gpu=True):
-                    _model = await loop.run_in_executor(_embed_executor, _load_model, model_dir, model_id)
+                    # Interactive search pins the model so a caption sweep
+                    # cannot bounce it every few seconds (ModelPool policy).
+                    _model = await loop.run_in_executor(
+                        _embed_executor,
+                        _load_model,
+                        model_dir,
+                        model_id,
+                        True,
+                    )
             _loaded_model_dir = model_dir
             _loaded_model_id = model_id
             _loaded_model_revision = model_revision
@@ -1242,6 +1284,7 @@ async def _run_embedding_worker_loop():
                                         _load_model,
                                         model_dir,
                                         model_id,
+                                        False,
                                     )
                             _loaded_model_dir = model_dir
                             _loaded_model_id = model_id

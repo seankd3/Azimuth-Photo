@@ -213,13 +213,21 @@ def _clear_cuda_cache() -> None:
     empty_cuda_cache()
 
 
-def _unload_model() -> None:
+def _drop_caption_residency() -> None:
+    """Clear caption globals. Called by ModelPool on unload/evict."""
     global _model, _processor, _loaded_key
     _model = None
     _processor = None
     _loaded_key = None
     _clear_cuda_cache()
     work_coordination.release_gpu_owner("captions")
+
+
+def _unload_model() -> None:
+    from core.model_pool import get_model_pool
+
+    if not get_model_pool().unload("captions"):
+        _drop_caption_residency()
 
 
 async def _wait_for_caption_turn() -> None:
@@ -252,60 +260,77 @@ def shutdown_caption_worker() -> None:
     _caption_executor = _new_caption_executor()
 
 
-def _load_model(config: dict[str, Any]):
+def _load_model(config: dict[str, Any], interactive: bool = False):
     global _model, _processor, _loaded_key
+    from core.model_pool import (
+        COST_CAPTIONS_RAM,
+        COST_CAPTIONS_VRAM,
+        get_model_pool,
+    )
+
     key = (
         str(config["model_dir"]),
         str(config["model_id"]),
         str(config.get("revision") or "main"),
         str(config.get("quantization") or ""),
     )
-    if _model is not None and _processor is not None and _loaded_key == key:
+    if _loaded_key is not None and _loaded_key != key:
+        _unload_model()
+
+    def _load():
+        global _model, _processor, _loaded_key
+        from transformers import AutoProcessor, BitsAndBytesConfig
+
+        try:
+            from transformers import AutoModelForImageTextToText as AutoCaptionModel
+        except ImportError:
+            from transformers import AutoModelForVision2Seq as AutoCaptionModel
+
+        from core.ml_device import preferred_device, transformers_device_map
+
+        quantized = str(config.get("quantization") or "") == "bnb-4bit"
+        kwargs = {
+            "local_files_only": True,
+            "revision": config.get("revision") or "main",
+            "device_map": transformers_device_map(quantized=quantized),
+            "trust_remote_code": True,
+        }
+        if quantized:
+            import torch
+
+            kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            # Whole-model pin (GPU 0 or CPU): accelerate's CPU-offload path crashes
+            # on this transformers+bitsandbytes pairing. CUDA OOM is handled by the
+            # worker's backoff. The 4-bit model fits when the card isn't shared.
+            kwargs["device_map"] = transformers_device_map(quantized=True)
+            log.info(
+                "caption model load device=%s device_map=%s",
+                preferred_device(),
+                kwargs["device_map"],
+            )
+        _processor = AutoProcessor.from_pretrained(
+            config["model_dir"],
+            local_files_only=True,
+            revision=config.get("revision") or "main",
+            trust_remote_code=True,
+        )
+        _model = AutoCaptionModel.from_pretrained(config["model_dir"], **kwargs)
+        _loaded_key = key
         return _model, _processor
 
-    from transformers import AutoProcessor, BitsAndBytesConfig
-
-    try:
-        from transformers import AutoModelForImageTextToText as AutoCaptionModel
-    except ImportError:
-        from transformers import AutoModelForVision2Seq as AutoCaptionModel
-
-    from core.ml_device import preferred_device, transformers_device_map
-
-    quantized = str(config.get("quantization") or "") == "bnb-4bit"
-    kwargs = {
-        "local_files_only": True,
-        "revision": config.get("revision") or "main",
-        "device_map": transformers_device_map(quantized=quantized),
-        "trust_remote_code": True,
-    }
-    if quantized:
-        import torch
-
-        kwargs["quantization_config"] = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16,
-        )
-        # Whole-model pin (GPU 0 or CPU): accelerate's CPU-offload path crashes
-        # on this transformers+bitsandbytes pairing. CUDA OOM is handled by the
-        # worker's backoff. The 4-bit model fits when the card isn't shared.
-        kwargs["device_map"] = transformers_device_map(quantized=True)
-        log.info(
-            "caption model load device=%s device_map=%s",
-            preferred_device(),
-            kwargs["device_map"],
-        )
-    _processor = AutoProcessor.from_pretrained(
-        config["model_dir"],
-        local_files_only=True,
-        revision=config.get("revision") or "main",
-        trust_remote_code=True,
+    return get_model_pool().acquire(
+        "captions",
+        load_fn=_load,
+        unload_fn=_drop_caption_residency,
+        vram_bytes=COST_CAPTIONS_VRAM,
+        ram_bytes=COST_CAPTIONS_RAM,
+        interactive=interactive,
     )
-    _model = AutoCaptionModel.from_pretrained(config["model_dir"], **kwargs)
-    _loaded_key = key
-    return _model, _processor
 
 
 def parse_caption_response(text: str) -> dict[str, Any]:
@@ -467,7 +492,12 @@ async def _run_caption_worker_loop() -> None:
             with work_coordination.manual_bulk("captions"):
                 try:
                     async with work_coordination.lease_heartbeat("captions", gpu=True):
-                        await loop.run_in_executor(_caption_executor, _load_model, caption_config)
+                        await loop.run_in_executor(
+                            _caption_executor,
+                            _load_model,
+                            caption_config,
+                            False,
+                        )
                     _reset_model_load_failures()
                 except Exception as exc:
                     if _is_cuda_oom_error(exc):

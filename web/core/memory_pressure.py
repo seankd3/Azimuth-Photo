@@ -170,14 +170,28 @@ def release_discardable_buffers() -> dict[str, Any]:
 
 
 def request_model_unload() -> list[str]:
-    """Ask search/caption/people residency to drop models (lazy reload later)."""
-    unloaded: list[str] = []
+    """Shed every ModelPool resident (search/caption/people/subject mask).
 
+    Same contract as before — memory pressure pauses bulk work and drops
+    ML residency for a lazy reload later. Pool is the choke point; worker
+    unload helpers clear any straggler globals set outside the pool.
+    """
+    unloaded: list[str] = []
+    try:
+        from core.model_pool import get_model_pool
+
+        unloaded.extend(get_model_pool().unload_all())
+    except Exception:
+        log.debug("memory_pressure: model_pool unload_all failed", exc_info=True)
+
+    # Straggler sweep: clear worker globals even if they bypassed the pool
+    # (tests, legacy paths). Pool-aware unload helpers are no-ops when empty.
     try:
         import embedding_worker
 
         embedding_worker._unload_model()
-        unloaded.append("embeddings")
+        if "embeddings" not in unloaded:
+            unloaded.append("embeddings")
     except Exception:
         log.debug("memory_pressure: embedding unload failed", exc_info=True)
 
@@ -185,7 +199,8 @@ def request_model_unload() -> list[str]:
         import caption_worker
 
         caption_worker._unload_model()
-        unloaded.append("captions")
+        if "captions" not in unloaded:
+            unloaded.append("captions")
     except Exception:
         log.debug("memory_pressure: caption unload failed", exc_info=True)
 
@@ -193,12 +208,20 @@ def request_model_unload() -> list[str]:
         import face_worker
 
         face_worker._unload_face_app()
-        unloaded.append("people")
+        if "people" not in unloaded:
+            unloaded.append("people")
     except Exception:
         log.debug("memory_pressure: people unload failed", exc_info=True)
 
-    # Workers clear cache on their own unload; one more pass after all drops
-    # so shared VRAM is actually returned on an 8GB card.
+    try:
+        from features.develop import ai_masks
+
+        ai_masks.unload_subject_session()
+        if "subject_mask" not in unloaded:
+            unloaded.append("subject_mask")
+    except Exception:
+        log.debug("memory_pressure: subject_mask unload failed", exc_info=True)
+
     try:
         from core.ml_device import empty_cuda_cache
 
