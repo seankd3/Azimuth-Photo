@@ -115,6 +115,40 @@ class TwoFailedBootsRollbackTests(unittest.TestCase):
                 str(new),
             )
 
+    def test_slow_but_alive_boot_never_increments_failure_counter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _old, new = self._seed(root)
+            polls = {"n": 0}
+
+            def spawn(**kwargs):
+                return FakeProcess(exit_code=None)
+
+            def wait_ready(*, process, timeout, **kwargs):
+                # Simulate wait_until_ready: alive past timeout keeps waiting, then succeeds.
+                self.assertGreaterEqual(float(timeout), 0.01)
+                polls["n"] += 1
+                self.assertIsNone(process.poll())
+                return True
+
+            code = launcher.run_supervised(
+                install_root=root,
+                ready_timeout=0.01,
+                spawn=spawn,
+                wait_ready=wait_ready,
+            )
+            self.assertEqual(code, 0)
+            self.assertEqual(polls["n"], 1)
+            self.assertFalse((root / "boot_attempts.txt").exists())
+            self.assertEqual(
+                (root / "current.txt").read_text(encoding="utf-8").strip(),
+                str(new),
+            )
+
+    def test_ready_timeout_env_defaults_to_120(self):
+        self.assertEqual(launcher.ready_timeout_seconds({}), 120.0)
+        self.assertEqual(launcher.ready_timeout_seconds({"PHOTOARCHIVE_READY_TIMEOUT": "90"}), 90.0)
+
 
 if __name__ == "__main__":
     unittest.main()
