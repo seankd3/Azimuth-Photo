@@ -11,7 +11,7 @@ from core import requests as request_helpers
 from core.source_files import inspect_source_file
 from data import connection as data_connection
 from data.repositories import images as image_repository
-from features.sync import satellite
+from features.sync import preview_mirror, satellite
 from features.sync.prefetch import (
     ThumbPrefetcher,
     _foreground_urllib_request as _urllib_request,
@@ -160,8 +160,12 @@ def _remote_media_pending_response(tier: str) -> Response:
 
 
 def _cache_remote_media(image, tier: str, data: bytes) -> str:
-    remote_id = int(image["hub_image_id"])
     image_id = int(image["id"])
+    if tier in preview_mirror.MIRROR_SIZES:
+        signature = preview_mirror.preview_version_for_image(image)
+        preview_mirror.put(image_id, tier, signature, data, hot=True)
+        return signature
+    remote_id = int(image["hub_image_id"])
     signature = ThumbPrefetcher._signature(remote_id, data)
     thumbnails._write_thumbnail_to_disk(tier, image_id, signature, data, hot=False)
     if tier != thumbnails.FULL_TIER:
@@ -243,9 +247,11 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     if size not in thumbnails.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
+    preview_mirror.note_request()
     image = None
     source_state = "available"
     cache_only = cached
+    mirror_version: str | None = None
     if not cached:
         image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
         if not image:
@@ -260,29 +266,49 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
             source_error = await _source_error_response(image, source_state)
             if source_error is not None:
                 return source_error
+        if source_state == "remote" and size in preview_mirror.MIRROR_SIZES:
+            mirror_version = preview_mirror.preview_version_for_image(image)
 
     # Cached probes remain DB-free. Active images validate the original first;
     # trashed rows are cache-only because their original path was intentionally moved.
+    # Remote sm/md: require preview_version match (stale = lazy miss).
     request_etag = request.headers.get("if-none-match")
+    required_signature = mirror_version
     entry = thumbnails._memory_get_entry_fast(size, image_id)
+    if entry is not None and required_signature is not None and entry[0] != required_signature:
+        entry = None
     if entry is None:
-        path_entry = thumbnails.fast_disk_path_entry(size, image_id)
-        if path_entry is not None:
-            signature, path = path_entry
-            headers = _cache_headers(signature)
-            if request_etag == headers["ETag"]:
-                return Response(status_code=304, headers=headers)
-            return FileResponse(path, media_type="image/jpeg", headers=headers)
+        if required_signature is not None:
+            path_hit = preview_mirror.get_local(image_id, size, required_signature, touch=True)
+            if path_hit is not None:
+                signature, path = path_hit
+                headers = _cache_headers(signature)
+                if request_etag == headers["ETag"]:
+                    return Response(status_code=304, headers=headers)
+                return FileResponse(path, media_type="image/jpeg", headers=headers)
+        else:
+            path_entry = thumbnails.fast_disk_path_entry(size, image_id)
+            if path_entry is not None:
+                signature, path = path_entry
+                headers = _cache_headers(signature)
+                if request_etag == headers["ETag"]:
+                    return Response(status_code=304, headers=headers)
+                return FileResponse(path, media_type="image/jpeg", headers=headers)
         entry = await asyncio.get_event_loop().run_in_executor(
             None,
             thumbnails.fast_disk_read_entry,
             size,
             image_id,
-            None,
+            required_signature,
         )
         if entry is not None:
             signature, data = entry
             thumbnails._memory_put(size, image_id, signature, data)
+        elif required_signature is not None:
+            # Version mismatch left a stale unversioned index hit — drop it.
+            stale = thumbnails.fast_disk_path_entry(size, image_id)
+            if stale is not None and stale[0] != required_signature:
+                preview_mirror.delete_entry(image_id, size)
     if entry is not None:
         signature, data = entry
         headers = _cache_headers(signature)
