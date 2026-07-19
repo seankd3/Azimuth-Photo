@@ -332,7 +332,9 @@ class DesktopCorrectnessTests(unittest.TestCase):
         scope_data = read("scope_data.js")
         page_loader = scope_data[scope_data.index("export async function loadScopePage"):]
 
-        self.assertIn("const params = scopeParams({ limit, offset });", page_loader)
+        self.assertIn("const params = scopeParams({ limit, offset }, { forGridResults });", page_loader)
+        # Similar sets must also resolve through rankings so quiet exclusion applies server-side.
+        self.assertIn("scopeParams({ limit, offset, ids: ids.join(',') }, { forGridResults })", page_loader)
         self.assertIn("getRankings(params, options)", page_loader)
         self.assertNotIn("getCollection(", page_loader)
         self.assertNotIn("loadCollectionImages", scope_data)
