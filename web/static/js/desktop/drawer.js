@@ -1217,8 +1217,8 @@ async function refreshDrawer({ initial = false } = {}) {
         listDevices().catch(() => null),
         getStorageOverview().catch(() => null),
         getLrConnect().catch(() => null),
-        refreshLibraryHealth(),
-        refreshCloudBackup(),
+        refreshLibraryHealth().catch(() => null),
+        refreshCloudBackup().catch(() => null),
     ]);
     if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
@@ -1246,6 +1246,9 @@ async function refreshDrawer({ initial = false } = {}) {
     else {
         patchDrawerStatus(workerGenerations);
         if (body?.querySelector('#cloud-backup-panel')) renderCloudBackupSection();
+        // Statuses can land after the section rendered — if a panel that
+        // should exist is missing (e.g. Connect Lightroom), re-render once.
+        if (lrConnectStatus?.show_button && !body?.querySelector('#connect-lightroom-panel')) renderCurrentSystemSurface();
     }
 }
 
