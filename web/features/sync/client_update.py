@@ -183,12 +183,13 @@ class ClientUpdater:
             # Some archives may root differently; accept top-level requirements too.
             alt = self.versions_dir / hub_sha / "requirements.txt"
             requirements = alt if alt.is_file() else requirements
-        deps = deps_hash(requirements) if requirements.is_file() else "nodeps"
+        req_file = requirements if requirements.is_file() else None
+        deps = deps_hash(req_file) if req_file is not None else "nodeps"
         venv_path = self.venvs_dir / deps
-        if venv_path.is_dir() and _venv_python(venv_path).is_file():
+        if should_reuse_venv(venv_path, req_file, expected_hash=deps):
             log.info("client update: reusing venv %s", venv_path.name)
             return venv_path
-        return build_venv(venv_path, requirements if requirements.is_file() else None)
+        return build_venv(venv_path, req_file)
 
     def _flip_current(self, hub_sha: str) -> None:
         version_dir = self.versions_dir / hub_sha
@@ -238,37 +239,61 @@ def _venv_python(venv_path: Path) -> Path:
 
 
 def build_venv(venv_path: Path, requirements: Path | None) -> Path:
-    """Create venvs/<deps-hash>/ when requirements changed. Testable without pip."""
+    """Create venvs/<deps-hash>/ crash-safely. Mid-pip crash leaves no reusable dir."""
 
     import subprocess
     import sys
     import venv
 
+    venv_path = Path(venv_path)
     venv_path.parent.mkdir(parents=True, exist_ok=True)
-    if venv_path.exists():
-        shutil.rmtree(venv_path)
-    venv.create(os.fspath(venv_path), with_pip=True)
-    python = _venv_python(venv_path)
-    if requirements is not None and requirements.is_file():
-        subprocess.check_call(
-            [os.fspath(python), "-m", "pip", "install", "-r", os.fspath(requirements)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    marker = venv_path / ".deps_hash"
-    marker.write_text(venv_path.name + "\n", encoding="utf-8")
+    building = venv_path.with_name(venv_path.name + ".building")
+    if building.exists():
+        shutil.rmtree(building)
+    try:
+        venv.create(os.fspath(building), with_pip=True)
+        python = _venv_python(building)
+        if requirements is not None and Path(requirements).is_file():
+            subprocess.check_call(
+                [os.fspath(python), "-m", "pip", "install", "-r", os.fspath(requirements)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        marker = building / ".deps_hash"
+        marker.write_text(venv_path.name + "\n", encoding="utf-8")
+        if not python.is_file() or not marker.is_file():
+            raise RuntimeError("venv build incomplete — python or .deps_hash missing")
+        if venv_path.exists():
+            shutil.rmtree(venv_path)
+        os.replace(building, venv_path)
+    except Exception:
+        if building.exists():
+            shutil.rmtree(building, ignore_errors=True)
+        raise
     # Silence unused in environments without needing sys at call sites.
     _ = sys.platform
     return venv_path
 
 
-def should_reuse_venv(venv_path: Path, requirements: Path) -> bool:
-    """Decision helper: same requirements.txt hash → reuse existing venv."""
+def should_reuse_venv(
+    venv_path: Path,
+    requirements: Path | None = None,
+    *,
+    expected_hash: str | None = None,
+) -> bool:
+    """Reuse only a complete venv: python + matching .deps_hash marker."""
 
     if not venv_path.is_dir() or not _venv_python(venv_path).is_file():
         return False
-    expected = deps_hash(requirements)
-    return venv_path.name == expected or (venv_path / ".deps_hash").read_text(encoding="utf-8").strip() == expected
+    marker = venv_path / ".deps_hash"
+    if not marker.is_file():
+        return False
+    if expected_hash is None:
+        if requirements is not None and Path(requirements).is_file():
+            expected_hash = deps_hash(requirements)
+        else:
+            expected_hash = "nodeps"
+    return marker.read_text(encoding="utf-8").strip() == expected_hash
 
 
 def atomic_write_text(path: Path, content: str) -> None:
