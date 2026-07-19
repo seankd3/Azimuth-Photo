@@ -82,6 +82,9 @@ DEFAULT_SETTINGS = {
     "paired_hub_id": "",
     "require_device_token": False,  # opt-in until pairing is wired into onboarding; flip to True for public release
     "setup_completed": False,
+    # Lightroom bridge: Elo → star projection (≥N comparisons; cumulative percentiles).
+    "elo_stars_min_comparisons": 3,
+    "elo_stars_thresholds": [0.02, 0.10, 0.30],
 }
 
 PRIVATE_SETTING_KEYS = {
@@ -143,6 +146,7 @@ INT_RANGES = {
     "embed_batch_size": (1, 32),
     "embed_model_dim": (64, 4096),
     "taste_blend_min_signal": (1, 10000),
+    "elo_stars_min_comparisons": (1, 1000),
     "face_detection_size": (160, 1280),
     "caption_batch_size": (1, 4),
     "sync_bandwidth_mbps": (0, 10000),
@@ -558,6 +562,25 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["setup_completed"] = _normalize_bool(
         raw.get("setup_completed", normalized["setup_completed"]), False
     )
+    try:
+        normalized["elo_stars_min_comparisons"] = max(
+            1,
+            int(raw.get("elo_stars_min_comparisons", normalized["elo_stars_min_comparisons"])),
+        )
+    except (TypeError, ValueError):
+        normalized["elo_stars_min_comparisons"] = DEFAULT_SETTINGS["elo_stars_min_comparisons"]
+    thresholds = raw.get("elo_stars_thresholds", normalized.get("elo_stars_thresholds"))
+    if isinstance(thresholds, (list, tuple)) and len(thresholds) >= 3:
+        try:
+            parsed = [float(thresholds[0]), float(thresholds[1]), float(thresholds[2])]
+            if 0 < parsed[0] <= parsed[1] <= parsed[2] <= 1.0:
+                normalized["elo_stars_thresholds"] = parsed
+            else:
+                normalized["elo_stars_thresholds"] = list(DEFAULT_SETTINGS["elo_stars_thresholds"])
+        except (TypeError, ValueError):
+            normalized["elo_stars_thresholds"] = list(DEFAULT_SETTINGS["elo_stars_thresholds"])
+    else:
+        normalized["elo_stars_thresholds"] = list(DEFAULT_SETTINGS["elo_stars_thresholds"])
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
     normalized["prefetch_workers"] = min(
         normalized["prefetch_workers"],
