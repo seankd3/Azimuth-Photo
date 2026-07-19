@@ -204,7 +204,8 @@ async def api_get_image_rating(image_id: int):
     rating = await image_repository.get_image_rating(_configured_db_path(), image_id)
     from features.sync import elo_stars as elo_stars_mod
 
-    content_hash = str(image.get("content_hash") or "")
+    row = dict(image) if not isinstance(image, dict) else image
+    content_hash = str(row.get("content_hash") or "")
     projected = 0
     if content_hash:
         by_hash = await elo_stars_mod.elo_stars_for_hashes(_configured_db_path(), [content_hash])

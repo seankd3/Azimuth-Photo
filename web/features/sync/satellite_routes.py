@@ -63,7 +63,7 @@ async def attach_hub(request: Request):
 
 
 @router.get("/api/sync/status")
-async def sync_status(lr_exports_since: float = Query(default=0.0)):
+async def sync_status(lr_exports_since: float = 0.0):
     worker = get_worker()
     if not satellite.is_satellite_mode() or worker is None:
         hub_state = (
