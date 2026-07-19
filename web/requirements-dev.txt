@@ -1,11 +1,6 @@
-<<<<<<< HEAD
-# Test-only dependencies (not imported by the production app).
-# Install into the shared web/.venv:
-#   .venv/bin/python -m pip install -r requirements-dev.txt
-pytest>=8
-pytest-xdist>=3.5
-=======
 # Test/lint-only dependencies (not imported by the production app).
 # Install into the shared web/.venv:
 #   uv pip install -r requirements-dev.txt
+pytest>=8
+pytest-xdist>=3.5
 ruff>=0.8
