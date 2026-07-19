@@ -17,7 +17,7 @@ import settings
 from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
-from features.sync import client_update, contract, oplog, satellite
+from features.sync import client_update, contract, oplog, preview_mirror, satellite
 from features.sync.executor import run_sync_work
 from features.trash import remote as trash_remote
 from features.trash import service as trash_service
@@ -57,6 +57,9 @@ class SyncWorker:
         self._request = request or _urllib_request
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
         self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._hub_request)
+        self.preview_mirror = preview_mirror.PreviewMirrorFiller(
+            db_path=db_path, hub=self.hub, request=self._hub_request
+        )
         self.updater = updater
         self._force_mirror_refresh = False
         self._force_contract_refresh = False
@@ -87,6 +90,7 @@ class SyncWorker:
             "paused": self._paused,
             "mirror": self.mirror.status(),
             "prefetch": self.prefetch.status(),
+            "preview_mirror": self.preview_mirror.status(),
             **contract.hub_status(self.hub),
         }
         if self.updater is not None:
@@ -348,12 +352,19 @@ class SyncWorker:
 
     async def _run_prefetch(self) -> None:
         try:
+            # Thermal doctrine: only sprint while the user isn't browsing.
+            if not preview_mirror.is_idle():
+                return
+            await self.preview_mirror.burst_once()
+            if not preview_mirror.is_idle():
+                return
             # Browse (`sm`) exclusively until complete; only then fill loupe (`md`).
             await self.prefetch.prefetch_browse_first()
             await self.prefetch.seed_predictive()
             await self.prefetch.run_predictive_once(uploads_active=bool(self._status.get("current_file")))
         except Exception as error:
             self.prefetch._status["last_error"] = str(error)
+            self.preview_mirror._status["last_error"] = str(error)
 
     async def _dirty_metadata_rows(self) -> list[dict]:
         conn = await connection.open_async(self.db_path)

@@ -77,6 +77,11 @@ async def _foreground_urllib_request(method: str, url: str, *, body: bytes | Non
 
 
 def _store_with_thumbnail_cache(size: str, image_id: int, signature: str, data: bytes) -> None:
+    if size in {"sm", "md"} and str(signature).startswith("pv:"):
+        from features.sync import preview_mirror
+
+        preview_mirror.put(image_id, size, signature, data, hot=False)
+        return
     import thumbnails
 
     thumbnails._write_thumbnail_to_disk(size, image_id, signature, data, hot=False)
@@ -251,7 +256,10 @@ class ThumbPrefetcher:
     async def fetch_single(self, size: str, image_id: int) -> bytes:
         conn = await connection.open_async(self.db_path)
         try:
-            row = await (await conn.execute("SELECT hub_image_id FROM images WHERE id = ? AND hub_remote = 1", (image_id,))).fetchone()
+            row = await (await conn.execute(
+                "SELECT hub_image_id, content_hash FROM images WHERE id = ? AND hub_remote = 1",
+                (image_id,),
+            )).fetchone()
         finally:
             await connection.close_async(conn, db_path=self.db_path)
         if row is None:
@@ -261,7 +269,10 @@ class ThumbPrefetcher:
             raise ConnectionError("Hub is unreachable")
         if not 200 <= code < 300:
             raise RuntimeError(f"hub thumb failed ({code})")
-        self._store(size, image_id, self._signature(row["hub_image_id"], body), body)
+        from features.sync import preview_mirror
+
+        signature = preview_mirror.preview_version_for_image(row)
+        self._store(size, image_id, signature, body)
         return body
 
     async def fetch_base(self, image_id: int) -> None:
@@ -302,6 +313,7 @@ class ThumbPrefetcher:
             archive = tarfile.open(fileobj=io.BytesIO(body), mode="r:")
         except tarfile.TarError as error:
             raise RuntimeError("hub returned an invalid thumbnail pack") from error
+
         with archive:
             for member in archive:
                 if not member.isfile():
@@ -321,19 +333,31 @@ class ThumbPrefetcher:
                     hub_id = int(stem)
                 except ValueError:
                     continue
-                local_id = await self._local_id_for_hub(hub_id)
+                local = await self._local_row_for_hub(hub_id)
                 last_hub_id = max(last_hub_id, hub_id)
-                if local_id is None or not data:
+                if local is None or not data:
                     continue
-                self._store(size, local_id, self._signature(hub_id, data), data)
+                local_id, signature = local
+                self._store(size, local_id, signature, data)
                 stored += 1
         return stored, last_hub_id, skipped
 
     async def _local_id_for_hub(self, hub_image_id: int) -> int | None:
+        row = await self._local_row_for_hub(hub_image_id)
+        return None if row is None else row[0]
+
+    async def _local_row_for_hub(self, hub_image_id: int) -> tuple[int, str] | None:
+        from features.sync import preview_mirror
+
         conn = await connection.open_async(self.db_path)
         try:
-            row = await (await conn.execute("SELECT id FROM images WHERE hub_image_id = ?", (hub_image_id,))).fetchone()
-            return int(row["id"]) if row else None
+            row = await (await conn.execute(
+                "SELECT id, hub_image_id, content_hash FROM images WHERE hub_image_id = ?",
+                (hub_image_id,),
+            )).fetchone()
+            if row is None:
+                return None
+            return int(row["id"]), preview_mirror.preview_version_for_image(row)
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
