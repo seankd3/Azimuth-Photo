@@ -1,0 +1,24 @@
+[tool.ruff]
+target-version = "py313"
+# p95≈89 / p99≈108 on this tree — match current style, don't force a reformat.
+line-length = 100
+extend-exclude = [".venv", ".models", "node_modules"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+]
+ignore = [
+    "E501",  # line length: measured style already clusters near 100; no reformat-the-world
+    "E402",  # module import not at top: intentional after env bootstrap / deferred heavy deps
+    "E731",  # lambda assignment: tiny local callables; rewriting is churn without signal
+    "E702",  # multiple statements on one line: rare dense numeric one-liners stay readable
+    "E741",  # ambiguous variable name: legacy short names in tests; rename is noise
+    "F405",  # undefined from star import: test_support harness uses `import *` by design
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Compatibility facade binds config constants via globals() from DEFAULT_EXPORT_NAMES.
+"thumbnails/__init__.py" = ["F821"]

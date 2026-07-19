@@ -1,0 +1,4 @@
+# Test/lint-only dependencies (not imported by the production app).
+# Install into the shared web/.venv:
+#   uv pip install -r requirements-dev.txt
+ruff>=0.8
