@@ -1,5 +1,5 @@
 import { createCollection, getCollectionSuggestions, thumbUrl } from './api.js';
-import { setActiveLens } from './state.js';
+import { setActiveLens, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
@@ -62,7 +62,7 @@ export async function loadSuggestionsOnce() {
     suggestionsError = false;
     notifyChange();
     try {
-        const data = await getCollectionSuggestions();
+        const data = await getCollectionSuggestions(scopeParams());
         if (data && Array.isArray(data.suggestions)) suggestions = data.suggestions;
     } catch {
         suggestions = [];

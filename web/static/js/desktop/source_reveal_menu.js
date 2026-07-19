@@ -70,6 +70,7 @@ export function openSourceRevealMenu(path, anchor, count = 0, options = {}) {
     menu.innerHTML = '<div class="pm-group">'
         + `<button data-act="scope">${icon('folder-tree')} Show in scope with subfolders</button>`
         + `<button data-act="refine">${icon('zap')} Open in Refine</button>`
+        + `<button data-act="quiet">${icon('eye')} ${options.quiet ? 'Show in library views' : 'Hide from library views'}</button>`
         + (revealAvailable ? `<button data-act="reveal">${icon('folder-open')} ${fileManagerMenuLabel()}</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
@@ -88,6 +89,7 @@ export function openSourceRevealMenu(path, anchor, count = 0, options = {}) {
                 applySourceScope(path);
                 emit('refine:open');
             }
+            if (action === 'quiet') options.onQuietToggle?.();
             if (action === 'reveal') revealSourcePath(path, sourceId);
             if (action === 'export') exportSourceScope(path, count, anchor);
         });
