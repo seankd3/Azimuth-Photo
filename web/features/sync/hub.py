@@ -163,11 +163,30 @@ def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
 
 
 # Satellites re-manifest their whole library every sync cycle, so positive
-# proofs are cached briefly to keep the per-item stat() off the 15s hot loop.
-# Negative results are never cached: a just-finalized upload must read as
-# known on the very next manifest.
+# stat() proofs are cached briefly to keep per-item disk access off the 15s
+# hot loop. ONLY the on-disk check is cached — the catalog query runs every
+# time, so trashed/missing/mirror transitions revoke "known" immediately
+# (Free-up-space on the phone deletes local copies of known hashes; a stale
+# positive here could delete the last copy). Negative stats are never cached:
+# a just-finalized upload must read as known on the very next manifest.
 _BYTE_PROOF_TTL_SECONDS = 600.0
-_byte_proof_cache: dict[tuple[str, str], tuple[float, int]] = {}
+_stat_proof_cache: dict[tuple[str, int], float] = {}
+
+
+def _byte_proof_ok_cached(filepath: str, source_path: str, expected_size: Any) -> bool:
+    if expected_size is None:
+        return _byte_proof_ok(filepath, source_path, expected_size)
+    key = (filepath, int(expected_size))
+    now = time.monotonic()
+    stamp = _stat_proof_cache.get(key)
+    if stamp is not None and now - stamp < _BYTE_PROOF_TTL_SECONDS:
+        return True
+    if _byte_proof_ok(filepath, source_path, expected_size):
+        if len(_stat_proof_cache) > 300_000:
+            _stat_proof_cache.clear()
+        _stat_proof_cache[key] = now
+        return True
+    return False
 
 
 async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) -> dict[str, int]:
@@ -177,22 +196,10 @@ async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) ->
     if not hashes:
         return {}
 
-    now = time.monotonic()
-    found: dict[str, int] = {}
-    unresolved: list[str] = []
-    for content_hash in hashes:
-        cached = _byte_proof_cache.get((db_path, content_hash))
-        if cached is not None and now - cached[0] < _BYTE_PROOF_TTL_SECONDS:
-            found[content_hash] = cached[1]
-        else:
-            unresolved.append(content_hash)
-    if not unresolved:
-        return found
-
     rows: list[Any] = []
     conn = await connection.open_async(db_path)
     try:
-        for batch in common.chunked(unresolved):
+        for batch in common.chunked(hashes):
             placeholders = ",".join("?" for _ in batch)
             rows.extend(
                 await (
@@ -216,7 +223,7 @@ async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) ->
             content_hash = str(row["content_hash"])
             if content_hash in checked:
                 continue
-            if _byte_proof_ok(
+            if _byte_proof_ok_cached(
                 str(row["filepath"] or ""),
                 str(row["source_path"] or ""),
                 row["file_size"],
@@ -224,14 +231,7 @@ async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) ->
                 checked[content_hash] = int(row["id"])
         return checked
 
-    fresh = await asyncio.to_thread(proven)
-    stamp = time.monotonic()
-    for content_hash, image_id in fresh.items():
-        _byte_proof_cache[(db_path, content_hash)] = (stamp, image_id)
-    if len(_byte_proof_cache) > 200_000:
-        _byte_proof_cache.clear()
-    found.update(fresh)
-    return found
+    return await asyncio.to_thread(proven)
 
 
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
