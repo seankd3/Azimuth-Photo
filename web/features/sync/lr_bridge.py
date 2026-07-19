@@ -25,12 +25,28 @@ def _normalize_path(filepath: str) -> str:
     return os.path.normpath(raw)
 
 
+def _canonicalize_path(filepath: str) -> str:
+    """Casefold + unify separators for Windows-style LR path identity."""
+
+    normalized = _normalize_path(filepath)
+    if not normalized:
+        return ""
+    return normalized.replace("\\", "/").casefold()
+
+
 async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None:
-    """Map an absolute LR filepath to the satellite's local-image identity."""
+    """Map an absolute LR filepath to the satellite's local-image identity.
+
+    Fast path: exact ``filepath = ?`` (uses existing filepath indexes).
+    On miss: compare ``LOWER(REPLACE(filepath, '\\', '/'))`` to a Python-
+    canonicalized probe. LR delta batches are small; the fallback only runs
+    on case/separator drift, so indexed exact match stays the common case.
+    """
 
     path = _normalize_path(filepath)
     if not path:
         return None
+    canon = _canonicalize_path(filepath)
     conn = await connection.open_async(db_path)
     try:
         row = await (
@@ -41,6 +57,16 @@ async def resolve_filepath(db_path: str, filepath: str) -> dict[str, Any] | None
                 (path,),
             )
         ).fetchone()
+        if row is None:
+            row = await (
+                await conn.execute(
+                    "SELECT id, content_hash, filepath, flag FROM images "
+                    "WHERE content_hash IS NOT NULL "
+                    "AND LOWER(REPLACE(filepath, '\\', '/')) = ? "
+                    "ORDER BY id LIMIT 1",
+                    (canon,),
+                )
+            ).fetchone()
         if row is None or not row["content_hash"]:
             return None
         return {

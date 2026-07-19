@@ -148,6 +148,19 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["pending_count"], 1)
         self.assertEqual(result["applied"]["received"], 0)
 
+    async def test_resolve_filepath_canonicalizes_windows_case_and_separators(self):
+        path = self._catalog()
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET filepath = ? WHERE id = 1",
+                (r"D:\Photos\IMG_1.dng",),
+            )
+            conn.commit()
+        identity = await lr_bridge.resolve_filepath(path, r"d:/photos/img_1.dng")
+        self.assertIsNotNone(identity)
+        self.assertEqual(identity["image_id"], 1)
+        self.assertEqual(identity["content_hash"], HASH_A)
+
     async def test_inbound_entries_expose_filepath_and_inbound_family(self):
         """Plugin ledger_remember_confirmed needs filepath + inbound family + value."""
 
