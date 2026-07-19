@@ -13,34 +13,34 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="uses POSIX process groups for its isolated Playwright server",
-)
+from conftest import free_port, worker_scratch
+
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="uses POSIX process groups for its isolated Playwright server",
+    ),
+    pytest.mark.slow,
+    pytest.mark.playwright,
+]
 
 WEB_ROOT = Path(__file__).resolve().parent
-REPO_ROOT = WEB_ROOT.parent
-SCRATCH = Path("/mnt/expansion/tmp/quiet-sources-playwright")
-DB_PATH = SCRATCH / "catalog.db"
-CACHE_ROOT = SCRATCH / "thumbs"
-SCREENSHOT = Path("/mnt/expansion/tmp/quiet-sources-sidebar.png")
-PORT = 8147
-BASE_URL = f"http://127.0.0.1:{PORT}"
 
 
-def _seed_catalog() -> None:
-    if SCRATCH.exists():
-        for path in SCRATCH.rglob("*"):
+def _seed_catalog(db_path: Path, cache_root: Path) -> None:
+    scratch = db_path.parent
+    if scratch.exists():
+        for path in scratch.rglob("*"):
             if path.is_file():
                 path.unlink()
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    if DB_PATH.exists():
-        DB_PATH.unlink()
+    scratch.mkdir(parents=True, exist_ok=True)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        db_path.unlink()
 
     env = os.environ.copy()
     env["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    env["PHOTOARCHIVE_DB_PATH"] = str(DB_PATH)
+    env["PHOTOARCHIVE_DB_PATH"] = str(db_path)
     env["PYTHONPATH"] = str(WEB_ROOT)
 
     script = r"""
@@ -87,7 +87,7 @@ async def main():
     print("seeded", personal_id, archive_id)
 
 asyncio.run(main())
-""" % (str(DB_PATH), str(CACHE_ROOT))
+""" % (str(db_path), str(cache_root))
     subprocess.check_call(
         [sys.executable, "-c", script],
         cwd=str(WEB_ROOT),
@@ -109,17 +109,23 @@ def _wait_ready(url: str, timeout: float = 30.0) -> None:
 
 @pytest.mark.playwright
 def test_quiet_source_sidebar_toggle_screenshot():
-    _seed_catalog()
+    scratch = worker_scratch("quiet-sources-playwright")
+    db_path = scratch / "catalog.db"
+    cache_root = scratch / "thumbs"
+    screenshot = scratch / "quiet-sources-sidebar.png"
+    port = free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    _seed_catalog(db_path, cache_root)
     env = os.environ.copy()
     env.update({
         "PHOTOARCHIVE_SMOKE_MODE": "1",
-        "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
-        "PHOTOARCHIVE_CACHE_DIR": str(CACHE_ROOT),
-        "PHOTOARCHIVE_PORT": str(PORT),
+        "PHOTOARCHIVE_DB_PATH": str(db_path),
+        "PHOTOARCHIVE_CACHE_DIR": str(cache_root),
+        "PHOTOARCHIVE_PORT": str(port),
         "PYTHONPATH": str(WEB_ROOT),
     })
     server = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
+        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
         cwd=str(WEB_ROOT),
         env=env,
         stdout=subprocess.DEVNULL,
@@ -127,20 +133,20 @@ def test_quiet_source_sidebar_toggle_screenshot():
         start_new_session=True,
     )
     try:
-        _wait_ready(f"{BASE_URL}/api/counts")
+        _wait_ready(f"{base_url}/api/counts")
         from playwright.sync_api import sync_playwright
 
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
             page = browser.new_page(viewport={"width": 1440, "height": 900})
-            page.goto(f"{BASE_URL}/", wait_until="networkidle")
+            page.goto(f"{base_url}/", wait_until="networkidle")
             page.wait_for_selector('#source-list [data-source]')
             personal = page.locator('#source-list [data-source*="quiet-personal"]')
             personal.hover()
             personal.locator('[data-quiet-toggle]').click()
             page.wait_for_selector('#source-list .source-row.is-quiet')
-            page.locator('#source-list').screenshot(path=str(SCREENSHOT))
-            assert SCREENSHOT.exists()
+            page.locator('#source-list').screenshot(path=str(screenshot))
+            assert screenshot.exists()
             assert personal.locator('.nr-count').inner_text().startswith('(')
             browser.close()
     finally:

@@ -1,0 +1,60 @@
+"""Shared pytest fixtures and parallel-safety hooks for the unit suite."""
+
+from __future__ import annotations
+
+import os
+import socket
+import tempfile
+from pathlib import Path
+
+import pytest
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "contract: closed-class product guards (tier 0; seconds)",
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow: e2e / Playwright / long wall-clock; excluded from gate quick",
+    )
+    config.addinivalue_line(
+        "markers",
+        "serial: must not share an xdist worker with other tests",
+    )
+    config.addinivalue_line(
+        "markers",
+        "playwright: browser-driven e2e proofs",
+    )
+
+
+def _worker_tag() -> str:
+    return os.environ.get("PYTEST_XDIST_WORKER") or "gw0"
+
+
+def free_port() -> int:
+    """Bind an ephemeral local port (safe under xdist)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen(1)
+        return int(sock.getsockname()[1])
+
+
+def worker_scratch(label: str) -> Path:
+    """Per-worker scratch under TMPDIR (never a shared fixed path)."""
+    root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()) / "pa-pytest"
+    path = root / _worker_tag() / label
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+@pytest.fixture
+def ephemeral_port() -> int:
+    return free_port()
+
+
+@pytest.fixture
+def worker_tmp_path(tmp_path: Path) -> Path:
+    """tmp_path already unique; expose under a stable name for clarity."""
+    return tmp_path

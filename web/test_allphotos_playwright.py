@@ -1,4 +1,4 @@
-"""Playwright proof: All Photos grid count matches catalog total on :8142."""
+"""Playwright proof: All Photos grid count matches catalog total."""
 
 from __future__ import annotations
 
@@ -13,35 +13,35 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="uses POSIX process groups for its isolated Playwright server",
-)
+from conftest import free_port, worker_scratch
+
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="uses POSIX process groups for its isolated Playwright server",
+    ),
+    pytest.mark.slow,
+    pytest.mark.playwright,
+]
 
 WEB_ROOT = Path(__file__).resolve().parent
-REPO_ROOT = WEB_ROOT.parent
-SCRATCH = Path("/mnt/expansion/tmp/bugs1/allphotos-playwright")
-DB_PATH = SCRATCH / "catalog.db"
-CACHE_ROOT = SCRATCH / "thumbs"
-SCREENSHOT = Path("/mnt/expansion/tmp/bugs1/allphotos-grid.png")
-PORT = 8142
-BASE_URL = f"http://127.0.0.1:{PORT}"
 EXPECTED_TOTAL = 27  # 3 local + 24 hub across many dates
 
 
-def _seed_catalog() -> None:
-    if SCRATCH.exists():
-        for path in SCRATCH.rglob("*"):
+def _seed_catalog(db_path: Path, cache_root: Path) -> None:
+    scratch = db_path.parent
+    if scratch.exists():
+        for path in scratch.rglob("*"):
             if path.is_file():
                 path.unlink()
-    SCRATCH.mkdir(parents=True, exist_ok=True)
-    CACHE_ROOT.mkdir(parents=True, exist_ok=True)
-    if DB_PATH.exists():
-        DB_PATH.unlink()
+    scratch.mkdir(parents=True, exist_ok=True)
+    cache_root.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        db_path.unlink()
 
     env = os.environ.copy()
     env["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    env["PHOTOARCHIVE_DB_PATH"] = str(DB_PATH)
+    env["PHOTOARCHIVE_DB_PATH"] = str(db_path)
     env["PHOTOARCHIVE_MODE"] = "satellite"
     env["PHOTOARCHIVE_HUB_URL"] = "http://stub-hub"
     env["PYTHONPATH"] = str(WEB_ROOT)
@@ -98,57 +98,65 @@ async def main():
     print("seeded", %d)
 
 asyncio.run(main())
-""" % (str(DB_PATH), str(CACHE_ROOT), EXPECTED_TOTAL)
+""" % (str(db_path), str(cache_root), EXPECTED_TOTAL)
 
     subprocess.run(
-        [str(WEB_ROOT / ".venv/bin/python"), "-c", script],
+        [sys.executable, "-c", script],
         check=True,
         cwd=str(WEB_ROOT),
         env=env,
     )
 
 
-def _wait_healthy(timeout: float = 30.0) -> None:
+def _wait_healthy(base_url: str, timeout: float = 30.0) -> None:
     deadline = time.time() + timeout
     last_error = ""
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(f"{BASE_URL}/api/dev/status", timeout=1) as response:
+            with urllib.request.urlopen(f"{base_url}/api/dev/status", timeout=1) as response:
                 if response.status == 200:
                     return
         except (urllib.error.URLError, TimeoutError) as exc:
             last_error = str(exc)
         time.sleep(0.25)
-    raise RuntimeError(f"server on {BASE_URL} did not become healthy: {last_error}")
+    raise RuntimeError(f"server on {base_url} did not become healthy: {last_error}")
 
 
 @pytest.fixture(scope="module")
 def allphotos_server():
-    _seed_catalog()
+    scratch = worker_scratch("allphotos-playwright")
+    db_path = scratch / "catalog.db"
+    cache_root = scratch / "thumbs"
+    screenshot = scratch / "allphotos-grid.png"
+    port = free_port()
+    base_url = f"http://127.0.0.1:{port}"
+    _seed_catalog(db_path, cache_root)
     env = os.environ.copy()
     env.update(
         {
             "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
+            "PHOTOARCHIVE_DB_PATH": str(db_path),
             "PHOTOARCHIVE_MODE": "satellite",
             "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
-            "PHOTOARCHIVE_PORT": str(PORT),
+            "PHOTOARCHIVE_PORT": str(port),
             "PHOTOARCHIVE_HOST": "127.0.0.1",
             "PHOTOARCHIVE_ACCESS": "local",
-            "TMPDIR": "/mnt/expansion/tmp",
+            "TMPDIR": str(scratch),
             "PYTHONPATH": str(WEB_ROOT),
         }
     )
-    log_path = SCRATCH / "server.log"
+    log_path = scratch / "server.log"
     log_file = open(log_path, "w", encoding="utf-8")
     proc = subprocess.Popen(
         [
-            str(WEB_ROOT / ".venv/bin/uvicorn"),
+            sys.executable,
+            "-m",
+            "uvicorn",
             "app:app",
             "--host",
             "127.0.0.1",
             "--port",
-            str(PORT),
+            str(port),
         ],
         cwd=str(WEB_ROOT),
         env=env,
@@ -157,8 +165,8 @@ def allphotos_server():
         start_new_session=True,
     )
     try:
-        _wait_healthy()
-        yield BASE_URL
+        _wait_healthy(base_url)
+        yield base_url, screenshot
     finally:
         try:
             os.killpg(proc.pid, signal.SIGTERM)
@@ -173,9 +181,10 @@ def allphotos_server():
 
 
 def test_all_photos_grid_matches_catalog_total(allphotos_server):
+    base_url, screenshot = allphotos_server
     playwright = pytest.importorskip("playwright.sync_api").sync_playwright
 
-    with urllib.request.urlopen(f"{allphotos_server}/api/rankings?limit=100&sort=elo") as response:
+    with urllib.request.urlopen(f"{base_url}/api/rankings?limit=100&sort=elo") as response:
         payload = __import__("json").loads(response.read().decode())
     assert payload["visible_images"] == EXPECTED_TOTAL
     assert payload["total_images"] == EXPECTED_TOTAL
@@ -192,7 +201,7 @@ def test_all_photos_grid_matches_catalog_total(allphotos_server):
         )
         context = browser.new_context(viewport={"width": 1440, "height": 1100})
         page = context.new_page()
-        page.goto(f"{allphotos_server}/d", wait_until="networkidle", timeout=60000)
+        page.goto(f"{base_url}/d", wait_until="networkidle", timeout=60000)
         page.wait_for_selector("#library-list .nav-item, #library-list button, #library-list [data-id]", timeout=30000)
         # Prefer explicit All photos control; fall back to clearing scope via label text.
         all_photos = page.locator("#library-list").get_by_text("All photos", exact=False)
@@ -218,8 +227,8 @@ def test_all_photos_grid_matches_catalog_total(allphotos_server):
             }"""
         )
         cell_count = page.locator(".cell[data-id]").count()
-        SCREENSHOT.parent.mkdir(parents=True, exist_ok=True)
-        page.screenshot(path=str(SCREENSHOT), full_page=True)
+        screenshot.parent.mkdir(parents=True, exist_ok=True)
+        page.screenshot(path=str(screenshot), full_page=True)
         browser.close()
 
     assert visible == EXPECTED_TOTAL, f"ctx-count={visible} expected={EXPECTED_TOTAL}"
