@@ -63,7 +63,7 @@ async def attach_hub(request: Request):
 
 
 @router.get("/api/sync/status")
-async def sync_status():
+async def sync_status(lr_exports_since: float = Query(default=0.0)):
     worker = get_worker()
     if not satellite.is_satellite_mode() or worker is None:
         hub_state = (
@@ -81,6 +81,13 @@ async def sync_status():
     )
     status["pending_hub_trash"] = int(pending["count"])
     status["pending_ops"] = await oplog.pending_entry_count(db.DB_PATH)
+    # Quiet LR bridge signals — piggyback; no dedicated poll loop.
+    from features.sync import lr_status
+
+    status["lr"] = await lr_status.bridge_status_payload(
+        db.DB_PATH,
+        exports_since=lr_exports_since,
+    )
     return status
 
 

@@ -26,6 +26,7 @@ import { initPanelSections } from './panel_sections.js';
 import { initCullBrief } from './cull_brief.js';
 import { initQuickGuide } from './quick_guide.js';
 import { initSyncChip } from './sync_chip.js';
+import { initLrRankingChip } from './lr_ranking_chip.js';
 
 async function boot() {
     await mountIconSprite();
@@ -51,6 +52,7 @@ async function boot() {
     initDrawer();
     initWatchedFolders();
     initSyncChip();
+    initLrRankingChip();
     initShortcutSheet();
     initKeyboard();
     initQuickGuide();
