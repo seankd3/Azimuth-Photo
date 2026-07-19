@@ -9,7 +9,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.sync import elo_stars, export_relation, lr_bridge, lr_connect, lr_status
+from features.sync import elo_stars, export_relation, lr_bridge, lr_connect, lr_status, shoot_rank
 
 router = APIRouter(tags=["lr-bridge"])
 
@@ -105,7 +105,16 @@ async def get_lr_deltas(
     for item in items:
         clock = max(clock, float(item.get("ts") or 0.0))
     lr_status.note_delta_exchange(direction="out")
-    return {"since": since, "clock": clock, "items": items, "count": len(items)}
+    # Per-shoot local ladder for Best-of collections + contextual whisper.
+    # Full snapshot each poll (idempotent membership); cheap ranked-only query.
+    shoot_context = await shoot_rank.shoot_rank_payload(db.DB_PATH)
+    return {
+        "since": since,
+        "clock": clock,
+        "items": items,
+        "count": len(items),
+        "shoot_context": shoot_context,
+    }
 
 
 @router.post("/api/lr/exports")

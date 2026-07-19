@@ -162,6 +162,63 @@ do
   check("parse rejects other", Core.parse_morning_collection_name("Other") == nil)
 end
 
+-- Best-of collection naming
+do
+  check("best-of title", Core.best_of_collection_title("Starbase") == "Best of Starbase")
+  check("best-of parse", Core.parse_best_of_collection_name("Best of Starbase") == "Starbase")
+  check("best-of set name", Core.BEST_OF_SET_NAME == "Azimuth / Best of")
+end
+
+-- Membership diff add/remove
+do
+  local diff = Core.diff_collection_membership(
+    { "/a.dng", "/b.dng", "/c.dng" },
+    { "/b.dng", "/c.dng", "/d.dng" }
+  )
+  check("diff adds a", #diff.add == 1 and diff.add[1] == "/a.dng")
+  check("diff removes d", #diff.remove == 1 and diff.remove[1] == "/d.dng")
+  local same = Core.diff_collection_membership({ "/a.dng" }, { "/a.dng" })
+  check("diff empty when equal", #same.add == 0 and #same.remove == 0)
+end
+
+-- Small-shoot suppression
+do
+  check("qualifies at min", Core.shoot_qualifies_for_best_of(5))
+  check("suppresses below min", not Core.shoot_qualifies_for_best_of(4))
+  local targets = Core.best_of_targets({
+    { shoot_key = "tiny", shoot_title = "Tiny", shoot_size = 4, filepaths = { "/t1.dng" } },
+    { shoot_key = "big", shoot_title = "Big", shoot_size = 10, filepaths = { "/b1.dng", "/b2.dng" } },
+  })
+  check("targets drop tiny shoot", #targets == 1 and targets[1].name == "Best of Big")
+end
+
+-- Plan: demotion removes membership; gone shoot deletes collection
+do
+  local targets = Core.best_of_targets({
+    { shoot_key = "s", shoot_title = "Shoot", shoot_size = 10, filepaths = { "/keep.dng" } },
+  })
+  local existing = {
+    ["Best of Shoot"] = { filepaths = { "/keep.dng", "/gone.dng" } },
+    ["Best of Old"] = { filepaths = { "/old.dng" } },
+  }
+  local plan = Core.plan_best_of_collections(targets, existing)
+  check("plan upserts shoot", #plan.upsert == 1 and plan.upsert[1].name == "Best of Shoot")
+  check("plan removes demoted", #plan.upsert[1].remove == 1 and plan.upsert[1].remove[1] == "/gone.dng")
+  check("plan deletes old shoot", #plan.delete == 1 and plan.delete[1] == "Best of Old")
+end
+
+-- Context-aware whisper composition
+do
+  local with_rank = Core.compose_star_whisper("Top 30% of your ranked photos", 4)
+  check("whisper with shoot rank", with_rank == "Top 30% of your ranked photos · #4 in this shoot")
+  local bare = Core.compose_star_whisper("Top 2% of your ranked photos", nil)
+  check("whisper without rank", bare == "Top 2% of your ranked photos")
+  check("whisper nil base", Core.compose_star_whisper(nil, 1) == nil)
+  check("rank lookup", Core.rank_in_shoot_for({
+    { filepath = "/a.dng", rank_in_shoot = 4 },
+  }, "/a.dng") == 4)
+end
+
 if failures > 0 then
   print(string.format("%d failure(s)", failures))
   os.exit(1)

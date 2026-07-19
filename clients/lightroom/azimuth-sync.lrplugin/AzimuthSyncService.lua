@@ -218,7 +218,7 @@ local function push_outbound(observations)
   end
 end
 
-local function apply_inbound(items)
+local function apply_inbound(items, shoot_context)
   if not items or #items == 0 then
     return
   end
@@ -226,6 +226,7 @@ local function apply_inbound(items)
   local snapshot = scan_catalog()
   local merged = Core.merge_inbound(items)
   local morning_picks = {}
+  local photos = (shoot_context and shoot_context.photos) or {}
   for _, batch in ipairs(Core.batches(merged, WRITE_BATCH)) do
     catalog:withWriteAccessDo("Azimuth Sync", function()
       for _, item in ipairs(batch) do
@@ -249,6 +250,20 @@ local function apply_inbound(items)
               Core.ledger_remember(Service.ledger, item.filepath, "elo_stars", item.value, item.ts)
               persist_ledger(Service.ledger)
               Service.status.synced = Service.status.synced + 1
+              -- Context-aware whisper (global band + shoot rank) for status/debug.
+              local stars = tonumber(item.value) or 0
+              local band = nil
+              if stars >= 5 then
+                band = "Top 2% of your ranked photos"
+              elseif stars == 4 then
+                band = "Top 10% of your ranked photos"
+              elseif stars == 3 then
+                band = "Top 30% of your ranked photos"
+              end
+              Service.status.last_whisper = Core.compose_star_whisper(
+                band,
+                Core.rank_in_shoot_for(photos, item.filepath)
+              )
             end
           end
         end
@@ -304,7 +319,7 @@ function maintain_morning_collection(new_pick_photos)
     local existing = list_morning_collections(catalog)
     for _, aged in ipairs(Core.aged_empty_collections(existing, os.time())) do
       if aged.collection then
-        catalog:deleteCollection(aged.collection)
+        aged.collection:delete()
       end
     end
     -- Find or create today's collection; append new picks.
@@ -340,13 +355,114 @@ function maintain_morning_collection(new_pick_photos)
   end)
 end
 
+local function ensure_best_of_set(catalog)
+  local sets = catalog:getChildCollectionSets() or {}
+  for _, set in ipairs(sets) do
+    if set:getName() == Core.BEST_OF_SET_NAME then
+      return set
+    end
+  end
+  if catalog.createCollectionSet then
+    return catalog:createCollectionSet(Core.BEST_OF_SET_NAME, nil, true)
+  end
+  return nil
+end
+
+local function list_best_of_children(parent_set)
+  local existing = {}
+  if not parent_set or not parent_set.getChildCollections then
+    return existing
+  end
+  for _, coll in ipairs(parent_set:getChildCollections() or {}) do
+    local name = coll:getName()
+    if Core.parse_best_of_collection_name(name) then
+      local paths = {}
+      for _, photo in ipairs(coll:getPhotos() or {}) do
+        local path = photo_filepath(photo)
+        if path then
+          paths[#paths + 1] = path
+        end
+      end
+      existing[name] = { collection = coll, filepaths = paths }
+    end
+  end
+  return existing
+end
+
+local function photos_for_paths(snapshot, filepaths)
+  local photos = {}
+  for _, path in ipairs(filepaths or {}) do
+    local state = snapshot[path]
+    if state and state.photo then
+      photos[#photos + 1] = state.photo
+    end
+  end
+  return photos
+end
+
+--- Idempotent "Azimuth / Best of" set: one child collection per qualifying shoot.
+function maintain_best_of_collections(shoot_context)
+  local context = shoot_context or {}
+  local targets = Core.best_of_targets(context.best_of_shoots or {})
+  local catalog = LrApplication.activeCatalog()
+  local snapshot = scan_catalog()
+  -- Collection sets are not usable as parents until the write gate returns
+  -- (LR SDK). Ensure the set in its own gate, then mutate children.
+  local parent = nil
+  catalog:withWriteAccessDo("Azimuth best-of set", function()
+    parent = ensure_best_of_set(catalog)
+  end)
+  if not parent then
+    -- Re-resolve after commit in case createCollectionSet deferred the object.
+    local sets = catalog:getChildCollectionSets() or {}
+    for _, set in ipairs(sets) do
+      if set:getName() == Core.BEST_OF_SET_NAME then
+        parent = set
+        break
+      end
+    end
+  end
+  if not parent then
+    return
+  end
+  catalog:withWriteAccessDo("Azimuth best-of collections", function()
+    local existing = list_best_of_children(parent)
+    local plan = Core.plan_best_of_collections(targets, existing)
+    for _, name in ipairs(plan.delete) do
+      local entry = existing[name]
+      if entry and entry.collection then
+        entry.collection:delete()
+      end
+    end
+    for _, item in ipairs(plan.upsert) do
+      local coll = existing[item.name] and existing[item.name].collection or nil
+      if not coll then
+        coll = catalog:createCollection(item.name, parent, true)
+      end
+      if coll then
+        local remove_photos = photos_for_paths(snapshot, item.remove)
+        if #remove_photos > 0 and coll.removePhotos then
+          coll:removePhotos(remove_photos)
+        end
+        local add_photos = photos_for_paths(snapshot, item.add)
+        if #add_photos > 0 and coll.addPhotos then
+          coll:addPhotos(add_photos)
+        end
+      end
+    end
+  end)
+end
+
 local function poll_once()
   local inbound = http_json("GET", "/api/lr/deltas?since=" .. tostring(Service.clock))
   if inbound and inbound.items then
-    apply_inbound(inbound.items)
+    apply_inbound(inbound.items, inbound.shoot_context)
     if inbound.clock then
       Service.clock = math.max(Service.clock, tonumber(inbound.clock) or 0)
     end
+  end
+  if inbound and inbound.shoot_context then
+    maintain_best_of_collections(inbound.shoot_context)
   end
 
   local current = scan_catalog()

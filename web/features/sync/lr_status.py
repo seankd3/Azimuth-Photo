@@ -149,12 +149,16 @@ async def bridge_status_payload(
 ) -> dict[str, Any]:
     """Combined LR quiet-status block for sync/integrity piggyback."""
 
+    from features.sync import shoot_rank
+
     exchange = delta_exchange_status()
     batch = await new_export_batch(db_path, since=exports_since)
+    ranks = await shoot_rank.shoot_rank_payload(db_path)
     return {
         "last_delta_at": exchange["last_delta_at"],
         "age_hours": exchange["age_hours"],
         "stale": exchange["stale"],
         "health_line": exchange["health_line"],
         "new_exports": batch,
+        "shoot_context": ranks,
     }
