@@ -401,6 +401,10 @@ def build_rclone_copy_argv(
         argv.extend(["--bwlimit", bwlimit])
     if exclude_file:
         argv.extend(["--exclude-from", exclude_file])
+    # Idle IO class so kernel BFQ deprioritizes vault sync against app reads.
+    ionice = shutil.which("ionice")
+    if ionice and os.name != "nt":
+        return [ionice, "-c3", *argv]
     return argv
 
 

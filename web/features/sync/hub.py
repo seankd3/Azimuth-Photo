@@ -30,6 +30,7 @@ from features.sync import family_clock
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.hashing import compute_content_hash, compute_full_hash
 from features.sync.validation import validate_content_hash
+from core import hdd_governor
 
 
 MAX_CHUNK_BYTES = 32 * 1024 * 1024
@@ -985,7 +986,11 @@ async def hash_backfill_batch(
     missing = 0
     for row in rows:
         try:
-            digest = await asyncio.to_thread(compute_content_hash, row["filepath"])
+            def _hash_one(path: str = row["filepath"]) -> str:
+                with hdd_governor.bulk_hdd_slot_sync():
+                    return compute_content_hash(path)
+
+            digest = await asyncio.to_thread(_hash_one)
         except OSError:
             missing += 1
             continue

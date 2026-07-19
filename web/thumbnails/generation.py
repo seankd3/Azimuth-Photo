@@ -335,6 +335,7 @@ def generate_missing_thumbnails(
     thumbnail_retry_seconds: float,
     now_provider=time.time,
     log=print,
+    on_source_loaded=None,
 ):
     needed_sizes = planned_thumbnail_sizes(
         filepath,
@@ -354,6 +355,8 @@ def generate_missing_thumbnails(
         max_target = max(sizes[size] for size in needed_sizes)
         prefer_draft = max_target <= sizes["sm"]
         img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
+        if on_source_loaded is not None:
+            on_source_loaded(None, img)
         queue_orientation(image_id, img)
 
         current = img
@@ -422,6 +425,7 @@ def generate_thumbnail_set(
     now_provider=time.time,
     monotonic_provider=time.monotonic,
     log=print,
+    on_source_loaded=None,
 ) -> dict:
     """Generate cache tiers for one image during a single warm-up pass."""
     needed_sizes = [
@@ -462,6 +466,8 @@ def generate_thumbnail_set(
                     prefer_draft=prefer_draft,
                 )
                 metrics["source_bytes"] = len(source_data)
+                if on_source_loaded is not None:
+                    on_source_loaded(source_data, img)
                 # Write the SSD original before the encode loop so we can drop
                 # source_data instead of holding file bytes + decoded frames.
                 full_id = int(full_item["id"])
@@ -484,6 +490,8 @@ def generate_thumbnail_set(
             else:
                 img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
                 metrics["source_bytes"] = int(source_bytes or 0)
+                if on_source_loaded is not None:
+                    on_source_loaded(None, img)
             metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
             metrics["source_reads"] = 1
             queue_orientation(image_id, img)

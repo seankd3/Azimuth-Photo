@@ -9,6 +9,7 @@ from collections.abc import Callable
 from date_inference import infer_image_date
 import image_headers
 from core import work_coordination
+from core import hdd_governor
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 
@@ -378,7 +379,8 @@ async def scan_metadata_background():
     def _extract_batch(rows):
         updates = []
         for row in rows:
-            metadata = photo_metadata.extract_image_metadata(row["filepath"])
+            with hdd_governor.bulk_hdd_slot_sync():
+                metadata = photo_metadata.extract_image_metadata(row["filepath"])
             metadata["source_root"] = row["source_root"]
             updates.append(metadata_update_tuple(row["id"], metadata))
         return updates
