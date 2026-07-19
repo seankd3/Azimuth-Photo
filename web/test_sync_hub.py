@@ -709,6 +709,219 @@ class SyncHubTests(unittest.TestCase):
         destination = self.raws / "2024" / "2024-06-07" / "legacy.jpg"
         self.assertEqual(destination.read_bytes(), payload)
 
+    def test_finalize_rejects_corrupt_bytes_then_accepts_good_retry(self):
+        """P0-A: declared hashes must match received bytes before any placement."""
+
+        good = b"GOOD-BYTES-" + (b"A" * 4096)
+        corrupt = b"BAD!-BYTES-" + (b"B" * 4096)
+        self.assertEqual(len(good), len(corrupt))
+        content_hash = self.digest(good)
+        response = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(good),
+                "bytes": len(good),
+                "filename": "000018240006.tif",
+                "date_taken": "2026-07-16",
+            }]},
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+
+        failed = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(corrupt))},
+            content=corrupt,
+        )
+        self.assertEqual(failed.status_code, 422, failed.text)
+        self.assertFalse(hub.upload_part_path(self.intake, content_hash).exists())
+        placed = list(self.root.rglob("000018240006.tif"))
+        self.assertEqual(placed, [])
+        conn = sqlite3.connect(self.db_path)
+        try:
+            self.assertEqual(
+                conn.execute(
+                    "SELECT COUNT(*) FROM images WHERE content_hash = ?", (content_hash,)
+                ).fetchone()[0],
+                0,
+            )
+        finally:
+            conn.close()
+
+        image_id = self.upload(content_hash, good)
+        destination = self.root / "Film Scans" / "2026" / "2026-07-16" / "000018240006.tif"
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), good)
+        self.assertGreater(image_id, 0)
+
+    def test_placement_is_persisted_and_collision_safe_across_retries(self):
+        """P0-B: first placement decision sticks; identical is idempotent; different errors."""
+
+        payload = b"ROLL-ORIGINAL-" + (b"C" * 2048)
+        content_hash = self.digest(payload)
+        first = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "roll.jpg",
+                "date_taken": "2026-07-16",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            locked = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(locked, "Film Scans/2026/2026-07-16/roll.jpg")
+
+        # A later manifest with a different date must not move the locked path.
+        second = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "roll.jpg",
+                "date_taken": "2026-01-01",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(second.status_code, 200, second.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            still = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(still, locked)
+
+        destination = self.root / Path(locked)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(payload)
+        image_id = self.upload(content_hash, payload)
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
+        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
+
+        # Different bytes already at the locked path → error, original untouched.
+        other = b"ROLL-COLLISION-" + (b"D" * 2047)
+        self.assertEqual(len(other), len(payload))
+        other_hash = self.digest(other)
+        declare_other = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": other_hash,
+                "full_hash": self.full_digest(other),
+                "bytes": len(other),
+                "filename": "collision.jpg",
+                "date_taken": "2026-07-16",
+                "folder": "Film Scans",
+            }]},
+        )
+        self.assertEqual(declare_other.status_code, 200, declare_other.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE sync_manifest_items SET placed_relpath = ? WHERE content_hash = ?",
+                (locked, other_hash),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        conflict = self.client.post(
+            f"/api/sync/upload/{other_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(other))},
+            content=other,
+        )
+        self.assertEqual(conflict.status_code, 422, conflict.text)
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertFalse((destination.parent / "collision.jpg").exists())
+        self.assertFalse((destination.parent / "roll-2.jpg").exists())
+        # Original catalog row for the first upload remains the only one at that path.
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT id, content_hash FROM images WHERE filepath = ?",
+                (str(destination),),
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][0], image_id)
+        self.assertEqual(rows[0][1], content_hash)
+
+    def test_manifest_known_requires_original_bytes_on_disk(self):
+        """P1-C: a catalog row without byte proof must report as needed, not known."""
+
+        payload = self.image_bytes("ghost.jpg", (70, 80, 90))
+        content_hash = self.declare("ghost.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "ghost.jpg"
+        self.assertTrue(destination.is_file())
+
+        destination.unlink()
+        missing = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(missing.status_code, 200, missing.text)
+        self.assertEqual(missing.json(), {"missing": [content_hash], "known": []})
+
+        # Size mismatch is also not proof.
+        destination.write_bytes(payload + b"x")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE images SET missing_at = NULL, file_size = ? WHERE id = ?",
+                (len(payload), image_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        mismatched = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(mismatched.json(), {"missing": [content_hash], "known": []})
+
+        destination.write_bytes(payload)
+        restored = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "ghost.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(
+            restored.json(),
+            {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

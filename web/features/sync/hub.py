@@ -20,8 +20,9 @@ from core import runtime_paths
 from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
+from data.repositories import common
 from features.imports import taxonomy
-from features.library import geodata, keywords
+from features.library import keywords
 from features.sync import family_clock
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.hashing import compute_content_hash, compute_full_hash
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS sync_manifest_items (
     bytes INTEGER NOT NULL,
     filename TEXT NOT NULL,
     date_taken TEXT,
-    folder TEXT
+    folder TEXT,
+    placed_relpath TEXT
 );
 """
 
@@ -97,6 +99,8 @@ async def ensure_sync_schema(db_path: str) -> None:
             await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN full_hash TEXT")
         if "folder" not in column_names:
             await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN folder TEXT")
+        if "placed_relpath" not in column_names:
+            await conn.execute("ALTER TABLE sync_manifest_items ADD COLUMN placed_relpath TEXT")
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -124,9 +128,115 @@ def _normalize_filename(value: Any) -> str:
     return filename
 
 
+def compute_placed_relpath(
+    *,
+    filename: str,
+    date_taken: str | None,
+    folder: str | None,
+) -> str:
+    """Deterministic library-relative destination for one sync identity.
+
+    Computed once on first manifest sighting and reused for every retry so a
+    mid-transfer timeout cannot place the same bytes under a second path.
+    """
+
+    year, day = _date_parts(date_taken) or (str(date.today().year), date.today().isoformat())
+    folder_hint = str(folder).strip() if folder else None
+    source_kind = "phone" if folder_hint == taxonomy.DEST_PERSONAL else None
+    destination_name = taxonomy.route_destination(
+        filename=filename,
+        source_kind=source_kind,
+        folder_hint=folder_hint,
+    )
+    return f"{destination_name}/{year}/{day}/{os.path.basename(filename)}"
+
+
+def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
+    """Existence + size is the floor for "hub has the bytes" without a full re-hash."""
+
+    state, file_stat = inspect_source_file(filepath, source_path)
+    if state != "available" or file_stat is None:
+        return False
+    if expected_size is None:
+        return True
+    return int(file_stat.st_size) == int(expected_size)
+
+
+# Satellites re-manifest their whole library every sync cycle, so positive
+# proofs are cached briefly to keep the per-item stat() off the 15s hot loop.
+# Negative results are never cached: a just-finalized upload must read as
+# known on the very next manifest.
+_BYTE_PROOF_TTL_SECONDS = 600.0
+_byte_proof_cache: dict[tuple[str, str], tuple[float, int]] = {}
+
+
+async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) -> dict[str, int]:
+    """Map content_hash → image_id only when an active original exists at expected size."""
+
+    hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
+    if not hashes:
+        return {}
+
+    now = time.monotonic()
+    found: dict[str, int] = {}
+    unresolved: list[str] = []
+    for content_hash in hashes:
+        cached = _byte_proof_cache.get((db_path, content_hash))
+        if cached is not None and now - cached[0] < _BYTE_PROOF_TTL_SECONDS:
+            found[content_hash] = cached[1]
+        else:
+            unresolved.append(content_hash)
+    if not unresolved:
+        return found
+
+    rows: list[Any] = []
+    conn = await connection.open_async(db_path)
+    try:
+        for batch in common.chunked(unresolved):
+            placeholders = ",".join("?" for _ in batch)
+            rows.extend(
+                await (
+                    await conn.execute(
+                        f"SELECT i.id, i.content_hash, i.filepath, i.file_size, s.path AS source_path "
+                        f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                        f"WHERE i.content_hash IN ({placeholders}) "
+                        "AND COALESCE(i.hub_remote, 0) = 0 "
+                        "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                        "ORDER BY i.id",
+                        list(batch),
+                    )
+                ).fetchall()
+            )
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    def proven() -> dict[str, int]:
+        checked: dict[str, int] = {}
+        for row in rows:
+            content_hash = str(row["content_hash"])
+            if content_hash in checked:
+                continue
+            if _byte_proof_ok(
+                str(row["filepath"] or ""),
+                str(row["source_path"] or ""),
+                row["file_size"],
+            ):
+                checked[content_hash] = int(row["id"])
+        return checked
+
+    fresh = await asyncio.to_thread(proven)
+    stamp = time.monotonic()
+    for content_hash, image_id in fresh.items():
+        _byte_proof_cache[(db_path, content_hash)] = (stamp, image_id)
+    if len(_byte_proof_cache) > 200_000:
+        _byte_proof_cache.clear()
+    found.update(fresh)
+    return found
+
+
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
-    normalized: list[tuple[str, str | None, int, str, str | None, str | None]] = []
+    normalized: list[tuple[str, str | None, int, str, str | None, str | None, str]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
         supplied_full_hash = item.get("full_hash")
@@ -136,39 +246,33 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
         if byte_count < 0 or not filename:
             raise ValueError("manifest items require non-negative bytes and a filename")
         folder = _normalize_folder(item.get("folder"))
-        normalized.append((content_hash, full_hash, byte_count, filename, item.get("date_taken"), folder))
+        date_taken = item.get("date_taken")
+        placed_relpath = compute_placed_relpath(
+            filename=filename, date_taken=date_taken, folder=folder
+        )
+        normalized.append(
+            (content_hash, full_hash, byte_count, filename, date_taken, folder, placed_relpath)
+        )
 
     conn = await connection.open_async(db_path)
     try:
         if normalized:
             await conn.executemany(
-                "INSERT INTO sync_manifest_items(content_hash, full_hash, bytes, filename, date_taken, folder) "
-                "VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
+                "INSERT INTO sync_manifest_items("
+                "content_hash, full_hash, bytes, filename, date_taken, folder, placed_relpath) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
                 "full_hash=COALESCE(excluded.full_hash, sync_manifest_items.full_hash), "
                 "bytes=excluded.bytes, filename=excluded.filename, date_taken=excluded.date_taken, "
-                "folder=excluded.folder",
+                "folder=excluded.folder, "
+                "placed_relpath=COALESCE(sync_manifest_items.placed_relpath, excluded.placed_relpath)",
                 normalized,
             )
-        hashes = [row[0] for row in normalized]
-        known_by_hash: dict[str, int] = {}
-        if hashes:
-            placeholders = ",".join("?" for _ in hashes)
-            rows = await (await conn.execute(
-                # "Known" must mean a recoverable original: not trashed, not
-                # missing on disk, and not a satellite mirror of a remote hub.
-                # Trashed rows keep their content_hash, so without this filter
-                # Free-up-space could delete the phone's last copy.
-                f"SELECT content_hash, MIN(id) AS image_id FROM images "
-                f"WHERE content_hash IN ({placeholders}) "
-                f"AND status IN ('kept', 'maybe') AND missing_at IS NULL "
-                f"AND COALESCE(hub_remote, 0) = 0 GROUP BY content_hash",
-                hashes,
-            )).fetchall()
-            known_by_hash = {str(row["content_hash"]): int(row["image_id"]) for row in rows}
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
+    hashes = [row[0] for row in normalized]
+    known_by_hash = await images_with_byte_proof(db_path, hashes)
     return {
         "missing": [content_hash for content_hash in hashes if content_hash not in known_by_hash],
         "known": [
@@ -298,21 +402,16 @@ def _date_parts(value: str | None) -> tuple[str, str] | None:
     return None
 
 
-def _unique_destination(path: Path) -> Path:
-    if not path.exists():
-        return path
-    for index in range(2, 10_000):
-        candidate = path.with_name(f"{path.stem}-{index}{path.suffix}")
-        if not candidate.exists():
-            return candidate
-    raise RuntimeError("Could not create a unique upload destination")
+def _discard_upload_temp(intake_root: Path, content_hash: str) -> None:
+    upload_part_path(intake_root, content_hash).unlink(missing_ok=True)
+    upload_offset_path(intake_root, content_hash).unlink(missing_ok=True)
 
 
 async def _manifest_item(db_path: str, content_hash: str) -> dict[str, Any] | None:
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute(
-            "SELECT content_hash, full_hash, bytes, filename, date_taken, folder "
+            "SELECT content_hash, full_hash, bytes, filename, date_taken, folder, placed_relpath "
             "FROM sync_manifest_items WHERE content_hash = ?",
             (content_hash,),
         )).fetchone()
@@ -321,7 +420,31 @@ async def _manifest_item(db_path: str, content_hash: str) -> dict[str, Any] | No
         await connection.close_async(conn, db_path=db_path)
 
 
-async def _known_image_id(db_path: str, content_hash: str) -> int | None:
+async def _persist_placed_relpath(db_path: str, content_hash: str, placed_relpath: str) -> str:
+    """Lock the first placement decision; later calls keep the original path."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute(
+            "UPDATE sync_manifest_items SET placed_relpath = COALESCE(placed_relpath, ?) "
+            "WHERE content_hash = ?",
+            (placed_relpath, content_hash),
+        )
+        row = await (await conn.execute(
+            "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+            (content_hash,),
+        )).fetchone()
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if row is None or not row["placed_relpath"]:
+        raise RuntimeError("Could not persist upload placement path")
+    return str(row["placed_relpath"])
+
+
+async def _catalog_image_id(db_path: str, content_hash: str) -> int | None:
+    """Any catalog row for this identity — used by metadata merge, not upload gates."""
+
     conn = await connection.open_async(db_path)
     try:
         row = await (await conn.execute(
@@ -330,6 +453,47 @@ async def _known_image_id(db_path: str, content_hash: str) -> int | None:
         return int(row["id"]) if row else None
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def _known_image_id(db_path: str, content_hash: str) -> int | None:
+    """Upload short-circuit: only when the original exists on disk at expected size."""
+
+    proven = await images_with_byte_proof(db_path, [content_hash])
+    return proven.get(validate_content_hash(content_hash))
+
+
+def _resolve_library_destination(
+    raws_root: Path,
+    placed_relpath: str,
+) -> tuple[Path, Path]:
+    """Return (absolute destination file, catalog source root) for a locked relpath.
+
+    ``RAWS/...`` always resolves through the configured raws_root (which may not
+    literally be named ``RAWS`` in tests/standalone layouts). Other tops stay
+    siblings under the library root.
+    """
+
+    library_root = taxonomy.library_root_from_raws(raws_root).resolve()
+    relative = Path(str(placed_relpath).replace("\\", "/"))
+    if relative.is_absolute() or ".." in relative.parts or not relative.parts:
+        raise ValueError("placed_relpath must be a safe library-relative path")
+    top = relative.parts[0]
+    rest = Path(*relative.parts[1:]) if len(relative.parts) > 1 else Path()
+    if top == taxonomy.DEST_RAWS:
+        source_root = Path(raws_root).resolve()
+        destination = (source_root / rest).resolve()
+        try:
+            destination.relative_to(source_root)
+        except ValueError as exc:
+            raise ValueError("placed_relpath escapes the RAWS root") from exc
+    else:
+        destination = (library_root / relative).resolve()
+        try:
+            destination.relative_to(library_root)
+        except ValueError as exc:
+            raise ValueError("placed_relpath escapes the library root") from exc
+        source_root = taxonomy.destination_source_root(library_root, top)
+    return destination, source_root
 
 
 async def _register_original(db_path: str, source_root: Path, path: Path, content_hash: str) -> int:
@@ -391,8 +555,7 @@ async def _append_upload_chunk_locked(
     await ensure_sync_schema(db_path)
     known = await _known_image_id(db_path, content_hash)
     if known is not None:
-        upload_part_path(intake_root, content_hash).unlink(missing_ok=True)
-        upload_offset_path(intake_root, content_hash).unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         return {"image_id": known}
     item = await _manifest_item(db_path, content_hash)
     if item is None:
@@ -419,49 +582,51 @@ async def _append_upload_chunk_locked(
     if current < total_bytes:
         return {"offset": current}
 
+    # Byte-verify BEFORE any library placement or catalog write. A full-size
+    # .part with corrupt bytes (the satellite→hub timeout failure mode) must
+    # never become an original.
     actual_hash = await asyncio.to_thread(compute_content_hash, part)
     if actual_hash != content_hash:
-        part.unlink(missing_ok=True)
-        offset_path.unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed content hash verification")
     actual_full_hash = await asyncio.to_thread(compute_full_hash, part)
     if actual_full_hash != item["full_hash"]:
-        part.unlink(missing_ok=True)
-        offset_path.unlink(missing_ok=True)
+        _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed full-file hash verification")
 
-    extracted = await asyncio.to_thread(geodata.extract_file_metadata, str(part))
-    taken = extracted.get("date_taken") or item.get("date_taken")
-    year, day = _date_parts(taken) or (str(date.today().year), date.today().isoformat())
-    folder = str(item["folder"]).strip() if item.get("folder") else None
-    # Named folders (e.g. Android PHONE_FOLDER="Personal Photos") are siblings of
-    # the configured RAWS tree under the library root — never nested inside RAWS.
-    # RAWS itself always lands in the configured raws_root (legacy date tree).
-    library_root = taxonomy.library_root_from_raws(raws_root)
-    source_kind = "phone" if folder == taxonomy.DEST_PERSONAL else None
-    destination_name = taxonomy.route_destination(
-        filename=str(item["filename"]),
-        source_kind=source_kind,
-        folder_hint=folder,
-    )
-    if destination_name == taxonomy.DEST_RAWS:
-        destination_root = Path(raws_root)
+    placed_relpath = str(item.get("placed_relpath") or "").strip()
+    if not placed_relpath:
+        placed_relpath = compute_placed_relpath(
+            filename=str(item["filename"]),
+            date_taken=item.get("date_taken"),
+            folder=item.get("folder"),
+        )
+        placed_relpath = await _persist_placed_relpath(db_path, content_hash, placed_relpath)
+    destination, destination_root = _resolve_library_destination(raws_root, placed_relpath)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+
+    created_destination = False
+    if destination.exists():
+        existing_full = await asyncio.to_thread(compute_full_hash, destination)
+        if existing_full != item["full_hash"]:
+            _discard_upload_temp(intake_root, content_hash)
+            raise ArithmeticError(
+                "Upload destination already exists with different content; refusing to overwrite"
+            )
+        # Identical bytes already at the locked path — idempotent success.
     else:
-        destination_root = taxonomy.destination_source_root(library_root, destination_name)
-    destination_dir = destination_root / year / day
-    destination_dir.mkdir(parents=True, exist_ok=True)
-    preferred = destination_dir / os.path.basename(str(item["filename"]))
-    if preferred.exists() and await asyncio.to_thread(compute_full_hash, preferred) == item["full_hash"]:
-        destination = preferred
-        created_destination = False
-    else:
-        destination = _unique_destination(preferred)
         try:
             await asyncio.to_thread(os.link, part, destination)
         except OSError:
             await asyncio.to_thread(shutil.copy2, part, destination)
             with destination.open("rb") as handle:
                 os.fsync(handle.fileno())
+            # Copy can silently diverge; prove the placed bytes before catalog commit.
+            placed_full = await asyncio.to_thread(compute_full_hash, destination)
+            if placed_full != item["full_hash"]:
+                destination.unlink(missing_ok=True)
+                _discard_upload_temp(intake_root, content_hash)
+                raise ArithmeticError("Placed upload failed full-file hash verification")
         created_destination = True
     try:
         image_id = await _register_original(db_path, destination_root, destination, content_hash)
@@ -469,8 +634,7 @@ async def _append_upload_chunk_locked(
         if created_destination:
             destination.unlink(missing_ok=True)
         raise
-    part.unlink(missing_ok=True)
-    offset_path.unlink(missing_ok=True)
+    _discard_upload_temp(intake_root, content_hash)
     return {"image_id": image_id}
 
 
@@ -594,7 +758,7 @@ async def merge_metadata(db_path: str, items: Iterable[dict[str, Any]]) -> dict[
     results: list[dict[str, Any]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
-        image_id = await _known_image_id(db_path, content_hash)
+        image_id = await _catalog_image_id(db_path, content_hash)
         if image_id is None:
             results.append({"content_hash": content_hash, "applied": [], "skipped": [{"family": "item", "reason": "unknown-content-hash"}]})
             continue
