@@ -275,6 +275,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("DELETE", "/api/system/backup/restore-staged"),
     ("POST", "/api/system/integrity/scan"),
     ("GET", "/api/system/integrity/status"),
+    ("GET", "/api/health/details"),
     # PATCH: quality lane
     ("GET", "/api/keywords"),
     ("POST", "/api/keywords"),

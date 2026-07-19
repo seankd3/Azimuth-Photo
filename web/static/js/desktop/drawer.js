@@ -24,6 +24,9 @@ import {
 import {
     bindCloudBackup, refreshCloudBackup, renderCloudBackup, stopCloudBackupPolling,
 } from './cloud_backup.js';
+import {
+    bindSystemHealth, refreshSystemHealth, renderSystemHealth, stopSystemHealthPolling,
+} from './system_health.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
@@ -1088,7 +1091,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderCloudBackup(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + renderCloudBackup(catalog) + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
@@ -1219,6 +1222,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getLrConnect().catch(() => null),
         refreshLibraryHealth().catch(() => null),
         refreshCloudBackup().catch(() => null),
+        refreshSystemHealth().catch(() => null),
     ]);
     if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
@@ -1246,6 +1250,7 @@ async function refreshDrawer({ initial = false } = {}) {
     else {
         patchDrawerStatus(workerGenerations);
         if (body?.querySelector('#cloud-backup-panel')) renderCloudBackupSection();
+        if (body?.querySelector('#system-health-panel')) renderSystemHealthSection();
         // Statuses can land after the section rendered — if a panel that
         // should exist is missing (e.g. Connect Lightroom), re-render once.
         if (lrConnectStatus?.show_button && !body?.querySelector('#connect-lightroom-panel')) renderCurrentSystemSurface();
@@ -1683,10 +1688,31 @@ function bindCloudBackupActions(body) {
     });
 }
 
+function renderSystemHealthSection() {
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    const current = body?.querySelector('#system-health-panel');
+    if (!body || !current) return;
+    const template = document.createElement('template');
+    template.innerHTML = renderSystemHealth();
+    const next = template.content.firstElementChild;
+    if (!next) return;
+    current.replaceWith(next);
+    bindSystemHealthActions(body);
+}
+
+function bindSystemHealthActions(body) {
+    bindSystemHealth(body, {
+        rerender: renderSystemHealthSection,
+    });
+}
+
 function bindDrawerActions(body = document.getElementById('drawer-body')) {
     if (!body) return;
     bindLibraryHealthActions(body);
     bindCloudBackupActions(body);
+    bindSystemHealthActions(body);
     bindSettingInputs(body);
     body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
         sessionStorage.setItem('azimuth-server-update-dismissed', '1');
@@ -1901,6 +1927,7 @@ function stopDrawerPolling() {
     installTimer = null;
     stopLibraryHealthPolling();
     stopCloudBackupPolling();
+    stopSystemHealthPolling();
     if (!freeupActive()) stopFreeUpPolling();
 }
 

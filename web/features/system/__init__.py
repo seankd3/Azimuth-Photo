@@ -1,1 +1,1 @@
-"""System maintenance: catalog backups and original-file integrity audits."""
+"""System maintenance: catalog backups, integrity audits, and health aggregation."""
