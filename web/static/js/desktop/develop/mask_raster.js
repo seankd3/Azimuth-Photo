@@ -4,8 +4,9 @@ import {
     LOCAL_COLOR_SIGMA_MIN, LOCAL_COLOR_SIGMA_RANGE, LOCAL_EXPOSURE_EV_SCALE,
     LOCAL_MASK_DOWNSAMPLE, LOCAL_RANGE_EPSILON, LOCAL_RENDER_CAP,
     LOCAL_SLIDER_SCALE, LOCAL_WB_MIRED_SCALE, LUMA_BLUE, LUMA_GREEN, LUMA_RED,
-    OKLAB_M1, OKLAB_M2,
+    GUIDED_DEFAULT_FEATHER, OKLAB_M1, OKLAB_M2,
 } from './ops_constants.js';
+import { lumaGuide, refineMask } from './guided_filter.js';
 
 const number = (values, key, fallback = 0) => {
     const result = Number(values?.[key]);
@@ -242,7 +243,7 @@ export async function rasterizeMask(mask, width, height, { image = null, grid = 
     return new Float32Array(width * height);
 }
 
-export async function rasterizeCorrection(correction, width, height, { image = null, downsample = LOCAL_MASK_DOWNSAMPLE, aiLoader = null } = {}) {
+export async function rasterizeCorrection(correction, width, height, { image = null, downsample = LOCAL_MASK_DOWNSAMPLE, aiLoader = null, edgeAware = true } = {}) {
     const [rasterWidth, rasterHeight] = rasterSize(width, height, downsample);
     const result = new Float32Array(rasterWidth * rasterHeight);
     if (!truth(correction?.CorrectionActive, true)) return { data: result, width: rasterWidth, height: rasterHeight };
@@ -262,6 +263,13 @@ export async function rasterizeCorrection(correction, width, height, { image = n
         const empty = !result.some((value) => value !== 0);
         for (let i = 0; i < result.length; i += 1) result[i] = empty ? part[i] : result[i] * part[i];
     }
+    const feather = correctionFeather(correction);
+    if (edgeAware && image && feather > LOCAL_RANGE_EPSILON && result.some((value) => value !== 0)) {
+        const pixels = normalizeImage(image, rasterWidth, rasterHeight);
+        const guide = lumaGuide(pixels, rasterWidth, rasterHeight);
+        const refined = refineMask(result, guide, rasterWidth, rasterHeight, { feather });
+        for (let i = 0; i < result.length; i += 1) result[i] = Math.min(Math.max(refined[i], 0), 2);
+    }
     // CorrectionAmount is applied as a GL uniform so R8 atlas storage retains
     // precision while still allowing effective mask strengths through 2.0.
     return { data: result, width: rasterWidth, height: rasterHeight };
@@ -276,11 +284,44 @@ export function rasterToImageData(raster) {
     return typeof ImageData !== 'undefined' ? new ImageData(data, raster.width, raster.height) : { data, width: raster.width, height: raster.height };
 }
 
-function needsRangeImage(corrections) {
-    return corrections.some((correction) => (correction?.CorrectionMasks || []).some((mask) => {
-        const rangeMask = mask.CorrectionRangeMask || mask;
-        return [1, 2].includes(number(rangeMask, 'Type')) || rangeMask.LumRange != null || sampledColors(rangeMask).length;
-    }));
+function maskFeatherAmount(mask) {
+    if (mask?.Feather != null) return clamp(number(mask, 'Feather', GUIDED_DEFAULT_FEATHER));
+    const rangeMask = mask?.CorrectionRangeMask || mask;
+    if (rangeMask?.LumRange != null) {
+        const [lowSoft, low, high, highSoft] = quad(rangeMask.LumRange);
+        return clamp(Math.max(low - lowSoft, highSoft - high) * 2);
+    }
+    return null;
+}
+
+function correctionFeather(correction) {
+    const amounts = [];
+    for (const mask of correction?.CorrectionMasks || []) {
+        if (!truth(mask?.MaskActive, true)) continue;
+        const amount = maskFeatherAmount(mask);
+        if (amount != null) {
+            amounts.push(amount);
+            continue;
+        }
+        const what = String(mask?.What || mask?.MaskType || '');
+        if (/Image/i.test(what) || mask?.pa_cache_key != null) amounts.push(GUIDED_DEFAULT_FEATHER);
+        else if (/Luminance|Color/i.test(what) || [1, 2].includes(number(mask, 'Type'))) amounts.push(GUIDED_DEFAULT_FEATHER);
+    }
+    const rangeMask = correction?.CorrectionRangeMask;
+    if (rangeMask && [1, 2].includes(number(rangeMask, 'Type'))) {
+        const amount = maskFeatherAmount(rangeMask);
+        amounts.push(amount != null ? amount : GUIDED_DEFAULT_FEATHER);
+    }
+    return amounts.length ? Math.max(...amounts) : 0;
+}
+
+function needsGuideImage(corrections) {
+    return corrections.some((correction) => correctionFeather(correction) > LOCAL_RANGE_EPSILON
+        || (correction?.CorrectionMasks || []).some((mask) => {
+            const rangeMask = mask.CorrectionRangeMask || mask;
+            return [1, 2].includes(number(rangeMask, 'Type')) || rangeMask.LumRange != null || sampledColors(rangeMask).length;
+        })
+        || (correction?.CorrectionRangeMask && [1, 2].includes(number(correction.CorrectionRangeMask, 'Type'))));
 }
 
 /** Live UI entrypoint consumed by masking.js. */
@@ -293,7 +334,7 @@ export async function buildMaskRasters({ imageId = null, corrections = [], width
         key: correctionRasterKey(correction, imageId, width, height),
     }));
     const dirty = keyed.filter(({ key }) => !MASK_RASTER_CACHE.has(key)).map(({ correction }) => correction);
-    const image = imageId != null && needsRangeImage(dirty) ? await imageUrlPixels(`/api/develop/${imageId}/base.jpg`, rasterWidth, rasterHeight) : null;
+    const image = imageId != null && needsGuideImage(dirty) ? await imageUrlPixels(`/api/develop/${imageId}/base.jpg`, rasterWidth, rasterHeight) : null;
     const aiLoader = async (mask, maskWidth, maskHeight) => {
         let key = mask.pa_cache_key;
         if (!key && imageId != null && mask.MaskSubType != null) {

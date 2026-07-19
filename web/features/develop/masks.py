@@ -18,6 +18,7 @@ from core import pil_limits  # noqa: F401  # disables the decompression-bomb lim
 
 from core.runtime_paths import resolve_runtime_paths
 from . import ops_constants as C
+from .guided_filter import refine_mask
 
 
 _LOG = logging.getLogger(__name__)
@@ -375,6 +376,47 @@ def rasterize_mask(
     return np.zeros((height, width), dtype=np.float32)
 
 
+def _mask_feather_amount(mask: Mapping[str, object]) -> float | None:
+    """Read an explicit Feather, or derive one from a LumRange soft window."""
+
+    if mask.get("Feather") is not None:
+        return float(np.clip(_number(mask, "Feather", C.GUIDED_DEFAULT_FEATHER), 0.0, 1.0))
+    range_mask = mask.get("CorrectionRangeMask")
+    range_mask = range_mask if isinstance(range_mask, Mapping) else mask
+    if range_mask.get("LumRange") is not None:
+        low_soft, low, high, high_soft = _quad(range_mask.get("LumRange"))
+        soft = max(low - low_soft, high_soft - high)
+        return float(np.clip(soft * 2.0, 0.0, 1.0))
+    return None
+
+
+def _correction_feather(correction: Mapping[str, object]) -> float:
+    """Best existing Feather signal for guided refine (radial / range / AI)."""
+
+    amounts: list[float] = []
+    masks = correction.get("CorrectionMasks")
+    if isinstance(masks, Sequence) and not isinstance(masks, (str, bytes)):
+        for mask in masks:
+            if not isinstance(mask, Mapping) or not _truth(mask.get("MaskActive"), True):
+                continue
+            amount = _mask_feather_amount(mask)
+            if amount is not None:
+                amounts.append(amount)
+                continue
+            what = str(mask.get("What") or mask.get("MaskType") or "")
+            if "Image" in what or mask.get("pa_cache_key") is not None:
+                amounts.append(C.GUIDED_DEFAULT_FEATHER)
+            elif "Luminance" in what or "Color" in what or int(_number(mask, "Type", 0.0)) in (1, 2):
+                amounts.append(C.GUIDED_DEFAULT_FEATHER)
+    range_mask = correction.get("CorrectionRangeMask")
+    if isinstance(range_mask, Mapping) and int(_number(range_mask, "Type")) in (1, 2):
+        amount = _mask_feather_amount(range_mask)
+        amounts.append(amount if amount is not None else C.GUIDED_DEFAULT_FEATHER)
+    if not amounts:
+        return 0.0
+    return float(max(amounts))
+
+
 def rasterize_correction(
     correction: Mapping[str, object],
     width: int,
@@ -386,6 +428,7 @@ def rasterize_correction(
     canvas_size: tuple[int, int] | None = None,
     ai_loader: Callable[[Mapping[str, object]], np.ndarray | None] | None = None,
     cache_root: str | Path | None = None,
+    edge_aware: bool = True,
 ) -> np.ndarray:
     raster_width = max(1, math.ceil(width / max(1, downsample)))
     raster_height = max(1, math.ceil(height / max(1, downsample)))
@@ -413,7 +456,16 @@ def rasterize_correction(
         part = rasterize_mask(range_mask, raster_width, raster_height, image=raster_image, grid=grid, canvas_size=full_canvas)
         combined = combined * part if np.any(combined) else part
     amount = float(np.clip(_number(correction, "CorrectionAmount", 1.0), 0.0, 2.0))
-    return np.clip(combined * amount, 0.0, 2.0).astype(np.float32)
+    combined = np.clip(combined * amount, 0.0, 2.0).astype(np.float32)
+    feather = _correction_feather(correction)
+    if edge_aware and raster_image is not None and feather > C.LOCAL_RANGE_EPSILON and np.any(combined):
+        guide = (
+            raster_image[..., 0] * C.LUMA_RED
+            + raster_image[..., 1] * C.LUMA_GREEN
+            + raster_image[..., 2] * C.LUMA_BLUE
+        ).astype(np.float32)
+        combined = np.clip(refine_mask(combined, guide, feather=feather), 0.0, 2.0)
+    return combined
 
 
 def rasterize_corrections(
