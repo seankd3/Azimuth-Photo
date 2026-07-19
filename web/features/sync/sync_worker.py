@@ -17,7 +17,7 @@ import settings
 from data import connection
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
-from features.sync import contract, oplog, satellite
+from features.sync import client_update, contract, oplog, satellite
 from features.sync.executor import run_sync_work
 from features.trash import remote as trash_remote
 from features.trash import service as trash_service
@@ -44,12 +44,20 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
 
 
 class SyncWorker:
-    def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None):
+    def __init__(
+        self,
+        *,
+        db_path: str,
+        hub: str | None = None,
+        request: RequestFn | None = None,
+        updater: client_update.ClientUpdater | None = None,
+    ):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
         self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._hub_request)
+        self.updater = updater
         self._force_mirror_refresh = False
         self._force_contract_refresh = False
         self._paused = False
@@ -74,13 +82,16 @@ class SyncWorker:
         }
 
     def status(self) -> dict:
-        return {
+        payload = {
             **self._status,
             "paused": self._paused,
             "mirror": self.mirror.status(),
             "prefetch": self.prefetch.status(),
             **contract.hub_status(self.hub),
         }
+        if self.updater is not None:
+            payload.update(self.updater.status.as_dict())
+        return payload
 
     def pause(self) -> None:
         self._paused = True
@@ -113,6 +124,8 @@ class SyncWorker:
                     self._error(error)
                     self._note_failure(error)
                     await self._reconcile_status_after_failure()
+            # Safe point between cycles: in-flight upload chunk loops have drained.
+            self._maybe_restart_for_update()
             self._wake.clear()
             idle = self._next_idle_seconds if not self._paused else 3600.0
             try:
@@ -160,8 +173,11 @@ class SyncWorker:
     async def sync_once(self) -> None:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
-        await self.refresh_hub_contract(force=self._force_contract_refresh)
+        await self.refresh_hub_contract(
+            force=self._force_contract_refresh or self.updater is not None
+        )
         self._force_contract_refresh = False
+        await self._consider_client_update()
         await self._retry_pending_hub_trash()
         items = await satellite.record_local_images(self.db_path)
         # A transient empty scan pass must not zero an owed queue mid-cycle;
@@ -188,6 +204,9 @@ class SyncWorker:
                 item = by_hash.get(content_hash)
                 if item is not None:
                     await self._upload(item)
+                    # Safe point between files: chunk loop for this upload has drained.
+                    if self._maybe_restart_for_update():
+                        return
                     pushed = True
             if known:
                 await self._set_uploaded(known)
@@ -202,6 +221,7 @@ class SyncWorker:
         self._status["current_file"] = None
         self._refresh_queue(await satellite.pending_upload_snapshot(self.db_path))
         self._status["state"] = "paused" if self._paused else ("syncing" if self._status["queue_depth"] else "idle")
+        self._maybe_restart_for_update()
 
     async def _retry_pending_hub_trash(self) -> None:
         """Drain durable satellite Trash work without turning it into a hot loop."""
@@ -416,6 +436,50 @@ class SyncWorker:
         """Refresh once at startup, then use the ten-minute shared cache."""
 
         await contract.refresh_hub_contract(self.hub, request=self._hub_request, force=force)
+
+    async def _consider_client_update(self) -> None:
+        if self.updater is None:
+            return
+        hub_contract = contract._contracts.get(self.hub.rstrip("/"))
+        if hub_contract is None or not hub_contract.reachable:
+            return
+        payload = {
+            "sha": hub_contract.sha,
+            "bundle_sha256": hub_contract.bundle_sha256,
+            "schema_version": hub_contract.schema_version,
+        }
+        # Breaking schema: hub is ahead of this binary — pause until update lands.
+        if hub_contract.schema_version is not None:
+            try:
+                from data.schema import SCHEMA_VERSION
+
+                if int(hub_contract.schema_version) > int(SCHEMA_VERSION):
+                    # Still attempt the update; only pause sync if we cannot converge.
+                    pass
+            except Exception:
+                pass
+        await self.updater.consider_hub_version(payload)
+        if (
+            hub_contract.schema_version is not None
+            and self.updater.status.state == client_update.STATUS_RETRY
+        ):
+            try:
+                from data.schema import SCHEMA_VERSION
+
+                if int(hub_contract.schema_version) > int(SCHEMA_VERSION):
+                    self.pause()
+                    self._status["recent_errors"] = [
+                        "Hub schema is newer than this satellite — sync paused until update succeeds.",
+                        *self._status["recent_errors"],
+                    ][:5]
+            except Exception:
+                pass
+
+    def _maybe_restart_for_update(self) -> bool:
+        if self.updater is None:
+            return False
+        uploading = self._status.get("current_file") is not None
+        return self.updater.request_restart_if_safe(uploading=uploading)
 
     async def _set_uploaded(self, content_hashes: set[str]) -> None:
         if not content_hashes:

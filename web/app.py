@@ -89,7 +89,23 @@ if satellite.is_satellite_mode():
             if getattr(app.state, "photoarchive_sync_worker", None) is not None:
                 return True
             await satellite.ensure_sync_state(_db.DB_PATH)
-            worker = SyncWorker(db_path=_db.DB_PATH)
+            updater = None
+            install_root = os.environ.get("PHOTOARCHIVE_INSTALL_ROOT", "").strip()
+            if install_root:
+                from features.sync import client_update
+
+                root = client_update.resolve_install_root(install_root)
+                updater = client_update.ClientUpdater(
+                    install_root=root,
+                    hub=satellite.hub_url(),
+                    local_sha=client_update.resolve_local_sha(install_root=root),
+                    restart=client_update.request_process_restart,
+                    ui_busy=client_update.ui_session_busy,
+                )
+            worker = SyncWorker(db_path=_db.DB_PATH, updater=updater)
+            if updater is not None:
+                updater.request = worker._hub_request
+                updater.hub = worker.hub
             configure_worker(worker)
             app.state.photoarchive_sync_worker = worker
             app.state.photoarchive_shell.track_background_task(worker.run())
