@@ -3,23 +3,20 @@ import logging
 import os
 
 from core import capabilities
+from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
 
 
 log = logging.getLogger(__name__)
 
 
-IDLE_ACTIVITY_EXCLUDED_PATHS = frozenset(
-    {
-        "/api/ai/status",
-        "/api/cache/status",
-        "/api/cache/pregen/status",
-        "/api/captions/status",
-        "/api/dev/status",
-        "/api/people/status",
-        "/api/scan/status",
-        "/api/settings",
-        "/api/ui/settings",
-    }
+# Re-export for app_factory / tests that still import the frozenset name.
+__all__ = (
+    "IDLE_ACTIVITY_EXCLUDED_PATHS",
+    "BackgroundTaskTracker",
+    "install_idle_activity_middleware",
+    "marks_user_activity",
+    "run_shutdown",
+    "track_idle_activity",
 )
 
 
@@ -118,15 +115,28 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
     return statuses
 
 
-async def track_idle_activity(request, call_next, *, thumbnails, excluded_paths: set[str]):
+async def track_idle_activity(
+    request,
+    call_next,
+    *,
+    thumbnails,
+    excluded_paths: set[str] | None = None,
+    activity_classifier=None,
+):
+    """Note browsing only for genuine media traffic.
+
+    The central classifier in ``core.user_activity`` is the source of truth.
+    ``excluded_paths`` is an optional extra deny-list (tests / specialized shells).
+    """
     path = request.url.path
-    if not path.startswith("/static") and path not in excluded_paths:
+    classify = activity_classifier or marks_user_activity
+    if classify(path) and (excluded_paths is None or path not in excluded_paths):
         thumbnails.note_user_activity()
     return await call_next(request)
 
 
 def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
-    excluded = set(excluded_paths or IDLE_ACTIVITY_EXCLUDED_PATHS)
+    extra_excludes = set(excluded_paths) if excluded_paths is not None else None
 
     @app.middleware("http")
     async def track_idle_activity_middleware(request, call_next):
@@ -134,7 +144,7 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
             request,
             call_next,
             thumbnails=thumbnails,
-            excluded_paths=excluded,
+            excluded_paths=extra_excludes,
         )
 
     return track_idle_activity_middleware
