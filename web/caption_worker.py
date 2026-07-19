@@ -13,7 +13,7 @@ from typing import Any
 
 import ai_models
 import settings
-from core import work_coordination
+from core import memory_pressure, work_coordination
 from workers.caption_health import CaptionOomCircuit
 
 
@@ -404,6 +404,12 @@ async def _run_caption_worker_loop() -> None:
                     _caption_manual_pause_message or "Captions are stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
+                continue
+
+            pressure = memory_pressure.gate_bulk_work()
+            if pressure.pause_bulk:
+                _enter_paused(pressure.message or memory_pressure.PAUSE_MESSAGE)
+                await asyncio.sleep(2)
                 continue
 
             if not ai_models.model_files_present(caption_config["model_dir"]):

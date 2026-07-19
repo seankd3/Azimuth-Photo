@@ -105,10 +105,22 @@ def load_source_image(
         import rawpy
 
         try:
+            # half_size only when a half-resolution demosaic still covers the
+            # largest requested tier — full demosaic of a 40–60MP RAW is the
+            # bulk of the overnight RSS spike, but small RAWs must never be
+            # half-decoded below the target and upscaled.
             with rawpy.imread(filepath) as raw:
-                rgb = raw.postprocess(use_camera_wb=True, no_auto_bright=True)
+                sizes = raw.sizes
+                half_size = max(sizes.width, sizes.height) >= 2 * max_target
+                rgb = raw.postprocess(
+                    use_camera_wb=True,
+                    no_auto_bright=True,
+                    half_size=half_size,
+                )
             # postprocess already applies the container rotation; do not rotate again.
-            return Image.fromarray(rgb)
+            img = Image.fromarray(rgb)
+            del rgb
+            return img
         except Exception:
             # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
             from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
@@ -119,12 +131,15 @@ def load_source_image(
 
             arr, _meta = decode_lossy_dng(filepath, max_px=max(max_target, 512))
             linear = arr.astype(_np.float32) / 65535.0
+            del arr
             encoded = _np.where(
                 linear <= 0.0031308,
                 linear * 12.92,
                 1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
             )
+            del linear
             image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
+            del encoded
             return apply_raw_orientation(image, _exiftool_raw_flip(filepath))
 
     with Image.open(filepath) as source:
@@ -447,6 +462,25 @@ def generate_thumbnail_set(
                     prefer_draft=prefer_draft,
                 )
                 metrics["source_bytes"] = len(source_data)
+                # Write the SSD original before the encode loop so we can drop
+                # source_data instead of holding file bytes + decoded frames.
+                full_id = int(full_item["id"])
+                result = cache_full_image_bytes_sync(
+                    full_item["filepath"],
+                    full_id,
+                    full_item["signature"],
+                    source_data,
+                    hot=False,
+                    room_prechecked=True,
+                )
+                source_data = None
+                if result != full_item["filepath"] and fast_disk_has(
+                    full_tier,
+                    full_id,
+                    full_item["signature"],
+                ):
+                    metrics["originals_written"] = 1
+                full_item = None
             else:
                 img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
                 metrics["source_bytes"] = int(source_bytes or 0)
@@ -479,30 +513,20 @@ def generate_thumbnail_set(
 
         if full_item:
             full_id = int(full_item["id"])
-            if source_data is not None:
-                result = cache_full_image_bytes_sync(
-                    full_item["filepath"],
-                    full_id,
-                    full_item["signature"],
-                    source_data,
-                    hot=False,
-                    room_prechecked=True,
-                )
-            else:
-                full_started = monotonic_provider()
-                result = cache_full_image_sync(
-                    full_item["filepath"],
-                    full_id,
-                    full_item["signature"],
-                    hot=False,
-                    room_prechecked=True,
-                )
-                full_seconds = max(0.0, monotonic_provider() - full_started)
-                if result != full_item["filepath"]:
-                    metrics["read_seconds"] += full_seconds
-                    metrics["source_bytes"] += int(full_item.get("source_size") or 0)
-                    if metrics["source_reads"] <= 0:
-                        metrics["source_reads"] = 1
+            full_started = monotonic_provider()
+            result = cache_full_image_sync(
+                full_item["filepath"],
+                full_id,
+                full_item["signature"],
+                hot=False,
+                room_prechecked=True,
+            )
+            full_seconds = max(0.0, monotonic_provider() - full_started)
+            if result != full_item["filepath"]:
+                metrics["read_seconds"] += full_seconds
+                metrics["source_bytes"] += int(full_item.get("source_size") or 0)
+                if metrics["source_reads"] <= 0:
+                    metrics["source_reads"] = 1
             if result != full_item["filepath"] and fast_disk_has(
                 full_tier,
                 full_id,

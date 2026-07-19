@@ -1531,16 +1531,20 @@ def _pregen_generate_batch_for_decision(decision) -> int:
 
 
 def _pregen_background_decision():
-    return pregen.BackgroundDecision(
-        mode="manual",
-        intensity=1.0,
-        pause=False,
-        sleep_seconds=0.0,
-        thumbnail_batch_size=PREGENERATE_GENERATE_BATCH,
-        thumbnail_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
-        embedding_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
-        reason="manual background work",
-        checked_at=time.time(),
+    from core import memory_pressure
+
+    return memory_pressure.apply_to_decision(
+        pregen.BackgroundDecision(
+            mode="manual",
+            intensity=1.0,
+            pause=False,
+            sleep_seconds=0.0,
+            thumbnail_batch_size=PREGENERATE_GENERATE_BATCH,
+            thumbnail_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
+            embedding_pause_seconds=PREGENERATE_BATCH_PAUSE_SECONDS,
+            reason="manual background work",
+            checked_at=time.time(),
+        )
     )
 
 
