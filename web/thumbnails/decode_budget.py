@@ -8,6 +8,11 @@ from contextlib import asynccontextmanager
 
 
 _GIB = 1024**3
+_RGB_BYTES_PER_PIXEL = 3
+# rawpy peak ≈ raw buffer + demosaic intermediates + RGB output (~3× output).
+_RAW_PEAK_FACTOR = 3
+# Non-RAW decode holds source raster + working copy.
+_NON_RAW_PEAK_FACTOR = 2
 
 
 def _env_bytes(name: str, default: int) -> int:
@@ -34,8 +39,25 @@ MAX_INFLIGHT_DECODE_BYTES = _env_bytes(
 MIN_DECODE_ESTIMATE_BYTES = 16 * 1024 * 1024
 
 
-def estimate_decode_bytes(source_bytes: int | None, *, raw: bool = False) -> int:
-    """Estimate peak decode working set from source file size."""
+def estimate_decode_bytes(
+    source_bytes: int | None = None,
+    *,
+    raw: bool = False,
+    width: int | None = None,
+    height: int | None = None,
+) -> int:
+    """Estimate peak decode working set.
+
+    Prefer catalog/EXIF (or rawpy) dimensions: peak is W×H×3×safety, not file
+    size. A 60MP demosaic is ~180MB of RGB alone; rawpy peaks near 3× that.
+    File-size fallback remains for rows missing dimensions.
+    """
+    pixels = max(0, int(width or 0)) * max(0, int(height or 0))
+    if pixels > 0:
+        output_bytes = pixels * _RGB_BYTES_PER_PIXEL
+        factor = _RAW_PEAK_FACTOR if raw else _NON_RAW_PEAK_FACTOR
+        return max(MIN_DECODE_ESTIMATE_BYTES, output_bytes * factor)
+
     size = max(0, int(source_bytes or 0))
     if size <= 0:
         return MIN_DECODE_ESTIMATE_BYTES

@@ -134,7 +134,9 @@ def evaluate_memory_pressure(*, rss_bytes: int | None = None) -> MemoryPressure:
         resume_bytes=resume,
         level=level if paused else "ok",
         pause_bulk=paused,
-        unload_models=paused and rss >= hard,
+        # Soft pause must shed ML residency too — waiting at soft with models
+        # still resident is not a stable wait state under a cgroup swap cap.
+        unload_models=paused,
         message=PAUSE_MESSAGE if paused else "",
     )
 
@@ -199,23 +201,25 @@ def request_model_unload() -> list[str]:
 
 
 def gate_bulk_work(*, rss_bytes: int | None = None) -> MemoryPressure:
-    """Shared bulk gate: pause above soft, unload models above hard."""
+    """Shared bulk gate: pause above soft, shed buffers + models, log RSS delta."""
     pressure = evaluate_memory_pressure(rss_bytes=rss_bytes)
     if not pressure.pause_bulk:
         return pressure
-    release_discardable_buffers()
+    before = read_rss_bytes() if rss_bytes is None else pressure.rss_bytes
+    released = release_discardable_buffers()
+    unloaded: list[str] = []
     if pressure.unload_models:
         unloaded = request_model_unload()
-        log.warning(
-            "worker=memory_pressure event=hard_watermark rss_bytes=%s unloaded=%s",
-            pressure.rss_bytes,
-            ",".join(unloaded) or "none",
-        )
-    else:
-        log.info(
-            "worker=memory_pressure event=soft_watermark rss_bytes=%s",
-            pressure.rss_bytes,
-        )
+    after = read_rss_bytes() if rss_bytes is None else pressure.rss_bytes
+    log.info(
+        "worker=memory_pressure event=%s_watermark rss_before=%s rss_after=%s "
+        "released=%s unloaded=%s",
+        pressure.level,
+        before,
+        after,
+        released,
+        ",".join(unloaded) or "none",
+    )
     return pressure
 
 
@@ -244,3 +248,15 @@ def apply_to_decision(decision: Any, *, rss_bytes: int | None = None) -> Any:
     if not updates:
         return decision
     return replace(decision, **updates)
+
+
+def effective_prefetch_workers(configured: int, *, rss_bytes: int | None = None) -> int:
+    """Halve in-flight decode concurrency above the resume watermark.
+
+    Full configured size restores only when RSS is at or below resume.
+    """
+    configured = max(1, int(configured or 1))
+    pressure = evaluate_memory_pressure(rss_bytes=rss_bytes)
+    if pressure.rss_bytes > pressure.resume_bytes:
+        return max(1, configured // 2)
+    return configured

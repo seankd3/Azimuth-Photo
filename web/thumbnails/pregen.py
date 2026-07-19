@@ -71,7 +71,8 @@ async def candidate_batch(get_db, cursor_state: dict, limit: int):
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
+            "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
+            "i.width, i.height "
             "FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE s.included = 1 AND s.online = 1 "
@@ -116,6 +117,7 @@ async def priority_candidate_batch(
     )
     select = (
         "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
+        "i.width, i.height, "
         + (
             "(SELECT name FROM collections WHERE id = ?) AS priority_collection_name "
             if requested_collection_id

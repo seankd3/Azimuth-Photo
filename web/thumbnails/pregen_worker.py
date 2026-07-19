@@ -4,12 +4,25 @@ import asyncio
 import os
 from functools import partial
 
-from core import work_coordination
+from core import memory_pressure, work_coordination
 from thumbnails.config import RAW_EXTENSIONS
 from thumbnails.decode_budget import bulk_decode_budget, estimate_decode_bytes
 
 
 PREGEN_YIELDED = -2
+PREGEN_PRESSURE = -3
+
+
+def _row_dimension(row, key: str) -> int | None:
+    try:
+        value = row[key]
+    except (KeyError, IndexError, TypeError):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
 
 async def run_pregen_bulk_batch(
@@ -38,6 +51,7 @@ async def run_pregen_bulk_batch(
     generate_thumbnail_set_sync,
     record_pregen_result,
     activity_burst_items: int,
+    prefetch_workers: int = 1,
 ) -> int:
     set_priority_scope(None)
     generate_batch = generate_batch or default_generate_batch
@@ -80,6 +94,8 @@ async def run_pregen_bulk_batch(
                 "signatures": size_signatures,
                 "full": full_item,
                 "source_size": source_size,
+                "width": _row_dimension(row, "width"),
+                "height": _row_dimension(row, "height"),
             })
             if len(pending) >= generate_batch:
                 break
@@ -150,18 +166,40 @@ async def run_pregen_bulk_batch(
     loop = asyncio.get_running_loop()
     completed = 0
     idx = 0
-    wave_size = 1
-    for start in range(0, len(pending), wave_size):
-        wave = pending[start:start + wave_size]
+    cursor = 0
+    pressure_abort = False
+    while cursor < len(pending) and not pressure_abort:
+        # Consult RSS per wave — a single demosaic can balloon multi-GB before
+        # the next between-batch gate would fire.
+        if memory_pressure.evaluate_memory_pressure().pause_bulk:
+            memory_pressure.gate_bulk_work()
+            pressure_abort = True
+            break
+
+        wave_size = memory_pressure.effective_prefetch_workers(prefetch_workers)
+        wave: list[dict] = []
         held_weights: list[int] = []
         try:
-            for item in wave:
+            while len(wave) < wave_size and cursor < len(pending):
+                if memory_pressure.evaluate_memory_pressure().pause_bulk:
+                    memory_pressure.gate_bulk_work()
+                    pressure_abort = True
+                    break
+                item = pending[cursor]
+                cursor += 1
                 ext = os.path.splitext(str(item.get("filepath") or ""))[1].lower()
                 estimate = estimate_decode_bytes(
                     item.get("source_size"),
                     raw=ext in RAW_EXTENSIONS,
+                    width=item.get("width"),
+                    height=item.get("height"),
                 )
                 held_weights.append(await bulk_decode_budget.acquire(estimate))
+                wave.append(item)
+
+            if pressure_abort or not wave:
+                break
+
             tasks = [
                 loop.run_in_executor(
                     prefetch_executor,
@@ -182,16 +220,27 @@ async def run_pregen_bulk_batch(
                 completed += record_pregen_result(await task)
                 if idx % 8 == 0 and not should_pause_for_priority():
                     await asyncio.to_thread(flush_write_queue)
+                if (
+                    not pressure_abort
+                    and memory_pressure.evaluate_memory_pressure().pause_bulk
+                ):
+                    memory_pressure.gate_bulk_work()
+                    pressure_abort = True
+                    # Finish already-submitted work in this wave, then stop.
         finally:
             for weight in held_weights:
                 await bulk_decode_budget.release(weight)
+
         if (
             should_pause_for_priority()
             and idx >= max(1, int(activity_burst_items))
         ):
             break
+
     if not should_pause_for_priority():
         await asyncio.to_thread(flush_write_queue)
+    if pressure_abort:
+        return PREGEN_PRESSURE
     if completed <= 0:
         return -1
     return completed
@@ -417,6 +466,12 @@ async def run_prefetch_worker_loop(
                     generated = await run_pregen_bulk_batch(generate_batch=generate_batch)
 
                 await flush_orientation_updates()
+
+            if generated == PREGEN_PRESSURE:
+                set_pregen_state("paused", memory_pressure.PAUSE_MESSAGE)
+                no_progress_scan_passes = 0
+                await sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
+                continue
 
             if generated == PREGEN_YIELDED:
                 set_pregen_state(
