@@ -85,6 +85,13 @@ DEFAULT_SETTINGS = {
     # Lightroom bridge: Elo → star projection (≥N comparisons; cumulative percentiles).
     "elo_stars_min_comparisons": 3,
     "elo_stars_thresholds": [0.02, 0.10, 0.30],
+    # Cloud Backup (rclone vault for original files — complementary to catalog snapshots).
+    "cloud_backup_remote": "",
+    "cloud_backup_dest_prefix": "",
+    "cloud_backup_trees": [],
+    "cloud_backup_bwlimit": "07:00,3M 23:00,off",
+    "cloud_backup_exclude_from_catalog": True,
+    "cloud_backup_nightly_enabled": False,
 }
 
 PRIVATE_SETTING_KEYS = {
@@ -581,6 +588,36 @@ def normalize_settings(raw: dict | None) -> dict:
             normalized["elo_stars_thresholds"] = list(DEFAULT_SETTINGS["elo_stars_thresholds"])
     else:
         normalized["elo_stars_thresholds"] = list(DEFAULT_SETTINGS["elo_stars_thresholds"])
+    normalized["cloud_backup_remote"] = str(raw.get("cloud_backup_remote") or "").strip().rstrip(":")
+    normalized["cloud_backup_dest_prefix"] = str(raw.get("cloud_backup_dest_prefix") or "").strip().rstrip("/")
+    trees_raw = raw.get("cloud_backup_trees", normalized.get("cloud_backup_trees"))
+    if isinstance(trees_raw, (list, tuple)):
+        seen_trees: set[str] = set()
+        trees: list[str] = []
+        for item in trees_raw:
+            path = os.path.abspath(os.path.expanduser(str(item or "").strip()))
+            if not path or path in seen_trees:
+                continue
+            seen_trees.add(path)
+            trees.append(path)
+        normalized["cloud_backup_trees"] = trees
+    else:
+        normalized["cloud_backup_trees"] = []
+    normalized["cloud_backup_bwlimit"] = (
+        str(raw.get("cloud_backup_bwlimit") or DEFAULT_SETTINGS["cloud_backup_bwlimit"]).strip()
+        or DEFAULT_SETTINGS["cloud_backup_bwlimit"]
+    )
+    normalized["cloud_backup_exclude_from_catalog"] = _normalize_bool(
+        raw.get(
+            "cloud_backup_exclude_from_catalog",
+            normalized["cloud_backup_exclude_from_catalog"],
+        ),
+        DEFAULT_SETTINGS["cloud_backup_exclude_from_catalog"],
+    )
+    normalized["cloud_backup_nightly_enabled"] = _normalize_bool(
+        raw.get("cloud_backup_nightly_enabled", normalized["cloud_backup_nightly_enabled"]),
+        DEFAULT_SETTINGS["cloud_backup_nightly_enabled"],
+    )
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
     normalized["prefetch_workers"] = min(
         normalized["prefetch_workers"],

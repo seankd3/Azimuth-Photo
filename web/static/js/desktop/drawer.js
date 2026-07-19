@@ -21,6 +21,9 @@ import {
 import {
     bindLibraryHealth, refreshLibraryHealth, renderLibraryHealth, stopLibraryHealthPolling,
 } from './library_health.js';
+import {
+    bindCloudBackup, refreshCloudBackup, renderCloudBackup, stopCloudBackupPolling,
+} from './cloud_backup.js';
 import { openSourceRevealMenu } from './source_reveal_menu.js';
 import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
@@ -1085,7 +1088,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderLibraryHealth(catalog) + renderCloudBackup(catalog) + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
@@ -1215,6 +1218,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getStorageOverview().catch(() => null),
         getLrConnect().catch(() => null),
         refreshLibraryHealth(),
+        refreshCloudBackup(),
     ]);
     if (settingsData) applySettingsData(settingsData);
     catalog = nextCatalog || catalog;
@@ -1239,7 +1243,10 @@ async function refreshDrawer({ initial = false } = {}) {
         ? document.getElementById('system-lens-content')
         : document.getElementById('drawer-body');
     if (initial || !body?.children.length) renderCurrentSystemSurface();
-    else patchDrawerStatus(workerGenerations);
+    else {
+        patchDrawerStatus(workerGenerations);
+        if (body?.querySelector('#cloud-backup-panel')) renderCloudBackupSection();
+    }
 }
 
 async function pollScanUntilDone(sourceId) {
@@ -1653,9 +1660,30 @@ function bindLibraryHealthActions(body) {
     });
 }
 
+function renderCloudBackupSection() {
+    const body = systemSurfaceRender
+        ? document.getElementById('system-lens-content')
+        : document.getElementById('drawer-body');
+    const current = body?.querySelector('#cloud-backup-panel');
+    if (!body || !current) return;
+    const template = document.createElement('template');
+    template.innerHTML = renderCloudBackup(catalog);
+    const next = template.content.firstElementChild;
+    if (!next) return;
+    current.replaceWith(next);
+    bindCloudBackupActions(body);
+}
+
+function bindCloudBackupActions(body) {
+    bindCloudBackup(body, {
+        rerender: renderCloudBackupSection,
+    });
+}
+
 function bindDrawerActions(body = document.getElementById('drawer-body')) {
     if (!body) return;
     bindLibraryHealthActions(body);
+    bindCloudBackupActions(body);
     bindSettingInputs(body);
     body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
         sessionStorage.setItem('azimuth-server-update-dismissed', '1');
@@ -1869,6 +1897,7 @@ function stopDrawerPolling() {
     clearInterval(installTimer);
     installTimer = null;
     stopLibraryHealthPolling();
+    stopCloudBackupPolling();
     if (!freeupActive()) stopFreeUpPolling();
 }
 
