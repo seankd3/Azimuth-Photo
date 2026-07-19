@@ -14,7 +14,7 @@ A satellite install must never be stale and must never ask the user about versio
 Field LANs may have no internet. The satellite updates FROM THE HUB, which serves its own running tree:
 
 1. **Hub advertises identity.** `GET /api/version` returns `{sha, bundle_sha256, schema_version}` of the running checkout. Cached at startup; no git calls per request.
-2. **Hub serves its tree.** `GET /api/client/bundle` returns a tar.gz of the hub's own checkout at its running sha (`git archive` produced once, cached on disk beside the thumb cache, regenerated only when sha changes). Endpoint sits behind existing device/owner auth like every sync route.
+2. **Hub serves its tree.** `GET /api/client/bundle` returns a tar.gz of the hub's own checkout at its running sha (`git archive` produced once, cached on disk beside the thumb cache, regenerated only when sha changes). Endpoint sits behind existing device/owner auth like every sync route. Open-trust LANs (device auth off) serve client code openly to anyone who can reach the hub.
 3. **Satellite converges on connect.** During the normal sync-contract handshake the satellite compares hub sha to its own. On mismatch:
    - download bundle → verify sha256 against `/api/version` → unpack to `versions/<sha>/` beside the install
    - deps: hash `requirements.txt`; reuse the existing venv when unchanged (normal case), else build `venvs/<deps-hash>/` fresh

@@ -134,6 +134,29 @@ class ClientBundleRouteTests(unittest.TestCase):
         self.assertEqual(response.headers.get("x-content-sha256"), hashlib.sha256(b"route-bundle-bytes").hexdigest())
         self.assertEqual(response.headers.get("x-content-sha"), self.sha)
 
+    def test_bundle_requires_device_token_when_auth_enabled(self):
+        from features.sync import pairing
+
+        self.auth_patch.stop()
+        with mock.patch.object(device_auth, "require_device_token_enabled", return_value=True):
+            denied = self.client.get("/api/client/bundle")
+            self.assertEqual(denied.status_code, 401)
+            with mock.patch.object(
+                pairing,
+                "authenticate_device_token",
+                new=mock.AsyncMock(return_value={"device_id": "sat-1"}),
+            ):
+                allowed = self.client.get(
+                    "/api/client/bundle",
+                    headers={"X-Device-Token": "live-token"},
+                )
+            self.assertEqual(allowed.status_code, 200)
+            self.assertEqual(allowed.content, b"route-bundle-bytes")
+        self.auth_patch = mock.patch.object(
+            device_auth, "require_device_token_enabled", return_value=False
+        )
+        self.auth_patch.start()
+
 
 if __name__ == "__main__":
     unittest.main()

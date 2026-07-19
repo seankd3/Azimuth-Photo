@@ -167,11 +167,7 @@ class ClientUpdater:
             staging = Path(tmp) / "staging"
             staging.mkdir()
             with tarfile.open(archive, "r:gz") as handle:
-                # Hub bytes were sha256-verified above; extractall is intentional.
-                try:
-                    handle.extractall(staging, filter="data")  # noqa: S202
-                except TypeError:
-                    handle.extractall(staging)  # noqa: S202
+                safe_extractall(handle, staging)
             _move_tree(staging, version_dir)
         marker = version_dir / ".client_sha"
         marker.write_text(hub_sha + "\n", encoding="utf-8")
@@ -200,6 +196,44 @@ class ClientUpdater:
             atomic_write_text(self.previous_pointer, self.current_pointer.read_text(encoding="utf-8"))
         atomic_write_text(self.current_pointer, os.fspath(version_dir) + "\n")
         prune_old_versions(self.versions_dir, keep={hub_sha, _sha_from_pointer(self.previous_pointer)})
+
+
+def _tar_member_is_safe(member: tarfile.TarInfo, dest: Path) -> bool:
+    """Reject absolute paths, ``..`` traversal, and link members."""
+
+    name = str(member.name or "")
+    if not name or name.startswith("/") or name.startswith("\\"):
+        return False
+    if member.issym() or member.islnk():
+        return False
+    # Drive-letter absolute (Windows) or UNC.
+    if len(name) >= 2 and name[1] == ":":
+        return False
+    parts = Path(name.replace("\\", "/")).parts
+    if any(part == ".." for part in parts):
+        return False
+    target = (dest / name).resolve()
+    try:
+        target.relative_to(dest.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def safe_extractall(handle: tarfile.TarFile, dest: Path) -> None:
+    """Extract with path/link guards. Prefer filter='data' on Python ≥3.12."""
+
+    dest = Path(dest)
+    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        handle.extractall(dest, filter="data")  # noqa: S202
+        return
+    except TypeError:
+        pass
+    for member in handle.getmembers():
+        if not _tar_member_is_safe(member, dest):
+            raise RuntimeError(f"refusing unsafe tar member: {member.name!r}")
+        handle.extract(member, dest)  # noqa: S202
 
 
 def _move_tree(src: Path, dest: Path) -> None:

@@ -214,5 +214,24 @@ class DepsHashReuseTests(unittest.TestCase):
             self.assertEqual((target / ".deps_hash").read_text(encoding="utf-8").strip(), "deadbeef")
 
 
+class SafeExtractTests(unittest.TestCase):
+    def test_safe_extract_refuses_path_traversal_and_links_without_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "staging"
+            dest.mkdir()
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+                evil = tarfile.TarInfo(name="../escape.txt")
+                payload = b"nope"
+                evil.size = len(payload)
+                archive.addfile(evil, io.BytesIO(payload))
+            buffer.seek(0)
+            with tarfile.open(fileobj=buffer, mode="r:gz") as handle:
+                with mock.patch.object(handle, "extractall", side_effect=TypeError("no filter")):
+                    with self.assertRaisesRegex(RuntimeError, "unsafe tar member"):
+                        client_update.safe_extractall(handle, dest)
+            self.assertFalse((Path(tmp) / "escape.txt").exists())
+
+
 if __name__ == "__main__":
     unittest.main()
