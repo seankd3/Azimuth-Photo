@@ -7,6 +7,8 @@ import sys
 import time
 import unittest
 
+import pytest
+
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -109,6 +111,7 @@ class GuidedMaskRefineTests(unittest.TestCase):
         np.testing.assert_allclose(refined, plain, atol=1e-7)
 
 
+@pytest.mark.bench
 class GuidedFilterPerfTests(unittest.TestCase):
     def test_24mp_equivalent_apply_vs_gaussian(self) -> None:
         # Quarter-res of ~24MP (6000×4000 → 1500×1000) matches LOCAL_MASK_DOWNSAMPLE=4.
