@@ -203,6 +203,7 @@ async def api_get_image_rating(image_id: int):
         return JSONResponse({"error": "Image not found"}, status_code=404)
     rating = await image_repository.get_image_rating(_configured_db_path(), image_id)
     from features.sync import elo_stars as elo_stars_mod
+    from features.sync import shoot_rank as shoot_rank_mod
 
     row = dict(image) if not isinstance(image, dict) else image
     content_hash = str(row.get("content_hash") or "")
@@ -210,7 +211,12 @@ async def api_get_image_rating(image_id: int):
     if content_hash:
         by_hash = await elo_stars_mod.elo_stars_for_hashes(_configured_db_path(), [content_hash])
         projected = int(by_hash.get(content_hash) or 0)
-    whisper = elo_stars_mod.whisper_for_stars(projected) if projected else None
+    base_whisper = elo_stars_mod.whisper_for_stars(projected) if projected else None
+    rank_in_shoot = None
+    filepath = str(row.get("filepath") or "")
+    if base_whisper and filepath:
+        rank_in_shoot = await shoot_rank_mod.rank_in_shoot_for_filepath(_configured_db_path(), filepath)
+    whisper = shoot_rank_mod.compose_star_whisper(base_whisper, rank_in_shoot)
     return {
         "ok": True,
         "id": image_id,
@@ -218,6 +224,7 @@ async def api_get_image_rating(image_id: int):
         "lr_rating": rating,
         "elo_stars": projected,
         "elo_stars_whisper": whisper,
+        "rank_in_shoot": rank_in_shoot,
         "yours": bool(rating and int(rating) > 0),
     }
 

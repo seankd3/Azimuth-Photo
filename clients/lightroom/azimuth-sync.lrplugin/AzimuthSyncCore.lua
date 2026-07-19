@@ -313,4 +313,157 @@ function Core.parse_morning_collection_name(name)
   return { count = tonumber(count), date = date }
 end
 
+-- ── Best-of-shoot collections + contextual whisper (pure-core) ──────────────
+
+-- Collection set name the plugin maintains (child collections live under it).
+Core.BEST_OF_SET_NAME = "Azimuth / Best of"
+
+-- Mirror of server BEST_OF_SHOOT_MIN_SIZE — suppress collections for tiny shoots.
+Core.BEST_OF_SHOOT_MIN_SIZE = 5
+
+--- "Best of <shoot>" child collection title.
+function Core.best_of_collection_title(shoot_title)
+  local title = tostring(shoot_title or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  if title == "" then
+    title = "Shoot"
+  end
+  return "Best of " .. title
+end
+
+--- Parse "Best of <title>" → title or nil.
+function Core.parse_best_of_collection_name(name)
+  local title = tostring(name or ""):match("^Best of (.+)$")
+  if not title or title == "" then
+    return nil
+  end
+  return title
+end
+
+--- Whether a shoot is large enough for an automatic Best-of collection.
+function Core.shoot_qualifies_for_best_of(shoot_size, min_size)
+  local size = tonumber(shoot_size) or 0
+  local floor = tonumber(min_size) or Core.BEST_OF_SHOOT_MIN_SIZE
+  return size >= floor
+end
+
+--- Membership diff: filepath lists → { add = {...}, remove = {...} } (sorted).
+function Core.diff_collection_membership(desired, current)
+  local want = {}
+  for _, path in ipairs(desired or {}) do
+    if path and path ~= "" then
+      want[path] = true
+    end
+  end
+  local have = {}
+  for _, path in ipairs(current or {}) do
+    if path and path ~= "" then
+      have[path] = true
+    end
+  end
+  local add, remove = {}, {}
+  for path, _ in pairs(want) do
+    if not have[path] then
+      add[#add + 1] = path
+    end
+  end
+  for path, _ in pairs(have) do
+    if not want[path] then
+      remove[#remove + 1] = path
+    end
+  end
+  table.sort(add)
+  table.sort(remove)
+  return { add = add, remove = remove }
+end
+
+--- Build desired Best-of child collections from server shoot_context.best_of_shoots.
+--- Drops shoots below min_size (defense in depth if server sends them).
+function Core.best_of_targets(best_of_shoots, min_size)
+  local floor = tonumber(min_size) or Core.BEST_OF_SHOOT_MIN_SIZE
+  local targets = {}
+  for _, shoot in ipairs(best_of_shoots or {}) do
+    local size = tonumber(shoot.shoot_size) or #(shoot.filepaths or {})
+    if Core.shoot_qualifies_for_best_of(size, floor) then
+      local filepaths = {}
+      for _, path in ipairs(shoot.filepaths or {}) do
+        if path and path ~= "" then
+          filepaths[#filepaths + 1] = path
+        end
+      end
+      table.sort(filepaths)
+      if #filepaths > 0 then
+        targets[#targets + 1] = {
+          shoot_key = shoot.shoot_key,
+          shoot_title = shoot.shoot_title or "Shoot",
+          shoot_size = size,
+          name = Core.best_of_collection_title(shoot.shoot_title),
+          filepaths = filepaths,
+        }
+      end
+    end
+  end
+  table.sort(targets, function(a, b)
+    return a.name < b.name
+  end)
+  return targets
+end
+
+--- Plan collection create/update/delete from desired targets + existing child names.
+--- ``existing`` is { name = { filepaths = {...} }, ... } for children under the Best-of set.
+--- Returns { upsert = { {name, filepaths, add, remove} }, delete = { name, ... } }.
+function Core.plan_best_of_collections(targets, existing)
+  existing = existing or {}
+  local desired_names = {}
+  local upsert = {}
+  for _, target in ipairs(targets or {}) do
+    desired_names[target.name] = true
+    local current = (existing[target.name] and existing[target.name].filepaths) or {}
+    local diff = Core.diff_collection_membership(target.filepaths, current)
+    upsert[#upsert + 1] = {
+      name = target.name,
+      shoot_key = target.shoot_key,
+      shoot_title = target.shoot_title,
+      filepaths = target.filepaths,
+      add = diff.add,
+      remove = diff.remove,
+      create = existing[target.name] == nil,
+    }
+  end
+  local delete = {}
+  for name, _ in pairs(existing) do
+    if not desired_names[name] then
+      delete[#delete + 1] = name
+    end
+  end
+  table.sort(delete)
+  return { upsert = upsert, delete = delete }
+end
+
+--- Context-aware star whisper: global band + optional shoot rank.
+--- Example: "Top 30% of your ranked photos · #4 in this shoot"
+function Core.compose_star_whisper(global_whisper, rank_in_shoot)
+  local base = tostring(global_whisper or "")
+  if base == "" then
+    return nil
+  end
+  local rank = tonumber(rank_in_shoot)
+  if rank and rank > 0 then
+    return string.format("%s · #%d in this shoot", base, math.floor(rank))
+  end
+  return base
+end
+
+--- Lookup rank_in_shoot for a filepath from shoot_context.photos (or nil).
+function Core.rank_in_shoot_for(photos, filepath)
+  if not filepath or filepath == "" then
+    return nil
+  end
+  for _, row in ipairs(photos or {}) do
+    if row.filepath == filepath then
+      return tonumber(row.rank_in_shoot)
+    end
+  end
+  return nil
+end
+
 return Core
