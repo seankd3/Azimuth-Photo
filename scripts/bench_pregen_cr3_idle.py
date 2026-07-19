@@ -96,6 +96,17 @@ def _prune_non_cr3(catalog_db: Path) -> int:
     return int(after)
 
 
+def _physical_thumb_count(cache_dir: Path) -> int:
+    """Count on-disk preview cache files (excludes cache marker)."""
+    if not cache_dir.is_dir():
+        return 0
+    marker = ".photoarchive-cache"
+    total = 0
+    for _root, _dirs, files in os.walk(cache_dir):
+        total += sum(1 for name in files if name != marker)
+    return total
+
+
 def _wait_http(url: str, timeout: float = 60.0) -> None:
     deadline = time.time() + timeout
     last = None
@@ -332,7 +343,7 @@ def main() -> int:
             )
             return 1
 
-        samples: list[tuple[float, int, int]] = []
+        samples: list[tuple[float, int, int, int]] = []
         started = time.time()
         status = {}
         while time.time() - started < args.seconds:
@@ -346,7 +357,8 @@ def main() -> int:
             # Prefer session counter; fall back to preview tier count if the
             # session counter lags (observed 0 while disk tiers advanced).
             preview_count = int((status.get("preview") or {}).get("count") or 0)
-            samples.append((time.time(), generated, preview_count))
+            physical = _physical_thumb_count(cache)
+            samples.append((time.time(), generated, preview_count, physical))
             # Ops-board regression: 3s status poller must not throttle idle waves.
             time.sleep(3)
 
@@ -355,12 +367,13 @@ def main() -> int:
             return 1
 
         mid = len(samples) // 3
-        t0, g0, p0 = samples[mid]
-        t1, g1, p1 = samples[-1]
+        t0, g0, p0, f0 = samples[mid]
+        t1, g1, p1, f1 = samples[-1]
         elapsed_min = max(1e-6, (t1 - t0) / 60.0)
         session_rate = (g1 - g0) / elapsed_min
         preview_rate = (p1 - p0) / elapsed_min
-        rate = max(session_rate, preview_rate)
+        physical_rate = (f1 - f0) / elapsed_min
+        rate = max(session_rate, preview_rate, physical_rate)
         print(
             json.dumps(
                 {
@@ -373,8 +386,11 @@ def main() -> int:
                     "generated_end": g1,
                     "preview_start": p0,
                     "preview_end": p1,
+                    "physical_start": f0,
+                    "physical_end": f1,
                     "session_per_min": round(session_rate, 1),
                     "preview_per_min": round(preview_rate, 1),
+                    "physical_per_min": round(physical_rate, 1),
                     "sustained_per_min": round(rate, 1),
                     "min_rate": args.min_rate,
                     "pass": rate >= args.min_rate,

@@ -2336,6 +2336,85 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         )
         self.assertEqual(needed, {})
 
+    def _mark_preview_tiers_cached(self, image_id: int, path: str) -> None:
+        """Seed cache_entries + disk index as if all preview tiers already exist."""
+        signatures, _file_size, _mtime = self._catalog_signatures(path, image_id=image_id)
+        now = time.time()
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            for size, signature in signatures.items():
+                cache_path = thumbnails._thumbnail_disk_path(size, image_id)
+                os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+                with open(cache_path, "wb") as handle:
+                    handle.write(b"cached")
+                conn.execute(
+                    "INSERT OR REPLACE INTO cache_entries "
+                    "(cache_root, size, image_id, path, source_signature, "
+                    "size_bytes, last_accessed, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        thumbnails.SSD_CACHE_DIR,
+                        size,
+                        image_id,
+                        cache_path,
+                        signature,
+                        6,
+                        now,
+                        now,
+                    ),
+                )
+                thumbnails._index_disk_entry(size, image_id, cache_path, signature)
+            conn.commit()
+
+    def test_bulk_warmup_skips_cached_prefix_and_reaches_pending_in_one_wave(self):
+        """Cached walk-order prefix must not starve later pending rows.
+
+        With the old full-table walk, max_scan_batches * scan_batch could burn an
+        entire wave on already-warmed rows ahead of the uncached region. Selection
+        must anti-join so one wave finds pending work.
+        """
+        cached_count = 40
+        scan_batch = 8  # 4 scan passes * 8 < 40 → old walk never reaches pending
+        old_scan_batch = thumbnails.PREGENERATE_SCAN_BATCH
+        try:
+            thumbnails.PREGENERATE_SCAN_BATCH = scan_batch
+            for index in range(cached_count):
+                image_id = index + 1
+                path = self._make_image(f"a-cached/{index:03d}.jpg")
+                self._add_catalog_original(image_id, path)
+                self._mark_preview_tiers_cached(image_id, path)
+
+            pending_id = cached_count + 1
+            pending_path = self._make_image("z-pending/pending.jpg")
+            self._add_catalog_original(pending_id, pending_path)
+
+            thumbnails._reset_pregen_bulk_cursor()
+            preview_priority.clear_scopes()
+            warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+            self.assertGreater(warmed, 0)
+            self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", pending_id))
+        finally:
+            thumbnails.PREGENERATE_SCAN_BATCH = old_scan_batch
+
+    def test_candidate_batch_anti_joins_missing_tiers(self):
+        cached = self._make_image("a-cached.jpg")
+        pending = self._make_image("z-pending.jpg")
+        self._add_catalog_original(1, cached)
+        self._add_catalog_original(2, pending)
+        self._mark_preview_tiers_cached(1, cached)
+
+        cursor = {"source_id": 0, "filepath": "", "id": 0}
+        rows = asyncio.run(
+            thumbnail_pregen.candidate_batch(
+                thumbnails.data_providers.get_db,
+                cursor,
+                10,
+                cache_root=thumbnails.SSD_CACHE_DIR,
+                missing_sizes=thumbnails.THUMB_TIERS,
+            )
+        )
+        self.assertEqual([int(row["id"]) for row in rows], [2])
+
     def test_rankings_scope_signal_prioritizes_the_browsed_folder_without_moving_cursor(self):
         backlog = self._make_image("a-backlog/backlog.jpg")
         priority = self._make_image("z-Film Scans/priority.jpg")

@@ -1199,10 +1199,28 @@ def _reset_pregen_full_cursor():
 
 
 async def _pregen_bulk_candidate_batch(limit: int):
+    # Anti-join against cache_entries so a long already-warmed prefix cannot
+    # starve selection. Walk-all remains only for stale-replacement mode, where
+    # rows still have cache_entries but need signature refresh.
+    missing_sizes = [
+        size for size in THUMB_TIERS if _background_tier_budget(size) > 0
+    ]
+    # Bulk waves also warm originals when the full tier has budget — keep those
+    # rows selectable even when every preview tier is already present.
+    if int(_disk_allocations.get(FULL_TIER, 0) or 0) > 0:
+        missing_sizes.append(FULL_TIER)
+    if _replace_stale_thumbnails or not missing_sizes:
+        return await pregen.candidate_batch(
+            data_providers.get_db,
+            _pregen_bulk_cursor,
+            limit,
+        )
     return await pregen.candidate_batch(
         data_providers.get_db,
         _pregen_bulk_cursor,
         limit,
+        cache_root=SSD_CACHE_DIR,
+        missing_sizes=tuple(missing_sizes),
     )
 
 
@@ -1238,6 +1256,8 @@ async def _pregen_full_candidate_batch(limit: int):
         data_providers.get_db,
         _pregen_full_cursor,
         limit,
+        cache_root=SSD_CACHE_DIR,
+        missing_sizes=(FULL_TIER,),
     )
 
 
