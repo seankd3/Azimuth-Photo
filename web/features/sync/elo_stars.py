@@ -2,6 +2,10 @@
 
 Thresholds default to top 2% / next 8% / next 20% (cumulative 2/10/30).
 Only photos with ≥N comparisons project; predicted-only Elo does not.
+
+Outbound also emits clear-to-zero when a previously projected photo drops
+below threshold — the server tracks last-emitted projections so demotions
+reach Lightroom even though the live projection map omits zeros.
 """
 
 from __future__ import annotations
@@ -16,6 +20,15 @@ DEFAULT_MIN_COMPARISONS = 3
 # Cumulative percentile ceilings for 5★ / 4★ / 3★.
 DEFAULT_THRESHOLDS = (0.02, 0.10, 0.30)
 _CACHE_TTL_SECONDS = 15.0
+
+PROJECTION_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS elo_stars_last_projected (
+    content_hash TEXT PRIMARY KEY,
+    filepath TEXT NOT NULL,
+    stars INTEGER NOT NULL,
+    updated_at REAL NOT NULL
+);
+"""
 
 _lock = threading.Lock()
 _cache: dict[str, Any] = {"key": None, "expires": 0.0, "by_hash": {}, "by_id": {}}
@@ -68,6 +81,64 @@ def invalidate_elo_stars_cache() -> None:
         _cache["expires"] = 0.0
         _cache["by_hash"] = {}
         _cache["by_id"] = {}
+
+
+async def _ensure_projection_ledger(db_path: str) -> None:
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.executescript(PROJECTION_LEDGER_DDL)
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def _load_last_projected(db_path: str) -> dict[str, dict[str, Any]]:
+    await _ensure_projection_ledger(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        rows = await (
+            await conn.execute(
+                "SELECT content_hash, filepath, stars FROM elo_stars_last_projected"
+            )
+        ).fetchall()
+        return {
+            str(row["content_hash"]): {
+                "filepath": str(row["filepath"] or ""),
+                "stars": int(row["stars"]),
+            }
+            for row in rows
+        }
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
+async def _persist_projected(
+    db_path: str,
+    updates: list[tuple[str, str, int]],
+) -> None:
+    """Upsert last-emitted projections. stars=0 stays so we do not re-emit clears."""
+
+    if not updates:
+        return
+    await _ensure_projection_ledger(db_path)
+    now = time.time()
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute("BEGIN IMMEDIATE")
+        for content_hash, filepath, stars in updates:
+            await conn.execute(
+                "INSERT INTO elo_stars_last_projected(content_hash, filepath, stars, updated_at) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(content_hash) DO UPDATE SET "
+                "filepath=excluded.filepath, stars=excluded.stars, updated_at=excluded.updated_at",
+                (content_hash, filepath, int(stars), now),
+            )
+        await conn.commit()
+    except Exception:
+        await conn.rollback()
+        raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
 
 
 async def _load_projection(db_path: str) -> tuple[dict[str, int], dict[int, int]]:
@@ -130,50 +201,76 @@ async def outbound_elo_star_deltas(
 ) -> list[dict[str, Any]]:
     """Project Elo into star deltas for photos the LR plugin can path-match.
 
-    ``since`` is ignored for projection freshness (recomputed cheaply); it is
-    accepted so the GET deltas cursor stays one number. Clients treat repeated
-    equal projections as echoes via their ledger.
+    Emits new/changed projections and clear-to-zero demotions for anything
+    previously projected that dropped below threshold. ``since`` is accepted
+    so the GET deltas cursor stays one number; projection freshness is the
+    server-side last-emitted ledger, not the poll clock.
     """
 
-    del since  # projection is a full snapshot; echo ledger suppresses no-ops
+    del since  # demotion tracking is ledger-based, not cursor-based
     by_hash, _ = await _load_projection(db_path)
-    if not by_hash:
-        return []
+    last = await _load_last_projected(db_path)
+    limit = max(1, min(int(limit), 2000))
+
     conn = await connection.open_async(db_path)
     try:
-        hashes = list(by_hash.keys())
-        deltas: list[dict[str, Any]] = []
-        # Chunk IN clauses for SQLite variable limits.
-        for start in range(0, len(hashes), 400):
-            chunk = hashes[start : start + 400]
-            placeholders = ",".join("?" for _ in chunk)
-            rows = await (
-                await conn.execute(
-                    f"SELECT filepath, content_hash FROM images "
-                    f"WHERE content_hash IN ({placeholders}) "
-                    f"AND filepath IS NOT NULL AND TRIM(filepath) != '' "
-                    f"ORDER BY id ASC",
-                    chunk,
-                )
-            ).fetchall()
-            for row in rows:
-                content_hash = str(row["content_hash"])
-                stars = by_hash.get(content_hash)
-                if not stars:
-                    continue
-                deltas.append(
-                    {
-                        "filepath": str(row["filepath"]),
-                        "content_hash": content_hash,
-                        "family": "elo_stars",
-                        "value": int(stars),
-                        "ts": time.time(),
-                        "origin": "hub-projection",
-                        "origin_seq": 0,
-                    }
-                )
-                if len(deltas) >= limit:
-                    return deltas
-        return deltas
+        path_by_hash: dict[str, str] = {}
+        needed = set(by_hash) | set(last)
+        if needed:
+            hashes = list(needed)
+            for start in range(0, len(hashes), 400):
+                chunk = hashes[start : start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                rows = await (
+                    await conn.execute(
+                        f"SELECT filepath, content_hash FROM images "
+                        f"WHERE content_hash IN ({placeholders}) "
+                        f"AND filepath IS NOT NULL AND TRIM(filepath) != ''",
+                        chunk,
+                    )
+                ).fetchall()
+                for row in rows:
+                    path_by_hash[str(row["content_hash"])] = str(row["filepath"])
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+    now = time.time()
+    candidates: list[tuple[str, str, int]] = []  # content_hash, filepath, stars
+
+    for content_hash, stars in by_hash.items():
+        filepath = path_by_hash.get(content_hash) or (last.get(content_hash) or {}).get("filepath") or ""
+        if not filepath:
+            continue
+        prev = last.get(content_hash)
+        if prev is not None and int(prev["stars"]) == int(stars):
+            continue
+        candidates.append((content_hash, filepath, int(stars)))
+
+    for content_hash, prev in last.items():
+        if content_hash in by_hash:
+            continue
+        if int(prev["stars"]) <= 0:
+            continue
+        filepath = path_by_hash.get(content_hash) or str(prev.get("filepath") or "")
+        if not filepath:
+            continue
+        candidates.append((content_hash, filepath, 0))
+
+    # Stable order: demotions first (clear sticky stars), then by filepath.
+    candidates.sort(key=lambda item: (0 if item[2] == 0 else 1, item[1], item[0]))
+    selected = candidates[:limit]
+
+    deltas = [
+        {
+            "filepath": filepath,
+            "content_hash": content_hash,
+            "family": "elo_stars",
+            "value": int(stars),
+            "ts": now,
+            "origin": "hub-projection",
+            "origin_seq": 0,
+        }
+        for content_hash, filepath, stars in selected
+    ]
+    await _persist_projected(db_path, selected)
+    return deltas

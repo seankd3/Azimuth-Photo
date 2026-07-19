@@ -120,18 +120,34 @@ async def apply_inbound_deltas(
                 "family": draft["family"],
                 "payload": draft["payload"],
                 "ts": draft["ts"],
+                "filepath": draft["filepath"],
+                "inbound_family": draft["inbound_family"],
+                "value": draft["payload"].get("value"),
             }
             for _identity, draft in prepared
         ]
         applied = await oplog.apply_origin_batch(
-            db_path, drafts, origin=LR_ORIGIN, applied_from="lr-bridge"
+            db_path,
+            [
+                {
+                    "content_hash": draft["content_hash"],
+                    "family": draft["family"],
+                    "payload": draft["payload"],
+                    "ts": draft["ts"],
+                }
+                for draft in drafts
+            ],
+            origin=LR_ORIGIN,
+            applied_from="lr-bridge",
         )
         entries = [
             {
                 "origin": item["origin"],
                 "origin_seq": item["origin_seq"],
                 "content_hash": drafts[index]["content_hash"],
-                "family": drafts[index]["family"],
+                "family": drafts[index]["inbound_family"],
+                "filepath": drafts[index]["filepath"],
+                "value": drafts[index]["value"],
                 "ts": drafts[index]["ts"],
             }
             for index, item in enumerate(applied.get("entries") or [])

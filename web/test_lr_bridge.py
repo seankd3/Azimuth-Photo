@@ -148,6 +148,25 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["pending_count"], 1)
         self.assertEqual(result["applied"]["received"], 0)
 
+    async def test_inbound_entries_expose_filepath_and_inbound_family(self):
+        """Plugin ledger_remember_confirmed needs filepath + inbound family + value."""
+
+        path = self._catalog()
+        mixed = await lr_bridge.apply_inbound_deltas(
+            path,
+            [
+                {"filepath": "/photos/IMG_1.dng", "family": "lr_rating", "value": 4, "observed_at": 5.0},
+                {"filepath": "/missing.dng", "family": "flag", "value": "picked"},
+            ],
+        )
+        self.assertEqual(mixed["pending_count"], 1)
+        self.assertEqual(len(mixed["entries"]), 1)
+        entry = mixed["entries"][0]
+        self.assertEqual(entry["filepath"], "/photos/IMG_1.dng")
+        self.assertEqual(entry["family"], "lr_rating")
+        self.assertEqual(entry["value"], 4)
+        self.assertNotIn("/missing.dng", {item.get("filepath") for item in mixed["entries"]})
+
     async def test_concurrent_inbound_posts_get_distinct_seqs_and_both_apply(self):
         """origin_seq must be allocated inside the insert txn — no silent collision."""
 
@@ -227,6 +246,41 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         elo_stars.invalidate_elo_stars_cache()
         by_hash = await elo_stars.elo_stars_for_hashes(path)
         self.assertNotIn(HASH_C, by_hash)
+
+    async def test_elo_stars_demotion_emits_clear_to_zero(self):
+        """Previously projected photo dropping below threshold must emit stars=0."""
+
+        path = self._catalog()
+        elo_stars.invalidate_elo_stars_cache()
+        with closing(sqlite3.connect(path)) as conn:
+            for index in range(4, 14):
+                content_hash = f"{index:032x}"
+                conn.execute(
+                    "INSERT INTO images(id, filename, filepath, content_hash, elo, comparisons, file_ext) "
+                    "VALUES (?, ?, ?, ?, ?, 5, 'dng')",
+                    (index, f"x{index}.dng", f"/photos/x{index}.dng", content_hash, 1000 - index),
+                )
+            conn.commit()
+        elo_stars.invalidate_elo_stars_cache()
+        first = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        by_path = {item["filepath"]: item["value"] for item in first}
+        self.assertEqual(by_path.get("/photos/IMG_1.dng"), 5)
+        # Demote HASH_A below the projecting band via comparisons=0.
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET comparisons = 0, elo = 0 WHERE content_hash = ?",
+                (HASH_A,),
+            )
+            conn.commit()
+        elo_stars.invalidate_elo_stars_cache()
+        second = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        clears = [item for item in second if item["filepath"] == "/photos/IMG_1.dng"]
+        self.assertEqual(len(clears), 1)
+        self.assertEqual(clears[0]["value"], 0)
+        self.assertEqual(clears[0]["family"], "elo_stars")
+        # Second poll must not re-emit the same clear.
+        third = await elo_stars.outbound_elo_star_deltas(path, limit=500)
+        self.assertFalse(any(item["filepath"] == "/photos/IMG_1.dng" for item in third))
 
     def test_project_stars_thresholds(self):
         thresholds = (0.02, 0.10, 0.30)

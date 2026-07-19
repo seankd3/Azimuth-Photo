@@ -16,9 +16,28 @@ end
 
 local Core = dofile(LrPathUtils.child(_PLUGIN.path, "AzimuthSyncCore.lua"))
 
+local POLL_SECONDS = 10
+local WRITE_BATCH = 25
+
+local function prefs()
+  return LrPrefs.prefsForPlugin()
+end
+
+local function load_persisted_ledger()
+  local stored = prefs().echoLedger
+  if type(stored) == "string" and #stored > 0 then
+    return Core.ledger_deserialize(stored)
+  end
+  return Core.new_ledger()
+end
+
+local function persist_ledger(ledger)
+  prefs().echoLedger = Core.ledger_serialize(ledger)
+end
+
 local Service = {
   running = false,
-  ledger = Core.new_ledger(),
+  ledger = load_persisted_ledger(),
   last_scan = {},
   clock = 0,
   status = {
@@ -29,13 +48,6 @@ local Service = {
     satellite_url = nil,
   },
 }
-
-local POLL_SECONDS = 10
-local WRITE_BATCH = 25
-
-local function prefs()
-  return LrPrefs.prefsForPlugin()
-end
 
 local function satellite_url()
   local p = prefs()
@@ -176,9 +188,9 @@ local function push_outbound(observations)
     if response then
       Service.status.pending = tonumber(response.pending_count) or 0
       Service.status.synced = Service.status.synced + #(response.entries or {})
-      for _, obs in ipairs(batch) do
-        Core.ledger_remember(Service.ledger, obs.filepath, obs.family, obs.value, obs.observed_at)
-      end
+      -- Only remember server-confirmed applies — pending/unmatched stay out of the ledger.
+      Core.ledger_remember_confirmed(Service.ledger, response.entries)
+      persist_ledger(Service.ledger)
     end
   end
 end
@@ -200,6 +212,7 @@ local function apply_inbound(items)
             if not Core.is_echo(Service.ledger, item.filepath, "flag", item.value) then
               photo:setRawMetadata("pickStatus", Core.azimuth_flag_to_lr(item.value))
               Core.ledger_remember(Service.ledger, item.filepath, "flag", item.value, item.ts)
+              persist_ledger(Service.ledger)
               Service.status.synced = Service.status.synced + 1
             end
           elseif item.family == "elo_stars" then
@@ -207,6 +220,7 @@ local function apply_inbound(items)
             if Core.may_apply_elo_stars(Service.ledger, item.filepath, current, item.value) then
               photo:setRawMetadata("rating", tonumber(item.value) or 0)
               Core.ledger_remember(Service.ledger, item.filepath, "elo_stars", item.value, item.ts)
+              persist_ledger(Service.ledger)
               Service.status.synced = Service.status.synced + 1
             end
           end
@@ -237,6 +251,7 @@ local function poll_once()
         Core.ledger_remember(Service.ledger, filepath, "lr_rating", state.rating, state.observed_at)
       end
     end
+    persist_ledger(Service.ledger)
   end
   Service.last_scan = current
 end
