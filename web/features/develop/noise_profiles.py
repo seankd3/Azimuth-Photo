@@ -2,7 +2,8 @@
 
 The shipped data is a small, generated distillation of darktable calibration
 measurements.  It estimates noise at scene-linear mid-grey with the standard
-Poissonian-Gaussian model: variance = a * x + b.
+Poissonian-Gaussian model: variance = a * x + b.  Those variance-stabilizing
+(a, b) coefficients drive the existing NR slider strength — not a new engine.
 """
 
 from __future__ import annotations
@@ -45,12 +46,45 @@ def _model_key(value: object) -> str:
     """Normalize the common Canon / EXIF spelling variants without fuzzy IDs."""
     model = _text(value).casefold()
     model = re.sub(r"^canon\s+", "", model)
+    model = re.sub(r"^sony\s+", "", model)
+    model = re.sub(r"^dji\s+", "", model)
     return re.sub(r"[^a-z0-9]+", "", model)
 
 
+@lru_cache(maxsize=1)
+def _payload() -> dict[str, object]:
+    try:
+        payload = json.loads(NOISE_PROFILES_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+@lru_cache(maxsize=1)
+def _aliases() -> dict[str, str]:
+    raw = _payload().get("aliases")
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        _model_key(source): _text(target)
+        for source, target in raw.items()
+        if _text(source) and _text(target)
+    }
+
+
+def canonicalize_model(camera_model: object) -> str:
+    """Map catalog/EXIF model strings onto the shipped profile model name."""
+    text = _text(camera_model)
+    if not text:
+        return ""
+    aliased = _aliases().get(_model_key(text))
+    return aliased or re.sub(r"^(Canon|Sony|DJI)\s+", "", text, flags=re.IGNORECASE)
+
+
 def _model_matches(camera_model: object, profile_model: object) -> bool:
-    """Match Canon-prefixed and punctuation-variant model names safely."""
-    return bool(_model_key(camera_model)) and _model_key(camera_model) == _model_key(profile_model)
+    """Match maker-prefixed, alias, and punctuation-variant model names safely."""
+    requested = canonicalize_model(camera_model)
+    return bool(_model_key(requested)) and _model_key(requested) == _model_key(profile_model)
 
 
 def _coefficient_vector(value: object) -> tuple[float, float, float] | None:
@@ -65,11 +99,7 @@ def _coefficient_vector(value: object) -> tuple[float, float, float] | None:
 
 @lru_cache(maxsize=1)
 def _profiles() -> tuple[dict[str, object], ...]:
-    try:
-        payload = json.loads(NOISE_PROFILES_PATH.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return ()
-    entries = payload.get("profiles") if isinstance(payload, dict) else None
+    entries = _payload().get("profiles")
     if not isinstance(entries, list):
         return ()
     result: list[dict[str, object]] = []
@@ -103,6 +133,8 @@ def _profiles() -> tuple[dict[str, object], ...]:
 
 def clear_noise_profile_cache() -> None:
     """Clear the generated-data cache for focused tests and data refreshes."""
+    _payload.cache_clear()
+    _aliases.cache_clear()
     _profiles.cache_clear()
 
 
@@ -125,6 +157,7 @@ def lookup(camera_model: str, iso: float) -> dict[str, list[float]] | None:
 
     Coefficients clamp to the nearest measured ISO.  Intermediate ISO values
     interpolate linearly in log-ISO space, matching exposure-stop spacing.
+    Unknown cameras return ``None`` (generic fallback = today's NR behavior).
     """
     try:
         requested_iso = float(iso)
@@ -158,16 +191,47 @@ def _green_sigma(coefficients: Mapping[str, object]) -> float | None:
     return math.sqrt(max(variance, 0.0)) if math.isfinite(variance) else None
 
 
-def suggested_defaults(camera_model: str, iso: float) -> dict[str, float] | None:
-    """Map measured mid-grey noise to our current NR slider units."""
+def vst_parameters(camera_model: str, iso: float) -> dict[str, object] | None:
+    """Variance-stabilizing parameters that drive existing NR strength.
+
+    Returns Poisson–Gaussian ``a`` / ``b``, mid-grey variance, and green-channel
+    sigma.  ``None`` means no profile — callers must keep today's behavior.
+    """
     coefficients = lookup(camera_model, iso)
+    if coefficients is None:
+        return None
+    sigma = _green_sigma(coefficients)
+    if sigma is None:
+        return None
+    a_g = float(coefficients["a"][1])
+    b_g = float(coefficients["b"][1])
+    mid = float(NR_CALIBRATION["mid_grey"])
+    return {
+        "model": canonicalize_model(camera_model),
+        "iso": float(iso),
+        "a": list(coefficients["a"]),
+        "b": list(coefficients["b"]),
+        "mid_grey": mid,
+        "variance": a_g * mid + b_g,
+        "sigma": sigma,
+    }
+
+
+def nr_strength_from_vst(parameters: Mapping[str, object]) -> dict[str, float] | None:
+    """Map VST mid-grey sigma onto our current NR slider units."""
     low_iso, high_iso = NR_CALIBRATION["anchor_isos"]
     low = lookup(NR_CALIBRATION["anchor_camera"], low_iso)
     high = lookup(NR_CALIBRATION["anchor_camera"], high_iso)
-    if coefficients is None or low is None or high is None:
+    if low is None or high is None:
         return None
-    sigma, low_sigma, high_sigma = (_green_sigma(value) for value in (coefficients, low, high))
-    if sigma is None or low_sigma is None or high_sigma is None or high_sigma <= low_sigma:
+    try:
+        sigma = float(parameters["sigma"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    low_sigma, high_sigma = (_green_sigma(value) for value in (low, high))
+    if low_sigma is None or high_sigma is None or high_sigma <= low_sigma:
+        return None
+    if not math.isfinite(sigma):
         return None
     # The R5 anchors establish the slider scale, while noisier bodies and
     # ISOs continue above that reference until the slider's own hard cap.
@@ -178,6 +242,12 @@ def suggested_defaults(camera_model: str, iso: float) -> dict[str, float] | None
     }
 
 
+def suggested_defaults(camera_model: str, iso: float) -> dict[str, float] | None:
+    """Map measured mid-grey noise to our current NR slider units."""
+    parameters = vst_parameters(camera_model, iso)
+    return nr_strength_from_vst(parameters) if parameters is not None else None
+
+
 def resolve_defaults(
     settings: Mapping[str, object] | None, metadata: Mapping[str, object] | None
 ) -> dict[str, object]:
@@ -185,7 +255,7 @@ def resolve_defaults(
 
     Any explicit NR setting suppresses this feature completely, preserving the
     existing pipeline input (and therefore pixels) for edited and imported
-    photos.
+    photos.  Unknown cameras leave settings unchanged (identical to today).
     """
     resolved = dict(settings or {})
     if any(key in resolved for key in NR_KEYS) or not isinstance(metadata, Mapping):

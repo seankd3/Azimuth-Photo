@@ -1,0 +1,38 @@
+{
+  "source": "/mnt/expansion/Photos/RAWS/2024/2024-10-24/20241024-191116-7.CR3",
+  "camera_model": "Canon EOS R7",
+  "iso": 3200.0,
+  "vst": {
+    "a": [
+      0.000176915246725245,
+      7.02037814510636e-05,
+      0.000134781080373563
+    ],
+    "b": [
+      3.83531049694398e-07,
+      2.25606592920363e-07,
+      3.36068796274614e-07
+    ],
+    "mid_grey": 0.18,
+    "variance": 1.286228725411181e-05,
+    "sigma": 0.003586403108144957
+  },
+  "before_settings": {
+    "LuminanceSmoothing": 0,
+    "ColorNoiseReduction": 0
+  },
+  "after_settings": {
+    "LuminanceSmoothing": 37.689,
+    "ColorNoiseReduction": 21.537
+  },
+  "crop": {
+    "x0": 266,
+    "y0": 277,
+    "side": 512,
+    "working_size": [
+      1600,
+      1067
+    ]
+  },
+  "mean_abs_diff": 0.0057022119872272015
+}
