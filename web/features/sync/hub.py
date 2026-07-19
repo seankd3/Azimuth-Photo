@@ -20,6 +20,7 @@ from core import runtime_paths
 from core.source_files import inspect_source_file
 from data import connection
 from data.repositories import catalog as catalog_repository
+from data.repositories import common
 from features.imports import taxonomy
 from features.library import keywords
 from features.sync import family_clock
@@ -161,44 +162,76 @@ def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
     return int(file_stat.st_size) == int(expected_size)
 
 
+# Satellites re-manifest their whole library every sync cycle, so positive
+# proofs are cached briefly to keep the per-item stat() off the 15s hot loop.
+# Negative results are never cached: a just-finalized upload must read as
+# known on the very next manifest.
+_BYTE_PROOF_TTL_SECONDS = 600.0
+_byte_proof_cache: dict[tuple[str, str], tuple[float, int]] = {}
+
+
 async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) -> dict[str, int]:
     """Map content_hash → image_id only when an active original exists at expected size."""
 
     hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
     if not hashes:
         return {}
+
+    now = time.monotonic()
+    found: dict[str, int] = {}
+    unresolved: list[str] = []
+    for content_hash in hashes:
+        cached = _byte_proof_cache.get((db_path, content_hash))
+        if cached is not None and now - cached[0] < _BYTE_PROOF_TTL_SECONDS:
+            found[content_hash] = cached[1]
+        else:
+            unresolved.append(content_hash)
+    if not unresolved:
+        return found
+
+    rows: list[Any] = []
     conn = await connection.open_async(db_path)
     try:
-        placeholders = ",".join("?" for _ in hashes)
-        rows = await (
-            await conn.execute(
-                f"SELECT i.id, i.content_hash, i.filepath, i.file_size, s.path AS source_path "
-                f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
-                f"WHERE i.content_hash IN ({placeholders}) "
-                "AND COALESCE(i.hub_remote, 0) = 0 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-                "ORDER BY i.id",
-                hashes,
+        for batch in common.chunked(unresolved):
+            placeholders = ",".join("?" for _ in batch)
+            rows.extend(
+                await (
+                    await conn.execute(
+                        f"SELECT i.id, i.content_hash, i.filepath, i.file_size, s.path AS source_path "
+                        f"FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                        f"WHERE i.content_hash IN ({placeholders}) "
+                        "AND COALESCE(i.hub_remote, 0) = 0 "
+                        "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                        "ORDER BY i.id",
+                        list(batch),
+                    )
+                ).fetchall()
             )
-        ).fetchall()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
     def proven() -> dict[str, int]:
-        found: dict[str, int] = {}
+        checked: dict[str, int] = {}
         for row in rows:
             content_hash = str(row["content_hash"])
-            if content_hash in found:
+            if content_hash in checked:
                 continue
             if _byte_proof_ok(
                 str(row["filepath"] or ""),
                 str(row["source_path"] or ""),
                 row["file_size"],
             ):
-                found[content_hash] = int(row["id"])
-        return found
+                checked[content_hash] = int(row["id"])
+        return checked
 
-    return await asyncio.to_thread(proven)
+    fresh = await asyncio.to_thread(proven)
+    stamp = time.monotonic()
+    for content_hash, image_id in fresh.items():
+        _byte_proof_cache[(db_path, content_hash)] = (stamp, image_id)
+    if len(_byte_proof_cache) > 200_000:
+        _byte_proof_cache.clear()
+    found.update(fresh)
+    return found
 
 
 async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
