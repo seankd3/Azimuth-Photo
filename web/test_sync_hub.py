@@ -755,7 +755,7 @@ class SyncHubTests(unittest.TestCase):
         self.assertGreater(image_id, 0)
 
     def test_placement_is_persisted_and_collision_safe_across_retries(self):
-        """P0-B: first placement decision sticks; identical is idempotent; different errors."""
+        """P0-B/S4: first placement sticks; identical is idempotent; different gets a suffix."""
 
         payload = b"ROLL-ORIGINAL-" + (b"C" * 2048)
         content_hash = self.digest(payload)
@@ -813,7 +813,7 @@ class SyncHubTests(unittest.TestCase):
         self.assertFalse((self.root / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
         self.assertFalse((self.root / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
 
-        # Different bytes already at the locked path → error, original untouched.
+        # Different bytes already at the locked path → per-identity suffix, no overwrite.
         other = b"ROLL-COLLISION-" + (b"D" * 2047)
         self.assertEqual(len(other), len(payload))
         other_hash = self.digest(other)
@@ -838,27 +838,109 @@ class SyncHubTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        conflict = self.client.post(
-            f"/api/sync/upload/{other_hash}",
-            headers={"X-Offset": "0", "X-Total-Bytes": str(len(other))},
-            content=other,
-        )
-        self.assertEqual(conflict.status_code, 422, conflict.text)
+        other_id = self.upload(other_hash, other)
         self.assertEqual(destination.read_bytes(), payload)
-        self.assertFalse((destination.parent / "collision.jpg").exists())
-        self.assertFalse((destination.parent / "roll-2.jpg").exists())
-        # Original catalog row for the first upload remains the only one at that path.
+        tagged = destination.parent / f"roll-{other_hash[:8]}.jpg"
+        self.assertTrue(tagged.is_file())
+        self.assertEqual(tagged.read_bytes(), other)
         conn = sqlite3.connect(self.db_path)
         try:
+            other_path = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (other_hash,),
+            ).fetchone()[0]
             rows = conn.execute(
                 "SELECT id, content_hash FROM images WHERE filepath = ?",
                 (str(destination),),
             ).fetchall()
+            tagged_rows = conn.execute(
+                "SELECT id, content_hash FROM images WHERE filepath = ?",
+                (str(tagged),),
+            ).fetchall()
         finally:
             conn.close()
+        self.assertEqual(other_path, f"Film Scans/2026/2026-07-16/roll-{other_hash[:8]}.jpg")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], image_id)
         self.assertEqual(rows[0][1], content_hash)
+        self.assertEqual(len(tagged_rows), 1)
+        self.assertEqual(tagged_rows[0][0], other_id)
+        self.assertEqual(tagged_rows[0][1], other_hash)
+
+    def test_concurrent_finalize_same_filename_keeps_both_bytes(self):
+        """S4: two identities, one preferred path — both survive at distinct persisted paths."""
+
+        first = b"CONCURRENT-A-" + (b"A" * 4096)
+        second = b"CONCURRENT-B-" + (b"B" * 4096)
+        self.assertEqual(len(first), len(second))
+        first_hash = self.digest(first)
+        second_hash = self.digest(second)
+        for content_hash, payload, name in (
+            (first_hash, first, "shared.jpg"),
+            (second_hash, second, "shared.jpg"),
+        ):
+            response = self.client.post(
+                "/api/sync/manifest",
+                json={"items": [{
+                    "content_hash": content_hash,
+                    "full_hash": self.full_digest(payload),
+                    "bytes": len(payload),
+                    "filename": name,
+                    "date_taken": "2026-07-16",
+                    "folder": "Film Scans",
+                }]},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        async def _finalize_both():
+            return await asyncio.gather(
+                hub.append_upload_chunk(
+                    self.db_path,
+                    self.intake,
+                    self.raws,
+                    first_hash,
+                    offset=0,
+                    total_bytes=len(first),
+                    chunk=first,
+                ),
+                hub.append_upload_chunk(
+                    self.db_path,
+                    self.intake,
+                    self.raws,
+                    second_hash,
+                    offset=0,
+                    total_bytes=len(second),
+                    chunk=second,
+                ),
+            )
+
+        results = asyncio.run(_finalize_both())
+        image_ids = {int(row["image_id"]) for row in results}
+        self.assertEqual(len(image_ids), 2)
+
+        preferred = self.root / "Film Scans" / "2026" / "2026-07-16" / "shared.jpg"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT content_hash, placed_relpath, filepath FROM images "
+                "JOIN sync_manifest_items USING (content_hash) "
+                "WHERE content_hash IN (?, ?) ORDER BY content_hash",
+                (first_hash, second_hash),
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 2)
+        paths = {row[1] for row in rows}
+        self.assertEqual(len(paths), 2)
+        on_disk = []
+        for _content_hash, placed, filepath in rows:
+            path = Path(filepath)
+            self.assertTrue(path.is_file())
+            self.assertEqual(path, self.root / Path(placed))
+            on_disk.append(path.read_bytes())
+        self.assertEqual(sorted(on_disk), sorted([first, second]))
+        self.assertTrue(preferred.is_file())
+        self.assertIn(preferred.read_bytes(), (first, second))
 
     def test_manifest_known_requires_original_bytes_on_disk(self):
         """P1-C: a catalog row without byte proof must report as needed, not known."""
@@ -921,6 +1003,146 @@ class SyncHubTests(unittest.TestCase):
             restored.json(),
             {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
         )
+
+    def test_upload_short_circuit_bypasses_stale_byte_proof_cache(self):
+        """S1: single-hash upload known-check must fresh-stat, not trust the TTL cache."""
+
+        payload = self.image_bytes("stale-cache.jpg", (11, 22, 33))
+        content_hash = self.declare("stale-cache.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "stale-cache.jpg"
+        self.assertTrue(destination.is_file())
+
+        # Warm the manifest bulk cache with a positive proof.
+        warm = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "stale-cache.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(
+            warm.json(),
+            {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
+        )
+        self.assertIn(
+            (str(destination), len(payload)),
+            hub._stat_proof_cache,
+        )
+
+        destination.unlink()
+        # Upload short-circuit must re-stat and refuse "known" despite the warm cache.
+        known = asyncio.run(hub._known_image_id(self.db_path, content_hash))
+        self.assertIsNone(known)
+        # Manifest bulk path may still report known from cache until TTL — that is
+        # intentional; upload is the path that must not skip restoring bytes.
+
+    def test_null_file_size_requires_fresh_nonempty_byte_proof(self):
+        """S3: NULL file_size only proves a fresh non-empty file and is never cached."""
+
+        payload = self.image_bytes("null-size.jpg", (44, 55, 66))
+        content_hash = self.declare("null-size.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "null-size.jpg"
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("UPDATE images SET file_size = NULL WHERE id = ?", (image_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        hub._stat_proof_cache.clear()
+        self.assertTrue(
+            hub._byte_proof_ok(str(destination), str(self.root), None),
+        )
+        # Null-size proofs must not enter the cache.
+        self.assertEqual(hub._stat_proof_cache, {})
+        cached = hub._byte_proof_ok_cached(str(destination), str(self.root), None)
+        self.assertTrue(cached)
+        self.assertEqual(hub._stat_proof_cache, {})
+
+        destination.write_bytes(b"")
+        self.assertFalse(hub._byte_proof_ok(str(destination), str(self.root), None))
+        self.assertIsNone(asyncio.run(hub._known_image_id(self.db_path, content_hash)))
+        missing = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "null-size.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(missing.json(), {"missing": [content_hash], "known": []})
+
+    def test_manifest_freezes_bytes_and_full_hash_mid_upload(self):
+        """S6: re-manifest during an in-flight .part must not rewrite upload-critical fields."""
+
+        payload = b"FREEZE-ORIGINAL-" + (b"E" * 2048)
+        content_hash = self.digest(payload)
+        full_hash = self.full_digest(payload)
+        first = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": full_hash,
+                "bytes": len(payload),
+                "filename": "freeze.jpg",
+                "date_taken": "2026-07-16",
+            }]},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        split = len(payload) // 2
+        partial = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(payload))},
+            content=payload[:split],
+        )
+        self.assertEqual(partial.status_code, 200, partial.text)
+        self.assertEqual(partial.json(), {"offset": split})
+        self.assertTrue(hub.upload_part_path(self.intake, content_hash).exists())
+
+        hostile = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": "f" * 32,
+                "bytes": len(payload) + 99,
+                "filename": "freeze-renamed.jpg",
+                "date_taken": "2026-01-01",
+            }]},
+        )
+        self.assertEqual(hostile.status_code, 200, hostile.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT full_hash, bytes, filename FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], full_hash)
+        self.assertEqual(row[1], len(payload))
+        self.assertEqual(row[2], "freeze-renamed.jpg")
+
+        finish = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": str(split), "X-Total-Bytes": str(len(payload))},
+            content=payload[split:],
+        )
+        self.assertEqual(finish.status_code, 200, finish.text)
+        image_id = int(finish.json()["image_id"])
+        destination = self.raws / "2026" / "2026-07-16" / "freeze.jpg"
+        # placed_relpath was locked on first sighting (freeze.jpg), not the rename.
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertGreater(image_id, 0)
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -28,6 +29,7 @@ from data import connection as data_connection
 log = logging.getLogger(__name__)
 
 BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
+OWNER_MARKER_NAME = ".photoarchive-backup-owner"
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 # Pre-migration snapshots are the rollback safety net for a schema upgrade; they
@@ -77,6 +79,9 @@ ON image_checksums(checked_at);
 
 _backup_lock = threading.Lock()
 _integrity_lock = threading.Lock()
+# Test-only hook: called after gzip write, before decompress verify / publish.
+# Production never sets this. Tests use it to corrupt the .gz mid-pipeline.
+_gzip_publish_hook: Any = None
 _integrity_state: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -305,6 +310,70 @@ def _assert_destination_matches_catalog(db_path: str, root: Path, *, source_imag
     )
 
 
+def _owner_marker_path(root: Path) -> Path:
+    return Path(root) / OWNER_MARKER_NAME
+
+
+def _catalog_identity(db_path: str) -> str:
+    return str(Path(db_path).resolve())
+
+
+def assert_backup_owner(root: Path, db_path: str) -> None:
+    """Refuse when this backup dir belongs to a different catalog instance.
+
+    The owner marker records the configured catalog path on first successful
+    snapshot. A mismatched marker (or pre-marker directory that already holds
+    snapshots) means this instance must not publish or prune here.
+    """
+
+    root = Path(root)
+    marker = _owner_marker_path(root)
+    catalog = _catalog_identity(db_path)
+    if marker.is_file():
+        try:
+            payload = json.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise BackupMisconfigurationError(
+                f"Refusing backup: owner marker '{marker}' is unreadable ({exc})"
+            ) from exc
+        owned = str(payload.get("catalog_path") or "").strip()
+        if owned != catalog:
+            raise BackupMisconfigurationError(
+                "Refusing backup: backup destination "
+                f"'{root}' belongs to catalog '{owned or '<unknown>'}', "
+                f"not this instance's catalog '{catalog}'."
+            )
+        return
+
+    existing = sorted(root.glob("photoarchive-*.db.gz"))
+    if existing:
+        raise BackupMisconfigurationError(
+            "Refusing backup: backup destination "
+            f"'{root}' already holds snapshots but has no owner marker. "
+            "That shape is a pre-marker or foreign directory; refusing to "
+            "publish or prune until ownership is explicit."
+        )
+
+
+def write_backup_owner_marker(root: Path, db_path: str) -> None:
+    """Persist catalog ownership after the first successful snapshot."""
+
+    root = Path(root)
+    marker = _owner_marker_path(root)
+    if marker.exists():
+        assert_backup_owner(root, db_path)
+        return
+    payload = {
+        "catalog_path": _catalog_identity(db_path),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+    temporary = marker.with_suffix(".tmp")
+    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _fsync_file(temporary)
+    os.replace(temporary, marker)
+    _fsync_directory(root)
+
+
 def catalog_quick_check(db_path: str) -> dict[str, Any]:
     """Read-only SQLite health check used before catalog startup work begins."""
     path = os.path.abspath(db_path)
@@ -405,13 +474,26 @@ def create_snapshot(
             finally:
                 data_connection.close_sync(probe, db_path=db_path)
             _assert_destination_matches_catalog(db_path, root, source_images=source_images)
+            # Cross-instance guard: must pass before any publish or retention.
+            assert_backup_owner(root, db_path)
             copied_images = _sqlite_backup_to_path(db_path, str(tmp_db))
             _verify_backup_artifact(str(tmp_db), db_path, snapshot_images=copied_images)
 
             with open(tmp_db, "rb") as raw, gzip.open(tmp_gz, "wb", compresslevel=6) as gz:
                 shutil.copyfileobj(raw, gz, length=1024 * 1024)
+                gz.flush()
+                os.fsync(gz.fileno())
+
+            hook = _gzip_publish_hook
+            if hook is not None:
+                hook(tmp_gz)
+
+            _verify_gzip_matches_db(tmp_gz, tmp_db)
 
             os.replace(tmp_gz, final_path)
+            _fsync_file(final_path)
+            _fsync_directory(root)
+            write_backup_owner_marker(root, db_path)
             size = final_path.stat().st_size
             pruned = apply_retention(root)
             created_at = (when or datetime.now().astimezone()).isoformat()
@@ -790,6 +872,54 @@ def _sha256_file(path: str) -> tuple[str, int]:
             digest.update(chunk)
             total += len(chunk)
     return digest.hexdigest(), total
+
+
+def _sha256_gzip_payload(path: Path) -> tuple[str, int]:
+    """Hash the decompressed payload of a .gz without writing it to disk."""
+
+    digest = hashlib.sha256()
+    total = 0
+    with gzip.open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(CHECKSUM_CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+    return digest.hexdigest(), total
+
+
+def _verify_gzip_matches_db(tmp_gz: Path, tmp_db: Path) -> None:
+    """Refuse to publish a gzip whose decompressed bytes diverge from the verified DB."""
+
+    expected_hash, expected_size = _sha256_file(str(tmp_db))
+    try:
+        actual_hash, actual_size = _sha256_gzip_payload(tmp_gz)
+    except (OSError, gzip.BadGzipFile, EOFError) as exc:
+        raise BackupVerificationError(
+            f"Published gzip failed decompress verification: {exc}"
+        ) from exc
+    if actual_hash != expected_hash or actual_size != expected_size:
+        raise BackupVerificationError(
+            "Published gzip payload does not match the verified catalog snapshot "
+            f"(db_sha256={expected_hash} gz_sha256={actual_hash} "
+            f"db_bytes={expected_size} gz_bytes={actual_size})"
+        )
+
+
+def _fsync_file(path: Path) -> None:
+    with open(path, "rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _select_integrity_candidates(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:

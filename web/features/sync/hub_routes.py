@@ -90,7 +90,11 @@ def _configured_raws_root() -> Path:
 @router.post("/api/sync/manifest")
 async def api_sync_manifest(body: ManifestRequest):
     try:
-        return await hub.manifest(_configured_db_path(), [item.model_dump() for item in body.items])
+        return await hub.manifest(
+            _configured_db_path(),
+            [item.model_dump() for item in body.items],
+            intake_root=_configured_intake_root(),
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

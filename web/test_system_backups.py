@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import gzip
+import json
 import os
 import sqlite3
 import tempfile
@@ -256,6 +257,27 @@ class BackupUnitTests(unittest.TestCase):
         summary = backups.integrity_summary(str(self.db_path))
         self.assertIn("Catalog backup failed", summary.get("alert") or "")
 
+    def test_corrupt_gzip_before_publish_is_refused(self):
+        """B1: decompress-verify the .gz against the verified tmp DB before os.replace."""
+
+        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+
+        def corrupt_gz(path: Path) -> None:
+            path.write_bytes(b"not-a-gzip-payload")
+
+        previous = backups._gzip_publish_hook
+        backups._gzip_publish_hook = corrupt_gz
+        try:
+            with self.assertRaises(backups.BackupVerificationError):
+                backups.create_snapshot(str(self.db_path))
+        finally:
+            backups._gzip_publish_hook = previous
+
+        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        self.assertEqual(after, before)
+        self.assertFalse(list(self.root.glob(".*.tmp.db")))
+        self.assertFalse(list(self.root.glob(".*.tmp.gz")))
+
     def test_empty_catalog_refuses_shared_historical_backup_dir(self):
         historical = self.root / "photoarchive-20260101-040000.db.gz"
         historical.write_bytes(b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1))
@@ -268,6 +290,44 @@ class BackupUnitTests(unittest.TestCase):
             if path.name != historical.name
         ]
         self.assertEqual(published, [])
+
+    def test_second_instance_refuses_foreign_backup_dir_without_pruning(self):
+        """B3/B4: owner marker blocks a foreign catalog; retention must not run."""
+
+        first = backups.create_snapshot(
+            str(self.db_path),
+            when=datetime(2026, 7, 1, 4, 0, 0),
+        )
+        self.assertTrue(first["ok"])
+        marker = self.root / backups.OWNER_MARKER_NAME
+        self.assertTrue(marker.is_file())
+        payload = json.loads(marker.read_text(encoding="utf-8"))
+        self.assertEqual(payload["catalog_path"], str(self.db_path.resolve()))
+
+        # Plant an extra same-day older snapshot that a successful second run would prune.
+        vulnerable = self.root / "photoarchive-20260701-030000.db.gz"
+        vulnerable.write_bytes(b"keep-me" * 64)
+        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+
+        other_db = Path(self.tempdir.name) / "other-instance.db"
+        _make_catalog(other_db, files=[(str(Path(self.tempdir.name) / "other.bin"), b"other-bytes")])
+
+        with mock.patch.object(backups, "backup_root_for", return_value=self.root):
+            with self.assertRaisesRegex(backups.BackupMisconfigurationError, "belongs to catalog"):
+                backups.create_snapshot(
+                    str(other_db),
+                    when=datetime(2026, 7, 1, 5, 0, 0),
+                )
+
+        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        self.assertEqual(after, before)
+        self.assertTrue(vulnerable.is_file())
+        self.assertEqual(vulnerable.read_bytes(), b"keep-me" * 64)
+        # Marker still names the original owner.
+        self.assertEqual(
+            json.loads(marker.read_text(encoding="utf-8"))["catalog_path"],
+            str(self.db_path.resolve()),
+        )
 
 
 class BackupIsolationTests(unittest.TestCase):

@@ -26,7 +26,9 @@ function isIdempotentGet(fetchOptions) {
     return requestMethod(fetchOptions) === 'GET';
 }
 
-function isTransientFailure(error, status) {
+function isTransientFailure(error, status, fetchOptions) {
+    // Caller-aborted requests are intentional cancels, not transient blips.
+    if (fetchOptions?.signal?.aborted) return false;
     if (status === 502 || status === 503 || status === 504) return true;
     if (status) return false;
     const cause = error?.cause || error;
@@ -38,9 +40,9 @@ function isTransientFailure(error, status) {
 }
 
 function retryDelayMs(attempt) {
-    const base = attempt <= 1 ? 1000 : 3000;
-    const jitter = Math.floor(Math.random() * 250);
-    return base + jitter;
+    // attempt 1 → ~0–1s jitter before second try; attempt 2 → 3–6s before third.
+    if (attempt <= 1) return Math.floor(Math.random() * 1000);
+    return 3000 + Math.floor(Math.random() * 3000);
 }
 
 function sleep(ms) {
@@ -89,7 +91,7 @@ export async function fetchJson(url, {
         } catch (error) {
             lastError = error;
             const status = error?.status || 0;
-            const canRetry = attempt < maxAttempts && isTransientFailure(error, status);
+            const canRetry = attempt < maxAttempts && isTransientFailure(error, status, fetchOptions);
             if (!canRetry) throw error;
             await sleep(retryDelayMs(attempt));
         }
