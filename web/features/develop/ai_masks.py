@@ -23,6 +23,7 @@ from PIL import Image
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
 from core.runtime_paths import resolve_runtime_paths
+from .guided_filter import guided_filter
 
 MaskKind = Literal["subject", "sky"]
 DEVELOP_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)
@@ -189,29 +190,6 @@ def _subject_mask(rgb: np.ndarray) -> np.ndarray:
     ) / np.float32(255.0)
 
 
-def _box_mean(values: np.ndarray, radius: int) -> np.ndarray:
-    """Edge-padded box average, used by the sky heuristic's guided filter."""
-
-    if radius <= 0:
-        return values
-    padded = np.pad(values, ((radius, radius), (radius, radius)), mode="edge")
-    integral = np.pad(padded, ((1, 0), (1, 0)), mode="constant").cumsum(axis=0).cumsum(axis=1)
-    span = radius * 2 + 1
-    return (integral[span:, span:] - integral[:-span, span:] - integral[span:, :-span] + integral[:-span, :-span]) / float(span * span)
-
-
-def _guided_filter(guide: np.ndarray, initial: np.ndarray, radius: int, epsilon: float = 0.003) -> np.ndarray:
-    """Classic gray guided filter, retaining edges in the base preview."""
-
-    mean_guide = _box_mean(guide, radius)
-    mean_initial = _box_mean(initial, radius)
-    variance = _box_mean(guide * guide, radius) - mean_guide * mean_guide
-    covariance = _box_mean(guide * initial, radius) - mean_guide * mean_initial
-    a = covariance / (variance + epsilon)
-    b = mean_initial - a * mean_guide
-    return _box_mean(a, radius) * guide + _box_mean(b, radius)
-
-
 def _sky_mask(rgb: np.ndarray) -> np.ndarray:
     """Honest v1 sky heuristic: top-of-frame and blue-chroma prior, edge refined."""
 
@@ -221,7 +199,7 @@ def _sky_mask(rgb: np.ndarray) -> np.ndarray:
     vertical = np.clip(1.0 - np.arange(height, dtype=np.float32)[:, None] / max(height * 0.86, 1.0), 0.0, 1.0)
     blue_chroma = np.clip((blue - np.maximum(red, green) + 0.10) / 0.34, 0.0, 1.0)
     coarse = vertical * (0.16 + 0.84 * blue_chroma)
-    refined = _guided_filter(luminance, coarse, max(2, min(height, width) // 80))
+    refined = guided_filter(luminance, coarse, max(2, min(height, width) // 80))
     return np.clip(refined, 0.0, 1.0)
 
 
