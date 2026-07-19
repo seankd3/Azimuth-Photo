@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 import db
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.sync import elo_stars, export_relation, lr_bridge
+from features.sync import elo_stars, export_relation, lr_bridge, lr_connect, lr_status
 
 router = APIRouter(tags=["lr-bridge"])
 
@@ -32,6 +32,48 @@ class LrExportBody(BaseModel):
     export_image_id: int | None = None
 
 
+class LrConnectBody(BaseModel):
+    satellite_url: str | None = None
+
+
+def _request_satellite_url(request: Request, override: str | None = None) -> str:
+    if override and str(override).strip():
+        return str(override).strip().rstrip("/")
+    # Prefer the URL the desktop itself is using (loopback for local satellite).
+    port = request.url.port or (443 if request.url.scheme == "https" else 80)
+    host = request.url.hostname or "127.0.0.1"
+    if host in {"0.0.0.0", "::", "[::]"}:
+        host = "127.0.0.1"
+    if (request.url.scheme == "http" and port == 80) or (request.url.scheme == "https" and port == 443):
+        return f"{request.url.scheme}://{host}"
+    return f"{request.url.scheme}://{host}:{port}"
+
+
+@router.get("/api/lr/connect")
+async def get_lr_connect(request: Request):
+    """Detect LR + plugin install state for the one-click Connect button."""
+
+    status = lr_connect.connect_status(satellite_url=_request_satellite_url(request))
+    return status
+
+
+@router.post("/api/lr/connect")
+async def post_lr_connect(request: Request, body: LrConnectBody | None = None):
+    """Install the plugin into LR Modules and write satellite URL config."""
+
+    url = _request_satellite_url(request, (body.satellite_url if body else None))
+    result = lr_connect.connect_plugin(satellite_url=url)
+    status = 200 if result.get("ok") else 400
+    return JSONResponse(result, status_code=status)
+
+
+@router.delete("/api/lr/connect")
+async def delete_lr_connect():
+    """Remove the installed plugin. Idempotent."""
+
+    return lr_connect.disconnect_plugin()
+
+
 @router.post("/api/lr/deltas")
 async def post_lr_deltas(body: LrDeltasBody):
     """Inbound LR flag/lr_rating batch → family-clock apply with origin lr."""
@@ -40,6 +82,7 @@ async def post_lr_deltas(body: LrDeltasBody):
         db.DB_PATH,
         [item.model_dump() for item in body.items],
     )
+    lr_status.note_delta_exchange(direction="in")
     return result
 
 
@@ -61,6 +104,7 @@ async def get_lr_deltas(
     clock = since
     for item in items:
         clock = max(clock, float(item.get("ts") or 0.0))
+    lr_status.note_delta_exchange(direction="out")
     return {"since": since, "clock": clock, "items": items, "count": len(items)}
 
 

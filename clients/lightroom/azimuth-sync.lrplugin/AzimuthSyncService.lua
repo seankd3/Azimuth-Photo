@@ -37,11 +37,34 @@ local function prefs()
   return LrPrefs.prefsForPlugin()
 end
 
+local function read_bundled_satellite_url()
+  -- One-click connect writes satellite_url.json beside Info.lua.
+  local path = LrPathUtils.child(_PLUGIN.path, "satellite_url.json")
+  local fh = io.open(path, "r")
+  if not fh then
+    return nil
+  end
+  local body = fh:read("*a")
+  fh:close()
+  if type(body) ~= "string" or #body == 0 then
+    return nil
+  end
+  local url = body:match('"satelliteUrl"%s*:%s*"([^"]+)"')
+  if url and #url > 0 then
+    return url:gsub("/+$", "")
+  end
+  return nil
+end
+
 local function satellite_url()
   local p = prefs()
   local url = p.satelliteUrl
   if type(url) == "string" and #url > 0 then
     return url:gsub("/+$", "")
+  end
+  local bundled = read_bundled_satellite_url()
+  if bundled then
+    return bundled
   end
   return "http://127.0.0.1:8000"
 end
@@ -190,6 +213,7 @@ local function apply_inbound(items)
   local catalog = LrApplication.activeCatalog()
   local snapshot = scan_catalog()
   local merged = Core.merge_inbound(items)
+  local morning_picks = {}
   for _, batch in ipairs(Core.batches(merged, WRITE_BATCH)) do
     catalog:withWriteAccessDo("Azimuth Sync", function()
       for _, item in ipairs(batch) do
@@ -201,6 +225,9 @@ local function apply_inbound(items)
               photo:setRawMetadata("pickStatus", Core.azimuth_flag_to_lr(item.value))
               Core.ledger_remember(Service.ledger, item.filepath, "flag", item.value, item.ts)
               Service.status.synced = Service.status.synced + 1
+              if item.value == "picked" then
+                morning_picks[#morning_picks + 1] = { filepath = item.filepath, photo = photo }
+              end
             end
           elseif item.family == "elo_stars" then
             local current = tonumber(photo:getRawMetadata("rating")) or 0
@@ -214,6 +241,89 @@ local function apply_inbound(items)
       end
     end)
   end
+  if #morning_picks > 0 then
+    maintain_morning_collection(morning_picks)
+  end
+end
+
+--- Dated "From Azimuth — N picks · date" collection for picks since last LR session.
+local function session_pick_baseline()
+  local p = prefs()
+  return p.morningBaseline or {}
+end
+
+local function save_session_pick_baseline(snapshot)
+  local baseline = {}
+  for filepath, state in pairs(snapshot or {}) do
+    if state.flag == "picked" then
+      baseline[filepath] = "picked"
+    end
+  end
+  prefs().morningBaseline = baseline
+end
+
+local function list_morning_collections(catalog)
+  local found = {}
+  local children = catalog:getChildCollections() or {}
+  for _, coll in ipairs(children) do
+    local name = coll:getName()
+    local parsed = Core.parse_morning_collection_name(name)
+    if parsed then
+      local photos = coll:getPhotos() or {}
+      found[#found + 1] = {
+        collection = coll,
+        name = name,
+        date = parsed.date,
+        photo_count = #photos,
+        empty = #photos == 0,
+      }
+    end
+  end
+  return found
+end
+
+function maintain_morning_collection(new_pick_photos)
+  local catalog = LrApplication.activeCatalog()
+  local today = os.date("%Y-%m-%d")
+  catalog:withWriteAccessDo("Azimuth morning collection", function()
+    -- Age out empty collections from prior days.
+    local existing = list_morning_collections(catalog)
+    for _, aged in ipairs(Core.aged_empty_collections(existing, os.time())) do
+      if aged.collection then
+        catalog:deleteCollection(aged.collection)
+      end
+    end
+    -- Find or create today's collection; append new picks.
+    local today_coll = nil
+    for _, entry in ipairs(list_morning_collections(catalog)) do
+      if entry.date == today then
+        today_coll = entry.collection
+        break
+      end
+    end
+    local photos = {}
+    for _, item in ipairs(new_pick_photos or {}) do
+      if item.photo then
+        photos[#photos + 1] = item.photo
+      end
+    end
+    if #photos == 0 then
+      return
+    end
+    if not today_coll then
+      local title = Core.morning_collection_title(#photos, os.time())
+      today_coll = catalog:createCollection(title, nil, false)
+    end
+    if today_coll and today_coll.addPhotos then
+      today_coll:addPhotos(photos)
+      -- Refresh title count from membership.
+      local members = today_coll:getPhotos() or photos
+      local title = Core.morning_collection_title(#members, os.time())
+      if today_coll.setName then
+        today_coll:setName(title)
+      end
+    end
+  end)
 end
 
 local function poll_once()
@@ -237,6 +347,12 @@ local function poll_once()
         Core.ledger_remember(Service.ledger, filepath, "lr_rating", state.rating, state.observed_at)
       end
     end
+    -- Remember which picks were already present when this LR session opened.
+    if not prefs().morningBaseline then
+      save_session_pick_baseline(current)
+    end
+    -- Age empty morning collections even when no new picks arrive.
+    maintain_morning_collection({})
   end
   Service.last_scan = current
 end
