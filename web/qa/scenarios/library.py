@@ -26,9 +26,9 @@ def library_grid_virtualization(qa) -> None:
 def scope_source_switch(qa) -> None:
     qa.goto_desktop()
     qa.mark("switch from All Photos to the hub mirror source")
-    source = qa.page.locator("#source-list [data-source]").first
-    source_count = number_from_text(source.locator(".nr-count").inner_text())
-    source.click()
+    source = qa.page.locator("#folder-tree [data-folder-source-path]").first
+    source_count = number_from_text(source.locator(".folder-count").inner_text())
+    source.locator(".folder-main").click()
     qa.page.wait_for_function(
         """expected => {
             const text = document.querySelector('#ctx-count')?.textContent || '';

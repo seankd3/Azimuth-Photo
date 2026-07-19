@@ -182,16 +182,20 @@ class UiContractsTests(BackendTestCase):
 
     async def test_source_rows_offer_the_complete_scope_menu(self):
         base_dir = os.path.dirname(__file__)
-        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
-            panel = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "folders.js"), encoding="utf-8") as fh:
+            folders = fh.read()
         with open(os.path.join(base_dir, "static", "js", "desktop", "source_reveal_menu.js"), encoding="utf-8") as fh:
             source_reveal_menu = fh.read()
         with open(os.path.join(base_dir, "static", "js", "desktop", "file_manager.js"), encoding="utf-8") as fh:
             file_manager = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "drawer.js"), encoding="utf-8") as fh:
+            drawer = fh.read()
 
-        self.assertIn("openSourceRevealMenu", panel)
-        self.assertIn("row.addEventListener('contextmenu'", panel)
-        self.assertIn("openSourceRevealMenu(row.dataset.source, row, count, {", panel)
+        self.assertIn("data-act=\"rescan\"", folders)
+        self.assertIn("data-quiet-toggle", folders)
+        self.assertIn("rescanCatalogSource", folders)
+        self.assertIn("row.addEventListener('contextmenu'", folders)
+        self.assertIn("openSourceRevealMenu", drawer)
         self.assertIn("revealFolder(path, sourceId)", source_reveal_menu)
         self.assertIn('data-act="scope"', source_reveal_menu)
         self.assertIn('data-act="refine"', source_reveal_menu)
@@ -200,7 +204,7 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("fileManagerMenuLabel()", source_reveal_menu)
         self.assertIn("revealAvailable", source_reveal_menu)
         self.assertIn("revealAvailable ?", source_reveal_menu)
-        self.assertIn("node.reveal_available !== false", (open(os.path.join(base_dir, "static", "js", "desktop", "folders.js"), encoding="utf-8")).read())
+        self.assertIn("node.reveal_available !== false", folders)
         self.assertIn("'Open in Explorer'", file_manager)
         self.assertNotIn("Reveal in Explorer", file_manager)
 
@@ -209,15 +213,17 @@ class UiContractsTests(BackendTestCase):
         desktop_dir = os.path.join(base_dir, "static", "js", "desktop")
         with open(os.path.join(desktop_dir, "drawer.js"), encoding="utf-8") as fh:
             drawer = fh.read()
-        with open(os.path.join(desktop_dir, "panel.js"), encoding="utf-8") as fh:
-            panel = fh.read()
         with open(os.path.join(desktop_dir, "folders.js"), encoding="utf-8") as fh:
             folders = fh.read()
+        with open(os.path.join(desktop_dir, "library_manage.js"), encoding="utf-8") as fh:
+            library_manage = fh.read()
 
         self.assertIn("export function openSourceAddFlow", drawer)
         self.assertIn("renderSourceAddUi()", drawer)
-        self.assertIn("openSourceAddFlow({ onSuccess: loadCatalogChrome })", panel)
         self.assertIn("openSourceAddFlow({ onSuccess: refreshFoldersPanel })", folders)
+        self.assertIn("openSourceAddFlow(", library_manage)
+        self.assertIn("isNestedSource", library_manage)
+        self.assertIn("nested — merge into parent", library_manage)
 
     async def test_deliver_treats_hook_retry_as_settling(self):
         base_dir = os.path.dirname(__file__)

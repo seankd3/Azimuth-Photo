@@ -348,7 +348,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
     @pytest.mark.contract
     def test_quiet_sources_compose_through_scope_params_once(self):
         state = read("state.js")
-        panel = read("panel.js")
+        folders = read("folders.js")
         quiet = read("quiet_sources.js")
         map_module = read("map.js")
         timeline = read("timeline.js")
@@ -357,7 +357,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("applyExcludeSources(params, undefined, folderValues(), { reveal });", state)
         self.assertIn("forGridResults", state)
         self.assertIn("export function applyExcludeSources", quiet)
-        self.assertIn("data-quiet-toggle", panel)
+        self.assertIn("data-quiet-toggle", folders)
         self.assertIn("pa_d_quiet_sources", quiet)
         self.assertIn("await getMapMarkers(scopeParams())", map_module)
         self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)

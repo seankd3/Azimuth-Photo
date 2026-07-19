@@ -80,16 +80,17 @@
                         <div id="library-list"></div>
                     </section>
                     <section class="psec" id="sec-folders">
-                        <div class="psec-head"><h3>Folders</h3></div>
+                        <div class="psec-head">
+                            <h3>Folders</h3>
+                            <button class="psec-act" id="folders-manage-btn" type="button" aria-label="Manage library" data-tip="Manage library" title="Manage library">
+                                <svg class="icon" aria-hidden="true"><use href="#i-settings-2"></use></svg>
+                            </button>
+                        </div>
                         <div class="folder-filter-wrap">
                             <span class="folder-filter-icon"><svg class="icon" aria-hidden="true"><use href="#i-search"></use></svg></span>
                             <input id="folder-filter" type="search" autocomplete="off" spellcheck="false" placeholder="Filter folders…" aria-label="Filter folders">
                         </div>
                         <div id="folder-tree" role="tree" aria-label="Folders"></div>
-                    </section>
-                    <section class="psec" id="sec-sources">
-                        <div class="psec-head"><h3>Sources</h3></div>
-                        <div id="source-list"></div>
                     </section>
                     <section class="psec" id="sec-tools">
                         <div class="psec-head"><h3>Tools</h3></div>
