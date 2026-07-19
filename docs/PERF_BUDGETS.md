@@ -4,6 +4,42 @@ Azimuth Photo treats browse speed as a product invariant. `web/test_perf_budgets
 runs in the default pytest suite, so `scripts/deploy.sh` cannot ship a regression
 that exceeds one of these budgets.
 
+## Interactive latency under load
+
+The number the speed doctrine gets held to: browse stays snappy while bulk work
+(pregen / captions) grinds in the background.
+
+```bash
+# Against a running server (default http://127.0.0.1:8000) — GET-only, prod-safe
+./scripts/bench_interactive.py
+./scripts/bench_interactive.py http://127.0.0.1:8000 --loops 10 --warmup 2
+./scripts/bench_interactive.py http://127.0.0.1:8000 --with-load --check
+```
+
+Each measured cycle mimics real browsing: one library grid page, 20 `sm`
+thumbnails, one `md` preview, one search query, one rankings page. Warm-up
+cycles run but are excluded from p50/p95/p99. A JSON line is appended to
+`bench-runs/interactive-history.jsonl` so regressions are diffable over time.
+
+### Load policy (stated choice)
+
+`--with-load` does **not** inject work. Starting pregen/captions is a mutating
+POST and is unsafe when this bench is pointed at prod. The second phase runs the
+identical mix while polling read-only `GET /api/cache/pregen/status` and
+`GET /api/captions/status`, recording whether bulk workers were naturally
+active. Findings go in the report; this tool does not fix performance.
+
+### Initial budgets (to be ratified)
+
+| Class | Budget | Notes |
+| --- | ---: | --- |
+| grid (`/api/rankings` date sort) p95 | **< 150 ms** | LAN, warm |
+| sm thumb p95 | **< 80 ms** | LAN, warm |
+
+Mark as initial until product ratifies. `--check` exits non-zero when either
+misses. Fixture acceptance runs use the QA `ProbeServer` + catalog (same boot
+path as `scripts/bench.py` / desktop QA).
+
 The test builds one temporary, synthetic 2,000-image catalog per module and shares
 it across its checks. Every image has an `sm` cache entry, so it covers both the
 normal Library first-page route and the cache-first visible-thumbnail query used by
