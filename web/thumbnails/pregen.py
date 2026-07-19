@@ -67,7 +67,42 @@ async def cache_target_total(get_db) -> int:
         await conn.close()
 
 
-async def candidate_batch(get_db, cursor_state: dict, limit: int):
+async def candidate_batch(
+    get_db,
+    cursor_state: dict,
+    limit: int,
+    *,
+    cache_root: str | None = None,
+    missing_sizes: tuple[str, ...] | list[str] | None = None,
+):
+    """Return the next catalog page for pregen, optionally only uncached rows.
+
+    When ``cache_root`` and ``missing_sizes`` are set, rows already present in
+    ``cache_entries`` for every requested size are excluded in SQL. That keeps
+    selection O(pending) instead of re-walking a long already-warmed prefix.
+    """
+    sizes = tuple(size for size in (missing_sizes or ()) if size)
+    missing_clause = ""
+    params: list = [
+        int(cursor_state.get("source_id") or 0),
+        int(cursor_state.get("source_id") or 0),
+        str(cursor_state.get("filepath") or ""),
+        str(cursor_state.get("filepath") or ""),
+        int(cursor_state.get("id") or 0),
+    ]
+    if cache_root and sizes:
+        missing_parts = []
+        for size in sizes:
+            missing_parts.append(
+                "NOT EXISTS ("
+                "SELECT 1 FROM cache_entries c "
+                "WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
+                ")"
+            )
+            params.extend([cache_root, size])
+        missing_clause = "AND (" + " OR ".join(missing_parts) + ") "
+    params.append(limit)
+
     conn = await get_db()
     try:
         cursor = await conn.execute(
@@ -81,16 +116,10 @@ async def candidate_batch(get_db, cursor_state: dict, limit: int):
             "  i.source_id > ? "
             "  OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))"
             ") "
-            "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
+            + missing_clause
+            + "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
             "LIMIT ?",
-            (
-                int(cursor_state.get("source_id") or 0),
-                int(cursor_state.get("source_id") or 0),
-                str(cursor_state.get("filepath") or ""),
-                str(cursor_state.get("filepath") or ""),
-                int(cursor_state.get("id") or 0),
-                limit,
-            ),
+            params,
         )
         rows = await cursor.fetchall()
         if rows:
