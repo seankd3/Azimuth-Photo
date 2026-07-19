@@ -108,16 +108,57 @@ cd "$WEB"
 : >"$LOG"
 echo "gate mode=$MODE log=$LOG python=$PYTHON node=$(command -v node) TMPDIR=$TMPDIR" | tee -a "$LOG"
 
+CONTRACT_FILES=(
+  test_modular_contracts.py
+  test_quiet_sources.py
+  test_settings.py
+  test_lr_bridge.py
+  test_develop_lrcat.py
+  test_sync_hub.py
+  test_desktop_correctness.py
+  test_mobile_contracts.py
+  test_trash.py
+  test_system_backups.py
+  test_runtime_paths.py
+  test_ui_contracts.py
+)
+
+# Prefer a capped worker count on a busy host — -n auto oversubscribes when
+# load average is already high and slows the wall clock.
+xdist_workers() {
+  local cpus load
+  cpus="$(nproc 2>/dev/null || echo 4)"
+  load="$(awk '{printf "%d", $1}' /proc/loadavg 2>/dev/null || echo 0)"
+  if (( load > cpus )); then
+    echo $(( (cpus + 1) / 2 ))
+  else
+    echo auto
+  fi
+}
+
 RC=0
+WORKERS="$(xdist_workers)"
+echo "gate xdist_workers=$WORKERS load=$(cut -d' ' -f1 /proc/loadavg)" | tee -a "$LOG"
+
 case "$MODE" in
   quick)
-    assert_slow_partition || RC=$?
+    # Partition assert lives on full; quick stays under the 90s wall.
+    # Limit contract collection to known files so import cost stays tiny.
+    run_pytest "contract" -q --tb=short --disable-warnings -m contract "${CONTRACT_FILES[@]}" || RC=$?
     if [[ $RC -eq 0 ]]; then
-      run_pytest "contract" -q --tb=short -m contract || RC=$?
+      run_pytest "quick-parallel" -n "$WORKERS" -q --tb=line --disable-warnings -m "not slow and not serial and not bench and not contract" || RC=$?
     fi
     if [[ $RC -eq 0 ]]; then
-      # Contracts already proved above — don't pay for them twice in the wave.
-      run_pytest "quick-parallel" -n auto -q --tb=line -m "not slow and not serial and not bench and not contract" || RC=$?
+      # Exit 5 = no tests collected; treat as success.
+      set +e
+      run_pytest "quick-serial" -n0 -q --tb=line --disable-warnings -m "serial and not slow and not bench"
+      serial_rc=$?
+      set -e
+      if [[ $serial_rc -eq 5 ]]; then
+        echo "gate: no serial-quick tests" | tee -a "$LOG"
+      elif [[ $serial_rc -ne 0 ]]; then
+        RC=$serial_rc
+      fi
     fi
     ;;
   changed)
@@ -127,22 +168,25 @@ case "$MODE" in
       exit 2
     fi
     EXPR="$1"
-    run_pytest "contract" -q --tb=short -m contract || RC=$?
+    run_pytest "contract" -q --tb=short --disable-warnings -m contract "${CONTRACT_FILES[@]}" || RC=$?
     if [[ $RC -eq 0 ]]; then
-      run_pytest "changed" -q --tb=short -k "$EXPR" || RC=$?
+      run_pytest "changed" -q --tb=short --disable-warnings -k "$EXPR" || RC=$?
     fi
     ;;
   full)
     assert_slow_partition || RC=$?
     if [[ $RC -eq 0 ]]; then
-      run_pytest "full-parallel" -n auto -q --tb=line -m "not serial and not bench" || RC=$?
+      run_pytest "full-parallel" -n "$WORKERS" -q --tb=line --disable-warnings -m "not serial and not bench" || RC=$?
     fi
     if [[ $RC -eq 0 ]]; then
-      # Serial group after parallel wave — never silently skipped.
-      SERIAL_COUNT="$(collect_count 'serial and not bench' || true)"
-      echo "gate: serial collected=$SERIAL_COUNT" | tee -a "$LOG"
-      if [[ -n "${SERIAL_COUNT:-}" && "$SERIAL_COUNT" -gt 0 ]]; then
-        run_pytest "full-serial" -n0 -q --tb=line -m "serial and not bench" || RC=$?
+      set +e
+      run_pytest "full-serial" -n0 -q --tb=line --disable-warnings -m "serial and not bench"
+      serial_rc=$?
+      set -e
+      if [[ $serial_rc -eq 5 ]]; then
+        echo "gate: no serial tests" | tee -a "$LOG"
+      elif [[ $serial_rc -ne 0 ]]; then
+        RC=$serial_rc
       fi
     else
       echo "gate: skipping serial group because parallel failed (exit=$RC)" | tee -a "$LOG"

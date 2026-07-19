@@ -96,6 +96,37 @@ class HubContractTests(unittest.TestCase):
 
 
 class VersionEndpointTests(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        import os
+        import db as db_module
+        from thumbnails import cache_entries as thumbnail_cache_entries
+
+        self._tmp = tempfile.TemporaryDirectory(prefix="pa-version-")
+        self._old_db = db_module.DB_PATH
+        self._old_smoke = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
+        self._old_conn = thumbnail_cache_entries._persistent_conn
+        thumbnail_cache_entries._persistent_conn = None
+        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        db_module.DB_PATH = os.path.join(self._tmp.name, "version.db")
+        self._db = db_module
+        self._thumb = thumbnail_cache_entries
+
+    def tearDown(self):
+        import os
+        if self._thumb._persistent_conn is not None:
+            try:
+                self._thumb._persistent_conn.close()
+            except Exception:
+                pass
+        self._thumb._persistent_conn = self._old_conn
+        self._db.DB_PATH = self._old_db
+        if self._old_smoke is None:
+            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+        else:
+            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self._old_smoke
+        self._tmp.cleanup()
+
     def test_version_endpoint_reports_the_versioned_contract_shape(self):
         with TestClient(app_module.app) as client:
             response = client.get("/api/version")

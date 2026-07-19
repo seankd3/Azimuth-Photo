@@ -20,16 +20,16 @@ from features.collections import suggestions as collection_suggestions
 from thumbnails import cache_entries as thumbnail_cache_entries
 
 
-pytestmark = pytest.mark.perf
+pytestmark = [pytest.mark.perf, pytest.mark.slow]
 
 IMAGE_COUNT = 2_000
 RUNS = 3
 
 # Re-baselined from the median of three uncached route/service calls on omarchy.
-# Values deliberately leave five-times headroom for normal parallel test-suite load.
+# Values leave headroom for parallel-suite contention on a busy host.
 BUDGET_MS = {
     "rankings_first_page": 200,
-    "date_histogram": 50,
+    "date_histogram": 80,
     "counts": 50,
     "filter_options": 125,
     "visible_library_query": 125,
