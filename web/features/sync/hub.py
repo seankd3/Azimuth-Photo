@@ -248,8 +248,14 @@ async def images_with_byte_proof(
     return await asyncio.to_thread(proven)
 
 
-async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, list[Any]]:
+async def manifest(
+    db_path: str,
+    items: Iterable[dict[str, Any]],
+    *,
+    intake_root: Path | None = None,
+) -> dict[str, list[Any]]:
     await ensure_sync_schema(db_path)
+    intake = Path(intake_root) if intake_root is not None else default_intake_root()
     normalized: list[tuple[str, str | None, int, str, str | None, str | None, str]] = []
     for item in items:
         content_hash = validate_content_hash(item.get("content_hash", ""))
@@ -268,24 +274,69 @@ async def manifest(db_path: str, items: Iterable[dict[str, Any]]) -> dict[str, l
             (content_hash, full_hash, byte_count, filename, date_taken, folder, placed_relpath)
         )
 
+    hashes = [row[0] for row in normalized]
+    # Bytes freeze while a resumable upload is in flight or the identity is already
+    # placed in the catalog. full_hash always keeps the first non-null value.
+    freeze_bytes = {
+        content_hash
+        for content_hash in hashes
+        if upload_part_path(intake, content_hash).exists()
+    }
+    existing_by_hash: dict[str, tuple[str | None, int]] = {}
     conn = await connection.open_async(db_path)
     try:
-        if normalized:
+        if hashes:
+            for batch in common.chunked(hashes):
+                placeholders = ",".join("?" for _ in batch)
+                placed_rows = await (
+                    await conn.execute(
+                        f"SELECT content_hash FROM images WHERE content_hash IN ({placeholders})",
+                        list(batch),
+                    )
+                ).fetchall()
+                freeze_bytes.update(str(row["content_hash"]) for row in placed_rows)
+                manifest_rows = await (
+                    await conn.execute(
+                        f"SELECT content_hash, full_hash, bytes FROM sync_manifest_items "
+                        f"WHERE content_hash IN ({placeholders})",
+                        list(batch),
+                    )
+                ).fetchall()
+                for row in manifest_rows:
+                    existing_by_hash[str(row["content_hash"])] = (
+                        str(row["full_hash"]) if row["full_hash"] else None,
+                        int(row["bytes"]),
+                    )
+
+        merged: list[tuple[str, str | None, int, str, str | None, str | None, str]] = []
+        for content_hash, full_hash, byte_count, filename, date_taken, folder, placed_relpath in normalized:
+            prior = existing_by_hash.get(content_hash)
+            if prior is not None:
+                prior_full, prior_bytes = prior
+                # First non-null full_hash wins; never replace.
+                if prior_full:
+                    full_hash = prior_full
+                if content_hash in freeze_bytes:
+                    byte_count = prior_bytes
+            merged.append(
+                (content_hash, full_hash, byte_count, filename, date_taken, folder, placed_relpath)
+            )
+
+        if merged:
             await conn.executemany(
                 "INSERT INTO sync_manifest_items("
                 "content_hash, full_hash, bytes, filename, date_taken, folder, placed_relpath) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(content_hash) DO UPDATE SET "
-                "full_hash=COALESCE(excluded.full_hash, sync_manifest_items.full_hash), "
+                "full_hash=COALESCE(sync_manifest_items.full_hash, excluded.full_hash), "
                 "bytes=excluded.bytes, filename=excluded.filename, date_taken=excluded.date_taken, "
                 "folder=excluded.folder, "
                 "placed_relpath=COALESCE(sync_manifest_items.placed_relpath, excluded.placed_relpath)",
-                normalized,
+                merged,
             )
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
-    hashes = [row[0] for row in normalized]
     known_by_hash = await images_with_byte_proof(db_path, hashes)
     return {
         "missing": [content_hash for content_hash in hashes if content_hash not in known_by_hash],

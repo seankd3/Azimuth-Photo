@@ -1080,6 +1080,70 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(missing.json(), {"missing": [content_hash], "known": []})
 
+    def test_manifest_freezes_bytes_and_full_hash_mid_upload(self):
+        """S6: re-manifest during an in-flight .part must not rewrite upload-critical fields."""
+
+        payload = b"FREEZE-ORIGINAL-" + (b"E" * 2048)
+        content_hash = self.digest(payload)
+        full_hash = self.full_digest(payload)
+        first = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": full_hash,
+                "bytes": len(payload),
+                "filename": "freeze.jpg",
+                "date_taken": "2026-07-16",
+            }]},
+        )
+        self.assertEqual(first.status_code, 200, first.text)
+
+        split = len(payload) // 2
+        partial = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": "0", "X-Total-Bytes": str(len(payload))},
+            content=payload[:split],
+        )
+        self.assertEqual(partial.status_code, 200, partial.text)
+        self.assertEqual(partial.json(), {"offset": split})
+        self.assertTrue(hub.upload_part_path(self.intake, content_hash).exists())
+
+        hostile = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": "f" * 32,
+                "bytes": len(payload) + 99,
+                "filename": "freeze-renamed.jpg",
+                "date_taken": "2026-01-01",
+            }]},
+        )
+        self.assertEqual(hostile.status_code, 200, hostile.text)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            row = conn.execute(
+                "SELECT full_hash, bytes, filename FROM sync_manifest_items WHERE content_hash = ?",
+                (content_hash,),
+            ).fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], full_hash)
+        self.assertEqual(row[1], len(payload))
+        self.assertEqual(row[2], "freeze-renamed.jpg")
+
+        finish = self.client.post(
+            f"/api/sync/upload/{content_hash}",
+            headers={"X-Offset": str(split), "X-Total-Bytes": str(len(payload))},
+            content=payload[split:],
+        )
+        self.assertEqual(finish.status_code, 200, finish.text)
+        image_id = int(finish.json()["image_id"])
+        destination = self.raws / "2026" / "2026-07-16" / "freeze.jpg"
+        # placed_relpath was locked on first sighting (freeze.jpg), not the rename.
+        self.assertTrue(destination.is_file())
+        self.assertEqual(destination.read_bytes(), payload)
+        self.assertGreater(image_id, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
