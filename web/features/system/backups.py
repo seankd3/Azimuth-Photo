@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import sqlite3
+import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -77,6 +78,9 @@ ON image_checksums(checked_at);
 
 _backup_lock = threading.Lock()
 _integrity_lock = threading.Lock()
+# Test-only hook: called after gzip write, before decompress verify / publish.
+# Production never sets this. Tests use it to corrupt the .gz mid-pipeline.
+_gzip_publish_hook: Any = None
 _integrity_state: dict[str, Any] = {
     "state": "idle",
     "started_at": None,
@@ -410,8 +414,18 @@ def create_snapshot(
 
             with open(tmp_db, "rb") as raw, gzip.open(tmp_gz, "wb", compresslevel=6) as gz:
                 shutil.copyfileobj(raw, gz, length=1024 * 1024)
+                gz.flush()
+                os.fsync(gz.fileno())
+
+            hook = _gzip_publish_hook
+            if hook is not None:
+                hook(tmp_gz)
+
+            _verify_gzip_matches_db(tmp_gz, tmp_db)
 
             os.replace(tmp_gz, final_path)
+            _fsync_file(final_path)
+            _fsync_directory(root)
             size = final_path.stat().st_size
             pruned = apply_retention(root)
             created_at = (when or datetime.now().astimezone()).isoformat()
@@ -790,6 +804,54 @@ def _sha256_file(path: str) -> tuple[str, int]:
             digest.update(chunk)
             total += len(chunk)
     return digest.hexdigest(), total
+
+
+def _sha256_gzip_payload(path: Path) -> tuple[str, int]:
+    """Hash the decompressed payload of a .gz without writing it to disk."""
+
+    digest = hashlib.sha256()
+    total = 0
+    with gzip.open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(CHECKSUM_CHUNK)
+            if not chunk:
+                break
+            digest.update(chunk)
+            total += len(chunk)
+    return digest.hexdigest(), total
+
+
+def _verify_gzip_matches_db(tmp_gz: Path, tmp_db: Path) -> None:
+    """Refuse to publish a gzip whose decompressed bytes diverge from the verified DB."""
+
+    expected_hash, expected_size = _sha256_file(str(tmp_db))
+    try:
+        actual_hash, actual_size = _sha256_gzip_payload(tmp_gz)
+    except (OSError, gzip.BadGzipFile, EOFError) as exc:
+        raise BackupVerificationError(
+            f"Published gzip failed decompress verification: {exc}"
+        ) from exc
+    if actual_hash != expected_hash or actual_size != expected_size:
+        raise BackupVerificationError(
+            "Published gzip payload does not match the verified catalog snapshot "
+            f"(db_sha256={expected_hash} gz_sha256={actual_hash} "
+            f"db_bytes={expected_size} gz_bytes={actual_size})"
+        )
+
+
+def _fsync_file(path: Path) -> None:
+    with open(path, "rb") as handle:
+        os.fsync(handle.fileno())
+
+
+def _fsync_directory(path: Path) -> None:
+    if sys.platform.startswith("win"):
+        return
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 def _select_integrity_candidates(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:

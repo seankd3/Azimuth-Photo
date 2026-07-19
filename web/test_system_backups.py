@@ -256,6 +256,27 @@ class BackupUnitTests(unittest.TestCase):
         summary = backups.integrity_summary(str(self.db_path))
         self.assertIn("Catalog backup failed", summary.get("alert") or "")
 
+    def test_corrupt_gzip_before_publish_is_refused(self):
+        """B1: decompress-verify the .gz against the verified tmp DB before os.replace."""
+
+        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+
+        def corrupt_gz(path: Path) -> None:
+            path.write_bytes(b"not-a-gzip-payload")
+
+        previous = backups._gzip_publish_hook
+        backups._gzip_publish_hook = corrupt_gz
+        try:
+            with self.assertRaises(backups.BackupVerificationError):
+                backups.create_snapshot(str(self.db_path))
+        finally:
+            backups._gzip_publish_hook = previous
+
+        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        self.assertEqual(after, before)
+        self.assertFalse(list(self.root.glob(".*.tmp.db")))
+        self.assertFalse(list(self.root.glob(".*.tmp.gz")))
+
     def test_empty_catalog_refuses_shared_historical_backup_dir(self):
         historical = self.root / "photoarchive-20260101-040000.db.gz"
         historical.write_bytes(b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1))
