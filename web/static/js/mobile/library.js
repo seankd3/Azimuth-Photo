@@ -12,7 +12,6 @@ import { applySmartScopeSort, nav, on, patchScope, setScope, clearScope, scopePa
 import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
-import { applyFlags } from './flags.js';
 import { icon } from '../icons.js';
 import { openCollectionShareSheet, renderSharedView } from './sharing.js';
 import { offlineSummary, openOfflineStatusSheet } from './offline.js';

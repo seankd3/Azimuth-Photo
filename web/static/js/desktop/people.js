@@ -430,7 +430,7 @@ export function reviewPeopleMergeByKey(action) {
     return true;
 }
 
-function mergePopoverHtml(source, target, options = {}) {
+function mergePopoverHtml(source, target, _options = {}) {
     const sourceLabel = personActionLabel(source);
     const targetLabel = personActionLabel(target);
     const sourceCount = countFor(source);

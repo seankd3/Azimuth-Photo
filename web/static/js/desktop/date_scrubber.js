@@ -1,7 +1,7 @@
 import { getDateHistogram } from './api.js';
 import { jumpToOffset } from './grid.js';
 import { collectionScopeActive } from './scope_data.js';
-import { on, scope, scopeParams, sortAscending, sortBase, viewState } from './state.js';
+import { on, scopeParams, sortAscending, sortBase, viewState } from './state.js';
 
 let months = [];
 let generation = 0;

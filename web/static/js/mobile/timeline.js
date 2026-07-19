@@ -1344,7 +1344,6 @@ function installPullToRefresh() {
         if (!pull.active) return;
         cancelLongPressGesture();
         e.preventDefault();
-        const visual = Math.min(96, dy * 0.72);
         const progress = clamp(dy / 70, 0, 1);
         pullEl.classList.add('on');
         pullEl.classList.toggle('ready', dy >= 70);

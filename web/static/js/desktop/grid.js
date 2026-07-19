@@ -73,7 +73,6 @@ function canRefreshPendingThumbnails() {
     return mounted && !loading && !activeJumpToken && !selection.size && canvas?.scrollTop <= 160;
 }
 
-function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
 
 function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
 

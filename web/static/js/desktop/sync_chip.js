@@ -174,7 +174,7 @@ async function refresh() {
         if (controlInFlight || generation !== statusGeneration) return;
         emit('sync:status', status);
         if (!pollOnly) patch(status);
-    } catch (error) {
+    } catch (_error) {
         if (controlInFlight || generation !== statusGeneration) return;
         if (!pollOnly) patchOffline();
     }
@@ -186,7 +186,7 @@ async function control(url) {
     try {
         const status = await json(url, { method: 'POST' });
         if (generation === statusGeneration) patch(status);
-    } catch (error) {
+    } catch (_error) {
         // A failed user command is not a hub outage — say so, and let the next
         // status poll decide whether the chip should show offline.
         showToast(url.includes('/pause') || url.includes('/resume')
