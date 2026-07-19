@@ -218,6 +218,8 @@ local function push_outbound(observations)
   end
 end
 
+local maintain_morning_collection, maintain_best_of_collections
+
 local function apply_inbound(items, shoot_context)
   if not items or #items == 0 then
     return
@@ -276,11 +278,6 @@ local function apply_inbound(items, shoot_context)
 end
 
 --- Dated "From Azimuth — N picks · date" collection for picks since last LR session.
-local function session_pick_baseline()
-  local p = prefs()
-  return p.morningBaseline or {}
-end
-
 local function save_session_pick_baseline(snapshot)
   local baseline = {}
   for filepath, state in pairs(snapshot or {}) do
@@ -311,7 +308,7 @@ local function list_morning_collections(catalog)
   return found
 end
 
-function maintain_morning_collection(new_pick_photos)
+maintain_morning_collection = function(new_pick_photos)
   local catalog = LrApplication.activeCatalog()
   local today = os.date("%Y-%m-%d")
   catalog:withWriteAccessDo("Azimuth morning collection", function()
@@ -401,7 +398,7 @@ local function photos_for_paths(snapshot, filepaths)
 end
 
 --- Idempotent "Azimuth / Best of" set: one child collection per qualifying shoot.
-function maintain_best_of_collections(shoot_context)
+maintain_best_of_collections = function(shoot_context)
   local context = shoot_context or {}
   local targets = Core.best_of_targets(context.best_of_shoots or {})
   local catalog = LrApplication.activeCatalog()
