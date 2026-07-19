@@ -109,6 +109,24 @@ if satellite.is_satellite_mode():
 
 
 @app.on_event("startup")
+async def _init_hub_client_bundle_identity():
+    """Cache /api/version identity + git-archive once at hub boot (not per request)."""
+
+    if satellite.is_satellite_mode():
+        return
+    from features.system import client_bundle
+
+    try:
+        await asyncio.to_thread(client_bundle.init_hub_client_identity)
+    except Exception:
+        # A missing git checkout must not take the hub down; /api/version still
+        # answers with sha=unknown and the bundle route returns 503.
+        import logging
+
+        logging.getLogger(__name__).exception("hub client bundle identity init failed")
+
+
+@app.on_event("startup")
 async def _start_hub_mdns():
     if not mdns.is_hub_mode():
         return

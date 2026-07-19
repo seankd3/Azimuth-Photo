@@ -38,8 +38,14 @@ def app_version() -> str:
 
 
 def version_payload() -> dict[str, str | int | list[str]]:
-    return {
+    payload: dict[str, str | int | list[str]] = {
         "app_version": app_version(),
         "api_rev": API_REV,
         "capabilities": sorted(CAPABILITIES),
     }
+    # Auto-update identity (sha / bundle_sha256 / schema_version). Imported lazily
+    # so core.version stays importable before runtime paths are applied.
+    from features.system import client_bundle
+
+    payload.update(client_bundle.identity_payload())
+    return payload
