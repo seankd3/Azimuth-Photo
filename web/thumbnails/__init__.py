@@ -959,7 +959,7 @@ async def prefetch_images(
         build_source_signature=_build_source_signature,
         has_cached=has_cached,
         ensure_thumbnail_with_executor=_ensure_thumbnail_with_executor,
-        prefetch_executor=_prefetch_executor,
+        prefetch_executor=current_prefetch_executor,
         create_task=asyncio.create_task,
     )
 
@@ -1556,6 +1556,11 @@ def _pregen_should_pause_for_priority() -> bool:
         get_idle_seconds(),
         settle_seconds=PREGENERATE_IDLE_SECONDS,
     )
+
+
+def current_prefetch_executor():
+    """Submit-time accessor so queued waves survive watchdog pool swaps."""
+    return _prefetch_executor
 
 
 def _reset_prefetch_executor() -> None:

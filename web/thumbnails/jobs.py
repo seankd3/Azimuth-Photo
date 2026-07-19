@@ -78,18 +78,26 @@ async def run_thumbnail_job(
     generate_missing_thumbnails_sync: Callable[..., object],
 ) -> object:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        executor,
-        partial(
-            generate_missing_thumbnails_sync,
-            filepath,
-            size,
-            image_id,
-            include_smaller_tiers=include_smaller_tiers,
-            hot=hot,
-            allow_stale_fallback=allow_stale_fallback,
-        ),
+    # An accessor may be passed instead of a pool so submits always target the
+    # CURRENT executor — the stall watchdog swaps pools, and tasks queued
+    # against the old one would die with "cannot schedule after shutdown".
+    resolve = executor if callable(executor) and not hasattr(executor, "submit") else None
+    job = partial(
+        generate_missing_thumbnails_sync,
+        filepath,
+        size,
+        image_id,
+        include_smaller_tiers=include_smaller_tiers,
+        hot=hot,
+        allow_stale_fallback=allow_stale_fallback,
     )
+    try:
+        return await loop.run_in_executor(resolve() if resolve else executor, job)
+    except RuntimeError as exc:
+        if resolve is None or "after shutdown" not in str(exc):
+            raise
+        # Pool was swapped between resolve and submit — retry on the new one.
+        return await loop.run_in_executor(resolve(), job)
 
 
 def _probe_cached_sync(
