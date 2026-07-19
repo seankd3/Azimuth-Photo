@@ -39,7 +39,7 @@ class RangeMaskTests(unittest.TestCase):
             console.log(JSON.stringify(Array.from(M.rasterizeColorRange({{Type:2,ColorAmount:.15,PointModels:['1 0 0']}}, image, 3, 1))));
         """
         result = subprocess.run(
-            ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+            ["node", "--input-type=module", "-e", script],
             check=True, capture_output=True, text=True,
         )
         javascript = np.asarray(json.loads(result.stdout), dtype=np.float32)

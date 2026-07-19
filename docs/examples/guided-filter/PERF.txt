@@ -1,0 +1,4 @@
+24MP-equivalent quarter-res (1500x1000), radius=20
+guided_filter: 58.5 ms
+gaussian soft_mask (old path): 118.9 ms
+delta: guided is +60.4 ms vs gaussian

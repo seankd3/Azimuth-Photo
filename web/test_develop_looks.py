@@ -100,7 +100,7 @@ const settings = {json.dumps(settings)};
 console.log(JSON.stringify({{ lut: Array.from(buildBaseProfileLut(null, settings)), effective: effectiveLookSettings(settings) }}));
 """
         result = subprocess.run(
-            ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+            ["node", "--input-type=module", "-e", script],
             cwd=Path(__file__).parent,
             check=True,
             capture_output=True,
