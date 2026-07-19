@@ -158,7 +158,7 @@ class MaskRasterTests(unittest.TestCase):
             console.log(JSON.stringify(result));
         """
         completed = subprocess.run(
-            ["node", "--experimental-default-type=module", "--input-type=module", "-e", script],
+            ["node", "--input-type=module", "-e", script],
             check=True,
             capture_output=True,
             text=True,

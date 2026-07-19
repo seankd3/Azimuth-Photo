@@ -284,6 +284,18 @@ LOCAL_COLOR_SIGMA_MIN = 0.015
 LOCAL_COLOR_SIGMA_RANGE = 0.18
 LOCAL_RANGE_EPSILON = 1e-6
 
+# Guided-filter mask refine (He–Sun / darktable tone-equalizer mapping).
+# Feather 0–1 → radius = Feather × min_side × fraction; ε = 1/feathering.
+GUIDED_RADIUS_FRACTION = 0.04
+GUIDED_FEATHERING_MIN = 10.0
+GUIDED_FEATHERING_RANGE = 990.0
+GUIDED_EPSILON_DEFAULT = 0.003
+GUIDED_DEFAULT_FEATHER = 0.5
+GUIDED_GAUSSIAN_SIGMA_SCALE = 0.5
+# darktable fast_guided_filter.h: compute moments at 1/subsample, upsample a,b.
+GUIDED_FAST_SUBSAMPLE = 4
+GUIDED_FAST_MIN_SIDE = 64
+
 # Circular clone/heal spots (§23), rendered as the final pixel operation.
 RETOUCH_RENDER_CAP = 32
 RETOUCH_RING_TAPS = 8
