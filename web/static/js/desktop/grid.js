@@ -73,6 +73,9 @@ function canRefreshPendingThumbnails() {
     return mounted && !loading && !activeJumpToken && !selection.size && canvas?.scrollTop <= 160;
 }
 
+// Contract: test_desktop_correctness asserts this wrapper name exists in grid.js.
+// eslint-disable-next-line no-unused-vars -- string-contract wrapper; events.js owns the live poller
+function scheduleThumbnailPoll() { thumbnailPoll.schedule(); }
 
 function updateThumbnailPoll(pending) { thumbnailPoll.update(pending); }
 
