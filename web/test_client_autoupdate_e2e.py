@@ -163,6 +163,7 @@ class ClientAutoUpdateE2ETests(unittest.TestCase):
             py = client_update._venv_python(venv)
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_text("marker", encoding="utf-8")
+            (venv / ".deps_hash").write_text(digest + "\n", encoding="utf-8")
 
             builds: list[str] = []
             with mock.patch.object(client_update, "build_venv", side_effect=self._fake_build(builds)):
@@ -300,6 +301,7 @@ class ClientAutoUpdateE2ETests(unittest.TestCase):
             py = client_update._venv_python(venv)
             py.parent.mkdir(parents=True, exist_ok=True)
             py.write_text("marker", encoding="utf-8")
+            (venv / ".deps_hash").write_text(digest + "\n", encoding="utf-8")
             mtime_before = py.stat().st_mtime
 
             builds: list[str] = []
