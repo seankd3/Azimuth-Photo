@@ -755,7 +755,7 @@ class SyncHubTests(unittest.TestCase):
         self.assertGreater(image_id, 0)
 
     def test_placement_is_persisted_and_collision_safe_across_retries(self):
-        """P0-B: first placement decision sticks; identical is idempotent; different errors."""
+        """P0-B/S4: first placement sticks; identical is idempotent; different gets a suffix."""
 
         payload = b"ROLL-ORIGINAL-" + (b"C" * 2048)
         content_hash = self.digest(payload)
@@ -813,7 +813,7 @@ class SyncHubTests(unittest.TestCase):
         self.assertFalse((self.root / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
         self.assertFalse((self.root / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
 
-        # Different bytes already at the locked path → error, original untouched.
+        # Different bytes already at the locked path → per-identity suffix, no overwrite.
         other = b"ROLL-COLLISION-" + (b"D" * 2047)
         self.assertEqual(len(other), len(payload))
         other_hash = self.digest(other)
@@ -838,27 +838,109 @@ class SyncHubTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        conflict = self.client.post(
-            f"/api/sync/upload/{other_hash}",
-            headers={"X-Offset": "0", "X-Total-Bytes": str(len(other))},
-            content=other,
-        )
-        self.assertEqual(conflict.status_code, 422, conflict.text)
+        other_id = self.upload(other_hash, other)
         self.assertEqual(destination.read_bytes(), payload)
-        self.assertFalse((destination.parent / "collision.jpg").exists())
-        self.assertFalse((destination.parent / "roll-2.jpg").exists())
-        # Original catalog row for the first upload remains the only one at that path.
+        tagged = destination.parent / f"roll-{other_hash[:8]}.jpg"
+        self.assertTrue(tagged.is_file())
+        self.assertEqual(tagged.read_bytes(), other)
         conn = sqlite3.connect(self.db_path)
         try:
+            other_path = conn.execute(
+                "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+                (other_hash,),
+            ).fetchone()[0]
             rows = conn.execute(
                 "SELECT id, content_hash FROM images WHERE filepath = ?",
                 (str(destination),),
             ).fetchall()
+            tagged_rows = conn.execute(
+                "SELECT id, content_hash FROM images WHERE filepath = ?",
+                (str(tagged),),
+            ).fetchall()
         finally:
             conn.close()
+        self.assertEqual(other_path, f"Film Scans/2026/2026-07-16/roll-{other_hash[:8]}.jpg")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], image_id)
         self.assertEqual(rows[0][1], content_hash)
+        self.assertEqual(len(tagged_rows), 1)
+        self.assertEqual(tagged_rows[0][0], other_id)
+        self.assertEqual(tagged_rows[0][1], other_hash)
+
+    def test_concurrent_finalize_same_filename_keeps_both_bytes(self):
+        """S4: two identities, one preferred path — both survive at distinct persisted paths."""
+
+        first = b"CONCURRENT-A-" + (b"A" * 4096)
+        second = b"CONCURRENT-B-" + (b"B" * 4096)
+        self.assertEqual(len(first), len(second))
+        first_hash = self.digest(first)
+        second_hash = self.digest(second)
+        for content_hash, payload, name in (
+            (first_hash, first, "shared.jpg"),
+            (second_hash, second, "shared.jpg"),
+        ):
+            response = self.client.post(
+                "/api/sync/manifest",
+                json={"items": [{
+                    "content_hash": content_hash,
+                    "full_hash": self.full_digest(payload),
+                    "bytes": len(payload),
+                    "filename": name,
+                    "date_taken": "2026-07-16",
+                    "folder": "Film Scans",
+                }]},
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+
+        async def _finalize_both():
+            return await asyncio.gather(
+                hub.append_upload_chunk(
+                    self.db_path,
+                    self.intake,
+                    self.raws,
+                    first_hash,
+                    offset=0,
+                    total_bytes=len(first),
+                    chunk=first,
+                ),
+                hub.append_upload_chunk(
+                    self.db_path,
+                    self.intake,
+                    self.raws,
+                    second_hash,
+                    offset=0,
+                    total_bytes=len(second),
+                    chunk=second,
+                ),
+            )
+
+        results = asyncio.run(_finalize_both())
+        image_ids = {int(row["image_id"]) for row in results}
+        self.assertEqual(len(image_ids), 2)
+
+        preferred = self.root / "Film Scans" / "2026" / "2026-07-16" / "shared.jpg"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            rows = conn.execute(
+                "SELECT content_hash, placed_relpath, filepath FROM images "
+                "JOIN sync_manifest_items USING (content_hash) "
+                "WHERE content_hash IN (?, ?) ORDER BY content_hash",
+                (first_hash, second_hash),
+            ).fetchall()
+        finally:
+            conn.close()
+        self.assertEqual(len(rows), 2)
+        paths = {row[1] for row in rows}
+        self.assertEqual(len(paths), 2)
+        on_disk = []
+        for _content_hash, placed, filepath in rows:
+            path = Path(filepath)
+            self.assertTrue(path.is_file())
+            self.assertEqual(path, self.root / Path(placed))
+            on_disk.append(path.read_bytes())
+        self.assertEqual(sorted(on_disk), sorted([first, second]))
+        self.assertTrue(preferred.is_file())
+        self.assertIn(preferred.read_bytes(), (first, second))
 
     def test_manifest_known_requires_original_bytes_on_disk(self):
         """P1-C: a catalog row without byte proof must report as needed, not known."""

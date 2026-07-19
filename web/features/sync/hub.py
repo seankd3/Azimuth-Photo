@@ -33,6 +33,10 @@ MAX_CHUNK_BYTES = 32 * 1024 * 1024
 BACKFILL_BATCH_SIZE = 100
 BACKFILL_THROTTLE_SECONDS = 0.05
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
+# Destination locks serialize placement for a library path so two different
+# content hashes that compute the same placed_relpath cannot both treat the
+# destination as missing and overwrite each other via copy2.
+_DEST_LOCKS: dict[str, asyncio.Lock] = {}
 _FOLDER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$")
 _WINDOWS_RESERVED_NAMES = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 
@@ -442,6 +446,50 @@ async def _persist_placed_relpath(db_path: str, content_hash: str, placed_relpat
     return str(row["placed_relpath"])
 
 
+async def _set_placed_relpath(db_path: str, content_hash: str, placed_relpath: str) -> str:
+    """Persist a collision-resolved placement path for this identity."""
+
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.execute(
+            "UPDATE sync_manifest_items SET placed_relpath = ? WHERE content_hash = ?",
+            (placed_relpath, content_hash),
+        )
+        row = await (await conn.execute(
+            "SELECT placed_relpath FROM sync_manifest_items WHERE content_hash = ?",
+            (content_hash,),
+        )).fetchone()
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if row is None or not row["placed_relpath"]:
+        raise RuntimeError("Could not persist collision placement path")
+    return str(row["placed_relpath"])
+
+
+def _collision_placed_relpath(placed_relpath: str, content_hash: str) -> str:
+    """Deterministic per-identity alternate path when the preferred slot is taken."""
+
+    relative = Path(str(placed_relpath).replace("\\", "/"))
+    tag = validate_content_hash(content_hash)[:8]
+    marker = f"-{tag}"
+    if relative.stem.endswith(marker):
+        # Already on this identity's tagged name — bump a numeric suffix.
+        for index in range(2, 10_000):
+            return str(relative.with_name(f"{relative.stem}-{index}{relative.suffix}")).replace("\\", "/")
+        raise RuntimeError("Could not allocate a collision-safe placement path")
+    return str(relative.with_name(f"{relative.stem}{marker}{relative.suffix}")).replace("\\", "/")
+
+
+def _copy_exclusive(source: Path, destination: Path) -> None:
+    """Copy bytes only when the destination does not already exist."""
+
+    with source.open("rb") as incoming, destination.open("xb") as outgoing:
+        shutil.copyfileobj(incoming, outgoing, length=1024 * 1024)
+        outgoing.flush()
+        os.fsync(outgoing.fileno())
+
+
 async def _catalog_image_id(db_path: str, content_hash: str) -> int | None:
     """Any catalog row for this identity — used by metadata merge, not upload gates."""
 
@@ -602,32 +650,52 @@ async def _append_upload_chunk_locked(
             folder=item.get("folder"),
         )
         placed_relpath = await _persist_placed_relpath(db_path, content_hash, placed_relpath)
-    destination, destination_root = _resolve_library_destination(raws_root, placed_relpath)
-    destination.parent.mkdir(parents=True, exist_ok=True)
 
     created_destination = False
-    if destination.exists():
-        existing_full = await asyncio.to_thread(compute_full_hash, destination)
-        if existing_full != item["full_hash"]:
-            _discard_upload_temp(intake_root, content_hash)
-            raise ArithmeticError(
-                "Upload destination already exists with different content; refusing to overwrite"
-            )
-        # Identical bytes already at the locked path — idempotent success.
+    destination: Path | None = None
+    destination_root: Path | None = None
+    for _attempt in range(10_000):
+        candidate_path, candidate_root = _resolve_library_destination(raws_root, placed_relpath)
+        dest_lock = _DEST_LOCKS.setdefault(str(candidate_path), asyncio.Lock())
+        async with dest_lock:
+            candidate_path.parent.mkdir(parents=True, exist_ok=True)
+            if candidate_path.exists():
+                existing_full = await asyncio.to_thread(compute_full_hash, candidate_path)
+                if existing_full == item["full_hash"]:
+                    # Identical bytes already at this path — idempotent success.
+                    destination, destination_root = candidate_path, candidate_root
+                    break
+                # Different bytes own this path. Choose a per-identity suffix once,
+                # persist it, and retry under that destination lock.
+                placed_relpath = await _set_placed_relpath(
+                    db_path,
+                    content_hash,
+                    _collision_placed_relpath(placed_relpath, content_hash),
+                )
+                continue
+            try:
+                await asyncio.to_thread(os.link, part, candidate_path)
+            except FileExistsError:
+                # Lost the race after the exists() check — re-enter compare/suffix.
+                continue
+            except OSError:
+                try:
+                    await asyncio.to_thread(_copy_exclusive, part, candidate_path)
+                except FileExistsError:
+                    continue
+                placed_full = await asyncio.to_thread(compute_full_hash, candidate_path)
+                if placed_full != item["full_hash"]:
+                    candidate_path.unlink(missing_ok=True)
+                    _discard_upload_temp(intake_root, content_hash)
+                    raise ArithmeticError("Placed upload failed full-file hash verification")
+            destination, destination_root = candidate_path, candidate_root
+            created_destination = True
+            break
     else:
-        try:
-            await asyncio.to_thread(os.link, part, destination)
-        except OSError:
-            await asyncio.to_thread(shutil.copy2, part, destination)
-            with destination.open("rb") as handle:
-                os.fsync(handle.fileno())
-            # Copy can silently diverge; prove the placed bytes before catalog commit.
-            placed_full = await asyncio.to_thread(compute_full_hash, destination)
-            if placed_full != item["full_hash"]:
-                destination.unlink(missing_ok=True)
-                _discard_upload_temp(intake_root, content_hash)
-                raise ArithmeticError("Placed upload failed full-file hash verification")
-        created_destination = True
+        _discard_upload_temp(intake_root, content_hash)
+        raise RuntimeError("Could not allocate a collision-safe upload destination")
+
+    assert destination is not None and destination_root is not None
     try:
         image_id = await _register_original(db_path, destination_root, destination, content_hash)
     except Exception:
