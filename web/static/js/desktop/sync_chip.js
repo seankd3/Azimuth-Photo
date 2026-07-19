@@ -1,6 +1,7 @@
 "use strict";
 
 import { fetchOptionsWithTimeout } from '../api.js';
+import { emit } from './state.js';
 import { showToast } from './toast.js';
 
 const POLL_MS = 3000;
@@ -9,6 +10,7 @@ let root = null;
 let currentStatus = null;
 let controlInFlight = 0;
 let statusGeneration = 0;
+let pollOnly = false;
 
 function formatBytes(bytes) {
     const value = Math.max(0, Number(bytes) || 0);
@@ -96,6 +98,7 @@ function patchErrors(errors) {
 }
 
 function patch(status) {
+    if (!root) return;
     currentStatus = status;
     const depth = Number(status.queue_depth) || 0;
     const pendingOps = Number(status.pending_ops) || 0;
@@ -156,12 +159,24 @@ function patch(status) {
 async function refresh() {
     const generation = statusGeneration;
     try {
-        const status = await json('/api/sync/status');
+        const since = (() => {
+            try {
+                const raw = Number(localStorage.getItem('pa_lr_exports_seen_at') || 0);
+                return Number.isFinite(raw) && raw > 0 ? raw : 0;
+            } catch {
+                return 0;
+            }
+        })();
+        const url = since > 0
+            ? `/api/sync/status?lr_exports_since=${encodeURIComponent(since)}`
+            : '/api/sync/status';
+        const status = await json(url);
         if (controlInFlight || generation !== statusGeneration) return;
-        patch(status);
+        emit('sync:status', status);
+        if (!pollOnly) patch(status);
     } catch (error) {
         if (controlInFlight || generation !== statusGeneration) return;
-        patchOffline();
+        if (!pollOnly) patchOffline();
     }
 }
 
@@ -199,17 +214,25 @@ function patchOffline() {
 export async function initSyncChip() {
     const slot = document.getElementById('sync-chip-slot');
     if (!slot) return;
+    let mode = 'hub';
+    let hasHub = false;
     try {
         const bootstrap = await json('/api/settings');
-        if (bootstrap?.sync?.mode !== 'satellite') return;
-        if (bootstrap?.sync?.has_hub === false) return; // standalone: nothing to sync with
+        mode = bootstrap?.sync?.mode || 'hub';
+        hasHub = bootstrap?.sync?.has_hub !== false && Boolean(bootstrap?.sync?.has_hub || bootstrap?.sync?.hub_url);
+        if (mode !== 'satellite') return;
     } catch (_error) {
         return;
     }
-    root = document.createElement('div');
-    root.className = 'sync-chip';
-    slot.replaceChildren(root);
-    mount();
+    // Always poll on satellite so LR quiet signals (new exports / health) piggyback.
+    // Visual sync chip only when a hub is attached.
+    pollOnly = !hasHub;
+    if (hasHub) {
+        root = document.createElement('div');
+        root.className = 'sync-chip';
+        slot.replaceChildren(root);
+        mount();
+    }
     await refresh();
     timer = window.setInterval(refresh, POLL_MS);
     window.addEventListener('pagehide', () => timer && window.clearInterval(timer), { once: true });

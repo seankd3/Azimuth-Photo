@@ -1,6 +1,6 @@
 import {
-    addCatalogSource, applyRemoteAccessServe, clearCache, connectToHub, createDeviceLink, discoverHubs,
-    getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getMetadataStatus, getPairStatus,
+    addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
+    disconnectLightroom, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
     getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
     installAiModel, listDevices,
     pauseAiEmbeddings,
@@ -41,6 +41,8 @@ let captionStatus = null;
 let metadataStatus = null;
 let remoteAccess = null;
 let pairStatus = null;
+let lrConnectStatus = null;
+
 let syncStatus = null;
 let freeableStatus = null;
 let freeupJob = null;
@@ -736,6 +738,22 @@ function renderConnectServer() {
         + '</div></section>';
 }
 
+function renderConnectLightroom() {
+    // Only when LR Classic is detected — no wizard, just state + one button.
+    if (!lrConnectStatus || !lrConnectStatus.show_button) return '';
+    const connected = Boolean(lrConnectStatus.connected);
+    const stateLine = connected
+        ? '<div class="setting-status" data-lr-connect-state="connected">Lightroom connected</div>'
+        : '<div class="setting-status" data-lr-connect-state="ready">Lightroom Classic found</div>';
+    const action = connected
+        ? '<button class="btn" id="lr-disconnect-btn" type="button" data-lr-connect-action="disconnect">Disconnect Lightroom</button>'
+        : '<button class="btn primary" id="lr-connect-btn" type="button" data-lr-connect-action="connect">Connect Lightroom</button>';
+    return '<section class="dr-sec" id="connect-lightroom-panel"><h3>Lightroom</h3>'
+        + stateLine
+        + '<p class="setting-hint">Next launch of Lightroom Classic picks up the bridge automatically.</p>'
+        + `<div class="setting-actions">${action}</div></section>`;
+}
+
 function remoteQrMarkup(text) {
     if (!text || typeof window.qrcode !== 'function') return '';
     try {
@@ -1072,7 +1090,7 @@ export function renderSystemSections() {
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
         publishing: renderPublishingSettings(),
-        connectivity: renderDevices() + renderConnectServer() + renderFreeUp() + renderRemote(),
+        connectivity: renderDevices() + renderConnectServer() + renderConnectLightroom() + renderFreeUp() + renderRemote(),
         preferences: renderPrefs(),
     };
 }
@@ -1181,7 +1199,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview, lrConnect] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1195,6 +1213,7 @@ async function refreshDrawer({ initial = false } = {}) {
         getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
         getStorageOverview().catch(() => null),
+        getLrConnect().catch(() => null),
         refreshLibraryHealth(),
     ]);
     if (settingsData) applySettingsData(settingsData);
@@ -1208,6 +1227,7 @@ async function refreshDrawer({ initial = false } = {}) {
     versionData = version || versionData;
     pairStatus = pair || pairStatus;
     syncStatus = sync || syncStatus;
+    lrConnectStatus = lrConnect || lrConnectStatus;
     devicesPayload = devices || devicesPayload;
     if (pairStatus?.mode === 'satellite' && pairStatus.has_hub && freeableStatus == null && !freeupActive()) {
         const available = await getFreeable(freeupOlderDays).catch(() => null);
@@ -1689,6 +1709,26 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             showToast('Connected to hub');
         } else {
             showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
+        }
+    }));
+    body.querySelector('#lr-connect-btn')?.addEventListener('click', (event) => withBusyAction('lr-connect', event.currentTarget, async () => {
+        const result = await connectLightroom();
+        lrConnectStatus = (result && result.data) || await getLrConnect().catch(() => lrConnectStatus);
+        if (result && result.ok) {
+            renderCurrentSystemSurface();
+            showToast('Lightroom connected');
+        } else {
+            showToast((result && result.data && result.data.error) || 'Couldn’t connect Lightroom');
+        }
+    }));
+    body.querySelector('#lr-disconnect-btn')?.addEventListener('click', (event) => withBusyAction('lr-disconnect', event.currentTarget, async () => {
+        const result = await disconnectLightroom();
+        lrConnectStatus = await getLrConnect().catch(() => ({ ...(lrConnectStatus || {}), connected: false }));
+        if (result && result.ok) {
+            renderCurrentSystemSurface();
+            showToast('Lightroom disconnected');
+        } else {
+            showToast('Couldn’t disconnect Lightroom');
         }
     }));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);

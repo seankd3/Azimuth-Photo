@@ -17,6 +17,32 @@ DEFAULT_MIN_COMPARISONS = 3
 DEFAULT_THRESHOLDS = (0.02, 0.10, 0.30)
 _CACHE_TTL_SECONDS = 15.0
 
+# Hover whisper copy for each projected band (matches default thresholds).
+_WHISPER_BY_STARS = {
+    5: "Top 2% of your ranked photos",
+    4: "Top 10% of your ranked photos",
+    3: "Top 30% of your ranked photos",
+}
+
+
+def whisper_for_stars(stars: int, thresholds: tuple[float, float, float] | None = None) -> str | None:
+    """Title/tooltip copy for an elo_stars projection band."""
+
+    value = int(stars or 0)
+    if value <= 0:
+        return None
+    bands = thresholds if thresholds is not None else _settings_projection()[1]
+    # Map star tier → cumulative ceiling label ("top N%").
+    if value >= 5:
+        pct = max(1, int(round(bands[0] * 100)))
+    elif value == 4:
+        pct = max(1, int(round(bands[1] * 100)))
+    elif value == 3:
+        pct = max(1, int(round(bands[2] * 100)))
+    else:
+        return _WHISPER_BY_STARS.get(value)
+    return f"Top {pct}% of your ranked photos"
+
 _lock = threading.Lock()
 _cache: dict[str, Any] = {"key": None, "expires": 0.0, "by_hash": {}, "by_id": {}}
 

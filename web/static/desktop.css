@@ -936,6 +936,29 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .sync-chip-actions { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s3); }
 .sync-chip-actions button { padding: 4px 7px; color: var(--text-2); font: inherit; font-size: var(--fs-caption); background: transparent; border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer; }
 .sync-chip-actions button:hover { color: var(--text); border-color: var(--accent-lin); }
+
+.lr-ranking-chip { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+.lr-ranking-chip[hidden] { display: none; }
+.lr-ranking-chip-button {
+    display: inline-flex; align-items: center; min-height: 30px; padding: 0 10px;
+    color: var(--text-2); font: inherit; font-size: var(--fs-caption);
+    background: var(--surface-raised); border: 1px solid var(--line); border-radius: var(--r-ctl); cursor: pointer;
+}
+.lr-ranking-chip-button:hover { color: var(--text); border-color: var(--accent-lin); }
+.lr-ranking-chip-dismiss {
+    width: 24px; height: 24px; padding: 0; color: var(--text-3); font: inherit; line-height: 1;
+    background: transparent; border: 0; border-radius: var(--r-ctl); cursor: pointer;
+}
+.lr-ranking-chip-dismiss:hover { color: var(--text); }
+
+.elo-stars-display { display: inline-flex; align-items: center; gap: 1px; vertical-align: middle; }
+.elo-stars-display .elo-star { display: inline-flex; color: var(--text-3); opacity: .35; }
+.elo-stars-display .elo-star .icon { width: 12px; height: 12px; }
+.elo-stars-display .elo-star.on { color: var(--accent); opacity: 1; }
+.elo-stars-yours {
+    margin-left: 4px; color: var(--text-3); font-size: var(--fs-micro); font-style: normal;
+    letter-spacing: .02em; opacity: .75;
+}
 body:has(#view-loupe.active) #toast { transform: translateX(-50%) translateY(-70px); }
 body:has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-56px); }
 body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-126px); }

@@ -290,8 +290,33 @@ export async function getPairStatus() {
     return fetchJson('/api/pair/status', { defaultValue: null });
 }
 
-export async function getSyncStatus() {
+export async function getSyncStatus(params = null) {
+    if (params && typeof params === 'object') {
+        const query = new URLSearchParams();
+        for (const [key, value] of Object.entries(params)) {
+            if (value == null || value === '') continue;
+            query.set(key, String(value));
+        }
+        const suffix = query.toString();
+        return fetchJson(`/api/sync/status${suffix ? `?${suffix}` : ''}`, { defaultValue: null });
+    }
     return fetchJson('/api/sync/status', { defaultValue: null });
+}
+
+export async function getLrConnect() {
+    return fetchJson('/api/lr/connect', { defaultValue: null });
+}
+
+export async function connectLightroom(satelliteUrl = null) {
+    return requestWithStatus('/api/lr/connect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(satelliteUrl ? { satellite_url: satelliteUrl } : {}),
+    });
+}
+
+export async function disconnectLightroom() {
+    return requestWithStatus('/api/lr/connect', { method: 'DELETE' });
 }
 
 export async function getFreeable(olderThanDays = 30) {

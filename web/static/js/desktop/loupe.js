@@ -7,6 +7,7 @@ import { openCollectionPicker } from './panel.js';
 import { requestMorePhotos } from './grid.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
+import { starsMarkup } from './elo_stars_display.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
@@ -84,13 +85,36 @@ function flagGlyph(flag) {
 }
 
 function caption(img) {
-    const name = img.filename || img.id;
+    const name = esc(img.filename || img.id);
     const elo = Math.round(Number(img.elo) || 0);
-    const flag = flagLabel(img.flag || 'unflagged');
-    return [name, `${index + 1} / ${scopeTotal() || images().length}`, `Elo ${elo}`, flag]
+    const flag = esc(flagLabel(img.flag || 'unflagged'));
+    const stars = starsMarkup({
+        eloStars: img.elo_stars,
+        lrRating: img.lr_rating ?? img.rating,
+        whisper: img.elo_stars_whisper,
+    });
+    return [name, `${index + 1} / ${scopeTotal() || images().length}`, stars || `Elo ${elo}`, flag]
         .filter(Boolean)
-        .map(esc)
         .join(' · ');
+}
+
+async function loadStarProjection(img) {
+    const imageId = Number(img?.id);
+    if (!imageId || img.elo_stars != null || img.lr_rating != null) return;
+    try {
+        const response = await fetch(`/api/image/${imageId}/rating`, { headers: { Accept: 'application/json' } });
+        if (!response.ok) return;
+        const data = await response.json();
+        img.elo_stars = Number(data.elo_stars) || 0;
+        img.lr_rating = Number(data.lr_rating ?? data.rating) || 0;
+        img.elo_stars_whisper = data.elo_stars_whisper || '';
+        img.rating = img.lr_rating;
+        if (open && currentIs(imageId)) updateInfoOverlay();
+        const host = document.getElementById('loupe-caption');
+        if (host && open && currentIs(imageId)) host.innerHTML = caption(img);
+    } catch {
+        // Quiet — stars are optional chrome.
+    }
 }
 
 function bytes(value) {
@@ -499,7 +523,8 @@ function updateChrome() {
     if (!img) return;
     if (isGridScope()) viewState.focusIndex = index;
     emit('focus', { image: img, index });
-    document.getElementById('loupe-cap').textContent = caption(img);
+    document.getElementById('loupe-cap').innerHTML = caption(img);
+    loadStarProjection(img);
     updateFlagControls();
     updateZoomChip();
     updateInfoOverlay();

@@ -140,6 +140,14 @@ function renderOffline(catalog) {
         + '<button class="mini-btn" type="button" data-health-check-sources>Check again</button></div>';
 }
 
+function renderLrBridge() {
+    const bridge = integrity && integrity.lr_bridge;
+    const line = bridge && bridge.health_line;
+    if (!line) return '';
+    return '<div class="health-block"><div class="health-line"><span><b>Lightroom bridge</b>'
+        + `<small>${esc(line)}</small></span><span class="health-badge warn">Quiet</span></div></div>`;
+}
+
 export function renderLibraryHealth(catalog) {
     if (!backups && !integrity && loading) {
         return '<section class="dr-sec library-health"><h3>Library Health</h3><div class="muted">Checking library health…</div></section>';
@@ -151,7 +159,7 @@ export function renderLibraryHealth(catalog) {
     return '<section class="dr-sec library-health"><div class="health-title"><h3>Library Health</h3>'
         + badge(overall) + '</div>'
         + '<p class="health-promise">Catalog snapshots protect organization, edits, and rankings. Your original photo files still need their own backup.</p>'
-        + renderRestore() + renderBackups() + renderIntegrity() + renderOffline(catalog) + '</section>';
+        + renderRestore() + renderBackups() + renderIntegrity() + renderLrBridge() + renderOffline(catalog) + '</section>';
 }
 
 export async function refreshLibraryHealth({ force = false } = {}) {
