@@ -182,6 +182,10 @@ export async function getIntegrityStatus() {
     return fetchJson('/api/system/integrity/status', { defaultValue: null });
 }
 
+export async function getHealthDetails() {
+    return fetchJson('/api/health/details', { defaultValue: null });
+}
+
 export async function startIntegrityScan(limit = 50) {
     return postJsonWithStatus('/api/system/integrity/scan', { limit });
 }

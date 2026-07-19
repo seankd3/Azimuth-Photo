@@ -56,6 +56,10 @@ class UiContractsTests(BackendTestCase):
             desktop_api = fh.read()
         with open(os.path.join(base_dir, "static", "js", "desktop", "library_health.js"), encoding="utf-8") as fh:
             library_health = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "system_health.js"), encoding="utf-8") as fh:
+            system_health = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "drawer.js"), encoding="utf-8") as fh:
+            drawer = fh.read()
         with open(os.path.join(base_dir, "static", "js", "mobile", "api.js"), encoding="utf-8") as fh:
             mobile_api = fh.read()
         with open(os.path.join(base_dir, "static", "js", "api.js"), encoding="utf-8") as fh:
@@ -67,6 +71,10 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("from '../api.js'", desktop_api)
         self.assertIn("renderLibraryHealth", library_health)
         self.assertIn("Check 50 originals", library_health)
+        self.assertIn("renderSystemHealth", system_health)
+        self.assertIn("getHealthDetails", system_health)
+        self.assertIn("renderSystemHealth", drawer)
+        self.assertIn("system-health-panel", drawer)
         self.assertIn("from '../api.js'", mobile_api)
         self.assertIn("export async function fetchJson", shared_api)
 
