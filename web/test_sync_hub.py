@@ -1004,6 +1004,82 @@ class SyncHubTests(unittest.TestCase):
             {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
         )
 
+    def test_upload_short_circuit_bypasses_stale_byte_proof_cache(self):
+        """S1: single-hash upload known-check must fresh-stat, not trust the TTL cache."""
+
+        payload = self.image_bytes("stale-cache.jpg", (11, 22, 33))
+        content_hash = self.declare("stale-cache.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "stale-cache.jpg"
+        self.assertTrue(destination.is_file())
+
+        # Warm the manifest bulk cache with a positive proof.
+        warm = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "stale-cache.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(
+            warm.json(),
+            {"missing": [], "known": [{"content_hash": content_hash, "image_id": image_id}]},
+        )
+        self.assertIn(
+            (str(destination), len(payload)),
+            hub._stat_proof_cache,
+        )
+
+        destination.unlink()
+        # Upload short-circuit must re-stat and refuse "known" despite the warm cache.
+        known = asyncio.run(hub._known_image_id(self.db_path, content_hash))
+        self.assertIsNone(known)
+        # Manifest bulk path may still report known from cache until TTL — that is
+        # intentional; upload is the path that must not skip restoring bytes.
+
+    def test_null_file_size_requires_fresh_nonempty_byte_proof(self):
+        """S3: NULL file_size only proves a fresh non-empty file and is never cached."""
+
+        payload = self.image_bytes("null-size.jpg", (44, 55, 66))
+        content_hash = self.declare("null-size.jpg", payload)
+        image_id = self.upload(content_hash, payload)
+        destination = self.raws / "2024" / "2024-06-07" / "null-size.jpg"
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("UPDATE images SET file_size = NULL WHERE id = ?", (image_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
+        hub._stat_proof_cache.clear()
+        self.assertTrue(
+            hub._byte_proof_ok(str(destination), str(self.root), None),
+        )
+        # Null-size proofs must not enter the cache.
+        self.assertEqual(hub._stat_proof_cache, {})
+        cached = hub._byte_proof_ok_cached(str(destination), str(self.root), None)
+        self.assertTrue(cached)
+        self.assertEqual(hub._stat_proof_cache, {})
+
+        destination.write_bytes(b"")
+        self.assertFalse(hub._byte_proof_ok(str(destination), str(self.root), None))
+        self.assertIsNone(asyncio.run(hub._known_image_id(self.db_path, content_hash)))
+        missing = self.client.post(
+            "/api/sync/manifest",
+            json={"items": [{
+                "content_hash": content_hash,
+                "full_hash": self.full_digest(payload),
+                "bytes": len(payload),
+                "filename": "null-size.jpg",
+                "date_taken": "2024-06-07",
+            }]},
+        )
+        self.assertEqual(missing.json(), {"missing": [content_hash], "known": []})
+
 
 if __name__ == "__main__":
     unittest.main()

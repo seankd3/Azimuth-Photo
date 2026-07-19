@@ -162,7 +162,9 @@ def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
     if state != "available" or file_stat is None:
         return False
     if expected_size is None:
-        return True
+        # Legacy/null file_size rows: only a fresh non-empty regular file counts,
+        # and callers must not cache this result.
+        return int(file_stat.st_size) > 0
     return int(file_stat.st_size) == int(expected_size)
 
 
@@ -173,7 +175,8 @@ def _byte_proof_ok(filepath: str, source_path: str, expected_size: Any) -> bool:
 # (Free-up-space on the phone deletes local copies of known hashes; a stale
 # positive here could delete the last copy). Negative stats are never cached:
 # a just-finalized upload must read as known on the very next manifest.
-_BYTE_PROOF_TTL_SECONDS = 600.0
+# Null expected sizes are never cached either — always re-stat.
+_BYTE_PROOF_TTL_SECONDS = 120.0
 _stat_proof_cache: dict[tuple[str, int], float] = {}
 
 
@@ -193,7 +196,12 @@ def _byte_proof_ok_cached(filepath: str, source_path: str, expected_size: Any) -
     return False
 
 
-async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) -> dict[str, int]:
+async def images_with_byte_proof(
+    db_path: str,
+    content_hashes: Iterable[str],
+    *,
+    use_cache: bool = True,
+) -> dict[str, int]:
     """Map content_hash → image_id only when an active original exists at expected size."""
 
     hashes = list(dict.fromkeys(validate_content_hash(value) for value in content_hashes))
@@ -221,13 +229,15 @@ async def images_with_byte_proof(db_path: str, content_hashes: Iterable[str]) ->
     finally:
         await connection.close_async(conn, db_path=db_path)
 
+    proof = _byte_proof_ok_cached if use_cache else _byte_proof_ok
+
     def proven() -> dict[str, int]:
         checked: dict[str, int] = {}
         for row in rows:
             content_hash = str(row["content_hash"])
             if content_hash in checked:
                 continue
-            if _byte_proof_ok_cached(
+            if proof(
                 str(row["filepath"] or ""),
                 str(row["source_path"] or ""),
                 row["file_size"],
@@ -504,9 +514,13 @@ async def _catalog_image_id(db_path: str, content_hash: str) -> int | None:
 
 
 async def _known_image_id(db_path: str, content_hash: str) -> int | None:
-    """Upload short-circuit: only when the original exists on disk at expected size."""
+    """Upload short-circuit: only when the original exists on disk at expected size.
 
-    proven = await images_with_byte_proof(db_path, [content_hash])
+    Always fresh-stats — a single-hash check is cheap, and a stale positive would
+    skip re-upload of bytes the hub no longer has.
+    """
+
+    proven = await images_with_byte_proof(db_path, [content_hash], use_cache=False)
     return proven.get(validate_content_hash(content_hash))
 
 
