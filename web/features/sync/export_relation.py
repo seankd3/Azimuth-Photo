@@ -16,6 +16,45 @@ from features.stacks import builders
 from features.sync import lr_bridge
 
 
+def match_export_fallback(db_path: str, export_image_id: int) -> dict[str, Any] | None:
+    """Stem + capture-time matcher — reuses version-group builder verbatim.
+
+    Only a confident stem match within a version group links. Blind
+    ``raw_ids[0]`` fallback is refused — unmatched beats wrong linkage.
+    """
+
+    rows = builders._active_rows(db_path)
+    if int(export_image_id) not in rows:
+        return None
+    for member_ids, representative_id, _scores in builders.build_version_groups(db_path, rows):
+        if int(export_image_id) not in member_ids:
+            continue
+        edit = rows[int(export_image_id)]
+        raw_ids = [image_id for image_id in member_ids if builders._is_raw(rows[image_id])]
+        if not raw_ids:
+            continue
+        export_stem = builders._version_stem(edit)
+        source_id = next(
+            (
+                image_id
+                for image_id in raw_ids
+                if builders._version_stem(rows[image_id]) == export_stem
+            ),
+            None,
+        )
+        if source_id is None:
+            # Same capture-time group but no stem match → honest unmatched.
+            continue
+        return {
+            "relation": "export_of",
+            "source_image_id": int(source_id),
+            "export_image_id": int(export_image_id),
+            "representative_image_id": int(representative_id),
+            "match": "stem",
+        }
+    return None
+
+
 async def link_export(
     db_path: str,
     *,
@@ -45,6 +84,13 @@ async def link_export(
         }
     if source_id == export_id:
         return {"linked": False, "reason": "same_image", "source_image_id": source_id, "export_image_id": export_id}
+    if not await _image_is_raw(db_path, source_id):
+        return {
+            "linked": False,
+            "reason": "source_not_raw",
+            "source_image_id": source_id,
+            "export_image_id": export_id,
+        }
     result = await stack_repository.join_version_stack(db_path, source_id, export_id)
     return {
         "linked": bool(result.get("joined")),
@@ -56,33 +102,20 @@ async def link_export(
     }
 
 
-def match_export_fallback(db_path: str, export_image_id: int) -> dict[str, Any] | None:
-    """Stem + capture-time matcher — reuses version-group builder verbatim."""
-
-    rows = builders._active_rows(db_path)
-    if int(export_image_id) not in rows:
-        return None
-    for member_ids, representative_id, _scores in builders.build_version_groups(db_path, rows):
-        if int(export_image_id) not in member_ids:
-            continue
-        edit = rows[int(export_image_id)]
-        raw_ids = [image_id for image_id in member_ids if builders._is_raw(rows[image_id])]
-        if not raw_ids:
-            continue
-        # Prefer exact stem match when several RAWs share a capture second.
-        export_stem = builders._version_stem(edit)
-        source_id = next(
-            (image_id for image_id in raw_ids if builders._version_stem(rows[image_id]) == export_stem),
-            raw_ids[0],
-        )
-        return {
-            "relation": "export_of",
-            "source_image_id": int(source_id),
-            "export_image_id": int(export_image_id),
-            "representative_image_id": int(representative_id),
-            "match": "stem" if builders._version_stem(rows[source_id]) == export_stem else "capture_time",
-        }
-    return None
+async def _image_is_raw(db_path: str, image_id: int) -> bool:
+    conn = await connection.open_async(db_path)
+    try:
+        row = await (
+            await conn.execute(
+                "SELECT filename, file_ext FROM images WHERE id = ?",
+                (int(image_id),),
+            )
+        ).fetchone()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if row is None:
+        return False
+    return builders._is_raw(dict(row))
 
 
 async def ensure_export_link(db_path: str, export_image_id: int) -> dict[str, Any]:
@@ -93,7 +126,11 @@ async def ensure_export_link(db_path: str, export_image_id: int) -> dict[str, An
         return {"linked": True, "reason": "existing", **existing}
     matched = match_export_fallback(db_path, int(export_image_id))
     if matched is None:
-        return {"linked": False, "reason": "no_match", "export_image_id": int(export_image_id)}
+        return {
+            "linked": False,
+            "reason": "unmatched",
+            "export_image_id": int(export_image_id),
+        }
     return await link_export(
         db_path,
         source_image_id=int(matched["source_image_id"]),

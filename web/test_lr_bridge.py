@@ -329,6 +329,52 @@ class LrBridgeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(matched["source_image_id"], 1)
         self.assertEqual(matched["match"], "stem")
 
+    async def test_export_ambiguous_fallback_stays_unmatched(self):
+        """Blind raw_ids[0] must not link when stem does not confidently match."""
+
+        path = self._catalog()
+        capture = "2026-01-01T12:00:00"
+        camera = "Canon EOS R5"
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "UPDATE images SET date_taken = ?, camera_model = ? WHERE id IN (1, 2)",
+                (capture, camera),
+            )
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext, date_taken, camera_model) "
+                "VALUES (20, 'EXPORT_OTHER.jpg', '/photos/EXPORT_OTHER.jpg', ?, 'jpg', ?, ?)",
+                ("f" * 32, capture, camera),
+            )
+            conn.commit()
+        matched = export_relation.match_export_fallback(path, 20)
+        self.assertIsNone(matched)
+        ensured = await export_relation.ensure_export_link(path, 20)
+        self.assertFalse(ensured["linked"])
+        self.assertEqual(ensured["reason"], "unmatched")
+        with closing(sqlite3.connect(path)) as conn:
+            stacks = conn.execute("SELECT COUNT(*) FROM stacks").fetchone()[0]
+            members = conn.execute("SELECT COUNT(*) FROM stack_members").fetchone()[0]
+        self.assertEqual(stacks, 0)
+        self.assertEqual(members, 0)
+
+    async def test_link_export_refuses_non_raw_source(self):
+        path = self._catalog()
+        with closing(sqlite3.connect(path)) as conn:
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext) "
+                "VALUES (21, 'a.jpg', '/photos/a.jpg', ?, 'jpg')",
+                ("1" * 32,),
+            )
+            conn.execute(
+                "INSERT INTO images(id, filename, filepath, content_hash, file_ext) "
+                "VALUES (22, 'b.jpg', '/photos/b.jpg', ?, 'jpg')",
+                ("2" * 32,),
+            )
+            conn.commit()
+        linked = await export_relation.link_export(path, source_image_id=21, export_image_id=22)
+        self.assertFalse(linked["linked"])
+        self.assertEqual(linked["reason"], "source_not_raw")
+
 
 class LrBridgeRouteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
