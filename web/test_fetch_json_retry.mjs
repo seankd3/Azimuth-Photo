@@ -29,7 +29,8 @@ function delay(ms) {
         const elapsed = Date.now() - started;
         assert.equal(data.ok, true);
         assert.equal(attempts, 3);
-        assert.ok(elapsed >= 3500, `expected ~1s+3s backoff, got ${elapsed}ms`);
+        // New backoff: 0ms jitter (random=0) + 3s second delay.
+        assert.ok(elapsed >= 2500, `expected ~0s+3s backoff, got ${elapsed}ms`);
     } finally {
         Math.random = originalRandom;
     }
@@ -86,6 +87,23 @@ function delay(ms) {
     }
 }
 
+{
+    let attempts = 0;
+    const controller = new AbortController();
+    controller.abort();
+    globalThis.fetch = async () => {
+        attempts += 1;
+        const error = new Error('The operation was aborted');
+        error.name = 'AbortError';
+        throw error;
+    };
+    await assert.rejects(
+        () => api.fetchJson('/api/probe', { fetchOptions: { signal: controller.signal } }),
+        (error) => error instanceof api.FetchJsonError,
+    );
+    assert.equal(attempts, 1, 'caller-aborted signal must not retry');
+}
+
 // Keep the suite snappy if a future change regresses delay math.
 await delay(0);
-console.log('fetchJson retry: GET recovers after transient failures; POST does not retry');
+console.log('fetchJson retry: GET recovers after transient failures; POST/abort do not retry');
