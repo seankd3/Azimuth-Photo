@@ -52,7 +52,6 @@ function anchoredPopover(anchor, html) {
 }
 
 async function scopedImageIds() {
-    if (scope.similarIds.length) return scope.similarIds.map(Number).filter((id) => id > 0);
     const bestOf = viewState.bestOf && viewState.bestOfLimit != null;
     const maxIds = bestOf ? Math.max(0, Number(viewState.bestOfLimit) || 0) : Infinity;
     const imageIds = [];
@@ -63,13 +62,17 @@ async function scopedImageIds() {
         showToast('Preparing photos for export…');
     }, SCOPE_EXPORT_PROGRESS_DELAY_MS);
     try {
+        // Similar sets resolve server-side with exclude_sources — never raw similarIds.
+        const similarIds = scope.similarIds.map(Number).filter((id) => id > 0);
         while (offset < maxIds) {
             const limit = Math.min(SCOPE_EXPORT_PAGE_SIZE, maxIds - offset);
-            const payload = await getRankings(scopeParams({
+            const extra = {
                 limit,
                 offset,
                 ...(bestOf ? { sort: 'elo' } : {}),
-            }));
+            };
+            if (similarIds.length) extra.ids = similarIds.join(',');
+            const payload = await getRankings(scopeParams(extra));
             const images = payload?.images || [];
             imageIds.push(...images.map((image) => Number(image.id)).filter((id) => id > 0));
             offset += images.length;

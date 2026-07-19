@@ -1220,6 +1220,7 @@ async def api_rankings_impl(
                 id_filter=search_ids,
                 text_query=text_query,
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                exclude_sources=exclude_sources,
             )
         )
     if blend_context.get("active") and cached_blended_order is not None:

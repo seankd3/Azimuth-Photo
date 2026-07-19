@@ -75,3 +75,17 @@ class QuietSourcesTests(BackendTestCase):
 
         scoped = await library_routes.api_rankings(limit=10, folder=source_a["path"])
         self.assertEqual([image["id"] for image in scoped["images"]], [image_a])
+
+    async def test_sort_quality_honors_exclude_sources(self):
+        source_a = await self._source("quiet-quality-a")
+        source_b = await self._source("quiet-quality-b")
+        await self._image(source_a["id"], "qa.jpg", elo=1400, comparisons=8)
+        await self._image(source_b["id"], "qb.jpg", elo=1300, comparisons=8)
+        library_service._rankings_response_cache.clear()
+
+        all_photos = await library_routes.api_rankings(limit=10)
+        excluded = await library_routes.api_rankings(limit=10, exclude_sources=str(source_a["id"]))
+        self.assertIsNotNone(all_photos.get("sort_quality"))
+        self.assertIsNotNone(excluded.get("sort_quality"))
+        self.assertEqual(int(all_photos["sort_quality"]["total"]), 2)
+        self.assertEqual(int(excluded["sort_quality"]["total"]), 1)
