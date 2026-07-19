@@ -197,6 +197,15 @@ def request_model_unload() -> list[str]:
     except Exception:
         log.debug("memory_pressure: people unload failed", exc_info=True)
 
+    # Workers clear cache on their own unload; one more pass after all drops
+    # so shared VRAM is actually returned on an 8GB card.
+    try:
+        from core.ml_device import empty_cuda_cache
+
+        empty_cuda_cache()
+    except Exception:
+        log.debug("memory_pressure: cuda empty_cache failed", exc_info=True)
+
     return unloaded
 
 

@@ -107,9 +107,10 @@ class OptionalAiPackagingTests(unittest.TestCase):
         model_id = "Qwen/Qwen3-VL-Embedding-2B"
         with patch.dict(sys.modules, {"torch": fake_torch, "sentence_transformers": fake_sentence}), patch.object(
             embedding_worker.importlib.util, "find_spec", return_value=None
-        ):
+        ), patch("core.ml_device.preferred_device", return_value="cpu"):
             embedding_worker._load_model("/tmp/test", model_id)
         self.assertEqual(constructor.call_args.kwargs["model_kwargs"], {"torch_dtype": fake_torch.float32})
+        self.assertEqual(constructor.call_args.kwargs["device"], "cpu")
 
     def test_minimal_install_can_import_app_without_optional_modules(self):
         script = """

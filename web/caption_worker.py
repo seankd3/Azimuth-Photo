@@ -208,13 +208,9 @@ def _is_cuda_oom_error(error) -> bool:
 
 
 def _clear_cuda_cache() -> None:
-    try:
-        import torch
+    from core.ml_device import empty_cuda_cache
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+    empty_cuda_cache()
 
 
 def _unload_model() -> None:
@@ -274,13 +270,16 @@ def _load_model(config: dict[str, Any]):
     except ImportError:
         from transformers import AutoModelForVision2Seq as AutoCaptionModel
 
+    from core.ml_device import preferred_device, transformers_device_map
+
+    quantized = str(config.get("quantization") or "") == "bnb-4bit"
     kwargs = {
         "local_files_only": True,
         "revision": config.get("revision") or "main",
-        "device_map": "auto",
+        "device_map": transformers_device_map(quantized=quantized),
         "trust_remote_code": True,
     }
-    if str(config.get("quantization") or "") == "bnb-4bit":
+    if quantized:
         import torch
 
         kwargs["quantization_config"] = BitsAndBytesConfig(
@@ -289,11 +288,15 @@ def _load_model(config: dict[str, Any]):
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=torch.float16,
         )
-        # Force a whole-model GPU load: accelerate's CPU-offload path crashes
-        # on this transformers+bitsandbytes pairing, and a clean CUDA OOM is
-        # handled by the worker's backoff. The 4-bit model fits when the card
-        # isn't shared with another loaded model.
-        kwargs["device_map"] = {"": 0}
+        # Whole-model pin (GPU 0 or CPU): accelerate's CPU-offload path crashes
+        # on this transformers+bitsandbytes pairing. CUDA OOM is handled by the
+        # worker's backoff. The 4-bit model fits when the card isn't shared.
+        kwargs["device_map"] = transformers_device_map(quantized=True)
+        log.info(
+            "caption model load device=%s device_map=%s",
+            preferred_device(),
+            kwargs["device_map"],
+        )
     _processor = AutoProcessor.from_pretrained(
         config["model_dir"],
         local_files_only=True,
