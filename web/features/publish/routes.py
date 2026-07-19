@@ -461,15 +461,20 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
         def persist_revoke(hook):
             if hook is None or hook.ok:
                 return asyncio.run(_delete_publish(collection_id))
+            # Hook failed: keep the publish row (with the failure recorded) so
+            # the retry machinery can re-run the hook against real state.
+            publish = asyncio.run(_get_publish(collection_id))
+            if publish is None:
+                return asyncio.run(_delete_publish(collection_id))
             attempts = 1
             return asyncio.run(
-                _upsert_publish(  # noqa: F821  # lint-report: publish unbound in revoke persist
+                _upsert_publish(
                     collection_id=collection_id,
-                    slug=publish["slug"],  # noqa: F821
-                    title=publish["title"],  # noqa: F821
-                    image_count=publish["image_count"],  # noqa: F821
-                    bundle_bytes=publish["bundle_bytes"],  # noqa: F821
-                    last_commit=publish.get("last_commit"),  # noqa: F821
+                    slug=publish["slug"],
+                    title=publish["title"],
+                    image_count=publish["image_count"],
+                    bundle_bytes=publish["bundle_bytes"],
+                    last_commit=publish.get("last_commit"),
                     hook_exit_code=hook.returncode if hook.configured else None,
                     hook_output=hook.output if hook.configured else "",
                     hook_ran_at=hook.ran_at if hook.configured else None,
