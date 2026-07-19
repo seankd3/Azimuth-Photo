@@ -168,7 +168,10 @@ class ClientUpdater:
             staging.mkdir()
             with tarfile.open(archive, "r:gz") as handle:
                 # Hub bytes were sha256-verified above; extractall is intentional.
-                handle.extractall(staging)  # noqa: S202
+                try:
+                    handle.extractall(staging, filter="data")  # noqa: S202
+                except TypeError:
+                    handle.extractall(staging)  # noqa: S202
             _move_tree(staging, version_dir)
         marker = version_dir / ".client_sha"
         marker.write_text(hub_sha + "\n", encoding="utf-8")
