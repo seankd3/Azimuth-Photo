@@ -186,6 +186,22 @@ export async function startIntegrityScan(limit = 50) {
     return postJsonWithStatus('/api/system/integrity/scan', { limit });
 }
 
+export async function getCloudBackupStatus() {
+    return fetchJson('/api/backup/cloud/status', { defaultValue: null });
+}
+
+export async function saveCloudBackupConfig(config) {
+    return requestWithStatus('/api/backup/cloud/config', jsonRequestOptions('PUT', config));
+}
+
+export async function startCloudBackup() {
+    return postJsonWithStatus('/api/backup/cloud/start');
+}
+
+export async function stopCloudBackup() {
+    return postJsonWithStatus('/api/backup/cloud/stop');
+}
+
 export async function getMetadataStatus() {
     return fetchJson('/api/catalog/metadata/status', { defaultValue: null });
 }

@@ -389,6 +389,19 @@ async def run_startup(
 
     try:
         import db as _db
+        from features.backup import cloud as _cloud_backup
+
+        track_background_task(
+            _start_background_daemon(
+                lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
+                delay=25.0,
+            )
+        )
+    except Exception:
+        log.exception("worker=cloud_backup scheduler failed to arm")
+
+    try:
+        import db as _db
         from features.library import watched_folders
         track_background_task(
             _start_background_daemon(
