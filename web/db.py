@@ -1145,6 +1145,52 @@ async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
     return await _annotate_caption_presence(rows)
 
 
+async def get_ranking_id_elo(
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    id_filter: set = None,
+    collection_id: int = 0,
+    text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
+) -> list[tuple[int, float]]:
+    """Lightweight (id, elo) pairs for taste-order construction."""
+    return await ranking_repository.ranking_id_elo(
+        DB_PATH,
+        catalog_counts=await get_catalog_image_counts(),
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        id_filter=id_filter,
+        collection_id=collection_id,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
+        caption_model_key=active_caption_model_key(),
+    )
+
+
+async def get_ranking_rows_by_ids(image_ids: list[int]) -> list[dict]:
+    """Fetch ranking rows for a small id page (IN-clause, then caption annotate)."""
+    rows = await ranking_repository.ranking_rows_by_ids(DB_PATH, image_ids)
+    return await _annotate_caption_presence(rows)
+
+
 _ranking_count_cache_key = ranking_repository.ranking_count_cache_key
 _facet_cache_key = ranking_repository.facet_cache_key
 

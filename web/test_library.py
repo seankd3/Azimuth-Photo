@@ -1059,7 +1059,7 @@ class LibraryTests(BackendTestCase):
         cache_events.invalidate_rankings_cache()
         compute_calls = 0
         ranking_limits = []
-        original_compute = taste_service._compute_scaled_scores
+        original_compute = taste_service._compute_similarity_and_scaled_scores
         original_get_rankings = library_service._get_rankings
 
         def counted_compute(*args, **kwargs):
@@ -1071,14 +1071,14 @@ class LibraryTests(BackendTestCase):
             ranking_limits.append(int(kwargs.get("limit") or 0))
             return await original_get_rankings(**kwargs)
 
-        taste_service._compute_scaled_scores = counted_compute
+        taste_service._compute_similarity_and_scaled_scores = counted_compute
         library_service._get_rankings = counted_get_rankings
         try:
             first = await library_routes.api_rankings(limit=20, offset=0, sort="elo")
             library_service._rankings_response_cache.clear()
             second = await library_routes.api_rankings(limit=20, offset=20, sort="elo")
         finally:
-            taste_service._compute_scaled_scores = original_compute
+            taste_service._compute_similarity_and_scaled_scores = original_compute
             library_service._get_rankings = original_get_rankings
 
         self.assertEqual(len(first["images"]), 20)

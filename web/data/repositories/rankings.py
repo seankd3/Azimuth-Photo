@@ -843,6 +843,162 @@ async def rankings(
         await connection.close_async(conn, db_path=db_path)
 
 
+async def ranking_id_elo(
+    db_path: str,
+    *,
+    catalog_counts: dict,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
+    id_filter: set | None = None,
+    collection_id: int = 0,
+    text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
+) -> list[tuple[int, float]]:
+    """Return (image_id, elo) for every ranking row matching filters — no captions/metadata.
+
+    Used by taste sort to build a full-library order without materializing image cards.
+    Runs sync SQLite in a worker thread — materially faster than aiosqlite for ~150k rows.
+    """
+    return await asyncio.to_thread(
+        ranking_id_elo_sync,
+        db_path,
+        catalog_counts=catalog_counts,
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        id_filter=id_filter,
+        collection_id=collection_id,
+        text_query=text_query,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
+    )
+
+
+def ranking_id_elo_sync(
+    db_path: str,
+    *,
+    catalog_counts: dict,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder: str = "",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    caption_model_key: str = "",
+    id_filter: set | None = None,
+    collection_id: int = 0,
+    text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
+) -> list[tuple[int, float]]:
+    """Sync (id, elo) fetch — faster than aiosqlite for the full-library taste order build."""
+    import sqlite3
+
+    active_images = int(catalog_counts.get("active_images") or 0)
+    if active_images <= 0:
+        return []
+
+    all_catalog_images_active = (
+        active_images > 0
+        and active_images == int(catalog_counts.get("total_catalog_images") or 0)
+        and int(catalog_counts.get("removed_images") or 0) == 0
+    )
+    conditions, params = ranking_filter_parts(
+        orientation=orientation,
+        compared=compared,
+        min_stars=min_stars,
+        folder=folder,
+        flag=flag,
+        date_taken=date_taken,
+        file_type=file_type,
+        camera=camera,
+        lens=lens,
+        tag=tag,
+        caption_model_key=caption_model_key,
+        text_query=text_query,
+        collection_id=collection_id,
+        include_source=not all_catalog_images_active,
+        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+        exclude_sources=exclude_sources,
+    )
+    if id_filter is not None and not id_filter:
+        return []
+
+    conn = sqlite3.connect(db_path, timeout=30)
+    conn.row_factory = sqlite3.Row
+    try:
+        id_filter_join = ""
+        if id_filter is not None:
+            from data.repositories.common import stage_temp_ids_sync
+
+            stage_temp_ids_sync(conn, "temp_ranking_scope_ids", id_filter)
+            id_filter_join = (
+                "JOIN temp_ranking_scope_ids ranking_scope "
+                "ON ranking_scope.image_id = i.id "
+            )
+        image_source = ranking_image_source(
+            "elo",
+            folder=folder,
+            orientation=orientation,
+            id_filter=id_filter,
+            text_query=text_query,
+            allow_forced_index=all_catalog_images_active,
+        )
+        source_join = (
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            if not all_catalog_images_active
+            else ""
+        )
+        source_join += id_filter_join
+        rows = conn.execute(
+            f"SELECT i.id, i.elo FROM {image_source} {source_join}"
+            f"WHERE {' AND '.join(conditions)}",
+            params,
+        ).fetchall()
+        return [(int(row["id"]), float(row["elo"] or 1200.0)) for row in rows]
+    finally:
+        conn.close()
+
+
+async def ranking_rows_by_ids(db_path: str, image_ids: list[int]) -> list[dict]:
+    """Fetch full ranking rows for a small ordered id list via IN (avoids temp-table join)."""
+    if not image_ids:
+        return []
+    placeholders = ",".join("?" for _ in image_ids)
+    conn = await connection.open_async(db_path)
+    try:
+        cursor = await conn.execute(
+            f"SELECT {IMAGE_ROW_SELECT} FROM images i "
+            f"WHERE i.id IN ({placeholders})",
+            [int(image_id) for image_id in image_ids],
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def rankings_cached(
     db_path: str,
     *,

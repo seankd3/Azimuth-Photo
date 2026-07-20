@@ -563,6 +563,8 @@ def configure_library_service(
         get_stats=lambda: db.get_stats(),
         count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
         get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
+        get_ranking_id_elo=lambda **kwargs: db.get_ranking_id_elo(**kwargs),
+        get_ranking_rows_by_ids=lambda image_ids: db.get_ranking_rows_by_ids(image_ids),
         get_rank_quality=lambda **kwargs: db.rank_quality(**kwargs),
         get_date_histogram=lambda **kwargs: db.date_histogram(**kwargs),
         get_scope_counts=lambda **kwargs: db.scope_counts(**kwargs),
