@@ -39,7 +39,9 @@ _cache: dict[str, object] = {
 _prediction_cache: dict[str, object] = {
     "key": None,
     "scores": None,
+    "similarities": None,
 }
+_row_norms_cache: dict[int, object] = {}
 _cache_generation = 0
 
 
@@ -60,6 +62,8 @@ def invalidate_taste_cache() -> None:
     _cache["verified_at"] = 0.0
     _prediction_cache["key"] = None
     _prediction_cache["scores"] = None
+    _prediction_cache["similarities"] = None
+    _row_norms_cache.clear()
 
 
 def _embedding_batch_stored(model_key: str, _image_ids: list[int]) -> None:
@@ -208,8 +212,26 @@ def _matrix_identity(matrix: np.ndarray | None) -> int:
     return int(matrix.__array_interface__["data"][0])
 
 
+async def taste_similarity_scores(taste: dict) -> dict[int, float] | None:
+    """Return image_id -> cosine similarity to the taste vector (vectorized + cached)."""
+    payload = await _taste_score_payload(taste)
+    if payload is None:
+        return None
+    similarities = payload.get("similarities")
+    return similarities if isinstance(similarities, dict) else None
+
+
 async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
     """Return image_id -> taste-scaled Elo prediction for the warm embedding matrix."""
+    payload = await _taste_score_payload(taste)
+    if payload is None:
+        return None
+    scores = payload.get("scores")
+    return scores if isinstance(scores, dict) else None
+
+
+async def _taste_score_payload(taste: dict) -> dict | None:
+    """Compute (and cache) raw similarities + Elo-scaled predictions in one matmul."""
     if not taste.get("available") or taste.get("vector") is None:
         return None
     model_key = str(taste.get("model_key") or "")
@@ -219,28 +241,66 @@ async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
     signature = taste_vector_signature(taste)
     cache_key = (taste.get("_cache_key"), signature, len(image_ids), _matrix_identity(matrix))
     if _prediction_cache.get("key") == cache_key:
-        cached = _prediction_cache.get("scores")
-        return cached if isinstance(cached, dict) else None
+        return {
+            "similarities": _prediction_cache.get("similarities"),
+            "scores": _prediction_cache.get("scores"),
+        }
 
-    scores = _compute_scaled_scores(image_ids, matrix, taste["vector"])
-    _prediction_cache.update({"key": cache_key, "scores": scores})
-    return scores
+    similarities, scores = _compute_similarity_and_scaled_scores(
+        image_ids, matrix, taste["vector"]
+    )
+    _prediction_cache.update({
+        "key": cache_key,
+        "similarities": similarities,
+        "scores": scores,
+    })
+    return {"similarities": similarities, "scores": scores}
+
+
+def _row_norms_for(matrix: np.ndarray):
+    """Cached per-row L2 norms. einsum is ~15× faster than np.linalg.norm(axis=1) here."""
+    import numpy as np  # deferred
+
+    identity = _matrix_identity(matrix)
+    cached = _row_norms_cache.get(identity)
+    if cached is not None and len(cached) == len(matrix):
+        return cached
+    norms = np.sqrt(np.einsum("ij,ij->i", matrix, matrix))
+    _row_norms_cache.clear()
+    _row_norms_cache[identity] = norms
+    return norms
 
 
 def _compute_scaled_scores(image_ids, matrix: np.ndarray, vector) -> dict[int, float]:
+    """Compat wrapper for tests that patch this symbol directly."""
+    _similarities, scores = _compute_similarity_and_scaled_scores(image_ids, matrix, vector)
+    return scores
+
+
+def _compute_similarity_and_scaled_scores(
+    image_ids, matrix: np.ndarray, vector
+) -> tuple[dict[int, float], dict[int, float]]:
     import numpy as np  # deferred: keeps numpy off boot until taste scores are computed
 
     vector = np.asarray(vector, dtype=np.float32)
-    row_norms = np.linalg.norm(matrix, axis=1)
+    row_norms = _row_norms_for(matrix)
     valid = row_norms > 0
     similarities = np.full(len(image_ids), np.nan, dtype=np.float32)
-    similarities[valid] = (matrix[valid] @ vector) / row_norms[valid]
-    scores = {
-        int(image_id): scaled
-        for image_id, similarity in zip(image_ids, similarities, strict=False)
-        if (scaled := taste_to_elo(float(similarity))) is not None
-    }
-    return scores
+    # One matmul for the whole matrix; divide only valid rows in place.
+    dots = matrix @ vector
+    np.divide(dots, row_norms, out=dots, where=valid)
+    similarities[valid] = dots[valid]
+    sim_map: dict[int, float] = {}
+    score_map: dict[int, float] = {}
+    for image_id, similarity in zip(image_ids, similarities, strict=False):
+        if not np.isfinite(similarity):
+            continue
+        value = float(similarity)
+        sim_map[int(image_id)] = value
+        scaled = taste_to_elo(value)
+        if scaled is not None:
+            score_map[int(image_id)] = scaled
+    return sim_map, score_map
 
 
 async def taste_vector() -> dict:

@@ -8,7 +8,6 @@ from datetime import datetime
 
 from fastapi.responses import Response
 
-import embed_cache
 import helpers as app_helpers
 import settings
 from core import responses as response_helpers
@@ -20,9 +19,13 @@ from features.sync import satellite
 
 _rankings_response_cache: dict[tuple, dict] = {}
 _blended_rankings_order_cache: dict[tuple, dict] = {}
+_taste_rankings_order_cache: dict[tuple, dict] = {}
+_taste_id_elo_cache: dict[tuple, list[tuple[int, float]]] = {}
 _rankings_response_cache_ttl_seconds = 1800.0
 _rankings_response_cache_max_entries = 256
 _blended_rankings_order_cache_max_entries = 12
+_taste_rankings_order_cache_max_entries = 12
+_taste_id_elo_cache_max_entries = 8
 MAX_RANKINGS_LIMIT = 5000
 ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
@@ -41,6 +44,8 @@ _get_filter_options: Callable[[], Awaitable[dict]] | None = None
 _get_stats: Callable[[], Awaitable[dict]] | None = None
 _count_rankings: Callable[..., Awaitable[int]] | None = None
 _get_rankings: Callable[..., Awaitable[list]] | None = None
+_get_ranking_id_elo: Callable[..., Awaitable[list[tuple[int, float]]]] | None = None
+_get_ranking_rows_by_ids: Callable[[list[int]], Awaitable[list]] | None = None
 _get_rank_quality: Callable[..., Awaitable[dict]] | None = None
 _get_date_histogram: Callable[..., Awaitable[dict]] | None = None
 _get_scope_counts: Callable[..., Awaitable[dict]] | None = None
@@ -74,12 +79,15 @@ def configure(
     get_rank_quality: Callable[..., Awaitable[dict]] | None = None,
     get_date_histogram: Callable[..., Awaitable[dict]] | None = None,
     get_scope_counts: Callable[..., Awaitable[dict]] | None = None,
+    get_ranking_id_elo: Callable[..., Awaitable[list[tuple[int, float]]]] | None = None,
+    get_ranking_rows_by_ids: Callable[[list[int]], Awaitable[list]] | None = None,
 ) -> None:
     global _resolve_library_constraints, _cache_root, _clamp_int, _normalize_search_query
     global _schedule_thumbnail_prefetch, _schedule_result_thumbnail_memory_warm
     global _rankings_response_cache_ttl_seconds_provider
     global _extension_search_terms, _db_signature, _get_date_groups, _get_map_markers
     global _get_filter_options, _get_stats, _count_rankings, _get_rankings
+    global _get_ranking_id_elo, _get_ranking_rows_by_ids
     global _get_visible_pairing_pool_counts, _get_cached_image_ids, _get_rank_quality
     global _get_date_histogram, _get_scope_counts, _resolve_smart_collection_image_ids
     _resolve_library_constraints = resolve_library_constraints
@@ -96,6 +104,8 @@ def configure(
     _get_stats = get_stats
     _count_rankings = count_rankings
     _get_rankings = get_rankings
+    _get_ranking_id_elo = get_ranking_id_elo
+    _get_ranking_rows_by_ids = get_ranking_rows_by_ids
     _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
     _get_cached_image_ids = get_cached_image_ids
     _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
@@ -121,6 +131,8 @@ def configure_stacks(
 def invalidate_rankings_response_cache() -> None:
     _rankings_response_cache.clear()
     _blended_rankings_order_cache.clear()
+    _taste_rankings_order_cache.clear()
+    _taste_id_elo_cache.clear()
 
 
 def _configured_cache_root() -> str:
@@ -337,6 +349,193 @@ async def _blended_order_page(
         row.update(annotations.get(image_id) or {})
         ordered.append(row)
     return ordered
+
+
+def _taste_order_cache_key(
+    *,
+    taste_signature: tuple,
+    orientation: str,
+    compared: str,
+    min_stars: int,
+    folder,
+    flag: str,
+    date_taken: str,
+    file_type: str,
+    camera: str,
+    lens: str,
+    tag: str,
+    search_ids,
+    text_query: str,
+    collection_id: int,
+    exclude_collapsed_stack_members: bool,
+    exclude_sources=(),
+) -> tuple:
+    return (
+        _configured_db_signature(),
+        "taste_order",
+        taste_signature,
+        orientation,
+        compared,
+        int(min_stars or 0),
+        _folder_cache_value(folder),
+        flag,
+        date_taken,
+        file_type,
+        camera,
+        lens,
+        tag,
+        None if search_ids is None else tuple(sorted(int(image_id) for image_id in search_ids)),
+        text_query or "",
+        int(collection_id or 0),
+        bool(exclude_collapsed_stack_members),
+        tuple(exclude_sources or ()),
+    )
+
+
+def _cache_taste_order(
+    cache_key: tuple,
+    *,
+    ordered_ids: list[int],
+    taste_scores: dict[int, float | None],
+    total_images: int,
+) -> None:
+    _taste_rankings_order_cache[cache_key] = {
+        "ids": ordered_ids,
+        "annotations": {
+            image_id: {"taste_score": score}
+            for image_id, score in taste_scores.items()
+            if score is not None
+        },
+        "total_images": int(total_images or 0),
+    }
+    while len(_taste_rankings_order_cache) > _taste_rankings_order_cache_max_entries:
+        _taste_rankings_order_cache.pop(next(iter(_taste_rankings_order_cache)))
+
+
+def _sort_taste_order_keys(
+    id_elo_rows: list[tuple[int, float]],
+    similarities: dict[int, float],
+) -> tuple[list[int], dict[int, float | None]]:
+    """Sort by (has_score, score, elo) descending, then id ascending for stability.
+
+    Same primary ranking meaning as the legacy per-row loop; id tie-break makes
+    equal taste+elo pairs deterministic across query plans.
+    """
+    keyed = []
+    taste_scores: dict[int, float | None] = {}
+    for image_id, elo in id_elo_rows:
+        score = similarities.get(image_id)
+        taste_scores[image_id] = score
+        keyed.append((
+            0 if score is not None else 1,
+            -(score if score is not None else -2.0),
+            -float(elo),
+            int(image_id),
+        ))
+    keyed.sort()
+    return [image_id for *_rest, image_id in keyed], taste_scores
+
+
+async def _taste_order_page(
+    cached: dict,
+    *,
+    offset: int,
+    limit: int,
+    orientation: str = "",
+    compared: str = "",
+    min_stars: int = 0,
+    folder="",
+    flag: str = "",
+    date_taken: str = "",
+    file_type: str = "",
+    camera: str = "",
+    lens: str = "",
+    tag: str = "",
+    search_ids=None,
+    collection_id: int = 0,
+    text_query: str = "",
+    exclude_collapsed_stack_members: bool = False,
+    exclude_sources=(),
+) -> list[dict]:
+    page_ids = cached["ids"][offset:offset + limit]
+    if not page_ids:
+        return []
+    if _get_ranking_rows_by_ids is not None and len(page_ids) <= 900:
+        rows = await _get_ranking_rows_by_ids(list(page_ids))
+    else:
+        rows = await _configured(_get_rankings)(
+            limit=len(page_ids),
+            offset=0,
+            sort="elo",
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            id_filter=set(page_ids) if search_ids is None else set(page_ids) & set(search_ids),
+            collection_id=collection_id,
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=exclude_sources,
+        )
+    rows_by_id = {int(row["id"]): dict(row) for row in rows}
+    annotations = cached.get("annotations") or {}
+    ordered = []
+    for image_id in page_ids:
+        row = rows_by_id.get(image_id)
+        if row is None:
+            continue
+        score = (annotations.get(image_id) or {}).get("taste_score")
+        ordered.append(app_helpers.image_card(row, "sm", taste_score=score))
+    return ordered
+
+
+async def _ranking_id_elo_rows(**kwargs) -> list[tuple[int, float]]:
+    total = kwargs.pop("_total", None)
+    cache_key = (
+        _configured_db_signature(),
+        "taste_id_elo",
+        kwargs.get("orientation") or "",
+        kwargs.get("compared") or "",
+        int(kwargs.get("min_stars") or 0),
+        _folder_cache_value(kwargs.get("folder")),
+        kwargs.get("flag") or "",
+        kwargs.get("date_taken") or "",
+        kwargs.get("file_type") or "",
+        kwargs.get("camera") or "",
+        kwargs.get("lens") or "",
+        kwargs.get("tag") or "",
+        None
+        if kwargs.get("id_filter") is None
+        else tuple(sorted(int(i) for i in kwargs["id_filter"])),
+        int(kwargs.get("collection_id") or 0),
+        kwargs.get("text_query") or "",
+        bool(kwargs.get("exclude_collapsed_stack_members")),
+        tuple(kwargs.get("exclude_sources") or ()),
+    )
+    cached = _taste_id_elo_cache.get(cache_key)
+    if cached is not None:
+        return cached
+    if _get_ranking_id_elo is not None:
+        rows = await _get_ranking_id_elo(**kwargs)
+    else:
+        # Test/fallback path: derive from full rankings rows.
+        fetched = await _configured(_get_rankings)(
+            limit=int(total or 10_000_000),
+            offset=0,
+            sort="elo",
+            **kwargs,
+        )
+        rows = [(int(row["id"]), float(row.get("elo") or 1200.0)) for row in fetched]
+    _taste_id_elo_cache[cache_key] = rows
+    while len(_taste_id_elo_cache) > _taste_id_elo_cache_max_entries:
+        _taste_id_elo_cache.pop(next(iter(_taste_id_elo_cache)))
+    return rows
 
 
 def _blend_card_kwargs(data: dict, blend_context: dict) -> dict:
@@ -956,81 +1155,174 @@ async def api_rankings_impl(
                 **taste_fields,
             }
 
-        total_task = asyncio.create_task(
-            _configured(_count_rankings)(
-                orientation=orientation, compared=compared, min_stars=min_stars,
-                folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-                camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
-                text_query=text_query,
-                exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                exclude_sources=exclude_sources,)
+        taste_signature = taste_service.taste_vector_signature(taste)
+        taste_order_key = _taste_order_cache_key(
+            taste_signature=taste_signature,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            search_ids=search_ids,
+            text_query=text_query,
+            collection_id=collection_id,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=exclude_sources,
         )
-        visible_images = await _configured(_count_rankings)(
-            orientation=orientation, compared=compared, min_stars=min_stars,
-            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-            camera=camera, lens=lens, tag=tag,
-            id_filter=search_ids,
-            collection_id=collection_id,
-            visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
-            text_query=text_query,
-            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        exclude_sources=exclude_sources,
-    )
-        total_images = await total_task
-        if total_images <= 0:
-            response = {
-                "images": [],
-                **_ranking_preview_metadata(total_images, visible_images),
-                "total_kept": total_images,
-                "search_mode": search_mode,
-                "search_sources": search.get("search_sources") or [],
-                "ai_unavailable": search["ai_unavailable"],
-                **taste_fields,
-            }
-            if rankings_cache_key is not None:
-                cache_rankings_response(rankings_cache_key, response)
-            return response
+        cached_taste_order = _taste_rankings_order_cache.get(taste_order_key)
 
-        images = await _configured(_get_rankings)(
-            limit=total_images, offset=0, sort="elo",
-            orientation=orientation, compared=compared, min_stars=min_stars,
-            folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
-            camera=camera, lens=lens, tag=tag,
-            id_filter=search_ids,
-            collection_id=collection_id,
-            text_query=text_query,
-            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        exclude_sources=exclude_sources,
-    )
-        # Deferred: keeps numpy's ~120 ms import off the boot path; the embed
-        # matrix that reaches this branch is itself numpy, so this never misses.
-        import numpy as np
-
-        _image_ids, matrix = await embed_cache.get_matrix(taste.get("model_key"))
-        id_to_idx = embed_cache.get_index(taste.get("model_key"))
-        taste_vector = taste.get("vector")
-        all_results = []
-        for img in images:
-            data = dict(img)
-            score = None
-            idx = id_to_idx.get(data["id"])
-            if matrix is not None and taste_vector is not None and idx is not None:
-                vec = matrix[idx]
-                norm = float(np.linalg.norm(vec))
-                if norm > 0:
-                    score = float(np.dot(vec, taste_vector) / norm)
-            all_results.append(
-                app_helpers.image_card(data, "sm", taste_score=score)
+        unfiltered_taste = not any(
+            (
+                orientation,
+                compared,
+                int(min_stars or 0),
+                folder,
+                flag,
+                date_taken,
+                file_type,
+                camera,
+                lens,
+                tag,
+                search_ids is not None,
+                search.get("people_active"),
+                text_query,
+                int(collection_id or 0),
+                exclude_collapsed_stack_members,
+                exclude_sources,
             )
-        all_results.sort(
-            key=lambda x: (
-                x.get("taste_score") is not None,
-                x.get("taste_score") if x.get("taste_score") is not None else -2.0,
-                x.get("elo", 0),
-            ),
-            reverse=True,
         )
-        page = all_results[offset:offset + limit]
+        if unfiltered_taste:
+            counts_task = asyncio.create_task(
+                _configured(_get_visible_pairing_pool_counts)("sm", _configured_cache_root())
+            )
+            total_task = None
+            visible_task = None
+        else:
+            counts_task = None
+            total_task = asyncio.create_task(
+                _configured(_count_rankings)(
+                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                    camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
+                    text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                    exclude_sources=exclude_sources,)
+            )
+            visible_task = asyncio.create_task(
+                _configured(_count_rankings)(
+                    orientation=orientation, compared=compared, min_stars=min_stars,
+                    folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
+                    camera=camera, lens=lens, tag=tag,
+                    id_filter=search_ids,
+                    collection_id=collection_id,
+                    visible_thumb_size=visible_thumb_size, cache_root=_configured_cache_root(),
+                    text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                    exclude_sources=exclude_sources,
+                )
+            )
+
+        async def _taste_totals() -> tuple[int, int]:
+            if counts_task is not None:
+                counts = await counts_task
+                total = int(counts.get("active_images") or 0)
+                visible = (
+                    int(counts.get("visible_images") or 0)
+                    if visible_thumb_size
+                    else total
+                )
+                return total, visible
+            return int(await total_task), int(await visible_task)
+
+        if cached_taste_order is None:
+            similarities_task = asyncio.create_task(
+                taste_service.taste_similarity_scores(taste)
+            )
+            id_elo_task = asyncio.create_task(
+                _ranking_id_elo_rows(
+                    orientation=orientation,
+                    compared=compared,
+                    min_stars=min_stars,
+                    folder=folder,
+                    flag=flag,
+                    date_taken=date_taken,
+                    file_type=file_type,
+                    camera=camera,
+                    lens=lens,
+                    tag=tag,
+                    id_filter=search_ids,
+                    collection_id=collection_id,
+                    text_query=text_query,
+                    exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+                    exclude_sources=exclude_sources,
+                )
+            )
+            similarities = await similarities_task or {}
+            id_elo_rows = await id_elo_task
+            ordered_ids, taste_scores = _sort_taste_order_keys(id_elo_rows, similarities)
+            total_images, visible_images = await _taste_totals()
+            if total_images <= 0:
+                response = {
+                    "images": [],
+                    **_ranking_preview_metadata(total_images, visible_images),
+                    "total_kept": total_images,
+                    "search_mode": search_mode,
+                    "search_sources": search.get("search_sources") or [],
+                    "ai_unavailable": search["ai_unavailable"],
+                    **taste_fields,
+                }
+                if rankings_cache_key is not None:
+                    cache_rankings_response(rankings_cache_key, response)
+                return response
+            _cache_taste_order(
+                taste_order_key,
+                ordered_ids=ordered_ids,
+                taste_scores=taste_scores,
+                total_images=total_images,
+            )
+            cached_taste_order = _taste_rankings_order_cache[taste_order_key]
+        else:
+            total_images, visible_images = await _taste_totals()
+            if total_images <= 0:
+                response = {
+                    "images": [],
+                    **_ranking_preview_metadata(total_images, visible_images),
+                    "total_kept": total_images,
+                    "search_mode": search_mode,
+                    "search_sources": search.get("search_sources") or [],
+                    "ai_unavailable": search["ai_unavailable"],
+                    **taste_fields,
+                }
+                if rankings_cache_key is not None:
+                    cache_rankings_response(rankings_cache_key, response)
+                return response
+            total_images = int(cached_taste_order.get("total_images") or total_images)
+
+        page = await _taste_order_page(
+            cached_taste_order,
+            offset=offset,
+            limit=limit,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            search_ids=search_ids,
+            collection_id=collection_id,
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=exclude_sources,
+        )
         page = await _attach_stack_counts(page, stacks_mode)
         page = await _attach_preview_state(page)
         if page:
