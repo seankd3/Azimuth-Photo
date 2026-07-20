@@ -27,12 +27,49 @@ import { closeGridContextMenu, gridContextMenuOpen } from './context_menu.js';
 import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
-import {
-    applyPreviousDevelopSettingsToGrid, copyDevelopSettingsFromGrid, createVirtualCopy,
-    closeDevelop, developOpen, openDevelop, pasteDevelopSettingsToGrid,
-} from './develop/develop.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
 import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
+
+// Develop/GL is lazy — cull/grid boot must not parse the develop tree.
+let developMod = null;
+
+async function loadDevelop() {
+    if (!developMod) developMod = await import('./develop/develop.js');
+    return developMod;
+}
+
+function developOpen() {
+    return Boolean(developMod?.developOpen());
+}
+
+function closeDevelop() {
+    developMod?.closeDevelop();
+}
+
+async function openDevelop() {
+    const mod = await loadDevelop();
+    mod.openDevelop();
+}
+
+async function createVirtualCopy() {
+    const mod = await loadDevelop();
+    return mod.createVirtualCopy();
+}
+
+async function copyDevelopSettingsFromGrid(image, anchor) {
+    const mod = await loadDevelop();
+    return mod.copyDevelopSettingsFromGrid(image, anchor);
+}
+
+async function pasteDevelopSettingsToGrid(targets) {
+    const mod = await loadDevelop();
+    return mod.pasteDevelopSettingsToGrid(targets);
+}
+
+async function applyPreviousDevelopSettingsToGrid(targets) {
+    const mod = await loadDevelop();
+    return mod.applyPreviousDevelopSettingsToGrid(targets);
+}
 
 function inputFocused() {
     const el = document.activeElement;

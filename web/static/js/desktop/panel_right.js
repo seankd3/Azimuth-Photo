@@ -8,13 +8,16 @@ import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 const exifCache = new Map();
 const exifPromises = new Map();
 const captionCache = new Map();
+const DETAIL_DEBOUNCE_MS = 80;
 let currentImageId = null;
 let focusedImage = null;
+let renderedFocusId = null;
 let histogramCache = { signature: '', bins: [], min: 0, max: 0, empty: true };
 let rankCache = { signature: '', byId: new Map(), total: 0 };
 let imageVersion = 0;
 let captionEditId = null;
 let captionToken = 0;
+let detailTimer = 0;
 
 function bytes(value) {
     const n = Number(value) || 0;
@@ -62,6 +65,11 @@ function rankedImages() {
     return viewState.images.filter((img) => img && Number.isFinite(Number(img.elo)));
 }
 
+function eloBinIndex(elo, min, max) {
+    const span = Math.max(1, max - min);
+    return Math.min(23, Math.max(0, Math.floor(((Number(elo) - min) / span) * 24)));
+}
+
 function histogramData() {
     const signature = imagesSignature();
     if (histogramCache.signature === signature) return histogramCache;
@@ -70,18 +78,27 @@ function histogramData() {
         histogramCache = { signature, bins: [], min: 0, max: 0, empty: true };
         return histogramCache;
     }
-    const bins = Array.from({ length: 24 }, () => ({ count: 0, ids: [] }));
+    // Counts only — highlight bins from focused/selected elo, not per-bin id lists.
+    const bins = Array.from({ length: 24 }, () => ({ count: 0 }));
     const values = images.map((img) => Number(img.elo));
     const min = Math.min(...values);
     const max = Math.max(...values);
-    const span = Math.max(1, max - min);
     for (const img of images) {
-        const bin = Math.min(23, Math.max(0, Math.floor(((Number(img.elo) - min) / span) * 24)));
-        bins[bin].count += 1;
-        bins[bin].ids.push(Number(img.id));
+        bins[eloBinIndex(img.elo, min, max)].count += 1;
     }
     histogramCache = { signature, bins, min, max, empty: false };
     return histogramCache;
+}
+
+function highlightedBinIndexes(data) {
+    const selected = new Set();
+    if (data.empty) return selected;
+    for (const id of highlightedIds()) {
+        const img = byId.get(Number(id));
+        if (!img || !Number.isFinite(Number(img.elo))) continue;
+        selected.add(eloBinIndex(img.elo, data.min, data.max));
+    }
+    return selected;
 }
 
 function renderHistogram() {
@@ -91,7 +108,7 @@ function renderHistogram() {
         host.innerHTML = '<div class="panel-empty">Load photos to see the rating spread.</div>';
         return;
     }
-    const ids = highlightedIds();
+    const selectedBins = highlightedBinIndexes(data);
     const top = Math.max(...data.bins.map((bin) => bin.count), 1);
     const barW = 5;
     const gap = 3;
@@ -100,7 +117,7 @@ function renderHistogram() {
         const h = Math.max(2, Math.round((bin.count / top) * 64));
         const x = index * (barW + gap);
         const y = 68 - h;
-        const selected = bin.ids.some((id) => ids.has(id));
+        const selected = selectedBins.has(index);
         return `<rect class="${selected ? 'sel-bin' : ''}" x="${x}" y="${y}" width="${barW}" height="${h}" rx="2"></rect>`;
     }).join('');
     host.innerHTML = `<svg viewBox="0 0 ${width} 68" preserveAspectRatio="none" aria-label="Rating histogram">${rects}</svg>`
@@ -244,11 +261,18 @@ function renderMetadata(img) {
     details.addEventListener('toggle', () => {
         if (details.open) loadExif(img, details);
     });
-    if (!cachedExif) {
+    if (!cachedExif) scheduleExifEnrichment(img);
+}
+
+function scheduleExifEnrichment(img) {
+    const imageId = Number(img.id);
+    clearTimeout(detailTimer);
+    detailTimer = setTimeout(() => {
+        if (Number(currentImageId) !== imageId) return;
         fetchExif(img).then(() => {
             if (Number(img.id) === currentImageId) renderMetadata(img);
         }).catch(() => {});
-    }
+    }, DETAIL_DEBOUNCE_MS);
 }
 
 function tagChips(tags) {
@@ -353,6 +377,9 @@ async function renderCaption(img) {
     let caption = captionCache.get(imageId);
     if (!caption) {
         host.innerHTML = '<div class="panel-empty">Loading caption…</div>';
+        // Debounce network while arrowing through the grid.
+        await new Promise((resolve) => setTimeout(resolve, DETAIL_DEBOUNCE_MS));
+        if (token !== captionToken || Number(currentImageId) !== imageId) return;
         try {
             caption = await getImageCaption(imageId);
         } catch {
@@ -389,8 +416,28 @@ function renderSelection() {
     }
 }
 
-function render() {
+function focusIdOf(img) {
+    return img ? Number(img.id) : null;
+}
+
+/** Full inspector rebuild when the loaded image SET changes. */
+function renderSet() {
     const img = currentImage();
+    renderedFocusId = focusIdOf(img);
+    renderHistogram();
+    renderRanking(img);
+    renderMetadata(img);
+    renderCaption(img);
+    renderSelection();
+}
+
+/** Focus-only: update focus-dependent panes; reuse cached histo/rank data. */
+function renderFocus() {
+    const img = currentImage();
+    const nextId = focusIdOf(img);
+    if (nextId === renderedFocusId) return;
+    renderedFocusId = nextId;
+    // Histogram data is set-keyed; only re-paint so sel-bin tracks focus.
     renderHistogram();
     renderRanking(img);
     renderMetadata(img);
@@ -407,16 +454,42 @@ export function initRightPanel() {
     shell.classList.toggle('right-collapsed', viewState.rightCollapsed);
     document.getElementById('collapse-right').addEventListener('click', toggleRightPanel);
     document.getElementById('btn-right-panel').addEventListener('click', toggleRightPanel);
-    on('rightpanel', (collapsed) => shell.classList.toggle('right-collapsed', collapsed));
+    on('rightpanel', (collapsed) => {
+        shell.classList.toggle('right-collapsed', collapsed);
+        if (!collapsed) renderSet();
+    });
     on('images', () => {
         imageVersion += 1;
-        render();
+        // Collapsed: keep signature fresh for the next expand, skip DOM work.
+        if (viewState.rightCollapsed) return;
+        const img = currentImage();
+        // Set change: rebuild histo/rank. Skip caption/EXIF churn when focus id is stable.
+        renderHistogram();
+        renderRanking(img);
+        renderSelection();
+        const nextId = focusIdOf(img);
+        if (nextId !== renderedFocusId) {
+            renderedFocusId = nextId;
+            renderMetadata(img);
+            renderCaption(img);
+        }
     });
-    on('selection', render);
-    on('flags', render);
+    on('selection', () => {
+        if (viewState.rightCollapsed) return;
+        renderedFocusId = null;
+        renderFocus();
+    });
+    on('flags', () => {
+        if (viewState.rightCollapsed) return;
+        renderSet();
+    });
     on('focus', ({ image } = {}) => {
+        const nextId = focusIdOf(image || null);
+        const prevId = focusIdOf(focusedImage);
         focusedImage = image || null;
-        render();
+        if (viewState.rightCollapsed) return;
+        if (nextId === prevId && nextId === renderedFocusId) return;
+        renderFocus();
     });
-    render();
+    if (!viewState.rightCollapsed) renderSet();
 }
