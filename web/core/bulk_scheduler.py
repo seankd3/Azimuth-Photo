@@ -44,11 +44,11 @@ def configure(*, previews_pending: Callable[[], bool] | None) -> None:
     _previews_pending_fn = previews_pending
 
 
-def reset_for_tests(*, desired_path: Path | None = None) -> None:
+def reset_for_tests(*, desired_path: Path | str | None = None) -> None:
     """Clear the live probe between unit tests; optional temp desired-file path."""
     global _previews_pending_fn, _desired_path_override
     _previews_pending_fn = None
-    _desired_path_override = desired_path
+    _desired_path_override = Path(desired_path) if desired_path is not None else None
 
 
 def desired_path() -> Path:
