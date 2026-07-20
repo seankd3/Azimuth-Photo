@@ -384,15 +384,26 @@ def check_memory() -> dict[str, Any]:
     pressure = memory_pressure.evaluate_memory_pressure()
     level = str(pressure.level or "ok")
     rss = _bytes_phrase(pressure.rss_bytes)
+    swap = _bytes_phrase(pressure.swap_bytes)
+    combined = _bytes_phrase(pressure.pressure_bytes)
+    signal = str(pressure.signal or "rss")
     if level == "hard":
         status: Status = "bad"
-        detail = f"Hard pressure · RSS {rss} — bulk work paused"
+        detail = (
+            f"Hard pressure · {combined} ({signal}: RSS {rss} + swap {swap}) "
+            "— bulk work paused"
+        )
     elif level == "soft" or pressure.pause_bulk:
         status = "warn"
-        detail = f"Soft pressure · RSS {rss} — bulk work paused"
+        detail = (
+            f"Soft pressure · {combined} ({signal}: RSS {rss} + swap {swap}) "
+            "— bulk work paused"
+        )
     else:
         status = "ok"
-        detail = f"RSS {rss} · within watermarks"
+        detail = (
+            f"{combined} ({signal}: RSS {rss} + swap {swap}) · within watermarks"
+        )
     return _check(
         id="memory",
         label="Memory pressure",
@@ -401,6 +412,9 @@ def check_memory() -> dict[str, Any]:
         checked_at=checked_at,
         level=level,
         rss_bytes=pressure.rss_bytes,
+        swap_bytes=pressure.swap_bytes,
+        pressure_bytes=pressure.pressure_bytes,
+        signal=signal,
     )
 
 

@@ -276,13 +276,23 @@ def _drop_embedding_residency() -> None:
     _release_embedding_owners()
 
 
-def _unload_model() -> asyncio.Task | None:
+def _unload_model(*, force: bool = False) -> asyncio.Task | None:
+    """Shed the embedding model. Pin-while-hot blocks unless ``force``.
+
+    Active interactive search pins the pool resident; pressure/pause/idle
+    paths must not yank VRAM mid-turn. Shutdown passes ``force=True``.
+    """
     from core.model_pool import get_model_pool
+
+    pool = get_model_pool()
+    if not force and pool.is_pinned("embeddings"):
+        log.info("embedding_worker event=unload_blocked reason=pinned")
+        return None
 
     # Cancel first so we can return the task to callers that await it;
     # pool unload also cancels via _drop, but the task handle is needed here.
     residency_task = _cancel_search_model_residency_task()
-    if not get_model_pool().unload("embeddings"):
+    if not pool.unload("embeddings", force=force):
         # Drop without a second cancel — residency already cancelled above.
         global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
         _model = None
@@ -292,6 +302,34 @@ def _unload_model() -> asyncio.Task | None:
         _clear_cuda_cache()
         _release_embedding_owners()
     return residency_task
+
+
+def _maybe_unload_idle_model(*, ttl_seconds: float | None = None) -> bool:
+    """Unload when idle past TTL (or immediately when manually paused) if unpinned."""
+    from core.model_pool import get_model_pool
+
+    pool = get_model_pool()
+    if pool.is_pinned("embeddings"):
+        return False
+
+    if _embedding_manual_pause:
+        before = _model is not None or "embeddings" in pool.resident_names()
+        _unload_model()
+        return before and _model is None
+
+    ttl = (
+        memory_pressure.MODEL_IDLE_TTL_SECONDS
+        if ttl_seconds is None
+        else max(0.0, float(ttl_seconds))
+    )
+    idle = pool.idle_seconds("embeddings")
+    if idle is None:
+        return False
+    if idle < ttl:
+        return False
+    before = _model is not None or "embeddings" in pool.resident_names()
+    _unload_model()
+    return before and _model is None and "embeddings" not in pool.resident_names()
 
 
 async def _maintain_search_model_residency() -> None:
@@ -312,6 +350,18 @@ async def _maintain_search_model_residency() -> None:
                     _set_worker_status(
                         "idle",
                         "Search model released for other background work.",
+                        ready=False,
+                    )
+                    return
+                # Pause or idle-past-TTL: shed VRAM when not pin-while-hot.
+                if _maybe_unload_idle_model():
+                    _set_worker_status(
+                        "idle" if not _embedding_manual_pause else "paused",
+                        (
+                            _manual_pause_message()
+                            if _embedding_manual_pause
+                            else "Search model released after idle."
+                        ),
                         ready=False,
                     )
                     return
@@ -399,7 +449,7 @@ async def shutdown_embedding_worker() -> None:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
     _search_model_load_task = None
-    residency_task = _unload_model()
+    residency_task = _unload_model(force=True)
     if residency_task is not None and not residency_task.done():
         await asyncio.gather(residency_task, return_exceptions=True)
     _embed_executor.shutdown(wait=False, cancel_futures=True)
@@ -1225,13 +1275,14 @@ async def _run_embedding_worker_loop():
             model_installed = ai_models.model_files_present(model_dir)
 
             if _embedding_manual_pause:
-                _unload_model()
+                _maybe_unload_idle_model()
                 _set_worker_status("paused", _manual_pause_message(), ready=_model is not None)
                 await asyncio.sleep(1)
                 continue
 
             pressure = memory_pressure.gate_bulk_work()
             if pressure.pause_bulk:
+                _maybe_unload_idle_model(ttl_seconds=0.0)
                 _set_worker_status(
                     "paused",
                     pressure.message or memory_pressure.PAUSE_MESSAGE,

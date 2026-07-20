@@ -160,6 +160,30 @@ class ModelPoolTests(unittest.TestCase):
         self.assertEqual(self.pool.resident_names(), [])
         self.assertIn("c", self.unloads)
 
+    def test_pressure_unload_all_skips_pinned(self) -> None:
+        self.pool.acquire(**self._fake("search", vram=40), interactive=True)
+        self.pool.acquire(**self._fake("captions", vram=30), interactive=False)
+        unloaded = self.pool.unload_all(force=False)
+        self.assertEqual(unloaded, ["captions"])
+        self.assertEqual(self.pool.resident_names(), ["search"])
+        self.assertEqual(self.unloads, ["captions"])
+
+        forced = self.pool.unload_all(force=True)
+        self.assertEqual(forced, ["search"])
+        self.assertEqual(self.pool.resident_names(), [])
+
+    def test_unload_if_idle_respects_ttl_and_pin(self) -> None:
+        self.pool.acquire(**self._fake("embeddings"), interactive=True)
+        self.assertFalse(self.pool.unload_if_idle("embeddings", ttl_seconds=5.0))
+        self.assertIn("embeddings", self.pool.resident_names())
+
+        self.clock.advance(11)  # pin expired
+        self.assertFalse(self.pool.unload_if_idle("embeddings", ttl_seconds=30.0))
+        self.clock.advance(30)
+        self.assertTrue(self.pool.unload_if_idle("embeddings", ttl_seconds=30.0))
+        self.assertEqual(self.pool.resident_names(), [])
+        self.assertEqual(self.unloads, ["embeddings"])
+
     def test_pass_through_when_budget_unset_or_huge(self) -> None:
         empty_calls = {"n": 0}
 

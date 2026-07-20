@@ -62,7 +62,7 @@ class MemoryPressureTests(unittest.TestCase):
             mock.patch.object(
                 memory_pressure,
                 "request_model_unload",
-                side_effect=lambda: unload_calls.append("unload") or ["embeddings"],
+                side_effect=lambda **_kwargs: unload_calls.append("unload") or ["embeddings"],
             ) as unload,
         ):
             pressure = memory_pressure.gate_bulk_work(rss_bytes=hard + 1)
@@ -71,7 +71,7 @@ class MemoryPressureTests(unittest.TestCase):
         self.assertTrue(pressure.unload_models)
         self.assertEqual(pressure.level, "hard")
         release.assert_called_once_with()
-        unload.assert_called_once_with()
+        unload.assert_called_once_with(force=False)
         self.assertEqual(unload_calls, ["unload"])
 
     def test_soft_gate_sheds_models_and_logs_rss_delta(self):
@@ -87,7 +87,7 @@ class MemoryPressureTests(unittest.TestCase):
             mock.patch.object(
                 memory_pressure,
                 "request_model_unload",
-                side_effect=lambda: unload_calls.append("unload") or ["embeddings"],
+                side_effect=lambda **_kwargs: unload_calls.append("unload") or ["embeddings"],
             ) as unload,
             mock.patch.object(memory_pressure, "read_rss_bytes", side_effect=[soft + 10, soft // 2]),
         ):
@@ -96,7 +96,7 @@ class MemoryPressureTests(unittest.TestCase):
         self.assertTrue(pressure.pause_bulk)
         self.assertTrue(pressure.unload_models)
         release.assert_called_once_with()
-        unload.assert_called_once_with()
+        unload.assert_called_once_with(force=False)
         self.assertEqual(unload_calls, ["unload"])
 
     def test_pause_shed_then_lower_rss_resumes(self):
@@ -123,7 +123,7 @@ class MemoryPressureTests(unittest.TestCase):
             paused = memory_pressure.gate_bulk_work()
             self.assertTrue(paused.pause_bulk)
             release.assert_called_once_with()
-            unload.assert_called_once_with()
+            unload.assert_called_once_with(force=False)
 
             # Shed "worked" — RSS falls to the resume watermark.
             rss_state["value"] = resume
@@ -226,6 +226,127 @@ class MemoryPressureTests(unittest.TestCase):
             memory_pressure.effective_prefetch_workers(1, rss_bytes=soft + 1),
             1,
         )
+
+    def test_combined_pressure_trips_on_high_swap_stays_calm_on_modest(self):
+        """RSS-only blind spot: low RSS + high swap must trip; normal browse must not."""
+        soft = memory_pressure.SOFT_WATERMARK_BYTES
+        gib = 1024**3
+
+        # Normal browse: ~1 GiB RSS + modest swap — well under soft.
+        calm = memory_pressure.evaluate_memory_pressure(
+            pressure_bytes=1 * gib + 200 * 1024 * 1024,
+            rss_bytes=1 * gib,
+            swap_bytes=200 * 1024 * 1024,
+        )
+        self.assertFalse(calm.pause_bulk)
+        self.assertEqual(calm.level, "ok")
+        self.assertEqual(calm.swap_bytes, 200 * 1024 * 1024)
+
+        # Synthetic: RSS alone looks fine, but swap pushes combined over soft.
+        rss_only = 1100 * 1024 * 1024
+        swap_heavy = soft - rss_only + (64 * 1024 * 1024)
+        self.assertLess(rss_only, soft)
+        tripped = memory_pressure.evaluate_memory_pressure(
+            pressure_bytes=rss_only + swap_heavy,
+            rss_bytes=rss_only,
+            swap_bytes=swap_heavy,
+        )
+        self.assertTrue(tripped.pause_bulk)
+        self.assertEqual(tripped.level, "soft")
+        self.assertTrue(tripped.unload_models)
+        self.assertGreaterEqual(tripped.pressure_bytes, soft)
+
+    def test_memory_reader_injection_drives_gate(self):
+        soft = memory_pressure.SOFT_WATERMARK_BYTES
+        memory_pressure.set_memory_reader(
+            lambda: memory_pressure.MemoryReading(
+                rss_bytes=900 * 1024 * 1024,
+                swap_bytes=soft,
+                pressure_bytes=900 * 1024 * 1024 + soft,
+                source="injected",
+            )
+        )
+        with (
+            mock.patch.object(
+                memory_pressure,
+                "release_discardable_buffers",
+                return_value={"gc": True},
+            ),
+            mock.patch.object(
+                memory_pressure,
+                "request_model_unload",
+                return_value=["embeddings"],
+            ) as unload,
+        ):
+            pressure = memory_pressure.gate_bulk_work()
+        self.assertTrue(pressure.pause_bulk)
+        self.assertEqual(pressure.signal, "injected")
+        self.assertGreater(pressure.swap_bytes, 0)
+        unload.assert_called_once_with(force=False)
+
+    def test_pressure_unload_skips_pinned_search_model(self):
+        from core.model_pool import ModelPool, reset_model_pool_for_tests
+
+        clock = {"now": 1000.0}
+        unloads: list[str] = []
+
+        def empty_cache():
+            return None
+
+        pool = reset_model_pool_for_tests(
+            ModelPool(
+                vram_budget_bytes=None,
+                ram_budget_bytes=None,
+                pin_seconds=30.0,
+                empty_cache=empty_cache,
+                clock=lambda: clock["now"],
+            )
+        )
+        self.addCleanup(
+            lambda: reset_model_pool_for_tests(
+                ModelPool(
+                    vram_budget_bytes=None,
+                    ram_budget_bytes=None,
+                    pin_seconds=0.0,
+                    empty_cache=lambda: None,
+                )
+            )
+        )
+
+        pool.acquire(
+            "embeddings",
+            load_fn=lambda: "search-model",
+            unload_fn=lambda: unloads.append("embeddings"),
+            vram_bytes=10,
+            ram_bytes=10,
+            interactive=True,
+        )
+        self.assertTrue(pool.is_pinned("embeddings"))
+
+        hard = memory_pressure.HARD_WATERMARK_BYTES
+        with mock.patch.object(
+            memory_pressure,
+            "release_discardable_buffers",
+            return_value={},
+        ):
+            pressure = memory_pressure.gate_bulk_work(rss_bytes=hard + 1)
+
+        self.assertTrue(pressure.pause_bulk)
+        self.assertTrue(pressure.unload_models)
+        self.assertIn("embeddings", pool.resident_names())
+        self.assertEqual(unloads, [])
+
+        # After pin window, the same shed path must clear residency.
+        clock["now"] += 31.0
+        self.assertFalse(pool.is_pinned("embeddings"))
+        with mock.patch.object(
+            memory_pressure,
+            "release_discardable_buffers",
+            return_value={},
+        ):
+            memory_pressure.gate_bulk_work(rss_bytes=hard + 1)
+        self.assertNotIn("embeddings", pool.resident_names())
+        self.assertEqual(unloads, ["embeddings"])
 
 
 class MidBatchPressureAbortTests(unittest.IsolatedAsyncioTestCase):

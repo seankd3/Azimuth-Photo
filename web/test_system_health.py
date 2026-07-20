@@ -236,27 +236,38 @@ class HealthAggregationTests(unittest.TestCase):
         soft = SimpleNamespace(
             level="soft",
             pause_bulk=True,
-            rss_bytes=6 * 1024**3,
-            soft_bytes=5 * 1024**3,
-            hard_bytes=7 * 1024**3,
-            resume_bytes=4 * 1024**3,
+            rss_bytes=4 * 1024**3,
+            swap_bytes=3 * 1024**3,
+            pressure_bytes=7 * 1024**3,
+            signal="cgroup",
+            soft_bytes=6 * 1024**3,
+            hard_bytes=10 * 1024**3,
+            resume_bytes=5 * 1024**3,
             unload_models=True,
             message="Paused: memory pressure",
         )
         hard = SimpleNamespace(
             level="hard",
             pause_bulk=True,
-            rss_bytes=8 * 1024**3,
-            soft_bytes=5 * 1024**3,
-            hard_bytes=7 * 1024**3,
-            resume_bytes=4 * 1024**3,
+            rss_bytes=5 * 1024**3,
+            swap_bytes=6 * 1024**3,
+            pressure_bytes=11 * 1024**3,
+            signal="cgroup",
+            soft_bytes=6 * 1024**3,
+            hard_bytes=10 * 1024**3,
+            resume_bytes=5 * 1024**3,
             unload_models=True,
             message="Paused: memory pressure",
         )
         with mock.patch.object(health.memory_pressure, "evaluate_memory_pressure", return_value=soft):
-            self.assertEqual(health.check_memory()["status"], "warn")
+            result = health.check_memory()
+            self.assertEqual(result["status"], "warn")
+            self.assertIn("swap", result["detail"])
+            self.assertEqual(result["pressure_bytes"], 7 * 1024**3)
         with mock.patch.object(health.memory_pressure, "evaluate_memory_pressure", return_value=hard):
-            self.assertEqual(health.check_memory()["status"], "bad")
+            result = health.check_memory()
+            self.assertEqual(result["status"], "bad")
+            self.assertIn("Hard pressure", result["detail"])
 
 
 class HealthRouteTests(unittest.TestCase):
