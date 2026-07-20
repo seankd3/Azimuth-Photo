@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
 from core import requests as request_helpers
+from core import hdd_governor
 from core.source_files import inspect_source_file
 from data import connection as data_connection
 from data.repositories import images as image_repository
@@ -32,7 +33,14 @@ _mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 _REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 2.0
+# Bound how long an interactive thumb request may wait on a cold decode.
+# Beyond this the decode keeps running in the shared inflight map; the client
+# gets a fast 204 and retries — never a 10s "library isn't responding" toast.
+_ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS = float(
+    os.environ.get("PHOTOARCHIVE_ON_DEMAND_FOREGROUND_TIMEOUT", "1.5")
+)
 _remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
+_local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
 
 def configure(
@@ -65,11 +73,28 @@ def _cache_headers(signature: str) -> dict:
     }
 
 
-async def _source_state(image) -> str:
+def _row_source_hint(image) -> str | None:
+    """Catalog-only source state — never touches the spindle."""
+
     if image["missing_at"] is not None:
         return "missing"
     if int(image["hub_remote"] or 0) == 1:
         return "remote"
+    status = image["status"] if "status" in image else None
+    if str(status or "") == "trashed":
+        # Local trash moved the original; serve cache only unless hub-remote.
+        return "cache_only"
+    return None
+
+
+async def _source_state(image) -> str:
+    hinted = _row_source_hint(image)
+    if hinted == "missing":
+        return "missing"
+    if hinted == "remote":
+        return "remote"
+    if hinted == "cache_only":
+        return "cache_only"
     filepath = str(image["filepath"] or "")
     source_path = str(image["source_path"] or "")
     file_state, _source_stat = await asyncio.to_thread(
@@ -91,6 +116,50 @@ async def _source_state(image) -> str:
     if file_state in {"not_regular", "empty"}:
         return "corrupt"
     return "available"
+
+
+def _pending_thumb_response() -> Response:
+    return Response(
+        status_code=204,
+        headers={"Cache-Control": "no-store", "Retry-After": "1"},
+    )
+
+
+def _schedule_local_thumb_fill(filepath: str, size: str, image_id: int) -> None:
+    """Keep a cold decode running after the request path returns 204."""
+
+    key = (int(image_id), size)
+    existing = _local_thumb_fill_tasks.get(key)
+    if existing is not None and not existing.done():
+        return
+
+    async def _fill() -> None:
+        try:
+            await thumbnails.get_thumbnail(filepath, size, image_id)
+        except Exception as exc:
+            log.debug(
+                "worker=local_thumb_fill image_id=%s size=%s error=%s",
+                image_id,
+                size,
+                exc,
+            )
+
+    task = asyncio.create_task(_fill())
+    _local_thumb_fill_tasks[key] = task
+    task.add_done_callback(lambda _done, task_key=key: _local_thumb_fill_tasks.pop(task_key, None))
+
+
+async def _await_thumbnail_bounded(filepath: str, size: str, image_id: int) -> bytes | None:
+    """Wait briefly for an on-demand decode; leave it running on timeout."""
+
+    timeout = max(0.05, _ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS)
+    gen_task = asyncio.create_task(thumbnails.get_thumbnail(filepath, size, image_id))
+    done, _pending = await asyncio.wait({gen_task}, timeout=timeout)
+    if gen_task in done:
+        return gen_task.result()
+    # Decode continues via get_thumbnail's inflight map + this task.
+    _schedule_local_thumb_fill(filepath, size, image_id)
+    return None
 
 
 async def _source_error_response(image, state: str) -> JSONResponse | None:
@@ -256,22 +325,22 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
-        if image["status"] == "trashed":
-            # Local originals were intentionally moved, but a mirrored Trash row
-            # can still be read through from its hub when no cached preview exists.
-            source_state = await _source_state(image)
-            cache_only = source_state != "remote"
-        else:
-            source_state = await _source_state(image)
-            source_error = await _source_error_response(image, source_state)
+        # Catalog hints only — never lstat the original before an SSD cache hit.
+        hinted = _row_source_hint(image)
+        if hinted == "remote":
+            source_state = "remote"
+            if size in preview_mirror.MIRROR_SIZES:
+                mirror_version = preview_mirror.preview_version_for_image(image)
+        elif hinted == "cache_only":
+            cache_only = True
+            source_state = "cache_only"
+        elif hinted == "missing":
+            source_error = await _source_error_response(image, "missing")
             if source_error is not None:
                 return source_error
-        if source_state == "remote" and size in preview_mirror.MIRROR_SIZES:
-            mirror_version = preview_mirror.preview_version_for_image(image)
 
-    # Cached probes remain DB-free. Active images validate the original first;
-    # trashed rows are cache-only because their original path was intentionally moved.
-    # Remote sm/md: require preview_version match (stale = lazy miss).
+    # Serve from memory/SSD cache before any spindle inspect. Interactive browse
+    # under bulk HDD load must not pay an original lstat on every warm thumb.
     request_etag = request.headers.get("if-none-match")
     required_signature = mirror_version
     entry = thumbnails._memory_get_entry_fast(size, image_id)
@@ -294,8 +363,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
                 if request_etag == headers["ETag"]:
                     return Response(status_code=304, headers=headers)
                 return FileResponse(path, media_type="image/jpeg", headers=headers)
-        entry = await asyncio.get_event_loop().run_in_executor(
-            None,
+        entry = await asyncio.to_thread(
             thumbnails.fast_disk_read_entry,
             size,
             image_id,
@@ -318,6 +386,32 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     if cache_only:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
+    # Cache miss: now it's worth inspecting the original (HDD) and decoding.
+    # When bulk workers already hold the spindle, skip the interactive lstat —
+    # it only adds seek contention. Try a bounded decode (governor-bypass) or
+    # return 204 so the client retries once the wave eases.
+    if source_state not in {"remote", "cache_only"}:
+        if hdd_governor.bulk_hdd_holds() > 0:
+            data = await _await_thumbnail_bounded(image["filepath"], size, image_id)
+            if data is None:
+                return _pending_thumb_response()
+            if not data:
+                # Fall through to a real inspect so missing/corrupt still quarantine.
+                source_state = await _source_state(image)
+                source_error = await _source_error_response(image, source_state)
+                if source_error is not None:
+                    return source_error
+            else:
+                headers = await asyncio.to_thread(
+                    thumbnails.response_headers, image["filepath"], size, image_id
+                )
+                return Response(content=data, media_type="image/jpeg", headers=headers)
+        else:
+            source_state = await _source_state(image)
+            source_error = await _source_error_response(image, source_state)
+            if source_error is not None:
+                return source_error
+
     if source_state == "remote":
         return await _remote_media_response(image, size)
 
@@ -331,7 +425,12 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
             status_code=404,
         )
 
-    data = await thumbnails.get_thumbnail(image["filepath"], size, image_id)
+    if source_state == "cache_only":
+        return _pending_thumb_response()
+
+    data = await _await_thumbnail_bounded(image["filepath"], size, image_id)
+    if data is None:
+        return _pending_thumb_response()
     if not data:
         changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
         if changed:
@@ -371,11 +470,14 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
     image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
-    source_state = await _source_state(image)
-    source_error = await _source_error_response(image, source_state)
-    if source_error is not None:
-        return source_error
 
+    hinted = _row_source_hint(image)
+    if hinted == "missing":
+        source_error = await _source_error_response(image, "missing")
+        if source_error is not None:
+            return source_error
+
+    # SSD full-tier hit before any original spindle inspect.
     full_entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
     if full_entry is not None:
         signature, path = full_entry
@@ -383,6 +485,14 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
+
+    if hinted == "remote":
+        return await _remote_media_response(image, thumbnails.FULL_TIER)
+
+    source_state = await _source_state(image)
+    source_error = await _source_error_response(image, source_state)
+    if source_error is not None:
+        return source_error
 
     if source_state == "remote":
         return await _remote_media_response(image, thumbnails.FULL_TIER)
@@ -397,13 +507,18 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             status_code=404,
         )
 
+    if source_state == "cache_only":
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
     ext = os.path.splitext(image["filepath"])[1].lower()
     if ext not in _browser_image_extensions:
         headers = await asyncio.to_thread(thumbnails.response_headers, image["filepath"], "lg", image_id)
         if request_etag == headers["ETag"]:
             return Response(status_code=304, headers=headers)
 
-        data = await thumbnails.get_thumbnail(image["filepath"], "lg", image_id)
+        data = await _await_thumbnail_bounded(image["filepath"], "lg", image_id)
+        if data is None:
+            return _pending_thumb_response()
         if not data:
             changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
             if changed:
