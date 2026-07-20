@@ -56,8 +56,10 @@ RAW_EXTENSIONS = {
     ".raf",
     ".rw2",
 }
-# RAW types whose embedded JPEG is reliably large enough for lg (3840).
-# .dng often has a tiny preview — load_raw_preview returns None and we demosaic.
+# RAW types whose embedded JPEG is reliably large enough for lg (3840) so the
+# bulk decode budget can charge the cheap embedded path. .dng embeds are often
+# ~1024px — enough for sm (and the generation path uses them for covered tiers)
+# but lg still demosaics, so keep .dng out of this set to avoid under-counting.
 EMBEDDED_PREVIEW_EXTENSIONS = frozenset(
     {
         ".arw",
