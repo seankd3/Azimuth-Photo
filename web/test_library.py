@@ -1825,6 +1825,92 @@ class LibraryTests(BackendTestCase):
 
         self.assertEqual(response, {"total": 4, "picked": 1, "rejected": 2})
 
+    async def test_unfiltered_scope_counts_match_full_aggregate_across_states(self):
+        """Fast unfiltered path must equal the full COUNT(*) aggregate.
+
+        Covers empty filter, an active virtual copy (counter historically includes
+        VCs; rankings hide them), and a trash transition that refreshes
+        catalog_sources.active_image_count.
+        """
+        source = await self._source()
+        original = await self._image(source["id"], "counts-original.jpg")
+        picked = await self._image(source["id"], "counts-picked.jpg")
+        rejected = await self._image(source["id"], "counts-rejected.jpg")
+        virtual = await self._image(source["id"], "counts-virtual.jpg")
+        doomed = await self._image(source["id"], "counts-doomed.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute("UPDATE images SET flag = 'picked' WHERE id = ?", (picked,))
+            await conn.execute("UPDATE images SET flag = 'rejected' WHERE id = ?", (rejected,))
+            await conn.execute(
+                "UPDATE images SET vc_of = ?, flag = 'picked' WHERE id = ?",
+                (original, virtual),
+            )
+            await db._update_source_counts(conn, int(source["id"]))
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        async def full_aggregate() -> dict:
+            conn = await db.get_db()
+            try:
+                cursor = await conn.execute(
+                    "SELECT COUNT(*) AS total, "
+                    "SUM(CASE WHEN i.flag = 'picked' THEN 1 ELSE 0 END) AS picked, "
+                    "SUM(CASE WHEN i.flag = 'rejected' THEN 1 ELSE 0 END) AS rejected "
+                    "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+                    "WHERE s.included = 1 "
+                    "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                    "AND i.vc_of IS NULL"
+                )
+                row = await cursor.fetchone()
+                return {
+                    "total": int(row["total"] or 0),
+                    "picked": int(row["picked"] or 0),
+                    "rejected": int(row["rejected"] or 0),
+                }
+            finally:
+                await conn.close()
+
+        expected = await full_aggregate()
+        # original + picked + rejected + doomed = 4; virtual hidden; flags exclude VC pick
+        self.assertEqual(expected, {"total": 4, "picked": 1, "rejected": 1})
+        self.assertEqual(await db.scope_counts(), expected)
+        self.assertEqual(await library_routes.api_counts(), expected)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET status = 'trashed', missing_at = NULL WHERE id = ?",
+                (doomed,),
+            )
+            await db._update_source_counts(conn, int(source["id"]))
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+
+        after_trash = await full_aggregate()
+        self.assertEqual(after_trash, {"total": 3, "picked": 1, "rejected": 1})
+        self.assertEqual(await db.scope_counts(), after_trash)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET orientation = 'landscape' "
+                "WHERE id IN (?, ?, ?, ?)",
+                (original, picked, rejected, virtual),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        # Filtered scopes keep the aggregate path and still match.
+        self.assertEqual(
+            await db.scope_counts(orientation="landscape"),
+            after_trash,
+        )
+
     async def test_date_taken_filter_accepts_year_month_and_undated(self):
         source = await self._source()
         november = await self._image(source["id"], "november.jpg")
