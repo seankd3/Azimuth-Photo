@@ -77,6 +77,13 @@ function syncState() {
                 + (status.eta ? ` · ETA ${status.eta}` : ''),
         };
     }
+    if (status.state === 'waiting') {
+        return {
+            tone: 'quiet',
+            label: 'Waiting',
+            detail: status.message || 'yielding disk to preview build',
+        };
+    }
     if (status.state === 'error' || status.last_error) {
         return {
             tone: 'bad',

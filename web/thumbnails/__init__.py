@@ -1612,8 +1612,11 @@ def configure(config: dict):
 
 def start_pregeneration() -> dict:
     global _pregen_manual_mode, _pregen_manual_pause
+    from core import bulk_scheduler
+
     _pregen_manual_mode = True
     _pregen_manual_pause = False
+    bulk_scheduler.set_pregen_desired(True)
     # Drop any wedged demosaic threads left from a prior wave so the fresh
     # start can schedule immediately (stop alone cannot cancel OS threads).
     _reset_prefetch_executor()
@@ -1626,8 +1629,11 @@ def start_pregeneration() -> dict:
 
 def stop_pregeneration() -> dict:
     global _pregen_manual_mode, _pregen_manual_pause
+    from core import bulk_scheduler
+
     _pregen_manual_mode = False
     _pregen_manual_pause = True
+    bulk_scheduler.set_pregen_desired(False)
     _reset_prefetch_executor()
     _set_pregen_state("paused", "Pre-generation paused by user.")
     return dict(_pregen_status)
