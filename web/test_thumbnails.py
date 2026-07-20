@@ -2522,7 +2522,13 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 2))
         self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 3))
 
-    def test_bulk_warmup_handles_full_only_work_in_same_cursor_pass(self):
+    def test_bulk_warmup_defers_full_only_work_to_full_phase(self):
+        """Preview bulk anti-joins thumbs only; full-only rows use the full phase.
+
+        Including ``full`` in the bulk missing_sizes OR-clause pollutes the
+        keyset with thumb-complete rows once full room is exhausted (or for
+        RAWs that cannot warm full), which strands sparse thumb-pending work.
+        """
         thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         path = self._make_image()
@@ -2530,10 +2536,66 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self._add_catalog_original(1, path)
         thumbnails._generate_thumbnail_set_sync(path, 1, signatures, source_bytes=file_size)
 
-        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
+        bulk_warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
+        self.assertEqual(bulk_warmed, 0)
+        self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
 
-        self.assertEqual(warmed, 1)
+        full_warmed = asyncio.run(thumbnails._run_full_warm_batch(generate_batch=10))
+        self.assertEqual(full_warmed, 1)
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
+
+    def test_bulk_candidate_batch_excludes_full_only_rows(self):
+        """Bulk preview selection must not return thumb-complete full-missing rows."""
+        thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
+        cached = self._make_image("a-cached.jpg")
+        pending = self._make_image("z-pending.jpg")
+        self._add_catalog_original(1, cached)
+        self._add_catalog_original(2, pending)
+        self._mark_preview_tiers_cached(1, cached)
+
+        thumbnails._reset_pregen_bulk_cursor()
+        rows = asyncio.run(thumbnails._pregen_bulk_candidate_batch(10))
+        self.assertEqual([int(row["id"]) for row in rows], [2])
+
+    def test_bulk_candidate_skips_full_only_desert_under_priority_scan(self):
+        """Full-missing thumb-complete desert must not starve later thumb work.
+
+        Reproduces the prod stall shape: full allocation non-zero but no usable
+        full room, priority mode shrinks scan_batch to activity_burst_items,
+        and a long full-only desert sits ahead of real thumb-pending images.
+        """
+        old_scan_batch = thumbnails.PREGENERATE_SCAN_BATCH
+        old_activity = thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS
+        old_full = thumbnails._disk_allocations.get(thumbnails.FULL_TIER, 0)
+        try:
+            thumbnails.PREGENERATE_SCAN_BATCH = 1024
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS = 2
+            # Non-zero full allocation (old bug OR'd it into anti-join) but too
+            # small for any original → full_candidate_signature always None.
+            thumbnails._disk_allocations[thumbnails.FULL_TIER] = 100
+            thumbnails._last_user_activity = thumbnails.time.monotonic()
+
+            for index in range(40):
+                image_id = index + 1
+                path = self._make_image(f"a-full-desert/{index:03d}.jpg")
+                self._add_catalog_original(image_id, path)
+                self._mark_preview_tiers_cached(image_id, path)
+
+            pending_id = 41
+            pending_path = self._make_image("z-pending/pending.jpg")
+            self._add_catalog_original(pending_id, pending_path)
+
+            thumbnails._reset_pregen_bulk_cursor()
+            preview_priority.clear_scopes()
+            warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+            self.assertGreater(warmed, 0)
+            self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", pending_id))
+        finally:
+            thumbnails.PREGENERATE_SCAN_BATCH = old_scan_batch
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS = old_activity
+            thumbnails._disk_allocations[thumbnails.FULL_TIER] = old_full
+            thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
 
     def test_bulk_warmup_treats_failure_only_batch_as_no_progress(self):
         path = self._make_original_file("bad.jpg", 128)

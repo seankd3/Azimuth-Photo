@@ -1205,13 +1205,16 @@ async def _pregen_bulk_candidate_batch(limit: int):
     # Anti-join against cache_entries so a long already-warmed prefix cannot
     # starve selection. Walk-all remains only for stale-replacement mode, where
     # rows still have cache_entries but need signature refresh.
+    #
+    # Preview bulk selects THUMB tiers only. Including ``full`` whenever the
+    # full allocation is non-zero pollutes the keyset with thumb-complete rows
+    # (esp. once full room is 0, or for RAWs that cannot warm full). Those
+    # unactionable rows advance the cursor inside tiny priority scan windows
+    # and strand real thumb-pending work behind false "no progress" passes.
+    # Originals use ``_pregen_full_candidate_batch`` / ``run_full_warm_batch``.
     missing_sizes = [
         size for size in THUMB_TIERS if _background_tier_budget(size) > 0
     ]
-    # Bulk waves also warm originals when the full tier has budget — keep those
-    # rows selectable even when every preview tier is already present.
-    if int(_disk_allocations.get(FULL_TIER, 0) or 0) > 0:
-        missing_sizes.append(FULL_TIER)
     if _replace_stale_thumbnails or not missing_sizes:
         return await pregen.candidate_batch(
             data_providers.get_db,

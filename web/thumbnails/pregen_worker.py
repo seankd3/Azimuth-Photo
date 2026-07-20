@@ -27,6 +27,21 @@ PREGEN_PRESSURE = -3
 # hook or it busy-loops at 100% CPU and starves the worker.
 _REAL_ASYNCIO_SLEEP = asyncio.sleep
 
+# Opt-in candidate-feed tracing (PHOTOARCHIVE_PREGEN_DIAG=1).
+_PREGEN_DIAG = os.environ.get("PHOTOARCHIVE_PREGEN_DIAG", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def _diag(msg: str, **fields) -> None:
+    if not _PREGEN_DIAG:
+        return
+    parts = " ".join(f"{key}={value!r}" for key, value in fields.items())
+    log.info("pregendiag %s %s", msg, parts)
+
 # state=running with no generation for this long → ERROR + reset iteration.
 PREGEN_STALL_WATCHDOG_SECONDS = float(
     os.environ.get("PHOTOARCHIVE_PREGEN_STALL_SECONDS", str(5 * 60))
@@ -103,9 +118,16 @@ async def run_pregen_bulk_batch(
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     full_room = {"bytes": full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
     pending = []
+    # Cap how many *actionable* pages we pull per wave. Also allow a larger
+    # empty-page budget so unactionable anti-join pollution cannot strand the
+    # keyset cursor inside a desert narrower than one priority scan window.
     max_scan_batches = 4
+    max_empty_scan_batches = 64
+    candidates_scanned = 0
+    empty_scan_batches = 0
 
-    def collect_candidates(rows) -> None:
+    def collect_candidates(rows) -> int:
+        found = 0
         for row in rows:
             if not is_prefetching() or is_manual_paused():
                 break
@@ -146,8 +168,10 @@ async def run_pregen_bulk_batch(
                 "need_hash": need_hash,
                 "need_metadata": need_metadata,
             })
+            found += 1
             if len(pending) >= generate_batch:
                 break
+        return found
 
     loop = asyncio.get_running_loop()
     priority_processed_ids: set[int] = set()
@@ -168,6 +192,7 @@ async def run_pregen_bulk_batch(
             break
         set_priority_scope(priority_label)
         priority_processed_ids.update(int(row["id"]) for row in rows)
+        candidates_scanned += len(rows)
         await loop.run_in_executor(prefetch_executor, collect_candidates, rows)
         priority_scanned_batches += 1
 
@@ -180,6 +205,7 @@ async def run_pregen_bulk_batch(
         use_normal_candidates
         and len(pending) < generate_batch
         and scanned_batches < max_scan_batches
+        and empty_scan_batches < max_empty_scan_batches
     ):
         if not is_prefetching() or is_manual_paused():
             break
@@ -196,11 +222,34 @@ async def run_pregen_bulk_batch(
                 break
             rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
             if not rows:
+                _diag(
+                    "bulk_batch",
+                    decision="no_candidates",
+                    candidates_scanned=candidates_scanned,
+                    candidates_pending_found=len(pending),
+                    generated_this_batch=0,
+                )
                 return 0
 
-        await loop.run_in_executor(prefetch_executor, collect_candidates, rows)
+        candidates_scanned += len(rows)
+        pending_before = len(pending)
+        found = await loop.run_in_executor(prefetch_executor, collect_candidates, rows)
+        if found <= 0 and len(pending) == pending_before:
+            empty_scan_batches += 1
+        else:
+            scanned_batches += 1
+            empty_scan_batches = 0
 
-        scanned_batches += 1
+        _diag(
+            "bulk_scan_page",
+            rows=len(rows),
+            pending_found_page=found,
+            pending_total=len(pending),
+            empty_scan_batches=empty_scan_batches,
+            scanned_batches=scanned_batches,
+            scan_batch=candidate_scan_batch,
+        )
+
         if len(rows) < candidate_scan_batch:
             reset_pregen_bulk_cursor()
             reached_end = True
@@ -209,8 +258,28 @@ async def run_pregen_bulk_batch(
             break
 
     if not pending:
-        if scanned_batches >= max_scan_batches and not reached_end:
+        if (
+            (scanned_batches >= max_scan_batches or empty_scan_batches >= max_empty_scan_batches)
+            and not reached_end
+        ):
+            _diag(
+                "bulk_batch",
+                decision="no_progress_scan",
+                candidates_scanned=candidates_scanned,
+                candidates_pending_found=0,
+                empty_scan_batches=empty_scan_batches,
+                scanned_batches=scanned_batches,
+                generated_this_batch=0,
+            )
             return -1
+        _diag(
+            "bulk_batch",
+            decision="no_candidates",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=0,
+            reached_end=reached_end,
+            generated_this_batch=0,
+        )
         return 0
 
     completed = 0
@@ -338,11 +407,39 @@ async def run_pregen_bulk_batch(
     if not should_pause_for_priority():
         await _flush_off_request_pool(flush_write_queue, prefetch_executor)
     if pressure_abort:
+        _diag(
+            "bulk_batch",
+            decision="memory_pause",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return PREGEN_PRESSURE
     if wave_timed_out and completed <= 0:
+        _diag(
+            "bulk_batch",
+            decision="wave_timeout",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return -1
     if completed <= 0:
+        _diag(
+            "bulk_batch",
+            decision="no_progress_generate",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return -1
+    _diag(
+        "bulk_batch",
+        decision="ran_batch",
+        candidates_scanned=candidates_scanned,
+        candidates_pending_found=len(pending),
+        generated_this_batch=completed,
+    )
     return completed
 
 
