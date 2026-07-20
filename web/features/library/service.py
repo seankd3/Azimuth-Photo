@@ -128,11 +128,19 @@ def configure_stacks(
     _get_stack_representative_counts = get_stack_representative_counts
 
 
-def invalidate_rankings_response_cache() -> None:
+def invalidate_rankings_response_cache(*, order_caches: bool = True) -> None:
+    """Clear rankings HTTP/response cache.
+
+    Thumbnail/pregen writes change preview_ready on cards, so they must clear
+    the response cache. They do NOT change taste/Elo order — pass
+    ``order_caches=False`` so the expensive ordered-id caches survive backfill.
+    Ranking-affecting events (flags, picks, embeds, catalog) keep the default.
+    """
     _rankings_response_cache.clear()
-    _blended_rankings_order_cache.clear()
-    _taste_rankings_order_cache.clear()
-    _taste_id_elo_cache.clear()
+    if order_caches:
+        _blended_rankings_order_cache.clear()
+        _taste_rankings_order_cache.clear()
+        _taste_id_elo_cache.clear()
 
 
 def _configured_cache_root() -> str:

@@ -260,8 +260,11 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
     invalidate_visible_cache_dependent_counts(cache_root, size)
     invalidate_visible_facet_caches(cache_root, size)
     if size == "sm":
+        # Preview readiness on cards changed — drop response payloads only.
+        # Taste/Elo ordered-id caches do not depend on thumbnail rows; clearing
+        # them here made every taste request rebuild (18–30s) during pregen.
         _, library_service, *_ = _configured()
-        library_service.invalidate_rankings_response_cache()
+        library_service.invalidate_rankings_response_cache(order_caches=False)
 
 
 def invalidate_rankable_image_ids_cache() -> None:

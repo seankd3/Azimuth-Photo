@@ -994,6 +994,43 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(fourth["comparison_count"], third["comparison_count"])
         self.assertEqual(taste_service._cache["key"][2], 5)
 
+    async def test_sm_thumbnail_writes_preserve_taste_order_cache(self):
+        """Pregen sm writes must not force a full taste order rebuild."""
+        source = await self._source()
+        winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]
+        losers = [await self._image(source["id"], f"loser-{idx}.jpg", comparisons=1) for idx in range(3)]
+        for image_id in winners:
+            await self._embedding(image_id, [1.0, 0.0])
+        for image_id in losers:
+            await self._embedding(image_id, [-1.0, 0.0])
+        await self._comparison_rows(list(zip(winners, losers)) + [(winners[0], losers[0]), (winners[1], losers[1])])
+        for image_id in winners + losers:
+            await self._cache_entry(image_id, "sm")
+
+        first = await library_routes.api_rankings(limit=4, sort="taste")
+        self.assertTrue(library_service._taste_rankings_order_cache)
+        self.assertTrue(library_service._rankings_response_cache)
+        order_before = dict(library_service._taste_rankings_order_cache)
+        id_elo_before = dict(library_service._taste_id_elo_cache)
+        first_ids = [img["id"] for img in first["images"]]
+
+        # Simulate continuous pregen: each sm write used to nuke taste order caches.
+        for image_id in winners:
+            db.note_cached_image_ids_added(thumbnails.SSD_CACHE_DIR, "sm", [image_id])
+
+        self.assertFalse(library_service._rankings_response_cache)
+        self.assertEqual(library_service._taste_rankings_order_cache, order_before)
+        self.assertEqual(library_service._taste_id_elo_cache, id_elo_before)
+
+        second = await library_routes.api_rankings(limit=4, sort="taste")
+        third = await library_routes.api_rankings(limit=2, sort="taste")
+        self.assertEqual([img["id"] for img in second["images"]], first_ids)
+        self.assertEqual([img["id"] for img in third["images"]], first_ids[:2])
+
+        # Elo / taste-affecting writes still clear order caches.
+        await settings_routes.api_set_image_flag(winners[0], JsonRequest({"flag": "picked"}))
+        self.assertFalse(library_service._taste_rankings_order_cache)
+
     async def test_taste_blend_warm_pages_reuse_predictions_and_precomputed_order(self):
         self._set_taste_blend(enabled=True, min_signal=1)
         source = await self._source()
