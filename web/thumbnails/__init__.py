@@ -1669,10 +1669,11 @@ def _pregen_background_decision():
 
 
 def _pregen_should_pause_for_priority() -> bool:
-    return pregen.should_pause_for_priority(
-        get_idle_seconds(),
-        settle_seconds=PREGENERATE_IDLE_SECONDS,
-    )
+    # Full-tilt (owner directive 2026-07-20): the server's bulk preview backfill
+    # is the one-and-only behavior and NEVER throttles for priority/activity.
+    # Interactivity is handled by the satellite's local cache + on-demand thumbnail
+    # requests that bypass the bulk gate — neither slows this backfill.
+    return False
 
 
 def current_prefetch_executor():
