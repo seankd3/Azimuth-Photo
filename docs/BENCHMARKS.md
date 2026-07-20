@@ -4,6 +4,7 @@ Reproducible hot-path timings tracked over time (newest first). Run `scripts/per
 
 | commit | label | preview/min | rankings | counts | folders | warm thumb |
 |--------|-------|------------:|---------:|-------:|--------:|-----------:|
+| `084c26e0d` | counts+pathorder+dngthumbs (clean re-measure) | ~50* | 1.2/1.7 | 5.8/7.9 | 17.0/47.0 | 6.0/12.5 |
 | `6615e2dfe` | overnight quality wave — baseline | 77 | 1.2/1.7 | 108.8/111.2 | 17.4/24.6 | 4.8/5.1 |
 
 ## Current bottleneck (bottleneck-hunting loop)

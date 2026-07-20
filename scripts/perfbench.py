@@ -108,10 +108,15 @@ def main():
 
     ts = args.epoch if args.epoch is not None else 0
     commit = _git_commit()
+    try:
+        load1 = round(os.getloadavg()[0],1)
+    except Exception:
+        load1 = None
     row = {
         "epoch": ts, "commit": commit, "label": args.label,
         "preview_files_per_min": preview_rate,
         "metrics_ms": metrics,
+        "load1": load1,
     }
 
     os.makedirs(os.path.join(REPO, "bench"), exist_ok=True)
@@ -124,7 +129,7 @@ def main():
 
     line = (f"commit={commit} label={args.label!r} | preview={preview_rate}/min | "
             f"rankings={cell('rankings')} counts={cell('counts')} "
-            f"folders={cell('folders_tree')} warmthumb={cell('warm_thumb_sm')} (p50/p95 ms)")
+            f"folders={cell('folders_tree')} warmthumb={cell('warm_thumb_sm')} (p50/p95 ms) load={load1}")
     print(line)
 
     if args.md:
