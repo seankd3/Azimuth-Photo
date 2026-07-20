@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import pathlib
 import hashlib
 import io
 import json
@@ -23,7 +24,26 @@ from features.sync.executor import run_foreground_sync_work, run_sync_work
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
 StoreFn = Callable[[str, int, str, bytes], Any]
-DEFAULT_THUMB_BUDGET_GB = 8
+# 0 = auto: 25% of free disk on the cache volume, clamped 8-64GB. Holding a
+# full sm+md tier set (~32GB on a 150k-image library) fits inside the ceiling;
+# small machines degrade gracefully instead of filling their disk.
+DEFAULT_THUMB_BUDGET_GB = 0
+AUTO_BUDGET_FLOOR_GB = 8
+AUTO_BUDGET_CEILING_GB = 64
+AUTO_BUDGET_FREE_FRACTION = 0.25
+
+
+def auto_thumb_budget_bytes(cache_root: str | None) -> int:
+    import shutil as _shutil
+
+    probe = cache_root or str(pathlib.Path.home())
+    try:
+        free = _shutil.disk_usage(probe).free
+    except OSError:
+        return AUTO_BUDGET_FLOOR_GB * 1024 ** 3
+    auto = int(free * AUTO_BUDGET_FREE_FRACTION)
+    return min(AUTO_BUDGET_CEILING_GB * 1024 ** 3, max(AUTO_BUDGET_FLOOR_GB * 1024 ** 3, auto))
+PACK_ORDER = "newest"
 _PREFETCH_DDL = """
 CREATE TABLE IF NOT EXISTS sync_prefetch_state (
     key TEXT PRIMARY KEY,
@@ -111,20 +131,24 @@ class ThumbPrefetcher:
         self._request = request or _urllib_request
         self._store = store or _store_with_thumbnail_cache
         self.cache_root = cache_root
-        self.budget_bytes = budget_bytes if budget_bytes is not None else self._settings_budget()
+        self.budget_bytes = (
+            budget_bytes if budget_bytes is not None else self._settings_budget(cache_root)
+        )
         self._queue: asyncio.PriorityQueue[_QueuedItem] = asyncio.PriorityQueue()
         self._last_predictive_seed_at = 0.0
         self._sm_gap_retry_at = 0.0
         self._status: dict[str, Any] = {"state": "idle", "size": "sm", "after_id": 0, "cached": 0, "total": 0, "library_cached": 0, "library_total": 0, "budget_bytes": self.budget_bytes, "last_error": "", "tier": "browse"}
 
     @staticmethod
-    def _settings_budget() -> int:
+    def _settings_budget(cache_root: str | None = None) -> int:
         try:
             import settings
             gigabytes = int(settings.get_settings().get("sync_thumb_budget_gb", DEFAULT_THUMB_BUDGET_GB) or DEFAULT_THUMB_BUDGET_GB)
         except Exception:
             gigabytes = DEFAULT_THUMB_BUDGET_GB
-        return max(0, gigabytes) * 1024 ** 3
+        if gigabytes > 0:
+            return gigabytes * 1024 ** 3
+        return auto_thumb_budget_bytes(cache_root)
 
     def status(self) -> dict[str, Any]:
         return {**self._status, "queued": self._queue.qsize()}
@@ -152,14 +176,23 @@ class ThumbPrefetcher:
         after_id = await self._state_int(f"after:{size}")
         tier = "browse" if size == self.BROWSE_SIZE else "loupe"
         self._status.update(state="fetching", size=size, after_id=after_id, tier=tier)
-        query = urlencode({"size": size, "after_id": after_id, "limit": min(500, max(1, limit))})
+        query = urlencode(
+            {
+                "size": size,
+                "after_id": after_id,
+                "limit": min(500, max(1, limit)),
+                "order": PACK_ORDER,
+            }
+        )
         code, _headers, body = await self._request("GET", f"{self.hub}/api/sync/thumbs/pack?{query}")
         if not 200 <= code < 300:
             raise RuntimeError(f"thumb pack failed ({code}): {body.decode(errors='replace')[:300]}")
         stored, last_hub_id, skipped = await self._store_pack(size, body)
-        if last_hub_id > after_id:
+        # newest: cursor descends (trailer after_id = lowest id scanned).
+        # asc fallback hubs ignore order= and ascend; accept either direction.
+        if last_hub_id > 0 and last_hub_id != after_id:
             await self._set_state(f"after:{size}", str(last_hub_id))
-        elif size == self.BROWSE_SIZE and stored == 0 and last_hub_id == after_id:
+        elif size == self.BROWSE_SIZE and stored == 0 and (last_hub_id == after_id or last_hub_id == 0):
             # Cursor reached the hub end while some sm cells are still missing
             # (hub skipped them). Periodically rewind so later hub generation
             # can fill browse gaps without waiting for a manual reset.
@@ -169,15 +202,17 @@ class ThumbPrefetcher:
                 await self._set_state(f"after:{size}", "0")
                 after_id = 0
         cached, total = await self._library_progress(size)
+        next_cursor = last_hub_id if last_hub_id > 0 else after_id
         self._status.update(
             state="idle",
-            after_id=max(after_id, last_hub_id),
+            after_id=next_cursor,
             cached=int(self._status["cached"]) + stored,
             total=int(self._status["total"]) + stored + skipped,
             library_cached=cached,
             library_total=total,
             last_error="",
             tier=tier,
+            order=PACK_ORDER,
         )
         return self.status()
 

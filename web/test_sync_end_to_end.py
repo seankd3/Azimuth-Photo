@@ -135,6 +135,9 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
                 thumb_status = await prefetch.prefetch_once(size="sm", limit=50)
             self.assertEqual(len(stored), 10)
             self.assertEqual(thumb_status["total"], 50)
+            self.assertEqual(thumb_status.get("order"), "newest")
+            # Newest-first: highest hub ids land before the older tail.
+            self.assertEqual([image_id for _size, image_id, _data in stored[:3]], [10, 9, 8])
 
             await oplog.append_flags(self.satellite_db, [first_satellite_id], "picked")
             first_exchange = await oplog.exchange_with_hub(self.satellite_db, self._json_request)

@@ -22,11 +22,12 @@ from features.sync import satellite
 log = logging.getLogger(__name__)
 
 MIRROR_SIZES = ("sm", "md")
-DEFAULT_MIRROR_MAX_BYTES = 20 * 1024**3
+# Match the satellite thumb budget: full sm+md with headroom (~40GB).
+DEFAULT_MIRROR_MAX_BYTES = 40 * 1024**3
 DEFAULT_IDLE_GATE_SECONDS = 10.0
-DEFAULT_BURST_LIMIT = 24
-DEFAULT_BURST_SLEEP_SECONDS = 1.5
-DEFAULT_RECENT_LIMIT = 2000
+DEFAULT_BURST_LIMIT = 48
+DEFAULT_BURST_SLEEP_SECONDS = 1.0
+DEFAULT_RECENT_LIMIT = 8000
 DEFAULT_STARRED_ELO_FLOOR = 1400.0
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]

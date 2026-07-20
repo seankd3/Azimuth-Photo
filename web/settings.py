@@ -76,7 +76,7 @@ DEFAULT_SETTINGS = {
     "owner_session_epoch": 0,
     "import_category_memory": {},
     "sync_bandwidth_mbps": 0,
-    "sync_thumb_budget_gb": 8,
+    "sync_thumb_budget_gb": 0,  # 0 = auto (adapts to free disk)
     "hub_url": "",
     "device_token": "",
     "paired_hub_id": "",
