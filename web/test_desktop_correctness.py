@@ -378,6 +378,14 @@ class DesktopCorrectnessTests(unittest.TestCase):
                 f"{path_name} must inherit quiet exclusion from scopeParams, not set it locally",
             )
 
+    def test_grid_prefetches_page_thumbs_and_registers_sw(self):
+        grid = read("grid.js")
+        bootstrap = read("bootstrap.js")
+        self.assertIn("function prefetchPageThumbs(images)", grid)
+        self.assertIn("prefetchPageThumbs(incoming);", grid)
+        self.assertIn("scheduleServiceWorkerRegistration", bootstrap)
+        self.assertIn("../sw_register.js", bootstrap)
+
     def test_reveal_quiet_stays_grid_results_only(self):
         state = read("state.js")
         quiet = read("quiet_sources.js")

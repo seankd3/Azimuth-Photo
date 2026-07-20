@@ -73,20 +73,10 @@
 
     <a id="m-dl" download hidden></a>
 
-    <script>
-        // Service workers require a secure context (HTTPS / localhost).
-        // On plain HTTP this is a no-op — the localStorage write queue still works.
-        // Version the SW URL with the same cache-bust stamp as CSS/JS so updates
-        // replace the shell cache (see docs/FIELD_HTTPS.md).
-        if ('serviceWorker' in navigator && window.isSecureContext) {
-            window.addEventListener('load', function () {
-                var version = document.documentElement.getAttribute('data-static-version') || '';
-                var url = version
-                    ? '/sw.js?v=' + encodeURIComponent(version)
-                    : '/sw.js';
-                navigator.serviceWorker.register(url).catch(function () {});
-            });
-        }
+    <script type="module">
+        import { scheduleServiceWorkerRegistration } from '/static/js/sw_register.js?v={{ static_version }}';
+        // HTTPS/localhost only; ?pa_sw=0 or localStorage pa_sw=0 disables (see sw_register.js).
+        scheduleServiceWorkerRegistration();
     </script>
     <script type="module" src="/static/js/mobile/bootstrap.js?v={{ static_version }}"></script>
 </body>

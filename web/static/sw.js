@@ -1,14 +1,16 @@
-/* Azimuth Photo mobile service worker.
+/* Azimuth Photo service worker (mobile shell + shared thumb cache).
  *
  * Strategy:
  * - Precache the /m app shell (page, css, js modules, manifest, icon).
- * - Stale-while-revalidate for thumbnails (/api/thumb/*), capped.
- * - Network-only for every other /api request: writes and live data
- *   must never be answered from a cache.
+ * - Stale-while-revalidate for thumbnail GETs (/api/thumb/*), size-bounded
+ *   Cache API. Only 200 image/* responses stored (never 204, never JSON).
+ * - Network-only for every other /api request: rankings, counts, writes.
  * - Navigations fall back to the cached /m shell when offline.
  * - Background Sync tag `pa-write-queue` wakes open clients so
  *   write_queue.js can drain its localStorage queue (SW cannot read
  *   localStorage — the page queue remains the source of truth).
+ *
+ * Disable from the page: ?pa_sw=0 or localStorage pa_sw=0 (see sw_register.js).
  *
  * Versioning: register as `/sw.js?v=<static_version>` (same cache-bust
  * idiom as `?v={{ static_version }}` on CSS/JS). The query value becomes
@@ -25,7 +27,7 @@ const CACHE_VERSION = (() => {
 })();
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
-const THUMB_CACHE_MAX_ENTRIES = 1500;
+const THUMB_CACHE_MAX_ENTRIES = 4000;
 const WRITE_SYNC_TAG = 'pa-write-queue';
 
 const SHELL_URLS = [
@@ -39,6 +41,7 @@ const SHELL_URLS = [
     '/static/js/previews.js',
     '/static/js/worker_state.js',
     '/static/js/api.js',
+    '/static/js/sw_register.js',
     '/static/js/mobile/api.js',
     '/static/js/mobile/bootstrap.js',
     '/static/js/mobile/caption_cache.js',
@@ -81,6 +84,12 @@ self.addEventListener('activate', (event) => {
     })());
 });
 
+function isCacheableThumbResponse(response) {
+    if (!response || response.status !== 200) return false;
+    const type = (response.headers.get('content-type') || '').toLowerCase();
+    return type.startsWith('image/');
+}
+
 async function trimThumbCache() {
     const cache = await caches.open(THUMB_CACHE);
     const keys = await cache.keys();
@@ -91,19 +100,19 @@ async function trimThumbCache() {
     }
 }
 
+/** Serve stored JPEG instantly, refresh in background — thumb URLs are
+ * unversioned, so pure cache-first would pin stale pixels after an edit. */
 async function thumbStaleWhileRevalidate(request) {
     const cache = await caches.open(THUMB_CACHE);
     const cached = await cache.match(request);
-    const refresh = fetch(request).then((response) => {
-        if (response && response.ok) {
-            cache.put(request, response.clone());
+    const refresh = fetch(request).then(async (response) => {
+        if (isCacheableThumbResponse(response)) {
+            await cache.put(request, response.clone());
             trimThumbCache();
         }
         return response;
     }).catch(() => null);
-    if (cached) {
-        return cached;
-    }
+    if (cached) return cached;
     const fresh = await refresh;
     if (fresh) return fresh;
     return new Response('', { status: 504, statusText: 'Offline' });

@@ -353,6 +353,24 @@ function warmMediumThumb(cell) {
     });
 }
 
+/** Warm HTTP/SW thumb cache for a newly loaded page before cells intersect. */
+function prefetchPageThumbs(images) {
+    const ready = (images || [])
+        .filter((image) => image && image.preview_ready !== false)
+        .map((image) => previewThumbUrl(image))
+        .filter(Boolean);
+    if (!ready.length) return;
+    const queue = window.requestIdleCallback || ((callback) => window.setTimeout(callback, 0));
+    queue(() => {
+        for (const url of ready) {
+            const preload = new Image();
+            preload.fetchPriority = 'low';
+            preload.decoding = 'async';
+            preload.src = url;
+        }
+    });
+}
+
 function resetImageObserver() {
     if (imageObserver) imageObserver.disconnect();
     imageObserver = null;
@@ -722,6 +740,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
             setFocus(requestStart);
             watchWindowStart(chunkEl);
         }
+        prefetchPageThumbs(incoming);
         renderPendingThumbnailNotice();
     }
     return incoming.length > 0;
