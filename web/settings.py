@@ -38,7 +38,7 @@ DEFAULT_SETTINGS = {
     "cache_profile": "original_heavy",
     "background_thumb_workers": 6,
     "pregen_generate_batch": 16,
-    "pregen_batch_pause_ms": 250,
+    "pregen_batch_pause_ms": 0,
     "embed_batch_pause_ms": 250,
     "embed_batch_size": 1,
     "embed_model_preset": DEFAULT_EMBED_MODEL_PRESET_KEY,
