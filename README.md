@@ -12,6 +12,14 @@ AI, sharing, and publishing use catalog data and generated derivatives; the one
 explicit file-moving action is Trash, which moves originals into a restorable
 `.trash` area until you empty it.
 
+> **▶ Try it live — no install: [azimuthphoto.com](https://azimuthphoto.com)**
+> The homepage isn't screenshots. It's the real library grid, the keyboard loupe, the Elo
+> Refine mosaic, and the fused search engine — running live in your browser on real catalog
+> data. Play with the app before you clone it.
+>
+> **📖 The full story: [the Field Log](https://azimuthphoto.com/log/)** — how a 2023 weekend
+> "which photo is better?" toy became this, across 1,562 commits, with interactive demos.
+
 ## Built for speed
 
 - **A tiered preview cache** (small / medium / large / originals) with configurable size budgets pre-generates in the background, so browsing never waits on a slow external drive.
@@ -52,6 +60,25 @@ A full canvas view, not a modal: metadata, Elo ranking, and a live histogram sta
 ![Refine mosaic](docs/assets/screens/refine-mosaic.jpg)
 
 **Refine** shows you a mosaic — pick the best one. The winner is replaced with a fresh contender; the rest stay and keep competing. Behind it: an Elo system with uncertainty tracking, propagation through visually similar photos, and selectable strategies (Diverse, Explore, Compete). A quality meter tells you how *sorted* any scope is. Rank your whole archive, one two-second decision at a time.
+
+## A darkroom, not just a manager
+
+![The Develop editor](docs/assets/screens/develop.jpg)
+
+Press **D** and any photo opens in a full non-destructive **Develop** module — a live WebGL2
+editor with Lightroom-ordered panels: white balance, tone, presence, an interactive tone
+curve, HSL, masking (brush / linear / radial / luminance / color-range, plus AI subject and
+sky masks), heal, crop, and history.
+
+- **Its own RAW pipeline.** DNG color science pixel-matched to Lightroom, and a decoder for
+  the lossy JPEG-XL DNGs LibRaw can't even open — a 2048px base in 0.4s.
+- **The twin.** Every edit runs *twice* — a WebGL shader for the live preview and a NumPy
+  pipeline for export — pinned to a shared constants table so they stay identical to within
+  **0.4 of 255** on every pixel. What you see is exactly what you export.
+- **A physically-modeled film engine.** Not a LUT — it models the photochemistry: spectral
+  layer exposure, halation, H&D characteristic curves, DIR couplers, per-layer grain. Eight
+  stocks tuned against **53 real lab scans**; the CineStill 800T glow *emerges* from the
+  physics. [See it work in the Field Log](https://azimuthphoto.com/log/#ch-darkroom).
 
 ## Search that actually understands
 
@@ -116,6 +143,7 @@ Choose the install path that fits your library in [Install Azimuth Photo](docs/I
 - [Development guide](docs/development.md)
 - [Background work & AI model behavior](docs/background-work-behavior.md)
 - [Data & privacy](docs/data-and-privacy.md)
+- [**The Field Log**](https://azimuthphoto.com/log/) — the full build story, 1,562 commits, with live demos
 
 ---
 
