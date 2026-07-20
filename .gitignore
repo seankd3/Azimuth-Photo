@@ -1,0 +1,15 @@
+# local clone of the app (regenerable: git clone omarchy:Projects/photo-archive)
+repo/
+# sample photos (regenerable from the archive; not ours to redistribute)
+sample-photos/
+# python venvs (regenerable)
+.capture-venv/
+.legacy-venv/
+.py310-venv/
+# capture rig scratch (regenerable)
+_worktrees/
+_scratch/
+captures/*.log
+captures/*.out
+__pycache__/
+node_modules/

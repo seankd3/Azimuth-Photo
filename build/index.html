@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Azimuth · Field Log — how a "which photo is better?" toy became a darkroom</title>
+<meta name="description" content="A Factorio-style development log of Azimuth Photo: 1,562 commits from a 2023 weekend Elo toy to an AI-native Lightroom with a physically-modeled film engine.">
+<link rel="stylesheet" href="devlog.css">
+</head>
+<body>
+
+<div class="topbar">
+  <span class="wm"><i class="dot"></i>AZIMUTH <b>· FIELD LOG</b></span>
+  <span class="spacer"></span>
+  <span class="bearing">BEARING <b id="bearing">000°</b></span>
+</div>
+<div class="scrollrail"><i></i></div>
+
+<!-- ============================================================ HERO -->
+<header class="hero" id="top">
+  <div class="grid-bg"></div>
+  <div class="kicker">A development log · <b>2023 → 2026</b> · 1,562 commits</div>
+  <h1>A weekend toy that asked <span class="accent">"which one is&nbsp;better?"</span> — and grew a <span class="film">darkroom</span>.</h1>
+  <p class="lede">This is the honest build history of <b>Azimuth Photo</b>: a self-hosted photo library that started as 228 lines of Python and became an AI-native Lightroom — with semantic search, an Elo-ranked culling engine, and a <b>physically-modeled film emulation engine</b> built out by a fleet of AI agents.</p>
+
+  <div class="statgrid">
+    <div class="cell"><div class="v">1,562</div><div class="k">commits</div></div>
+    <div class="cell"><div class="v">2<small>y</small> 11<small>mo</small></div><div class="k">first → latest</div></div>
+    <div class="cell"><div class="v">1,133</div><div class="k">in July 2026 alone</div></div>
+    <div class="cell"><div class="v">150k</div><div class="k">photo library</div></div>
+    <div class="cell"><div class="v">&lt;0.4<small>/255</small></div><div class="k">GL↔numpy parity</div></div>
+  </div>
+
+  <div class="scrolldown">SCROLL TO BEGIN <span class="arrow">↓</span></div>
+</header>
+
+<div class="shell">
+  <!-- ============================================================ RAIL -->
+  <nav class="rail" aria-label="Chapters">
+    <h4>FIELD LOG</h4>
+    <ol>
+      <li><a href="#ch-genesis"><span class="n">00</span><span>The Toy</span></a></li>
+      <li><a href="#ch-web"><span class="n">01</span><span>The Web Rebirth</span></a></li>
+      <li><a href="#ch-mind"><span class="n">02</span><span>The Mind Awakens</span></a></li>
+      <li><a href="#ch-speed"><span class="n">03</span><span>The Need for Speed</span></a></li>
+      <li><a href="#ch-modular"><span class="n">04</span><span>The Great Refactor</span></a></li>
+      <li><a href="#ch-one"><span class="n">05</span><span>One Library, Three Faces</span></a></li>
+      <li><a href="#ch-darkroom"><span class="n">06</span><span>The Darkroom</span></a></li>
+      <li><a href="#wins"><span class="n">◆</span><span>Measured Wins</span></a></li>
+      <li><a href="#ch-field"><span class="n">07</span><span>The Field</span></a></li>
+      <li><a href="#ch-azimuth"><span class="n">08</span><span>Becoming Azimuth</span></a></li>
+      <li><a href="#stories"><span class="n">◆</span><span>War Stories</span></a></li>
+      <li><a href="#ch-fleet"><span class="n">09</span><span>The Fleet</span></a></li>
+      <li><a href="#ch-final"><span class="n">10</span><span>What It Cost</span></a></li>
+    </ol>
+    <div class="spark">
+      <h4 style="margin-bottom:8px">COMMIT DENSITY</h4>
+      <canvas style="width:100%;height:54px"></canvas>
+      <div style="font-size:10px;color:var(--ink-4);margin-top:6px;letter-spacing:.08em">'23 ·········· '26·07</div>
+    </div>
+  </nav>
+
+  <!-- ============================================================ CONTENT -->
+  <main class="content">
+
+  <!-- ─────────────────────────────────────────────── CH0 GENESIS -->
+  <section class="chapter" id="ch-genesis">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 00 <span class="sep">/</span> Aug 2023 – Aug 2024 <span class="sep">/</span> <span class="muted">f60ab3c…4586172 · 12 commits</span></div>
+      <h2>The toy that refused to die</h2>
+      <p class="dek">You cannot honestly star-rate ten thousand photos. But you can always answer one question: <b>this one, or that one?</b></p>
+    </div>
+
+    <div class="prose rv">
+      <p class="lead">The very first commit is a 228-line Python script called <code>PhotoRanker</code>. It opens a black Tkinter window, shows you two of your photos side by side, and waits. You click the better one. It updates a chess <strong>Elo</strong> rating for both, loads the next pair, and waits again.</p>
+      <p>That's the whole idea, and it's a good one. A 1–5 star scale collapses under its own subjectivity by the third shoot — is <em>this</em> sunset a 4 or a 5? Elo sidesteps the question entirely. Every click is a tiny, honest comparison, and thousands of them resolve into a single global order. The best photos naturally rise; the pairing is even biased toward the current top ten, so your leaders keep getting stress-tested against each other.</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">PhotoRanker · Main.py</span><span class="hash">d97f2aae5 · 2023</span></div>
+      <div class="img"><img src="assets/screens/01-photoranker-2023.jpg" alt="The 2023 PhotoRanker desktop app: two photos side by side with Left/Right ranking buttons" loading="lazy"></div>
+      <figcaption>The original, run verbatim from the 2023 commit for this log. Two of Sean's Starbase frames, <b>Left</b> / <b>Right</b> to pick a winner, and an honest little counter: <b>"Unrated Images in Current Folder: 23."</b> DNG support via rawpy, a threaded preload queue, even Xbox controller support for long couch culling sessions.</figcaption>
+    </figure>
+
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">Main.py</span><span class="why">the seed of everything · d97f2aae5</span></div>
+<pre><span class="tok-kw">def</span> <span class="tok-fn">update_elo_rank</span>(winner_elo, loser_elo, K):
+    expected_winner = <span class="tok-num">1</span> / (<span class="tok-num">1</span> + <span class="tok-num">10</span> ** ((loser_elo - winner_elo) / <span class="tok-num">400</span>))
+    winner_elo += K * (<span class="tok-num">1</span> - expected_winner)
+    loser_elo  += K * (expected_winner - <span class="tok-num">1</span>)
+    <span class="tok-kw">return</span> winner_elo, loser_elo
+
+<span class="tok-com"># adaptive K: swing hard when ratings are close, gently when far apart</span>
+K = <span class="tok-num">32</span> <span class="tok-kw">if</span> abs(winner_elo - loser_elo) &lt; <span class="tok-num">100</span> <span class="tok-kw">else</span> <span class="tok-num">16</span></pre>
+    </div>
+
+    <p class="prose rv" style="margin-top:26px">That adaptive K-factor is the entire ranking philosophy in two lines, and — remarkably — it survives, almost unchanged, into the app you can run today. Everything else was thrown away and rebuilt. This wasn't.</p>
+
+    <p class="prose rv">Try it. This is the real update rule, wired to a handful of Sean's photos:</p>
+
+    <!-- ELO DEMO -->
+    <div class="demo elo-demo rv">
+      <div class="dh"><span class="badge">Live</span><span class="title">elo_ranker.js — the 2023 rule, in your browser</span><span class="hint">click the better photo</span></div>
+      <div class="db">
+        <div class="elo">
+          <div class="card" aria-label="Pick this photo"><img alt="candidate photo"><div class="meter"><span class="rt">1200</span><span class="delta"></span></div></div>
+          <div class="vs">VS</div>
+          <div class="card" aria-label="Pick this photo"><img alt="candidate photo"><div class="meter"><span class="rt">1200</span><span class="delta"></span></div></div>
+        </div>
+        <div class="elo-foot">
+          <div class="stat">comparisons <b id="elo-comp">0</b></div>
+          <div class="stat">propagated <b id="elo-prop">0</b></div>
+          <div class="stat">top rating <b id="elo-top">1200</b></div>
+          <button class="btn" id="elo-reset">Reset</button>
+        </div>
+      </div>
+    </div>
+    <p class="note rv">"Propagated" is a preview of a much later idea (Chapter 03): when you pick a winner, its visual look-alikes should move too. Here it's faked with tile-adjacency; in the real app it's cosine similarity over CLIP embeddings.</p>
+
+    <p class="prose rv" style="margin-top:30px">Then the toy went quiet. One commit in September 2023, three in August 2024 (blacklisting, controller support), and then <strong>eighteen months of silence</strong>. The idea was right. The shell was a dead end. It would take a completely different kind of tooling to wake it up.</p>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH1 WEB -->
+  <section class="chapter" id="ch-web">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 01 <span class="sep">/</span> Feb 2026 <span class="sep">/</span> <span class="muted">db3b4ad…60cb19f · 2 commits</span></div>
+      <h2>The web rebirth</h2>
+      <p class="dek">Same idea. New body. The comparison leaves the desktop and moves to where the library actually lives — the browser.</p>
+    </div>
+
+    <div class="prose rv">
+      <p>In February 2026 the project restarts as a web app. Two commits. The Tkinter window becomes a FastAPI server and a dark HTML page. But the interesting change isn't the stack — it's a new way to ask the question.</p>
+      <p>Instead of a strict two-up duel, there's now a <strong>mosaic</strong>: a grid of candidates where you pick the single standout and everything else takes a small loss. More judgments per click, less fatigue. The same Elo math, fed faster.</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">PhotoRanker (web) · mosaic mode</span><span class="hash">60cb19f39 · 2026-02</span></div>
+      <div class="img"><img src="assets/screens/02-web-mosaic.jpg" alt="Web PhotoRanker mosaic: a grid of candidate photos with Mosaic / Swiss / Top 50 modes" loading="lazy"></div>
+      <figcaption>Booted from the February 2026 commit. Still called <b>PhotoRanker</b>. "64 images in pool — mosaic mode," with <b>Mosaic / Swiss / Top 50</b> tournament styles and an <b>Explore / Compete / Top Cut</b> strategy row. The bones of a real culling tool are here; the intelligence is not — yet.</figcaption>
+    </figure>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">PhotoRanker (web) · rankings</span><span class="hash">the leaderboard</span></div>
+      <div class="img"><img src="assets/screens/02b-web-rankings.jpg" alt="The rankings leaderboard: photos sorted by Elo rating" loading="lazy"></div>
+      <figcaption>The payoff view — every photo sorted by its earned Elo. This is the same idea as the 2023 desktop toy's "View Top Ranked" button, finally with room to breathe.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH2 MIND -->
+  <section class="chapter" id="ch-mind">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 02 <span class="sep">/</span> April 21, 2026 <span class="sep">/</span> <span class="muted">one astonishing day · ~16 commits</span></div>
+      <h2>The mind awakens</h2>
+      <p class="dek">In a single day, the ranker learned to <b>see</b>. And by the last commit, it had a new name.</p>
+    </div>
+
+    <div class="prose rv">
+      <p class="lead">April 21st is the most important day in the whole history. Read the commit list in order and you can watch a tool become a product:</p>
+      <p><em>CLIP active learning → a unified bottom bar → an AI panel with effective-Elo pairing → a Library page with a justified grid and AI search → Qwen3-VL-Embedding-8B for state-of-the-art search → </em><strong>rename PhotoRanker → photoArchive</strong><em> → lightbox, find-similar, duplicate detection, EXIF, k-means auto-collections → Qwen3-VL-2B-int4 "to fit the GPU alongside other apps."</em></p>
+      <p>The core realization: a photo library shouldn't make you type tags. It should <strong>understand the pictures</strong>. Embeddings turn every image into a vector; suddenly you can search "golden hour over water" in plain language, find everything visually similar to a frame you love, and cluster a shoot automatically — all without a single keyword.</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">photoArchive · Library (the day it was born)</span><span class="hash">c0d7f5441 · 2026-04-21</span></div>
+      <div class="img"><img src="assets/screens/03-library-apr21.jpg" alt="photoArchive Library: edge-to-edge justified grid with an AI search bar and Top Rated / AI Ranked sorting" loading="lazy"></div>
+      <figcaption>The newborn <b>photoArchive</b>, booted from the April 21 commit. An edge-to-edge justified grid, a search bar that reads <b>"e.g. sunset, portrait, building,"</b> and sorting by <b>Top Rated / AI Ranked / Most Compared</b>. Fred Haise, Starbase, weddings, protests — Sean's real archive, now searchable by meaning.</figcaption>
+    </figure>
+
+    <div class="callout rv">
+      <div class="t">◈ the constraint that shaped everything</div>
+      <p>The state-of-the-art 8-billion-parameter embedding model was chosen at 10am and <b>abandoned by evening</b> for a 2-billion-parameter int4 version. Why? It had to share a single 8GB GPU with Sean's other resident AI models. "Fits the GPU alongside other apps" is the first appearance of a constraint that never leaves: <b>this is a real machine, not a datacenter.</b> Half the engineering in this log is a negotiation with 8GB of VRAM.</p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH3 SPEED -->
+  <section class="chapter" id="ch-speed">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 03 <span class="sep">/</span> April 22–25, 2026 <span class="sep">/</span> <span class="muted">the doctrine is born</span></div>
+      <h2>The need for speed</h2>
+      <p class="dek">A four-day sprint that set the law the app still lives by: <b>profile first, and never widen a budget to hide slowness.</b></p>
+    </div>
+
+    <div class="prose rv">
+      <p>With intelligence in place, photoArchive got obsessed with speed — the way only a tool you use every single day can. Over four days the commit log reads like a benchmark changelog, and each win came from the same move: stop asking the slow disk, and answer from memory.</p>
+    </div>
+
+    <!-- BENCHMARK RACE -->
+    <div class="demo rv">
+      <div class="dh"><span class="badge">Measured</span><span class="title">the speed sprint, from the commit messages</span><span class="hint">real before → after</span></div>
+      <div class="db">
+        <div class="race">
+          <div class="row"><div class="rl">Thumbnail serving<span class="cm">6b2f46443</span></div><div class="bars">
+            <div class="lane"><div class="bar before" data-w="80"></div><span class="tag">baseline · disk + SQLite/req</span></div>
+            <div class="lane a"><div class="bar after" data-w="3"></div><span class="tag">30–50× faster · in-memory path index</span></div>
+          </div></div>
+          <div class="row"><div class="rl">Sort &amp; filter<span class="cm">3ea37e76b</span></div><div class="bars">
+            <div class="lane"><div class="bar before" data-w="80"></div><span class="tag">baseline · table scan</span></div>
+            <div class="lane a"><div class="bar after" data-w="10"></div><span class="tag">5–20× faster · composite indexes</span></div>
+          </div></div>
+          <div class="row"><div class="rl">Search / similar<span class="cm">bf6a3e2ed</span></div><div class="bars">
+            <div class="lane"><div class="bar before" data-w="80"></div><span class="tag">baseline · recompute per call</span></div>
+            <div class="lane a"><div class="bar after" data-w="6"></div><span class="tag">near-instant · shared embedding cache</span></div>
+          </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="prose rv">
+      <p>The headline win — thumbnails <strong>30–50× faster</strong> — is almost embarrassingly simple in hindsight. Every thumbnail request was doing an <code>os.stat()</code> on a spinning HDD <em>plus</em> a lock-contended SQLite lookup, even for images already sitting on the SSD. The fix: build a <code>(size, image_id) → path</code> dictionary once at startup and never touch the database on the hot path again.</p>
+    </div>
+
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">web/thumbnails.py</span><span class="why">no SQLite, no locks, no HDD stat · 6b2f46443</span></div>
+<pre><span class="tok-com"># In-memory index: (size, image_id) -&gt; disk path. Built once, updated on writes.</span>
+_disk_path_index: dict[tuple[str, int], str] = {}
+
+<span class="tok-kw">def</span> <span class="tok-fn">fast_disk_read</span>(size: str, image_id: int) -&gt; bytes | <span class="tok-kw">None</span>:
+    <span class="tok-str">"""Fast path: SSD read via in-memory index. No SQLite, no locks, no HDD stat."""</span>
+    <span class="tok-kw">if</span> <span class="tok-kw">not</span> _disk_index_built:
+        _build_disk_path_index()
+    path = _disk_path_index.get((size, image_id))
+    <span class="tok-kw">if</span> path <span class="tok-kw">is</span> <span class="tok-kw">None</span>:
+        <span class="tok-kw">return</span> <span class="tok-kw">None</span>
+    <span class="tok-kw">with</span> open(path, <span class="tok-str">"rb"</span>) <span class="tok-kw">as</span> f:
+        <span class="tok-kw">return</span> f.read()</pre>
+    </div>
+
+    <p class="prose rv" style="margin-top:26px">The same sprint refined the <strong>Elo propagation</strong> the demo above hinted at. When you pick a winner, its embedding-neighbors are nudged too — so ranking a 20,000-image archive doesn't require comparing every pair. The trick is a cubic falloff: a near-identical 0.99-similar frame gets 89% of the change, but a barely-qualifying 0.75 match gets almost nothing. That's why they could raise the neighbor count to 100 for free.</p>
+
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">web/elo_propagation.py</span><span class="why">weak matches contribute ~0 · 93e12896e</span></div>
+<pre><span class="tok-kw">def</span> <span class="tok-fn">_nonlinear_weight</span>(similarity: float) -&gt; float:
+    <span class="tok-str">"""Cubic remap so near-identical images get strong propagation,
+    barely-qualifying ones get almost none.
+      linear: 0.75→0.75  0.90→0.90  0.99→0.99
+      cubic:  0.75→0.00  0.90→0.22  0.99→0.89
+    """</span>
+    t = (similarity - SIMILARITY_THRESHOLD) / (<span class="tok-num">1.0</span> - SIMILARITY_THRESHOLD)
+    <span class="tok-kw">return</span> t * t * t  <span class="tok-com"># cubic</span></pre>
+    </div>
+
+    <div class="pull rv">
+      <p>The fastest photo app ever made. Profile first; never widen a timing budget to mask slowness.</p>
+      <div class="who">— the doctrine that starts here and never leaves the codebase</div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH4 MODULAR -->
+  <section class="chapter" id="ch-modular">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 04 <span class="sep">/</span> May 17–18, 2026 <span class="sep">/</span> <span class="muted">~130 commits in 48 hours</span></div>
+      <h2>The great refactor</h2>
+      <p class="dek">The least glamorous chapter — and the one that made every chapter after it possible.</p>
+    </div>
+    <div class="prose rv">
+      <p>Over a single weekend, ~130 commits with names like <code>refactor: drain compare route facades</code> land back to back. A monolithic <code>app.py</code> is dismantled into feature modules; the thumbnail cache becomes its own package; every route, every controller — loupe, mosaic, date-scrubber, pregeneration — is extracted and given a home.</p>
+      <p>It's tedious to read and it was surely tedious to do. But you cannot bolt a physically-modeled darkroom onto a ten-thousand-line file. This weekend is the foundation the entire second half of the story is built on. <strong>Boring, and load-bearing.</strong></p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH5 ONE -->
+  <section class="chapter" id="ch-one">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 05 <span class="sep">/</span> Jun – Jul 8, 2026 <span class="sep">/</span> <span class="muted">the "one" redesign</span></div>
+      <h2>One library, three faces</h2>
+      <p class="dek">A charter is written: <b>mobile is Google Photos. Desktop is Lightroom Classic.</b> Same library, two personalities — and a native Android app for the third.</p>
+    </div>
+
+    <div class="prose rv">
+      <p>By summer the product vision crystallizes into a single sentence and a hard split. On the phone, photoArchive should feel like Google Photos — effortless, scrollable, one-handed. On the desktop, it should feel like Lightroom Classic — dense, keyboard-driven, serious. In June a native Kotlin/Compose Android client is born; in early July the desktop <code>/d</code> and mobile <code>/m</code> surfaces get a unified redesign with real writes, stacks, safe trash, share links, and smart collections.</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Desktop · Library grid + live ranking panel</span><span class="hash">2026-07-08</span></div>
+      <div class="img"><img src="assets/screens/04-library-grid.jpg" alt="The desktop library: justified grid of landscapes with a live Elo ranking panel showing 1492, top 3% of scope" loading="lazy"></div>
+      <figcaption>The Lightroom-Classic desktop face. A justified grid of Sean's landscapes, and on the right the ranking panel reads a real Elo: <b>1492 · top 3% of scope · 105 comparisons · 28 propagated · Confident.</b> The whole culling philosophy from Chapter 00, now a quiet sidebar readout.</figcaption>
+    </figure>
+
+    <div class="plate-duo">
+      <figure class="plate rv">
+        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Loupe</span><span class="hash">lights on</span></div>
+        <div class="img"><img src="assets/screens/05-loupe.jpg" alt="Loupe view of a landscape with metadata panels" loading="lazy"></div>
+        <figcaption>The loupe — full-frame review with live panels.</figcaption>
+      </figure>
+      <figure class="plate rv">
+        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Refine · mosaic duel</span><span class="hash">pick the keeper</span></div>
+        <div class="img"><img src="assets/screens/07-refine-mosaic.jpg" alt="Refine mosaic: a grid of similar photos to pick the best from" loading="lazy"></div>
+        <figcaption>Refine — the 2023 mosaic idea, grown up.</figcaption>
+      </figure>
+    </div>
+
+    <div class="callout rv">
+      <div class="t">◈ still negotiating with 8GB</div>
+      <p>Search v2 added a vision-language <b>caption model</b> for a text understanding index. Getting a 4-bit 7B VLM to load beside a resident voice daemon on one 8GB card took a string of commits — whole-model GPU placement, a hard 1280px cap on vision input ("uncapped previews demand &gt;9GiB of attention memory"), and finally a retreat to a 3B captioner. Honest engineering against a wall that doesn't move.</p>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH6 DARKROOM -->
+  <section class="chapter" id="ch-darkroom">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 06 <span class="sep">/</span> July 9–11, 2026 <span class="sep">/</span> <span class="muted">dev1 → dev7 · 611 tests green</span></div>
+      <h2>The darkroom</h2>
+      <p class="dek">photoArchive stops being a <em>manager</em> and becomes an <em>editor</em> — aiming, explicitly, to beat Lightroom, darktable, and Affinity pillar by pillar.</p>
+    </div>
+
+    <div class="prose rv">
+      <p class="lead">This is the technical peak of the whole project. In three days, a full RAW develop module appears: a live WebGL2 pipeline with Lightroom-ordered panels, an interactive tone curve, HSL, a clipping histogram, crop, masking, and history — plus its own RAW decoder, its own color science, and a film emulation engine that models actual photochemistry.</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Develop · the live WebGL2 editor</span><span class="hash">D-key entry</span></div>
+      <div class="img"><img src="assets/screens/09-develop.jpg" alt="The Develop editor: presets rail, tone/presence sliders, RGB histogram, and an interactive tone curve" loading="lazy"></div>
+      <figcaption>The darkroom. Basic / Tone / Presence panels, a live RGB histogram, an interactive tone curve, presets (including Sean's own imported Fuji look), masking, heal, and soft-proofing — all rendering live in a WebGL2 shader.</figcaption>
+    </figure>
+
+    <h3 class="prose rv" style="max-width:var(--measure)">The twin: a fast lie and a slow truth that must agree</h3>
+    <div class="prose rv">
+      <p>Here's the central discipline of the whole module. Every editing operation exists <strong>twice</strong>: once in NumPy (the export truth) and once in GLSL (the live preview). If they disagree, your edit looks one way on screen and exports another — the cardinal sin of a photo editor. So both twins are pinned to a single shared constants table, and a test enforces that they land within <strong>0.4 of 255</strong> on every pixel, across 53 operations.</p>
+    </div>
+
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">develop/ops_constants.py</span><span class="why">the contract is derived, not hand-kept · ef81437ab</span></div>
+<pre>TINT_UV_SCALE = <span class="tok-num">3000.0</span>
+LUMA_RED = <span class="tok-num">0.2126</span>;  LUMA_GREEN = <span class="tok-num">0.7152</span>;  LUMA_BLUE = <span class="tok-num">0.0722</span>
+TONE_GAMMA = <span class="tok-num">2.2</span>
+<span class="tok-com"># ... 50+ more named constants ...</span>
+
+<span class="tok-com"># PARITY_TABLE auto-collects every uppercase constant, so no value can</span>
+<span class="tok-com"># silently drift out of the GL↔numpy contract.</span>
+PARITY_TABLE = {
+    name: value
+    <span class="tok-kw">for</span> name, value <span class="tok-kw">in</span> tuple(globals().items())
+    <span class="tok-kw">if</span> name.isupper() <span class="tok-kw">and</span> name != <span class="tok-str">"PARITY_TABLE"</span>
+}</pre>
+    </div>
+
+    <p class="prose rv" style="margin-top:26px">You can feel the parity yourself. Drag the exposure below — the left canvas is the "GL" fast path, the right is the "numpy" reference. The per-pixel max difference stays at zero:</p>
+
+    <!-- TWIN DEMO -->
+    <div class="demo twin-demo rv">
+      <div class="dh"><span class="badge">Live</span><span class="title">GL preview vs numpy export — same math, same pixels</span><span class="hint">drag exposure</span></div>
+      <div class="db">
+        <div class="twin">
+          <div class="side"><div class="lab">GL PREVIEW <b>fast</b></div><canvas id="twin-gl"></canvas></div>
+          <div class="side"><div class="lab">NUMPY EXPORT <b>truth</b></div><canvas id="twin-np"></canvas></div>
+          <div class="twin-foot">
+            <div class="d">exposure <input type="range" id="twin-ev" min="-3" max="3" step="0.05" value="0.6" style="width:180px;vertical-align:middle"> <span id="twin-ev-o" style="color:var(--ink)">+0.60 EV</span></div>
+            <div class="d">max pixel Δ <b id="twin-diff">0.00 / 255</b></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 class="prose rv" style="max-width:var(--measure)">The film engine: halation from the physics</h3>
+    <div class="prose rv">
+      <p>The showpiece is <code>film.py</code> — a physically-modeled film emulation engine. It is not a LUT or a color grade. It models the photochemical chain: spectral layer exposure, halation, H&amp;D characteristic curves, DIR coupler inhibition, and per-layer grain. The famous CineStill 800T red glow around bright lights isn't painted on. It <strong>emerges</strong>, because bright scene light physically bounces off the film base and back into the red-sensitive layer.</p>
+    </div>
+
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">develop/film.py</span><span class="why">the 800T glow is not painted — it emerges · cc6071721</span></div>
+<pre><span class="tok-com"># halation: bright scene light bounces off the base into the red layer</span>
+hal = t[<span class="tok-str">"halation"</span>]
+amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
+<span class="tok-kw">if</span> amount &gt; <span class="tok-num">0.0</span>:
+    luma   = rgb @ np.float32([<span class="tok-num">0.2126</span>, <span class="tok-num">0.7152</span>, <span class="tok-num">0.0722</span>])
+    excess = np.maximum(luma - hal[<span class="tok-str">"threshold"</span>], <span class="tok-num">0.0</span>)
+    glow   = _gaussian_blur(excess, sigma)
+    layer[..., <span class="tok-num">0</span>] += amount * glow                       <span class="tok-com"># red bleed</span>
+    layer[..., <span class="tok-num">1</span>] += amount * hal[<span class="tok-str">"green_fraction"</span>] * glow  <span class="tok-com"># a touch of green</span></pre>
+    </div>
+
+    <p class="prose rv" style="margin-top:26px">That's the actual algorithm below — a synthetic night scene, threshold the bright spots, blur them, bleed them back into red. Turn halation up and watch the glow appear on the lights. This is the film engine's core, running live:</p>
+
+    <!-- HALATION DEMO -->
+    <div class="demo hala-demo rv">
+      <div class="dh"><span class="badge" style="background:var(--film);color:#fff">Physics</span><span class="title">halation — faithful port of film.py</span><span class="hint">drag the sliders</span></div>
+      <div class="db">
+        <div class="hala">
+          <canvas></canvas>
+          <div class="ctrls">
+            <div class="toggle">
+              <button data-on="1" class="on">Halation ON</button>
+              <button data-on="0">OFF</button>
+            </div>
+            <div class="ctrl"><label>Amount <b id="hal-amt-o">0.85</b></label><input type="range" id="hal-amt" min="0" max="1.6" step="0.01" value="0.85"></div>
+            <div class="ctrl"><label>Bleed radius <b id="hal-rad-o">9px</b></label><input type="range" id="hal-rad" min="1" max="24" step="1" value="9"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="note rv">Eight film stocks were datasheet-anchored, then tuned against <b>53 real San Marcos lab scans</b> (Portra 400, Gold 200, Fuji 400, HP5). The halation radius came from measuring the actual red-minus-blue falloff around lights in Sean's own scanned negatives.</p>
+
+    <h3 class="prose rv" style="max-width:var(--measure)">Decoding files LibRaw refuses</h3>
+    <div class="prose rv">
+      <p>Lightroom's lossy DNGs (JPEG XL, DNG 1.7) can't be unpacked by LibRaw at all. So the develop module grew its own decoder: read the LinearRaw pyramid directly, then apply the DNG spec's color pipeline by hand — black/white levels, AsShotNeutral white balance, ForwardMatrix to XYZ, a Bradford-adapted matrix to linear sRGB, BaselineExposure. A 2048px base decodes in <strong>0.4 seconds</strong>. And the whole thing is calibrated to be <em>pixel-matched to Sean's actual Lightroom exports</em> — a B&amp;W conversion pair came out "near-indistinguishable."</p>
+    </div>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Develop · a look applied (Sean's Fuji Film)</span><span class="hash">history logged</span></div>
+      <div class="img"><img src="assets/screens/10-film.jpg" alt="The develop editor with a graded film look applied: Contrast 97, Texture 40, custom white balance" loading="lazy"></div>
+      <figcaption>The same frame with Sean's imported Fuji preset previewing — white balance shifted to Custom, Contrast 97, Texture 40, and a fresh entry in the <b>History</b> rail. Non-destructive, reproducible, and it exports exactly what you see, thanks to the twin.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── INTERLUDE: WINS -->
+  <section class="interlude" id="wins">
+    <div class="rv">
+      <div class="lab">◆ Interlude</div>
+      <h2>Measured wins</h2>
+      <p class="dek" style="color:var(--ink-2);max-width:40ch;margin-top:14px">Every number here is lifted straight from a commit message. Nothing was widened to hide a regression — that was the rule.</p>
+    </div>
+    <div class="bench rv">
+      <div class="chip"><span class="lab">Cold boot</span><span class="ba"><span class="before">65 s</span><span class="arw">→</span><span class="after">~5 s</span></span><span class="cm">59758bc2e · quick_check only after unclean shutdown</span></div>
+      <div class="chip"><span class="lab">Cold search</span><span class="ba"><span class="before">2.1 s</span><span class="arw">→</span><span class="after">0.7 s</span></span><span class="cm">e7c7d55ae · targeted IN-query, not 87k materialize</span></div>
+      <div class="chip"><span class="lab">Develop open</span><span class="ba"><span class="before">483 ms</span><span class="arw">→</span><span class="after">30 ms</span></span><span class="cm">b310546c7 · on-demand Adobe profile store</span></div>
+      <div class="chip"><span class="lab">Suggestions</span><span class="ba"><span class="before">10.5 s</span><span class="arw">→</span><span class="after">in-mem</span></span><span class="cm">f4aa36f85 · tag co-occurrence, not a SQL self-join</span></div>
+      <div class="chip"><span class="lab">/api/stats @139k</span><span class="ba"><span class="after">&lt;200 ms</span></span><span class="cm">633d97173 · warm</span></div>
+      <div class="chip"><span class="lab">Lossy-DNG 2048px</span><span class="ba"><span class="before">(fails)</span><span class="arw">→</span><span class="after">0.4 s</span></span><span class="cm">e68b0973e · LinearRaw pyramid</span></div>
+      <div class="chip"><span class="lab">Windows QA</span><span class="ba"><span class="before">95 fail</span><span class="arw">→</span><span class="after">0</span></span><span class="cm">1cbb60da2 · first Windows runner, on real GPU</span></div>
+      <div class="chip"><span class="lab">GL↔numpy twin</span><span class="ba"><span class="after">&lt;0.4/255</span></span><span class="cm">874b8a705 · 53 ops exact</span></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH7 FIELD -->
+  <section class="chapter" id="ch-field">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 07 <span class="sep">/</span> July 11–13, 2026 <span class="sep">/</span> <span class="muted">FIELD_SPEC · one library everywhere</span></div>
+      <h2>The field</h2>
+      <p class="dek">The library stops living on one machine. A laptop in the field, a hub at home, a phone in your pocket — one catalog, converging.</p>
+    </div>
+    <div class="prose rv">
+      <p>The three faces from Chapter 05 needed to actually share a library. So the app grew a <strong>satellite ↔ hub</strong> architecture: a catalog mirror, tiered thumbnails, predictive prefetch, and an oplog that <em>converges</em> rather than a request that blocks. The governing rule — the laptop never waits on the server. You cull on the plane; it reconciles when you land. Geodata backfill, a Google Timeline importer, and keyword/IPTC support land in the same window.</p>
+    </div>
+
+    <div class="plate-duo">
+      <figure class="plate rv">
+        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Map lens</span><span class="hash">EXIF GPS + timeline</span></div>
+        <div class="img"><img src="assets/screens/12-map.jpg" alt="Map lens showing photo locations on a world map" loading="lazy"></div>
+        <figcaption>Geodata: EXIF GPS, trail interpolation, world landmasses rendered under the pins.</figcaption>
+      </figure>
+      <figure class="plate rv">
+        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Timeline lens</span><span class="hash">date river</span></div>
+        <div class="img"><img src="assets/screens/13-timeline.jpg" alt="Timeline lens: a date-river of months with photo counts and a scrubber" loading="lazy"></div>
+        <figcaption>The date-river — months, day-rows, and a scrubber that jumps years at catalog scale.</figcaption>
+      </figure>
+    </div>
+    <figure class="plate rv" style="max-width:420px">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Mobile · /m</span><span class="hash">Google-Photos face</span></div>
+      <div class="img"><img src="assets/screens/08-mobile.jpg" alt="The mobile library, one-handed Google-Photos-style" loading="lazy"></div>
+      <figcaption>The phone face — installable PWA, one-handed, offline-aware, with the same library underneath.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH8 AZIMUTH -->
+  <section class="chapter" id="ch-azimuth">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 08 <span class="sep">/</span> July 12–13, 2026 <span class="sep">/</span> <span class="muted">c5fc4579a · the rebrand</span></div>
+      <h2>Becoming Azimuth</h2>
+      <p class="dek">photoArchive gets a real name, a real installer, and a real front door — the turn from "my tool" to "a thing other people can run."</p>
+    </div>
+    <div class="prose rv">
+      <p><strong>photoArchive → Azimuth Photo.</strong> A brand layer across the wordmark, the PWA manifest, the Android launcher, the Tauri desktop shell; bundle IDs move to <code>app.azimuthphoto.*</code>. Crucially, the internal identifiers, paths, and database names are left untouched and sequenced behind in-flight work — a rename done like an engineer, not a marketer. A Docker image, a compose file, an Unraid template, and an <code>INSTALL.md</code> for NAS boxes turn it into something installable. A full Google-Photos-replacement Android client — timeline, auto-backup, free-up-space — ships the same week.</p>
+    </div>
+    <div class="pull rv">
+      <p>Commit the phone client source — it was untracked on every machine. Git is the backup.</p>
+      <div class="who">— d4ea3fa30, a lesson learned the hard way</div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── INTERLUDE: STORIES -->
+  <section class="interlude" id="stories">
+    <div class="rv">
+      <div class="lab">◆ Interlude</div>
+      <h2>War stories</h2>
+      <p class="dek" style="color:var(--ink-2);max-width:42ch;margin-top:14px">The scariest commits in the log. Every one is a real incident — mostly caught in review, some in production.</p>
+    </div>
+    <div class="ledger rv">
+      <div class="row"><div class="no">01</div><div><div class="h">"Free-up-space could delete your last copy" <span class="hash">a9a1829</span></div><p>The phone deletes a local photo once the hub reports it "backed up." The manifest counted <b>trashed, missing, and mirror rows</b> as backed up — so the feature could delete a photo the hub didn't actually have. The fix requires on-disk byte proof: a live original, present, at the expected size.</p></div></div>
+      <div class="row"><div class="no">02</div><div><div class="h">Production had zero valid backups <span class="hash">5c07f6344</span></div><p>A nightly 04:00 job used shared temp filenames across instances. Two instances collided and left prod with <b>zero sealed snapshots</b>. Fixed with per-process temp names, an orphan sweep, and a weekly restore drill proven against a real 150k-image snapshot.</p></div></div>
+      <div class="row"><div class="no">03</div><div><div class="h">A remote-code-execution hole in publishing <span class="hash">e340a84ca</span></div><p>The website publish hook was a shell command the client could set — a verified RCE. Closed by making the hook server-side-only and adding default-deny owner authentication to every non-public route.</p></div></div>
+      <div class="row"><div class="no">04</div><div><div class="h">An empty scan wiped the library <span class="hash">4a35e5728</span></div><p>Scanning a source that happened to be offline marked <b>every photo missing</b>. A data-loss guard now refuses to let an empty online scan blank the catalog.</p></div></div>
+      <div class="row"><div class="no">05</div><div><div class="h">The captioner OOM'd an 8GB card <span class="hash">8cf59a6d2</span></div><p>The 4-bit 7B vision model's CPU-offload path crashed on this transformers/bnb pairing. The resolution: whole-model GPU placement so a clean OOM is at least recoverable — and a permanent retreat to a 3B model.</p></div></div>
+    </div>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH9 FLEET -->
+  <section class="chapter" id="ch-fleet">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 09 <span class="sep">/</span> July 15–20, 2026 <span class="sep">/</span> <span class="muted">1,133 commits · the mega-sprint</span></div>
+      <h2>The fleet</h2>
+      <p class="dek">The most surprising thing in the git graph: for the final push, the app was built out by a <b>fleet of AI models</b>, each owning a lane, checking each other's work.</p>
+    </div>
+    <div class="prose rv">
+      <p class="lead">July 2026 has 1,133 commits — 72% of the entire project. Read them and a structure emerges: a <strong>session-lane charter</strong>, an explicit org model of "CEO / CTO / managers / subagents," and hundreds of merges from named branches — <code>qfix-workers</code>, <code>ux2-perf</code>, <code>errhonesty</code>, <code>dt-gfilter</code>. This is a human designer directing a fleet of frontier models, each taking a lane, with <strong>cross-model review</strong> as a hard rule: whoever wrote it cannot be the one to bless it.</p>
+    </div>
+
+    <div class="fleet rv">
+      <div class="m"><div class="who"><i style="background:var(--amber)"></i>The Orchestrator</div><div class="role">architecture · taste · adjudication</div><p>Owns the vision, the specs, the naming, and the final diff review. Decides what ships. Never trusts a delegate's own summary of its work.</p></div>
+      <div class="m"><div class="who"><i style="background:var(--accent)"></i>The Implementers</div><div class="role">features · refactors · tests</div><p>Flat-rate coding lanes that take a tight spec and return a branch. Literal, fast, and required to prove their work with a passing gate.</p></div>
+      <div class="m"><div class="who"><i style="background:var(--green)"></i>The Swarm</div><div class="role">bug hunts · audits · second opinions</div><p>Parallel reviewers fired liberally at every merge — confident, occasionally wrong, so every finding is independently verified before it counts.</p></div>
+      <div class="m"><div class="who"><i style="background:var(--film)"></i>The Adversary</div><div class="role">cross-model review</div><p>A different model tries to <em>refute</em> each change. Five real regressions in one night's UX wave were caught exactly this way.</p></div>
+    </div>
+
+    <p class="prose rv" style="margin-top:30px">The lane that names this era is <strong>error-honesty</strong>: the app must never lie about its own state. Toasts only after the write commits. Loading, empty, and "preparing" states that tell the truth. Worker waits that read as active work. "Photos exist on screen immediately, and it is never a void." An entire quality program — dozens of <code>qfix</code> merges in a loop-until-dry rhythm — enforcing the idea that a confident-looking lie is worse than an honest "working on it."</p>
+
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Azimuth Photo · today</span><span class="hash">HEAD · b9a701bac</span></div>
+      <div class="img"><img src="assets/screens/11-current-grid.jpg" alt="Azimuth Photo today: the current desktop grid with live ranking and metadata panels" loading="lazy"></div>
+      <figcaption>The current build, booted from the latest commit for this log. Three years from a black Tkinter window — the same 64 sample photos, now understood, ranked, geolocated, and one keystroke from a physically-modeled darkroom.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── CH10 FINAL -->
+  <section class="chapter" id="ch-final">
+    <div class="head rv">
+      <div class="eyebrow">Chapter 10 <span class="sep">/</span> the ledger</div>
+      <h2>What it cost, what it taught</h2>
+      <p class="dek">Three lessons run through all 1,562 commits like grain through film.</p>
+    </div>
+    <div class="prose rv">
+      <p><strong>Speed is a feature you defend, not a number you report.</strong> The doctrine from Chapter 03 — profile first, never widen a budget to hide slowness — is why boot went 65s→5s and search 2.1s→0.7s instead of the reverse.</p>
+      <p><strong>Honesty is an architecture, not a manner.</strong> Whether it's a UI that won't fake a success toast, a backup that requires byte proof, or a twin that must match to 0.4/255 — the recurring move is refusing to let the system claim something it can't back up.</p>
+      <p><strong>Your originals are sacred.</strong> Every war story is a variation on one fear: losing a photo you can't get back. Collision-proof before deletion, hash-gate every purge, verify the final state — not the intermediate one.</p>
+    </div>
+
+    <div class="foot rv">
+      <div class="big">From "which one is better?" to a darkroom that models the chemistry of film — 1,562 commits, and still going.</div>
+      <p>AZIMUTH · FIELD LOG — a development log built from the real git history of Azimuth Photo.<br>
+      Every screenshot on this page was captured by <b>checking out the exact commit and running that era's software</b> against a fixed set of 64 of Sean's real photographs — the 2023 Tkinter app included. Every benchmark and code excerpt is quoted from the commit that shipped it.<br><br>
+      <b>Span</b> 2023-08-11 → 2026-07-20 · <b>Commits</b> 1,562 · <b>Peak</b> 1,133 in one month · <b>Twin parity</b> &lt;0.4/255 · <b>Film stocks</b> 8, tuned on 53 real lab scans.</p>
+    </div>
+  </section>
+
+  </main>
+</div>
+
+<script src="assets/demo-photos.js"></script>
+<script src="devlog.js"></script>
+</body>
+</html>
