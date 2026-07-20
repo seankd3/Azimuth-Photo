@@ -180,10 +180,18 @@ function markThumbOffline(img) {
     cell.classList.remove('skel', 'thumb-retrying');
     cell.classList.add('thumb-offline');
     cell.setAttribute('aria-label', `${img.alt || 'Photo'} — original offline`);
-    if (img.dataset.thumbRetryScheduled !== '1' && img.dataset.thumbRetried !== '1') {
-        img.dataset.thumbRetryScheduled = '1';
-        window.setTimeout(() => retryOfflineThumb(img), 30_000);
-    }
+    if (img.dataset.thumbRetryScheduled === '1') return;
+    img.dataset.thumbRetryScheduled = '1';
+    // Soft miss (204 while cold decode fills): retry quickly, then back off.
+    // Hard offline still recovers on window focus via ensureThumbRetryFocusHandler.
+    const attempt = Number(img.dataset.thumbRetryAttempt || 0) + 1;
+    img.dataset.thumbRetryAttempt = String(attempt);
+    const delayMs = attempt === 1 ? 1_000 : attempt === 2 ? 5_000 : 30_000;
+    window.setTimeout(() => {
+        img.dataset.thumbRetryScheduled = '0';
+        if (attempt < 3) img.dataset.thumbRetried = '0';
+        retryOfflineThumb(img);
+    }, delayMs);
 }
 
 function ensureThumbRetryFocusHandler() {

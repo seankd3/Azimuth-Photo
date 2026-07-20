@@ -5,6 +5,7 @@ import logging
 import os
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from date_inference import infer_image_date
 import image_headers
@@ -17,6 +18,26 @@ from data.repositories import images as image_repository
 log = logging.getLogger(__name__)
 ORIENTATION_RETRY_SECONDS = 15 * 60
 ORIENTATION_POISON_THRESHOLD = 3
+
+# Keep catalog bulk IO off asyncio's default pool so interactive to_thread
+# (thumb cache probes, source inspect on real misses) is not starved.
+_CATALOG_WORKERS = max(1, int(os.environ.get("PHOTOARCHIVE_CATALOG_METADATA_WORKERS", "2")))
+_catalog_executor: ThreadPoolExecutor | None = None
+
+
+def _get_catalog_executor() -> ThreadPoolExecutor:
+    global _catalog_executor
+    if _catalog_executor is None:
+        _catalog_executor = ThreadPoolExecutor(
+            max_workers=_CATALOG_WORKERS,
+            thread_name_prefix="catalog-meta",
+        )
+    return _catalog_executor
+
+
+async def _run_catalog_work(func, /, *args, **kwargs):
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_get_catalog_executor(), lambda: func(*args, **kwargs))
 
 
 DbPathProvider = Callable[[], str]
@@ -197,17 +218,17 @@ def _orientation_retry_summary() -> dict[str, int]:
 
 async def classify_orientations_background():
     """Continuously classify unclassified images by reading just the image header."""
-    loop = asyncio.get_event_loop()
 
     def _classify_batch(rows):
         results = []
         failures = []
         for row in rows:
             try:
-                dimensions = image_headers.read_header_dimensions(
-                    row["filepath"],
-                    budget_seconds=None,
-                )
+                with hdd_governor.bulk_hdd_slot_sync():
+                    dimensions = image_headers.read_header_dimensions(
+                        row["filepath"],
+                        budget_seconds=None,
+                    )
                 if dimensions is None:
                     raise ValueError("unsupported or unreadable image header")
                 w, h = dimensions
@@ -266,7 +287,7 @@ async def classify_orientations_background():
             started = time.perf_counter()
             _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
             with work_coordination.manual_bulk("catalog_metadata"):
-                results, failures = await loop.run_in_executor(None, _classify_batch, rows)
+                results, failures = await _run_catalog_work(_classify_batch, rows)
             for image_id, filepath, reason, source_root, source_online in failures:
                 if not source_online or os.path.exists(filepath):
                     _note_orientation_failure(
@@ -374,8 +395,6 @@ async def scan_metadata_background():
     """Backfill EXIF/file metadata used for library filters and sorts."""
     import photo_metadata  # deferred: keeps Pillow off boot until catalog metadata work runs
 
-    loop = asyncio.get_event_loop()
-
     def _extract_batch(rows):
         updates = []
         for row in rows:
@@ -408,7 +427,7 @@ async def scan_metadata_background():
             started = time.perf_counter()
             _status.update(state="running", message=f"Scanning metadata for {len(rows)} images.")
             with work_coordination.manual_bulk("catalog_metadata"):
-                updates = await loop.run_in_executor(None, _extract_batch, rows)
+                updates = await _run_catalog_work(_extract_batch, rows)
             await batch_update_metadata(updates)
             _status.update(
                 state="running",
