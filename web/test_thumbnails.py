@@ -2661,16 +2661,17 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_pregeneration_yields_after_activity_then_resumes_when_idle(self):
+    def test_pregeneration_never_yields_for_activity_fulltilt(self):
+        # Full-tilt: the server backfill never throttles for priority/activity.
         thumbnails.note_user_activity()
-
-        self.assertTrue(thumbnails._pregen_should_pause_for_priority())
+        self.assertFalse(thumbnails._pregen_should_pause_for_priority())
         thumbnails._last_user_activity = (
             thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
         )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
 
-    def test_pregeneration_makes_a_bounded_burst_during_continuous_activity(self):
+    def test_pregeneration_full_batch_during_activity_fulltilt(self):
+        # Full-tilt: activity does NOT bound the batch — all pending warm.
         path = self._make_image()
         for image_id in range(1, 6):
             self._add_catalog_original(image_id, path)
@@ -2684,10 +2685,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         ]
 
         self.assertGreater(warmed, 0)
-        self.assertEqual(
-            len(cached),
-            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS,
-        )
+        self.assertEqual(len(cached), 5)
 
     def test_prefetch_worker_reports_activity_yield_instead_of_complete(self):
         old_sleep = thumbnails.asyncio.sleep
