@@ -80,7 +80,7 @@
     <figure class="plate wide rv">
       <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">PhotoRanker · Main.py</span><span class="hash">d97f2aae5 · 2023</span></div>
       <div class="img"><img src="assets/screens/01-photoranker-2023.jpg" alt="The 2023 PhotoRanker desktop app: two photos side by side with Left/Right ranking buttons" loading="lazy"></div>
-      <figcaption>The original, run verbatim from the 2023 commit for this log. Two of Sean's Starbase frames, <b>Left</b> / <b>Right</b> to pick a winner, and an honest little counter: <b>"Unrated Images in Current Folder: 23."</b> DNG support via rawpy, a threaded preload queue, even Xbox controller support for long couch culling sessions.</figcaption>
+      <figcaption>The original, run verbatim from the 2023 commit for this log. Two of Sean's night frames, <b>Left</b> / <b>Right</b> to pick a winner, and an honest little counter: <b>"Unrated Images in Current Folder: 23."</b> DNG support via rawpy, a threaded preload queue, even Xbox controller support for long couch culling sessions.</figcaption>
     </figure>
 
     <div class="code rv">
@@ -164,7 +164,7 @@ K = <span class="tok-num">32</span> <span class="tok-kw">if</span> abs(winner_el
     <figure class="plate wide rv">
       <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">photoArchive · Library (the day it was born)</span><span class="hash">c0d7f5441 · 2026-04-21</span></div>
       <div class="img"><img src="assets/screens/03-library-apr21.jpg" alt="photoArchive Library: edge-to-edge justified grid with an AI search bar and Top Rated / AI Ranked sorting" loading="lazy"></div>
-      <figcaption>The newborn <b>photoArchive</b>, booted from the April 21 commit. An edge-to-edge justified grid, a search bar that reads <b>"e.g. sunset, portrait, building,"</b> and sorting by <b>Top Rated / AI Ranked / Most Compared</b>. Fred Haise, Starbase, weddings, protests — Sean's real archive, now searchable by meaning.</figcaption>
+      <figcaption>The newborn <b>photoArchive</b>, booted from the April 21 commit. An edge-to-edge justified grid, a search bar that reads <b>"e.g. sunset, portrait, building,"</b> and sorting by <b>Top Rated / AI Ranked / Most Compared</b>. Heritage-flight jets, Starbase, coastlines, aurora — Sean's real archive, now searchable by meaning.</figcaption>
     </figure>
 
     <div class="callout rv">
@@ -397,9 +397,9 @@ amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
     </div>
 
     <figure class="plate wide rv">
-      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Develop · a look applied (Sean's Fuji Film)</span><span class="hash">history logged</span></div>
-      <div class="img"><img src="assets/screens/10-film.jpg" alt="The develop editor with a graded film look applied: Contrast 97, Texture 40, custom white balance" loading="lazy"></div>
-      <figcaption>The same frame with Sean's imported Fuji preset previewing — white balance shifted to Custom, Contrast 97, Texture 40, and a fresh entry in the <b>History</b> rail. Non-destructive, reproducible, and it exports exactly what you see, thanks to the twin.</figcaption>
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Develop · a long-exposure in the editor</span><span class="hash">RGB16F, live</span></div>
+      <div class="img"><img src="assets/screens/10-film.jpg" alt="The develop editor on a long-exposure sunset over water, with a live RGB histogram and a preset rail" loading="lazy"></div>
+      <figcaption>A different frame in the same darkroom — a long-exposure lake sunset, its full-range histogram spread live across the RGB channels. Every edit is non-destructive and reproducible, and because the numpy twin renders the identical math, it <b>exports exactly what you see</b>. The presets rail on the left holds 994 imported Lightroom looks and Sean's own film emulation.</figcaption>
     </figure>
   </section>
 
@@ -433,18 +433,11 @@ amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
       <p>The three faces from Chapter 05 needed to actually share a library. So the app grew a <strong>satellite ↔ hub</strong> architecture: a catalog mirror, tiered thumbnails, predictive prefetch, and an oplog that <em>converges</em> rather than a request that blocks. The governing rule — the laptop never waits on the server. You cull on the plane; it reconciles when you land. Geodata backfill, a Google Timeline importer, and keyword/IPTC support land in the same window.</p>
     </div>
 
-    <div class="plate-duo">
-      <figure class="plate rv">
-        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Map lens</span><span class="hash">EXIF GPS + timeline</span></div>
-        <div class="img"><img src="assets/screens/12-map.jpg" alt="Map lens showing photo locations on a world map" loading="lazy"></div>
-        <figcaption>Geodata: EXIF GPS, trail interpolation, world landmasses rendered under the pins.</figcaption>
-      </figure>
-      <figure class="plate rv">
-        <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Timeline lens</span><span class="hash">date river</span></div>
-        <div class="img"><img src="assets/screens/13-timeline.jpg" alt="Timeline lens: a date-river of months with photo counts and a scrubber" loading="lazy"></div>
-        <figcaption>The date-river — months, day-rows, and a scrubber that jumps years at catalog scale.</figcaption>
-      </figure>
-    </div>
+    <figure class="plate wide rv">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Timeline lens</span><span class="hash">date river</span></div>
+      <div class="img"><img src="assets/screens/13-timeline.jpg" alt="Timeline lens: a date-river of months with photo counts and a scrubber" loading="lazy"></div>
+      <figcaption>The date-river — months, day-rows, per-day thumbnails, and a scrubber on the right edge that jumps years at catalog scale. Alongside it: EXIF geodata backfill, a Google&nbsp;Timeline importer, and keyword/IPTC support, so the same library is navigable by <b>when</b> and <b>where</b>, not just <b>what</b>.</figcaption>
+    </figure>
     <figure class="plate rv" style="max-width:420px">
       <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Mobile · /m</span><span class="hash">Google-Photos face</span></div>
       <div class="img"><img src="assets/screens/08-mobile.jpg" alt="The mobile library, one-handed Google-Photos-style" loading="lazy"></div>
@@ -461,6 +454,11 @@ amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
     </div>
     <div class="prose rv">
       <p><strong>photoArchive → Azimuth Photo.</strong> A brand layer across the wordmark, the PWA manifest, the Android launcher, the Tauri desktop shell; bundle IDs move to <code>app.azimuthphoto.*</code>. Crucially, the internal identifiers, paths, and database names are left untouched and sequenced behind in-flight work — a rename done like an engineer, not a marketer. A Docker image, a compose file, an Unraid template, and an <code>INSTALL.md</code> for NAS boxes turn it into something installable. A full Google-Photos-replacement Android client — timeline, auto-backup, free-up-space — ships the same week.</p>
+    </div>
+
+    <div class="callout rv" style="border-left-color:var(--amber); background:color-mix(in srgb, var(--amber) 6%, var(--panel))">
+      <div class="t" style="color:var(--amber)">◈ credit where it's due</div>
+      <p>The name <b>Azimuth</b> wasn't the developer's idea. It was suggested by his <b>beautiful, creative, and clever girlfriend</b> — an azimuth is the compass bearing to a point on the horizon, which is a rather perfect name for a tool that helps you find your way through tens of thousands of photographs. He takes no credit for it, and gladly so.</p>
     </div>
     <div class="pull rv">
       <p>Commit the phone client source — it was untracked on every machine. Git is the backup.</p>

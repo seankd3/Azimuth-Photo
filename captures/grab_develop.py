@@ -8,7 +8,7 @@ os.makedirs(OUT, exist_ok=True)
 
 def shot(page, name):
     page.wait_for_timeout(1200)
-    page.screenshot(path=os.path.join(OUT, name + ".png"))
+    page.screenshot(path=os.path.join(OUT, name + ".png"), timeout=60000, animations="disabled")
     print("shot ->", name)
 
 with sync_playwright() as p:
