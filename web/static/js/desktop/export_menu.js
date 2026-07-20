@@ -2,9 +2,18 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { getRankings } from './api.js';
 import { scope, scopeParams, viewState } from './state.js';
-import { cancelBatchExportPoll, fetchDataExport, openExportDialog, savedOriginalsExportSize } from './develop/export_dialog.js';
 
-export { savedOriginalsExportSize };
+// Keep originals-size preference readable without pulling export_dialog at boot.
+const EXPORT_OPTIONS_STORAGE_KEY = 'pa_d_export_dialog_photos';
+
+export function savedOriginalsExportSize() {
+    try {
+        const value = JSON.parse(localStorage.getItem(EXPORT_OPTIONS_STORAGE_KEY) || '{}');
+        return (value && typeof value === 'object' && value.originals_size) || 'original';
+    } catch {
+        return 'original';
+    }
+}
 
 export const ZIP_EXPORT_MAX = 2000;
 const SCOPE_EXPORT_PAGE_SIZE = 1000;
@@ -12,6 +21,13 @@ const SCOPE_EXPORT_PROGRESS_DELAY_MS = 1000;
 
 let menu = null;
 let returnEl = null;
+let exportDialogMod = null;
+
+async function loadExportDialog() {
+    if (!exportDialogMod) exportDialogMod = await import('./develop/export_dialog.js');
+    return exportDialogMod;
+}
+
 function ensureMenu() {
     if (menu) return menu;
     menu = document.createElement('div');
@@ -85,11 +101,12 @@ async function scopedImageIds() {
     }
 }
 
-export function openExportMenu(anchor, choose, options = {}) {
+export async function openExportMenu(anchor, choose, options = {}) {
     if (!anchor || !choose) return;
     ensureMenu();
     releaseFocus(menu);
     returnEl = anchor;
+    const { openExportDialog } = await loadExportDialog();
     const popover = openExportDialog({
         button: anchor,
         imageIds: options.imageIds || null,
@@ -106,7 +123,7 @@ export function openExportMenu(anchor, choose, options = {}) {
 
 export function closeExportMenu() {
     if (!menu || menu.hidden) return;
-    cancelBatchExportPoll();
+    exportDialogMod?.cancelBatchExportPoll();
     menu.hidden = true;
     releaseFocus(menu);
     if (returnEl && document.contains(returnEl) && returnEl.focus) returnEl.focus({ preventScroll: true });
@@ -119,7 +136,9 @@ export function downloadExport(params, { count = 0, message = '' } = {}) {
         return false;
     }
     if (format !== 'zip') {
-        void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}`, message });
+        void loadExportDialog().then(({ fetchDataExport }) => {
+            void fetchDataExport(params, { showToast, filename: `azimuth-photo-export.${format}`, message });
+        });
         return true;
     }
     const link = document.getElementById('download-link');

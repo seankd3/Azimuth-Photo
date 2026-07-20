@@ -26,8 +26,19 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
         self.assertIn("export function closeDevelop()", develop)
         self.assertIn("function closeDevelop() {\n    unmount();\n}", develop)
-        self.assertEqual(keyboard.count("closeDevelop();"), 2)
+        # Stub delegates once; Escape + D-toggle each call closeDevelop().
+        self.assertEqual(keyboard.count("closeDevelop();"), 3)
+        self.assertIn("developMod?.closeDevelop();", keyboard)
         self.assertIn("if (developOpen()) return;", keyboard)
+        # Boot-split: Develop/GL must not be a static keyboard import.
+        self.assertNotIn("from './develop/develop.js'", keyboard)
+        self.assertIn("import('./develop/develop.js')", keyboard)
+
+    def test_export_menu_lazily_loads_export_dialog(self):
+        export_menu = read("export_menu.js")
+        self.assertNotIn("from './develop/export_dialog.js'", export_menu)
+        self.assertIn("import('./develop/export_dialog.js')", export_menu)
+        self.assertIn("export function savedOriginalsExportSize()", export_menu)
 
     def test_develop_history_reload_does_not_paint_after_an_image_switch(self):
         history = read("develop", "history_panel.js")
@@ -412,7 +423,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         ]
         shared_dialog_scope = export_menu[
             export_menu.index("async function scopedImageIds"):
-            export_menu.index("export function openExportMenu")
+            export_menu.index("export async function openExportMenu")
         ]
 
         self.assertIn("const params = scopeParams({ format });", export_scope)
