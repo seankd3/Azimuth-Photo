@@ -51,6 +51,7 @@
       <li><a href="#ch-azimuth"><span class="n">08</span><span>Becoming Azimuth</span></a></li>
       <li><a href="#stories"><span class="n">◆</span><span>War Stories</span></a></li>
       <li><a href="#ch-fleet"><span class="n">09</span><span>The Fleet</span></a></li>
+      <li><a href="#method"><span class="n">◆</span><span>How It Was Made</span></a></li>
       <li><a href="#ch-final"><span class="n">10</span><span>What It Cost</span></a></li>
     </ol>
     <div class="spark">
@@ -508,6 +509,30 @@ amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
       <div class="img"><img src="assets/screens/11-current-grid.jpg" alt="Azimuth Photo today: the current desktop grid with live ranking and metadata panels" loading="lazy"></div>
       <figcaption>The current build, booted from the latest commit for this log. Three years from a black Tkinter window — the same 64 sample photos, now understood, ranked, geolocated, and one keystroke from a physically-modeled darkroom.</figcaption>
     </figure>
+  </section>
+
+  <!-- ─────────────────────────────────────────────── INTERLUDE: METHOD -->
+  <section class="interlude" id="method">
+    <div class="rv">
+      <div class="lab">◆ How this log was made</div>
+      <h2>Every screenshot is the real software, at that moment</h2>
+      <p class="dek" style="color:var(--ink-2);max-width:44ch;margin-top:14px">No mockups, no re-creations. Each era's UI was captured by <b>time-traveling the codebase</b> and running it.</p>
+    </div>
+    <div class="prose rv">
+      <p>The screenshots in this log aren't reconstructions of how the app looked — they're the actual historical software, booted and photographed. For each milestone commit, a small rig checks it out into an isolated <code>git worktree</code> on a scratch port with a scratch database, scans a fixed set of <strong>64 of Sean's real photos</strong>, warms the thumbnail cache, and drives a headless browser to shoot the UI. Nothing touches the real library.</p>
+      <p>Time travel has a cost: <strong>old code needs old dependencies.</strong> The February–April 2026 eras render their pages with a Jinja template call that modern Starlette flat-out removed, so they run on a pinned <code>Starlette 0.37</code> interpreter. The May-schema eras won't boot on <em>any</em> current <code>aiosqlite</code> at all — they wrap schema setup in a transaction and then call <code>executescript</code>, which today raises <code>cannot commit transaction — SQL statements in progress</code>. A later commit fixed exactly that, which is why the darkroom shots are from the current build. The 2023 Tkinter app? Run verbatim, only the folder-picker auto-answered — the same accommodation as disabling AI for the web eras.</p>
+    </div>
+    <div class="code rv">
+      <div class="h"><span class="lang">python</span><span class="path">captures/harness.py</span><span class="why">boot a commit in isolation, then shoot it</span></div>
+<pre><span class="tok-kw">def</span> <span class="tok-fn">capture_era</span>(label, commit, shots, port, server_py=<span class="tok-kw">None</span>):
+    wt = ensure_worktree(label, commit)          <span class="tok-com"># detached git worktree</span>
+    home = SCRATCH / label                        <span class="tok-com"># scratch DB + caches</span>
+    proc = start_server(wt, port, home, server_py) <span class="tok-com"># era-matched interpreter</span>
+    wait_http(base); scan_and_wait(base, SAMPLE)  <span class="tok-com"># ingest the 64 fixtures</span>
+    wait_ready(base)                              <span class="tok-com"># warm previews til the grid paints</span>
+    capture_routes(base, shots)                   <span class="tok-com"># Playwright, per era</span></pre>
+    </div>
+    <p class="note rv">The whole rig — <code>harness.py</code>, per-era config, three pinned Python environments, and the boot-and-hold server used for the interactive Develop/Film shots — lives beside this page. It is, fittingly, its own tiny piece of software written to tell the story of another one.</p>
   </section>
 
   <!-- ─────────────────────────────────────────────── CH10 FINAL -->
