@@ -80,6 +80,11 @@ async def candidate_batch(
     When ``cache_root`` and ``missing_sizes`` are set, rows already present in
     ``cache_entries`` for every requested size are excluded in SQL. That keeps
     selection O(pending) instead of re-walking a long already-warmed prefix.
+
+    Candidates are ordered by ``(source_id, filepath, id)`` so the bulk HDD
+    sweep walks folder-by-folder. On the expansion archive (exFAT, no FIEMAP),
+    filepath order is the reliable proxy for physical disk order and avoids
+    seek-thrashing between scattered folders.
     """
     sizes = tuple(size for size in (missing_sizes or ()) if size)
     missing_clause = ""
@@ -207,7 +212,7 @@ async def priority_candidate_batch(
             + scope_join
             + "WHERE "
             + " AND ".join(conditions)
-            + " ORDER BY i.filepath ASC, i.id ASC LIMIT ?",
+            + " ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC LIMIT ?",
             params,
         )
         return await cursor.fetchall()
