@@ -36,8 +36,10 @@ ON_DEMAND_HEAVY_DECODE_LIMIT = int(
     os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")
 )
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
-BROWSER_CACHE_MAX_AGE = 86400
-BROWSER_CACHE_STALE_WHILE_REVALIDATE = 604800
+# Thumb URLs are /api/thumb/{size}/{id} (not content-hashed), so immutable is unsafe.
+# Long max-age + ETag: browsers skip the network for a week, then revalidate cheaply.
+BROWSER_CACHE_MAX_AGE = 604800
+BROWSER_CACHE_STALE_WHILE_REVALIDATE = 2592000
 HOT_LG_RESERVE_FRACTION = 0.35
 HOT_LG_RESERVE_MIN_BYTES = 2 * 1024 * 1024 * 1024
 HOT_LG_RESERVE_MAX_BYTES = 64 * 1024 * 1024 * 1024

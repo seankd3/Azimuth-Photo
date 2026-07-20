@@ -163,22 +163,31 @@ class SelectiveGZipMiddleware:
 
 
 class StaticCacheHeadersMiddleware:
-    """Let browsers reuse static JS/CSS briefly while still revalidating soon."""
+    """Cache static assets; versioned URLs (?v=) are immutable for a year."""
 
-    def __init__(self, app, max_age: int = 300):
+    def __init__(self, app, max_age: int = 300, versioned_max_age: int = 31_536_000):
         self.app = app
-        self.cache_control = f"public, max-age={max_age}, stale-while-revalidate=3600"
+        self.max_age = max_age
+        self.versioned_max_age = versioned_max_age
+
+    def _cache_control(self, scope) -> str:
+        query = scope.get("query_string") or b""
+        if b"v=" in query:
+            return f"public, max-age={self.versioned_max_age}, immutable"
+        return f"public, max-age={self.max_age}, stale-while-revalidate=3600"
 
     async def __call__(self, scope, receive, send):
         if scope.get("type") != "http" or not (scope.get("path") or "").startswith("/static/"):
             await self.app(scope, receive, send)
             return
 
+        cache_control = self._cache_control(scope)
+
         async def send_with_cache_headers(message):
             if message.get("type") == "http.response.start":
                 headers = list(message.get("headers") or [])
                 if not any(name.lower() == b"cache-control" for name, _value in headers):
-                    headers.append((b"cache-control", self.cache_control.encode("ascii")))
+                    headers.append((b"cache-control", cache_control.encode("ascii")))
                     message = {**message, "headers": headers}
             await send(message)
 

@@ -31,12 +31,16 @@ class MobileOfflineContractsTests(unittest.TestCase):
     def test_service_worker_is_secure_only_and_versioned(self):
         template = self.read("templates", "mobile.html")
         service_worker = self.read("static", "sw.js")
+        register = self.read("static", "js", "sw_register.js")
         manifest = self.read("static", "manifest.webmanifest")
 
-        self.assertIn("window.isSecureContext", template)
-        self.assertIn("/sw.js?v=", template)
+        self.assertIn("scheduleServiceWorkerRegistration", template)
+        self.assertIn("sw_register.js", template)
+        self.assertIn("isSecureContext", register)
+        self.assertIn("pa_sw", register)
         self.assertIn("data-static-version", template)
         self.assertIn("searchParams.get('v')", service_worker)
+        self.assertIn("thumbStaleWhileRevalidate", service_worker)
         self.assertIn("'/static/js/mobile/write_queue.js'", service_worker)
         self.assertIn("pa-write-queue", service_worker)
         self.assertIn('"display": "standalone"', manifest)

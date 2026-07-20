@@ -415,11 +415,27 @@ class ModularContractTests(unittest.TestCase):
         self.assertIn('src="/static/js/desktop/bootstrap.js', desktop_template)
         self.assertIn('href="/static/mobile.css', mobile_template)
         self.assertIn('src="/static/js/mobile/bootstrap.js', mobile_template)
-        self.assertIn("window.isSecureContext", mobile_template)
-        self.assertIn("navigator.serviceWorker.register(url)", mobile_template)
-        self.assertIn("/sw.js?v=", mobile_template)
+        self.assertIn("sw_register.js", mobile_template)
+        self.assertIn("scheduleServiceWorkerRegistration", mobile_template)
         self.assertIn("from '../api.js'", desktop_api)
         self.assertIn("from '../api.js'", mobile_api)
+
+    def test_versioned_static_assets_are_immutable(self):
+        from core.app_factory import create_base_app
+        from starlette.testclient import TestClient
+
+        app = create_base_app(base_dir=os.path.dirname(__file__))
+        client = TestClient(app)
+        plain = client.get("/static/desktop.css")
+        versioned = client.get("/static/desktop.css?v=9001")
+        self.assertEqual(
+            plain.headers.get("cache-control"),
+            "public, max-age=300, stale-while-revalidate=3600",
+        )
+        self.assertEqual(
+            versioned.headers.get("cache-control"),
+            "public, max-age=31536000, immutable",
+        )
 
 
 if __name__ == "__main__":

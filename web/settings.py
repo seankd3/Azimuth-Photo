@@ -173,7 +173,7 @@ _settings = None
 CACHE_PROFILES = ("browse_fast", "balanced", "original_heavy")
 
 BROWSER_CACHE_MAX_AGE = 86400
-BROWSER_CACHE_STALE_WHILE_REVALIDATE = 604800
+BROWSER_CACHE_STALE_WHILE_REVALIDATE = 2592000
 
 
 def _copy_settings(value: dict) -> dict:
