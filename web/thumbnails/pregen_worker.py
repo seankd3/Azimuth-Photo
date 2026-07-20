@@ -85,6 +85,7 @@ async def run_pregen_bulk_batch(
     record_pregen_result,
     activity_burst_items: int,
     prefetch_workers: int = 1,
+    note_progress=None,
 ) -> int:
     set_priority_scope(None)
     generate_batch = generate_batch or default_generate_batch
@@ -227,7 +228,8 @@ async def run_pregen_bulk_batch(
 
         wave_size = memory_pressure.effective_prefetch_workers(prefetch_workers)
         wave: list[dict] = []
-        held_weights: list[int] = []
+        # (epoch, weight) so a watchdog reset cannot be undone by this finally.
+        held_weights: list[tuple[int, int]] = []
         try:
             while len(wave) < wave_size and cursor < len(pending):
                 if memory_pressure.evaluate_memory_pressure().pause_bulk:
@@ -248,7 +250,12 @@ async def run_pregen_bulk_batch(
                     width=item.get("width"),
                     height=item.get("height"),
                 )
-                held_weights.append(await bulk_decode_budget.acquire(estimate))
+                weight = await bulk_decode_budget.acquire(estimate)
+                held_weights.append((bulk_decode_budget.epoch, weight))
+                # Decode is actively starting — keep the stall watchdog off our back
+                # while demosaic makes slow-but-real progress.
+                if note_progress is not None:
+                    note_progress()
                 wave.append(item)
 
             if pressure_abort or not wave:
@@ -297,6 +304,9 @@ async def run_pregen_bulk_batch(
                         raise
                     except Exception as exc:
                         log.warning("pregen wave item failed: %s", exc)
+                    # Any finished item (success or fail) is progress — not a stall.
+                    if note_progress is not None:
+                        note_progress()
                     if idx % 8 == 0 and not should_pause_for_priority():
                         await _flush_off_request_pool(flush_write_queue, prefetch_executor)
                     if (
@@ -310,8 +320,14 @@ async def run_pregen_bulk_batch(
                         task.cancel()
                     break
         finally:
-            for weight in held_weights:
-                await bulk_decode_budget.release(weight)
+            # release_nowait: CancelledError must not skip budget return.
+            released_any = False
+            for epoch, weight in held_weights:
+                if bulk_decode_budget.release_nowait(weight, epoch=epoch):
+                    released_any = True
+            held_weights.clear()
+            if released_any:
+                bulk_decode_budget.wake_waiters_soon()
 
         if (
             should_pause_for_priority()
@@ -490,9 +506,15 @@ async def run_prefetch_worker_loop(
     target_total_cache = 0
     target_total_at = 0.0
     no_progress_scan_passes = 0
-    stall_limit = float(
-        PREGEN_STALL_WATCHDOG_SECONDS if stall_watchdog_seconds is None else stall_watchdog_seconds
-    )
+    if stall_watchdog_seconds is None:
+        stall_limit = float(PREGEN_STALL_WATCHDOG_SECONDS)
+        # Floor only for the production default/env path. Explicit overrides
+        # (tests) keep their short limits. Never shorter than one wave: a single
+        # demosaic-heavy DNG can take tens of seconds.
+        if stall_limit > 0:
+            stall_limit = max(stall_limit, PREGEN_WAVE_TIMEOUT_SECONDS)
+    else:
+        stall_limit = float(stall_watchdog_seconds)
     active_batch: asyncio.Task | None = None
     stall_reset = asyncio.Event()
     watchdog_enabled = stall_limit > 0
@@ -530,25 +552,37 @@ async def run_prefetch_worker_loop(
             raise
 
     async def _stall_watchdog() -> None:
-        """Detect state=running with no generation — cancel stuck batch + reset budget."""
+        """Detect state=running with no progress — cancel stuck batch + reset budget.
+
+        Progress includes decode starts and per-image completions (last_progress_at),
+        not only successful writes (last_generated_at). A slow demosaic batch that is
+        still working must not be treated as stalled.
+        """
         while is_prefetching():
             # Real asyncio.sleep captured at import — not the injectable `sleep`
             # hook and not a late-bound asyncio.sleep that tests may replace.
             await _REAL_ASYNCIO_SLEEP(PREGEN_STALL_WATCHDOG_POLL_SECONDS)
             if not watchdog_enabled or pregen_status.get("state") != "running":
                 continue
+            batch = active_batch
+            # No live batch → nothing to cancel. Avoid false positives while
+            # scanning for work or sitting between waves.
+            if batch is None or batch.done():
+                continue
             last = pregen_status.get("last_generated_at")
+            progress = pregen_status.get("last_progress_at")
             started = pregen_status.get("started_at")
             now_wall = time.time()
-            anchor = float(last or started or 0.0)
-            if anchor <= 0:
+            anchors = [float(v) for v in (last, progress, started) if v]
+            if not anchors:
                 continue
+            anchor = max(anchors)
             stalled_for = now_wall - anchor
             if stalled_for < stall_limit:
                 continue
             leaked = await bulk_decode_budget.reset_and_notify()
             log.error(
-                "pregen stall watchdog: state=running with no generation for "
+                "pregen stall watchdog: state=running with no progress for "
                 "%.0fs (limit=%.0fs); resetting decode budget (leaked=%s bytes) "
                 "and cancelling stuck batch",
                 stalled_for,
@@ -556,7 +590,9 @@ async def run_prefetch_worker_loop(
                 leaked,
             )
             # Arm recovery before cancel so the awaiter sees stall_reset set.
-            pregen_status["last_generated_at"] = time.time()
+            now_recover = time.time()
+            pregen_status["last_generated_at"] = now_recover
+            pregen_status["last_progress_at"] = now_recover
             stall_reset.set()
             _cancel_active_batch("stall_watchdog")
             _recover_stuck_executor()
