@@ -239,8 +239,8 @@ async def run_pregen_bulk_batch(
                 ext = os.path.splitext(str(item.get("filepath") or ""))[1].lower()
                 is_raw = ext in RAW_EXTENSIONS
                 # Charge the embedded-JPEG path only for formats that reliably
-                # have a large enough preview. .dng often falls through to a
-                # full demosaic — under-counting that cost over-commits the pool.
+                # cover lg from the embed. .dng uses the embed for sm when it
+                # fits, but lg still demosaics — keep charging demosaic weight.
                 estimate = estimate_decode_bytes(
                     item.get("source_size"),
                     raw=is_raw,

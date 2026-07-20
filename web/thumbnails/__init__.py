@@ -837,6 +837,7 @@ def _generate_missing_thumbnails_sync(
             thumbnail_retry_after=_thumbnail_retry_after,
             thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
             on_source_loaded=on_source_loaded,
+            raw_extensions=RAW_EXTENSIONS,
         )
 
     need_hash, need_metadata = False, False
@@ -907,6 +908,7 @@ def _generate_thumbnail_set_sync(
             monotonic_provider=time.monotonic,
             log=print,
             on_source_loaded=kwargs.get("on_source_loaded"),
+            raw_extensions=RAW_EXTENSIONS,
         )
 
     if not need_hash and not need_metadata:
