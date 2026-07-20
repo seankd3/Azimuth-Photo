@@ -321,6 +321,18 @@ input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border: none; b
 .ledger .row .h .hash { font-family: var(--mono); font-size: 11px; color: var(--amber-dk); font-weight: 400; margin-left: 8px; }
 .ledger .row p { margin: 6px 0 0; font-size: 14.5px; color: var(--ink-2); }
 
+/* closing product CTA */
+.endcta { margin: 60px 0 0; padding: clamp(28px,4vw,48px); border: 1px solid var(--line-2); border-radius: var(--radius-lg);
+  background: radial-gradient(120% 140% at 100% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%), var(--panel); max-width: var(--measure); }
+.endcta .ec-k { font-family: var(--mono); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+.endcta h3 { font-size: clamp(22px,3vw,32px); margin: 12px 0 0; color: var(--ink); max-width: 20ch; }
+.endcta p { color: var(--ink-2); margin: 14px 0 0; max-width: 48ch; font-size: 15.5px; }
+.endcta .ec-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 26px; }
+.endcta .ec-btn { font-family: var(--mono); font-size: 13px; letter-spacing: .04em; padding: 11px 20px; border-radius: 8px; border: 1px solid var(--line-2); color: var(--ink); transition: background .15s, border-color .15s, transform .15s; }
+.endcta .ec-btn:hover { text-decoration: none; border-color: var(--accent); transform: translateY(-2px); }
+.endcta .ec-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.endcta .ec-btn.primary:hover { background: var(--accent-dk); }
+
 /* footer */
 .foot { margin-top: 110px; padding: 40px 0 60px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; color: var(--ink-4); }
 .foot b { color: var(--ink-3); }
