@@ -11,7 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 import embedding_worker  # noqa: E402
-from core import work_coordination  # noqa: E402
+from core import memory_pressure, work_coordination  # noqa: E402
 
 
 class FakeImage:
@@ -858,6 +858,88 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(embedding_worker._model_load_error_key)
         self.assertFalse(embedding_worker._embedding_manual_pause)
         self.assertEqual(embedding_worker.get_worker_status()["state"], "idle")
+
+
+class EmbeddingIdleUnloadTests(unittest.TestCase):
+    def setUp(self):
+        from core.model_pool import ModelPool, reset_model_pool_for_tests
+
+        memory_pressure.reset_for_tests()
+        self.clock = {"now": 1000.0}
+        self.unloads: list[str] = []
+        self.pool = reset_model_pool_for_tests(
+            ModelPool(
+                vram_budget_bytes=None,
+                ram_budget_bytes=None,
+                pin_seconds=30.0,
+                empty_cache=lambda: None,
+                clock=lambda: self.clock["now"],
+            )
+        )
+        self.old_model = embedding_worker._model
+        self.old_pause = embedding_worker._embedding_manual_pause
+        self.addCleanup(self._cleanup)
+
+    def _cleanup(self):
+        from core.model_pool import ModelPool, reset_model_pool_for_tests
+
+        embedding_worker._embedding_manual_pause = self.old_pause
+        embedding_worker._model = self.old_model
+        embedding_worker._unload_model(force=True)
+        reset_model_pool_for_tests(
+            ModelPool(
+                vram_budget_bytes=None,
+                ram_budget_bytes=None,
+                pin_seconds=0.0,
+                empty_cache=lambda: None,
+            )
+        )
+        memory_pressure.reset_for_tests()
+
+    def _load_pinned(self):
+        def unload():
+            self.unloads.append("embeddings")
+            embedding_worker._model = None
+
+        self.pool.acquire(
+            "embeddings",
+            load_fn=lambda: "search-model",
+            unload_fn=unload,
+            vram_bytes=10,
+            ram_bytes=10,
+            interactive=True,
+        )
+        embedding_worker._model = "search-model"
+
+    def test_pause_unload_blocked_while_search_pinned(self):
+        self._load_pinned()
+        embedding_worker._embedding_manual_pause = True
+
+        blocked = embedding_worker._maybe_unload_idle_model()
+        self.assertFalse(blocked)
+        self.assertEqual(embedding_worker._model, "search-model")
+        self.assertIn("embeddings", self.pool.resident_names())
+        self.assertEqual(self.unloads, [])
+
+        # Pin window ends → pause shed fires.
+        self.clock["now"] += 31.0
+        shed = embedding_worker._maybe_unload_idle_model()
+        self.assertTrue(shed)
+        self.assertIsNone(embedding_worker._model)
+        self.assertEqual(self.unloads, ["embeddings"])
+
+    def test_idle_ttl_unloads_after_quiet_period(self):
+        self._load_pinned()
+        embedding_worker._embedding_manual_pause = False
+        self.clock["now"] += 31.0  # pin expired
+        self.assertFalse(
+            embedding_worker._maybe_unload_idle_model(ttl_seconds=120.0)
+        )
+        self.clock["now"] += 120.0
+        self.assertTrue(
+            embedding_worker._maybe_unload_idle_model(ttl_seconds=120.0)
+        )
+        self.assertIsNone(embedding_worker._model)
 
 
 if __name__ == "__main__":

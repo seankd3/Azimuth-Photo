@@ -379,23 +379,93 @@ class ModelPool:
                 resident.pin_until = now + self._pin_seconds
             return True
 
-    def unload(self, name: str) -> bool:
-        """Drop one resident and run its unload callback."""
+    def is_pinned(self, name: str) -> bool:
+        """True when ``name`` is pin-while-hot (active search/embed turn)."""
         with self._lock:
+            resident = self._residents.get(name)
+            if resident is None:
+                return False
+            return self._is_pinned(resident, self._clock())
+
+    def idle_seconds(self, name: str) -> float | None:
+        """Seconds since last use, or ``None`` if absent."""
+        with self._lock:
+            resident = self._residents.get(name)
+            if resident is None:
+                return None
+            return max(0.0, self._clock() - resident.last_used)
+
+    def unload(self, name: str, *, force: bool = False) -> bool:
+        """Drop one resident and run its unload callback.
+
+        Pin-while-hot blocks unload unless ``force=True`` (shutdown only).
+        Mid-search/embed must never stall from a pressure shed.
+        """
+        with self._lock:
+            resident = self._residents.get(name)
+            if resident is None:
+                return False
+            if not force and self._is_pinned(resident, self._clock()):
+                log.info("model_pool event=unload_blocked name=%s reason=pinned", name)
+                return False
             dropped = self._drop_locked(name, run_unload=True)
             if dropped:
-                log.info("model_pool event=unload name=%s", name)
+                log.info("model_pool event=unload name=%s force=%s", name, force)
             return dropped
 
-    def unload_all(self) -> list[str]:
-        """Shed every resident. Used by memory_pressure."""
+    def unload_all(self, *, force: bool = False) -> list[str]:
+        """Shed residents. Skips pin-while-hot unless ``force=True``.
+
+        Used by memory_pressure (force=False) and process shutdown (force=True).
+        """
         with self._lock:
+            now = self._clock()
             names = list(self._residents)
+            unloaded: list[str] = []
+            blocked: list[str] = []
             for name in names:
-                self._drop_locked(name, run_unload=True)
-            if names:
-                log.info("model_pool event=unload_all names=%s", ",".join(names))
-            return names
+                resident = self._residents.get(name)
+                if resident is None:
+                    continue
+                if not force and self._is_pinned(resident, now):
+                    blocked.append(name)
+                    continue
+                if self._drop_locked(name, run_unload=True):
+                    unloaded.append(name)
+            if blocked:
+                log.info(
+                    "model_pool event=unload_all_blocked names=%s",
+                    ",".join(blocked),
+                )
+            if unloaded:
+                log.info(
+                    "model_pool event=unload_all names=%s force=%s",
+                    ",".join(unloaded),
+                    force,
+                )
+            return unloaded
+
+    def unload_if_idle(self, name: str, *, ttl_seconds: float) -> bool:
+        """Unload ``name`` when unpinned and idle past ``ttl_seconds``."""
+        ttl_seconds = max(0.0, float(ttl_seconds))
+        with self._lock:
+            resident = self._residents.get(name)
+            if resident is None:
+                return False
+            now = self._clock()
+            if self._is_pinned(resident, now):
+                return False
+            if (now - resident.last_used) < ttl_seconds:
+                return False
+            dropped = self._drop_locked(name, run_unload=True)
+            if dropped:
+                log.info(
+                    "model_pool event=unload_idle name=%s idle_s=%.1f ttl_s=%.1f",
+                    name,
+                    now - resident.last_used,
+                    ttl_seconds,
+                )
+            return dropped
 
     def drop_tracking(self, name: str) -> bool:
         """Remove residency bookkeeping without calling unload_fn.
