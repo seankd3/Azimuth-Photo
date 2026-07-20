@@ -158,14 +158,15 @@ def _load_snapshot_sync(expected_count: int, model_key: str):
             return None
         if meta.get("embedding_signature") != _embedding_source_signature(model_key):
             return None
-        # Load into RAM rather than returning a memmap. Search/similar should
-        # pay a predictable warmup cost instead of page-faulting during the
-        # first similarity matmul.
-        ids = np.load(ids_path)
-        matrix = np.load(matrix_path)
+        # File-backed mmap: taste/search can keep the read-only matrix available
+        # without pinning ~729MB anonymous RSS. The OS reclaims pages under
+        # pressure; remapping a warm .npy is near-instant. add_vectors() copies
+        # to a writable ndarray before mutating.
+        ids = np.load(ids_path, mmap_mode="r")
+        matrix = np.load(matrix_path, mmap_mode="r")
         if len(ids) != expected_count or matrix.shape[0] != expected_count:
             return None
-        return ids.astype(np.int64).tolist(), matrix
+        return np.asarray(ids, dtype=np.int64).tolist(), matrix
     except Exception:
         return None
 
@@ -342,6 +343,17 @@ def get_warm_matrix(model_key: str | None = None):
     return cache["image_ids"], _matrix_view(cache)
 
 
+def _writable_matrix(matrix: np.ndarray, *, rows: int | None = None) -> np.ndarray:
+    """Copy mmap/read-only matrices before in-place embedding updates."""
+    import numpy as np  # deferred
+
+    row_count = int(rows if rows is not None else matrix.shape[0])
+    view = matrix[:row_count]
+    if isinstance(matrix, np.memmap) or not getattr(matrix, "flags", None) or not matrix.flags.writeable:
+        return np.array(view, dtype=np.float32, copy=True)
+    return matrix
+
+
 def add_vectors(rows: list[tuple[int, np.ndarray]], model_key: str | None = None):
     """Append freshly stored vectors to the warm cache without a full DB rebuild."""
     import numpy as np  # deferred: keeps numpy off boot until new embeddings are added
@@ -357,7 +369,9 @@ def add_vectors(rows: list[tuple[int, np.ndarray]], model_key: str | None = None
         return
 
     id_to_idx = cache["id_to_idx"] or {}
-    matrix = cache["matrix"]
+    image_ids = list(cache["image_ids"])
+    matrix = _writable_matrix(cache["matrix"], rows=len(image_ids))
+    cache["matrix"] = matrix
     new_rows = []
     for image_id, vec in rows:
         idx = id_to_idx.get(image_id)
@@ -370,7 +384,6 @@ def add_vectors(rows: list[tuple[int, np.ndarray]], model_key: str | None = None
         cache["checked_at"] = time.monotonic()
         return
 
-    image_ids = list(cache["image_ids"])
     old_count = len(image_ids)
     dim = matrix.shape[1]
     new_count = old_count + len(new_rows)

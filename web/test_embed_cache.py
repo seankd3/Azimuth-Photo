@@ -183,5 +183,42 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(matrix.shape[1], 2)
         self.assertEqual(matrix[0].tolist(), [0.25, 0.75])
 
-if __name__ == "__main__":
-    unittest.main()
+    async def test_snapshot_load_uses_file_backed_mmap(self):
+        old_snapshot_dir = embed_cache.SNAPSHOT_DIR
+        old_signature = embed_cache._embedding_source_signature
+        with tempfile.TemporaryDirectory() as tempdir:
+            embed_cache.SNAPSHOT_DIR = tempdir
+            try:
+                embed_cache._get_embedding_count_sync = lambda _model_key: 2
+                embed_cache._embedding_source_signature = lambda _model_key: [
+                    "fast-model", 2, 2, "", 3
+                ]
+                ids = [10, 11]
+                matrix = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+                embed_cache._save_snapshot_sync(ids, matrix, "fast-model")
+
+                loaded_ids, loaded_matrix = embed_cache._load_snapshot_sync(2, "fast-model")
+
+                self.assertEqual(loaded_ids, ids)
+                self.assertIsInstance(loaded_matrix, np.memmap)
+                self.assertEqual(loaded_matrix.tolist(), matrix.tolist())
+
+                embed_cache._caches["fast-model"] = {
+                    "image_ids": loaded_ids,
+                    "id_to_idx": {10: 0, 11: 1},
+                    "matrix": loaded_matrix,
+                    "count": 2,
+                    "checked_at": 0.0,
+                    "model_key": "fast-model",
+                }
+                embed_cache.add_vectors(
+                    [(12, np.array([0.0, 1.0], dtype=np.float32))],
+                    model_key="fast-model",
+                )
+                warm = embed_cache._caches["fast-model"]["matrix"]
+                self.assertFalse(isinstance(warm, np.memmap))
+                self.assertTrue(warm.flags.writeable)
+                self.assertEqual(embed_cache.get_vector(12, "fast-model").tolist(), [0.0, 1.0])
+            finally:
+                embed_cache.SNAPSHOT_DIR = old_snapshot_dir
+                embed_cache._embedding_source_signature = old_signature
