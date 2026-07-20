@@ -22,12 +22,14 @@ from pathlib import Path
 from typing import Any, Callable
 
 import settings as app_settings
+from core import bulk_scheduler
 from core.runtime_paths import resolve_runtime_paths
 
 log = logging.getLogger(__name__)
 
 DEFAULT_BWLIMIT = "07:00,3M 23:00,off"
 STATUS_FILENAME = "cloud_backup_status.json"
+_VAULT_WAIT_POLL_SECONDS = 2.0
 
 # rclone --stats-one-line examples:
 #   Transferred:   	  123.456 MiB / 1.234 GiB, 10%, 12.345 MiB/s, ETA 1m23s
@@ -67,7 +69,8 @@ _process: subprocess.Popen | None = None
 _worker_thread: threading.Thread | None = None
 _stop_requested = False
 _runtime: dict[str, Any] = {
-    "state": "idle",  # idle | running | stopping | unavailable | error
+    # idle | waiting | running | stopping | unavailable | error
+    "state": "idle",
     "message": "",
     "current_tree": None,
     "bytes_done": 0,
@@ -78,6 +81,7 @@ _runtime: dict[str, Any] = {
     "started_at": None,
     "finished_at": None,
     "last_error": None,
+    "manual_override": False,
 }
 
 
@@ -504,8 +508,53 @@ def _terminate_process(proc: subprocess.Popen | None) -> None:
             pass
 
 
-def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
+def _clear_desired_after_job() -> None:
+    """Sync finished or failed — do not auto-resume a completed one-shot on boot."""
+    try:
+        bulk_scheduler.set_vault_desired(False)
+    except Exception:
+        log.exception("cloud_backup failed to clear desired_running flag")
+
+
+def _wait_for_disk_turn() -> bool:
+    """Block until previews release the disk (or stop). Return True to proceed."""
+    while not _stop_requested:
+        if not bulk_scheduler.sequencing_enabled() or not bulk_scheduler.previews_pending():
+            return True
+        _set_runtime(
+            state="waiting",
+            message=bulk_scheduler.VAULT_WAIT_MESSAGE,
+            current_tree=None,
+            speed="",
+            eta="",
+        )
+        time.sleep(_VAULT_WAIT_POLL_SECONDS)
+    return False
+
+
+def _run_sync_job(
+    db_path: str,
+    config: dict[str, Any],
+    *,
+    wait_for_previews: bool = False,
+    override_warning: str = "",
+) -> None:
     global _process, _stop_requested
+    if wait_for_previews:
+        _set_runtime(
+            state="waiting",
+            message=bulk_scheduler.VAULT_WAIT_MESSAGE,
+            current_tree=None,
+        )
+        if not _wait_for_disk_turn():
+            _set_runtime(
+                state="idle",
+                message="Cloud Backup paused",
+                finished_at=time.time(),
+                current_tree=None,
+            )
+            return
+
     binary = rclone_binary()
     if not binary:
         _set_runtime(
@@ -514,6 +563,7 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
             last_error="rclone is not installed",
             finished_at=time.time(),
         )
+        _clear_desired_after_job()
         return
 
     work_dir = tempfile.mkdtemp(prefix="cloud-backup-")
@@ -524,10 +574,13 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
             if _stop_requested:
                 break
             tree_name = Path(tree).name or tree
+            message = f"Syncing {tree_name}"
+            if override_warning:
+                message = f"{override_warning} — {message}"
             _set_runtime(
                 state="running",
                 current_tree=tree,
-                message=f"Syncing {tree_name}",
+                message=message,
                 bytes_done=0,
                 bytes_total=0,
                 pct=0.0,
@@ -598,6 +651,7 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
                     finished_at=time.time(),
                     current_tree=tree,
                 )
+                _clear_desired_after_job()
                 return
             tree_results[tree] = {"bytes": tree_bytes}
             total_bytes += tree_bytes
@@ -609,6 +663,7 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
                 finished_at=time.time(),
                 current_tree=None,
             )
+            # Stop is explicit — desired already cleared in stop_sync.
             return
 
         record_sync_success(trees=tree_results, total_bytes=total_bytes)
@@ -620,6 +675,7 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
             pct=100.0 if tree_results else 0.0,
             last_error=None,
         )
+        _clear_desired_after_job()
     except Exception as exc:
         log.exception("cloud_backup job failed")
         record_sync_failure(str(exc))
@@ -629,19 +685,29 @@ def _run_sync_job(db_path: str, config: dict[str, Any]) -> None:
             last_error=str(exc),
             finished_at=time.time(),
         )
+        _clear_desired_after_job()
     finally:
         with _runner_lock:
             _process = None
         shutil.rmtree(work_dir, ignore_errors=True)
 
 
-def start_sync(db_path: str, *, config: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Start a vault sync. One at a time. Raises ValueError / RuntimeError."""
+def start_sync(
+    db_path: str,
+    *,
+    config: dict[str, Any] | None = None,
+    manual_override: bool = False,
+) -> dict[str, Any]:
+    """Start a vault sync. One at a time. Raises ValueError / RuntimeError.
+
+    ``manual_override=True`` (explicit POST /api/backup/cloud/start) runs even
+    when preview backfill holds the disk. Scheduled / auto-resume starts wait.
+    """
     global _worker_thread, _stop_requested
     if not rclone_available():
         raise RuntimeError("rclone is not installed — Cloud Backup is unavailable")
     with _runner_lock:
-        if _runtime.get("state") == "running" or (
+        if _runtime.get("state") in {"running", "waiting", "stopping"} or (
             _worker_thread is not None and _worker_thread.is_alive()
         ):
             raise RuntimeError("Cloud Backup is already running")
@@ -649,12 +715,24 @@ def start_sync(db_path: str, *, config: dict[str, Any] | None = None) -> dict[st
             config or config_from_settings(),
             require_trees=True,
         )
+        bulk_scheduler.set_vault_desired(True)
+        decision = bulk_scheduler.decide_vault_start(manual_override=manual_override)
+        wait_for_previews = decision["action"] == "wait"
+        override_warning = decision["message"] if decision["action"] == "run" else ""
+        if wait_for_previews:
+            initial_state = "waiting"
+            initial_message = bulk_scheduler.VAULT_WAIT_MESSAGE
+        else:
+            initial_state = "running"
+            initial_message = override_warning or "Starting Cloud Backup"
         _stop_requested = False
         _runtime.update(
             {
-                "state": "running",
-                "message": "Starting Cloud Backup",
-                "current_tree": resolved["trees"][0] if resolved["trees"] else None,
+                "state": initial_state,
+                "message": initial_message,
+                "current_tree": None if wait_for_previews else (
+                    resolved["trees"][0] if resolved["trees"] else None
+                ),
                 "bytes_done": 0,
                 "bytes_total": 0,
                 "pct": 0.0,
@@ -663,11 +741,20 @@ def start_sync(db_path: str, *, config: dict[str, Any] | None = None) -> dict[st
                 "started_at": time.time(),
                 "finished_at": None,
                 "last_error": None,
+                "manual_override": bool(manual_override),
             }
         )
+        if wait_for_previews:
+            log.info("cloud_backup yielding disk to preview build")
+        elif override_warning:
+            log.warning("cloud_backup manual override while previews pending")
         thread = threading.Thread(
             target=_run_sync_job,
             args=(db_path, resolved),
+            kwargs={
+                "wait_for_previews": wait_for_previews,
+                "override_warning": override_warning,
+            },
             name="cloud-backup-runner",
             daemon=True,
         )
@@ -677,11 +764,12 @@ def start_sync(db_path: str, *, config: dict[str, Any] | None = None) -> dict[st
 
 
 def stop_sync() -> dict[str, Any]:
-    """Request pause/stop of the active sync."""
+    """Request pause/stop of the active sync (or waiting yield)."""
     global _stop_requested
+    bulk_scheduler.set_vault_desired(False)
     with _runner_lock:
         alive = _worker_thread is not None and _worker_thread.is_alive()
-        if not alive and _runtime.get("state") not in {"running", "stopping"}:
+        if not alive and _runtime.get("state") not in {"running", "waiting", "stopping"}:
             return status_payload()
         _stop_requested = True
         _runtime["state"] = "stopping"
@@ -714,6 +802,7 @@ def reset_runner_for_tests() -> None:
                 "started_at": None,
                 "finished_at": None,
                 "last_error": None,
+                "manual_override": False,
             }
         )
     _scheduler_started = False

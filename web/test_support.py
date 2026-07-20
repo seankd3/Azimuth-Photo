@@ -27,7 +27,7 @@ import face_worker  # noqa: E402
 import scanner  # noqa: E402
 import settings  # noqa: E402
 import thumbnails  # noqa: E402
-from core import app_factory  # noqa: E402
+from core import app_factory, bulk_scheduler  # noqa: E402
 from core import background as background_runtime  # noqa: E402
 from core import cache_events  # noqa: E402
 from core import query_constraints  # noqa: E402
@@ -112,6 +112,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         thumbnail_cache_entries._persistent_conn = None
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         settings._settings = None
+        bulk_scheduler.reset_for_tests(
+            desired_path=os.path.join(self.tempdir.name, "bulk_desired.json")
+        )
         self._reset_shared_runtime_state()
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()
@@ -165,6 +168,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
         settings.SETTINGS_PATH = self.old_settings_path
         settings._settings = self.old_settings_state
+        bulk_scheduler.reset_for_tests()
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
         db.invalidate_cached_image_ids_cache()

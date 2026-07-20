@@ -246,6 +246,22 @@ async def run_startup(
     await init_db()
     thumbnails.configure(settings.load_settings())
 
+    # Bulk HDD sequencing: one spindle consumer at a time (previews before vault).
+    try:
+        from core import bulk_scheduler as _bulk_scheduler
+
+        def _previews_hold_disk() -> bool:
+            status = getattr(thumbnails, "_pregen_status", {}) or {}
+            return _bulk_scheduler.previews_hold_disk(
+                manual_mode=bool(status.get("manual_mode")),
+                manual_pause=bool(status.get("manual_pause")),
+                state=str(status.get("state") or ""),
+            )
+
+        _bulk_scheduler.configure(previews_pending=_previews_hold_disk)
+    except Exception:
+        log.exception("worker=bulk_scheduler failed to configure")
+
     async def _cleanup_stale_cache_temps_when_quiet():
         await asyncio.to_thread(thumbnails.cleanup_stale_cache_temps)
 
@@ -384,6 +400,17 @@ async def run_startup(
         caption_worker=caption_worker,
     )
 
+    # Auto-resume bulk workers that were running before the last shutdown.
+    # Pregen first so the vault scheduler can yield to it when both resume.
+    try:
+        from core import bulk_scheduler as _bulk_scheduler
+
+        if _bulk_scheduler.pregen_desired():
+            log.info("bulk_scheduler resuming preview pregen from prior desired state")
+            thumbnails.start_pregeneration()
+    except Exception:
+        log.exception("worker=pregen auto-resume failed")
+
     try:
         import db as _db
         from features.system import backups as _catalog_backups
@@ -399,13 +426,31 @@ async def run_startup(
 
     try:
         import db as _db
+        from core import bulk_scheduler as _bulk_scheduler
         from features.backup import cloud as _cloud_backup
+
+        async def _resume_vault_if_desired() -> None:
+            if not _bulk_scheduler.vault_desired():
+                return
+            log.info("bulk_scheduler resuming cloud vault from prior desired state")
+            try:
+                await asyncio.to_thread(
+                    _cloud_backup.start_sync,
+                    _db.DB_PATH,
+                    manual_override=False,
+                )
+            except Exception:
+                log.exception("cloud_backup auto-resume failed to start")
 
         track_background_task(
             _start_background_daemon(
                 lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
                 delay=25.0,
             )
+        )
+        # Slight delay so pregen status is live before the vault decision.
+        track_background_task(
+            _start_background_daemon(_resume_vault_if_desired, delay=3.0)
         )
     except Exception:
         log.exception("worker=cloud_backup scheduler failed to arm")

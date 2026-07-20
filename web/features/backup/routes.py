@@ -98,7 +98,7 @@ async def api_cloud_backup_start():
             status_code=503,
         )
     try:
-        payload = cloud.start_sync(_configured_db_path())
+        payload = cloud.start_sync(_configured_db_path(), manual_override=True)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     except RuntimeError as exc:

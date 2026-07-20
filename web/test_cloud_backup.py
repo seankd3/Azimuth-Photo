@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -158,8 +159,22 @@ class RunnerStateMachineTests(unittest.TestCase):
         _make_catalog(self.db)
         self.status_dir = Path(self.tmp.name) / "state"
         self.status_dir.mkdir()
+        self._old_path = settings.SETTINGS_PATH
+        settings.SETTINGS_PATH = str(Path(self.tmp.name) / "settings.json")
+        settings.reset_settings()
+        self.addCleanup(self._restore_settings)
+        from core import bulk_scheduler
+
+        bulk_scheduler.reset_for_tests(
+            desired_path=Path(self.tmp.name) / "bulk_desired.json"
+        )
+        self.addCleanup(bulk_scheduler.reset_for_tests)
         cloud.reset_runner_for_tests()
         self.addCleanup(cloud.reset_runner_for_tests)
+
+    def _restore_settings(self):
+        settings.SETTINGS_PATH = self._old_path
+        settings.load_settings(force=True)
 
     def test_start_stop_and_already_running(self):
         config = {
@@ -171,7 +186,7 @@ class RunnerStateMachineTests(unittest.TestCase):
             "nightly_enabled": False,
         }
 
-        def fake_job(db_path, resolved):
+        def fake_job(db_path, resolved, **_kwargs):
             del db_path, resolved
             cloud._set_runtime(state="running", message="working")
             deadline = time.time() + 2.0
@@ -204,6 +219,87 @@ class RunnerStateMachineTests(unittest.TestCase):
                 time.sleep(0.05)
             self.assertEqual(cloud.status_payload()["state"], "idle")
 
+    def test_scheduled_start_waits_while_previews_pending(self):
+        from core import bulk_scheduler
+
+        config = {
+            "remote": "localvault",
+            "dest_prefix": "Vault",
+            "trees": [str(self.tree)],
+            "bwlimit": "off",
+            "exclude_from_catalog": False,
+            "nightly_enabled": False,
+        }
+        started = threading.Event()
+
+        def fake_job(db_path, resolved, *, wait_for_previews=False, override_warning=""):
+            del db_path, resolved, override_warning
+            if wait_for_previews:
+                cloud._set_runtime(
+                    state="waiting",
+                    message=bulk_scheduler.VAULT_WAIT_MESSAGE,
+                )
+                deadline = time.time() + 2.0
+                while time.time() < deadline and not cloud._stop_requested:
+                    time.sleep(0.05)
+                cloud._set_runtime(state="idle", message="paused", finished_at=time.time())
+                return
+            started.set()
+            cloud._set_runtime(state="running", message="should-not-run")
+
+        # Keep the temp desired path from setUp; only rewire the previews probe.
+        bulk_scheduler.configure(previews_pending=lambda: True)
+
+        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}), mock.patch.object(
+            cloud, "rclone_available", return_value=True
+        ), mock.patch.object(cloud, "list_remotes", return_value=["localvault"]), mock.patch.object(
+            cloud, "_run_sync_job", side_effect=fake_job
+        ):
+            payload = cloud.start_sync(str(self.db), config=config, manual_override=False)
+            self.assertEqual(payload["state"], "waiting")
+            self.assertIn("preview", payload["message"].lower())
+            self.assertFalse(started.wait(0.3))
+            cloud.stop_sync()
+
+    def test_manual_override_runs_while_previews_pending(self):
+        from core import bulk_scheduler
+
+        config = {
+            "remote": "localvault",
+            "dest_prefix": "Vault",
+            "trees": [str(self.tree)],
+            "bwlimit": "off",
+            "exclude_from_catalog": False,
+            "nightly_enabled": False,
+        }
+        seen = {}
+
+        def fake_job(db_path, resolved, *, wait_for_previews=False, override_warning=""):
+            del db_path, resolved
+            seen["wait"] = wait_for_previews
+            seen["warning"] = override_warning
+            cloud._set_runtime(state="running", message=override_warning or "running")
+            time.sleep(0.1)
+            cloud._set_runtime(state="idle", message="done", finished_at=time.time())
+
+        # Keep the temp desired path; only rewire the previews probe.
+        bulk_scheduler.configure(previews_pending=lambda: True)
+
+        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}), mock.patch.object(
+            cloud, "rclone_available", return_value=True
+        ), mock.patch.object(cloud, "list_remotes", return_value=["localvault"]), mock.patch.object(
+            cloud, "_run_sync_job", side_effect=fake_job
+        ):
+            payload = cloud.start_sync(str(self.db), config=config, manual_override=True)
+            self.assertEqual(payload["state"], "running")
+            self.assertIn("share the disk", payload["message"])
+            deadline = time.time() + 2.0
+            while time.time() < deadline and "wait" not in seen:
+                time.sleep(0.02)
+            self.assertFalse(seen.get("wait"))
+            self.assertIn("share the disk", seen.get("warning", ""))
+            cloud.stop_sync()
+
 
 class CloudBackupRouteTests(unittest.TestCase):
     def setUp(self):
@@ -223,6 +319,12 @@ class CloudBackupRouteTests(unittest.TestCase):
         self.addCleanup(self._restore_settings)
 
         cloud_routes.configure(db_path=lambda: str(self.db))
+        from core import bulk_scheduler
+
+        bulk_scheduler.reset_for_tests(
+            desired_path=Path(self.tmp.name) / "bulk_desired.json"
+        )
+        self.addCleanup(bulk_scheduler.reset_for_tests)
         app = FastAPI()
         app.include_router(cloud_routes.router)
         self.client = TestClient(app)
@@ -312,6 +414,10 @@ class RealLocalRcloneSyncTests(unittest.TestCase):
         self.status_dir.mkdir()
         self._old_rclone_config = os.environ.get("RCLONE_CONFIG")
         os.environ["RCLONE_CONFIG"] = str(self.conf)
+        from core import bulk_scheduler
+
+        bulk_scheduler.reset_for_tests(desired_path=root / "bulk_desired.json")
+        self.addCleanup(bulk_scheduler.reset_for_tests)
         cloud.reset_runner_for_tests()
         self.addCleanup(self._cleanup)
 
