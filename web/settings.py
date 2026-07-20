@@ -36,7 +36,7 @@ DEFAULT_SETTINGS = {
     "ssd_cache_gb": 100,
     "memory_cache_gb": 0.5,
     "cache_profile": "original_heavy",
-    "background_thumb_workers": 2,
+    "background_thumb_workers": 6,
     "pregen_generate_batch": 16,
     "pregen_batch_pause_ms": 250,
     "embed_batch_pause_ms": 250,
@@ -146,7 +146,7 @@ INT_RANGES = {
     "thumb_size_lg": (128, 8192),
     "thumb_quality": (40, 100),
     "ssd_cache_gb": (0, 4096),
-    "background_thumb_workers": (1, 4),
+    "background_thumb_workers": (1, 8),
     "pregen_generate_batch": (4, 64),
     "pregen_batch_pause_ms": (0, 5000),
     "embed_batch_pause_ms": (0, 5000),
@@ -307,8 +307,11 @@ def _derive_runtime_tuning(memory_cache_gb: float) -> dict:
             user_workers = min(user_workers, 6)
 
     cache_aggression = max(1, min(4, int(memory_cache_gb / 0.5) if memory_cache_gb > 0 else 1))
-    prefetch_target = min(user_workers - 2, user_workers // 2 + cache_aggression - 1)
-    prefetch_workers = _clamp(max(1, prefetch_target), 1, 4)
+    # Decode pool sized to ~cores: HDD governor is read-only (single-flight
+    # spindle), so demosaic must run in parallel. DecodeByteBudget still caps
+    # peak RAM (~768MB default → ~5 concurrent RAW frames on a 16GB box).
+    prefetch_target = max(user_workers - 1, user_workers // 2 + cache_aggression)
+    prefetch_workers = _clamp(max(1, prefetch_target), 1, min(8, cpu_count))
     warm_factor = max(1, prefetch_workers * cache_aggression)
 
     return {
@@ -619,10 +622,13 @@ def normalize_settings(raw: dict | None) -> dict:
         DEFAULT_SETTINGS["cloud_backup_nightly_enabled"],
     )
     normalized.update(_derive_runtime_tuning(normalized["memory_cache_gb"]))
-    normalized["prefetch_workers"] = min(
-        normalized["prefetch_workers"],
-        normalized["background_thumb_workers"],
-    )
+    # Decode pool tracks cores after the HDD-slot split. Lift a legacy
+    # background_thumb_workers=2 so it cannot re-serialize demosaic; operator
+    # can still raise the cap (range max 8). Keep the two knobs aligned.
+    pool = max(normalized["prefetch_workers"], normalized["background_thumb_workers"])
+    pool = min(pool, max(1, min(8, os.cpu_count() or 4)))
+    normalized["prefetch_workers"] = pool
+    normalized["background_thumb_workers"] = pool
     normalized["settings_version"] = SETTINGS_VERSION
 
     return normalized

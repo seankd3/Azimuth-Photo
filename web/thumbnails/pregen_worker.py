@@ -248,6 +248,9 @@ async def run_pregen_bulk_batch(
                     width=item.get("width"),
                     height=item.get("height"),
                 )
+                # Whole-file buffers stay in RAM across decode after the HDD
+                # slot split — charge source bytes on top of the demosaic peak.
+                estimate += max(0, int(item.get("source_size") or 0))
                 held_weights.append(await bulk_decode_budget.acquire(estimate))
                 wave.append(item)
 
