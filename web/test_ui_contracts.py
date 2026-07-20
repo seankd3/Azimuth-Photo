@@ -102,7 +102,7 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("'/static/js/mobile/bootstrap.js'", service_worker)
         self.assertIn("'/static/js/mobile/write_queue.js'", service_worker)
         self.assertIn("searchParams.get('v')", service_worker)
-        self.assertIn("thumbCacheFirst", service_worker)
+        self.assertIn("thumbStaleWhileRevalidate", service_worker)
         self.assertIn("pa-write-queue", service_worker)
         self.assertNotIn("style" + ".css", service_worker)
         self.assertNotIn("app" + ".js", service_worker)
