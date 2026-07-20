@@ -27,6 +27,9 @@ def pytest_configure(config):
         "markers",
         "playwright: browser-driven e2e proofs",
     )
+    # Unit tests stay in-process unless a test explicitly enables the pool.
+    # Spawning demosaic workers per test case is slow and unrelated to most asserts.
+    os.environ.setdefault("PHOTOARCHIVE_DEMOSAIC_PROCESSES", "0")
 
 
 def _worker_tag() -> str:

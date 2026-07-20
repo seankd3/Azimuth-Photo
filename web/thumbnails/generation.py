@@ -1,43 +1,19 @@
 import io
-import json
 import os
-import subprocess
 import time
 
 from PIL import Image, ImageOps
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
-
-
-def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:
-    """Apply libraw's container orientation to an untagged RAW image."""
-    transforms = {
-        1: Image.Transpose.FLIP_LEFT_RIGHT,
-        2: Image.Transpose.FLIP_TOP_BOTTOM,
-        3: Image.Transpose.ROTATE_180,
-        4: Image.Transpose.TRANSPOSE,
-        5: Image.Transpose.ROTATE_90,
-        6: Image.Transpose.ROTATE_270,
-        7: Image.Transpose.TRANSVERSE,
-    }
-    transform = transforms.get(int(flip or 0))
-    return img.transpose(transform) if transform is not None else img
-
-
-def _exiftool_raw_flip(filepath: str) -> int:
-    """Map the container Orientation tag to libraw's flip values when needed."""
-    try:
-        result = subprocess.run(
-            ["exiftool", "-n", "-j", "-Orientation", filepath],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-        )
-        orientation = int((json.loads(result.stdout) or [{}])[0].get("Orientation", 1))
-    except (OSError, ValueError, TypeError, json.JSONDecodeError, IndexError):
-        return 0
-    return {2: 1, 3: 3, 4: 2, 5: 4, 6: 6, 7: 7, 8: 5}.get(orientation, 0)
+from raw_thumb_ops import (
+    apply_raw_orientation,
+    demosaic_raw_for_thumbnail,
+    demosaic_tier_jpegs as _demosaic_tier_jpegs_local,
+    exiftool_raw_flip as _exiftool_raw_flip,
+    resize_to_long_side,
+    resize_to_long_side_exact,
+    thumbnail_jpeg_bytes,
+)
 
 
 def _raw_preview_flip(raw, filepath: str) -> int:
@@ -105,86 +81,6 @@ def load_raw_preview(
         return img
     img.close()
     return None
-
-
-def demosaic_raw_for_thumbnail(
-    filepath: str,
-    max_target: int,
-    *,
-    source_data: bytes | None = None,
-) -> Image.Image:
-    """Fast LibRaw (or lossy-DNG) demosaic for library thumbs — not Develop.
-
-    One demosaic per source. Prefers half_size whenever the half frame is
-    within ~25% of the target (mild upscale beats a multi-second full
-    demosaic for grid/loupe previews). Does not build or read the Develop
-    ``.bin.gz`` base cache.
-
-    When ``source_data`` is provided, demosaic from the in-RAM buffer (no disk).
-    """
-    import rawpy
-
-    try:
-        target = _raw_open_target(filepath, source_data)
-        with rawpy.imread(target) as raw:
-            sizes = raw.sizes
-            long_side = max(sizes.width, sizes.height)
-            # Full demosaic only when half-res would undershoot the target a lot
-            # (small RAWs, or tiny embeds forcing a demosaic for sm alone).
-            half_size = (long_side // 2) >= int(max_target * 0.75)
-            rgb = raw.postprocess(
-                use_camera_wb=True,
-                no_auto_bright=True,
-                half_size=half_size,
-                demosaic_algorithm=rawpy.DemosaicAlgorithm.LINEAR,
-            )
-        # postprocess already applies the container rotation; do not rotate again.
-        img = Image.fromarray(rgb)
-        del rgb
-        return img
-    except Exception:
-        # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
-        from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
-
-        lossy_path = filepath
-        tmp_path = None
-        try:
-            if source_data is not None:
-                import tempfile
-
-                tmp = tempfile.NamedTemporaryFile(
-                    suffix=os.path.splitext(filepath)[1] or ".dng",
-                    delete=False,
-                )
-                try:
-                    tmp.write(source_data)
-                    tmp.flush()
-                finally:
-                    tmp.close()
-                tmp_path = tmp.name
-                lossy_path = tmp_path
-            if not is_lossy_dng(lossy_path):
-                raise
-            import numpy as _np
-
-            arr, _meta = decode_lossy_dng(lossy_path, max_px=max(max_target, 512))
-            linear = arr.astype(_np.float32) / 65535.0
-            del arr
-            encoded = _np.where(
-                linear <= 0.0031308,
-                linear * 12.92,
-                1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
-            )
-            del linear
-            image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
-            del encoded
-            return apply_raw_orientation(image, _exiftool_raw_flip(lossy_path))
-        finally:
-            if tmp_path is not None:
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
 
 
 def partition_raw_thumbnail_tiers(
@@ -261,56 +157,6 @@ def load_source_image_from_bytes(
         return img
 
 
-def resize_to_long_side(img: Image.Image, target_long_side: int) -> Image.Image:
-    long_side = max(img.width, img.height)
-    if long_side <= target_long_side:
-        return img.copy()
-
-    factor = max(1, long_side // (target_long_side * 2))
-    if factor > 1:
-        img = img.reduce(factor)
-        long_side = max(img.width, img.height)
-
-    scale = target_long_side / long_side
-    new_size = (
-        max(1, int(round(img.width * scale))),
-        max(1, int(round(img.height * scale))),
-    )
-    resample = Image.BILINEAR if target_long_side >= 1920 else Image.LANCZOS
-    return img.resize(new_size, resample)
-
-
-def resize_to_long_side_exact(img: Image.Image, target_long_side: int) -> Image.Image:
-    """Like ``resize_to_long_side`` but upscales when the source is smaller.
-
-    Used for library demosaic frames that intentionally half-size decode
-    (~3k) then stretch to the lg tier (3840) — mild upscale beats a full
-    40–60MP demosaic for preview quality.
-    """
-    long_side = max(img.width, img.height)
-    if long_side == target_long_side:
-        return img.copy()
-    if long_side > target_long_side:
-        return resize_to_long_side(img, target_long_side)
-    scale = target_long_side / long_side
-    new_size = (
-        max(1, int(round(img.width * scale))),
-        max(1, int(round(img.height * scale))),
-    )
-    return img.resize(new_size, Image.BILINEAR)
-
-
-def thumbnail_jpeg_bytes(variant: Image.Image, size: str, quality: int) -> bytes:
-    buf = io.BytesIO()
-    variant.save(
-        buf,
-        "JPEG",
-        quality=quality,
-        progressive=(size != "sm"),
-    )
-    return buf.getvalue()
-
-
 def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orientation_queue) -> None:
     orientation = "landscape" if img.width >= img.height else "portrait"
     aspect_ratio = round(img.width / img.height, 4) if img.height > 0 else 1.5
@@ -343,20 +189,25 @@ def encode_and_cache_thumbnail(
     size: str,
     image_id: int,
     source_signature: str,
-    variant: Image.Image,
+    variant: Image.Image | None,
     *,
     hot: bool,
     thumb_quality: int,
     memory_put,
     write_thumbnail_to_disk,
     thumbnail_retry_after: dict,
-) -> tuple[Image.Image, bytes, bool]:
-    if variant.mode != "RGB":
-        converted = variant.convert("RGB")
-        variant.close()
-        variant = converted
-
-    data = thumbnail_jpeg_bytes(variant, size, thumb_quality)
+    preencoded: bytes | None = None,
+) -> tuple[Image.Image | None, bytes, bool]:
+    if preencoded is not None:
+        data = preencoded
+    else:
+        if variant is None:
+            raise ValueError("encode_and_cache_thumbnail requires variant or preencoded")
+        if variant.mode != "RGB":
+            converted = variant.convert("RGB")
+            variant.close()
+            variant = converted
+        data = thumbnail_jpeg_bytes(variant, size, thumb_quality)
     memory_put(size, image_id, source_signature, data)
     written = write_thumbnail_to_disk(size, image_id, source_signature, data, hot=hot)
     thumbnail_retry_after.pop((size, image_id, source_signature), None)
@@ -474,15 +325,16 @@ def _raw_library_sources(
     *,
     sizes: dict[str, int],
     source_data: bytes | None = None,
-) -> list[tuple[Image.Image, list[str], bool]]:
-    """Build one or two RAW sources: embed for covered tiers, demosaic for the rest.
+    demosaic: bool = True,
+) -> tuple[list[tuple[Image.Image, list[str], bool]], list[str]]:
+    """Split RAW work: embed for covered tiers; optionally demosaic uncovered.
 
-    Each tuple is ``(image, tiers, allow_upscale)``. Demosaic frames may be
-    half-size and need mild upscale to hit lg. When ``source_data`` is set,
-    both paths decode from RAM (HDD slot already released).
+    Returns ``(source_groups, uncovered_tiers)``. When ``demosaic`` is False
+    (process-pool path), uncovered tiers are returned for the caller to run
+    out-of-process — never demosaic on the calling thread.
     """
     if not needed_sizes:
-        return []
+        return [], []
 
     embedded = extract_embedded_raw_preview(filepath, source_data=source_data)
     emb_long = max(embedded.width, embedded.height) if embedded is not None else 0
@@ -498,7 +350,7 @@ def _raw_library_sources(
     elif embedded is not None:
         embedded.close()
 
-    if uncovered:
+    if uncovered and demosaic:
         max_target = max(sizes[size] for size in uncovered)
         sources.append(
             (
@@ -507,7 +359,83 @@ def _raw_library_sources(
                 True,
             )
         )
-    return sources
+        return sources, []
+    return sources, uncovered
+
+
+def run_demosaic_tier_jpegs(
+    filepath: str,
+    uncovered: list[str],
+    *,
+    sizes: dict[str, int],
+    thumb_quality: int,
+    source_data: bytes | None = None,
+    interactive: bool = False,
+) -> dict:
+    """Demosaic uncovered tiers via process pool (GIL bypass) or in-process."""
+    if not uncovered:
+        return {"jpegs": {}, "width": 0, "height": 0}
+    from . import demosaic_pool
+
+    if demosaic_pool.is_enabled():
+        return demosaic_pool.run_demosaic_tier_jpegs(
+            filepath,
+            uncovered,
+            sizes=sizes,
+            thumb_quality=thumb_quality,
+            source_data=source_data,
+            interactive=interactive,
+        )
+    return _demosaic_tier_jpegs_local(
+        filepath,
+        list(uncovered),
+        dict(sizes),
+        int(thumb_quality),
+        source_data=source_data,
+    )
+
+
+def cache_preencoded_thumbnails(
+    jpeg_by_size: dict[str, bytes],
+    *,
+    image_id: int,
+    filepath: str,
+    hot: bool,
+    sizes: dict[str, int],
+    encode_and_cache_thumbnail,
+    build_source_signature=None,
+    size_signatures: dict[str, str] | None = None,
+    fast_disk_has=None,
+    requested_size: str | None = None,
+) -> tuple[bytes | None, int]:
+    """Cache JPEG bytes from the demosaic process pool (no re-encode)."""
+    requested_data = None
+    written_count = 0
+    ordered = sorted(jpeg_by_size, key=lambda tier: sizes[tier], reverse=True)
+    for size in ordered:
+        data = jpeg_by_size[size]
+        source_signature = (
+            size_signatures[size]
+            if size_signatures is not None
+            else build_source_signature(filepath, size, image_id)
+        )
+        if fast_disk_has is not None and fast_disk_has(size, image_id, source_signature):
+            if requested_size is not None and size == requested_size:
+                requested_data = data
+            continue
+        _variant, stored, written = encode_and_cache_thumbnail(
+            size,
+            image_id,
+            source_signature,
+            None,
+            hot=hot,
+            preencoded=data,
+        )
+        if written:
+            written_count += 1
+        if requested_size is not None and size == requested_size:
+            requested_data = stored
+    return requested_data, written_count
 
 
 def generate_missing_thumbnails(
@@ -534,6 +462,7 @@ def generate_missing_thumbnails(
     raw_extensions: set[str] | frozenset[str] | None = None,
     source_data: bytes | None = None,
     load_source_image_from_bytes=None,
+    thumb_quality: int = 92,
 ):
     needed_sizes = planned_thumbnail_sizes(
         filepath,
@@ -555,17 +484,20 @@ def generate_missing_thumbnails(
         use_raw_split = raw_extensions is not None and ext in raw_extensions
 
         if use_raw_split:
-            source_groups = _raw_library_sources(
+            # Embedded preview stays on this thread (releases GIL). Demosaic
+            # goes through the process pool so rawpy.postprocess can parallelize.
+            source_groups, uncovered = _raw_library_sources(
                 filepath,
                 needed_sizes,
                 sizes=sizes,
                 source_data=source_data,
+                demosaic=False,
             )
-            if not source_groups:
+            if not source_groups and not uncovered:
                 return None
-            for source_img, group_sizes, allow_upscale in source_groups:
+            for index, (source_img, group_sizes, allow_upscale) in enumerate(source_groups):
                 owned_sources.append(source_img)
-                if on_source_loaded is not None and source_img is source_groups[0][0]:
+                if on_source_loaded is not None and index == 0:
                     on_source_loaded(source_data, source_img)
                 queue_orientation(image_id, source_img)
                 ladder_variant, group_requested, _written = _encode_size_ladder(
@@ -585,6 +517,39 @@ def generate_missing_thumbnails(
                     requested_data = group_requested
                 if ladder_variant is not None:
                     ladder_variant.close()
+            if uncovered:
+                pool_result = run_demosaic_tier_jpegs(
+                    filepath,
+                    uncovered,
+                    sizes=sizes,
+                    thumb_quality=thumb_quality,
+                    source_data=source_data,
+                    interactive=True,
+                )
+                jpegs = pool_result.get("jpegs") or {}
+                if jpegs:
+                    width = int(pool_result.get("width") or 0)
+                    height = int(pool_result.get("height") or 0)
+                    if not source_groups and width > 0 and height > 0:
+                        orient = Image.new("RGB", (width, height))
+                        try:
+                            if on_source_loaded is not None:
+                                on_source_loaded(source_data, orient)
+                            queue_orientation(image_id, orient)
+                        finally:
+                            orient.close()
+                    group_requested, _written = cache_preencoded_thumbnails(
+                        jpegs,
+                        image_id=image_id,
+                        filepath=filepath,
+                        hot=hot,
+                        sizes=sizes,
+                        encode_and_cache_thumbnail=encode_and_cache_thumbnail,
+                        build_source_signature=build_source_signature,
+                        requested_size=requested_size,
+                    )
+                    if group_requested is not None:
+                        requested_data = group_requested
         else:
             max_target = max(sizes[size] for size in needed_sizes)
             prefer_draft = max_target <= sizes["sm"]
@@ -672,6 +637,7 @@ def generate_thumbnail_set(
     on_source_loaded=None,
     raw_extensions: set[str] | frozenset[str] | None = None,
     source_data: bytes | None = None,
+    thumb_quality: int = 92,
 ) -> dict:
     """Generate cache tiers for one image during a single warm-up pass.
 
@@ -775,13 +741,14 @@ def generate_thumbnail_set(
                     0.0, monotonic_provider() - process_started
                 )
             elif use_raw_split:
-                # Embedded preview covers sm (and any tier ≤ embed long-side);
-                # demosaic once for the rest. Never builds Develop .bin.gz.
-                source_groups = _raw_library_sources(
+                # Embedded preview covers sm (thread pool — releases GIL);
+                # demosaic for the rest runs in the process pool (GIL bypass).
+                source_groups, uncovered = _raw_library_sources(
                     filepath,
                     needed_sizes,
                     sizes=sizes,
                     source_data=file_bytes,
+                    demosaic=False,
                 )
                 if file_bytes is None:
                     metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
@@ -789,7 +756,7 @@ def generate_thumbnail_set(
                 else:
                     metrics["read_seconds"] = 0.0
                     metrics["source_bytes"] = len(file_bytes)
-                metrics["source_reads"] = 1 if source_groups else 0
+                metrics["source_reads"] = 1 if (source_groups or uncovered) else 0
                 process_started = monotonic_provider()
                 for index, (source_img, group_sizes, allow_upscale) in enumerate(source_groups):
                     owned_sources.append(source_img)
@@ -812,6 +779,38 @@ def generate_thumbnail_set(
                     metrics["thumbnails_written"] += written
                     if ladder_variant is not None:
                         ladder_variant.close()
+                if uncovered:
+                    pool_result = run_demosaic_tier_jpegs(
+                        filepath,
+                        uncovered,
+                        sizes=sizes,
+                        thumb_quality=thumb_quality,
+                        source_data=file_bytes,
+                        interactive=False,
+                    )
+                    jpegs = pool_result.get("jpegs") or {}
+                    if jpegs:
+                        width = int(pool_result.get("width") or 0)
+                        height = int(pool_result.get("height") or 0)
+                        if not source_groups and width > 0 and height > 0:
+                            orient = Image.new("RGB", (width, height))
+                            try:
+                                if on_source_loaded is not None:
+                                    on_source_loaded(file_bytes, orient)
+                                queue_orientation(image_id, orient)
+                            finally:
+                                orient.close()
+                        _requested, written = cache_preencoded_thumbnails(
+                            jpegs,
+                            image_id=image_id,
+                            filepath=filepath,
+                            hot=hot,
+                            sizes=sizes,
+                            encode_and_cache_thumbnail=encode_and_cache_thumbnail,
+                            size_signatures=size_signatures,
+                            fast_disk_has=fast_disk_has,
+                        )
+                        metrics["thumbnails_written"] += written
                 metrics["decode_encode_seconds"] = max(
                     0.0, monotonic_provider() - process_started
                 )

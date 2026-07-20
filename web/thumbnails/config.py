@@ -37,6 +37,10 @@ MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS = 5.0
 ON_DEMAND_HEAVY_DECODE_LIMIT = int(
     os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")
 )
+# Process-pool size for GIL-bound RAW demosaic (0 = in-process). Default
+# min(ncores-1, 6) — see thumbnails.demosaic_pool / PROCDEMOSAIC.md.
+DEMOSAIC_PROCESSES_ENV = "PHOTOARCHIVE_DEMOSAIC_PROCESSES"
+DEMOSAIC_IPC_ENV = "PHOTOARCHIVE_DEMOSAIC_IPC"
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
 # Thumb URLs are /api/thumb/{size}/{id} (not content-hashed), so immutable is unsafe.
 # Long max-age + ETag: browsers skip the network for a week, then revalidate cheaply.

@@ -737,10 +737,11 @@ def _encode_and_cache_thumbnail(
     size: str,
     image_id: int,
     source_signature: str,
-    variant: Image.Image,
+    variant,
     *,
     hot: bool,
-) -> tuple[Image.Image, bytes, bool]:
+    preencoded: bytes | None = None,
+) -> tuple:
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
 
     return generation.encode_and_cache_thumbnail(
@@ -753,6 +754,7 @@ def _encode_and_cache_thumbnail(
         memory_put=_memory_put,
         write_thumbnail_to_disk=_write_thumbnail_to_disk,
         thumbnail_retry_after=_thumbnail_retry_after,
+        preencoded=preencoded,
     )
 
 
@@ -840,6 +842,7 @@ def _generate_missing_thumbnails_sync(
             raw_extensions=RAW_EXTENSIONS,
             source_data=source_data,
             load_source_image_from_bytes=_load_source_image_from_bytes,
+            thumb_quality=THUMB_QUALITY,
         )
 
     need_hash, need_metadata = False, False
@@ -912,6 +915,7 @@ def _generate_thumbnail_set_sync(
             on_source_loaded=kwargs.get("on_source_loaded"),
             raw_extensions=RAW_EXTENSIONS,
             source_data=kwargs.get("source_data"),
+            thumb_quality=THUMB_QUALITY,
         )
 
     if not need_hash and not need_metadata:
