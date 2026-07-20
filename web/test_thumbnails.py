@@ -532,6 +532,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             "active_phase": None,
             "started_at": None,
             "last_generated_at": None,
+            "last_progress_at": None,
             "generated_this_session": 0,
             "last_error": "",
         }
@@ -692,6 +693,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             "active_phase": None,
             "started_at": None,
             "last_generated_at": None,
+            "last_progress_at": None,
             "generated_this_session": 7,
             "last_error": "",
         }
@@ -743,6 +745,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             self.assertEqual(facade_return, 4)
             self.assertEqual(thumbnails._pregen_status["generated_this_session"], 9)
             self.assertEqual(thumbnails._pregen_status["last_generated_at"], 55.5)
+            self.assertEqual(thumbnails._pregen_status["last_progress_at"], 55.5)
             self.assertEqual(facade_batches[0][0], 2)
             self.assertEqual(facade_batches[0][1]["thumbnails_written"], 3)
             self.assertEqual(facade_batches[0][1]["source_bytes"], 1024)
@@ -753,14 +756,16 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
                 failure_only_result,
                 direct_status,
                 record_batch=direct_record_batch,
-                now_provider=lambda: self.fail("failure-only result should not update generation time"),
+                # Failures bump last_progress_at (stall heartbeat) but not last_generated_at.
+                now_provider=lambda: 66.6,
             )
 
             thumbnails._pregen_status = dict(base_status)
             facade_batches = []
-            thumbnails._current_time = lambda: self.fail(
-                "failure-only result should not update generation time"
+            thumbnails._record_pregen_batch = (
+                lambda count, **kwargs: facade_batches.append((count, kwargs))
             )
+            thumbnails._current_time = lambda: 66.6
 
             facade_return = thumbnails._record_pregen_result(failure_only_result)
 
@@ -770,6 +775,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             self.assertEqual(facade_return, 0)
             self.assertEqual(thumbnails._pregen_status["generated_this_session"], 7)
             self.assertIsNone(thumbnails._pregen_status["last_generated_at"])
+            self.assertEqual(thumbnails._pregen_status["last_progress_at"], 66.6)
             self.assertEqual(facade_batches[0][0], 0)
             self.assertEqual(facade_batches[0][1]["source_read_failures"], 1)
         finally:

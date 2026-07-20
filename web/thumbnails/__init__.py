@@ -86,6 +86,7 @@ _pregen_status = {
     "active_phase": None,
     "started_at": None,
     "last_generated_at": None,
+    "last_progress_at": None,
     "generated_this_session": 0,
     "last_error": "",
     "priority_scope": None,
@@ -1364,6 +1365,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         record_pregen_result=_record_pregen_result,
         activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
         prefetch_workers=_prefetch_workers_count,
+        note_progress=lambda: _pregen_status.__setitem__("last_progress_at", _current_time()),
     )
 
 

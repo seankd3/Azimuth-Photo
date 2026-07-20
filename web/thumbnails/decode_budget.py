@@ -84,48 +84,94 @@ def estimate_decode_bytes(
 
 
 class DecodeByteBudget:
-    """Async weighted semaphore over estimated decoded-frame bytes."""
+    """Async weighted semaphore over estimated decoded-frame bytes.
+
+    Holds are epoch-stamped. ``reset()`` bumps the epoch so a cancelled batch's
+    late ``release`` cannot steal weight from a newer acquisition (watchdog
+    reset → cancel → finally race). ``release_nowait`` is safe inside a
+    cancelled task's ``finally`` (no await).
+    """
 
     def __init__(self, max_bytes: int | None = None):
         self.max_bytes = max(MIN_DECODE_ESTIMATE_BYTES, int(max_bytes or MAX_INFLIGHT_DECODE_BYTES))
         self._used = 0
+        self._epoch = 0
         self._cond = asyncio.Condition()
 
     @property
     def used_bytes(self) -> int:
         return self._used
 
+    @property
+    def epoch(self) -> int:
+        return self._epoch
+
     def reset(self) -> int:
         """Drop held weight — recovery path for a stalled/leaked budget.
 
         Returns the bytes that were marked in-use before the reset.
+        Bumps epoch so in-flight releases from the cancelled generation are no-ops.
         """
         leaked = self._used
         self._used = 0
+        self._epoch += 1
         return leaked
 
     async def acquire(self, estimate: int) -> int:
         weight = max(MIN_DECODE_ESTIMATE_BYTES, int(estimate or 0))
         # Never block forever on a single frame larger than the budget.
         weight = min(weight, self.max_bytes)
-        async with self._cond:
-            while self._used > 0 and self._used + weight > self.max_bytes:
-                # Timed wait so cancellation / watchdog can interrupt; the
-                # pregen self-watchdog resets leaked weight on stall.
-                try:
-                    await asyncio.wait_for(
-                        self._cond.wait(),
-                        timeout=DECODE_BUDGET_WAIT_SECONDS,
-                    )
-                except TimeoutError:
-                    continue
-            self._used += weight
-        return weight
+        charged = False
+        try:
+            async with self._cond:
+                while self._used > 0 and self._used + weight > self.max_bytes:
+                    # Timed wait so cancellation / watchdog can interrupt; the
+                    # pregen self-watchdog resets leaked weight on stall.
+                    try:
+                        await asyncio.wait_for(
+                            self._cond.wait(),
+                            timeout=DECODE_BUDGET_WAIT_SECONDS,
+                        )
+                    except TimeoutError:
+                        continue
+                self._used += weight
+                charged = True
+            return weight
+        except asyncio.CancelledError:
+            # If we charged then got cancelled before the caller stored the
+            # weight (or during lock exit), drop it synchronously.
+            if charged:
+                self.release_nowait(weight, epoch=self._epoch)
+                self.wake_waiters_soon()
+            raise
 
-    async def release(self, weight: int) -> None:
+    def release_nowait(self, weight: int, *, epoch: int | None = None) -> bool:
+        """Release without awaiting — safe from cancel-interrupted finally blocks.
+
+        Returns False when ``epoch`` is stale (hold was already cleared by reset).
+        """
+        if epoch is not None and epoch != self._epoch:
+            return False
+        self._used = max(0, self._used - max(0, int(weight or 0)))
+        return True
+
+    def wake_waiters_soon(self) -> None:
+        """Schedule a condition notify without awaiting (cancel-safe)."""
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+
+        async def _notify() -> None:
+            async with self._cond:
+                self._cond.notify_all()
+
+        loop.create_task(_notify())
+
+    async def release(self, weight: int, *, epoch: int | None = None) -> None:
         async with self._cond:
-            self._used = max(0, self._used - max(0, int(weight or 0)))
-            self._cond.notify_all()
+            if self.release_nowait(weight, epoch=epoch):
+                self._cond.notify_all()
 
     async def reset_and_notify(self) -> int:
         async with self._cond:
@@ -136,10 +182,13 @@ class DecodeByteBudget:
     @asynccontextmanager
     async def hold(self, estimate: int):
         weight = await self.acquire(estimate)
+        epoch = self._epoch
         try:
             yield weight
         finally:
-            await self.release(weight)
+            # Never await here — CancelledError must not skip the release.
+            if self.release_nowait(weight, epoch=epoch):
+                self.wake_waiters_soon()
 
 
 # Process-wide bulk decode budget (one archive process).
