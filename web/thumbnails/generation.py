@@ -45,18 +45,32 @@ def _raw_preview_flip(raw, filepath: str) -> int:
     return int(flip) if flip is not None else _exiftool_raw_flip(filepath)
 
 
-def extract_embedded_raw_preview(filepath: str) -> Image.Image | None:
+def _raw_open_target(filepath: str, source_data: bytes | None = None):
+    """Path or BytesIO for rawpy.imread — caller must keep BytesIO alive."""
+    if source_data is not None:
+        return io.BytesIO(source_data)
+    return filepath
+
+
+def extract_embedded_raw_preview(
+    filepath: str,
+    *,
+    source_data: bytes | None = None,
+) -> Image.Image | None:
     """Extract the oriented embedded JPEG/bitmap from a RAW — no size gate.
 
     Library thumbs use this for every tier the embed can cover without
     upscaling (typically sm at 400 from a ~1024px DNG preview). Larger
     tiers demosaic once via ``demosaic_raw_for_thumbnail`` instead of
     running Develop's linear base + gzip path.
+
+    When ``source_data`` is provided, decode from the in-RAM buffer (no disk).
     """
     import rawpy
 
     try:
-        with rawpy.imread(filepath) as raw:
+        target = _raw_open_target(filepath, source_data)
+        with rawpy.imread(target) as raw:
             thumb = raw.extract_thumb()
             raw_flip = _raw_preview_flip(raw, filepath)
         if thumb.format == rawpy.ThumbFormat.JPEG:
@@ -77,9 +91,14 @@ def extract_embedded_raw_preview(filepath: str) -> Image.Image | None:
     return None
 
 
-def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
+def load_raw_preview(
+    filepath: str,
+    max_target: int,
+    *,
+    source_data: bytes | None = None,
+) -> Image.Image | None:
     """Return the embedded RAW preview only when it covers ``max_target``."""
-    img = extract_embedded_raw_preview(filepath)
+    img = extract_embedded_raw_preview(filepath, source_data=source_data)
     if img is None:
         return None
     if max(img.width, img.height) >= max_target:
@@ -88,18 +107,26 @@ def load_raw_preview(filepath: str, max_target: int) -> Image.Image | None:
     return None
 
 
-def demosaic_raw_for_thumbnail(filepath: str, max_target: int) -> Image.Image:
+def demosaic_raw_for_thumbnail(
+    filepath: str,
+    max_target: int,
+    *,
+    source_data: bytes | None = None,
+) -> Image.Image:
     """Fast LibRaw (or lossy-DNG) demosaic for library thumbs — not Develop.
 
     One demosaic per source. Prefers half_size whenever the half frame is
     within ~25% of the target (mild upscale beats a multi-second full
     demosaic for grid/loupe previews). Does not build or read the Develop
     ``.bin.gz`` base cache.
+
+    When ``source_data`` is provided, demosaic from the in-RAM buffer (no disk).
     """
     import rawpy
 
     try:
-        with rawpy.imread(filepath) as raw:
+        target = _raw_open_target(filepath, source_data)
+        with rawpy.imread(target) as raw:
             sizes = raw.sizes
             long_side = max(sizes.width, sizes.height)
             # Full demosaic only when half-res would undershoot the target a lot
@@ -119,22 +146,45 @@ def demosaic_raw_for_thumbnail(filepath: str, max_target: int) -> Image.Image:
         # Lossy (JPEG XL) DNGs: decode a pyramid level and display-encode.
         from features.develop.lossydng import decode_lossy_dng, is_lossy_dng
 
-        if not is_lossy_dng(filepath):
-            raise
-        import numpy as _np
+        lossy_path = filepath
+        tmp_path = None
+        try:
+            if source_data is not None:
+                import tempfile
 
-        arr, _meta = decode_lossy_dng(filepath, max_px=max(max_target, 512))
-        linear = arr.astype(_np.float32) / 65535.0
-        del arr
-        encoded = _np.where(
-            linear <= 0.0031308,
-            linear * 12.92,
-            1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
-        )
-        del linear
-        image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
-        del encoded
-        return apply_raw_orientation(image, _exiftool_raw_flip(filepath))
+                tmp = tempfile.NamedTemporaryFile(
+                    suffix=os.path.splitext(filepath)[1] or ".dng",
+                    delete=False,
+                )
+                try:
+                    tmp.write(source_data)
+                    tmp.flush()
+                finally:
+                    tmp.close()
+                tmp_path = tmp.name
+                lossy_path = tmp_path
+            if not is_lossy_dng(lossy_path):
+                raise
+            import numpy as _np
+
+            arr, _meta = decode_lossy_dng(lossy_path, max_px=max(max_target, 512))
+            linear = arr.astype(_np.float32) / 65535.0
+            del arr
+            encoded = _np.where(
+                linear <= 0.0031308,
+                linear * 12.92,
+                1.055 * _np.power(_np.clip(linear, 0.0, 1.0), 1.0 / 2.4) - 0.055,
+            )
+            del linear
+            image = Image.fromarray((_np.clip(encoded, 0.0, 1.0) * 255.0 + 0.5).astype(_np.uint8))
+            del encoded
+            return apply_raw_orientation(image, _exiftool_raw_flip(lossy_path))
+        finally:
+            if tmp_path is not None:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
 
 def partition_raw_thumbnail_tiers(
@@ -192,15 +242,14 @@ def load_source_image_from_bytes(
     jpeg_extensions: set[str],
     raw_extensions: set[str],
 ) -> Image.Image:
+    """Decode from an in-RAM original buffer — no second spindle touch."""
+    del prefer_draft  # draft sizing is applied for JPEG below; kept for API parity
     ext = os.path.splitext(filepath)[1].lower()
     if ext in raw_extensions:
-        return load_source_image(
-            filepath,
-            max_target,
-            prefer_draft,
-            jpeg_extensions=jpeg_extensions,
-            raw_extensions=raw_extensions,
-        )
+        preview = load_raw_preview(filepath, max_target, source_data=data)
+        if preview is not None:
+            return preview
+        return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
 
     with Image.open(io.BytesIO(data)) as source:
         if ext in jpeg_extensions:
@@ -424,16 +473,18 @@ def _raw_library_sources(
     needed_sizes: list[str],
     *,
     sizes: dict[str, int],
+    source_data: bytes | None = None,
 ) -> list[tuple[Image.Image, list[str], bool]]:
     """Build one or two RAW sources: embed for covered tiers, demosaic for the rest.
 
     Each tuple is ``(image, tiers, allow_upscale)``. Demosaic frames may be
-    half-size and need mild upscale to hit lg.
+    half-size and need mild upscale to hit lg. When ``source_data`` is set,
+    both paths decode from RAM (HDD slot already released).
     """
     if not needed_sizes:
         return []
 
-    embedded = extract_embedded_raw_preview(filepath)
+    embedded = extract_embedded_raw_preview(filepath, source_data=source_data)
     emb_long = max(embedded.width, embedded.height) if embedded is not None else 0
     covered, uncovered = partition_raw_thumbnail_tiers(
         needed_sizes,
@@ -449,7 +500,13 @@ def _raw_library_sources(
 
     if uncovered:
         max_target = max(sizes[size] for size in uncovered)
-        sources.append((demosaic_raw_for_thumbnail(filepath, max_target), uncovered, True))
+        sources.append(
+            (
+                demosaic_raw_for_thumbnail(filepath, max_target, source_data=source_data),
+                uncovered,
+                True,
+            )
+        )
     return sources
 
 
@@ -475,6 +532,8 @@ def generate_missing_thumbnails(
     log=print,
     on_source_loaded=None,
     raw_extensions: set[str] | frozenset[str] | None = None,
+    source_data: bytes | None = None,
+    load_source_image_from_bytes=None,
 ):
     needed_sizes = planned_thumbnail_sizes(
         filepath,
@@ -496,13 +555,18 @@ def generate_missing_thumbnails(
         use_raw_split = raw_extensions is not None and ext in raw_extensions
 
         if use_raw_split:
-            source_groups = _raw_library_sources(filepath, needed_sizes, sizes=sizes)
+            source_groups = _raw_library_sources(
+                filepath,
+                needed_sizes,
+                sizes=sizes,
+                source_data=source_data,
+            )
             if not source_groups:
                 return None
             for source_img, group_sizes, allow_upscale in source_groups:
                 owned_sources.append(source_img)
                 if on_source_loaded is not None and source_img is source_groups[0][0]:
-                    on_source_loaded(None, source_img)
+                    on_source_loaded(source_data, source_img)
                 queue_orientation(image_id, source_img)
                 ladder_variant, group_requested, _written = _encode_size_ladder(
                     source_img,
@@ -524,9 +588,19 @@ def generate_missing_thumbnails(
         else:
             max_target = max(sizes[size] for size in needed_sizes)
             prefer_draft = max_target <= sizes["sm"]
-            img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
+            if source_data is not None and load_source_image_from_bytes is not None:
+                img = load_source_image_from_bytes(
+                    filepath,
+                    source_data,
+                    max_target,
+                    prefer_draft=prefer_draft,
+                )
+            else:
+                img = load_source_image(
+                    filepath, max_target, prefer_draft=prefer_draft, image_id=image_id
+                )
             if on_source_loaded is not None:
-                on_source_loaded(None, img)
+                on_source_loaded(source_data, img)
             queue_orientation(image_id, img)
 
             current, requested_data, _written = _encode_size_ladder(
@@ -597,8 +671,13 @@ def generate_thumbnail_set(
     log=print,
     on_source_loaded=None,
     raw_extensions: set[str] | frozenset[str] | None = None,
+    source_data: bytes | None = None,
 ) -> dict:
-    """Generate cache tiers for one image during a single warm-up pass."""
+    """Generate cache tiers for one image during a single warm-up pass.
+
+    When ``source_data`` is provided (bulk harvest after the HDD slot released),
+    all decode paths use the in-RAM buffer — no further spindle opens.
+    """
     needed_sizes = [
         size for size in sorted(size_signatures, key=lambda tier: sizes[tier], reverse=True)
         if size in thumb_tiers
@@ -617,7 +696,7 @@ def generate_thumbnail_set(
 
     img = None
     current = None
-    source_data = None
+    file_bytes = source_data
     owned_sources: list[Image.Image] = []
     try:
         if needed_sizes:
@@ -640,29 +719,34 @@ def generate_thumbnail_set(
             ):
                 max_target = max(sizes[size] for size in needed_sizes)
                 prefer_draft = max_target <= sizes["sm"]
-                with open(filepath, "rb") as f:
-                    source_data = f.read()
+                if file_bytes is None:
+                    with open(filepath, "rb") as f:
+                        file_bytes = f.read()
+                    metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+                else:
+                    # Caller already timed the spindle read under the HDD gate.
+                    metrics["read_seconds"] = 0.0
                 img = load_source_image_from_bytes(
                     filepath,
-                    source_data,
+                    file_bytes,
                     max_target,
                     prefer_draft=prefer_draft,
                 )
-                metrics["source_bytes"] = len(source_data)
+                metrics["source_bytes"] = len(file_bytes)
                 if on_source_loaded is not None:
-                    on_source_loaded(source_data, img)
+                    on_source_loaded(file_bytes, img)
                 # Write the SSD original before the encode loop so we can drop
-                # source_data instead of holding file bytes + decoded frames.
+                # file_bytes instead of holding file bytes + decoded frames.
                 full_id = int(full_item["id"])
                 result = cache_full_image_bytes_sync(
                     full_item["filepath"],
                     full_id,
                     full_item["signature"],
-                    source_data,
+                    file_bytes,
                     hot=False,
                     room_prechecked=True,
                 )
-                source_data = None
+                file_bytes = None
                 if result != full_item["filepath"] and fast_disk_has(
                     full_tier,
                     full_id,
@@ -670,7 +754,6 @@ def generate_thumbnail_set(
                 ):
                     metrics["originals_written"] = 1
                 full_item = None
-                metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
                 metrics["source_reads"] = 1
                 queue_orientation(image_id, img)
 
@@ -694,15 +777,24 @@ def generate_thumbnail_set(
             elif use_raw_split:
                 # Embedded preview covers sm (and any tier ≤ embed long-side);
                 # demosaic once for the rest. Never builds Develop .bin.gz.
-                source_groups = _raw_library_sources(filepath, needed_sizes, sizes=sizes)
-                metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+                source_groups = _raw_library_sources(
+                    filepath,
+                    needed_sizes,
+                    sizes=sizes,
+                    source_data=file_bytes,
+                )
+                if file_bytes is None:
+                    metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+                    metrics["source_bytes"] = int(source_bytes or 0)
+                else:
+                    metrics["read_seconds"] = 0.0
+                    metrics["source_bytes"] = len(file_bytes)
                 metrics["source_reads"] = 1 if source_groups else 0
-                metrics["source_bytes"] = int(source_bytes or 0)
                 process_started = monotonic_provider()
                 for index, (source_img, group_sizes, allow_upscale) in enumerate(source_groups):
                     owned_sources.append(source_img)
                     if on_source_loaded is not None and index == 0:
-                        on_source_loaded(None, source_img)
+                        on_source_loaded(file_bytes, source_img)
                     queue_orientation(image_id, source_img)
                     ladder_variant, _requested, written = _encode_size_ladder(
                         source_img,
@@ -726,11 +818,25 @@ def generate_thumbnail_set(
             else:
                 max_target = max(sizes[size] for size in needed_sizes)
                 prefer_draft = max_target <= sizes["sm"]
-                img = load_source_image(filepath, max_target, prefer_draft=prefer_draft, image_id=image_id)
-                metrics["source_bytes"] = int(source_bytes or 0)
-                if on_source_loaded is not None:
-                    on_source_loaded(None, img)
-                metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+                if file_bytes is not None:
+                    img = load_source_image_from_bytes(
+                        filepath,
+                        file_bytes,
+                        max_target,
+                        prefer_draft=prefer_draft,
+                    )
+                    metrics["source_bytes"] = len(file_bytes)
+                    metrics["read_seconds"] = 0.0
+                    if on_source_loaded is not None:
+                        on_source_loaded(file_bytes, img)
+                else:
+                    img = load_source_image(
+                        filepath, max_target, prefer_draft=prefer_draft, image_id=image_id
+                    )
+                    metrics["source_bytes"] = int(source_bytes or 0)
+                    metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
+                    if on_source_loaded is not None:
+                        on_source_loaded(None, img)
                 metrics["source_reads"] = 1
                 queue_orientation(image_id, img)
 
@@ -754,20 +860,37 @@ def generate_thumbnail_set(
 
         if full_item:
             full_id = int(full_item["id"])
-            full_started = monotonic_provider()
-            result = cache_full_image_sync(
-                full_item["filepath"],
-                full_id,
-                full_item["signature"],
-                hot=False,
-                room_prechecked=True,
-            )
-            full_seconds = max(0.0, monotonic_provider() - full_started)
-            if result != full_item["filepath"]:
-                metrics["read_seconds"] += full_seconds
-                metrics["source_bytes"] += int(full_item.get("source_size") or 0)
+            if file_bytes is not None:
+                full_started = monotonic_provider()
+                result = cache_full_image_bytes_sync(
+                    full_item["filepath"],
+                    full_id,
+                    full_item["signature"],
+                    file_bytes,
+                    hot=False,
+                    room_prechecked=True,
+                )
+                full_seconds = max(0.0, monotonic_provider() - full_started)
+                # Bytes already in RAM — this is an SSD write, not a spindle read.
+                metrics["decode_encode_seconds"] += full_seconds
                 if metrics["source_reads"] <= 0:
                     metrics["source_reads"] = 1
+                    metrics["source_bytes"] = max(metrics["source_bytes"], len(file_bytes))
+            else:
+                full_started = monotonic_provider()
+                result = cache_full_image_sync(
+                    full_item["filepath"],
+                    full_id,
+                    full_item["signature"],
+                    hot=False,
+                    room_prechecked=True,
+                )
+                full_seconds = max(0.0, monotonic_provider() - full_started)
+                if result != full_item["filepath"]:
+                    metrics["read_seconds"] += full_seconds
+                    metrics["source_bytes"] += int(full_item.get("source_size") or 0)
+                    if metrics["source_reads"] <= 0:
+                        metrics["source_reads"] = 1
             if result != full_item["filepath"] and fast_disk_has(
                 full_tier,
                 full_id,

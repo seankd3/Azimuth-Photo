@@ -818,7 +818,7 @@ def _generate_missing_thumbnails_sync(
     from . import harvest
     import photo_metadata
 
-    def _generate(*_args, on_source_loaded=None, **_ignored):
+    def _generate(*_args, on_source_loaded=None, source_data=None, **_ignored):
         return generation.generate_missing_thumbnails(
             filepath,
             requested_size,
@@ -838,6 +838,8 @@ def _generate_missing_thumbnails_sync(
             thumbnail_retry_seconds=THUMBNAIL_RETRY_SECONDS,
             on_source_loaded=on_source_loaded,
             raw_extensions=RAW_EXTENSIONS,
+            source_data=source_data,
+            load_source_image_from_bytes=_load_source_image_from_bytes,
         )
 
     need_hash, need_metadata = False, False
@@ -909,6 +911,7 @@ def _generate_thumbnail_set_sync(
             log=print,
             on_source_loaded=kwargs.get("on_source_loaded"),
             raw_extensions=RAW_EXTENSIONS,
+            source_data=kwargs.get("source_data"),
         )
 
     if not need_hash and not need_metadata:
