@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+from core.background import track_background_task
 from core.requests import RequestBodyTooLarge, read_body_limited
 from core.source_files import source_file_is_safe
 from data.repositories import images as image_repository
@@ -235,7 +236,7 @@ async def api_sync_hash_backfill():
         return {"ok": True, "started": False, "backfill": dict(_backfill_status)}
     _backfill_status.clear()
     _backfill_status.update(state="queued", counts={}, error="")
-    _backfill_task = asyncio.create_task(hub.run_hash_backfill(_configured_db_path(), _backfill_status))
+    _backfill_task = track_background_task(hub.run_hash_backfill(_configured_db_path(), _backfill_status))
     return {"ok": True, "started": True, "backfill": dict(_backfill_status)}
 
 

@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from core.background import track_background_task
 from core.requests import json_object
 from features.develop import importer, lrcat_import
 
@@ -58,7 +59,7 @@ async def api_scan_develop_import(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=400)
     if claimed_root is None:
         return JSONResponse({"error": "Develop import is already running", "status": importer.import_status()}, status_code=409)
-    asyncio.create_task(_scan_in_background(claimed_root, _configured_db_path()))
+    track_background_task(_scan_in_background(claimed_root, _configured_db_path()))
     return {"started": True, "status": importer.import_status()}
 
 
@@ -68,7 +69,10 @@ async def api_develop_import_status():
 
 
 async def _scan_lrcat_in_background(paths: list[str], db_path: str) -> None:
-    await asyncio.to_thread(lrcat_import.scan_catalogs, paths, db_path, claimed=True)
+    try:
+        await asyncio.to_thread(lrcat_import.scan_catalogs, paths, db_path, claimed=True)
+    except Exception:
+        _LOG.exception("Lightroom catalog import worker failed")
 
 
 @router.post("/api/develop/lrcat/scan")
@@ -85,7 +89,7 @@ async def api_scan_lrcat(request: Request):
         return JSONResponse({"error": "No Lightroom catalogs found"}, status_code=404)
     if not lrcat_import.begin_scan():
         return JSONResponse({"error": "Lightroom catalog import is already running", "status": lrcat_import.import_status()}, status_code=409)
-    asyncio.create_task(_scan_lrcat_in_background(paths, _configured_db_path()))
+    track_background_task(_scan_lrcat_in_background(paths, _configured_db_path()))
     return {"started": True, "catalogs": paths, "status": lrcat_import.import_status()}
 
 

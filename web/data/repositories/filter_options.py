@@ -2,11 +2,15 @@
 
 import asyncio
 from collections import Counter
+import logging
 import time as _time
 
+from core.background import track_background_task
 from data import connection
 from data.repositories.common import stage_temp_ids_sync
 from data.repositories.rankings import ranking_filter_parts
+
+log = logging.getLogger(__name__)
 
 _filter_options_cache = {"data": None, "expires": 0}
 _filter_options_refreshing = False
@@ -71,10 +75,12 @@ async def filter_options_cached(
                         get_active_source_id_set=get_active_source_id_set,
                         ttl_seconds=ttl_seconds,
                     )
+                except Exception:
+                    log.exception("filter options background refresh failed")
                 finally:
                     _filter_options_refreshing = False
 
-            asyncio.create_task(_refresh_filter_options())
+            track_background_task(_refresh_filter_options())
         return data
     return await load_filter_options_uncached(
         db_path,

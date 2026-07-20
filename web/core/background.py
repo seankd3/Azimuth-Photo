@@ -16,6 +16,7 @@ __all__ = (
     "install_idle_activity_middleware",
     "marks_user_activity",
     "run_shutdown",
+    "track_background_task",
     "track_idle_activity",
 )
 
@@ -51,6 +52,16 @@ class BackgroundTaskTracker:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self.tasks.clear()
+
+
+# Shared tracker for layers that spawn SWR/refresh work without DI (repositories,
+# route helpers). Same exception logging as AppShell.track_background_task.
+_fire_and_forget = BackgroundTaskTracker()
+
+
+def track_background_task(coro) -> asyncio.Task:
+    """Spawn a fire-and-forget task; exceptions are logged, not left unretrieved."""
+    return _fire_and_forget.track(coro)
 
 
 def smoke_mode_enabled() -> bool:

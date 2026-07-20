@@ -9,6 +9,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from core.background import track_background_task
 from features.library import geodata
 from features.library.timeline_import import parse_timeline_file
 
@@ -55,7 +56,7 @@ async def start_geo_backfill():
     global _backfill_task
     if not _start(_backfill_task, _backfill_status, geodata.run_backfill):
         return {"ok": True, "started": False, "backfill": dict(_backfill_status)}
-    _backfill_task = asyncio.create_task(geodata.run_backfill(_configured_db_path(), _backfill_status))
+    _backfill_task = track_background_task(geodata.run_backfill(_configured_db_path(), _backfill_status))
     return {"ok": True, "started": True, "backfill": dict(_backfill_status)}
 
 
@@ -64,7 +65,7 @@ async def start_geo_inference():
     global _infer_task
     if not _start(_infer_task, _infer_status, geodata.run_inference):
         return {"ok": True, "started": False, "inference": dict(_infer_status)}
-    _infer_task = asyncio.create_task(geodata.run_inference(_configured_db_path(), _infer_status))
+    _infer_task = track_background_task(geodata.run_inference(_configured_db_path(), _infer_status))
     return {"ok": True, "started": True, "inference": dict(_infer_status)}
 
 

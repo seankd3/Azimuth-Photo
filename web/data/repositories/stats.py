@@ -1,9 +1,13 @@
 """Aggregate count queries and caches for catalog and AI status surfaces."""
 
 import asyncio
+import logging
 import time as _time
 
+from core.background import track_background_task
 from data import connection
+
+log = logging.getLogger(__name__)
 
 CATALOG_IMAGE_COUNTS_TTL_SECONDS = 10.0
 FULL_STATS_CACHE_TTL_SECONDS = 30.0
@@ -269,10 +273,17 @@ async def refresh_full_stats_cache(
     return result
 
 
-def _refresh_coroutine(db_path: str, ttl_seconds: float, refresh):
+async def _do_full_stats_refresh(db_path: str, ttl_seconds: float, refresh):
     if refresh is not None:
-        return refresh()
-    return refresh_full_stats_cache(db_path, ttl_seconds=ttl_seconds)
+        return await refresh()
+    return await refresh_full_stats_cache(db_path, ttl_seconds=ttl_seconds)
+
+
+async def _swr_full_stats_refresh(db_path: str, ttl_seconds: float, refresh):
+    try:
+        return await _do_full_stats_refresh(db_path, ttl_seconds, refresh)
+    except Exception:
+        log.exception("full stats background refresh failed")
 
 
 def schedule_full_stats_refresh(
@@ -288,8 +299,8 @@ def schedule_full_stats_refresh(
         return None
     task = _stats_inflight_task
     if task is None or task.done() or task.get_loop() is not loop:
-        _stats_inflight_task = loop.create_task(
-            _refresh_coroutine(db_path, ttl_seconds, refresh)
+        _stats_inflight_task = track_background_task(
+            _swr_full_stats_refresh(db_path, ttl_seconds, refresh)
         )
     return _stats_inflight_task
 
@@ -308,13 +319,13 @@ async def full_stats_cached(
     task = _stats_inflight_task
     if cached_data:
         if task is None or task.done() or task.get_loop() is not loop:
-            _stats_inflight_task = loop.create_task(
-                _refresh_coroutine(db_path, ttl_seconds, refresh)
+            _stats_inflight_task = track_background_task(
+                _swr_full_stats_refresh(db_path, ttl_seconds, refresh)
             )
         return cached_data
     if task is not None and not task.done() and task.get_loop() is loop:
         return await task
-    task = loop.create_task(_refresh_coroutine(db_path, ttl_seconds, refresh))
+    task = track_background_task(_do_full_stats_refresh(db_path, ttl_seconds, refresh))
     _stats_inflight_task = task
     try:
         return await task

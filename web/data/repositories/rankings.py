@@ -3,11 +3,15 @@
 import re
 import asyncio
 from datetime import datetime
+import logging
 import time as _time
 
+from core.background import track_background_task
 from data import connection
 from data.repositories.catalog import HUB_MIRROR_SOURCE_PATH
 from data.repositories.common import chunked as _chunked, stage_temp_ids
+
+log = logging.getLogger(__name__)
 
 RANKING_SORTS = {
     "elo": "i.elo DESC",
@@ -1634,10 +1638,12 @@ async def date_histogram_cached(
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                         exclude_sources=exclude_sources,
                     )
+                except Exception:
+                    log.exception("date histogram background refresh failed")
                 finally:
                     _date_histogram_refreshing.discard(cache_key)
 
-            asyncio.create_task(_refresh_date_histogram())
+            track_background_task(_refresh_date_histogram())
         return cached["data"]
 
     catalog_counts = await get_catalog_image_counts()
@@ -1962,10 +1968,12 @@ async def date_groups_cached(
                         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                         exclude_sources=exclude_sources,
                     )
+                except Exception:
+                    log.exception("date groups background refresh failed")
                 finally:
                     _date_groups_refreshing.discard(cache_key)
 
-            asyncio.create_task(_refresh_date_groups())
+            track_background_task(_refresh_date_groups())
         return cached["data"]
 
     catalog_counts = await get_catalog_image_counts()

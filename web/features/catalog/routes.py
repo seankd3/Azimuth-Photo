@@ -15,6 +15,7 @@ import scanner
 import settings
 import thumbnails
 from core import cache_events
+from core.background import track_background_task
 from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
@@ -193,7 +194,7 @@ async def start_scan(request: Request):
     if error:
         return error
     folder = body.get("folder", "")
-    if not folder or not os.path.isdir(folder):
+    if not folder or not await asyncio.to_thread(os.path.isdir, folder):
         return JSONResponse({"error": "Invalid folder path"}, status_code=400)
 
     if not scanner.try_begin_scan():
@@ -205,7 +206,7 @@ async def start_scan(request: Request):
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
+    track_background_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {"status": "started", "folder": source["path"], "source_id": source["id"]}
 
@@ -427,6 +428,11 @@ async def api_catalog_select_folder(request: Request):
 @router.get("/api/catalog/browse")
 async def api_catalog_browse(path: str = ""):
     current = catalog_repository.normalize_source_path(path or os.path.expanduser("~"))
+    return await asyncio.to_thread(_browse_dir, current)
+
+
+def _browse_dir(current: str) -> dict:
+    """Sync filesystem browse payload — run via asyncio.to_thread from the handler."""
     roots = quick_browse_roots()
     result = {
         "path": current,
@@ -498,7 +504,7 @@ async def api_add_catalog_source(request: Request):
             scanner.release_scan_claim()
         raise
     if scan:
-        asyncio.create_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
+        track_background_task(_run_scan(source["path"], int(source["id"]), first_run=first_run))
     _catalog_changed(matchups=True)
     return {
         "ok": True,
@@ -529,7 +535,7 @@ async def api_rescan_catalog_source(source_id: int):
     except Exception:
         scanner.release_scan_claim()
         raise
-    asyncio.create_task(_run_scan(restored["path"], int(restored["id"])))
+    track_background_task(_run_scan(restored["path"], int(restored["id"])))
     _catalog_changed(matchups=True)
     return {"ok": True, "source": dict(restored), "scan_started": True}
 
@@ -851,10 +857,12 @@ async def api_folders(max_depth: int | None = None):
                         "data": result,
                         "expires": _time.time() + _folders_cache_ttl_seconds,
                     }
+                except Exception:
+                    log.exception("folders background refresh failed")
                 finally:
                     _folders_refreshing.discard(normalized_max_depth)
 
-            asyncio.create_task(_refresh_folders())
+            track_background_task(_refresh_folders())
         return cached["data"]
     counts = await _configured(_get_catalog_image_counts)()
     if int(counts.get("active_images") or 0) <= 0:
