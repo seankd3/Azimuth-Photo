@@ -97,6 +97,7 @@ class PrefetchTests(BackendTestCase):
         )
         await prefetch.prefetch_once()
         self.assertEqual(prefetch.status()["after_id"], 9)
+        self.assertTrue(any("order=newest" in url for url in calls if "/thumbs/pack" in url))
         await prefetch.enqueue_loupe_neighbors(self.image)
         self.assertEqual(await prefetch.run_predictive_once(uploads_active=True), 0)
         self.assertGreater(prefetch.status()["queued"], 0)
@@ -191,3 +192,53 @@ class PrefetchTests(BackendTestCase):
         self.assertEqual(pack_sizes, ["md"])
         self.assertEqual(loupe["size"], "md")
         self.assertEqual(loupe["tier"], "loupe")
+
+    async def test_pack_prefetch_runs_while_user_is_browsing(self):
+        """Bulk pack fill must not stall behind the idle gate during refine."""
+
+        from features.sync import preview_mirror
+        from features.sync.sync_worker import SyncWorker
+
+        pack_calls = []
+
+        async def request(method, url, *, body=None, headers=None):
+            if "/thumbs/pack" in url:
+                pack_calls.append(url)
+                return 200, {}, self._pack([9])
+            if "/api/version" in url or "/api/sync/" in url:
+                return 200, {"content-type": "application/json"}, b"{}"
+            return 200, {}, b""
+
+        worker = SyncWorker(db_path=db.DB_PATH, hub="http://hub", request=request)
+        worker.prefetch = ThumbPrefetcher(
+            db_path=db.DB_PATH,
+            hub="http://hub",
+            request=request,
+            store=lambda *_a: None,
+            cache_root=self.tempdir.name,
+            budget_bytes=8 * 1024 ** 3,
+        )
+        preview_mirror.note_request()
+        self.assertFalse(preview_mirror.is_idle(idle_seconds=10.0))
+        await worker._run_prefetch()
+        self.assertEqual(len(pack_calls), 1)
+        self.assertIn("order=newest", pack_calls[0])
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+def test_auto_budget_adapts_to_free_disk(tmp_path):
+    from features.sync import prefetch as prefetch_mod
+
+    # 200GB free -> 25% = 50GB (inside 8-64 clamp); tiny disks clamp to the
+    # floor; huge disks clamp to the ceiling.
+    import shutil as real_shutil
+    import unittest.mock as mock
+    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=200 * 1024 ** 3)):
+        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 50 * 1024 ** 3
+    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=4 * 1024 ** 3)):
+        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 8 * 1024 ** 3
+    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=1024 * 1024 ** 3)):
+        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 64 * 1024 ** 3

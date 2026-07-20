@@ -167,15 +167,42 @@ async def thumbnail_pack_stream(
     size: str,
     after_id: int,
     limit: int,
+    order: str = "asc",
 ) -> AsyncIterator[bytes]:
-    """Yield an uncompressed tar followed by the v2 skipped-id trailer line."""
+    """Yield an uncompressed tar followed by the v2 skipped-id trailer line.
 
+    ``order=asc`` (default, frozen v2): ``id > after_id ORDER BY id ASC``.
+    ``order=newest`` (additive): walk highest ids first so satellites fill
+    recent work before the long tail. Cursor semantics flip to a high-water
+    exclusive bound: ``after_id=0`` starts at the top; the trailer ``after_id``
+    is the lowest id scanned so the next page uses ``id < after_id``.
+    """
+
+    newest = order == "newest"
     conn = await connection.open_async(db_path)
     try:
-        rows = await (await conn.execute(
-            "SELECT id FROM images WHERE id > ? ORDER BY id ASC LIMIT ?",
-            (after_id, limit),
-        )).fetchall()
+        if newest:
+            if after_id <= 0:
+                rows = await (
+                    await conn.execute(
+                        "SELECT id FROM images ORDER BY id DESC LIMIT ?",
+                        (limit,),
+                    )
+                ).fetchall()
+            else:
+                rows = await (
+                    await conn.execute(
+                        "SELECT id FROM images WHERE id < ? ORDER BY id DESC LIMIT ?",
+                        (after_id, limit),
+                    )
+                ).fetchall()
+        else:
+            rows = await (
+                await conn.execute(
+                    "SELECT id FROM images WHERE id > ? ORDER BY id ASC LIMIT ?",
+                    (after_id, limit),
+                )
+            ).fetchall()
     finally:
         await connection.close_async(conn, db_path=db_path)
 
@@ -199,7 +226,13 @@ async def thumbnail_pack_stream(
                 yield padding
         except OSError:
             skipped.append(image_id)
-    trailer = (json.dumps({"skipped": skipped, "after_id": scanned_through}, separators=(",", ":")) + "\n").encode()
+    trailer = (
+        json.dumps(
+            {"skipped": skipped, "after_id": scanned_through, "order": order},
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode()
     yield _tar_header(".photoarchive-trailer.json", len(trailer), 0)
     yield trailer
     padding = _tar_padding(len(trailer))
@@ -208,7 +241,12 @@ async def thumbnail_pack_stream(
     yield b"\0" * (tarfile.BLOCKSIZE * 2)
 
 
-def validate_thumb_pack_request(size: str, after_id: int | str | None, limit: int | str | None) -> tuple[str, int, int]:
+def validate_thumb_pack_request(
+    size: str,
+    after_id: int | str | None,
+    limit: int | str | None,
+    order: str | None = None,
+) -> tuple[str, int, int, str]:
     normalized_size = str(size or "").strip().lower()
     if normalized_size not in {"sm", "md", "lg"}:
         raise ValueError("size must be one of sm, md, or lg")
@@ -219,4 +257,7 @@ def validate_thumb_pack_request(size: str, after_id: int | str | None, limit: in
         raise ValueError("limit must be an integer from 1 through 500") from exc
     if not 1 <= page_size <= 500:
         raise ValueError("limit must be an integer from 1 through 500")
-    return normalized_size, cursor, page_size
+    normalized_order = str(order or "asc").strip().lower() or "asc"
+    if normalized_order not in {"asc", "newest"}:
+        raise ValueError("order must be asc or newest")
+    return normalized_size, cursor, page_size, normalized_order

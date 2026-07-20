@@ -351,16 +351,19 @@ class SyncWorker:
 
     async def _run_prefetch(self) -> None:
         try:
-            # Thermal doctrine: only sprint while the user isn't browsing.
+            # Bulk pack fill always converges in the background — even mid-browse.
+            # Idle-gated work (miss-by-miss burst + predictive) stays quiet so
+            # refine sessions don't share Tailscale with single-thumb races.
+            await self.prefetch.prefetch_browse_first()
             if not preview_mirror.is_idle():
                 return
             await self.preview_mirror.burst_once()
             if not preview_mirror.is_idle():
                 return
-            # Browse (`sm`) exclusively until complete; only then fill loupe (`md`).
-            await self.prefetch.prefetch_browse_first()
             await self.prefetch.seed_predictive()
-            await self.prefetch.run_predictive_once(uploads_active=bool(self._status.get("current_file")))
+            await self.prefetch.run_predictive_once(
+                uploads_active=bool(self._status.get("current_file"))
+            )
         except Exception as error:
             self.prefetch._status["last_error"] = str(error)
             self.preview_mirror._status["last_error"] = str(error)

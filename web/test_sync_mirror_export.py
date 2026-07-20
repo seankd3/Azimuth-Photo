@@ -177,4 +177,47 @@ class SyncMirrorExportTests(unittest.TestCase):
             self.assertEqual(archive.getnames(), [f"{first_id}.jpg", ".photoarchive-trailer.json"])
             self.assertEqual(archive.extractfile(f"{first_id}.jpg").read(), b"existing-thumbnail")
             trailer = archive.extractfile(".photoarchive-trailer.json").read()
-        self.assertEqual(json.loads(trailer), {"skipped": [second_id], "after_id": second_id})
+        self.assertEqual(
+            json.loads(trailer),
+            {"skipped": [second_id], "after_id": second_id, "order": "asc"},
+        )
+
+    def test_thumb_pack_newest_walks_high_ids_first(self):
+        low_id = self._image("older.jpg", "f" * 32)
+        high_id = self._image("newer.jpg", "a" * 32)
+        cached_low = self.root / "older.jpg"
+        cached_high = self.root / "newer.jpg"
+        cached_low.write_bytes(b"low-thumb")
+        cached_high.write_bytes(b"high-thumb")
+
+        def disk_index(size: str, image_id: int):
+            self.assertEqual(size, "sm")
+            if image_id == high_id:
+                return ("signature", str(cached_high))
+            if image_id == low_id:
+                return ("signature", str(cached_low))
+            return None
+
+        with mock.patch.object(mirror_export.thumbnails, "fast_disk_path_entry", side_effect=disk_index):
+            first = self.client.get(
+                "/api/sync/thumbs/pack?size=sm&after_id=0&limit=1&order=newest"
+            )
+            self.assertEqual(first.status_code, 200, first.text)
+            with tarfile.open(fileobj=io.BytesIO(first.content), mode="r:") as archive:
+                self.assertEqual(archive.getnames()[0], f"{high_id}.jpg")
+                trailer = json.loads(
+                    archive.extractfile(".photoarchive-trailer.json").read()
+                )
+            self.assertEqual(trailer["after_id"], high_id)
+            self.assertEqual(trailer["order"], "newest")
+
+            second = self.client.get(
+                f"/api/sync/thumbs/pack?size=sm&after_id={high_id}&limit=1&order=newest"
+            )
+            self.assertEqual(second.status_code, 200, second.text)
+            with tarfile.open(fileobj=io.BytesIO(second.content), mode="r:") as archive:
+                self.assertEqual(archive.getnames()[0], f"{low_id}.jpg")
+                trailer = json.loads(
+                    archive.extractfile(".photoarchive-trailer.json").read()
+                )
+            self.assertEqual(trailer["after_id"], low_id)

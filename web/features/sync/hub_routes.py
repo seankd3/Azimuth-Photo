@@ -206,14 +206,22 @@ async def api_sync_catalog_export(cursor: int = 0):
 
 
 @router.get("/api/sync/thumbs/pack")
-async def api_sync_thumb_pack(size: str, after_id: int = 0, limit: int = 500):
+async def api_sync_thumb_pack(
+    size: str, after_id: int = 0, limit: int = 500, order: str = "asc"
+):
     try:
-        size, after_id, limit = mirror_export.validate_thumb_pack_request(size, after_id, limit)
+        size, after_id, limit, order = mirror_export.validate_thumb_pack_request(
+            size, after_id, limit, order
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(
         mirror_export.thumbnail_pack_stream(
-            _configured_db_path(), size=size, after_id=after_id, limit=limit,
+            _configured_db_path(),
+            size=size,
+            after_id=after_id,
+            limit=limit,
+            order=order,
         ),
         media_type="application/x-tar",
         headers={"Cache-Control": "no-store"},

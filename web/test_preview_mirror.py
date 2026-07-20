@@ -209,6 +209,29 @@ class PreviewMirrorTests(BackendTestCase):
         hit = preview_mirror.read_local(self.image_id, "sm", self.version)
         self.assertEqual(hit[1], b"tee-body")
 
+    async def test_warm_local_hit_never_contacts_hub(self):
+        """Local-first: a cached sm/md must not block on or call the hub."""
+
+        payload = b"warm-local-sm"
+        self.assertTrue(preview_mirror.put(self.image_id, "sm", self.version, payload))
+        thumbnails._flush_write_queue()
+
+        async def request(*_args, **_kwargs):
+            raise AssertionError("hub must not be contacted on local hit")
+
+        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
+            media_routes,
+            "_configured_db_path",
+            return_value=db.DB_PATH,
+        ):
+            response = await media_routes.thumbnail_response(HeaderRequest(), "sm", self.image_id)
+        self.assertEqual(response.status_code, 200)
+        if hasattr(response, "path"):
+            with open(response.path, "rb") as handle:
+                self.assertEqual(handle.read(), payload)
+        else:
+            self.assertEqual(response.body, payload)
+
 
 if __name__ == "__main__":
     unittest.main()
