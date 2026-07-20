@@ -1675,6 +1675,38 @@ async def date_histogram_cached(
     return histogram
 
 
+_UNFILTERED_SCOPE_COUNTS_SQL = (
+    # Unfiltered /api/counts: avoid walking ~150k active rows.
+    # total = maintained catalog_sources.active_image_count (scan/trash/import
+    # keep it honest) minus active virtual copies, which rankings filters hide
+    # via vc_of IS NULL but the denormalized counter historically includes.
+    # Force idx_images_vc_of — without it the planner can walk every active
+    # row via idx_images_source_missing_id looking for the rare VC case.
+    # picked/rejected: partial flag index seeks, not a full active walk.
+    "SELECT "
+    "  (SELECT COALESCE(SUM(active_image_count), 0) FROM catalog_sources "
+    "   WHERE included = 1) "
+    "  - (SELECT COUNT(*) FROM images i INDEXED BY idx_images_vc_of "
+    "     JOIN catalog_sources s ON s.id = i.source_id "
+    "     WHERE s.included = 1 "
+    "       AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    "       AND i.vc_of IS NOT NULL) "
+    "  AS total, "
+    "  (SELECT COUNT(*) FROM images i INDEXED BY idx_images_active_flag_elo "
+    "   JOIN catalog_sources s ON s.id = i.source_id "
+    "   WHERE s.included = 1 "
+    "     AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    "     AND i.vc_of IS NULL AND i.flag = 'picked') "
+    "  AS picked, "
+    "  (SELECT COUNT(*) FROM images i INDEXED BY idx_images_active_flag_elo "
+    "   JOIN catalog_sources s ON s.id = i.source_id "
+    "   WHERE s.included = 1 "
+    "     AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    "     AND i.vc_of IS NULL AND i.flag = 'rejected') "
+    "  AS rejected"
+)
+
+
 async def scope_counts(
     db_path: str,
     *,
@@ -1694,6 +1726,35 @@ async def scope_counts(
     exclude_sources=(),
 ) -> dict:
     """Cheap total/picked/rejected counts for a scope in one query."""
+    if not has_ranking_count_filters(
+        orientation,
+        compared,
+        min_stars,
+        folder,
+        "",
+        date_taken,
+        file_type,
+        camera,
+        lens,
+        tag,
+        id_filter,
+        text_query,
+        0,
+        exclude_collapsed_stack_members,
+        exclude_sources,
+    ):
+        conn = await connection.open_async(db_path)
+        try:
+            cursor = await conn.execute(_UNFILTERED_SCOPE_COUNTS_SQL)
+            row = await cursor.fetchone()
+            return {
+                "total": int(row["total"] or 0),
+                "picked": int(row["picked"] or 0),
+                "rejected": int(row["rejected"] or 0),
+            }
+        finally:
+            await connection.close_async(conn, db_path=db_path)
+
     conditions, params = ranking_filter_parts(
         orientation=orientation,
         compared=compared,
