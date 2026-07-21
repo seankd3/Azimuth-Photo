@@ -4,6 +4,10 @@ This module deliberately owns only the satellite side of the frozen
 ``GET /api/sync/base/{content_hash}`` contract.  It does not replicate catalog
 data or decode originals: a missing local original can be developed from the
 hub's already-generated PABASE1 cache instead.
+
+Request-path paint never awaits the hub: ``fetch_base_cache_for_image`` returns
+any already-local base immediately and warms a miss in the background. Blocking
+hub I/O stays behind ``blocking=True`` for dedicated sync/background workers.
 """
 
 from __future__ import annotations
@@ -11,9 +15,11 @@ from __future__ import annotations
 import base64
 import gzip
 import json
+import logging
 import os
 import sqlite3
 import tempfile
+import threading
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -31,6 +37,10 @@ _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
 _BASE_MAGIC = b"PABASE1\0"
 _BASE_HEADER_BYTES = 16
 _DEFAULT_TIMEOUT_SECONDS = 5.0
+log = logging.getLogger(__name__)
+
+_warm_lock = threading.Lock()
+_warm_inflight: set[int] = set()
 
 
 class BaseReadthroughError(RuntimeError):
@@ -220,14 +230,28 @@ def _write_preview(binary: bytes, preview_path: Path) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def fetch_base_cache_for_image(image_id: int, paths, *, db_path: str, source_path: str, timeout: float = _DEFAULT_TIMEOUT_SECONDS) -> dict[str, Any] | None:
-    """Fetch and atomically materialize the hub base for one local catalog row.
+def _read_local_metadata(paths) -> dict[str, Any] | None:
+    metadata_path = Path(paths.metadata)
+    if not (
+        Path(paths.binary).is_file()
+        and metadata_path.is_file()
+        and Path(paths.preview).is_file()
+    ):
+        return None
+    try:
+        return _json_metadata(metadata_path.read_bytes())
+    except BaseReadthroughError:
+        return None
 
-    Returns ``None`` when the row has no usable content hash, allowing callers
-    to retain their normal local-decode failure.  Network and artifact failures
-    deliberately raise an honest, user-safe ``BaseReadthroughError``.
-    """
 
+def _materialize_from_hub(
+    image_id: int,
+    paths,
+    *,
+    db_path: str,
+    source_path: str,
+    timeout: float,
+) -> dict[str, Any] | None:
     if not can_read_through():
         return None
     content_hash = _content_hash_for_image(image_id, db_path)
@@ -243,3 +267,70 @@ def fetch_base_cache_for_image(image_id: int, paths, *, db_path: str, source_pat
     _write_atomic(Path(paths.metadata), json.dumps(metadata, separators=(",", ":")).encode("utf-8"))
     _write_preview(binary, Path(paths.preview))
     return metadata
+
+
+def _schedule_base_warm(image_id: int, paths, *, db_path: str, source_path: str) -> None:
+    key = int(image_id)
+    with _warm_lock:
+        if key in _warm_inflight:
+            return
+        _warm_inflight.add(key)
+
+    def _run() -> None:
+        try:
+            _materialize_from_hub(
+                key,
+                paths,
+                db_path=db_path,
+                source_path=source_path,
+                timeout=_DEFAULT_TIMEOUT_SECONDS,
+            )
+        except Exception as exc:
+            log.debug(
+                "worker=develop_base_warm image_id=%s error=%s",
+                key,
+                exc,
+            )
+        finally:
+            with _warm_lock:
+                _warm_inflight.discard(key)
+
+    threading.Thread(target=_run, name=f"develop-base-warm-{key}", daemon=True).start()
+
+
+def fetch_base_cache_for_image(
+    image_id: int,
+    paths,
+    *,
+    db_path: str,
+    source_path: str,
+    timeout: float = _DEFAULT_TIMEOUT_SECONDS,
+    blocking: bool = False,
+) -> dict[str, Any] | None:
+    """Fetch and atomically materialize the hub base for one local catalog row.
+
+    Default (``blocking=False``): return any already-local base immediately and
+    enqueue a hub warm on miss — Develop paint must never wait on the hub.
+    Pass ``blocking=True`` for background/sync workers that need the artifact
+    materialized before continuing.
+
+    Returns ``None`` when the row has no usable content hash or a non-blocking
+    miss was only scheduled. Network and artifact failures on the blocking path
+    deliberately raise an honest, user-safe ``BaseReadthroughError``.
+    """
+
+    local = _read_local_metadata(paths)
+    if local is not None:
+        return local
+    if not can_read_through():
+        return None
+    if not blocking:
+        _schedule_base_warm(image_id, paths, db_path=db_path, source_path=source_path)
+        return None
+    return _materialize_from_hub(
+        image_id,
+        paths,
+        db_path=db_path,
+        source_path=source_path,
+        timeout=timeout,
+    )

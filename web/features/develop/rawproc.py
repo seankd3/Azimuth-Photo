@@ -716,6 +716,7 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
                         paths,
                         db_path=db.DB_PATH,
                         source_path=str(path),
+                        blocking=True,
                     )
                 except readthrough.BaseReadthroughError as exc:
                     raise RawDecodeError(str(exc)) from exc

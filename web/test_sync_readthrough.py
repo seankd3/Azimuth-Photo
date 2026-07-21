@@ -108,7 +108,9 @@ class ReadthroughTests(unittest.TestCase):
 
     def test_fetches_base_and_companion_metadata_from_stub_hub(self):
         paths = _Paths(Path(self.tempdir.name) / "cache")
-        metadata = readthrough.fetch_base_cache_for_image(1, paths, db_path=self.db_path, source_path="/offline/raw.dng")
+        metadata = readthrough.fetch_base_cache_for_image(
+            1, paths, db_path=self.db_path, source_path="/offline/raw.dng", blocking=True
+        )
         self.assertEqual(metadata["camera"], "stub")
         self.assertEqual(metadata["source_path"], "/offline/raw.dng")
         self.assertTrue(paths.binary.exists())
@@ -137,20 +139,40 @@ class ReadthroughTests(unittest.TestCase):
         readthrough._request = missing
         try:
             with self.assertRaisesRegex(readthrough.BaseReadthroughError, "no cached"):
-                readthrough.fetch_base_cache_for_image(1, _Paths(Path(self.tempdir.name) / "cache"), db_path=self.db_path, source_path="/offline/raw.dng")
+                readthrough.fetch_base_cache_for_image(
+                    1,
+                    _Paths(Path(self.tempdir.name) / "cache"),
+                    db_path=self.db_path,
+                    source_path="/offline/raw.dng",
+                    blocking=True,
+                )
         finally:
             readthrough._request = original
 
-    def test_sm_thumbnail_uses_the_media_readthrough_and_caches_locally(self):
-        calls = []
+    def test_nonblocking_miss_returns_immediately_and_warms_in_background(self):
+        paths = _Paths(Path(self.tempdir.name) / "pending")
+        started = threading.Event()
+        release = threading.Event()
+        original = readthrough._materialize_from_hub
 
-        async def request(method, url, *, body=None, headers=None):
-            calls.append((method, url, body, headers))
-            return 200, {"content-type": "image/jpeg"}, b"remote-sm-thumb"
+        def slow_materialize(*args, **kwargs):
+            started.set()
+            release.wait(timeout=2)
+            return original(*args, **kwargs)
 
-        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
-            thumbnails, "_write_thumbnail_to_disk"
-        ) as write_disk, mock.patch.object(thumbnails, "_memory_put") as memory_put:
+        with mock.patch.object(readthrough, "_materialize_from_hub", side_effect=slow_materialize):
+            t0 = __import__("time").perf_counter()
+            result = readthrough.fetch_base_cache_for_image(
+                1, paths, db_path=self.db_path, source_path="/offline/raw.dng"
+            )
+            elapsed = __import__("time").perf_counter() - t0
+        self.assertIsNone(result)
+        self.assertLessEqual(elapsed, 0.25)
+        self.assertTrue(started.wait(timeout=1))
+        release.set()
+
+    def test_sm_thumbnail_miss_returns_pending_without_foreground_hub_await(self):
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue:
             response = asyncio.run(
                 media_routes._remote_media_response(
                     {"id": 41, "hub_image_id": 9},
@@ -158,11 +180,10 @@ class ReadthroughTests(unittest.TestCase):
                 )
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"remote-sm-thumb")
-        self.assertEqual(calls[0][0:2], ("GET", f"{os.environ['PHOTOARCHIVE_HUB_URL']}/api/thumb/sm/9"))
-        write_disk.assert_called_once()
-        memory_put.assert_called_once()
+        self.assertEqual(response.status_code, 204)
+        self.assertEqual(media_routes._REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS, 0.0)
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], "sm")
 
     def test_cli_delegates_one_pass_to_the_satellite_worker(self):
         output = io.StringIO()

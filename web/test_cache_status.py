@@ -781,12 +781,8 @@ class CacheStatusTests(BackendTestCase):
         finally:
             await conn.close()
 
-        async def dead_hub(*_args, **_kwargs):
-            await asyncio.sleep(30)
-
         with (
             unittest.mock.patch.object(media_routes.satellite, "hub_url", return_value="http://dead-hub"),
-            unittest.mock.patch.object(media_routes, "_urllib_request", side_effect=dead_hub),
             unittest.mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue,
             unittest.mock.patch.object(thumbnails, "_memory_get_entry_fast", return_value=None),
             unittest.mock.patch.object(thumbnails, "fast_disk_path_entry", return_value=None),
@@ -797,7 +793,8 @@ class CacheStatusTests(BackendTestCase):
             elapsed = time.perf_counter() - started
 
         self.assertEqual(response.status_code, 204)
-        self.assertLessEqual(elapsed, 3.0)
+        self.assertEqual(media_routes._REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS, 0.0)
+        self.assertLessEqual(elapsed, 0.25)
         enqueue.assert_called_once()
         self.assertEqual(enqueue.call_args.args[1], "sm")
 
