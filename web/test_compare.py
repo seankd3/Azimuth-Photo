@@ -1083,11 +1083,14 @@ class CompareTests(BackendTestCase):
             compare_service.default_visible_pairing_candidates = fake_default
             compare_service._get_visible_pairing_pool_counts = fake_pool
             compare_service._interaction_response_cache.clear()
+            old_exists = compare_service._tier_file_exists
+            compare_service._tier_file_exists = lambda *_a, **_k: True
 
             result = await compare_service.mosaic_next_impl(n=2, strategy="explore")
         finally:
             compare_service.default_visible_pairing_candidates = old_default
             compare_service._get_visible_pairing_pool_counts = old_pool
+            compare_service._tier_file_exists = old_exists
             compare_service._interaction_response_cache.clear()
 
         self.assertEqual(calls[0][0], compare_service._mosaic_pool_tier())

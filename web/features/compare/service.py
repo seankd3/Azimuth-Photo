@@ -1284,17 +1284,44 @@ def _mosaic_pool_tier() -> str:
     return tier if tier in ("sm", "md") else "md"
 
 
-def _servable_sample(rows: list[dict], tier: str) -> list[dict]:
-    """Admit-time truth gate on the returned tiles: never hand the client an id
-    whose render-tier file is missing (phantom cache row). A stat on ~12 ids is
-    cheap, and fast_disk_has self-heals the disk index on a miss."""
+def _tier_file_exists(tier: str, image_id: int) -> bool:
     try:
         import thumbnails
 
-        kept = [row for row in rows if thumbnails.fast_disk_has(tier, int(row["id"]))]
+        return bool(thumbnails.fast_disk_has(tier, image_id))
     except Exception:
-        return rows
-    return kept if len(kept) >= 2 else rows
+        # Fail open only on infrastructure errors — never for a known-missing file.
+        return True
+
+
+async def _servable_sample(
+    rows: list[dict],
+    candidates: list[dict],
+    count: int,
+    tier: str,
+    exclude_ids,
+) -> list[dict]:
+    """Admit-time truth gate + refill: drop ids whose render-tier file is
+    missing (phantom cache row — fast_disk_has self-heals the index), then top
+    back up from the already-gated candidate reservoir so the grid never
+    shrinks. Returns an honest short set only if the reservoir runs dry."""
+    kept = [row for row in rows if _tier_file_exists(tier, int(row["id"]))]
+    if len(kept) >= count or not candidates:
+        return kept
+    used = {int(row["id"]) for row in rows} | set(exclude_ids or ())
+    refill = []
+    for cand in candidates:
+        if len(kept) + len(refill) >= count:
+            break
+        cand_id = int(cand["id"])
+        if cand_id in used:
+            continue
+        used.add(cand_id)
+        if _tier_file_exists(tier, cand_id):
+            refill.append(cand)
+    if refill:
+        kept.extend(await hydrate_active_rows(refill))
+    return kept
 
 
 async def mosaic_next_impl(
@@ -1335,20 +1362,28 @@ async def mosaic_next_impl(
             _configured_cache_root(),
             int(n),
             strategy,
+            pool_tier,
         )
         cached_response = _interaction_response_cache.get(response_cache_key)
         if cached_response and cached_response["expires"] > time.monotonic():
             response = response_helpers.copy_interaction_response(cached_response["data"])
-            response["candidate_source"] = "response_cache"
-            response["cache_hit"] = True
-            response.setdefault("counts_stale", False)
-            response.setdefault("reservoir_remaining", 0)
-            _configured_schedule_cached_thumbnail_memory_warm(
-                response.get("images") or [],
-                "sm",
-                limit=min(max(1, n), 48),
-            )
-            return response
+            cached_images = response.get("images") or []
+            # Re-run the admit-time gate on hits: the TTL is minutes, and a
+            # tile file can vanish (reclaim) after the response was cached.
+            if cached_images and all(
+                _tier_file_exists(pool_tier, int(img["id"])) for img in cached_images
+            ):
+                response["candidate_source"] = "response_cache"
+                response["cache_hit"] = True
+                response.setdefault("counts_stale", False)
+                response.setdefault("reservoir_remaining", 0)
+                _configured_schedule_cached_thumbnail_memory_warm(
+                    cached_images,
+                    "sm",
+                    limit=min(max(1, n), 48),
+                )
+                return response
+            _interaction_response_cache.pop(response_cache_key, None)
     if default_pool_only and strategy != "top":
         candidate_source = f"default_{strategy}_reservoir"
         counts_task = asyncio.create_task(
@@ -1466,7 +1501,7 @@ async def mosaic_next_impl(
         if strategy == "top":
             images = await _configured(_get_top_images)(limit=50)
         else:
-            images = await get_pairing_images("sm")
+            images = await get_pairing_images(pool_tier)
         candidates = app_helpers.filter_compare_mosaic_candidates(
             images,
             exclude_ids=exclude_ids,
@@ -1541,7 +1576,9 @@ async def mosaic_next_impl(
 
     sample_elo_by_id = {img["id"]: _effective_elo(img) for img in sample}
     hydrated_sample = await hydrate_active_rows(sample)
-    hydrated_sample = _servable_sample(hydrated_sample, pool_tier)
+    hydrated_sample = await _servable_sample(
+        hydrated_sample, candidates, count, pool_tier, exclude_ids
+    )
     result = [
         app_helpers.image_card(img, "sm", elo_value=sample_elo_by_id.get(img["id"], img["elo"]))
         for img in hydrated_sample

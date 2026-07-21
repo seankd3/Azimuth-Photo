@@ -137,16 +137,22 @@ async function refreshPropagation() {
     }
 }
 
+let healsThisRender = 0;
+const HEAL_BUDGET = 24;
+
 function setImagesLoadedHandlers() {
+    healsThisRender = 0;
     for (const img of document.querySelectorAll('#refine-stage .ref-card img')) {
         const markLoaded = () => img.classList.add('loaded');
-        img.addEventListener('load', markLoaded, { once: true });
-        img.addEventListener('error', () => {
+        const heal = () => {
             const card = img.closest('.ref-card');
             const index = card ? Number(card.dataset.index) : NaN;
             if (Number.isInteger(index)) healFailedCell(index);
-        }, { once: true });
+        };
+        img.addEventListener('load', markLoaded, { once: true });
+        img.addEventListener('error', heal, { once: true });
         if (img.complete && img.naturalWidth > 0) markLoaded();
+        else if (img.complete && img.src) heal();
     }
 }
 
@@ -154,7 +160,9 @@ function healFailedCell(index) {
     // A tile whose thumb failed to load must never sit as a blank card —
     // swap in a probe-screened replacement; with none left, the honest
     // skeleton stays (rare now that the pool is gated on servable files).
-    if (!open) return;
+    // The per-render budget bounds heal->swap->fail chains.
+    if (!open || healsThisRender >= HEAL_BUDGET) return;
+    healsThisRender += 1;
     const next = takeReplacement();
     if (next) {
         swapCell(index, next);
