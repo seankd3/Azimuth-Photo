@@ -800,8 +800,8 @@ class CompareTests(BackendTestCase):
         first = await self._image(source["id"], "first.jpg", elo=1500)
         hidden = await self._image(source["id"], "hidden.jpg", elo=1400)
         second = await self._image(source["id"], "second.jpg", elo=1300)
-        await self._cache_entry(first, "sm")
-        await self._cache_entry(second, "sm")
+        await self._cache_entry(first, compare_service._mosaic_pool_tier())
+        await self._cache_entry(second, compare_service._mosaic_pool_tier())
 
         result = await compare_routes.mosaic_next(n=3, strategy="diverse")
         ids = [img["id"] for img in result["images"]]
@@ -821,6 +821,7 @@ class CompareTests(BackendTestCase):
         third = await self._image(source["id"], "third.jpg", elo=1300)
         for image_id in (first, second, third):
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         result = await compare_routes.mosaic_next(n=2, ids=f"{first},{third}")
 
@@ -848,6 +849,7 @@ class CompareTests(BackendTestCase):
         outside = await self._image(source["id"], "outside.jpg", elo=1300)
         for image_id in (first, second, outside):
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
         collection = await db.create_collection(name="Refine", image_ids=[first, second])
 
         result = await compare_routes.mosaic_next(n=2, collection_id=collection["id"])
@@ -968,6 +970,7 @@ class CompareTests(BackendTestCase):
         second = await self._image(source["id"], "second.jpg", elo=1400)
         for image_id in (first, second):
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         result = await compare_routes.mosaic_next(n=2, ids=str(first))
 
@@ -1087,7 +1090,7 @@ class CompareTests(BackendTestCase):
             compare_service._get_visible_pairing_pool_counts = old_pool
             compare_service._interaction_response_cache.clear()
 
-        self.assertEqual(calls[0][0], "sm")
+        self.assertEqual(calls[0][0], compare_service._mosaic_pool_tier())
         self.assertEqual(calls[0][1].get("order"), "least_compared")
         self.assertEqual(result["candidate_source"], "default_explore_least_compared")
         self.assertEqual({image["id"] for image in result["images"]}, {1, 2})
@@ -1101,6 +1104,7 @@ class CompareTests(BackendTestCase):
         image_ids = [sunset_a, sunset_b, screen_a, screen_b]
         for image_id in image_ids:
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         matrix = np.array(
             [
@@ -1181,6 +1185,7 @@ class CompareTests(BackendTestCase):
         image_ids = warm_ids + cool_ids
         for image_id in image_ids:
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         matrix = np.array(
             [
@@ -1316,6 +1321,7 @@ class CompareTests(BackendTestCase):
         ]
         for image_id in image_ids:
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         matrix = np.array(
             [
@@ -1360,6 +1366,7 @@ class CompareTests(BackendTestCase):
         third = await self._image(source["id"], "third.jpg")
         for image_id in (first, second, third):
             await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         await compare_routes.submit_comparison(
             JsonRequest({"winner_id": first, "loser_id": second})
@@ -1450,7 +1457,7 @@ class CompareTests(BackendTestCase):
             compare_service._interaction_response_cache.clear()
 
         self.assertEqual(len(calls), 2)
-        self.assertEqual(calls[0][0], "sm")
+        self.assertEqual(calls[0][0], compare_service._mosaic_pool_tier())
         self.assertIsNone(calls[0][1].get("limit"))
         self.assertEqual(calls[0][1].get("order"), "cache")
         self.assertFalse(calls[0][1].get("include_card_metadata"))
@@ -1464,7 +1471,9 @@ class CompareTests(BackendTestCase):
         first = await self._image(source["id"], "first.jpg", elo=1500)
         second = await self._image(source["id"], "second.jpg", elo=1300)
         await self._cache_entry(first, "sm")
+        await self._cache_entry(first, "md")
         await self._cache_entry(second, "sm")
+        await self._cache_entry(second, "md")
         started = asyncio.Event()
         release = asyncio.Event()
 

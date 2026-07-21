@@ -2,6 +2,7 @@
 
 import asyncio
 import hashlib
+import os
 import time
 from collections.abc import Awaitable, Callable
 
@@ -1275,6 +1276,27 @@ async def _refine_sample(
     return sample, "strategy"
 
 
+def _mosaic_pool_tier() -> str:
+    """Refine tiles render the md tier, so candidate pools must be gated on md
+    servability — an sm-visible image with no md file paints a blank cell.
+    Rollback override: PHOTOARCHIVE_REFINE_VISIBLE_TIER=sm."""
+    tier = os.environ.get("PHOTOARCHIVE_REFINE_VISIBLE_TIER", "md").strip().lower()
+    return tier if tier in ("sm", "md") else "md"
+
+
+def _servable_sample(rows: list[dict], tier: str) -> list[dict]:
+    """Admit-time truth gate on the returned tiles: never hand the client an id
+    whose render-tier file is missing (phantom cache row). A stat on ~12 ids is
+    cheap, and fast_disk_has self-heals the disk index on a miss."""
+    try:
+        import thumbnails
+
+        kept = [row for row in rows if thumbnails.fast_disk_has(tier, int(row["id"]))]
+    except Exception:
+        return rows
+    return kept if len(kept) >= 2 else rows
+
+
 async def mosaic_next_impl(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
     orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
@@ -1283,6 +1305,7 @@ async def mosaic_next_impl(
     collection_id: int = 0, import_batch: int = 0, exclude_sources=(),
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
+    pool_tier = _mosaic_pool_tier()
     candidate_source = "mosaic_window"
     cache_hit = False
     counts_stale = False
@@ -1329,24 +1352,24 @@ async def mosaic_next_impl(
     if default_pool_only and strategy != "top":
         candidate_source = f"default_{strategy}_reservoir"
         counts_task = asyncio.create_task(
-            _configured(_get_visible_pairing_pool_counts)("sm", _configured_cache_root())
+            _configured(_get_visible_pairing_pool_counts)(pool_tier, _configured_cache_root())
         )
         if strategy == "explore":
             candidate_source = "default_explore_least_compared"
             candidates = await default_visible_pairing_candidates(
-                "sm",
+                pool_tier,
                 limit=max(_MOSAIC_EXPLORE_WINDOW, n * 80),
                 order="least_compared",
             )
         elif strategy == "diverse":
             candidate_source = "default_diverse_universe"
             candidates = await default_visible_pairing_candidates(
-                "sm",
+                pool_tier,
                 order="cache",
                 include_card_metadata=False,
             )
         else:
-            candidates = await default_visible_pairing_candidates("sm")
+            candidates = await default_visible_pairing_candidates(pool_tier)
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
         counts = await counts_task
@@ -1357,7 +1380,7 @@ async def mosaic_next_impl(
         candidate_source = "filtered_reservoir"
         stats = None
         candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
-            "sm",
+            pool_tier,
             limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
             sort="least_compared_shuffled" if strategy == "explore" else "elo",
             orientation=orientation,
@@ -1374,7 +1397,7 @@ async def mosaic_next_impl(
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "filtered_diverse_universe"
             candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
-                "sm",
+                pool_tier,
                 limit=visible_count,
                 orientation=orientation,
                 compared=compared,
@@ -1401,7 +1424,7 @@ async def mosaic_next_impl(
             # not a fixed head of the ranking order.
             scoped_window = max(scoped_window, min(len(scoped_id_filter), _SCOPED_MOSAIC_WINDOW_MAX))
         candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
-            "sm",
+            pool_tier,
             limit=scoped_window,
             search=search,
             sort="least_compared_shuffled" if strategy == "explore" else "elo",
@@ -1421,7 +1444,7 @@ async def mosaic_next_impl(
         if strategy == "diverse" and visible_count > len(candidates):
             candidate_source = "search_diverse_universe" if search.get("active") else "scoped_diverse_universe"
             candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
-                "sm",
+                pool_tier,
                 limit=visible_count,
                 search=search,
                 exclude_ids=exclude_ids,
@@ -1460,11 +1483,11 @@ async def mosaic_next_impl(
         candidates = apply_tag_constraint(candidates, tag)
         candidates = apply_text_search_constraint(candidates, search)
         filtered_total = len(candidates)
-        candidates = await filter_visible_candidates(candidates, "sm")
+        candidates = await filter_visible_candidates(candidates, pool_tier)
         visible_count = len(candidates)
 
     if len(candidates) < 2 and default_pool_only and strategy == "explore" and visible_count > len(candidates):
-        candidates = await default_visible_pairing_candidates("sm", order="least_compared")
+        candidates = await default_visible_pairing_candidates(pool_tier, order="least_compared")
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
         visible_count = len(candidates)
@@ -1477,7 +1500,7 @@ async def mosaic_next_impl(
         await add_explore_uncompared_stats(
             stats,
             strategy=strategy,
-            size="sm",
+            size=pool_tier,
             filtered_total=filtered_total,
             visible_count=visible_count,
             search=search,
@@ -1518,6 +1541,7 @@ async def mosaic_next_impl(
 
     sample_elo_by_id = {img["id"]: _effective_elo(img) for img in sample}
     hydrated_sample = await hydrate_active_rows(sample)
+    hydrated_sample = _servable_sample(hydrated_sample, pool_tier)
     result = [
         app_helpers.image_card(img, "sm", elo_value=sample_elo_by_id.get(img["id"], img["elo"]))
         for img in hydrated_sample
@@ -1539,7 +1563,7 @@ async def mosaic_next_impl(
     await add_explore_uncompared_stats(
         stats,
         strategy=strategy,
-        size="sm",
+        size=pool_tier,
         filtered_total=filtered_total,
         visible_count=visible_count,
         search=search,
