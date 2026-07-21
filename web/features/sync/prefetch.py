@@ -179,6 +179,7 @@ class ThumbPrefetcher:
         self._request = request or _urllib_request
         self._store = store or _store_with_thumbnail_cache
         self.cache_root = cache_root
+        self._budget_override = budget_bytes is not None
         self.budget_bytes = (
             budget_bytes if budget_bytes is not None else self._settings_budget(cache_root)
         )
@@ -220,12 +221,15 @@ class ThumbPrefetcher:
         """Recompute budget + mirror completeness for the sync status payload."""
 
         needed, avg_sm, avg_md, image_count = await self._estimate_needed_bytes()
-        budget = auto_thumb_budget_bytes(
-            self.cache_root,
-            needed_bytes=needed,
-            image_count=image_count,
-        )
-        self.budget_bytes = budget
+        if not self._budget_override:
+            budget = auto_thumb_budget_bytes(
+                self.cache_root,
+                needed_bytes=needed,
+                image_count=image_count,
+            )
+            self.budget_bytes = budget
+        else:
+            budget = self.budget_bytes
         cached, total = await self._mirror_progress()
         disk_total = 0
         try:
