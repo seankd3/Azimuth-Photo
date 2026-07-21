@@ -1,4 +1,5 @@
 ﻿from test_support import *  # noqa: F401,F403
+import os
 from unittest import mock
 
 from features.catalog import metadata as catalog_metadata
@@ -357,6 +358,21 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(normalized["embed_model_preset"], "qwen3-vl-embedding-8b")
         self.assertEqual(normalized["embed_model_id"], "Qwen/Qwen3-VL-Embedding-8B")
         self.assertEqual(normalized["embed_model_dim"], 4096)
+
+    async def test_satellite_memory_cache_defaults_to_fraction_of_ram(self):
+        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "satellite"}, clear=False), mock.patch.object(
+            settings, "_system_memory_gb", return_value=64.0
+        ):
+            normalized = settings.normalize_settings({})
+        # min(25% of 64GB, 8GB) = 8GB
+        self.assertEqual(normalized["memory_cache_gb"], 8.0)
+
+    async def test_hub_memory_cache_keeps_half_gb_default(self):
+        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "hub"}, clear=False), mock.patch.object(
+            settings, "_system_memory_gb", return_value=64.0
+        ):
+            normalized = settings.normalize_settings({})
+        self.assertEqual(normalized["memory_cache_gb"], 0.5)
 
     async def test_unversioned_qwen2b_default_migrates_to_qwen8b(self):
         two_b = settings.embedding_model_config_for_preset("qwen3-vl-embedding-2b")

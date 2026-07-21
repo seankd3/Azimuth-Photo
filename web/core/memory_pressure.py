@@ -34,8 +34,9 @@ PAUSE_MESSAGE = "Paused: memory pressure"
 # Headroom under cgroup MemoryHigh / MemoryMax when deriving defaults.
 _HIGH_HEADROOM_BYTES = 2 * _GIB
 _MAX_HEADROOM_BYTES = 2 * _GIB
-_FALLBACK_SOFT_BYTES = 6 * _GIB
-_FALLBACK_HARD_BYTES = 10 * _GIB
+# Fallback when no cgroup limits: soft=55% / hard=72% of detected total RAM.
+_FALLBACK_SOFT_FRACTION = 0.55
+_FALLBACK_HARD_FRACTION = 0.72
 
 
 def _env_bytes(name: str, default: int) -> int:
@@ -110,13 +111,49 @@ def read_cgroup_limits() -> tuple[int | None, int | None]:
     )
 
 
+def _detect_total_ram_bytes() -> int | None:
+    """Total system RAM — psutil first, then sysconf."""
+
+    try:
+        import psutil
+
+        total = int(psutil.virtual_memory().total)
+        if total > 0:
+            return total
+    except Exception:
+        pass
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+        if page_size > 0 and phys_pages > 0:
+            return int(page_size) * int(phys_pages)
+    except (AttributeError, OSError, ValueError):
+        pass
+    return None
+
+
 def _default_watermarks() -> tuple[int, int]:
-    """Soft/hard defaults with headroom under MemoryHigh / MemoryMax."""
+    """Soft/hard defaults with headroom under MemoryHigh / MemoryMax.
+
+    Cgroup path stays first (hub under systemd). Fallback is fraction-of-RAM
+    so an 8GB laptop and a 64GB box share one formula.
+    """
     high, maximum = read_cgroup_limits()
-    soft = (high - _HIGH_HEADROOM_BYTES) if high is not None else _FALLBACK_SOFT_BYTES
-    hard = (maximum - _MAX_HEADROOM_BYTES) if maximum is not None else _FALLBACK_HARD_BYTES
-    soft = max(2 * _GIB, int(soft))
-    hard = max(soft + _GIB, int(hard))
+    if high is not None or maximum is not None:
+        soft = (high - _HIGH_HEADROOM_BYTES) if high is not None else None
+        hard = (maximum - _MAX_HEADROOM_BYTES) if maximum is not None else None
+        if soft is None and hard is not None:
+            soft = int(hard * _FALLBACK_SOFT_FRACTION / _FALLBACK_HARD_FRACTION)
+        if hard is None and soft is not None:
+            hard = int(soft * _FALLBACK_HARD_FRACTION / _FALLBACK_SOFT_FRACTION)
+        soft = max(2 * _GIB, int(soft or 2 * _GIB))
+        hard = max(soft + _GIB, int(hard or soft + _GIB))
+        return soft, hard
+
+    total = _detect_total_ram_bytes() or (16 * _GIB)
+    # soft = 55% of total RAM; hard = 72% of total RAM
+    soft = max(2 * _GIB, int(total * _FALLBACK_SOFT_FRACTION))
+    hard = max(soft + _GIB, int(total * _FALLBACK_HARD_FRACTION))
     return soft, hard
 
 

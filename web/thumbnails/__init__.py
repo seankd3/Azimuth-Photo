@@ -183,6 +183,23 @@ def cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
     return _cleanup_stale_cache_temps(max_age_seconds=max_age_seconds)
 
 
+def sweep_missing_cache_entries(
+    *,
+    batch_size: int = 500,
+    max_batches: int | None = None,
+) -> dict:
+    """Drop phantom cache_entries rows whose files no longer exist."""
+
+    return thumbnail_maintenance.sweep_missing_cache_entries(
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        remove_cache_entry_locked=thumbnail_cache_entries._remove_cache_entry_locked,
+        invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
+        batch_size=batch_size,
+        max_batches=max_batches,
+    )
+
+
 SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
 MEMORY_CACHE_PROFILES = thumbnail_config.MEMORY_CACHE_PROFILES
 

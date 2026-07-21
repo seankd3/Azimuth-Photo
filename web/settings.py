@@ -34,7 +34,7 @@ DEFAULT_SETTINGS = {
     "thumb_quality": 92,
     "ssd_cache_dir": _default_thumb_cache_dir(),
     "ssd_cache_gb": 100,
-    "memory_cache_gb": 0.5,
+    "memory_cache_gb": 0.5,  # overwritten by default_memory_cache_gb() when unset
     "cache_profile": "original_heavy",
     "background_thumb_workers": 2,
     "pregen_generate_batch": 16,
@@ -291,6 +291,28 @@ def _system_memory_gb() -> float | None:
         return None
 
 
+def default_memory_cache_gb() -> float:
+    """Automatic RAM thumb-cache size from detected hardware.
+
+    Satellite: min(25% of total RAM, 8GB), floor 512MB — keep the working
+    set hot on a 64GB laptop without drowning an 8GB one.
+    Hub keeps the historic 0.5GB default (bulk workers dominate RAM there).
+    """
+
+    try:
+        from features.sync import satellite
+
+        if not satellite.is_satellite_mode():
+            return 0.5
+    except Exception:
+        return 0.5
+    total = _system_memory_gb()
+    if total is None or total <= 0:
+        return 0.5
+    # min(25% of total RAM, 8GB), floor 0.5GB
+    return max(0.5, min(float(total) * 0.25, 8.0))
+
+
 def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
@@ -403,6 +425,8 @@ def normalize_settings(raw: dict | None) -> dict:
                 }
             except (TypeError, ValueError):
                 pass
+        else:
+            raw = {**raw, "memory_cache_gb": default_memory_cache_gb()}
 
     if _settings_version(raw) < SETTINGS_VERSION and _raw_uses_legacy_2b_default(raw):
         raw = {**raw, "embed_model_preset": DEFAULT_EMBED_MODEL_PRESET_KEY}

@@ -465,5 +465,26 @@ class DecodeBudgetDimensionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order, ["wait", "got"])
 
 
+class AdaptiveWatermarkTests(unittest.TestCase):
+    def test_fallback_watermarks_are_fractions_of_detected_ram(self):
+        total = 16 * memory_pressure._GIB
+        with mock.patch.object(memory_pressure, "read_cgroup_limits", return_value=(None, None)), mock.patch.object(
+            memory_pressure, "_detect_total_ram_bytes", return_value=total
+        ):
+            soft, hard = memory_pressure._default_watermarks()
+        self.assertEqual(soft, int(total * 0.55))
+        self.assertEqual(hard, int(total * 0.72))
+
+    def test_fallback_watermarks_scale_on_64gb_host(self):
+        total = 64 * memory_pressure._GIB
+        with mock.patch.object(memory_pressure, "read_cgroup_limits", return_value=(None, None)), mock.patch.object(
+            memory_pressure, "_detect_total_ram_bytes", return_value=total
+        ):
+            soft, hard = memory_pressure._default_watermarks()
+        self.assertEqual(soft, int(total * 0.55))
+        self.assertEqual(hard, int(total * 0.72))
+        self.assertGreater(soft, 30 * memory_pressure._GIB)
+
+
 if __name__ == "__main__":
     unittest.main()

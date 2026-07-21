@@ -81,6 +81,66 @@ def cleanup_stale_cache_temps(
     return result
 
 
+def sweep_missing_cache_entries(
+    *,
+    meta_lock,
+    db_connect: Callable[[], object],
+    remove_cache_entry_locked: Callable[[object, object], object],
+    invalidate_disk_stats_cache: Callable[[], object] | None = None,
+    batch_size: int = 500,
+    max_batches: int | None = None,
+    path_exists: Callable[[str], bool] = os.path.exists,
+) -> dict:
+    """Delete cache_entries rows whose files are gone (phantom preview_ready).
+
+    Cheap idle-time repair: batched, resumable via ``after_rowid``, once per
+    process start. Does not delete real files — only rows already pointing at
+    missing paths.
+    """
+
+    removed = 0
+    scanned = 0
+    batches = 0
+    after_rowid = 0
+    batch = max(50, int(batch_size))
+    while True:
+        if max_batches is not None and batches >= max_batches:
+            break
+        with meta_lock:
+            conn = db_connect()
+            try:
+                rows = conn.execute(
+                    "SELECT rowid, cache_root, size, image_id, path "
+                    "FROM cache_entries WHERE rowid > ? "
+                    "ORDER BY rowid ASC LIMIT ?",
+                    (after_rowid, batch),
+                ).fetchall()
+                if not rows:
+                    break
+                batches += 1
+                for row in rows:
+                    after_rowid = int(row["rowid"])
+                    scanned += 1
+                    path = str(row["path"] or "")
+                    if path and path_exists(path):
+                        continue
+                    remove_cache_entry_locked(conn, row)
+                    removed += 1
+                conn.commit()
+            finally:
+                conn.close()
+        if len(rows) < batch:
+            break
+    if removed and invalidate_disk_stats_cache is not None:
+        invalidate_disk_stats_cache()
+    return {
+        "scanned": scanned,
+        "removed": removed,
+        "batches": batches,
+        "after_rowid": after_rowid,
+    }
+
+
 def purge_image_cache(
     image_ids: list[int],
     *,

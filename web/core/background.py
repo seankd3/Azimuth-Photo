@@ -283,6 +283,17 @@ async def run_startup(
     async def _cleanup_stale_cache_temps_when_quiet():
         await asyncio.to_thread(thumbnails.cleanup_stale_cache_temps)
 
+    async def _sweep_phantom_cache_entries():
+        # Once per process start; low priority after interactive warmers settle.
+        await asyncio.sleep(45.0)
+        result = await asyncio.to_thread(thumbnails.sweep_missing_cache_entries)
+        log.info(
+            "worker=cache_phantom_sweep scanned=%s removed=%s batches=%s",
+            result.get("scanned"),
+            result.get("removed"),
+            result.get("batches"),
+        )
+
     async def _warm_common_filter_caches():
         options = await get_filter_options()
         file_types = [
@@ -409,6 +420,7 @@ async def run_startup(
 
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
+    track_background_task(_sweep_phantom_cache_entries())
     track_background_task(_start_background_daemon(classify_orientations_background))
     track_background_task(_start_background_daemon(scan_metadata_background))
     schedule_optional_workers(

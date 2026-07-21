@@ -3,6 +3,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import closing
@@ -849,6 +850,59 @@ class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
         self.assertEqual(invalidations, ["invalidated"])
         self.assertFalse(os.path.exists(old_tmp))
         self.assertTrue(os.path.exists(fresh_tmp))
+
+    def test_phantom_cache_sweep_deletes_rows_for_missing_files(self):
+        events = []
+        missing_row = {
+            "rowid": 1,
+            "cache_root": "/cache",
+            "size": "sm",
+            "image_id": 7,
+            "path": "/cache/sm/7.jpg",
+        }
+        live_row = {
+            "rowid": 2,
+            "cache_root": "/cache",
+            "size": "sm",
+            "image_id": 8,
+            "path": "/cache/sm/8.jpg",
+        }
+
+        class FakeConnection:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, sql, params=()):
+                self.calls += 1
+                events.append(("execute", sql.split()[0], tuple(params)))
+
+                class FakeCursor:
+                    def fetchall(inner_self):
+                        if self.calls == 1:
+                            return [missing_row, live_row]
+                        return []
+
+                return FakeCursor()
+
+            def commit(self):
+                events.append(("commit",))
+
+            def close(self):
+                events.append(("close",))
+
+        removed = []
+        result = thumbnail_maintenance.sweep_missing_cache_entries(
+            meta_lock=threading.Lock(),
+            db_connect=FakeConnection,
+            remove_cache_entry_locked=lambda _conn, row: removed.append(dict(row)),
+            invalidate_disk_stats_cache=lambda: events.append(("invalidate",)),
+            path_exists=lambda path: path.endswith("8.jpg"),
+            batch_size=50,
+        )
+        self.assertEqual(result["scanned"], 2)
+        self.assertEqual(result["removed"], 1)
+        self.assertEqual(removed[0]["image_id"], 7)
+        self.assertIn(("invalidate",), events)
 
     def test_cache_purge_helper_owns_memory_disk_and_source_invalidation(self):
         cache_file = os.path.join(self._legacy_cache_root(), "sm", "42.jpg")
