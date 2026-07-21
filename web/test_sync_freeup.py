@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest import mock
 
@@ -87,16 +88,15 @@ class FreeUpSpaceTests(BackendTestCase):
         request = Request({"type": "http", "method": "GET", "path": f"/api/full/{image_id}", "headers": []})
         with mock.patch.object(satellite, "hub_url", return_value="http://hub"), mock.patch.object(
             media_routes,
-            "_urllib_request",
-            new=mock.AsyncMock(return_value=(200, {"content-type": "image/jpeg"}, b"hub-readthrough")),
-        ), mock.patch.object(
-            media_routes, "_cache_remote_media", return_value="hub-signature"
-        ), mock.patch.object(thumbnails, "fast_disk_path_entry", return_value=None):
+            "_schedule_remote_media_prefetch",
+        ) as enqueue, mock.patch.object(thumbnails, "fast_disk_path_entry", return_value=None):
             response = await media_routes.serve_full_image(
                 request, image_id, BackgroundTasks()
             )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"hub-readthrough")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(json.loads(response.body)["reason"], "hub_media_pending")
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], thumbnails.FULL_TIER)
 
     async def test_hub_have_requires_matching_bytes_not_mere_existence(self):
         # A truncated/corrupted hub original at the right path must NOT read as present:

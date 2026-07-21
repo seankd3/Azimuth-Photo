@@ -577,20 +577,17 @@ class TrashTests(BackendTestCase):
         self.assertTrue(await self._image_exists(mirror_id))
         self.assertEqual(worker.status()["pending_hub_trash"], 1)
 
-    async def test_trashed_mirror_thumbnail_reads_through_from_hub(self):
+    async def test_trashed_mirror_thumbnail_returns_pending_without_hub_await(self):
         mirror_id = await self._mirrored_trash(hub_image_id=888)
 
-        async def hub_thumb(_method, url, **_kwargs):
-            self.assertTrue(url.endswith("/api/thumb/sm/888"))
-            return 200, {"Content-Type": "image/jpeg"}, b"hub-thumb"
-
         with patch.dict(os.environ, {"PHOTOARCHIVE_HUB_URL": "http://stub-hub"}, clear=False), patch(
-            "features.media.routes._urllib_request", side_effect=hub_thumb
-        ):
+            "features.media.routes._schedule_remote_media_prefetch"
+        ) as enqueue:
             response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", mirror_id)
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"hub-thumb")
+        self.assertEqual(response.status_code, 204)
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], "sm")
 
     async def test_satellite_scoped_empty_queues_hub_without_capability(self):
         conn = await db.get_db()

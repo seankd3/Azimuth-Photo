@@ -176,7 +176,7 @@ class PreviewMirrorTests(BackendTestCase):
         hit = preview_mirror.read_local(self.image_id, "md", self.version)
         self.assertEqual(hit[1], b"remote-md-bytes")
 
-        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
             media_routes,
             "_configured_db_path",
             return_value=db.DB_PATH,
@@ -189,25 +189,19 @@ class PreviewMirrorTests(BackendTestCase):
         else:
             self.assertEqual(response.body, b"remote-md-bytes")
         self.assertEqual(len(calls), 1)
+        enqueue.assert_not_called()
 
-    async def test_remote_miss_tees_through_media_route(self):
-        calls = []
-
-        async def request(method, url, *, body=None, headers=None):
-            calls.append(url)
-            return 200, {"content-type": "image/jpeg"}, b"tee-body"
-
-        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
+    async def test_remote_miss_returns_pending_and_enqueues_background_fill(self):
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
             media_routes,
             "_configured_db_path",
             return_value=db.DB_PATH,
         ):
             response = await media_routes.thumbnail_response(HeaderRequest(), "sm", self.image_id)
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.body, b"tee-body")
-        self.assertEqual(len(calls), 1)
-        hit = preview_mirror.read_local(self.image_id, "sm", self.version)
-        self.assertEqual(hit[1], b"tee-body")
+        self.assertEqual(response.status_code, 204)
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[1], "sm")
+        self.assertIsNone(preview_mirror.read_local(self.image_id, "sm", self.version))
 
     async def test_warm_local_hit_never_contacts_hub(self):
         """Local-first: a cached sm/md must not block on or call the hub."""
@@ -216,16 +210,14 @@ class PreviewMirrorTests(BackendTestCase):
         self.assertTrue(preview_mirror.put(self.image_id, "sm", self.version, payload))
         thumbnails._flush_write_queue()
 
-        async def request(*_args, **_kwargs):
-            raise AssertionError("hub must not be contacted on local hit")
-
-        with mock.patch.object(media_routes, "_urllib_request", request), mock.patch.object(
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
             media_routes,
             "_configured_db_path",
             return_value=db.DB_PATH,
         ):
             response = await media_routes.thumbnail_response(HeaderRequest(), "sm", self.image_id)
         self.assertEqual(response.status_code, 200)
+        enqueue.assert_not_called()
         if hasattr(response, "path"):
             with open(response.path, "rb") as handle:
                 self.assertEqual(handle.read(), payload)
