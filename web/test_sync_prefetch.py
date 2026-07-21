@@ -230,16 +230,44 @@ if __name__ == "__main__":
     unittest.main()
 
 
-def test_auto_budget_adapts_to_free_disk(tmp_path):
+def test_auto_budget_adapts_to_disk_and_library(tmp_path):
     from features.sync import prefetch as prefetch_mod
 
-    # 200GB free -> 25% = 50GB (inside 8-64 clamp); tiny disks clamp to the
-    # floor; huge disks clamp to the ceiling.
     import shutil as real_shutil
     import unittest.mock as mock
-    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=200 * 1024 ** 3)):
-        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 50 * 1024 ** 3
-    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=4 * 1024 ** 3)):
-        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 8 * 1024 ** 3
-    with mock.patch.object(real_shutil, "disk_usage", return_value=mock.Mock(free=1024 * 1024 ** 3)):
-        assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 64 * 1024 ** 3
+
+    # Legacy hub path: 25% of FREE, clamped 8-64GB.
+    with mock.patch.object(prefetch_mod.satellite, "is_satellite_mode", return_value=False):
+        with mock.patch.object(
+            real_shutil, "disk_usage", return_value=mock.Mock(free=200 * 1024 ** 3, total=500 * 1024 ** 3)
+        ):
+            assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 50 * 1024 ** 3
+        with mock.patch.object(
+            real_shutil, "disk_usage", return_value=mock.Mock(free=4 * 1024 ** 3, total=20 * 1024 ** 3)
+        ):
+            assert prefetch_mod.auto_thumb_budget_bytes(str(tmp_path)) == 8 * 1024 ** 3
+
+    # Satellite: clamp(needed*1.2, floor 8GB, cap 25% of TOTAL).
+    # 32GB sm+md on a 500GB disk → 38.4GB (under 125GB cap).
+    with mock.patch.object(prefetch_mod.satellite, "is_satellite_mode", return_value=True):
+        with mock.patch.object(
+            real_shutil, "disk_usage", return_value=mock.Mock(free=100 * 1024 ** 3, total=500 * 1024 ** 3)
+        ):
+            needed = 32 * 1024 ** 3
+            assert prefetch_mod.auto_thumb_budget_bytes(
+                str(tmp_path), needed_bytes=needed
+            ) == int(needed * 1.20)
+        # Tiny disk: 25% of 20GB = 5GB < 8GB floor → floor wins.
+        with mock.patch.object(
+            real_shutil, "disk_usage", return_value=mock.Mock(free=2 * 1024 ** 3, total=20 * 1024 ** 3)
+        ):
+            assert prefetch_mod.auto_thumb_budget_bytes(
+                str(tmp_path), needed_bytes=32 * 1024 ** 3
+            ) == 8 * 1024 ** 3
+        # Large need on mid disk: cap binds (25% of 100GB = 25GB < 38.4GB need).
+        with mock.patch.object(
+            real_shutil, "disk_usage", return_value=mock.Mock(free=40 * 1024 ** 3, total=100 * 1024 ** 3)
+        ):
+            assert prefetch_mod.auto_thumb_budget_bytes(
+                str(tmp_path), needed_bytes=32 * 1024 ** 3
+            ) == int(100 * 1024 ** 3 * 0.25)

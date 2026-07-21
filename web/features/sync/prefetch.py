@@ -24,25 +24,73 @@ from features.sync.executor import run_foreground_sync_work, run_sync_work
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
 StoreFn = Callable[[str, int, str, bytes], Any]
-# 0 = auto: 25% of free disk on the cache volume, clamped 8-64GB. Holding a
-# full sm+md tier set (~32GB on a 150k-image library) fits inside the ceiling;
-# small machines degrade gracefully instead of filling their disk.
+# 0 = auto. Satellite: clamp(full sm+md need + 20% headroom, floor 8GB,
+# cap 25% of TOTAL cache-drive capacity). Hub/legacy free-disk clamp retained
+# only when not in satellite mode.
 DEFAULT_THUMB_BUDGET_GB = 0
 AUTO_BUDGET_FLOOR_GB = 8
 AUTO_BUDGET_CEILING_GB = 64
 AUTO_BUDGET_FREE_FRACTION = 0.25
+AUTO_BUDGET_CAPACITY_FRACTION = 0.25
+AUTO_BUDGET_HEADROOM = 1.20
+# Fallback per-image JPEG sizes when the local cache has no samples yet.
+# Tuned so ~150k images ≈ 32GB for a full sm+md set.
+_ESTIMATE_SM_BYTES = 64 * 1024
+_ESTIMATE_MD_BYTES = 160 * 1024
 
 
-def auto_thumb_budget_bytes(cache_root: str | None) -> int:
+def _disk_usage(cache_root: str | None):
     import shutil as _shutil
 
     probe = cache_root or str(pathlib.Path.home())
+    return _shutil.disk_usage(probe)
+
+
+def estimate_sm_md_set_bytes(
+    *,
+    image_count: int,
+    avg_sm_bytes: int | None = None,
+    avg_md_bytes: int | None = None,
+) -> int:
+    """Bytes for a full local sm+md mirror of ``image_count`` photos."""
+
+    count = max(0, int(image_count))
+    sm = int(avg_sm_bytes) if avg_sm_bytes and avg_sm_bytes > 0 else _ESTIMATE_SM_BYTES
+    md = int(avg_md_bytes) if avg_md_bytes and avg_md_bytes > 0 else _ESTIMATE_MD_BYTES
+    return count * (sm + md)
+
+
+def auto_thumb_budget_bytes(
+    cache_root: str | None,
+    *,
+    needed_bytes: int | None = None,
+    image_count: int | None = None,
+) -> int:
+    """Derive the satellite thumb mirror budget from disk + library size.
+
+    Formula (satellite): clamp(needed * 1.20, floor 8GB, cap 25% of TOTAL disk).
+    Non-satellite keeps the legacy free-disk fraction clamp for safety.
+    """
+
+    floor = AUTO_BUDGET_FLOOR_GB * 1024 ** 3
     try:
-        free = _shutil.disk_usage(probe).free
+        usage = _disk_usage(cache_root)
     except OSError:
-        return AUTO_BUDGET_FLOOR_GB * 1024 ** 3
-    auto = int(free * AUTO_BUDGET_FREE_FRACTION)
-    return min(AUTO_BUDGET_CEILING_GB * 1024 ** 3, max(AUTO_BUDGET_FLOOR_GB * 1024 ** 3, auto))
+        return floor
+
+    if not satellite.is_satellite_mode():
+        auto = int(usage.free * AUTO_BUDGET_FREE_FRACTION)
+        return min(AUTO_BUDGET_CEILING_GB * 1024 ** 3, max(floor, auto))
+
+    if needed_bytes is None:
+        needed_bytes = estimate_sm_md_set_bytes(image_count=int(image_count or 0))
+    target = int(max(0, int(needed_bytes)) * AUTO_BUDGET_HEADROOM)
+    # Cap = 25% of TOTAL capacity of the cache drive (not free space).
+    capacity_cap = int(usage.total * AUTO_BUDGET_CAPACITY_FRACTION)
+    if target <= 0:
+        target = floor
+    # clamp(target, floor, cap) — if cap < floor (tiny disk), floor still wins.
+    return max(floor, min(target, capacity_cap if capacity_cap > 0 else target))
 PACK_ORDER = "newest"
 _PREFETCH_DDL = """
 CREATE TABLE IF NOT EXISTS sync_prefetch_state (
@@ -137,7 +185,22 @@ class ThumbPrefetcher:
         self._queue: asyncio.PriorityQueue[_QueuedItem] = asyncio.PriorityQueue()
         self._last_predictive_seed_at = 0.0
         self._sm_gap_retry_at = 0.0
-        self._status: dict[str, Any] = {"state": "idle", "size": "sm", "after_id": 0, "cached": 0, "total": 0, "library_cached": 0, "library_total": 0, "budget_bytes": self.budget_bytes, "last_error": "", "tier": "browse"}
+        self._status: dict[str, Any] = {
+            "state": "idle",
+            "size": "sm",
+            "after_id": 0,
+            "cached": 0,
+            "total": 0,
+            "library_cached": 0,
+            "library_total": 0,
+            "mirror_cached": 0,
+            "mirror_total": 0,
+            "budget_bytes": self.budget_bytes,
+            "needed_bytes": 0,
+            "disk_total_bytes": 0,
+            "last_error": "",
+            "tier": "browse",
+        }
 
     @staticmethod
     def _settings_budget(cache_root: str | None = None) -> int:
@@ -153,12 +216,40 @@ class ThumbPrefetcher:
     def status(self) -> dict[str, Any]:
         return {**self._status, "queued": self._queue.qsize()}
 
+    async def refresh_budget_status(self) -> dict[str, Any]:
+        """Recompute budget + mirror completeness for the sync status payload."""
+
+        needed, avg_sm, avg_md, image_count = await self._estimate_needed_bytes()
+        budget = auto_thumb_budget_bytes(
+            self.cache_root,
+            needed_bytes=needed,
+            image_count=image_count,
+        )
+        self.budget_bytes = budget
+        cached, total = await self._mirror_progress()
+        disk_total = 0
+        try:
+            disk_total = int(_disk_usage(self.cache_root).total)
+        except OSError:
+            disk_total = 0
+        self._status.update(
+            budget_bytes=budget,
+            needed_bytes=needed,
+            disk_total_bytes=disk_total,
+            mirror_cached=cached,
+            mirror_total=total,
+            avg_sm_bytes=avg_sm,
+            avg_md_bytes=avg_md,
+        )
+        return self.status()
+
     async def prefetch_once(self, *, size: str = "sm", limit: int = 500) -> dict[str, Any]:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for thumbnail prefetch")
         if size not in {"sm", "md"}:
             raise ValueError("thumbnail prefetch supports sm or md")
         await self._ensure_state()
+        await self.refresh_budget_status()
         if await self._at_budget():
             if size == self.BROWSE_SIZE:
                 # Prefer reclaiming loupe thumbs over leaving the grid cold.
@@ -492,6 +583,42 @@ class ThumbPrefetcher:
             return int(cached["count"] or 0), int(total["count"] or 0)
         finally:
             await connection.close_async(conn, db_path=self.db_path)
+
+    async def _mirror_progress(self) -> tuple[int, int]:
+        """sm+md local thumb rows vs 2× hub-remote catalog count."""
+
+        sm_cached, total = await self._library_progress(self.BROWSE_SIZE)
+        md_cached, _ = await self._library_progress(self.LOUPE_SIZE)
+        return sm_cached + md_cached, total * 2
+
+    async def _estimate_needed_bytes(self) -> tuple[int, int, int, int]:
+        if self.cache_root is None:
+            import thumbnails
+            self.cache_root = thumbnails.SSD_CACHE_DIR
+        conn = await connection.open_async(self.db_path)
+        try:
+            total_row = await (
+                await conn.execute("SELECT COUNT(*) AS count FROM images WHERE hub_remote = 1")
+            ).fetchone()
+            image_count = int(total_row["count"] or 0)
+            averages = {}
+            for size in (self.BROWSE_SIZE, self.LOUPE_SIZE):
+                row = await (
+                    await conn.execute(
+                        """SELECT AVG(size_bytes) AS avg_bytes FROM cache_entries
+                           WHERE cache_root = ? AND size = ? AND size_bytes > 0""",
+                        (self.cache_root, size),
+                    )
+                ).fetchone()
+                averages[size] = int(row["avg_bytes"] or 0) if row and row["avg_bytes"] else 0
+        finally:
+            await connection.close_async(conn, db_path=self.db_path)
+        avg_sm = averages.get(self.BROWSE_SIZE) or _ESTIMATE_SM_BYTES
+        avg_md = averages.get(self.LOUPE_SIZE) or _ESTIMATE_MD_BYTES
+        needed = estimate_sm_md_set_bytes(
+            image_count=image_count, avg_sm_bytes=avg_sm, avg_md_bytes=avg_md
+        )
+        return needed, avg_sm, avg_md, image_count
 
     @staticmethod
     def _signature(hub_image_id: Any, data: bytes) -> str:
