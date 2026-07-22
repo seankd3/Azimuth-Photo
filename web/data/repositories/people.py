@@ -3,6 +3,7 @@
 import time as _time
 
 from data import connection
+from features.people.clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
 
 
 def parse_people_ids(value) -> tuple[int, ...]:
@@ -408,7 +409,7 @@ async def cluster_unassigned_faces(
             centroids[person_id] = centroid.astype(np.float32)
 
         cursor = await conn.execute(
-            "SELECT fd.id, fd.embedding FROM face_detections fd "
+            "SELECT fd.id, fd.image_id, fd.embedding FROM face_detections fd "
             "LEFT JOIN face_assignments fa ON fa.face_id = fd.id AND fa.active = 1 "
             "WHERE fa.face_id IS NULL AND fd.ignored = 0 "
             "AND fd.embedding_model = ? AND fd.embedding IS NOT NULL "
@@ -419,34 +420,49 @@ async def cluster_unassigned_faces(
         assigned = 0
         created_people = 0
         threshold = float(similarity_threshold or 0.52)
-
+        batch_faces = []
         for row in unassigned:
-            vec = _face_embedding_vector(row["embedding"])
-            if vec is None:
-                continue
-            best_person_id = 0
-            best_similarity = -1.0
-            for person_id, centroid in centroids.items():
-                similarity = float(np.dot(vec, centroid))
-                if similarity > best_similarity:
-                    best_person_id = person_id
-                    best_similarity = similarity
-            if best_person_id <= 0 or best_similarity < threshold:
+            vector = _face_embedding_vector(row["embedding"])
+            if vector is not None:
+                batch_faces.append(FaceVector(int(row["id"]), int(row["image_id"]), vector))
+        cursor = await conn.execute(
+            "SELECT person_id, image_id FROM person_image_membership"
+        )
+        person_images: dict[int, set[int]] = {}
+        for row in await cursor.fetchall():
+            person_images.setdefault(int(row["person_id"]), set()).add(int(row["image_id"]))
+
+        for group in group_face_batch(batch_faces, similarity_threshold=threshold):
+            centroid = group_centroid(group)
+            group_images = {face.image_id for face in group}
+            excluded = {
+                person_id for person_id, image_ids in person_images.items()
+                if group_images & image_ids
+            }
+            best_person_id, _similarity = confident_person_match(
+                centroid,
+                centroids,
+                similarity_threshold=threshold,
+                excluded_person_ids=excluded,
+            )
+            if best_person_id <= 0:
                 best_person_id = await create_person_on_conn(conn)
-                centroids[best_person_id] = vec
+                centroids[best_person_id] = centroid
                 created_people += 1
             else:
                 existing = centroids[best_person_id]
-                merged = existing * 0.9 + vec * 0.1
+                merged = existing * 0.9 + centroid * 0.1
                 norm = float(np.linalg.norm(merged))
                 centroids[best_person_id] = (merged / norm).astype(np.float32) if norm > 0 else merged
-            await conn.execute(
-                "INSERT OR REPLACE INTO face_assignments "
-                "(face_id, person_id, source, active, assigned_at) VALUES (?, ?, 'worker', 1, ?)",
-                (int(row["id"]), best_person_id, _time.time()),
-            )
+            for face in group:
+                await conn.execute(
+                    "INSERT OR REPLACE INTO face_assignments "
+                    "(face_id, person_id, source, active, assigned_at) VALUES (?, ?, 'worker', 1, ?)",
+                    (face.face_id, best_person_id, _time.time()),
+                )
+                assigned += 1
+            person_images.setdefault(best_person_id, set()).update(group_images)
             affected_people.add(best_person_id)
-            assigned += 1
 
         if affected_people:
             await refresh_people_membership_on_conn(conn, tuple(affected_people))

@@ -31,6 +31,38 @@ def tags_json(tags) -> str:
     return json.dumps(normalize_tags(tags), ensure_ascii=True)
 
 
+def normalize_understanding(value) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    visible_text = " ".join(str(value.get("visible_text") or "").split())[:4000]
+    entities = normalize_tags(value.get("entities"))[:30]
+    raw_attributes = value.get("attributes")
+    attributes = {}
+    if isinstance(raw_attributes, dict):
+        for key, raw in raw_attributes.items():
+            clean_key = str(key or "").strip().casefold()[:40]
+            if not clean_key:
+                continue
+            if isinstance(raw, list):
+                clean_value = [str(item or "").strip()[:120] for item in raw if str(item or "").strip()]
+            else:
+                clean_value = str(raw or "").strip()[:240]
+            if clean_value:
+                attributes[clean_key] = clean_value
+    return {
+        "visible_text": visible_text,
+        "entities": entities,
+        "attributes": attributes,
+    }
+
+
+def understanding_search_text(understanding: dict) -> str:
+    values = list(understanding.get("entities") or [])
+    for value in (understanding.get("attributes") or {}).values():
+        values.extend(value if isinstance(value, list) else [value])
+    return " ".join(str(value) for value in values if value)
+
+
 def _tags_signature_key(db_path: str, model_key: str, q: str, limit: int, signature: int) -> tuple:
     return (db_path, model_key, q.casefold(), int(limit), int(signature))
 
@@ -60,6 +92,7 @@ async def ensure_active_caption_fts_model(db_path: str, model_key: str) -> None:
             (model_key,),
         )
         await conn.execute("DELETE FROM image_captions_fts")
+        await conn.execute("DELETE FROM image_understanding_fts")
         cursor = await conn.execute(
             "SELECT image_id, caption, tags FROM image_captions WHERE model_key = ?",
             (model_key,),
@@ -69,6 +102,18 @@ async def ensure_active_caption_fts_model(db_path: str, model_key: str) -> None:
             await conn.executemany(
                 "INSERT INTO image_captions_fts(rowid, caption, tags) VALUES (?, ?, ?)",
                 [(row["image_id"], row["caption"], row["tags"]) for row in rows],
+            )
+        cursor = await conn.execute(
+            "SELECT image_id, visible_text, entities, attributes, search_text "
+            "FROM image_understanding WHERE model_key = ?",
+            (model_key,),
+        )
+        understanding_rows = await cursor.fetchall()
+        if understanding_rows:
+            await conn.executemany(
+                "INSERT INTO image_understanding_fts"
+                "(rowid, visible_text, entities, attributes, search_text) VALUES (?, ?, ?, ?, ?)",
+                [tuple(row) for row in understanding_rows],
             )
         await conn.commit()
     except Exception:
@@ -86,11 +131,13 @@ async def store_caption_result(
     caption: str,
     tags,
     quality: str | None = None,
+    understanding: dict | None = None,
     status: str = "done",
     error: str = "",
 ) -> None:
     now = time.time()
     tags_text = tags_json(tags)
+    structured = normalize_understanding(understanding)
 
     async def _write() -> None:
         write_status = caption_ledger_status(requested_status=status, error=error)
@@ -118,6 +165,22 @@ async def store_caption_result(
                     "WHERE COALESCE(image_captions.user_edited, 0) = 0",
                     (int(image_id), model_key, str(caption or ""), tags_text, quality, now),
                 )
+                if structured:
+                    await conn.execute(
+                        "INSERT INTO image_understanding "
+                        "(image_id, model_key, visible_text, entities, attributes, search_text, created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                        "ON CONFLICT(model_key, image_id) DO UPDATE SET "
+                        "visible_text = excluded.visible_text, entities = excluded.entities, "
+                        "attributes = excluded.attributes, search_text = excluded.search_text, "
+                        "created_at = excluded.created_at",
+                        (
+                            int(image_id), model_key, structured["visible_text"],
+                            json.dumps(structured["entities"], ensure_ascii=True),
+                            json.dumps(structured["attributes"], ensure_ascii=True, sort_keys=True),
+                            understanding_search_text(structured), now,
+                        ),
+                    )
             await conn.execute(
                 "INSERT INTO caption_scan_images "
                 "(image_id, model_key, status, last_error, scanned_at) "
@@ -201,8 +264,11 @@ async def get_image_caption(db_path: str, *, image_id: int, model_key: str) -> d
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT image_id, model_key, caption, tags, quality, user_edited, created_at "
-            "FROM image_captions WHERE image_id = ? AND model_key = ?",
+            "SELECT c.image_id, c.model_key, c.caption, c.tags, c.quality, "
+            "c.user_edited, c.created_at, u.visible_text, u.entities, u.attributes "
+            "FROM image_captions c LEFT JOIN image_understanding u "
+            "ON u.image_id = c.image_id AND u.model_key = c.model_key "
+            "WHERE c.image_id = ? AND c.model_key = ?",
             (int(image_id), model_key),
         )
         row = await cursor.fetchone()
@@ -212,6 +278,14 @@ async def get_image_caption(db_path: str, *, image_id: int, model_key: str) -> d
             parsed_tags = json.loads(row["tags"] or "[]")
         except (TypeError, ValueError):
             parsed_tags = []
+        try:
+            entities = json.loads(row["entities"] or "[]")
+        except (TypeError, ValueError):
+            entities = []
+        try:
+            attributes = json.loads(row["attributes"] or "{}")
+        except (TypeError, ValueError):
+            attributes = {}
         return {
             "image_id": int(row["image_id"]),
             "model_key": row["model_key"],
@@ -220,6 +294,11 @@ async def get_image_caption(db_path: str, *, image_id: int, model_key: str) -> d
             "quality": row["quality"] or "",
             "user_edited": bool(row["user_edited"]),
             "created_at": row["created_at"],
+            "understanding": {
+                "visible_text": row["visible_text"] or "",
+                "entities": entities,
+                "attributes": attributes,
+            } if row["visible_text"] is not None else {},
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
@@ -346,8 +425,13 @@ async def get_images_needing_captions(
     cache_root: str,
     cache_size: str = "md",
     limit: int = 8,
+    include_understanding_backfill: bool = False,
 ) -> list[dict]:
     retry_before = time.time() - ERROR_RETRY_AFTER_SECONDS
+    understanding_clause = (
+        " OR (csi.status = 'done' AND iu.image_id IS NULL)"
+        if include_understanding_backfill else ""
+    )
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -358,15 +442,18 @@ async def get_images_needing_captions(
             "AND ce.cache_root = ? AND ce.size = ? "
             "LEFT JOIN caption_scan_images csi "
             "ON csi.image_id = i.id AND csi.model_key = ? "
+            "LEFT JOIN image_understanding iu "
+            "ON iu.image_id = i.id AND iu.model_key = ? "
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND (csi.status IS NULL OR csi.status = 'pending' "
             "OR (csi.status = 'error' AND (csi.scanned_at <= ? "
-            "OR instr(lower(csi.last_error), 'out of memory') > 0))) "
+            "OR instr(lower(csi.last_error), 'out of memory') > 0))"
+            f"{understanding_clause}) "
             "ORDER BY CASE WHEN i.flag = 'picked' THEN 0 ELSE 1 END, "
             "(i.date_taken IS NULL), i.date_taken DESC, i.id DESC "
             "LIMIT ?",
-            (cache_root, cache_size, model_key, retry_before, max(1, int(limit))),
+            (cache_root, cache_size, model_key, model_key, retry_before, max(1, int(limit))),
         )
         return [dict(row) for row in await cursor.fetchall()]
     finally:
@@ -379,8 +466,13 @@ async def count_images_needing_captions(
     model_key: str,
     cache_root: str,
     cache_size: str = "md",
+    include_understanding_backfill: bool = False,
 ) -> int:
     retry_before = time.time() - ERROR_RETRY_AFTER_SECONDS
+    understanding_clause = (
+        " OR (csi.status = 'done' AND iu.image_id IS NULL)"
+        if include_understanding_backfill else ""
+    )
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
@@ -391,12 +483,15 @@ async def count_images_needing_captions(
             "AND ce.cache_root = ? AND ce.size = ? "
             "LEFT JOIN caption_scan_images csi "
             "ON csi.image_id = i.id AND csi.model_key = ? "
+            "LEFT JOIN image_understanding iu "
+            "ON iu.image_id = i.id AND iu.model_key = ? "
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND (csi.status IS NULL OR csi.status = 'pending' "
             "OR (csi.status = 'error' AND (csi.scanned_at <= ? "
-            "OR instr(lower(csi.last_error), 'out of memory') > 0)))",
-            (cache_root, cache_size, model_key, retry_before),
+            "OR instr(lower(csi.last_error), 'out of memory') > 0))"
+            f"{understanding_clause})",
+            (cache_root, cache_size, model_key, model_key, retry_before),
         )
         row = await cursor.fetchone()
         return int(row["c"] if row else 0)
@@ -462,16 +557,24 @@ async def caption_search_ranked_image_ids(
     conn = await connection.open_async(db_path)
     try:
         source_placeholders = ",".join("?" for _ in active_source_ids)
+        fts_query = metadata_fts_query(query)
         cursor = await conn.execute(
+            "WITH matches AS ("
             "SELECT f.rowid AS id, bm25(image_captions_fts) AS score "
             "FROM image_captions_fts f "
-            "JOIN images i ON i.id = f.rowid "
             "JOIN image_captions c ON c.image_id = f.rowid AND c.model_key = ? "
+            "WHERE image_captions_fts MATCH ? "
+            "UNION ALL "
+            "SELECT u.rowid AS id, bm25(image_understanding_fts) AS score "
+            "FROM image_understanding_fts u "
+            "JOIN image_understanding d ON d.image_id = u.rowid AND d.model_key = ? "
+            "WHERE image_understanding_fts MATCH ?"
+            ") SELECT matches.id, MIN(matches.score) AS score FROM matches "
+            "JOIN images i ON i.id = matches.id "
             f"WHERE i.source_id IN ({source_placeholders}) "
             "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
-            "AND image_captions_fts MATCH ? "
-            "ORDER BY score ASC LIMIT ?",
-            (model_key, *active_source_ids, metadata_fts_query(query), int(max_results)),
+            "GROUP BY matches.id ORDER BY score ASC LIMIT ?",
+            (model_key, fts_query, model_key, fts_query, *active_source_ids, int(max_results)),
         )
         return [(int(row["id"]), -float(row["score"] or 0.0)) for row in await cursor.fetchall()]
     finally:

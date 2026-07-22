@@ -1562,6 +1562,7 @@ async def get_images_needing_captions(
     caption_config: dict | None = None,
     cache_root: str = "",
     cache_size: str = "md",
+    include_understanding_backfill: bool = False,
 ) -> list[dict]:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.get_images_needing_captions(
@@ -1570,6 +1571,7 @@ async def get_images_needing_captions(
         cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
         cache_size=cache_size,
         limit=limit,
+        include_understanding_backfill=include_understanding_backfill,
     )
 
 
@@ -1577,6 +1579,7 @@ async def count_images_needing_captions(
     caption_config: dict | None = None,
     cache_root: str = "",
     cache_size: str = "md",
+    include_understanding_backfill: bool = False,
 ) -> int:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.count_images_needing_captions(
@@ -1584,6 +1587,7 @@ async def count_images_needing_captions(
         model_key=caption_config["model_key"],
         cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
         cache_size=cache_size,
+        include_understanding_backfill=include_understanding_backfill,
     )
 
 
@@ -1594,6 +1598,7 @@ async def store_caption_result(
     caption: str = "",
     tags=None,
     quality: str | None = None,
+    understanding: dict | None = None,
     status: str = "done",
     error: str = "",
 ) -> None:
@@ -1606,6 +1611,7 @@ async def store_caption_result(
         caption=caption,
         tags=tags or [],
         quality=quality,
+        understanding=understanding,
         status=status,
         error=error,
     )

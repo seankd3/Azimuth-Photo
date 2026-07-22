@@ -4,7 +4,8 @@ import importlib.util
 import logging
 import time
 
-from features.search.fusion import FUSED_CANDIDATE_LIMIT, fused_candidate_scores
+from features.search.fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_candidate_scores
+from features.search.planning import plan_search
 
 
 
@@ -165,6 +166,8 @@ async def resolve_text_search(
         "search_sources": [],
         "ai_unavailable": False,
         "fallback_reason": "",
+        "query_plan": {},
+        "evidence_by_id": {},
     }
     if not normalized_query:
         return result
@@ -174,6 +177,8 @@ async def resolve_text_search(
     if config_provider is None:
         raise RuntimeError("resolve_text_search requires active_embedding_config")
     active_config = config_provider()
+    query_plan = plan_search(normalized_query)
+    result["query_plan"] = query_plan.as_dict()
     threshold = get_settings().get("search_similarity_threshold", 0.35)
     caption_signature = None
     if caption_count_for_signature is not None:
@@ -186,6 +191,8 @@ async def resolve_text_search(
         bool(deep),
         active_config["model_key"],
         caption_signature,
+        query_plan.version,
+        query_plan.intent,
         f"{float(threshold or 0.0):.6f}",
     )
     cached = _text_search_resolution_cache.get(cache_key)
@@ -363,6 +370,8 @@ async def resolve_text_search(
                     ranked_sources=ranked_sources,
                     embedding_scores=scores,
                     rows_by_id=rows_by_id,
+                    source_weights=query_plan.source_weights,
+                    recency_weight=query_plan.recency_weight,
                     limit=FUSED_CANDIDATE_LIMIT,
                 )
                 if not fused_scores and scores:
@@ -373,6 +382,7 @@ async def resolve_text_search(
                     "scores": fused_scores,
                     "search_mode": "fused" if len(sources) > 1 else (sources[0] if sources else "embedding"),
                     "search_sources": sources,
+                    "evidence_by_id": candidate_evidence(ranked_sources, fused_scores),
                 })
                 _text_search_resolution_cache[cache_key] = {
                     "data": dict(result),

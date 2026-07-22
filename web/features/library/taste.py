@@ -14,6 +14,7 @@ import time
 import embed_cache
 import settings
 from data import connection
+from features.library.preference_model import fit_pairwise_preference, preference_confidence
 
 
 MIN_COMPARISON_ROWS = 5
@@ -305,8 +306,6 @@ def _compute_similarity_and_scaled_scores(
 
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
-    import numpy as np  # deferred: keeps numpy off boot until a taste vector is requested
-
     model_key = _active_model_key()
     db_path = _configured(_db_path, "db_path")()
     db_signature = _configured(_db_signature, "db_signature")()
@@ -370,13 +369,18 @@ async def taste_vector() -> dict:
     id_to_idx = embed_cache.get_index(model_key)
     winner_vectors = []
     loser_vectors = []
+    paired_winners = []
+    paired_losers = []
     for winner_id, loser_id in comparison_rows:
         winner_idx = id_to_idx.get(winner_id)
+        loser_idx = id_to_idx.get(loser_id)
         if winner_idx is not None:
             winner_vectors.append(matrix[winner_idx])
-        loser_idx = id_to_idx.get(loser_id)
         if loser_idx is not None:
             loser_vectors.append(matrix[loser_idx])
+        if winner_idx is not None and loser_idx is not None:
+            paired_winners.append(matrix[winner_idx])
+            paired_losers.append(matrix[loser_idx])
 
     winner_count = len(winner_vectors)
     loser_count = len(loser_vectors)
@@ -395,8 +399,11 @@ async def taste_vector() -> dict:
         _cache.update({"key": cache_key, "payload": payload, "verified_at": now})
         return dict(payload)
 
-    vector = np.mean(winner_vectors, axis=0) - np.mean(loser_vectors, axis=0)
-    normalized = _normalize(vector)
+    normalized, pairwise_accuracy = await _to_thread(
+        fit_pairwise_preference,
+        paired_winners,
+        paired_losers,
+    )
     if normalized is None:
         payload = _unavailable(
             "Taste comparisons do not yet form a directional preference.",
@@ -417,6 +424,10 @@ async def taste_vector() -> dict:
         "embedded_winner_count": winner_count,
         "embedded_loser_count": loser_count,
         "signal_count": min(winner_count, loser_count),
+        "paired_signal_count": len(paired_winners),
+        "pairwise_accuracy": round(float(pairwise_accuracy), 4),
+        "confidence": preference_confidence(len(paired_winners), pairwise_accuracy),
+        "algorithm": "regularized_pairwise_logistic_v1",
         "fallback_reason": "",
         "_cache_key": cache_key,
     }
