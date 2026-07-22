@@ -4,8 +4,8 @@
 // each member's ranking signals.
 
 import {
-    createCollection, deleteCollection, fetchJson, getAiStatus, getCacheStatus, getCatalog, getCollection, getCounts,
-    getFoldersTree, getPeopleStatus, listCollections,
+    createCollection, deleteCollection, fetchJson, getBackgroundWorkStatus, getCatalog, getCollection, getCounts,
+    getFoldersTree, listCollections,
     renameCollection, setBackgroundWork, thumbUrl, writeFailureMessage,
 } from './api.js';
 import { applySmartScopeSort, nav, on, patchScope, setScope, clearScope, scopePatchFromSmartQuery } from './state.js';
@@ -417,12 +417,12 @@ async function loadWorkStatus() {
     if (workLoading) return;
     workLoading = true;
     try {
-        const [ai, cache, peopleStatus] = await Promise.all([
-            getAiStatus(),
-            getCacheStatus(),
-            getPeopleStatus(),
-        ]);
-        workStatus = { ai, cache, people: peopleStatus };
+        const status = await getBackgroundWorkStatus();
+        workStatus = status ? {
+            ai: status.ai,
+            cache: status.cache,
+            people: status.people,
+        } : null;
     } catch {
         workStatus = null;
     } finally {

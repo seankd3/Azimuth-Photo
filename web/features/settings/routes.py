@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -162,6 +163,25 @@ async def api_settings():
         get_refreshing=_get_refreshing,
         set_refreshing=_set_refreshing,
     )
+
+
+@router.get("/api/background-work/status")
+async def api_background_work_status():
+    """One bounded snapshot for the desktop and mobile activity widgets."""
+
+    from features.captions import routes as caption_routes
+
+    payload, captions = await asyncio.gather(
+        api_settings(),
+        caption_routes.caption_status_payload(),
+    )
+    return {
+        "ai": payload.get("ai_status"),
+        "cache": payload.get("cache_stats"),
+        "people": payload.get("people_status"),
+        "captions": captions,
+        "metadata": payload.get("metadata_status"),
+    }
 
 
 @router.get("/api/ui/settings")

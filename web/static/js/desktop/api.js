@@ -294,6 +294,10 @@ export async function getPeopleStatus() {
     return fetchJson('/api/people/status', { defaultValue: null });
 }
 
+export async function getBackgroundWorkStatus() {
+    return fetchJson('/api/background-work/status', { defaultValue: null });
+}
+
 export async function pausePeopleScan() {
     return postJson('/api/people/scan/pause');
 }

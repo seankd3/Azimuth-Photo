@@ -1,6 +1,6 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
-    disconnectLightroom, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
+    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
     getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
     installAiModel, listDevices,
     pauseAiEmbeddings,
@@ -404,18 +404,12 @@ function renderActivity() {
 
 async function refreshActivity() {
     if (document.hidden) return;
-    const [ai, cache, people, captions, metadata] = await Promise.all([
-        getAiStatus().catch(() => null),
-        getCacheStatus().catch(() => null),
-        getPeopleStatus().catch(() => null),
-        getCaptionStatus().catch(() => null),
-        getMetadataStatus().catch(() => null),
-    ]);
-    aiStatus = ai || aiStatus;
-    cacheStatus = cache || cacheStatus;
-    peopleStatus = people || peopleStatus;
-    captionStatus = captions || captionStatus;
-    metadataStatus = metadata || metadataStatus;
+    const status = await getBackgroundWorkStatus().catch(() => null);
+    aiStatus = status?.ai || aiStatus;
+    cacheStatus = status?.cache || cacheStatus;
+    peopleStatus = status?.people || peopleStatus;
+    captionStatus = status?.captions || captionStatus;
+    metadataStatus = status?.metadata || metadataStatus;
     renderActivity();
     if (open) patchDrawerStatus();
 }

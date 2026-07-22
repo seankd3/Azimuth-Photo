@@ -2,9 +2,36 @@
 from unittest import mock
 
 from features.catalog import metadata as catalog_metadata
+from features.captions import routes as caption_routes
 
 
 class SettingsStatusTests(BackendTestCase):
+    async def test_background_work_status_composes_one_bounded_snapshot(self):
+        settings_payload = {
+            "ai_status": {"worker_state": "paused"},
+            "cache_stats": {"pregen": {"state": "running"}},
+            "people_status": {"worker": {"state": "idle"}},
+            "metadata_status": {"state": "done"},
+        }
+        captions = {"worker": {"state": "paused"}}
+
+        with mock.patch.object(
+            settings_routes,
+            "api_settings",
+            new=mock.AsyncMock(return_value=settings_payload),
+        ), mock.patch.object(
+            caption_routes,
+            "caption_status_payload",
+            new=mock.AsyncMock(return_value=captions),
+        ):
+            result = await settings_routes.api_background_work_status()
+
+        self.assertEqual(result["ai"], settings_payload["ai_status"])
+        self.assertEqual(result["cache"], settings_payload["cache_stats"])
+        self.assertEqual(result["people"], settings_payload["people_status"])
+        self.assertEqual(result["captions"], captions)
+        self.assertEqual(result["metadata"], settings_payload["metadata_status"])
+
     async def test_orientation_worker_leaves_raws_for_preview_decoder(self):
         source = await self._source("mixed-formats")
         raw_id = await self._image(source["id"], "photo.cr3")

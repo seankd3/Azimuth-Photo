@@ -222,6 +222,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/write-xmp/batch"),
     # PATCH: satellite lane — local controls are inert in hub mode.
     ("GET", "/api/sync/status"),
+    ("GET", "/api/background-work/status"),
     ("POST", "/api/sync/hub"),
     ("POST", "/api/sync/pause"),
     ("POST", "/api/sync/resume"),
