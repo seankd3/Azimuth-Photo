@@ -806,6 +806,7 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #duplicates-count { color: var(--text-2); font-size: var(--fs-ui); }
 #stacks-review-tools, #duplicates-adhoc-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
 #stacks-review-tools[hidden], #duplicates-adhoc-tools[hidden] { display: none; }
+#stacks-review-tools > [hidden] { display: none; }
 #stacks-kind-chips { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 7px var(--s4); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--surface-chrome); }
 #stacks-kind-chips::-webkit-scrollbar { display: none; }
 .seg-compact { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); }

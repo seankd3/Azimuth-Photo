@@ -20,6 +20,14 @@ def read_mobile(*parts):
 
 
 class DesktopCorrectnessTests(unittest.TestCase):
+    def test_lens_startup_clears_static_grid_before_mounting_a_tool(self):
+        lenses = read("lenses.js")
+        self.assertIn("for (const view of document.querySelectorAll('.view.active'))", lenses)
+        self.assertLess(
+            lenses.index("document.querySelectorAll('.view.active')"),
+            lenses.index("LENSES[next].mount();"),
+        )
+
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
         develop = read("develop", "develop.js")
