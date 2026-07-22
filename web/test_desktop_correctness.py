@@ -589,6 +589,24 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress", active_progress)
         self.assertIn("|| cachePregenStateIsActive(cacheStatus)", activity)
 
+    def test_activity_popover_uses_compact_nonblocking_status_copy(self):
+        drawer = read("drawer.js")
+        activity_status = drawer[
+            drawer.index("function activityStatusText"):
+            drawer.index("function renderActivity")
+        ]
+        activity = drawer[
+            drawer.index("function renderActivity"):
+            drawer.index("async function refreshActivity")
+        ]
+
+        self.assertIn("data.status_stale", activity_status)
+        self.assertIn("fmtCompact", activity_status)
+        self.assertIn("done ·", activity_status)
+        self.assertIn("left ·", activity_status)
+        self.assertIn("activityStatusText(name, data)", activity)
+        self.assertNotIn("statusText(name, data)", activity)
+
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")
 

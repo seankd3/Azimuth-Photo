@@ -135,7 +135,7 @@ body.loupe-lights-out #ctxbar { display: none; }
 .ap-row { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: var(--fs-caption); color: var(--text-2); margin: 5px 0; }
 .ap-track { height: 3px; border-radius: 2px; background: rgba(255,255,255,.08); overflow: hidden; }
 .ap-track i { display: block; height: 100%; width: 0; border-radius: 2px; background: var(--accent); }
-.ap-val { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.ap-val { color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #scope-wrap { flex: 1 1 auto; display: flex; justify-content: center; min-width: 0; }
 #scopebox { position: relative; width: min(520px, 100%); }
 #scope-field { display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 10px 0 6px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); cursor: text; }

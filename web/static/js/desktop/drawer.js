@@ -107,6 +107,11 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const compactNumberFormatter = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+});
+const fmtCompact = (n) => compactNumberFormatter.format(Number(n || 0)).toLowerCase();
 
 function bytes(value) {
     const n = Number(value) || 0;
@@ -370,6 +375,32 @@ function statusText(name, data) {
     return `${fmt(counts.detected_faces || counts.people || 0)} faces · ${worker.state || 'idle'}`;
 }
 
+function activityStatusText(name, data) {
+    if (data && data.status_stale) return 'Refreshing…';
+    if (name === 'AI') {
+        return `${fmtCompact(data.embedded)} / ${fmtCompact(data.total_images)} · ${data.worker_state || 'idle'}`;
+    }
+    if (name === 'Cache') {
+        const pregen = (data && data.pregen) || {};
+        const preview = pregen.preview || {};
+        return `${fmtCompact(preview.count)} / ${fmtCompact(preview.total)} · ${pregen.state || 'idle'}`;
+    }
+    if (name === 'Captions') {
+        const worker = (data && data.worker) || {};
+        const counts = (data && data.counts) || {};
+        return `${fmtCompact(counts.captioned)} done · ${fmtCompact(counts.pending_cached_images)} left · ${worker.state || 'idle'}`;
+    }
+    if (name === 'Metadata') {
+        const worker = (data && data.worker) || {};
+        const state = data && data.manual_pause ? 'paused' : worker.state || (data && data.active ? 'running' : 'idle');
+        const pending = Number((data && (data.pending || data.remaining)) || 0);
+        return `${state}${pending ? ` · ${fmtCompact(pending)} left` : ''}`;
+    }
+    const worker = (data && data.worker) || {};
+    const counts = (data && data.counts) || {};
+    return `${fmtCompact(counts.detected_faces || counts.people)} faces · ${worker.state || 'idle'}`;
+}
+
 function renderActivity() {
     const widget = document.getElementById('activity-widget');
     const pop = document.getElementById('activity-popover');
@@ -398,7 +429,7 @@ function renderActivity() {
         ['Captions', values.captions, captionStatus || {}],
         ['Metadata', values.metadata, metadataStatus || {}],
     ].map(([name, value, data]) => (
-        `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(statusText(name, data))}</span></div>`
+        `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(activityStatusText(name, data))}</span></div>`
     )).join('');
 }
 
