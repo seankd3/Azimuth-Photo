@@ -1137,6 +1137,8 @@ async def api_rankings_impl(
         taste_fields = {
             "taste_available": bool(taste.get("available")),
             "taste_signal_count": int(taste.get("signal_count") or 0),
+            "taste_confidence": float(taste.get("confidence") or 0.0),
+            "taste_pairwise_accuracy": float(taste.get("pairwise_accuracy") or 0.0),
             "fallback_reason": str(taste.get("fallback_reason") or ""),
         }
         if not taste.get("available"):
