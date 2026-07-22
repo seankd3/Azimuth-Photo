@@ -18,7 +18,9 @@ _text_search_resolution_cache_ttl_seconds = 300.0
 # cache hit / the test mock lands well under this; a cold 8B encode blows it
 # and we fall back to metadata while the embedding warms in the background.
 _FAST_ENCODE_BUDGET_SECONDS = 0.35
+_COMMITTED_COLD_START_BUDGET_SECONDS = 2.0
 _inflight_query_encodes: set = set()
+_inflight_model_loads: set = set()
 _CONFIG: dict[str, object] = {}
 
 
@@ -133,6 +135,65 @@ async def apply_configured_metadata_search_ids(result: dict, normalized_query: s
         normalized_query,
         metadata_search_image_ids=_dependency("metadata_search_image_ids"),
     )
+
+
+async def _apply_lexical_search(
+    result: dict,
+    normalized_query: str,
+    *,
+    query_plan,
+    metadata_ranked_image_ids,
+    caption_ranked_image_ids,
+    get_active_images_by_ids,
+) -> bool:
+    """Return caption/metadata intelligence immediately while embeddings warm."""
+
+    async def ranked(provider):
+        if provider is None:
+            return []
+        try:
+            return await provider(normalized_query)
+        except Exception:
+            return []
+
+    metadata_ranked, caption_ranked = await asyncio.gather(
+        ranked(metadata_ranked_image_ids),
+        ranked(caption_ranked_image_ids),
+    )
+    ranked_sources = {}
+    if metadata_ranked:
+        ranked_sources["metadata"] = [int(image_id) for image_id, _score in metadata_ranked]
+    if caption_ranked:
+        ranked_sources["captions"] = [int(image_id) for image_id, _score in caption_ranked]
+    if not ranked_sources:
+        return False
+    source_union = {
+        image_id
+        for image_ids in ranked_sources.values()
+        for image_id in image_ids[:FUSED_CANDIDATE_LIMIT]
+    }
+    rows_by_id = (
+        await get_active_images_by_ids(list(source_union))
+        if source_union and get_active_images_by_ids is not None
+        else {}
+    )
+    scores, sources = fused_candidate_scores(
+        ranked_sources=ranked_sources,
+        rows_by_id=rows_by_id,
+        source_weights=query_plan.source_weights,
+        recency_weight=query_plan.recency_weight,
+        limit=FUSED_CANDIDATE_LIMIT,
+    )
+    result.update({
+        "id_filter": set(scores),
+        "scores": scores,
+        "search_mode": "fused" if len(sources) > 1 else sources[0],
+        "search_sources": sources,
+        "evidence_by_id": candidate_evidence(ranked_sources, scores),
+        "ai_unavailable": True,
+        "fallback_reason": "embedding_warming",
+    })
+    return True
 
 
 async def resolve_text_search(
@@ -287,6 +348,15 @@ async def resolve_text_search(
                         pass
 
                 encode_future.add_done_callback(_store_encoded)
+                if await _apply_lexical_search(
+                    result,
+                    normalized_query,
+                    query_plan=query_plan,
+                    metadata_ranked_image_ids=metadata_ranked_image_ids,
+                    caption_ranked_image_ids=caption_ranked_image_ids,
+                    get_active_images_by_ids=get_active_images_by_ids,
+                ):
+                    return result
                 result.update({
                     "text_query": normalized_query,
                     "search_mode": "metadata",
@@ -297,7 +367,19 @@ async def resolve_text_search(
                 if extension_query not in extension_search_terms and apply_metadata_ids is not None:
                     await apply_metadata_ids(result, normalized_query)
                 return result
-        if text_vec is None and deep and await ensure_model_loaded(embedding_worker):
+        model_ready = False
+        if text_vec is None and deep:
+            model_load = asyncio.create_task(ensure_model_loaded(embedding_worker))
+            _inflight_model_loads.add(model_load)
+            model_load.add_done_callback(_inflight_model_loads.discard)
+            try:
+                model_ready = await asyncio.wait_for(
+                    asyncio.shield(model_load),
+                    _COMMITTED_COLD_START_BUDGET_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                model_ready = False
+        if text_vec is None and deep and model_ready:
             text_vec = await asyncio.get_event_loop().run_in_executor(
                 None,
                 encode_text,
@@ -314,6 +396,16 @@ async def resolve_text_search(
                         text_arr.tobytes(),
                     )
                     text_vec = text_arr
+        if text_vec is None and deep and not model_ready:
+            if await _apply_lexical_search(
+                result,
+                normalized_query,
+                query_plan=query_plan,
+                metadata_ranked_image_ids=metadata_ranked_image_ids,
+                caption_ranked_image_ids=caption_ranked_image_ids,
+                get_active_images_by_ids=get_active_images_by_ids,
+            ):
+                return result
         if text_vec is None and start_model_load(embedding_worker):
             result.update({
                 "text_query": normalized_query,
