@@ -54,11 +54,25 @@ function suggestionCard(suggestion, index) {
         + `<div class="collection-suggestion-cover">${cover}<span class="collection-suggestion-kind">${esc(suggestion.kind || 'idea')}</span></div>`
         + '<div class="collection-suggestion-copy">'
         + `<div><strong title="${esc(suggestion.title)}">${esc(suggestion.title)}</strong>`
-        + `<span>${esc(suggestion.reason || 'Suggested from your library')} · ${fmt(suggestion.count)} photos</span></div>`
+        + `<span>${esc(suggestion.reason || 'Suggested from your library')} · ${fmt(suggestion.count)} photos</span>`
+        + suggestionSignals(suggestion)
+        + suggestionChange(suggestion)
+        + '</div>'
         + '<div class="collection-suggestion-actions">'
         + `<button class="btn primary" data-suggestion-create="${index}" type="button">Create</button>`
         + `<button class="icon-btn" data-suggestion-dismiss="${index}" data-tip="Dismiss" aria-label="Dismiss ${esc(suggestion.title)}" type="button">${icon('x')}</button>`
         + '</div></div></article>';
+}
+
+function suggestionSignals(suggestion) {
+    const labels = (Array.isArray(suggestion.evidence) ? suggestion.evidence : [])
+        .map((item) => String(item?.label || '').trim()).filter(Boolean).slice(0, 2);
+    return labels.length ? `<small class="collection-suggestion-evidence">${esc(labels.join(' · '))}</small>` : '';
+}
+
+function suggestionChange(suggestion) {
+    const summary = String(suggestion.change_summary || '').trim();
+    return summary ? `<small class="collection-suggestion-change">${esc(summary)}</small>` : '';
 }
 
 function createCard() {

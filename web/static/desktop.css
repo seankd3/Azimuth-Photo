@@ -534,6 +534,8 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .collection-suggestion-copy strong, .collection-suggestion-copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collection-suggestion-copy strong { font-size: var(--fs-body); font-weight: var(--fw-semibold); }
 .collection-suggestion-copy > div:first-child span { color: var(--text-3); font-size: var(--fs-caption); }
+.collection-suggestion-evidence, .collection-suggestion-change { overflow: hidden; color: var(--text-3); font-size: 10px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.collection-suggestion-change { color: var(--accent-text, var(--text-2)); }
 .collection-suggestion-actions { display: flex; align-items: center; gap: var(--s1); }
 .collection-suggestion-actions .btn { height: 25px; padding-inline: 10px; }
 .collection-suggestion-actions .icon-btn { width: 25px; height: 25px; }
@@ -741,6 +743,8 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .suggest-live-copy .icon { width: 13px; height: 13px; stroke-width: 2.25; }
 .suggest-review-head h2 { font-size: var(--fs-display); line-height: var(--lh-display); font-weight: var(--fw-semibold); }
 .suggest-review-head p { margin-top: 3px; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.suggest-evidence, .suggest-change { display: block; margin-top: 5px; color: var(--text-3); font-size: 11px; line-height: 1.3; }
+.suggest-change { color: var(--accent-text, var(--text-2)); }
 .suggest-review-actions { display: flex; gap: var(--s2); flex: none; }
 .suggest-preview-grid {
     min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--s3); display: grid;

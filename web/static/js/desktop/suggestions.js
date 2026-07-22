@@ -29,6 +29,11 @@ export const suggestionFingerprint = (s) => (
     s.fingerprint || `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`
 );
 
+export function suggestionFingerprints(suggestion) {
+    const aliases = Array.isArray(suggestion?.fingerprint_aliases) ? suggestion.fingerprint_aliases : [];
+    return [...new Set([suggestionFingerprint(suggestion), ...aliases].filter((value) => typeof value === 'string' && value))];
+}
+
 function dismissed() {
     try {
         const values = JSON.parse(localStorage.getItem(DISMISSED_KEY) || '[]');
@@ -52,7 +57,7 @@ function restoreFingerprint(fp) {
 
 export function visibleSuggestions() {
     const gone = new Set(dismissed());
-    return (suggestions || []).filter((s) => !gone.has(suggestionFingerprint(s)));
+    return (suggestions || []).filter((suggestion) => !suggestionFingerprints(suggestion).some((fingerprint) => gone.has(fingerprint)));
 }
 
 function currentSuggestions() {
@@ -94,10 +99,11 @@ function closeSuggestionsReview() {
 
 export async function createSuggestion(suggestion) {
     const fp = suggestionFingerprint(suggestion);
+    const fingerprints = suggestionFingerprints(suggestion);
     if (creatingFingerprints.has(fp)) return false;
     creatingFingerprints.add(fp);
     try {
-        dismissFingerprint(fp);
+        fingerprints.forEach(dismissFingerprint);
         notifyChanged();
         render();
         const result = await createCollection(
@@ -107,7 +113,7 @@ export async function createSuggestion(suggestion) {
             suggestion.query || null,
         );
         if (!(result && result.ok)) {
-            restoreFingerprint(fp);
+            fingerprints.forEach(restoreFingerprint);
             notifyChanged();
             render();
             showToast("Couldn't create collection");
@@ -125,13 +131,13 @@ export async function createSuggestion(suggestion) {
 }
 
 export function dismissSuggestion(suggestion) {
-    const fp = suggestionFingerprint(suggestion);
-    dismissFingerprint(fp);
+    const fingerprints = suggestionFingerprints(suggestion);
+    fingerprints.forEach(dismissFingerprint);
     notifyChanged();
     render();
     showToast('Dismissed', {
         undo: () => {
-            restoreFingerprint(fp);
+            fingerprints.forEach(restoreFingerprint);
             notifyChanged();
             render();
         },
@@ -145,8 +151,19 @@ function kindLabel(kind) {
 }
 
 function liveMark(suggestion) {
-    if (!suggestion.query) return '';
+    if (suggestion.mode !== 'smart' && !suggestion.query) return '';
     return `<span class="suggest-live-mark" title="Live collection">${icon('sparkles')} Live</span>`;
+}
+
+function evidenceHtml(suggestion) {
+    const labels = (Array.isArray(suggestion.evidence) ? suggestion.evidence : [])
+        .map((item) => String(item?.label || '').trim()).filter(Boolean).slice(0, 2);
+    return labels.length ? `<span class="suggest-evidence" title="Why this collection">${esc(labels.join(' · '))}</span>` : '';
+}
+
+function changeHtml(suggestion) {
+    const summary = String(suggestion.change_summary || '').trim();
+    return summary ? `<span class="suggest-change">${esc(summary)}</span>` : '';
 }
 
 function rowHtml(suggestion, index) {
@@ -229,7 +246,7 @@ function render() {
 
     const suggestion = visible[activeIndex];
     const creating = creatingFingerprints.has(suggestionFingerprint(suggestion));
-    const liveCopy = suggestion.query ? 'Live' : '';
+    const liveCopy = suggestion.mode === 'smart' || suggestion.query ? 'Live' : '';
     root.innerHTML = '<div class="suggest-review">'
         + headerHtml(visible.length)
         + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
@@ -239,6 +256,8 @@ function render() {
         + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy" title="Updates automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
         + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
+        + evidenceHtml(suggestion)
+        + changeHtml(suggestion)
         + '</div>'
         + '<div class="suggest-review-actions">'
         + `<button class="btn primary" id="suggest-create" type="button" ${creating ? 'disabled' : ''}>Create collection</button>`

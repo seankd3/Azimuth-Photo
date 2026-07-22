@@ -37,6 +37,20 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("openCollectionActions", collections)
         self.assertIn("openDeliverOverlay", collections)
 
+    @pytest.mark.contract
+    def test_collections_consumes_explainable_suggestion_contract_without_exposing_scores(self):
+        collections = read("collections.js")
+        suggestions = read("suggestions.js")
+
+        self.assertIn("fingerprint_aliases", suggestions)
+        self.assertIn("suggestionFingerprints", suggestions)
+        self.assertIn("suggestion.mode === 'smart'", suggestions)
+        self.assertIn("suggestion.evidence", suggestions)
+        self.assertIn("suggestion.change_summary", suggestions)
+        self.assertIn("suggestion.evidence", collections)
+        self.assertIn("suggestion.change_summary", collections)
+        self.assertNotIn("suggestion.confidence", collections)
+
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
         develop = read("develop", "develop.js")
