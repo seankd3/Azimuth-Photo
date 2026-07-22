@@ -20,6 +20,13 @@ def read_mobile(*parts):
 
 
 class DesktopCorrectnessTests(unittest.TestCase):
+    def test_lenses_mount_before_slow_library_panel_bootstrap(self):
+        bootstrap = read("bootstrap.js")
+        self.assertLess(
+            bootstrap.index("initLenses();"),
+            bootstrap.index("await initPanel();"),
+        )
+
     def test_lens_startup_clears_static_grid_before_mounting_a_tool(self):
         lenses = read("lenses.js")
         self.assertIn("for (const view of document.querySelectorAll('.view.active'))", lenses)
