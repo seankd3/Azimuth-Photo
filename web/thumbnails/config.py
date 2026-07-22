@@ -28,13 +28,19 @@ PREGENERATE_SCAN_BATCH = 1024
 PREGENERATE_GENERATE_BATCH = 16
 PREGENERATE_ACTIVITY_BURST_ITEMS = 2
 PREGENERATE_NO_PROGRESS_SCAN_LIMIT = 12
-PREGENERATE_BATCH_PAUSE_SECONDS = 0.25
+# Blind inter-batch pause was starving decode (~0.25s idle per wave). Isolation
+# + should_pause_for_priority already protect interactive browsing — default 0.
+PREGENERATE_BATCH_PAUSE_SECONDS = 0.0
 MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS = 5.0
 # Cap concurrent user-facing cold decodes so a grid of cold thumbs queues
 # instead of saturating the pool and starving status/health probes.
 ON_DEMAND_HEAVY_DECODE_LIMIT = int(
     os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")
 )
+# Process-pool size for GIL-bound RAW demosaic (0 = in-process). Default
+# min(ncores-1, 6) — see thumbnails.demosaic_pool / PROCDEMOSAIC.md.
+DEMOSAIC_PROCESSES_ENV = "PHOTOARCHIVE_DEMOSAIC_PROCESSES"
+DEMOSAIC_IPC_ENV = "PHOTOARCHIVE_DEMOSAIC_IPC"
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
 # Thumb URLs are /api/thumb/{size}/{id} (not content-hashed), so immutable is unsafe.
 # Long max-age + ETag: browsers skip the network for a week, then revalidate cheaply.
@@ -350,7 +356,7 @@ def runtime_config_values(
         ),
         "pregenerate_batch_pause_seconds": max(
             0.0,
-            min(5.0, float(config.get("pregen_batch_pause_ms", 250)) / 1000.0),
+            min(5.0, float(config.get("pregen_batch_pause_ms", 0)) / 1000.0),
         ),
         "ssd_cache_dir": os.path.abspath(str(disk_cache_dir).strip() or current_ssd_cache_dir),
         "user_workers": int(config.get("user_workers", current_executor_workers)),

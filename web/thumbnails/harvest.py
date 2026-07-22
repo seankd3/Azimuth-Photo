@@ -4,12 +4,17 @@ When any bulk or on-demand path must touch an original on the spindle, call
 ``harvest_original`` instead of separate thumb / hash / metadata passes. Already
 present products are skipped. Bulk callers wrap with the HDD governor; interactive
 callers pass ``bulk=False`` and stay outside the gate.
+
+Bulk path (2026-07-20): the governor slot covers ONLY the spindle read into RAM.
+Demosaic / decode / resize / encode / write run after release so N decode threads
+can use idle cores while the next file streams through the single-flight read.
 """
 
 from __future__ import annotations
 
 import os
 import sqlite3
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -147,6 +152,12 @@ def _hash_from_open(
     return compute_content_hash_from_prefix(prefix, int(st.st_size)), prefix
 
 
+def _read_original_bytes(filepath: str) -> bytes:
+    """Single sequential spindle read of the whole original into RAM."""
+    with open(filepath, "rb") as handle:
+        return handle.read()
+
+
 def harvest_side_products(
     filepath: str,
     image_id: int,
@@ -217,7 +228,8 @@ def harvest_original(
     """Single entry: produce all missing derived products from one original touch.
 
     Bulk callers set ``bulk=True`` so the HDD governor serializes spindle IO.
-    Interactive on-demand callers leave ``bulk=False``.
+    The slot is held only for the file read into RAM; demosaic/decode/encode
+    run after release. Interactive on-demand callers leave ``bulk=False``.
 
     Catalog persists for hash/metadata happen *after* the governor slot is
     released so sync SQLite writes cannot deadlock against the async catalog
@@ -237,48 +249,72 @@ def harvest_original(
             pending_side["file_size"] = len(source_data)
 
     gate = hdd_governor.bulk_hdd_slot_sync if bulk else nullcontext
-    with gate():
-        result = _harvest_body(
-            filepath,
-            image_id,
-            size_signatures=size_signatures,
-            full_item=full_item,
-            source_bytes=source_bytes,
-            hot=hot,
-            need_hash=False,
-            need_metadata=False,
-            requested_size=requested_size,
-            include_smaller_tiers=include_smaller_tiers,
-            allow_stale_fallback=allow_stale_fallback,
-            generate_thumbnail_set=generate_thumbnail_set,
-            generate_missing_thumbnails=generate_missing_thumbnails,
-            persist_hash=None,
-            persist_metadata=None,
-            source_root=source_root,
-            on_source_loaded=on_source_loaded if (need_hash or need_metadata) else None,
-        )
-        # Prefix hash while we still own the spindle slot (RAW decode path).
-        if (
-            need_hash
-            and not result.source_read_failures
-            and result.source_reads > 0
-            and pending_side["source_data"] is None
-        ):
+    will_generate = (
+        size_signatures is not None
+        or requested_size is not None
+        or full_item is not None
+    )
+
+    # --- Bulk: read under the slot, decode outside ---------------------------------
+    preloaded: bytes | None = None
+    pre_read_seconds = 0.0
+    if bulk and will_generate:
+        with gate():
             try:
-                digest, _prefix = _hash_from_open(
-                    filepath,
-                    source_data=None,
-                    source_bytes=pending_side["file_size"],
-                )
-                pending_side["precomputed_hash"] = digest
+                started = time.monotonic()
+                preloaded = _read_original_bytes(filepath)
+                pre_read_seconds = max(0.0, time.monotonic() - started)
             except OSError:
-                pass
+                # Fall through to generate so mark_source_missing still runs.
+                preloaded = None
+                pre_read_seconds = 0.0
+        if preloaded is not None:
+            pending_side["source_data"] = preloaded
+            pending_side["file_size"] = len(preloaded)
+            if need_hash:
+                try:
+                    digest, _prefix = _hash_from_open(
+                        filepath,
+                        source_data=preloaded,
+                        source_bytes=len(preloaded),
+                    )
+                    pending_side["precomputed_hash"] = digest
+                except OSError:
+                    pass
+
+    # Decode / encode / write — outside the bulk HDD slot (or never gated).
+    result = _harvest_body(
+        filepath,
+        image_id,
+        size_signatures=size_signatures,
+        full_item=full_item,
+        source_bytes=source_bytes if preloaded is None else len(preloaded),
+        hot=hot,
+        need_hash=False,
+        need_metadata=False,
+        requested_size=requested_size,
+        include_smaller_tiers=include_smaller_tiers,
+        allow_stale_fallback=allow_stale_fallback,
+        generate_thumbnail_set=generate_thumbnail_set,
+        generate_missing_thumbnails=generate_missing_thumbnails,
+        persist_hash=None,
+        persist_metadata=None,
+        source_root=source_root,
+        on_source_loaded=on_source_loaded if (need_hash or need_metadata) else None,
+        source_data=preloaded,
+    )
+    if preloaded is not None:
+        # Spindle time was measured under the gate; decode metrics stay separate.
+        result.read_seconds = pre_read_seconds
+        result.source_bytes = max(result.source_bytes, len(preloaded))
+        if result.source_reads <= 0 and not result.source_read_failures:
+            result.source_reads = 1
 
     if result.source_read_failures or not (need_hash or need_metadata):
         return result
 
     # Side-only harvest (no thumb work) still needs to touch the original under
-    # the gate — handled below when nothing was decoded above.
+    # the gate — read into RAM, then hash/metadata outside.
     side_only = (
         size_signatures is None
         and requested_size is None
@@ -286,7 +322,26 @@ def harvest_original(
         and result.source_reads <= 0
     )
     if side_only:
-        with gate():
+        side_bytes: bytes | None = None
+        if bulk:
+            with gate():
+                try:
+                    side_bytes = _read_original_bytes(filepath)
+                except OSError:
+                    return HarvestResult(source_read_failures=1)
+            side = harvest_side_products(
+                filepath,
+                image_id,
+                need_hash=need_hash,
+                need_metadata=need_metadata,
+                source_data=side_bytes,
+                source_bytes=len(side_bytes),
+                persist_hash=persist_hash,
+                persist_metadata=persist_metadata,
+                source_root=source_root,
+            )
+        else:
+            # Interactive: bypass the bulk gate (may open the file directly).
             side = harvest_side_products(
                 filepath,
                 image_id,
@@ -297,13 +352,19 @@ def harvest_original(
                 source_root=source_root,
             )
         result.source_reads = 1 if (need_hash or need_metadata) else 0
+        if side_bytes is not None:
+            result.source_bytes = len(side_bytes)
         result.content_hash = side.content_hash
         result.hash_written = side.hash_written
         result.metadata_written = side.metadata_written
         result.products.extend(side.products)
         return result
 
-    if result.source_reads <= 0 and pending_side["source_data"] is None and pending_side["pil_image"] is None:
+    if (
+        result.source_reads <= 0
+        and pending_side["source_data"] is None
+        and pending_side["pil_image"] is None
+    ):
         return result
 
     try:
@@ -362,6 +423,7 @@ def _harvest_body(
     persist_metadata,
     source_root,
     on_source_loaded,
+    source_data: bytes | None = None,
 ) -> HarvestResult:
     del need_hash, need_metadata, persist_hash, persist_metadata, source_root
     result = HarvestResult()
@@ -377,6 +439,7 @@ def _harvest_body(
             full_item=full_item,
             hot=hot,
             on_source_loaded=on_source_loaded,
+            source_data=source_data,
         )
         result.source_reads = int(metrics.get("source_reads") or 0)
         result.thumbnails_written = int(metrics.get("thumbnails_written") or 0)
@@ -402,6 +465,7 @@ def _harvest_body(
             hot=hot,
             allow_stale_fallback=allow_stale_fallback,
             on_source_loaded=on_source_loaded,
+            source_data=source_data,
         )
         if thumb:
             result.requested_thumb = thumb if isinstance(thumb, (bytes, bytearray)) else None
@@ -410,6 +474,8 @@ def _harvest_body(
         elif on_source_loaded is not None:
             # Decode happened even if the requested tier was already warm-written
             # by a concurrent writer; treat as a touch when the hook fired.
+            result.source_reads = 1
+        elif source_data is not None:
             result.source_reads = 1
         return result
 

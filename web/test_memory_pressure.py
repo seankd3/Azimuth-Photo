@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 import unittest
 from dataclasses import dataclass
 from unittest import mock
@@ -430,6 +432,230 @@ class MidBatchPressureAbortTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, pregen_worker.PREGEN_PRESSURE)
         self.assertEqual(submissions, [1])
         self.assertTrue(memory_pressure.evaluate_memory_pressure().pause_bulk)
+
+
+class ContinuousPumpTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        memory_pressure.reset_for_tests()
+        self.addCleanup(memory_pressure.reset_for_tests)
+
+    async def test_slow_item_does_not_block_next_submit(self):
+        """Continuous pump refills on FIRST_COMPLETED — no wave barrier."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from thumbnails.decode_budget import bulk_decode_budget
+
+        await bulk_decode_budget.reset_and_notify()
+
+        started: list[tuple[float, int]] = []
+        finished: list[tuple[float, int]] = []
+        lock = threading.Lock()
+        t0 = time.perf_counter()
+
+        def fake_generate(filepath, image_id, signatures, **kwargs):
+            with lock:
+                started.append((time.perf_counter() - t0, int(image_id)))
+            # Item 1 is slow; 2 and 3 are fast — under a wave barrier, 2+3 would
+            # wait for 1 before the next wave. Continuous pump starts 4 while 1 runs.
+            delay = 0.25 if int(image_id) == 1 else 0.02
+            time.sleep(delay)
+            with lock:
+                finished.append((time.perf_counter() - t0, int(image_id)))
+            return {"written": 1, "image_id": image_id}
+
+        rows = [
+            {
+                "id": i,
+                "source_id": 1,
+                "filepath": f"/tmp/photo_{i}.jpg",
+                "file_size": 1024,
+                "file_modified_at": 1.0,
+                "width": 100,
+                "height": 100,
+                "content_hash": "x",
+                "metadata_scanned_at": 1.0,
+                "metadata_version": 99,
+            }
+            for i in range(1, 5)
+        ]
+        cursor = {"n": 0}
+
+        async def fake_candidates(limit):
+            start = cursor["n"]
+            end = min(len(rows), start + limit)
+            cursor["n"] = end
+            return rows[start:end]
+
+        async def _priority_empty(limit, processed):
+            return [], None
+
+        original_estimate = pregen_worker._item_decode_estimate
+        original_effective = memory_pressure.effective_prefetch_workers
+        pregen_worker._item_decode_estimate = lambda item: 1024 * 1024
+        memory_pressure.effective_prefetch_workers = (
+            lambda configured, rss_bytes=None: max(1, int(configured))
+        )
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                result = await pregen_worker.run_pregen_bulk_batch(
+                    generate_batch=4,
+                    default_generate_batch=4,
+                    scan_batch=4,
+                    thumb_tiers=("sm",),
+                    full_tier="full",
+                    disk_allocations={"sm": 10**12, "full": 0},
+                    is_prefetching=lambda: True,
+                    is_manual_paused=lambda: False,
+                    should_pause_for_priority=lambda: False,
+                    flush_write_queue=lambda: True,
+                    cache_metadata_backoff_active=lambda: False,
+                    bulk_tier_budgets=lambda: {"sm": 10**12},
+                    bulk_tier_room=lambda budgets: {"sm": 10**12},
+                    full_tier_room=lambda budget: 0,
+                    pregen_priority_candidate_batch=_priority_empty,
+                    pregen_bulk_candidate_batch=fake_candidates,
+                    reset_pregen_bulk_cursor=lambda: None,
+                    set_priority_scope=lambda label: None,
+                    bulk_candidate_signatures=lambda row, tier_room, tier_budgets: (
+                        {"sm": "sig"},
+                        int(row["file_size"]),
+                    ),
+                    full_candidate_signature=lambda *args, **kwargs: None,
+                    prefetch_executor=pool,
+                    generate_thumbnail_set_sync=fake_generate,
+                    record_pregen_result=lambda result: int(result.get("written") or 0),
+                    activity_burst_items=2,
+                    prefetch_workers=4,
+                )
+        finally:
+            pregen_worker._item_decode_estimate = original_estimate
+            memory_pressure.effective_prefetch_workers = original_effective
+            await bulk_decode_budget.reset_and_notify()
+
+        self.assertEqual(result, 4)
+        started_ids = [i for _, i in started]
+        self.assertEqual(set(started_ids), {1, 2, 3, 4})
+        # All four must have started before the slow item finishes.
+        slow_finish = next(t for t, i in finished if i == 1)
+        late_starts = [t for t, i in started if i != 1]
+        self.assertTrue(
+            all(t < slow_finish for t in late_starts),
+            f"expected siblings to start before slow finish; started={started} finished={finished}",
+        )
+
+    async def test_write_flush_does_not_serialize_decode_submits(self):
+        """Flush is scheduled off the critical path — decodes keep submitting."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        from thumbnails.decode_budget import bulk_decode_budget
+
+        await bulk_decode_budget.reset_and_notify()
+        flush_starts: list[float] = []
+        decode_starts: list[float] = []
+        t0 = time.perf_counter()
+        flush_gate = threading.Event()
+        flush_calls = {"n": 0}
+
+        def gated_flush():
+            flush_calls["n"] += 1
+            # Initial pre-pump flush must return immediately; only mid-batch
+            # flushes are held to prove the pump does not await them.
+            if flush_calls["n"] == 1:
+                return True
+            flush_starts.append(time.perf_counter() - t0)
+            flush_gate.wait(timeout=1.0)
+            return True
+
+        def fake_generate(filepath, image_id, signatures, **kwargs):
+            decode_starts.append(time.perf_counter() - t0)
+            time.sleep(0.01)
+            return {"written": 1, "image_id": image_id}
+
+        rows = [
+            {
+                "id": i,
+                "source_id": 1,
+                "filepath": f"/tmp/photo_{i}.jpg",
+                "file_size": 1024,
+                "file_modified_at": 1.0,
+                "width": 100,
+                "height": 100,
+                "content_hash": "x",
+                "metadata_scanned_at": 1.0,
+                "metadata_version": 99,
+            }
+            for i in range(1, 17)
+        ]
+        cursor = {"n": 0}
+
+        async def fake_candidates(limit):
+            start = cursor["n"]
+            end = min(len(rows), start + limit)
+            cursor["n"] = end
+            return rows[start:end]
+
+        async def _priority_empty(limit, processed):
+            return [], None
+
+        original_estimate = pregen_worker._item_decode_estimate
+        original_effective = memory_pressure.effective_prefetch_workers
+        pregen_worker._item_decode_estimate = lambda item: 1024 * 1024
+        memory_pressure.effective_prefetch_workers = (
+            lambda configured, rss_bytes=None: max(1, int(configured))
+        )
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                task = asyncio.create_task(
+                    pregen_worker.run_pregen_bulk_batch(
+                        generate_batch=16,
+                        default_generate_batch=16,
+                        scan_batch=16,
+                        thumb_tiers=("sm",),
+                        full_tier="full",
+                        disk_allocations={"sm": 10**12, "full": 0},
+                        is_prefetching=lambda: True,
+                        is_manual_paused=lambda: False,
+                        should_pause_for_priority=lambda: False,
+                        flush_write_queue=gated_flush,
+                        cache_metadata_backoff_active=lambda: False,
+                        bulk_tier_budgets=lambda: {"sm": 10**12},
+                        bulk_tier_room=lambda budgets: {"sm": 10**12},
+                        full_tier_room=lambda budget: 0,
+                        pregen_priority_candidate_batch=_priority_empty,
+                        pregen_bulk_candidate_batch=fake_candidates,
+                        reset_pregen_bulk_cursor=lambda: None,
+                        set_priority_scope=lambda label: None,
+                        bulk_candidate_signatures=lambda row, tier_room, tier_budgets: (
+                            {"sm": "sig"},
+                            int(row["file_size"]),
+                        ),
+                        full_candidate_signature=lambda *args, **kwargs: None,
+                        prefetch_executor=pool,
+                        generate_thumbnail_set_sync=fake_generate,
+                        record_pregen_result=lambda result: int(result.get("written") or 0),
+                        activity_burst_items=2,
+                        prefetch_workers=4,
+                    )
+                )
+                # Let the mid-batch flush arm, then confirm decodes continue.
+                for _ in range(50):
+                    if flush_starts:
+                        break
+                    await asyncio.sleep(0.02)
+                decodes_while_flush_blocked = len(decode_starts)
+                flush_gate.set()
+                result = await asyncio.wait_for(task, timeout=5.0)
+        finally:
+            flush_gate.set()
+            pregen_worker._item_decode_estimate = original_estimate
+            memory_pressure.effective_prefetch_workers = original_effective
+            await bulk_decode_budget.reset_and_notify()
+
+        self.assertEqual(result, 16)
+        self.assertGreaterEqual(len(flush_starts), 1)
+        # While flush was held, the pump must have kept submitting (more than one
+        # wave worth of starts already in flight / completed).
+        self.assertGreaterEqual(decodes_while_flush_blocked, 4)
 
 
 class DecodeBudgetDimensionTests(unittest.IsolatedAsyncioTestCase):

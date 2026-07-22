@@ -1235,6 +1235,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.old_allocations = dict(thumbnails._disk_allocations)
         self.old_get_source_bits = thumbnails._get_source_bits
         self.old_load_source_image = thumbnails._load_source_image
+        self.old_load_source_image_from_bytes = thumbnails._load_source_image_from_bytes
         self.old_memory_bytes = thumbnails.MEMORY_CACHE_BYTES
         self.old_db_connect = thumbnails._db_connect
         self.old_cache_entry_db_connect = thumbnail_cache_entries._db_connect
@@ -1327,6 +1328,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         thumbnails._disk_allocations.update(self.old_allocations)
         thumbnails._get_source_bits = self.old_get_source_bits
         thumbnails._load_source_image = self.old_load_source_image
+        thumbnails._load_source_image_from_bytes = self.old_load_source_image_from_bytes
         thumbnails._db_connect = self.old_db_connect
         thumbnail_cache_entries._db_connect = self.old_cache_entry_db_connect
         if thumbnail_cache_entries._persistent_conn is not None:
@@ -2222,12 +2224,13 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         signatures, file_size, _mtime = self._catalog_signatures(path)
         load_count = 0
 
-        def counted_load(*args, **kwargs):
+        def counted_load_from_bytes(*args, **kwargs):
             nonlocal load_count
             load_count += 1
-            return self.old_load_source_image(*args, **kwargs)
+            return self.old_load_source_image_from_bytes(*args, **kwargs)
 
-        thumbnails._load_source_image = counted_load
+        # Bulk harvest reads once into RAM, then decodes via from_bytes.
+        thumbnails._load_source_image_from_bytes = counted_load_from_bytes
         metrics = thumbnails._generate_thumbnail_set_sync(
             path,
             1,

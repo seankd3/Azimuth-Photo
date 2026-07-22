@@ -131,17 +131,23 @@ class HarvestReadOnceTests(unittest.TestCase):
 
     def test_harvest_original_bulk_uses_governor_and_one_thumb_load(self):
         loads = {"count": 0}
+        holds_during_generate = []
+        holds_during_read = []
+        received_source_data = []
 
         def fake_generate(fp, iid, sigs, **kwargs):
             loads["count"] += 1
+            holds_during_generate.append(hdd_governor.bulk_hdd_holds())
+            source_data = kwargs.get("source_data")
+            received_source_data.append(source_data)
             on_loaded = kwargs.get("on_source_loaded")
             if on_loaded is not None:
-                on_loaded(self.image.read_bytes(), mock.Mock(width=64, height=48, getexif=lambda: {}))
+                on_loaded(source_data, mock.Mock(width=64, height=48, getexif=lambda: {}))
             return {
                 "source_reads": 1,
                 "thumbnails_written": 3,
-                "source_bytes": self.image.stat().st_size,
-                "read_seconds": 0.01,
+                "source_bytes": len(source_data) if source_data else self.image.stat().st_size,
+                "read_seconds": 0.0,
                 "decode_encode_seconds": 0.01,
                 "source_read_failures": 0,
                 "originals_written": 0,
@@ -156,30 +162,35 @@ class HarvestReadOnceTests(unittest.TestCase):
             )
             return True
 
-        holds_during = []
+        real_read = harvest._read_original_bytes
 
-        def wrapped_generate(fp, iid, sigs, **kwargs):
-            holds_during.append(hdd_governor.bulk_hdd_holds())
-            return fake_generate(fp, iid, sigs, **kwargs)
+        def counting_read(path):
+            holds_during_read.append(hdd_governor.bulk_hdd_holds())
+            return real_read(path)
 
-        result = harvest.harvest_original(
-            str(self.image),
-            1,
-            bulk=True,
-            size_signatures={"sm": "sig"},
-            need_hash=True,
-            need_metadata=True,
-            generate_thumbnail_set=wrapped_generate,
-            persist_hash=lambda iid, digest: harvest.persist_content_hash_sync(
-                str(self.db), iid, digest
-            ),
-            persist_metadata=persist_meta,
-        )
+        with mock.patch.object(harvest, "_read_original_bytes", counting_read):
+            result = harvest.harvest_original(
+                str(self.image),
+                1,
+                bulk=True,
+                size_signatures={"sm": "sig"},
+                need_hash=True,
+                need_metadata=True,
+                generate_thumbnail_set=fake_generate,
+                persist_hash=lambda iid, digest: harvest.persist_content_hash_sync(
+                    str(self.db), iid, digest
+                ),
+                persist_metadata=persist_meta,
+            )
         self.assertEqual(loads["count"], 1)
         self.assertEqual(result.source_reads, 1)
         self.assertTrue(result.hash_written)
         self.assertTrue(result.metadata_written)
-        self.assertEqual(holds_during, [1])
+        # Slot held during the spindle read only — released before decode.
+        self.assertEqual(holds_during_read, [1])
+        self.assertEqual(holds_during_generate, [0])
+        self.assertEqual(len(received_source_data), 1)
+        self.assertEqual(received_source_data[0], self.image.read_bytes())
         conn = sqlite3.connect(self.db)
         row = conn.execute(
             "SELECT content_hash, metadata_scanned_at FROM images WHERE id = 1"
@@ -188,6 +199,49 @@ class HarvestReadOnceTests(unittest.TestCase):
         self.assertTrue(row[0])
         self.assertIsNotNone(row[1])
 
+    def test_bulk_slot_released_before_decode_allows_parallel_cpu(self):
+        """Two bulk harvests: reads serialize, decode phases overlap."""
+        decode_peaks: list[int] = []
+        lock = threading.Lock()
+        in_decode = 0
+        started = threading.Barrier(2)
+
+        def slow_generate(fp, iid, sigs, **kwargs):
+            nonlocal in_decode
+            self.assertEqual(hdd_governor.bulk_hdd_holds(), 0)
+            self.assertIsInstance(kwargs.get("source_data"), (bytes, bytearray))
+            started.wait(timeout=2)
+            with lock:
+                in_decode += 1
+                decode_peaks.append(in_decode)
+            time.sleep(0.08)
+            with lock:
+                in_decode -= 1
+            return {
+                "source_reads": 1,
+                "thumbnails_written": 1,
+                "source_bytes": len(kwargs["source_data"]),
+                "read_seconds": 0.0,
+                "decode_encode_seconds": 0.08,
+                "source_read_failures": 0,
+                "originals_written": 0,
+            }
+
+        def worker():
+            harvest.harvest_original(
+                str(self.image),
+                1,
+                bulk=True,
+                size_signatures={"sm": "sig"},
+                generate_thumbnail_set=slow_generate,
+            )
+
+        threads = [threading.Thread(target=worker) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=5)
+        self.assertEqual(max(decode_peaks), 2)
 
 class RcloneIoniceTests(unittest.TestCase):
     def test_build_argv_prefixes_ionice_when_available(self):

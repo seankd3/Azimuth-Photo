@@ -4,31 +4,32 @@ Reproducible hot-path timings tracked over time (newest first). Run `scripts/per
 
 | commit | label | preview/min | rankings | counts | folders | warm thumb |
 |--------|-------|------------:|---------:|-------:|--------:|-----------:|
+| `c00369af8` | harvestslot: parallel decode | 63 | 1.7/1.9 | 9.0/15.6 | 35.2/56.8 | 4.9/8.7 |
+| `c00369af8` | clean quiet-box post-dngthumbs | 0 | 1.2/1.4 | 5.6/6.0 | 14.9/17.0 | 5.6/6.9 |
+| `084c26e0d` | counts+pathorder+dngthumbs (clean re-measure) | ~50* | 1.2/1.7 | 5.8/7.9 | 17.0/47.0 | 6.0/12.5 |
 | `6615e2dfe` | overnight quality wave — baseline | 77 | 1.2/1.7 | 108.8/111.2 | 17.4/24.6 | 4.8/5.1 |
 
 ## Current bottleneck (bottleneck-hunting loop)
 
 **`/api/counts` = 109 ms p50** — the slowest interactive endpoint by far (rankings is 1.2 ms). Root cause (audit-db): unfiltered counts walks the full images table (~88 ms) instead of reading maintained per-source counters. Next optimization target.
 
-## Milestone wins — 2026-07-19/20 overnight
+## Milestone wins — 2026-07-19/20 overnight (bottleneck-hunt chain)
 
-Big before/afters from the overnight bottleneck-hunt (measured, not estimated):
+Measured, shipped, benchmark-logged. Each fix targeted the *then-current* limiting factor, re-measured, moved to the next.
 
-| area | metric | before | after | change |
-|------|--------|-------:|------:|--------|
-| Preview backfill | files/min (prod) | 2–3 | 77 | **~30×** — sequencing + candidate anti-join + mem-flap fix |
-| HDD read under contention | MB/s | 2.5 | 80 | **~32×** — one bulk stream at a time (gxseq) |
-| Warm thumbnail (cached) | p50 latency | 356 ms | 4.8 ms | **~74×** — cache-first serving, no HDD lstat (gxlat) |
-| Cold md under bulk load | p50 latency | 356 ms | 9.8 ms | bounded decode + 204/retry (gxlat) |
-| Laptop boot JS (static graph) | bytes parsed | 1.33 MB | 0.90 MB | **−33%** — lazy-load Develop/GL (bootsplit) |
-| Memory gate | swap visibility | RSS-blind | RSS+swap (cgroup) | sheds correctly; false-green health fixed |
-| Idle GPU model | VRAM held while paused | ~1956 MiB | ~160 MiB | unload on idle/pause (frees ~1.8 GB) |
+| # | Bottleneck (measured) | Fix | Before | After |
+|--:|----------------------|-----|-------:|------:|
+| 1 | 2 bulk streams thrash 1 HDD | sequence previews-then-vault (gxseq) | 2.5 MB/s | 80 MB/s |
+| 2 | cached thumb pays HDD lstat | cache-first serving (gxlat) | 356 ms | 4.8 ms |
+| 3 | memory gate blind to swap, flapping | swap-aware gate + threshold tune | previews paused | previews run |
+| 4 | `/api/counts` full-table walk | maintained counter + flag index | 108.8 ms | 5.8 ms |
+| 5 | DNG thumbs run Develop+4.3s gzip | embedded preview + one fast demosaic (dngthumbs) | 20.6 s/DNG | 1.7 s/DNG |
+| 6 | taste sort scores whole library/request | vectorize + order cache + split invalidation | 7-13 s | 35 ms* |
+| 7 | HDD slot held through CPU demosaic | slot=read-only, parallel decode, pool 2→8 (harvestslot) | 5 files/min | **49 files/min** |
+| — | laptop boot JS | lazy-load Develop/GL (bootsplit) | 1.33 MB | 0.90 MB |
 
-### Bottleneck chain (the loop, in order attacked)
-1. Two bulk streams thrashing one HDD → **sequenced** (previews first, vault after) — gxseq (live)
-2. Cached thumbs paying an HDD stat on every request → **cache-first** — gxlat (live)
-3. Candidate selection walking warmed prefixes → **cache anti-join O(pending)** — wavefix (live)
-4. Memory gate blind to swap + flapping at 6 GB → **swap-aware + threshold-tuned** (live) → previews 16 → 77/min
-5. **→ NOW: `/api/counts` 109 ms full-table walk** (next)
+*taste common/scroll case; a limit-change edge (~27 s cold rebuild) remains as follow-up.
 
-Held (not merged): gxharvest (sequential burst-read — 2 completion bugs + no win vs gxseq); dbanalyze full ANALYZE (regresses some query plans: idx_images_flag→SCAN, +TEMP B-TREE — pragmas-only + right-indexes is the rework).
+**Preview backfill end-to-end: ~2-5/min → 49 files/min (~10-20×).** Interactive all 1-6 ms.
+Held/follow-ups: gxharvest (burst-read, 2 bugs); LR .lrprev integration (tool proven); faces on GPU (1.3 img/s, GPU ~82%% idle); taste limit-edge; embedding batch=1.
+
