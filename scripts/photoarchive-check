@@ -9,14 +9,14 @@ AREA=""
 
 declare -A AREA_TARGETS=(
     [background-work]="test_ui_contracts"
-    [ai-search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit"
+    [ai-search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit test_search_stability test_search_experience"
     [previews]="test_cache_status test_thumbnails"
     [people-work]="test_people"
     [compare]="test_compare"
     [settings]="test_settings_status"
     [imports]="test_imports test_import_staging test_modular_contracts"
     [frontend]="test_ui_contracts"
-    [search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit"
+    [search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit test_search_stability test_search_experience"
     [cache]="test_cache_status test_thumbnails"
     [people]="test_people"
 )

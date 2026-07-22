@@ -80,6 +80,20 @@ def start_search_model_load(embedding_worker) -> bool:
         return False
 
 
+async def ensure_search_model_loaded(embedding_worker) -> bool:
+    """Wait for the interactive model only after a committed search needs it."""
+    ensure = getattr(embedding_worker, "ensure_model_loaded_for_search", None)
+    if not callable(ensure):
+        return False
+    try:
+        result = ensure()
+        if inspect.isawaitable(result):
+            result = await result
+        return bool(result)
+    except Exception:
+        return False
+
+
 def _embedding_ranked_scores(matrix, text_vec, image_ids, threshold, max_results: int) -> dict[int, float]:
     import numpy as np
 
@@ -127,6 +141,7 @@ async def resolve_text_search(
     normalize_query=normalize_search_query,
     encode_text=encode_text_with_config,
     start_model_load=start_search_model_load,
+    ensure_model_loaded=ensure_search_model_loaded,
     apply_metadata_ids=None,
     get_search_query_embedding=None,
     store_search_query_embedding=None,
@@ -275,6 +290,23 @@ async def resolve_text_search(
                 if extension_query not in extension_search_terms and apply_metadata_ids is not None:
                     await apply_metadata_ids(result, normalized_query)
                 return result
+        if text_vec is None and deep and await ensure_model_loaded(embedding_worker):
+            text_vec = await asyncio.get_event_loop().run_in_executor(
+                None,
+                encode_text,
+                embedding_worker.encode_text,
+                normalized_query,
+                active_config,
+            )
+            if text_vec is not None and store_search_query_embedding is not None:
+                text_arr = np.asarray(text_vec, dtype=np.float32)
+                if text_arr.shape[0] == int(active_config["dimension"]):
+                    await store_search_query_embedding(
+                        active_config,
+                        normalized_query,
+                        text_arr.tobytes(),
+                    )
+                    text_vec = text_arr
         if text_vec is None and start_model_load(embedding_worker):
             result.update({
                 "text_query": normalized_query,

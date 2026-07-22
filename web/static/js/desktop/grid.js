@@ -497,9 +497,6 @@ function renderSkeletons() {
 
 function bindScopeEmptyActions(flow) {
     flow.querySelector('[data-empty-action="clear-query"]')?.addEventListener('click', () => clearFacet('q'));
-    flow.querySelector('[data-empty-action="deep-search"]')?.addEventListener('click', () => {
-        setScope({ q: scope.q, deep: true }, { merge: true });
-    });
     flow.querySelector('[data-empty-action="clear-filters"]')?.addEventListener('click', () => {
         setScope({ q: scope.q, sort: scope.sort || 'elo' });
     });
@@ -592,10 +589,9 @@ function renderEmptyState() {
     if (scope.q) {
         flow.innerHTML = emptyStateHtml({
             title: `No matches for “${scope.q}”`,
-            detail: scope.deep ? 'Nothing in this library matches that search.' : 'Try another phrase, or use Deep search for a broader visual match.',
+            detail: 'Nothing in this library matches that search. Try another phrase.',
             actions: [
-                ...(!scope.deep ? [{ label: 'Try Deep search', action: 'deep-search', primary: true }] : []),
-                { label: 'Clear search', action: 'clear-query', primary: scope.deep },
+                { label: 'Clear search', action: 'clear-query', primary: true },
             ],
             iconName: 'search',
         });

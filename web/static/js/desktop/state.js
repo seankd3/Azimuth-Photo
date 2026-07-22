@@ -295,7 +295,9 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
     preserveSearchSort(next);
     if (!Array.isArray(next.similarIds)) next.similarIds = [];
     next.similarLimit = [100, 250, 500].includes(Number(next.similarLimit)) ? Number(next.similarLimit) : 100;
-    next.deep = Boolean(next.deep && next.q);
+    // Search commitment is always the thorough path. Live omnibox previews stay
+    // fast, but the grid never exposes a model-quality decision to the user.
+    next.deep = Boolean(next.q);
     next.folder = normalizeFolderValue(next.folder);
     if (String(next.q || '') !== String(scope.q || '')) clearQuietReveal();
     Object.assign(scope, next);
@@ -538,7 +540,7 @@ function loadHash() {
         patch[key] = params.get(key) || '';
     }
     patch.folder = params.getAll('folder').filter(Boolean);
-    patch.deep = ['1', 'true', 'yes', 'on'].includes(String(params.get('deep') || '').toLowerCase()) && Boolean(patch.q);
+    patch.deep = Boolean(patch.q);
     patch.collectionSmart = patch.collectionSmart === '1' || patch.collectionSmart === 'true';
     patch.similarIds = [];
     patch.similarLabel = '';

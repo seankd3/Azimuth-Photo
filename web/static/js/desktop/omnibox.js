@@ -22,7 +22,6 @@ const LIVE_DELAY_MS = 250;
 const LIVE_MIN_CHARS = 2;
 const LIVE_LIMIT = 6;
 const MAX_SECTION_ROWS = 6;
-const DEEP_SEARCH_TIP = 'Slower, more thorough visual search';
 const FLAG_VALUES = [
     { value: 'picked', label: 'Picked', icon: 'star' },
     { value: 'rejected', label: 'Rejected', icon: 'x' },
@@ -98,7 +97,6 @@ let liveAbort = null;
 let liveSeq = 0;
 let live = { q: '', loading: false, data: null, error: false };
 let tokenSelected = false;
-let pendingDeep = null;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -239,7 +237,6 @@ function open() {
 function close() {
     document.getElementById('scopebox').classList.remove('open');
     hot = -1;
-    pendingDeep = null;
     const input = document.getElementById('scope-input');
     input?.removeAttribute('aria-activedescendant');
     input?.setAttribute('aria-expanded', 'false');
@@ -325,7 +322,7 @@ function searchRow(term) {
 
 function buildPhotoRows(term) {
     if (!term) return [];
-    const section = [{ head: 'Photos' }, { deepToggle: true, term }, searchRow(term)];
+    const section = [{ head: 'Photos' }, searchRow(term)];
     if (term.length < LIVE_MIN_CHARS) return section;
     if (live.q === term && live.loading) {
         section.push({ photoSkeleton: true });
@@ -698,11 +695,6 @@ function render() {
                 + `<button data-orient="landscape" class="${scope.orientation === 'landscape' ? 'active' : ''}"><span>${icon('image')}</span>Horizontal</button>`
                 + `<button data-orient="portrait" class="${scope.orientation === 'portrait' ? 'active' : ''}"><span class="rot90">${icon('image')}</span>Vertical</button>`
                 + '</div>';
-        } else if (row.deepToggle) {
-            const deep = pendingDeep == null ? scope.deep : pendingDeep;
-            html += '<div class="sd-tools">'
-                + `<button class="sd-chip ${deep ? 'active' : ''}" data-deep-toggle="1" data-tip="${esc(DEEP_SEARCH_TIP)}" aria-pressed="${deep ? 'true' : 'false'}">${icon('sparkles')} Deep</button>`
-                + '</div>';
         } else if (row.photoSkeleton) {
             html += skeletonPhotosHtml();
         } else if (row.loadError) {
@@ -756,11 +748,6 @@ function bindDropdown(drop) {
             render();
         });
     }
-    drop.querySelector('[data-deep-toggle]')?.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleDeepSearch();
-    });
     drop.querySelector('[data-live-retry]')?.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
@@ -820,18 +807,11 @@ function applyScope(patch, { keepFocus = false, merge = true } = {}) {
 }
 
 function applySearch(term) {
-    applyScope({ q: term, deep: pendingDeep == null ? scope.deep : pendingDeep, sort: 'similarity' });
-}
-
-function toggleDeepSearch() {
-    pendingDeep = !(pendingDeep == null ? scope.deep : pendingDeep);
-    scheduleLiveSearch();
-    open();
+    applyScope({ q: term, deep: true, sort: 'similarity' });
 }
 
 function openPhotoResult(term, photo, images) {
-    const deep = pendingDeep == null ? scope.deep : pendingDeep;
-    navigateToScope({ q: term, deep, sort: 'similarity' }, { merge: true });
+    navigateToScope({ q: term, deep: true, sort: 'similarity' }, { merge: true });
     document.getElementById('scope-input').value = '';
     close();
     requestAnimationFrame(() => {
@@ -935,7 +915,6 @@ function scheduleLiveSearch() {
         const controller = new AbortController();
         liveAbort = controller;
         const params = new URLSearchParams({ q: term, limit: String(LIVE_LIMIT), offset: '0', sort: 'similarity' });
-        if (pendingDeep == null ? scope.deep : pendingDeep) params.set('deep', '1');
         if (scope.people) params.set('people', scope.people);
         if (scope.tag) params.set('tag', scope.tag);
         if (scope.camera) params.set('camera', scope.camera);
