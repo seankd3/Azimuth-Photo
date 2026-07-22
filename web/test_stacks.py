@@ -17,6 +17,7 @@ from data.repositories import stacks as stack_repository
 from features.library import routes as library_routes
 from features.library import service as library_service
 from features.stacks import builders
+from features.stacks import identical
 from features.stacks import routes as stack_routes
 
 
@@ -279,6 +280,86 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         groups = await asyncio.to_thread(builders.build_embedding_groups, db.DB_PATH)
         self.assertEqual(groups["crosssource"][0][1], exported_id)
 
+    async def test_identical_candidates_prefer_earliest_file_modified_copy(self):
+        source = await self._source("catalog")
+        newer = await self._image(source, "newer.jpg", file_size=4)
+        older = await self._image(source, "older.jpg", file_size=4)
+        conn = await db.get_db()
+        try:
+            await conn.executemany(
+                "UPDATE images SET content_hash = ?, file_modified_at = ? WHERE id = ?",
+                [("candidate", 200.0, newer), ("candidate", 100.0, older)],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        groups, summary = identical.candidate_groups_sync(db.DB_PATH)
+
+        self.assertEqual(summary["total_groups"], 1)
+        self.assertEqual(summary["potential_removable_count"], 1)
+        self.assertEqual(groups[0]["representative"]["id"], older)
+
+    async def test_identical_verification_requires_matching_full_files(self):
+        source = await self._source("catalog")
+        first_path = os.path.join(source["path"], "first.jpg")
+        second_path = os.path.join(source["path"], "second.jpg")
+        with open(first_path, "wb") as handle:
+            handle.write(b"first")
+        with open(second_path, "wb") as handle:
+            handle.write(b"other")
+        first = await self._image(source, "first.jpg", filepath=first_path, file_size=5)
+        second = await self._image(source, "second.jpg", filepath=second_path, file_size=5)
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = 'fast-candidate' WHERE id IN (?, ?)",
+                (first, second),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        token = identical.queue_verification()
+        self.assertIsNotNone(token)
+        identical.run_verification(db.DB_PATH, token)
+        status = identical.verification_status()
+
+        self.assertEqual(status["state"], "complete")
+        self.assertEqual(status["ready_groups"], 0)
+        self.assertEqual(status["exception_groups"], 1)
+
+    async def test_identical_cleanup_plan_rejects_files_changed_after_verification(self):
+        source = await self._source("catalog")
+        first_path = os.path.join(source["path"], "first.jpg")
+        second_path = os.path.join(source["path"], "second.jpg")
+        for path in (first_path, second_path):
+            with open(path, "wb") as handle:
+                handle.write(b"same bytes")
+        first = await self._image(source, "first.jpg", filepath=first_path, file_size=10)
+        second = await self._image(source, "second.jpg", filepath=second_path, file_size=10)
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = 'fast-candidate' WHERE id IN (?, ?)",
+                (first, second),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        token = identical.queue_verification()
+        self.assertIsNotNone(token)
+        identical.run_verification(db.DB_PATH, token)
+        self.assertEqual(identical.verification_status()["ready_groups"], 1)
+        with open(second_path, "ab") as handle:
+            handle.write(b"changed")
+
+        image_ids, skipped = identical.validated_cleanup_ids(token)
+
+        self.assertEqual(image_ids, [])
+        self.assertEqual(len(skipped), 1)
+
     async def test_manual_stacks_survive_auto_rebuild_and_priority_steals_lower_auto_members(self):
         source = await self._source("catalog")
         first = await self._image(source, "one.jpg")
@@ -305,6 +386,27 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         third_stack = await stack_repository.stack_for_image(db.DB_PATH, third)
         self.assertEqual(third_stack["kind"], "variant")
         self.assertEqual({member["id"] for member in third_stack["members"]}, {third, fourth})
+
+    async def test_versions_filter_combines_variants_and_raw_edit_lineage(self):
+        source = await self._source("catalog")
+        image_ids = [await self._image(source, f"photo-{index}.jpg") for index in range(4)]
+        await stack_repository.create_stack(
+            db.DB_PATH,
+            kind="variant",
+            representative_image_id=image_ids[0],
+            member_rows=[{"image_id": image_ids[0]}, {"image_id": image_ids[1]}],
+        )
+        await stack_repository.create_stack(
+            db.DB_PATH,
+            kind="version",
+            representative_image_id=image_ids[2],
+            member_rows=[{"image_id": image_ids[2]}, {"image_id": image_ids[3]}],
+        )
+
+        result = await stack_repository.list_stacks(db.DB_PATH, kind="versions")
+
+        self.assertEqual(result["total"], 2)
+        self.assertEqual({stack["kind"] for stack in result["stacks"]}, {"variant", "version"})
 
     async def test_rebuild_reports_final_counts_after_priority_steals(self):
         primary = await self._source("catalog")

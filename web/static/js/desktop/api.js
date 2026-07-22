@@ -577,6 +577,29 @@ export async function listStacks({ kind = '', limit = 50, offset = 0 } = {}) {
     return fetchJson(`/api/stacks?${params.toString()}`, { defaultValue: null });
 }
 
+export async function listIdenticalStacks({ limit = 25, offset = 0 } = {}) {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    return fetchJson(`/api/stacks/identical?${params.toString()}`, { defaultValue: null });
+}
+
+export async function getIdenticalVerificationStatus() {
+    const data = await fetchJson('/api/stacks/identical/status', { defaultValue: null });
+    return data?.verification_status || null;
+}
+
+export async function getIdenticalSummary() {
+    const data = await fetchJson('/api/stacks/identical/summary', { defaultValue: null });
+    return data?.summary || null;
+}
+
+export async function verifyIdenticalStacks() {
+    return postJsonWithStatus('/api/stacks/identical/verify');
+}
+
+export async function cleanupIdenticalStacks(token) {
+    return postJsonWithStatus('/api/stacks/identical/cleanup', { token });
+}
+
 export async function getStack(stackId) {
     return fetchJson(`/api/stacks/${encodeURIComponent(stackId)}`, { defaultValue: null });
 }
@@ -601,7 +624,8 @@ export async function rebuildStacks(kinds = null) {
 }
 
 export async function getStackRebuildStatus() {
-    return fetchJson('/api/stacks/rebuild/status', { defaultValue: null });
+    const data = await fetchJson('/api/stacks/rebuild/status', { defaultValue: null });
+    return data?.rebuild_status || null;
 }
 
 export async function getTrash({ limit = 200, offset = 0, signal = null } = {}) {

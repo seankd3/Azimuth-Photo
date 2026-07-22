@@ -20,6 +20,14 @@ def read_mobile(*parts):
 
 
 class DesktopCorrectnessTests(unittest.TestCase):
+    def test_lens_startup_clears_static_grid_before_mounting_a_tool(self):
+        lenses = read("lenses.js")
+        self.assertIn("for (const view of document.querySelectorAll('.view.active'))", lenses)
+        self.assertLess(
+            lenses.index("document.querySelectorAll('.view.active')"),
+            lenses.index("LENSES[next].mount();"),
+        )
+
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
         develop = read("develop", "develop.js")
@@ -240,7 +248,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("fmt(trashedIds.length)", trash_action)
         self.assertIn("mutationPartialSuffix(errors, 'trashed')", trash_action)
 
-        for function_name in ("keepCoverForStack", "keepCoversEverywhere"):
+        for function_name in ("keepCoverForStack", "cleanupVerifiedIdenticals"):
             start = duplicates.index(f"async function {function_name}(")
             action = duplicates[start:duplicates.index("\n}\n", start)]
             self.assertLess(
@@ -287,9 +295,9 @@ class DesktopCorrectnessTests(unittest.TestCase):
             self.assertIn("result?.partial", refine)
             self.assertIn("Undo partial — ranking drifted", refine)
 
-    def test_keep_covers_button_is_reenabled_if_stack_reload_fails(self):
+    def test_identical_cleanup_button_is_reenabled_if_stack_reload_fails(self):
         duplicates = read("duplicates.js")
-        action_start = duplicates.index("async function keepCoversEverywhere()")
+        action_start = duplicates.index("async function cleanupVerifiedIdenticals()")
         action = duplicates[action_start:duplicates.index("\n}\n", action_start)]
 
         self.assertIn("await reloadStacks();", action)

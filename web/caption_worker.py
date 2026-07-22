@@ -14,6 +14,7 @@ from typing import Any
 import ai_models
 import settings
 from core import memory_pressure, work_coordination
+from core.ai_failures import is_gpu_resource_error
 from workers.caption_health import CaptionOomCircuit
 
 
@@ -198,13 +199,7 @@ def _record_model_load_failure(error: Exception) -> bool:
 
 
 def _is_cuda_oom_error(error) -> bool:
-    name = type(error).__name__.lower()
-    text = str(error).lower()
-    return (
-        "outofmemoryerror" in name
-        or "cuda out of memory" in text
-        or ("cuda" in text and "out of memory" in text)
-    )
+    return is_gpu_resource_error(error)
 
 
 def _clear_cuda_cache() -> None:

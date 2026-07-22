@@ -8,6 +8,7 @@ import time
 from data import connection
 from data.repositories.common import chunked as _chunked
 from data.repositories.metadata_search import metadata_fts_query
+from core.ai_failures import caption_ledger_status
 
 
 ERROR_RETRY_AFTER_SECONDS = 24 * 60 * 60
@@ -92,7 +93,7 @@ async def store_caption_result(
     tags_text = tags_json(tags)
 
     async def _write() -> None:
-        write_status = status
+        write_status = caption_ledger_status(requested_status=status, error=error)
         write_error = error
         conn = await connection.open_async(db_path)
         try:
@@ -360,7 +361,8 @@ async def get_images_needing_captions(
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND (csi.status IS NULL OR csi.status = 'pending' "
-            "OR (csi.status = 'error' AND csi.scanned_at <= ?)) "
+            "OR (csi.status = 'error' AND (csi.scanned_at <= ? "
+            "OR instr(lower(csi.last_error), 'out of memory') > 0))) "
             "ORDER BY CASE WHEN i.flag = 'picked' THEN 0 ELSE 1 END, "
             "(i.date_taken IS NULL), i.date_taken DESC, i.id DESC "
             "LIMIT ?",
@@ -392,7 +394,8 @@ async def count_images_needing_captions(
             "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') "
             "AND i.missing_at IS NULL "
             "AND (csi.status IS NULL OR csi.status = 'pending' "
-            "OR (csi.status = 'error' AND csi.scanned_at <= ?))",
+            "OR (csi.status = 'error' AND (csi.scanned_at <= ? "
+            "OR instr(lower(csi.last_error), 'out of memory') > 0)))",
             (cache_root, cache_size, model_key, retry_before),
         )
         row = await cursor.fetchone()
@@ -415,6 +418,13 @@ async def caption_status_counts(db_path: str, *, model_key: str, cache_root: str
             (model_key,),
         )
         by_status = {row["status"]: int(row["c"]) for row in await cursor.fetchall()}
+        cursor = await conn.execute(
+            "SELECT COUNT(*) AS c FROM caption_scan_images "
+            "WHERE model_key = ? AND status = 'error' "
+            "AND instr(lower(last_error), 'out of memory') > 0",
+            (model_key,),
+        )
+        system_deferred = int((await cursor.fetchone())["c"])
         pending = await count_images_needing_captions(
             db_path,
             model_key=model_key,
@@ -425,7 +435,8 @@ async def caption_status_counts(db_path: str, *, model_key: str, cache_root: str
             "captioned": captioned,
             "pending_cached_images": pending,
             "done": by_status.get("done", 0),
-            "error": by_status.get("error", 0),
+            "error": max(0, by_status.get("error", 0) - system_deferred),
+            "system_deferred": system_deferred,
             "pending": by_status.get("pending", 0),
             "scan": by_status,
         }

@@ -233,6 +233,10 @@ CREATE TABLE IF NOT EXISTS comparisons (
 CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
 CREATE INDEX IF NOT EXISTS idx_images_content_hash
 ON images(content_hash) WHERE content_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_content_hash_size
+ON images(content_hash, file_size)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL
+AND content_hash IS NOT NULL AND trim(content_hash) != '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id
 ON images(hub_image_id) WHERE hub_image_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_images_hub_remote
@@ -1019,6 +1023,12 @@ COMPAT_INDEX_SQL = (
         "CREATE INDEX IF NOT EXISTS idx_images_content_hash "
         "ON images(content_hash) WHERE content_hash IS NOT NULL"
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_content_hash_size "
+        "ON images(content_hash, file_size) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL "
+        "AND content_hash IS NOT NULL AND trim(content_hash) != ''"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_comparisons_action_id ON comparisons(action_id)",
     "CREATE INDEX IF NOT EXISTS idx_comparisons_loser ON comparisons(loser_id)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_id ON images(source_id)",
@@ -1385,6 +1395,7 @@ REQUIRED_INDEXES = {
     "idx_images_source_missing_rating_signal",
     "idx_images_active_visible_orientation_elo",
     "idx_images_visible_comparisons_elo",
+    "idx_images_active_content_hash_size",
     "idx_images_missing_file_ext_source_size",
     "idx_images_active_camera_sort_desc",
     "idx_images_active_gps_markers",

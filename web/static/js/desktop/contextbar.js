@@ -83,7 +83,6 @@ function renderChips() {
     if (scope.q) chips.push(chipHtml('q', `“${scope.q}”`, `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`));
     const searchMode = renderSearchModeChip();
     if (searchMode) chips.push(searchMode);
-    if (scope.q && scope.deep) chips.push(chipHtml('deep', 'Deep search', `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>`, 'smart-chip', 'Slower, more thorough visual search'));
     if (scope.collectionId) {
         const glyph = scope.collectionSmart ? `<span class="tk-glyph tk-spark">${icon('sparkles')}</span>` : '';
         chips.push(chipHtml('collectionId', `Collection · ${scope.collectionName || 'Untitled'}`, glyph, scope.collectionSmart ? 'smart-chip' : ''));
@@ -244,7 +243,7 @@ export function scopeTokenHtml() {
         return `<span class="scope-token" title="${esc(label)}"><span class="tk-glyph">${icon('scan-search')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     if (scope.q) {
-        const label = scope.deep ? `Deep · “${scope.q}”` : `“${scope.q}”`;
+        const label = `“${scope.q}”`;
         return `<span class="scope-token semantic" title="${esc(label)}"><span class="tk-glyph tk-spark">${icon('sparkles')}</span><b title="${esc(label)}">${esc(label)}</b>${count}</span>`;
     }
     if (scope.tag) {
