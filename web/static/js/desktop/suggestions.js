@@ -15,6 +15,11 @@ let refreshCollections = async () => {};
 let notifyChange = () => {};
 const creatingFingerprints = new Set();
 
+function notifyChanged() {
+    notifyChange();
+    window.dispatchEvent(new CustomEvent('collection-suggestions:changed'));
+}
+
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
@@ -60,7 +65,7 @@ export async function loadSuggestionsOnce() {
     if (suggestions || suggestionsLoading) return;
     suggestionsLoading = true;
     suggestionsError = false;
-    notifyChange();
+    notifyChanged();
     try {
         const data = await getCollectionSuggestions(scopeParams());
         if (data && Array.isArray(data.suggestions)) suggestions = data.suggestions;
@@ -69,7 +74,7 @@ export async function loadSuggestionsOnce() {
         suggestionsError = true;
     } finally {
         suggestionsLoading = false;
-        notifyChange();
+        notifyChanged();
         if (mounted) render();
     }
 }
@@ -93,7 +98,7 @@ export async function createSuggestion(suggestion) {
     creatingFingerprints.add(fp);
     try {
         dismissFingerprint(fp);
-        notifyChange();
+        notifyChanged();
         render();
         const result = await createCollection(
             suggestion.title,
@@ -103,14 +108,14 @@ export async function createSuggestion(suggestion) {
         );
         if (!(result && result.ok)) {
             restoreFingerprint(fp);
-            notifyChange();
+            notifyChanged();
             render();
             showToast("Couldn't create collection");
             return false;
         }
         await refreshCollections();
         showToast('Collection created');
-        notifyChange();
+        notifyChanged();
         render();
         return true;
     } finally {
@@ -122,12 +127,12 @@ export async function createSuggestion(suggestion) {
 export function dismissSuggestion(suggestion) {
     const fp = suggestionFingerprint(suggestion);
     dismissFingerprint(fp);
-    notifyChange();
+    notifyChanged();
     render();
     showToast('Dismissed', {
         undo: () => {
             restoreFingerprint(fp);
-            notifyChange();
+            notifyChanged();
             render();
         },
     });

@@ -463,7 +463,7 @@ export function initKeyboard() {
             }
             else if (key === 'o') { event.preventDefault(); switchLens('people'); }
             else if (key === 'm') { event.preventDefault(); switchLens('map'); }
-            else if (key === 'y') { event.preventDefault(); switchLens('events'); }
+            else if (key === 'c') { event.preventDefault(); switchLens('collections'); }
             return;
         }
         if (key === '/') {
@@ -491,9 +491,9 @@ export function initKeyboard() {
         } else if (key === 'o') {
             event.preventDefault();
             switchLens('people');
-        } else if (key === 'y') {
+        } else if (key === 'c') {
             event.preventDefault();
-            switchLens('events');
+            switchLens('collections');
         } else if (key === 'm') {
             event.preventDefault();
             switchLens('map');

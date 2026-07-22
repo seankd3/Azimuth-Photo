@@ -1,4 +1,4 @@
-import { eventGap, initEvents, mountEvents, setEventGap, unmountEvents } from './events.js';
+import { initCollections, mountCollections, unmountCollections } from './collections.js';
 import { initDateScrubber } from './date_scrubber.js';
 import { initGrid, mountGrid, unmountGrid } from './grid.js';
 import { initMap, mountMap, unmountMap } from './map.js';
@@ -15,7 +15,7 @@ import { on, setActiveLens, viewState } from './state.js';
 
 const LENSES = {
     grid: { mount: mountGrid, unmount: unmountGrid },
-    events: { mount: mountEvents, unmount: unmountEvents },
+    collections: { mount: mountCollections, unmount: unmountCollections },
     timeline: { mount: mountTimeline, unmount: unmountTimeline },
     people: { mount: mountPeople, unmount: unmountPeople },
     map: { mount: mountMap, unmount: unmountMap },
@@ -36,18 +36,17 @@ function syncChrome(lens) {
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
-    document.getElementById('shell').classList.toggle('right-hidden', lens === 'events' || lens === 'timeline' || lens === 'map' || lens === 'suggestions' || lens === 'shared' || lens === 'system');
-    document.getElementById('event-gap-wrap').hidden = lens !== 'events';
-    const sortDisabled = lens === 'people' || lens === 'timeline' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared' || lens === 'system';
+    document.getElementById('shell').classList.toggle('right-hidden', lens === 'collections' || lens === 'timeline' || lens === 'map' || lens === 'suggestions' || lens === 'shared' || lens === 'system');
+    const sortDisabled = lens === 'collections' || lens === 'people' || lens === 'timeline' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared' || lens === 'system';
     document.getElementById('sort-select').disabled = sortDisabled;
     document.getElementById('sort-dir').disabled = sortDisabled;
-    document.getElementById('thumb-size').disabled = lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'shared' || lens === 'system';
+    document.getElementById('thumb-size').disabled = lens === 'collections' || lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'shared' || lens === 'system';
     document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
     document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
     document.getElementById('shared-view')?.classList.toggle('active', lens === 'shared');
-    document.getElementById('ctx-mid').hidden = lens === 'shared';
-    document.getElementById('ctx-right').hidden = lens === 'shared';
+    document.getElementById('ctx-mid').hidden = lens === 'shared' || lens === 'collections';
+    document.getElementById('ctx-right').hidden = lens === 'shared' || lens === 'collections';
 }
 
 function activate(lens) {
@@ -72,7 +71,7 @@ export function activeLens() {
 
 export function initLenses() {
     initGrid();
-    initEvents();
+    initCollections();
     initTimeline();
     initPeople();
     initMap();
@@ -87,9 +86,6 @@ export function initLenses() {
             switchLens(button.dataset.view);
         });
     }
-    const gap = document.getElementById('event-gap');
-    gap.value = String(eventGap());
-    gap.addEventListener('change', () => setEventGap(gap.value));
     on('lens', activate);
     activate(viewState.activeLens || 'grid');
 }

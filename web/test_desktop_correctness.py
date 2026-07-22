@@ -20,6 +20,23 @@ def read_mobile(*parts):
 
 
 class DesktopCorrectnessTests(unittest.TestCase):
+    @pytest.mark.contract
+    def test_collections_replaces_events_as_a_real_desktop_lens(self):
+        template = (WEB / "templates" / "desktop.html").read_text(encoding="utf-8")
+        lenses = read("lenses.js")
+        state = read("state.js")
+        collections = read("collections.js")
+
+        self.assertIn('data-view="collections"', template)
+        self.assertIn('id="view-collections"', template)
+        self.assertNotIn('data-view="events"', template)
+        self.assertIn("collections: { mount: mountCollections, unmount: unmountCollections }", lenses)
+        self.assertIn("'collections'", state)
+        self.assertIn("await createCollection(name, []);", collections)
+        self.assertIn("createSuggestion", collections)
+        self.assertIn("openCollectionActions", collections)
+        self.assertIn("openDeliverOverlay", collections)
+
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
         develop = read("develop", "develop.js")

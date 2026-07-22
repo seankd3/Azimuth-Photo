@@ -36,7 +36,7 @@ Every piece of UI is exactly one of:
 1. **Shell** — permanent chrome: the scope omnibox, left panel (collections,
    library, sources, tools), right panel (info), context bar. The shell never
    grows when features are added.
-2. **Lens** — a way of seeing the current scope: Grid, Events, People, Map,
+2. **Lens** — a way of seeing the current scope: Grid, Collections, People, Map,
    Suggestions, Stacks, Trash, Shared. Persistent everyday lenses live in the
    top switcher; tool lenses live in the left panel. A lens renders a scope or
    review surface; it does not own app navigation.
@@ -53,7 +53,7 @@ Roadmap phases expressed in the grammar:
 - Private sharing → a verb (overlay) on Collection plus Shared triage.
 - Website publishing → a second verb on Collection plus Shared triage.
 - AI assistance → annotations inside existing lenses (suggested stacks in
-  Grid, suggested collections in Events, suggested keepers in Refine).
+  Grid, suggested collections in Collections, suggested keepers in Refine).
 - Mobile → the same nouns and verbs in a tab-bar shell.
 
 ## Controls: the disclosure ladder

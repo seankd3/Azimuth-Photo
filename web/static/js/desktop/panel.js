@@ -196,10 +196,24 @@ function openCollectionMenu(row, anchor) {
             if (action === 'edit-query') startSmartQueryEdit(id);
             if (action === 'materialize') startSmartMaterialize(id, name);
             if (action === 'deliver') openDeliverOverlay(id, name, anchor);
-            if (action === 'rename') startCollectionRename(id);
+            if (action === 'rename') {
+                setLeftCollapsed(false);
+                requestAnimationFrame(() => startCollectionRename(id));
+            }
             if (action === 'delete') startCollectionDelete(id, name);
         });
     }
+}
+
+export function openCollectionActions(collection, anchor) {
+    if (!collection?.id || !anchor) return;
+    const row = {
+        dataset: {
+            collId: String(collection.id),
+            collName: collection.name || 'Collection',
+        },
+    };
+    openCollectionMenu(row, anchor);
 }
 
 function formatShareDate(value) {
