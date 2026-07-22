@@ -10,9 +10,8 @@ Policy
    ``unload_all``. A loader that bypasses the pool is a bug.
 2. Each model declares approximate ``vram_bytes`` / ``ram_bytes`` costs.
    Budgets come from ``PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES`` and
-   ``PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES``. Empty / unset / ``0`` /
-   ``unlimited`` → unlimited budget (pass-through: no eviction — today's
-   behavior). Recommended host defaults live in ``DEFAULT_*_BUDGET_BYTES``.
+   ``PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES``. Empty / unset uses the safe host
+   defaults. ``0`` / ``unlimited`` explicitly opts into pass-through.
 3. Loading that would exceed a finite budget evicts LRU residents first
    (skipping pin-while-hot), then calls their unload callback +
    ``torch.cuda.empty_cache``.
@@ -70,6 +69,10 @@ def _env_budget_bytes(name: str) -> int | None:
     """Parse a budget env var. None means unlimited (pass-through)."""
     raw = os.environ.get(name, "").strip()
     if not raw:
+        if name == ENV_VRAM_BUDGET:
+            return DEFAULT_VRAM_BUDGET_BYTES
+        if name == ENV_RAM_BUDGET:
+            return DEFAULT_RAM_BUDGET_BYTES
         return None
     lowered = raw.lower()
     if lowered in {"0", "unlimited", "none", "off"}:

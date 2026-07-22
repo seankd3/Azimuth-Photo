@@ -75,6 +75,8 @@ class IntelligenceAuditTests(unittest.TestCase):
         self.assertEqual(health["library"]["active_images"], 3)
         self.assertEqual(health["search"]["coverage_pct"], 66.67)
         self.assertEqual(health["captions"]["oom_errors"], 1)
+        self.assertEqual(health["captions"]["errors"], 0)
+        self.assertEqual(health["captions"]["system_deferred"], 1)
         self.assertEqual(health["people"]["singleton_cluster_pct"], 50.0)
         self.assertEqual(health["search"]["judged_evaluation_queries"], 1)
         self.assertEqual(health["taste"]["direct_comparisons"], 2)

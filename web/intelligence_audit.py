@@ -61,7 +61,7 @@ def collect_health(
         "SELECT COUNT(*) FROM caption_scan_images WHERE model_key = ? AND status = 'done'",
         (caption_model_key,),
     )
-    caption_errors = _count(
+    caption_error_rows = _count(
         conn,
         "SELECT COUNT(*) FROM caption_scan_images WHERE model_key = ? AND status = 'error'",
         (caption_model_key,),
@@ -72,6 +72,7 @@ def collect_health(
         "AND LOWER(last_error) LIKE '%out of memory%'",
         (caption_model_key,),
     )
+    caption_errors = max(0, caption_error_rows - caption_oom)
     face_scanned = _count(
         conn,
         "SELECT COUNT(DISTINCT fsi.image_id) FROM face_scan_images fsi "
@@ -125,6 +126,7 @@ def collect_health(
             "coverage_pct": _ratio(captioned, active_images),
             "done": caption_done,
             "errors": caption_errors,
+            "system_deferred": caption_oom,
             "oom_errors": caption_oom,
             "success_pct": _ratio(caption_done, caption_done + caption_errors),
         },
@@ -159,7 +161,8 @@ def render_markdown(health: dict) -> str:
         ),
         (
             f"| Captions | {captions['captioned_images']:,} · {captions['coverage_pct']:.2f}% "
-            f"| {captions['errors']:,} errors · {captions['oom_errors']:,} OOM |"
+            f"| {captions['errors']:,} media errors · "
+            f"{captions['system_deferred']:,} system deferrals |"
         ),
         (
             f"| People | {people['scanned_images']:,} photos · {people['scan_coverage_pct']:.2f}% "
