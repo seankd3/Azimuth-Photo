@@ -1654,6 +1654,7 @@ async def api_rankings_impl(
         )
         _configured_schedule_result_thumbnail_memory_warm(images)
     result = []
+    search_evidence = search.get("evidence_by_id") or {}
     for img in images:
         data = dict(img)
         kwargs = {}
@@ -1662,7 +1663,11 @@ async def api_rankings_impl(
         kwargs.update(_blend_card_kwargs(data, blend_context))
         if sort in ("date_taken", "date_taken_asc"):
             kwargs["date_group"] = app_helpers.date_group_for_image(data)
-        result.append(app_helpers.image_card(data, "sm", **kwargs))
+        card = app_helpers.image_card(data, "sm", **kwargs)
+        evidence = search_evidence.get(int(data["id"]))
+        if evidence:
+            card["search_evidence"] = evidence
+        result.append(card)
     result = await _attach_stack_counts(result, stacks_mode)
     result = await _attach_preview_state(result)
     response = {
@@ -1673,6 +1678,7 @@ async def api_rankings_impl(
         "search_sources": search.get("search_sources") or [],
         "ai_unavailable": search["ai_unavailable"],
         "fallback_reason": search.get("fallback_reason", ""),
+        "query_plan": search.get("query_plan") or {},
     }
     if exclude_sources and search.get("active"):
         response["hidden_in_quiet_sources"] = await _hidden_in_quiet_sources_count(
