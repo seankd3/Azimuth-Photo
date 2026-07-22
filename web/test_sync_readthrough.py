@@ -22,7 +22,6 @@ import numpy as np
 from data import connection as data_connection
 from features.sync import readthrough
 from features.media import routes as media_routes
-import thumbnails
 import field_sync
 
 
@@ -170,6 +169,24 @@ class ReadthroughTests(unittest.TestCase):
         self.assertLessEqual(elapsed, 0.25)
         self.assertTrue(started.wait(timeout=1))
         release.set()
+
+    def test_nonblocking_base_warm_queue_is_bounded(self):
+        paths = _Paths(Path(self.tempdir.name) / "bounded")
+        readthrough._warm_inflight.add(99)
+        try:
+            with mock.patch.object(readthrough, "_BASE_WARM_MAX_INFLIGHT", 1), mock.patch.object(
+                readthrough, "_materialize_from_hub"
+            ) as materialize:
+                readthrough._schedule_base_warm(
+                    2,
+                    paths,
+                    db_path=self.db_path,
+                    source_path="/offline/raw.dng",
+                )
+            materialize.assert_not_called()
+            self.assertNotIn(2, readthrough._warm_inflight)
+        finally:
+            readthrough._warm_inflight.discard(99)
 
     def test_sm_thumbnail_miss_returns_pending_without_foreground_hub_await(self):
         with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue:

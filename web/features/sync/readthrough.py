@@ -20,6 +20,7 @@ import os
 import sqlite3
 import tempfile
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
@@ -37,10 +38,12 @@ _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
 _BASE_MAGIC = b"PABASE1\0"
 _BASE_HEADER_BYTES = 16
 _DEFAULT_TIMEOUT_SECONDS = 5.0
+_BASE_WARM_MAX_INFLIGHT = 16
 log = logging.getLogger(__name__)
 
 _warm_lock = threading.Lock()
 _warm_inflight: set[int] = set()
+_warm_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="develop-base-warm")
 
 
 class BaseReadthroughError(RuntimeError):
@@ -272,7 +275,7 @@ def _materialize_from_hub(
 def _schedule_base_warm(image_id: int, paths, *, db_path: str, source_path: str) -> None:
     key = int(image_id)
     with _warm_lock:
-        if key in _warm_inflight:
+        if key in _warm_inflight or len(_warm_inflight) >= _BASE_WARM_MAX_INFLIGHT:
             return
         _warm_inflight.add(key)
 
@@ -295,7 +298,7 @@ def _schedule_base_warm(image_id: int, paths, *, db_path: str, source_path: str)
             with _warm_lock:
                 _warm_inflight.discard(key)
 
-    threading.Thread(target=_run, name=f"develop-base-warm-{key}", daemon=True).start()
+    _warm_executor.submit(_run)
 
 
 def fetch_base_cache_for_image(
