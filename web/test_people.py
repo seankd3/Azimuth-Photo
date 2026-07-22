@@ -3,6 +3,8 @@ import asyncio
 import contextlib
 from unittest import mock
 
+import httpx
+
 from features.people import routes as people_routes
 
 
@@ -145,13 +147,9 @@ class PeopleTests(BackendTestCase):
             face_worker._status.update(old_status)
             work_coordination.release_manual_owner("people")
     async def _request(self, method, path, **kwargs):
-        from fastapi.testclient import TestClient
-
-        def send():
-            with TestClient(__import__("app").app) as client:
-                return client.request(method, path, **kwargs)
-
-        return await asyncio.to_thread(send)
+        transport = httpx.ASGITransport(app=__import__("app").app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.request(method, path, **kwargs)
 
     async def _face(self, image_id, *, vector):
         scan = await db.store_face_scan_result(
