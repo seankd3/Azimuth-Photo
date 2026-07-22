@@ -16,6 +16,7 @@ from features.catalog import routes as catalog_routes
 
 class BackgroundRefreshHygieneTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
+        await background_runtime._fire_and_forget.cancel_all()
         filter_options_repository.clear_filter_options_cache()
 
     async def test_filter_options_swr_refresh_logs_and_clears_inflight_flag(self):
@@ -78,6 +79,23 @@ class BackgroundRefreshHygieneTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(seen), 1)
         self.assertIsInstance(seen[0], RuntimeError)
         self.assertEqual(str(seen[0]), "worker exploded")
+
+    async def test_shutdown_cancels_shared_route_refreshes(self):
+        cancelled = asyncio.Event()
+
+        async def waits_forever():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        task = background_runtime.track_background_task(waits_forever())
+        await asyncio.sleep(0)
+        await background_runtime._fire_and_forget.cancel_all()
+
+        self.assertTrue(cancelled.is_set())
+        self.assertTrue(task.cancelled())
+        self.assertEqual(background_runtime._fire_and_forget.tasks, set())
 
 
 class CatalogBrowseHygieneTests(unittest.TestCase):

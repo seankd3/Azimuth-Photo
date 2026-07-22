@@ -169,6 +169,7 @@ async def run_shutdown(
 ) -> None:
     thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
+    await _fire_and_forget.cancel_all()
     await thumbnails.cancel_background_tasks()
 
     from features.media import warm as media_warm
