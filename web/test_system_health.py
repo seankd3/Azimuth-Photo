@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import tempfile
 import time
@@ -337,6 +338,29 @@ class HealthRouteTests(unittest.TestCase):
                 "checks": {"catalog_db": "ok", "workers": "warn"},
             },
         )
+
+    def test_summary_timeout_keeps_refresh_running_off_request(self):
+        async def scenario():
+            gate = asyncio.Event()
+
+            async def slow_refresh():
+                await gate.wait()
+                return {"overall": "ok", "checked_at": 123.0, "checks": []}
+
+            with mock.patch.object(health_routes, "_refresh_health", slow_refresh):
+                started = time.perf_counter()
+                result = await health_routes._health_snapshot(initial_wait_seconds=0.05)
+                elapsed = time.perf_counter() - started
+                task = health_routes._health_refresh_task
+                self.assertEqual(result["overall"], "warn")
+                self.assertTrue(result["status_stale"])
+                self.assertLess(elapsed, 0.2)
+                self.assertIsNotNone(task)
+                self.assertFalse(task.cancelled())
+                gate.set()
+                await task
+
+        asyncio.run(scenario())
 
 
 class HealthAuthTests(unittest.TestCase):
