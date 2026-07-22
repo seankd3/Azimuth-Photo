@@ -6,6 +6,7 @@ import io
 import json
 import sqlite3
 import tarfile
+import unittest
 
 import db
 from features.sync.prefetch import ThumbPrefetcher
