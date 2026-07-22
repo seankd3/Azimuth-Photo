@@ -10,7 +10,6 @@ from raw_thumb_ops import (
     demosaic_raw_for_thumbnail,
     demosaic_tier_jpegs as _demosaic_tier_jpegs_local,
     exiftool_raw_flip as _exiftool_raw_flip,
-    resize_to_long_side,
     resize_to_long_side_exact,
     thumbnail_jpeg_bytes,
 )
