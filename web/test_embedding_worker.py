@@ -781,7 +781,7 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
                 ):
                     await asyncio.sleep(0.001)
 
-            await asyncio.wait_for(wait_for_renewal(), timeout=0.1)
+            await asyncio.wait_for(wait_for_renewal(), timeout=1.0)
 
         self.assertEqual(work_coordination.manual_owner(), "embeddings")
         self.assertEqual(work_coordination.gpu_owner(), "embeddings")

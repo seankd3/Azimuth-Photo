@@ -211,11 +211,11 @@ class SearchTests(BackendTestCase):
             compare_service.diverse_sample = old_diverse
             compare_service._resolve_library_constraints = old_resolve
 
-        self.assertEqual(filtered_limits[0], ("sm", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40)))
-        self.assertEqual(filtered_limits[1], ("sm", 500))
+        self.assertEqual(filtered_limits[0], ("md", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40)))
+        self.assertEqual(filtered_limits[1], ("md", 500))
         self.assertEqual(filtered["candidate_source"], "filtered_diverse_universe")
-        self.assertEqual(search_calls[0], ("sm", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40), True, "sunset"))
-        self.assertEqual(search_calls[1], ("sm", 300, True, "sunset"))
+        self.assertEqual(search_calls[0], ("md", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40), True, "sunset"))
+        self.assertEqual(search_calls[1], ("md", 300, True, "sunset"))
         self.assertEqual(searched["candidate_source"], "search_diverse_universe")
 
     async def test_search_visibility_is_mode_aware(self):
@@ -503,7 +503,7 @@ class SearchTests(BackendTestCase):
         visible_b = await self._image(source["id"], "landscape-b.jpg")
         miss = await self._image(source["id"], "portrait-miss.jpg")
         for image_id in (visible_a, visible_b, miss):
-            await self._cache_entry(image_id, "sm")
+            await self._cache_entry(image_id, "md")
 
         self._stub_text_search(
             [visible_a, hidden_match, visible_b, miss],
