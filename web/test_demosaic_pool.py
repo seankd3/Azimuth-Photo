@@ -30,6 +30,11 @@ class DemosaicPoolConfigTests(unittest.TestCase):
         self.assertGreaterEqual(n, 1)
         self.assertLessEqual(n, 6)
         self.assertLessEqual(n, max(1, (os.cpu_count() or 4) - 1))
+        total_gib = (
+            int(os.sysconf("SC_PHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE")) / 1024**3
+        )
+        if total_gib < 24:
+            self.assertEqual(n, 1)
 
     def test_ipc_mode_defaults_to_path(self):
         os.environ.pop("PHOTOARCHIVE_DEMOSAIC_IPC", None)

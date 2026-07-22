@@ -33,9 +33,25 @@ _shutdown = False
 
 
 def default_demosaic_processes() -> int:
-    """Bound for a 16GB box: ~0.5–1GB working set per demosaic worker."""
+    """Size the pool from RAM, not only CPU count.
+
+    Real 40–60 MP RAWs peak near 3 GB per spawned worker on the production
+    host.  CPU-based sizing alone could therefore commit 18 GB before the
+    parent server, AI model, or a second maintenance process was counted.
+    """
     ncores = max(1, os.cpu_count() or 4)
-    return max(1, min(ncores - 1, 6))
+    try:
+        total_bytes = int(os.sysconf("SC_PHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, TypeError, ValueError):
+        total_bytes = 16 * 1024**3
+    total_gib = total_bytes / 1024**3
+    if total_gib < 24:
+        memory_workers = 1
+    elif total_gib < 48:
+        memory_workers = 2
+    else:
+        memory_workers = 4
+    return max(1, min(ncores - 1, memory_workers, 6))
 
 
 def configured_demosaic_processes() -> int:
