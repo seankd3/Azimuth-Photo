@@ -1,15 +1,82 @@
-// Placeholder proxy eval set for Sean to refine against the real archive.
-[
-  {"query": "portraits", "relevant_hints": {"filename_patterns": ["*portrait*"], "note": "People and portrait sessions."}},
-  {"query": "wedding", "relevant_hints": {"filename_patterns": ["*wedding*"], "folders": ["*wedding*"], "note": "Wedding ceremony and reception."}},
-  {"query": "starbase rocket", "relevant_hints": {"filename_patterns": ["*starbase*", "*rocket*"], "folders": ["*starbase*", "*rocket*"], "note": "SpaceX Starbase or rocket photos."}},
-  {"query": "airshow jets", "relevant_hints": {"filename_patterns": ["*airshow*", "*jet*"], "folders": ["*airshow*"], "note": "Jets at airshows."}},
-  {"query": "night sky stars", "relevant_hints": {"filename_patterns": ["*stars*", "*night*"], "folders": ["*astro*", "*stars*"], "note": "Stars and night-sky images."}},
-  {"query": "film scan", "relevant_hints": {"filename_patterns": ["*scan*", "*film*"], "folders": ["*film*", "*scan*"], "note": "Scanned film frames."}},
-  {"query": "cat", "relevant_hints": {"filename_patterns": ["*cat*"], "folders": ["*cat*"], "note": "Cat photos."}},
-  {"query": "sunset water", "relevant_hints": {"filename_patterns": ["*sunset*", "*water*"], "folders": ["*lake*", "*beach*", "*water*"], "note": "Sunset over water."}},
-  {"query": "snow", "relevant_hints": {"filename_patterns": ["*snow*"], "folders": ["*snow*", "*winter*"], "note": "Snow and winter scenes."}},
-  {"query": "concert stage", "relevant_hints": {"filename_patterns": ["*concert*", "*stage*"], "folders": ["*concert*", "*music*"], "note": "Concert or stage lighting."}},
-  {"query": "macro flower", "relevant_hints": {"filename_patterns": ["*flower*", "*macro*"], "folders": ["*flower*", "*garden*"], "note": "Close-up flowers."}},
-  {"query": "group photo", "relevant_hints": {"filename_patterns": ["*group*"], "folders": ["*family*", "*friends*"], "note": "Group photos with multiple people."}}
-]
+{
+  "version": 1,
+  "queries": [
+    {
+      "query": "dog and baby sleeping together",
+      "category": "semantic memory",
+      "judgments": {"43300": 3, "47996": 3, "42357": 3, "42667": 2},
+      "notes": "Caption-verified archive examples; exact filenames carry no relevance weight."
+    },
+    {
+      "query": "children on a trampoline",
+      "category": "activity",
+      "judgments": {
+        "39340": 3, "45939": 3, "39371": 2, "46014": 2,
+        "39359": 3, "45983": 3, "39348": 3, "39338": 3, "39350": 3,
+        "45947": 3, "45937": 3, "45965": 3, "39353": 3, "45968": 3
+      }
+    },
+    {
+      "query": "kindergarten signs",
+      "category": "visible text",
+      "judgments": {"47940": 3, "47923": 3, "39488": 3, "46267": 3}
+    },
+    {
+      "query": "babies sleeping",
+      "category": "subject and state",
+      "judgments": {
+        "42421": 3, "44313": 3, "42424": 2, "42515": 3, "42520": 3,
+        "42466": 3, "42533": 3, "42532": 3, "42529": 3, "42607": 3,
+        "42708": 3, "43327": 3, "42927": 3
+      }
+    },
+    {
+      "query": "family gathered in a cozy living room",
+      "category": "scene",
+      "judgments": {
+        "40179": 3, "47238": 3, "50219": 3, "44592": 1, "44538": 3,
+        "47146": 3, "50198": 3, "47114": 3, "44533": 3, "44584": 3,
+        "49372": 3, "50147": 3, "44566": 3
+      }
+    },
+    {
+      "query": "child coloring with markers",
+      "category": "activity",
+      "judgments": {"40614": 3, "47724": 3, "50475": 2, "48689": 3}
+    },
+    {
+      "query": "boy playing with toy trucks on the beach",
+      "category": "compositional",
+      "judgments": {"39418": 3, "46121": 3, "39424": 3, "46127": 3}
+    },
+    {
+      "query": "Halloween skeleton decorations",
+      "category": "event and object",
+      "judgments": {
+        "41913": 3, "41888": 2, "41870": 3, "41866": 3, "41941": 3,
+        "39745": 3, "46534": 3, "39740": 3, "46528": 3, "41940": 3,
+        "46529": 3, "41915": 3, "41894": 3, "41874": 3
+      }
+    },
+    {
+      "query": "children with a horse drawn carriage",
+      "category": "activity",
+      "judgments": {"39669": 3, "46455": 3}
+    },
+    {
+      "query": "quote written on a background",
+      "category": "visible text",
+      "judgments": {"41838": 3, "41484": 3, "50512": 3, "47904": 3}
+    },
+    {
+      "query": "babies in high chairs",
+      "category": "subject and object",
+      "judgments": {"47991": 3, "44459": 3, "43512": 3, "44403": 2}
+    },
+    {
+      "query": "child brushing teeth",
+      "category": "activity",
+      "judgments": {"48135": 3, "42301": 3, "46168": 3, "49020": 3}
+    }
+  ]
+}
