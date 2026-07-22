@@ -292,9 +292,12 @@ async def list_stacks(
     params: list = []
     where = ""
     if kind:
-        normalized = _normalize_kind(kind)
-        where = "WHERE s.kind = ?"
-        params.append(normalized)
+        if str(kind).strip().lower() == "versions":
+            where = "WHERE s.kind IN ('variant', 'version')"
+        else:
+            normalized = _normalize_kind(kind)
+            where = "WHERE s.kind = ?"
+            params.append(normalized)
     safe_limit = max(1, min(int(limit or 50), 500))
     safe_offset = max(0, int(offset or 0))
     conn = await data_connection.open_async(db_path)
