@@ -1,5 +1,6 @@
 from test_support import *  # noqa: F401,F403
 
+import asyncio
 import caption_worker
 import contextlib
 import threading
@@ -12,6 +13,45 @@ from workers.caption_health import CaptionOomCircuit
 
 
 class CaptionTests(BackendTestCase):
+    async def test_caption_status_never_waits_for_slow_catalog_counts(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def slow_counts(**_kwargs):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return {"captioned": 12, "pending_cached_images": 3}
+
+        caption_routes.invalidate_caption_status_cache()
+        try:
+            with unittest.mock.patch.object(
+                caption_routes,
+                "_get_caption_status_counts",
+                side_effect=slow_counts,
+            ):
+                first = await caption_routes.caption_status_payload()
+                await asyncio.wait_for(started.wait(), timeout=1)
+                second = await caption_routes.caption_status_payload()
+
+                self.assertTrue(first["status_stale"])
+                self.assertTrue(second["status_stale"])
+                self.assertEqual(calls, 1)
+
+                release.set()
+                for _ in range(20):
+                    if not caption_routes._caption_counts_refreshing:
+                        break
+                    await asyncio.sleep(0)
+                refreshed = await caption_routes.caption_status_payload()
+                self.assertFalse(refreshed["status_stale"])
+                self.assertEqual(refreshed["counts"]["captioned"], 12)
+        finally:
+            release.set()
+            caption_routes.invalidate_caption_status_cache()
+
     async def test_caption_ownership_loss_unloads_before_reentering_waits(self):
         wait_order = []
 
