@@ -88,12 +88,18 @@ async def _start_background_daemon(coro_factory, delay: float = 5.0):
 
 
 def schedule_optional_workers(*, track_background_task, settings, face_worker, caption_worker) -> dict:
-    """Arm only inference workers whose explicit dependency packs are present."""
+    """Arm hub inference workers whose explicit dependency packs are present."""
 
     statuses = {
         key: capabilities.capability_status(key)
         for key in ("search", "people", "captions")
     }
+    from features.sync import satellite
+
+    if satellite.is_satellite_mode():
+        log.info("worker=optional_ai skipped reason=satellite_mode")
+        return statuses
+
     if statuses["search"]["available"]:
         try:
             import embedding_worker
@@ -412,16 +418,22 @@ async def run_startup(
         caption_worker=caption_worker,
     )
 
-    # Auto-resume bulk workers that were running before the last shutdown.
-    # Pregen first so the vault scheduler can yield to it when both resume.
-    try:
-        from core import bulk_scheduler as _bulk_scheduler
+    from features.sync import satellite as _satellite
 
-        if _bulk_scheduler.pregen_desired():
-            log.info("bulk_scheduler resuming preview pregen from prior desired state")
-            thumbnails.start_pregeneration()
-    except Exception:
-        log.exception("worker=pregen auto-resume failed")
+    # Auto-resume bulk workers that were running before the last shutdown.
+    # Pregen and cloud vault own the hub's archive disk. Satellites keep only
+    # interactive/on-demand previews and receive generated work through sync.
+    if not _satellite.is_satellite_mode():
+        try:
+            from core import bulk_scheduler as _bulk_scheduler
+
+            if _bulk_scheduler.pregen_desired():
+                log.info("bulk_scheduler resuming preview pregen from prior desired state")
+                thumbnails.start_pregeneration()
+        except Exception:
+            log.exception("worker=pregen auto-resume failed")
+    else:
+        log.info("worker=pregen auto-resume skipped reason=satellite_mode")
 
     try:
         import db as _db
@@ -436,36 +448,38 @@ async def run_startup(
     except Exception:
         log.exception("worker=catalog_backup scheduler failed to arm")
 
-    try:
-        import db as _db
-        from core import bulk_scheduler as _bulk_scheduler
-        from features.backup import cloud as _cloud_backup
+    if not _satellite.is_satellite_mode():
+        try:
+            import db as _db
+            from core import bulk_scheduler as _bulk_scheduler
+            from features.backup import cloud as _cloud_backup
 
-        async def _resume_vault_if_desired() -> None:
-            if not _bulk_scheduler.vault_desired():
-                return
-            log.info("bulk_scheduler resuming cloud vault from prior desired state")
-            try:
-                await asyncio.to_thread(
-                    _cloud_backup.start_sync,
-                    _db.DB_PATH,
-                    manual_override=False,
+            async def _resume_vault_if_desired() -> None:
+                if not _bulk_scheduler.vault_desired():
+                    return
+                log.info("bulk_scheduler resuming cloud vault from prior desired state")
+                try:
+                    await asyncio.to_thread(
+                        _cloud_backup.start_sync,
+                        _db.DB_PATH,
+                        manual_override=False,
+                    )
+                except Exception:
+                    log.exception("cloud_backup auto-resume failed to start")
+
+            track_background_task(
+                _start_background_daemon(
+                    lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
+                    delay=25.0,
                 )
-            except Exception:
-                log.exception("cloud_backup auto-resume failed to start")
-
-        track_background_task(
-            _start_background_daemon(
-                lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
-                delay=25.0,
             )
-        )
-        # Slight delay so pregen status is live before the vault decision.
-        track_background_task(
-            _start_background_daemon(_resume_vault_if_desired, delay=3.0)
-        )
-    except Exception:
-        log.exception("worker=cloud_backup scheduler failed to arm")
+            track_background_task(
+                _start_background_daemon(_resume_vault_if_desired, delay=3.0)
+            )
+        except Exception:
+            log.exception("worker=cloud_backup scheduler failed to arm")
+    else:
+        log.info("worker=cloud_backup skipped reason=satellite_mode")
 
     try:
         import db as _db

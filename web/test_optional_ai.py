@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -164,6 +165,32 @@ assert app.app.title == 'Azimuth Photo'
         self.assertEqual(people_worker.unavailable, unavailable["people"])
         self.assertEqual(captions_worker.unavailable, unavailable["captions"])
         self.assertFalse(statuses["search"]["available"])
+
+    def test_satellite_startup_skips_hub_compute_workers(self):
+        available = {
+            key: {"available": True, "install_command": ""}
+            for key in ("search", "people", "captions")
+        }
+        tracked = []
+
+        class Worker:
+            def mark_dependencies_unavailable(self, _status):
+                raise AssertionError("satellite must not arm hub workers")
+
+        with patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "satellite"}), patch.object(
+            background.capabilities,
+            "capability_status",
+            side_effect=lambda key: available[key],
+        ), patch("features.sync.satellite.is_satellite_mode", return_value=True):
+            statuses = background.schedule_optional_workers(
+                track_background_task=tracked.append,
+                settings=object(),
+                face_worker=Worker(),
+                caption_worker=Worker(),
+            )
+
+        self.assertEqual(tracked, [])
+        self.assertTrue(statuses["search"]["available"])
 
     def test_missing_pack_resume_routes_return_409_before_starting_work(self):
         people = missing_capability("people")

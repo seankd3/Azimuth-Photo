@@ -878,7 +878,14 @@ function settingToggle(field, label) {
         + '<i></i></label>';
 }
 
+function hubComputeSettingsVisible() {
+    if (remoteAccess && remoteAccess.hub_mode === false) return false;
+    if (pairStatus && pairStatus.mode && pairStatus.mode !== 'hub') return false;
+    return true;
+}
+
 function renderAiSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     const rawPresets = settingsPageData && settingsPageData.embedding_model_presets || [];
     const presets = rawPresets.map((preset) => ({
         value: preset.key,
@@ -945,6 +952,7 @@ function renderThumbnailSettings() {
 }
 
 function renderPeopleSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     return detailsSection('People recognition', 'Keep face grouping useful without changing your original photos.',
         `<div class="setting-status" data-setting-status="people">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
@@ -959,6 +967,7 @@ function renderPeopleSettings() {
 }
 
 function renderCaptionSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     const rawPresets = settingsPageData && settingsPageData.caption_model_presets || [];
     const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
@@ -1075,7 +1084,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + renderCloudBackup(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + (hubComputeSettingsVisible() ? renderCloudBackup(catalog) : '') + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),

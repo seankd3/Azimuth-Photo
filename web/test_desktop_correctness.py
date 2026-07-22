@@ -607,6 +607,15 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("activityStatusText(name, data)", activity)
         self.assertNotIn("statusText(name, data)", activity)
 
+    def test_satellites_hide_hub_only_compute_controls(self):
+        drawer = read("drawer.js")
+
+        self.assertIn("function hubComputeSettingsVisible()", drawer)
+        self.assertIn("remoteAccess.hub_mode === false", drawer)
+        self.assertIn("pairStatus.mode !== 'hub'", drawer)
+        self.assertIn("if (!hubComputeSettingsVisible()) return '';", drawer)
+        self.assertIn("hubComputeSettingsVisible() ? renderCloudBackup(catalog) : ''", drawer)
+
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")
 
