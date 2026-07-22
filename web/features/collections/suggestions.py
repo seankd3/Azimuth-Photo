@@ -306,11 +306,20 @@ def _coverage_rank_multiplier(captioned_count: int, total_count: int) -> float:
     return 0.35 + (0.65 * strength)
 
 
-def _fingerprint(kind: str, key: str, start_ts: float | None, end_ts: float | None, ids: list[int]) -> str:
+def _legacy_fingerprint(kind: str, key: str, start_ts: float | None, end_ts: float | None, ids: list[int]) -> str:
     start = int((start_ts or 0) // 86400)
     end = int((end_ts or 0) // 86400)
     sample = "-".join(str(image_id) for image_id in sorted(ids[:8])[:8])
     return f"{kind}|{key}|{start}|{end}|{len(ids)}|{sample}"
+
+
+def _fingerprint(kind: str, key: str, ids: list[int]) -> str:
+    """Identify the discovery definition, not its changing result membership."""
+
+    stable_key = _normalize_key(key)
+    if kind == "cluster" and ids:
+        stable_key = f"visual-{min(int(image_id) for image_id in ids)}"
+    return f"v2|{kind}|{stable_key}"
 
 
 def group_events(rows: list[dict], *, gap_seconds: float = EVENT_GAP_SECONDS,
@@ -968,24 +977,82 @@ async def _enrich_people(db_path: str, candidates: list[dict]) -> list[dict]:
     return candidates
 
 
-def _public_suggestion(candidate: dict) -> dict:
+def _suggestion_confidence(candidate: dict) -> float:
+    coherence = max(0.0, min(1.0, float(candidate.get("_coherence") or _DEFAULT_COHERENCE)))
+    support = min(1.0, math.log1p(max(0, int(candidate.get("count") or 0))) / math.log1p(100))
+    coverage = max(0.0, min(1.0, float(candidate.get("_rank_multiplier") or 1.0)))
+    return round((0.5 * coherence) + (0.3 * support) + (0.2 * coverage), 3)
+
+
+def _suggestion_evidence(candidate: dict) -> list[dict]:
+    kind = str(candidate.get("kind") or "shoot")
+    signal = {
+        "cluster": "visual_coherence",
+        "event": "capture_time",
+        "shoot": "shoot_structure",
+        "theme": "photo_understanding",
+    }.get(kind, "archive_structure")
+    evidence = [{
+        "signal": signal,
+        "label": str(candidate.get("reason") or "Photos that belong together"),
+        "strength": round(float(candidate.get("_coherence") or _DEFAULT_COHERENCE), 3),
+    }]
+    if candidate.get("query"):
+        evidence.append({
+            "signal": "live_query",
+            "label": "Updates as matching photos are understood",
+            "strength": 1.0,
+        })
+    return evidence
+
+
+def _membership_change(previous: dict | None, ids: list[int]) -> tuple[dict, str]:
+    if not previous:
+        return {"added": 0, "removed": 0}, ""
+    before = {int(image_id) for image_id in previous.get("image_ids") or []}
+    after = {int(image_id) for image_id in ids}
+    added = len(after - before)
+    removed = len(before - after)
+    parts = []
+    if added:
+        parts.append(f"{added} new photo{'s' if added != 1 else ''}")
+    if removed:
+        parts.append(f"{removed} no longer match{'es' if removed == 1 else ''}")
+    return {"added": added, "removed": removed}, " · ".join(parts)
+
+
+def _public_suggestion(
+    candidate: dict,
+    *,
+    generated_at: float | None = None,
+    previous: dict | None = None,
+) -> dict:
     ids = candidate.get("_all_ids") or candidate.get("image_ids") or []
+    kind = str(candidate.get("kind") or "shoot")
+    key = str(candidate.get("_key") or candidate.get("title") or "")
+    fingerprint = _fingerprint(kind, key, list(ids))
+    change, change_summary = _membership_change(previous, list(ids[:MEMBER_ID_LIMIT]))
     suggestion = {
-        "kind": candidate.get("kind") or "shoot",
+        "kind": kind,
         "title": candidate.get("title") or "Suggested collection",
         "subtitle": candidate.get("subtitle") or _subtitle(len(ids), candidate.get("_start"), candidate.get("_end")),
         "reason": candidate.get("reason") or "Same shoot",
         "count": int(candidate.get("count") or len(ids)),
         "cover_image_id": int(candidate.get("cover_image_id") or (ids[0] if ids else 0)),
         "image_ids": list(ids[:MEMBER_ID_LIMIT]),
-        "fingerprint": _fingerprint(
-            str(candidate.get("kind") or "shoot"),
-            str(candidate.get("_key") or candidate.get("title") or ""),
-            candidate.get("_start"),
-            candidate.get("_end"),
-            list(ids),
-        ),
+        "fingerprint": fingerprint,
+        "fingerprint_aliases": [
+            _legacy_fingerprint(
+                kind, key, candidate.get("_start"), candidate.get("_end"), list(ids)
+            )
+        ],
         "cohesion": round(float(candidate.get("_coherence") or candidate.get("cohesion") or _DEFAULT_COHERENCE), 3),
+        "mode": "smart" if candidate.get("query") else "static",
+        "confidence": _suggestion_confidence(candidate),
+        "evidence": _suggestion_evidence(candidate),
+        "generated_at": round(float(generated_at or time.time()), 3),
+        "change": change,
+        "change_summary": change_summary,
     }
     if candidate.get("query"):
         suggestion["query"] = dict(candidate["query"])
@@ -1024,6 +1091,12 @@ async def _existing_member_ids(db_path: str) -> set[int]:
 
 
 async def _build_suggestions(db_path: str, cache_key) -> dict:
+    previous_suggestions = list((_cache.get("data") or {}).get("suggestions") or [])
+    previous_by_fingerprint = {
+        str(item.get("fingerprint") or ""): item
+        for item in previous_suggestions
+        if item.get("fingerprint")
+    }
     shoots, themes, existing = await asyncio.gather(
         _shoot_suggestions(db_path),
         _theme_suggestions(db_path),
@@ -1053,7 +1126,20 @@ async def _build_suggestions(db_path: str, cache_key) -> dict:
     candidates.sort(key=lambda item: _candidate_rank(item, now_ts), reverse=True)
     candidates = _distinct_candidates(candidates)
     candidates = await _enrich_people(db_path, candidates)
-    suggestions = [_public_suggestion(candidate) for candidate in candidates]
+    generated_at = time.time()
+    suggestions = []
+    for candidate in candidates:
+        ids = candidate.get("_all_ids") or candidate.get("image_ids") or []
+        fingerprint = _fingerprint(
+            str(candidate.get("kind") or "shoot"),
+            str(candidate.get("_key") or candidate.get("title") or ""),
+            list(ids),
+        )
+        suggestions.append(_public_suggestion(
+            candidate,
+            generated_at=generated_at,
+            previous=previous_by_fingerprint.get(fingerprint),
+        ))
 
     response = {"suggestions": suggestions}
     _cache.update({"key": cache_key, "data": response, "expires": time.monotonic() + _CACHE_TTL_SECONDS})
@@ -1166,4 +1252,3 @@ async def filter_suggestions_excluding_sources(db_path: str, payload: dict, excl
             next_suggestion["cover_image_id"] = ids[0]
         filtered.append(next_suggestion)
     return {**(payload or {}), "suggestions": filtered}
-
