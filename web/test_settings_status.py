@@ -6,31 +6,73 @@ from features.captions import routes as caption_routes
 
 
 class SettingsStatusTests(BackendTestCase):
+    async def test_bounded_status_does_not_cancel_slow_sqlite_style_work(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        completed = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def slow_status():
+            started.set()
+            try:
+                await release.wait()
+                return {"fresh": True}
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+            finally:
+                completed.set()
+
+        result = await settings_status._bounded_status(
+            slow_status(),
+            lambda latency_ms: {"status_stale": True, "latency_ms": latency_ms},
+            timeout_seconds=0.01,
+        )
+
+        self.assertTrue(started.is_set())
+        self.assertTrue(result["status_stale"])
+        self.assertFalse(cancelled.is_set())
+        self.assertFalse(completed.is_set())
+
+        release.set()
+        await asyncio.wait_for(completed.wait(), timeout=1)
+        self.assertFalse(cancelled.is_set())
+
     async def test_background_work_status_composes_one_bounded_snapshot(self):
-        settings_payload = {
-            "ai_status": {"worker_state": "paused"},
-            "cache_stats": {"pregen": {"state": "running"}},
-            "people_status": {"worker": {"state": "idle"}},
-            "metadata_status": {"state": "done"},
-        }
+        ai = {"worker_state": "paused"}
+        cache = {"pregen": {"state": "running"}}
+        people = {"worker": {"state": "idle"}}
         captions = {"worker": {"state": "paused"}}
+        metadata = {"state": "done"}
 
         with mock.patch.object(
             settings_routes,
-            "api_settings",
-            new=mock.AsyncMock(return_value=settings_payload),
+            "_build_ai_status",
+            new=mock.AsyncMock(return_value=ai),
+        ), mock.patch.object(
+            settings_routes,
+            "_build_cache_status",
+            new=mock.AsyncMock(return_value=cache),
+        ), mock.patch.object(
+            settings_routes,
+            "_people_status_payload",
+            new=mock.AsyncMock(return_value=people),
         ), mock.patch.object(
             caption_routes,
             "caption_status_payload",
             new=mock.AsyncMock(return_value=captions),
+        ), mock.patch.object(
+            catalog_metadata,
+            "catalog_metadata_status",
+            return_value=metadata,
         ):
             result = await settings_routes.api_background_work_status()
 
-        self.assertEqual(result["ai"], settings_payload["ai_status"])
-        self.assertEqual(result["cache"], settings_payload["cache_stats"])
-        self.assertEqual(result["people"], settings_payload["people_status"])
+        self.assertEqual(result["ai"], ai)
+        self.assertEqual(result["cache"], cache)
+        self.assertEqual(result["people"], people)
         self.assertEqual(result["captions"], captions)
-        self.assertEqual(result["metadata"], settings_payload["metadata_status"])
+        self.assertEqual(result["metadata"], metadata)
 
     async def test_orientation_worker_leaves_raws_for_preview_decoder(self):
         source = await self._source("mixed-formats")

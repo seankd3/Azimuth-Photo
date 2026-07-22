@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable
 
 import ai_models
 import settings
+from core.background import track_background_task as track_route_background_task
 from core import responses as response_helpers
 from data.repositories import catalog as catalog_repository
 from features.catalog import metadata as catalog_metadata
@@ -129,6 +130,17 @@ def _stale_people_status(latency_ms: float) -> dict:
     }
 
 
+def _stale_caption_status(latency_ms: float) -> dict:
+    return {
+        "active": False,
+        "worker": {"state": "stale"},
+        "counts": {"captioned": 0, "pending_cached_images": 0, "scan": {}},
+        "counts_stale": True,
+        "status_stale": True,
+        "latency_ms": latency_ms,
+    }
+
+
 def _stale_catalog_status(latency_ms: float) -> dict:
     return {
         "sources": [],
@@ -141,8 +153,15 @@ def _stale_catalog_status(latency_ms: float) -> dict:
 
 async def _bounded_status(coro, stale_builder, timeout_seconds: float = _status_component_timeout_seconds) -> dict:
     started = time.perf_counter()
+    task = track_route_background_task(coro)
     try:
-        return await asyncio.wait_for(coro, timeout=max(0.05, float(timeout_seconds)))
+        done, _ = await asyncio.wait(
+            {task},
+            timeout=max(0.05, float(timeout_seconds)),
+        )
+        if task not in done:
+            return stale_builder(round((time.perf_counter() - started) * 1000, 1))
+        return task.result()
     except Exception:
         return stale_builder(round((time.perf_counter() - started) * 1000, 1))
 
