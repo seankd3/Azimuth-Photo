@@ -116,13 +116,19 @@ function patch(status) {
     const hubHealth = status.hub_health || 'ok';
     const needsUpdate = hubHealth === 'needs_update';
     const unreachable = hubHealth === 'unreachable';
+    const hubSystemHealth = String(status.hub_system_health || 'unknown');
+    const degraded = hubSystemHealth === 'warn' || hubSystemHealth === 'bad';
     const updateMessage = String(status.update_message || '');
     const updateState = String(status.update_state || '');
     const contractMessage = 'The hub is running an older version — some actions are paused until it updates.';
     root.classList.toggle('needs-update', needsUpdate);
     root.classList.toggle('hub-unreachable', unreachable);
+    root.classList.toggle('hub-degraded', degraded);
     button.classList.remove('offline');
-    button.title = needsUpdate ? contractMessage : unreachable ? 'Hub unavailable — sync will retry.' : mirrorTooltip(status);
+    button.title = needsUpdate ? contractMessage
+        : unreachable ? 'Hub unavailable — sync will retry.'
+        : degraded ? 'The hub needs attention — open System Health on the hub.'
+        : mirrorTooltip(status);
     const recovering = status.state === 'recovering' && !status.paused;
     const backoff = Math.round(Number(status.backoff_seconds) || 0);
     patchText('.sync-chip-arrow', needsUpdate ? '!' : status.paused ? 'Ⅱ' : recovering ? '↻' : depth || pendingOps ? '↑' : '✓');
@@ -135,7 +141,9 @@ function patch(status) {
         : status.current_file ? `Uploading ${status.current_file}`
         : depth ? 'Waiting to upload'
         : pendingHubTrash ? `${pendingHubTrash} photo${pendingHubTrash === 1 ? '' : 's'} waiting to be removed from hub`
-        : pendingOps ? 'Sync needs attention' : 'Everything is synced');
+        : pendingOps ? 'Sync needs attention'
+        : degraded ? 'Everything is synced · hub needs attention'
+        : 'Everything is synced');
     const contract = root.querySelector('[data-sync-contract]');
     if (contract) {
         patchText('[data-sync-contract]', updateMessage && updateState !== 'idle' ? updateMessage : contractMessage);

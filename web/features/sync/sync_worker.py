@@ -27,6 +27,7 @@ CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 _BASE_IDLE_SECONDS = 15.0
 _MAX_BACKOFF_SECONDS = 300.0
+_HEALTH_PROBE_SECONDS = 30.0
 
 
 async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
@@ -69,6 +70,7 @@ class SyncWorker:
         self._pending_trash_failure_streak = 0
         self._pending_trash_next_attempt = 0.0
         self._next_idle_seconds = _BASE_IDLE_SECONDS
+        self._last_health_probe_at = 0.0
         self._status: dict[str, Any] = {
             "mode": "satellite",
             "paused": False,
@@ -81,6 +83,8 @@ class SyncWorker:
             "last_sync_at": None,
             "backoff_seconds": 0,
             "pending_hub_trash": 0,
+            "hub_system_health": "unknown",
+            "hub_health_checks": {},
         }
 
     def status(self) -> dict:
@@ -176,9 +180,9 @@ class SyncWorker:
     async def sync_once(self) -> None:
         if not self.hub:
             raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
-        await self.refresh_hub_contract(
-            force=self._force_contract_refresh or self.updater is not None
-        )
+        force_probe = self._force_contract_refresh
+        await self.refresh_hub_contract(force=force_probe or self.updater is not None)
+        await self._refresh_hub_health(force=force_probe)
         self._force_contract_refresh = False
         await self._consider_client_update()
         await self._retry_pending_hub_trash()
@@ -449,6 +453,33 @@ class SyncWorker:
         """Refresh once at startup, then use the ten-minute shared cache."""
 
         await contract.refresh_hub_contract(self.hub, request=self._hub_request, force=force)
+
+    async def _refresh_hub_health(self, *, force: bool = False) -> None:
+        """Sample the hub's cheap health summary without adding a UI poll loop."""
+
+        now = time.monotonic()
+        if not force and now - self._last_health_probe_at < _HEALTH_PROBE_SECONDS:
+            return
+        self._last_health_probe_at = now
+        status_code, _headers, body = await self._hub_request(
+            "GET", self.hub + "/api/health"
+        )
+        if status_code == 404:
+            self._status["hub_system_health"] = "unknown"
+            self._status["hub_health_checks"] = {}
+            return
+        if not 200 <= status_code < 300:
+            raise RuntimeError(f"hub health probe failed ({status_code})")
+        try:
+            payload = json.loads(body or b"{}")
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise RuntimeError("hub health probe returned invalid JSON") from error
+        state = str(payload.get("status") or "unknown")
+        if state not in {"ok", "warn", "bad"}:
+            state = "unknown"
+        checks = payload.get("checks")
+        self._status["hub_system_health"] = state
+        self._status["hub_health_checks"] = checks if isinstance(checks, dict) else {}
 
     async def _consider_client_update(self) -> None:
         if self.updater is None:
