@@ -39,7 +39,10 @@ else
     HOST="${PHOTOARCHIVE_HOST:-127.0.0.1}"
 fi
 PORT="${PHOTOARCHIVE_PORT:-8000}"
-STOP_TIMEOUT_SECONDS="${PHOTOARCHIVE_STOP_TIMEOUT_SECONDS:-4}"
+# Startup trusts a clean-shutdown marker to skip a full multi-GB integrity
+# scan. Give model and background-task teardown enough time to write it before
+# falling back to SIGKILL; callers can still override this for emergencies.
+STOP_TIMEOUT_SECONDS="${PHOTOARCHIVE_STOP_TIMEOUT_SECONDS:-60}"
 URL="http://${HOST}:${PORT}"
 export PHOTOARCHIVE_ACCESS="$ACCESS"
 export PHOTOARCHIVE_HOST="$HOST" PHOTOARCHIVE_PORT="$PORT"
