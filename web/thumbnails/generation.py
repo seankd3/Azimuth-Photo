@@ -10,6 +10,7 @@ from raw_thumb_ops import (
     demosaic_raw_for_thumbnail,
     demosaic_tier_jpegs as _demosaic_tier_jpegs_local,
     exiftool_raw_flip as _exiftool_raw_flip,
+    resize_to_long_side,  # noqa: F401 - compatibility facade for thumbnails.__init__
     resize_to_long_side_exact,
     thumbnail_jpeg_bytes,
 )
@@ -273,7 +274,7 @@ def _encode_size_ladder(
     filepath: str,
     hot: bool,
     sizes: dict[str, int],
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     encode_and_cache_thumbnail,
     build_source_signature=None,
     size_signatures: dict[str, str] | None = None,
@@ -449,7 +450,7 @@ def generate_missing_thumbnails(
     sizes: dict[str, int],
     load_source_image,
     queue_orientation,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     build_source_signature,
     encode_and_cache_thumbnail,
     mark_source_missing_from_error,
@@ -621,7 +622,7 @@ def generate_thumbnail_set(
     load_source_image,
     load_source_image_from_bytes,
     queue_orientation,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     encode_and_cache_thumbnail,
     cache_full_image_sync,
     cache_full_image_bytes_sync,
@@ -935,7 +936,7 @@ def load_embedding_image(
     memory_get,
     read_disk_thumbnail,
     load_source_image,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
 ) -> Image.Image | None:
     """Load an embedding input, preferring cached md thumbnails over originals."""
     data = memory_get_fast("md", image_id)
