@@ -697,12 +697,21 @@ def _load_model(model_dir: str, model_id: str, interactive: bool = False):
         log.info(f"{model_id} loaded from {model_dir} device={device}")
         return model
 
+    try:
+        from core.host_profile import detect_host_profile
+
+        profile = detect_host_profile()
+        vram_cost = profile.embed_vram_cost_bytes(model_id)
+        ram_cost = COST_EMBEDDINGS_RAM
+    except Exception:
+        vram_cost = COST_EMBEDDINGS_VRAM
+        ram_cost = COST_EMBEDDINGS_RAM
     return get_model_pool().acquire(
         "embeddings",
         load_fn=_load,
         unload_fn=_drop_embedding_residency,
-        vram_bytes=COST_EMBEDDINGS_VRAM,
-        ram_bytes=COST_EMBEDDINGS_RAM,
+        vram_bytes=vram_cost,
+        ram_bytes=ram_cost,
         interactive=interactive,
     )
 

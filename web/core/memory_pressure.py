@@ -9,9 +9,8 @@ Signal (periodic poll, not PSI watch):
   2. else ``VmRSS`` + ``VmSwap`` from ``/proc/self/status``
   3. else ``VmRSS`` alone
 
-Defaults sit under systemd ``MemoryHigh`` / ``MemoryMax`` (8G / 12G on
-this host) with headroom so normal browse (≈1G RSS + modest swap) stays
-calm. Existing ``PHOTOARCHIVE_MEMORY_*_BYTES`` env knobs still win.
+Defaults come from ``host_profile`` (cgroup limits or fraction-of-RAM)
+so any machine size shares one formula. Env knobs still win.
 """
 
 from __future__ import annotations
@@ -132,12 +131,14 @@ def _detect_total_ram_bytes() -> int | None:
     return None
 
 
-def _default_watermarks() -> tuple[int, int]:
-    """Soft/hard defaults with headroom under MemoryHigh / MemoryMax.
+def _default_watermarks() -> tuple[int, int, int]:
+    """Soft/hard/resume from host_profile (proportional headroom, any box size)."""
+    try:
+        from core.host_profile import detect_host_profile
 
-    Cgroup path stays first (hub under systemd). Fallback is fraction-of-RAM
-    so an 8GB laptop and a 64GB box share one formula.
-    """
+        return detect_host_profile().memory_watermarks()
+    except Exception:
+        log.debug("memory_pressure: host_profile unavailable", exc_info=True)
     high, maximum = read_cgroup_limits()
     if high is not None or maximum is not None:
         soft = (high - _HIGH_HEADROOM_BYTES) if high is not None else None
@@ -146,23 +147,24 @@ def _default_watermarks() -> tuple[int, int]:
             soft = int(hard * _FALLBACK_SOFT_FRACTION / _FALLBACK_HARD_FRACTION)
         if hard is None and soft is not None:
             hard = int(soft * _FALLBACK_HARD_FRACTION / _FALLBACK_SOFT_FRACTION)
-        soft = max(2 * _GIB, int(soft or 2 * _GIB))
-        hard = max(soft + _GIB, int(hard or soft + _GIB))
-        return soft, hard
+        soft = max(1 * _GIB, int(soft or 1 * _GIB))
+        hard = max(soft + 256 * 1024 * 1024, int(hard or soft + 256 * 1024 * 1024))
+        resume = min(soft, max(soft * 85 // 100, soft - 512 * 1024 * 1024))
+        return soft, hard, resume
 
     total = _detect_total_ram_bytes() or (16 * _GIB)
-    # soft = 55% of total RAM; hard = 72% of total RAM
-    soft = max(2 * _GIB, int(total * _FALLBACK_SOFT_FRACTION))
-    hard = max(soft + _GIB, int(total * _FALLBACK_HARD_FRACTION))
-    return soft, hard
+    soft = max(1 * _GIB, int(total * _FALLBACK_SOFT_FRACTION))
+    hard = max(soft + 256 * 1024 * 1024, int(total * _FALLBACK_HARD_FRACTION))
+    resume = min(soft, max(soft * 85 // 100, soft - 512 * 1024 * 1024))
+    return soft, hard, resume
 
 
-_DEFAULT_SOFT, _DEFAULT_HARD = _default_watermarks()
+_DEFAULT_SOFT, _DEFAULT_HARD, _DEFAULT_RESUME = _default_watermarks()
 SOFT_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
 HARD_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_HARD_BYTES", _DEFAULT_HARD)
 RESUME_WATERMARK_BYTES = _env_bytes(
     "PHOTOARCHIVE_MEMORY_RESUME_BYTES",
-    max(SOFT_WATERMARK_BYTES - (512 * 1024 * 1024), SOFT_WATERMARK_BYTES * 85 // 100),
+    _DEFAULT_RESUME,
 )
 
 # Idle model residency TTL (seconds). Used by workers / pool idle shed.
