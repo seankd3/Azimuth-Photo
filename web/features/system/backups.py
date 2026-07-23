@@ -28,7 +28,7 @@ from data import connection as data_connection
 
 log = logging.getLogger(__name__)
 
-BACKUP_NAME_RE = re.compile(r"^photoarchive-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
+BACKUP_NAME_RE = re.compile(r"^(?:photoarchive|azimuth)-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
 OWNER_MARKER_NAME = ".photoarchive-backup-owner"
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
@@ -172,8 +172,8 @@ def _timestamp_name(when: datetime | None = None, label: str | None = None) -> s
     moment = when or datetime.now().astimezone()
     stamp = moment.strftime("%Y%m%d-%H%M%S")
     if label:
-        return f"photoarchive-{stamp}-{label}.db.gz"
-    return f"photoarchive-{stamp}.db.gz"
+        return f"azimuth-{stamp}-{label}.db.gz"
+    return f"azimuth-{stamp}.db.gz"
 
 
 def _parse_backup_name(name: str) -> datetime | None:

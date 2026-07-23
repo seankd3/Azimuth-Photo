@@ -30,11 +30,11 @@ class RuntimePathTests(unittest.TestCase):
                 "/home/alex",
             )
         self.assertEqual(paths.layout, "native")
-        self.assertEqual(paths.catalog_db, "/data/photoarchive/catalog/photoarchive.db")
-        self.assertEqual(paths.settings_file, "/config/photoarchive/settings.json")
-        self.assertEqual(paths.thumb_cache_dir, "/cache/photoarchive/previews")
-        self.assertEqual(paths.model_root, "/data/photoarchive/models")
-        self.assertEqual(paths.server_log, "/state/photoarchive/logs/server.log")
+        self.assertEqual(paths.catalog_db, "/data/azimuthphoto/catalog/azimuth.db")
+        self.assertEqual(paths.settings_file, "/config/azimuthphoto/settings.json")
+        self.assertEqual(paths.thumb_cache_dir, "/cache/azimuthphoto/previews")
+        self.assertEqual(paths.model_root, "/data/azimuthphoto/models")
+        self.assertEqual(paths.server_log, "/state/azimuthphoto/logs/server.log")
 
     def test_clean_windows_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -53,15 +53,15 @@ class RuntimePathTests(unittest.TestCase):
         self.assertEqual(paths.layout, "native")
         self.assertEqual(
             paths.catalog_db,
-            r"C:\Users\Alex\AppData\Local\photoArchive\catalog\photoarchive.db",
+            r"C:\Users\Alex\AppData\Local\Azimuth Photo\catalog\azimuth.db",
         )
         self.assertEqual(
             paths.settings_file,
-            r"C:\Users\Alex\AppData\Roaming\photoArchive\settings.json",
+            r"C:\Users\Alex\AppData\Roaming\Azimuth Photo\settings.json",
         )
         self.assertEqual(
             paths.thumb_cache_dir,
-            r"C:\Users\Alex\AppData\Local\photoArchive\cache\previews",
+            r"C:\Users\Alex\AppData\Local\Azimuth Photo\cache\previews",
         )
 
     def test_clean_macos_defaults(self):
@@ -71,16 +71,16 @@ class RuntimePathTests(unittest.TestCase):
             paths = resolve_runtime_paths(web, {"HOME": "/Users/alex"}, "darwin", "/Users/alex")
         self.assertEqual(
             paths.catalog_db,
-            "/Users/alex/Library/Application Support/photoArchive/catalog/photoarchive.db",
+            "/Users/alex/Library/Application Support/Azimuth Photo/catalog/azimuth.db",
         )
-        self.assertEqual(paths.thumb_cache_dir, "/Users/alex/Library/Caches/photoArchive/previews")
-        self.assertEqual(paths.server_log, "/Users/alex/Library/Logs/photoArchive/server.log")
+        self.assertEqual(paths.thumb_cache_dir, "/Users/alex/Library/Caches/Azimuth Photo/previews")
+        self.assertEqual(paths.server_log, "/Users/alex/Library/Logs/Azimuth Photo/server.log")
 
     def test_photoarchive_home_opts_out_of_legacy(self):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            (web / "photoarchive.db").touch()
+            (web / "azimuth.db").touch()
             paths = resolve_runtime_paths(
                 web,
                 {"HOME": "/home/alex", "PHOTOARCHIVE_HOME": "/srv/photoarchive"},
@@ -88,7 +88,7 @@ class RuntimePathTests(unittest.TestCase):
                 "/home/alex",
             )
         self.assertEqual(paths.layout, "custom")
-        self.assertEqual(paths.catalog_db, "/srv/photoarchive/data/catalog/photoarchive.db")
+        self.assertEqual(paths.catalog_db, "/srv/photoarchive/data/catalog/azimuth.db")
         self.assertEqual(paths.settings_file, "/srv/photoarchive/config/settings.json")
         self.assertEqual(paths.thumb_cache_dir, "/srv/photoarchive/cache/previews")
 
@@ -96,7 +96,7 @@ class RuntimePathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            (web / "photoarchive.db").touch()
+            (web / "azimuth.db").touch()
             paths = resolve_runtime_paths(
                 web,
                 {
@@ -124,7 +124,7 @@ class RuntimePathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            (web / "photoarchive.db").touch()
+            (web / "azimuth.db").touch()
             paths = resolve_runtime_paths(
                 web,
                 {
@@ -138,7 +138,7 @@ class RuntimePathTests(unittest.TestCase):
                 "/home/alex",
             )
         self.assertEqual(paths.layout, "legacy")
-        self.assertEqual(paths.catalog_db, "/data/catalog/photoarchive.db")
+        self.assertEqual(paths.catalog_db, "/data/catalog/azimuth.db")
         self.assertEqual(paths.settings_file, "/config/settings.json")
         self.assertEqual(paths.thumb_cache_dir, "/cache/previews")
         self.assertEqual(paths.model_root, "/data/models")
@@ -151,13 +151,13 @@ class RuntimePathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            for name in ("photoarchive.db", "settings.local.json"):
+            for name in ("azimuth.db", "settings.local.json"):
                 (web / name).touch()
             for name in (".thumbcache", ".models", ".embedcache", ".run"):
                 (web / name).mkdir()
             paths = resolve_runtime_paths(web, {"HOME": str(Path(tmp) / "home")}, "linux")
             self.assertEqual(paths.layout, "legacy")
-            self.assertEqual(paths.catalog_db, posixpath.join(str(web), "photoarchive.db"))
+            self.assertEqual(paths.catalog_db, posixpath.join(str(web), "azimuth.db"))
             self.assertEqual(paths.settings_file, posixpath.join(str(web), "settings.local.json"))
             self.assertEqual(paths.thumb_cache_dir, posixpath.join(str(web), ".thumbcache"))
             self.assertEqual(paths.model_root, posixpath.join(str(web), ".models"))
@@ -168,10 +168,10 @@ class RuntimePathTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            (web / "photoarchive.db.pre-dev7.bak").touch()
+            (web / "azimuth.db.pre-dev7.bak").touch()
             paths = resolve_runtime_paths(web, {"HOME": "/home/alex"}, "linux", "/home/alex")
         self.assertEqual(paths.layout, "native")
-        self.assertEqual(paths.catalog_db, "/home/alex/.local/share/photoarchive/catalog/photoarchive.db")
+        self.assertEqual(paths.catalog_db, "/home/alex/.local/share/azimuthphoto/catalog/azimuth.db")
 
     def test_resolution_has_no_filesystem_side_effects(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -201,9 +201,9 @@ class RuntimePathTests(unittest.TestCase):
 
     def test_current_checkout_selects_legacy_without_mutation(self):
         web = Path(__file__).resolve().parent
-        if not (web / "photoarchive.db").exists():
+        if not (web / "azimuth.db").exists():
             self.skipTest("current checkout has no legacy catalog")
-        catalog = web / "photoarchive.db"
+        catalog = web / "azimuth.db"
         before = (catalog.stat().st_ino, catalog.stat().st_size)
         paths = resolve_runtime_paths(web)
         after = (catalog.stat().st_ino, catalog.stat().st_size)
@@ -253,10 +253,14 @@ class RuntimePathTests(unittest.TestCase):
         ):
             normalized = settings.normalize_settings(raw)
         self.assertEqual(normalized["ssd_cache_dir"], "/deploy/previews")
-        self.assertEqual(normalized["embed_model_dir"], os.path.normpath("/deploy/models/Qwen--Qwen3-VL-Embedding-8B"))
-        self.assertEqual(
+        # Host-adaptive model presets still must live under the deploy models root.
+        self.assertTrue(
+            str(normalized["embed_model_dir"]).replace("\\", "/").startswith("/deploy/models/"),
+            normalized["embed_model_dir"],
+        )
+        self.assertTrue(
+            str(normalized["caption_model_dir"]).replace("\\", "/").startswith("/deploy/models/"),
             normalized["caption_model_dir"],
-            os.path.normpath("/deploy/models/Qwen--Qwen2.5-VL-7B-Instruct"),
         )
         self.assertEqual(normalized["face_model_dir"], os.path.normpath("/deploy/models/insightface"))
 

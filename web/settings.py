@@ -4,6 +4,7 @@ import os
 import threading
 
 from core.runtime_paths import resolve_runtime_paths
+from core import env_names
 
 WEB_DIR = os.path.dirname(__file__)
 SETTINGS_PATH = resolve_runtime_paths().settings_file
@@ -33,7 +34,7 @@ def recommended_caption_preset_key() -> str:
 
 
 def _default_import_root() -> str:
-    return os.path.join(os.path.expanduser("~"), "Pictures", "photoArchive Imports")
+    return os.path.join(os.path.expanduser("~"), "Pictures", "Azimuth Imports")
 
 
 def _default_model_dir(model_id: str) -> str:
@@ -477,7 +478,7 @@ def normalize_settings(raw: dict | None) -> dict:
         "embed_model_dim": preset_config["dimension"],
         "embed_model_dir": (
             _default_model_dir(preset_config["model_id"])
-            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            if env_names.env_get("MODELS_DIR")
             else raw.get("embed_model_dir")
             if raw.get("embed_model_id") == preset_config["model_id"]
             and raw.get("embed_model_dir")
@@ -504,7 +505,7 @@ def normalize_settings(raw: dict | None) -> dict:
         "caption_model_revision": caption_preset_config["revision"],
         "caption_model_dir": (
             _default_model_dir(caption_preset_config["model_id"])
-            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            if env_names.env_get("MODELS_DIR")
             else raw.get("caption_model_dir")
             if raw.get("caption_model_id") == caption_preset_config["model_id"]
             and raw.get("caption_model_dir")
@@ -523,7 +524,7 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["embed_model_revision"] = revision or "main"
 
     normalized["ssd_cache_dir"] = _resolve_cache_dir(
-        os.environ.get("PHOTOARCHIVE_THUMB_CACHE_DIR")
+        env_names.env_get("THUMB_CACHE_DIR")
         or raw.get("ssd_cache_dir", normalized["ssd_cache_dir"]),
         _default_thumb_cache_dir(),
     )
@@ -550,7 +551,7 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["face_model_id"] = face_model_id or DEFAULT_SETTINGS["face_model_id"]
     normalized["face_model_dir"] = _resolve_cache_dir(
         _default_model_dir("insightface")
-        if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+        if env_names.env_get("MODELS_DIR")
         else raw.get("face_model_dir", normalized["face_model_dir"]),
         _default_model_dir("insightface"),
     )
