@@ -100,6 +100,12 @@ def partition_raw_thumbnail_tiers(
     return covered, uncovered
 
 
+# Still-frame thumbnail pipeline only. Videos live in the catalog for
+# playback/backup, but Pillow cannot decode them — skip quietly so bulk
+# pregen does not thrash retries on every .mp4/.mov in Personal Photos.
+VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
+
+
 def load_source_image(
     filepath: str,
     max_target: int,
@@ -660,13 +666,18 @@ def generate_thumbnail_set(
     if not needed_sizes and not full_item:
         return metrics
 
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in VIDEO_THUMB_EXTENSIONS:
+        # Not a still image — do not count as a source-read failure or schedule retries.
+        log(f"Thumbnail skip video (no still pipeline): {filepath}")
+        return metrics
+
     img = None
     current = None
     file_bytes = source_data
     owned_sources: list[Image.Image] = []
     try:
         if needed_sizes:
-            ext = os.path.splitext(filepath)[1].lower()
             use_raw_split = (
                 raw_extensions is not None
                 and ext in raw_extensions
