@@ -1,5 +1,7 @@
 """Generate the Azimuth Photo app icon: dark rounded square, aperture-inspired mark."""
 import math
+from pathlib import Path
+
 from PIL import Image, ImageDraw
 
 S = 1024
@@ -37,5 +39,6 @@ for i in range(blades):
 # center hole
 d.ellipse([cx - R_inner + 34, cy - R_inner + 34, cx + R_inner - 34, cy + R_inner - 34], fill=(13, 15, 18, 255))
 
-img.save(r"C:\Users\smast\OneDrive\Desktop\Projects\photography\photoarchive-desktop\app-icon.png")
-print("icon written")
+output = Path(__file__).with_name("app-icon.png")
+img.save(output)
+print(f"icon written to {output}")

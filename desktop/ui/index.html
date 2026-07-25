@@ -38,12 +38,12 @@
 </head>
 <body>
   <div class="wrap">
-    <div class="mark">photo<span>Archive</span></div>
+    <div class="mark">Azimuth <span>Photo</span></div>
     <div class="spinner" id="spinner"></div>
-    <div class="status" id="status">Starting the local library…</div>
+    <div class="status" id="status">Opening your library…</div>
   </div>
   <script>
-    // Called from the Rust shell while the satellite server comes up.
+    // Called from the Rust shell while the local engine starts.
     window.__paStatus = function (message, isError) {
       var status = document.getElementById('status');
       status.textContent = message;

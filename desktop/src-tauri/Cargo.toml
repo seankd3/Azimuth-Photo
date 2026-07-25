@@ -1,6 +1,6 @@
 [package]
 name = "photoarchive-desktop"
-version = "0.1.0"
+version = "1.0.0-rc.1"
 description = "Azimuth Photo desktop shell"
 authors = ["Sean Kenneth Doherty"]
 edition = "2021"
@@ -13,7 +13,7 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-single-instance = "2"
 open = "5"
-# Plain-HTTP client for the local server (readiness poll + sync status); no TLS needed.
+# Plain-HTTP client for the local engine readiness probe; no TLS needed.
 ureq = { version = "3", default-features = false, features = ["json"] }
 serde_json = "1"
 

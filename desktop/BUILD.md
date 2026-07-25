@@ -1,94 +1,59 @@
-# Building Azimuth Photo desktop
+# Build the Azimuth Photo Windows app
 
-Tauri v2 shell that spawns the local satellite server and wraps
-`http://127.0.0.1:8010/d` in a native window with a sync tray.
+The Windows app is a self-contained Tauri package. It includes the frozen
+Azimuth Photo engine, opens the real first-run experience, and stores its
+catalog and generated data in the normal Windows application-data folders.
+Customers do not install Python or configure a URL.
 
-## Prerequisites
+## Build an unsigned test installer
 
-- **MSVC toolchain** — Visual Studio Build Tools with the "Desktop development with C++"
-  workload (provides `link.exe` + Windows SDK). This is the only missing piece; Rust
-  (`rustup` with the `x86_64-pc-windows-msvc` target) is already installed.
-- **WebView2 runtime** — preinstalled on Windows 11.
-- The field server venv at `photoarchive-field\web\.venv` (already set up per
-  `photoarchive-field\FIELD_README.md`).
-
-## Compile check (first thing once MSVC lands)
+On Windows, install the MSVC desktop toolchain, Rust, and the Tauri CLI:
 
 ```powershell
-cd C:\Users\smast\OneDrive\Desktop\Projects\photography\photoarchive-desktop\src-tauri
-cargo check
+cargo install tauri-cli --locked
 ```
 
-## Run in dev
+From the repository root:
 
 ```powershell
-cd C:\Users\smast\OneDrive\Desktop\Projects\photography\photoarchive-desktop\src-tauri
-cargo run
+.\scripts\build_windows_desktop.ps1
 ```
 
-Dev builds open devtools automatically. The app spawns the satellite server itself —
-don't start one manually, or do: if :8010 is already serving, the shell skips the spawn
-and just connects.
+The script:
 
-## Release build
+1. verifies `VERSION`, Cargo, and Tauri versions agree;
+2. builds `dist\photoarchive-server\photoarchive-server.exe` and its supporting
+   onedir files;
+3. bundles that complete directory into the desktop app;
+4. creates a per-user NSIS installer without requiring administrator access.
 
-```powershell
-cd C:\Users\smast\OneDrive\Desktop\Projects\photography\photoarchive-desktop\src-tauri
-cargo build --release
+The final line prints the installer path under:
+
+```text
+desktop\src-tauri\target\release\bundle\nsis\
 ```
 
-Exe lands at: `src-tauri\target\release\photoarchive-desktop.exe`
+This lane intentionally does not enable signing or automatic updates. Those
+belong after the unsigned install-to-library flow passes on a clean Windows
+machine.
 
-## NSIS installer
+## First-install smoke
 
-Needs the Tauri CLI once: `cargo install tauri-cli --locked` (or `npx @tauri-apps/cli`).
+Use a Windows account with no existing Azimuth Photo data:
 
-```powershell
-cd C:\Users\smast\OneDrive\Desktop\Projects\photography\photoarchive-desktop\src-tauri
-cargo tauri build
-```
+1. Install and launch Azimuth Photo without a terminal.
+2. Confirm the welcome screen appears and no browser address or engine window
+   is shown.
+3. Choose a local photo folder; confirm scanning begins and the library opens.
+4. Repeat with a mapped NAS drive.
+5. Type or choose a UNC share such as `\\NAS\Photos`; confirm photos appear.
+6. Quit and relaunch; confirm the same library opens without setup repeating.
 
-Outputs:
-- Exe: `src-tauri\target\release\photoArchive.exe`
-- Installer: `src-tauri\target\release\bundle\nsis\photoArchive_0.1.0_x64-setup.exe`
-  (per-user install, no admin needed — `installMode: currentUser`)
+App data belongs under `%LOCALAPPDATA%\Azimuth Photo` and
+`%APPDATA%\Azimuth Photo`. Originals remain in the selected folders.
 
-## Shell config (`%APPDATA%\photoarchive\shell.json`)
+## Developer override
 
-The desktop shell no longer hard-requires the compile-time venv paths. On startup
-it reads `%APPDATA%\photoarchive\shell.json` (created by the installer or by hand
-for dev machines). Missing keys fall back to the historical constants in
-`src-tauri/src/server.rs`.
-
-```json
-{
-  "python": "C:\\Path\\To\\photoarchive-server\\python.exe",
-  "server_cwd": "C:\\Path\\To\\photoarchive-server",
-  "env": {
-    "PHOTOARCHIVE_MODE": "standalone",
-    "PHOTOARCHIVE_HOME": "C:\\PhotoArchive",
-    "PHOTOARCHIVE_PORT": "8010"
-  }
-}
-```
-
-- `python` — interpreter that can run `python -m uvicorn app:app`
-- `server_cwd` — working directory for that process (the `web/` tree or the
-  frozen sidecar folder that contains `app`)
-- `env` — optional overrides merged onto the default satellite/standalone env
-  map (override individual keys; omit `env` to keep the built-in defaults)
-
-Installed builds point `python` / `server_cwd` at the bundled
-`dist/photoarchive-server/` sidecar. Dev machines can point them at a checkout
-venv without rebuilding the shell.
-
-## What the shell does at runtime
-
-1. Shows a splash (`ui/index.html`), probes `http://127.0.0.1:8010/`.
-2. If nothing is serving, spawns the configured Python with
-   `-m uvicorn app:app --host 127.0.0.1 --port 8010` (cwd + env from
-   `shell.json`, else the fallback satellite profile in `server.rs`).
-3. Polls readiness up to 45 s, then navigates to `http://127.0.0.1:8010/d`.
-4. Tray: Open / sync status (polled every 30 s) / Pause–Resume sync / Quit.
-   The spawned server is killed on app exit; an externally started server is left alone.
-5. Single instance: relaunching focuses the existing window.
+A developer may run the shell against another frozen engine by setting
+`AZIMUTH_DESKTOP_ENGINE_PATH` to the executable before `cargo run`. This is a
+development seam only; installed builds resolve the bundled engine resource.
