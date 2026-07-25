@@ -221,11 +221,12 @@ areas, but responsibility does not.
   filter facets avoid self-contention; the library serves before updater-bundle
   housekeeping.
 - **Current evidence:** scan safety, recovery truth, and preview honesty are
-  integrated as `b7405c86d`, `119337ad1`, and `22f841466`. Preview integration
-  passed 120 cache-status/thumbnail/interactive-benchmark tests plus quick;
-  filter-options `a9e11f4ed` and first-use `fce783a7a` remain serialized next.
-  Boot moved from 3759 ms to 1415 ms and filter facets from 37.8 ms to 29.2 ms
-  in branch-local evidence that still requires integration reruns.
+  integrated as `b7405c86d`, `119337ad1`, and `22f841466`; filter options is
+  integrated as `91b1d66bc`. Preview integration passed 120 focused tests plus
+  quick. Filter integration passed 16 focused tests plus quick and moved the
+  controlled 2,000-image uncached median from 61.9 ms to 26.9 ms. First-use
+  `fce783a7a` remains the final serialized item. Boot moved from 3759 ms to
+  1415 ms in branch-local evidence that still requires an integration rerun.
 - **Prerequisite:** coordinator-approved `main` reconciliation; manual review of
   `backups.py`, thumbnail paths, and `app.py` overlaps; separate cohort gates.
 - **Boundary:** integrate only named commits; no scanner/cache/runtime redesign.
@@ -971,7 +972,8 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | Date / source | Metric | Current | Target | Status |
 |---|---|---:|---|---|
 | 2026-07-25 first-use lane | First library HTTP response during boot | 3759 ms before; 1415 ms after | Preserve or improve after integration; exact release budget to ratify | `done awaiting integration` |
-| 2026-07-25 filter-options lane | Filter facet read | 37.8 ms before; 29.2 ms after | No correctness loss or integration regression | `done awaiting integration` |
+| 2026-07-25 filter-options lane | Filter facet read | 37.8 ms before; 29.2 ms after | No correctness loss or integration regression | `active` |
+| 2026-07-25 filter integration, controlled 2,000-image catalog | Uncached `/api/filter-options` median of three route calls | 61.9 ms on parent `4170f7bf1`; 26.9 ms on staged `a9e11f4ed` composition (56.5% lower) | At or below the standing 125 ms synthetic budget with exact scoped facets | `active` |
 | 2026-07-25 real-catalog ranking clone | Dual/direct durable submit p95 | 30.87 ms; 6.4 s worst outlier | Action acknowledgment at or below 50 ms p95 **proposed**; below 100 ms p99 **proposed** | `parked` |
 | 2026-07-25 real-catalog ranking clone | 12-photo mosaic submit p95 | 73.64 ms | At or below 50 ms action acknowledgment **proposed** | `parked` |
 | 2026-07-25 real-catalog ranking clone | Next mosaic candidates p95 | 182.80 ms | Prepared candidate handoff within click covenant; exact backend split to ratify | `parked` |
@@ -1174,7 +1176,7 @@ not permission to merge it.
 | CORE-01 | `scan-safety` / `a5dacedd9` | Interrupted/offline scan catalog safety | Core cohort after main reconciliation |
 | CORE-01/CORE-07 | `recovery-truth` / `e518de33c` → merge `119337ad1` | Dual-prefix snapshot discovery, retention, destination guard, and restore-drill truth | Integrated without conflicts; focused recovery matrix 50 passed, 1 skipped; quick green |
 | CORE-01 | `preview-honesty` / `e6c98e937` → merge `22f841466` | Honest background preview state/ETA and preview-first disk reserve | Integrated after manual heartbeat/watchdog/bulk-selection overlap review; 120 focused tests and quick green; no live latency claim |
-| CORE-01 | `perf-filter-options` / `a9e11f4ed` | Consolidated exact facet reads | Rerun correctness and latency |
+| CORE-01 | `perf-filter-options` / `a9e11f4ed` → merge `91b1d66bc` | Consolidated exact facet reads from one materialized eligible-image set plus scoped People query | Integrated without conflicts; 16 focused tests and quick green; controlled 2,000-image median 61.9 → 26.9 ms; large-catalog live proof remains |
 | CORE-01 | `first-use-boot` / `fce783a7a` | Defer updater bundle prep after library readiness | Review `app.py`; preserve untracked benchmark receipts |
 | MOB-01 | `mobile-field-resilience` / `462997293` | Offline/reconnect/terminal mobile write behavior | Customer-trust cohort |
 | DESK-01 | `deliver-load-resilience` / `9e8802643` | Independent Deliver destination loading/retry | Manual `panel.js` review |
