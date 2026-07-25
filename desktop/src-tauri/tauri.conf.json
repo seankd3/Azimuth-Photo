@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Azimuth Photo",
-  "version": "0.1.0",
+  "version": "1.0.0-rc.1",
   "identifier": "app.azimuthphoto.desktop",
   "build": {
     "frontendDist": "../ui"
@@ -10,16 +10,6 @@
     "withGlobalTauri": false,
     "security": {
       "csp": null
-    }
-  },
-  "plugins": {
-    "updater": {
-      "active": true,
-      "endpoints": [
-        "https://github.com/Sean-Kenneth-Doherty/azimuth-photo/releases/latest/download/latest.json"
-      ],
-      "dialog": false,
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY"
     }
   },
   "bundle": {

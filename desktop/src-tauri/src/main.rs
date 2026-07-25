@@ -1,7 +1,7 @@
-// Azimuth Photo desktop shell — wraps the local satellite server.
-// in a native window: spawns it on launch, shows a splash until it's ready, tray for sync.
+// Azimuth Photo desktop shell — starts the bundled local engine and opens the library.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod engine;
 mod server;
 mod tray;
 
@@ -45,7 +45,7 @@ fn main() {
 
             tray::setup(app)?;
 
-            // Bring up (or attach to) the local satellite server off the main thread.
+            // Bring up (or attach to) the local engine off the main thread.
             let handle = app.handle().clone();
             std::thread::spawn(move || server::start(handle));
             Ok(())
