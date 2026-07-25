@@ -2602,6 +2602,74 @@ class LibraryTests(BackendTestCase):
         self.assertTrue(all(row["missing_at"] is None for row in rows))
         self.assertIn("scan found no files", scanner.scan_state["warning"].lower())
 
+    async def test_interrupted_scan_preserves_catalog_and_offers_retry(self):
+        source = await self._source("scan-interrupted")
+        filepath = os.path.join(source["path"], "preserve.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        def inaccessible_walk(*_args, **kwargs):
+            kwargs["onerror"](PermissionError("network detail must not reach the library"))
+            yield from ()
+
+        with unittest.mock.patch.object(scanner.os, "walk", inaccessible_walk):
+            await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        conn = await db.get_db()
+        try:
+            image = await (await conn.execute(
+                "SELECT missing_at FROM images WHERE filepath = ?", (filepath,)
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertIsNone(image["missing_at"])
+        self.assertEqual(
+            scanner.scan_state["error"],
+            "We couldn't finish checking this folder. Your library is unchanged.",
+        )
+        self.assertTrue(scanner.scan_state["recoverable"])
+        self.assertEqual(scanner.scan_state["action"], "Try again")
+        self.assertNotIn("network detail", scanner.scan_state["error"])
+
+    async def test_cancelled_scan_preserves_catalog_and_can_be_retried(self):
+        source = await self._source("scan-cancelled")
+        filepath = os.path.join(source["path"], "preserve.jpg")
+        with open(filepath, "wb") as handle:
+            handle.write(b"photo")
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        batch_started = asyncio.Event()
+        never = asyncio.Event()
+        row = ("preserve.jpg", filepath, ".jpg", 5, 1.0, None, None)
+
+        def slow_walk(*_args, **_kwargs):
+            yield from [row] * 100
+
+        async def wait_for_batch(_count):
+            batch_started.set()
+            await never.wait()
+
+        with unittest.mock.patch.object(scanner, "walk_images", slow_walk):
+            task = asyncio.create_task(
+                scanner.scan_folder(source["path"], source_id=source["id"], on_batch=wait_for_batch)
+            )
+            await batch_started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+
+        conn = await db.get_db()
+        try:
+            image = await (await conn.execute(
+                "SELECT missing_at FROM images WHERE filepath = ?", (filepath,)
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertIsNone(image["missing_at"])
+        self.assertTrue(scanner.scan_state["recoverable"])
+        self.assertEqual(scanner.scan_state["action"], "Try again")
+
     async def test_scan_preserves_catalog_when_source_goes_offline_before_finalize(self):
         source = await self._source("scan-offline")
         filepath = os.path.join(source["path"], "preserve.jpg")
@@ -2626,7 +2694,10 @@ class LibraryTests(BackendTestCase):
 
         self.assertIsNone(image["missing_at"])
         self.assertEqual(refreshed_source["online"], 0)
-        self.assertIn("existing catalog entries were preserved", scanner.scan_state["error"])
+        self.assertEqual(
+            scanner.scan_state["error"],
+            "We couldn't finish checking this folder. Your library is unchanged.",
+        )
         error_log.assert_called_once()
 
     async def test_scan_quarantines_zero_byte_file_and_logs_only_first_detection(self):

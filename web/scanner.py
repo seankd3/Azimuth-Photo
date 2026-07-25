@@ -28,6 +28,8 @@ scan_state = {
     "done": False,
     "error": "",
     "warning": "",
+    "recoverable": False,
+    "action": "",
 }
 
 
@@ -73,9 +75,20 @@ def is_junk_file(name: str) -> bool:
     return name.startswith("._")  # AppleDouble sidecars
 
 
+class ScanInterrupted(RuntimeError):
+    """The source could not be fully read, so catalog availability must not change."""
+
+
+def _interrupted_message() -> str:
+    return "We couldn't finish checking this folder. Your library is unchanged."
+
+
 def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = None):
     """Yield image rows with cheap filesystem metadata."""
-    for root, _dirs, files in os.walk(folder):
+    def onerror(_error: OSError) -> None:
+        raise ScanInterrupted from _error
+
+    for root, _dirs, files in os.walk(folder, onerror=onerror):
         included_dirs = []
         for directory in _dirs:
             if is_junk_directory(directory):
@@ -91,6 +104,8 @@ def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = Non
             if file_ext in SUPPORTED_EXTENSIONS:
                 filepath = os.path.join(root, f)
                 state, file_stat = inspect_source_file(filepath, folder)
+                if state == "unavailable":
+                    raise ScanInterrupted
                 if state not in {"available", "empty"} or file_stat is None:
                     continue
                 file_size = int(file_stat.st_size)
@@ -145,6 +160,8 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     scan_state["done"] = False
     scan_state["error"] = ""
     scan_state["warning"] = ""
+    scan_state["recoverable"] = False
+    scan_state["action"] = ""
 
     batch = []
     batch_size = 100
@@ -189,8 +206,27 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
             folder,
             exc,
         )
+    except asyncio.CancelledError:
+        scan_state["error"] = _interrupted_message()
+        scan_state["recoverable"] = True
+        scan_state["action"] = "Try again"
+        log.info("worker=catalog_scan source_id=%s folder=%r interrupted", source_id, folder)
+        raise
     except Exception as exc:
-        scan_state["error"] = str(exc)
+        if source_id is not None and not os.path.isdir(folder):
+            try:
+                await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(source_id)
+            except Exception:
+                pass
+        scan_state["error"] = _interrupted_message()
+        scan_state["recoverable"] = True
+        scan_state["action"] = "Try again"
+        log.warning(
+            "worker=catalog_scan source_id=%s folder=%r interrupted: %s",
+            source_id,
+            folder,
+            exc,
+        )
     finally:
         scan_state["scanning"] = False
         scan_state["done"] = True
