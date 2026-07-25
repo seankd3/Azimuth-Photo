@@ -117,7 +117,7 @@ class WizardHubCardContracts(unittest.TestCase):
             template = handle.read()
 
         self.assertIn('id="su-connect-card" hidden', template)
-        self.assertIn("status?.sync?.mode !== 'satellite'", template)
+        self.assertIn("status?.sync?.mode !== 'satellite' || !status?.sync?.has_hub", template)
         self.assertIn("json('/api/settings')", template)
         self.assertIn("json('/api/discover')", template)
         self.assertIn("Connected — your library will sync in the background.", template)
@@ -129,7 +129,18 @@ class WizardHubCardContracts(unittest.TestCase):
 
         finish_handler = template[template.index("finishBtn.addEventListener('click'"):]
         self.assertNotIn("/api/rankings?limit=1", finish_handler)
-        self.assertIn("window.location.assign('/d');", finish_handler)
+        self.assertIn("await completeSetup();", finish_handler)
+        self.assertIn("window.location.assign('/d');", template)
+
+    def test_standalone_desktop_completes_without_network_owner_setup(self):
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "setup.html")
+        with open(template_path, encoding="utf-8") as handle:
+            template = handle.read()
+
+        open_handler = template[template.index("document.getElementById('su-open')"):]
+        self.assertIn("status?.sync?.mode === 'satellite' && !status?.sync?.has_hub", open_handler)
+        self.assertIn("await completeSetup();", open_handler)
+        self.assertLess(open_handler.index("await completeSetup();"), open_handler.index("show('secure');"))
 
     def test_folder_path_focus_replaces_the_prefill_and_import_trims_it(self):
         template_path = os.path.join(os.path.dirname(__file__), "templates", "setup.html")

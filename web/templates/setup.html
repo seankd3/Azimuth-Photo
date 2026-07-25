@@ -142,14 +142,14 @@
             <div class="su-actions">
                 <span class="su-kbd"><kbd>Enter</kbd> to continue</span>
                 <span class="spacer"></span>
-                <button class="su-btn primary" data-next>Choose your photos folder</button>
+                <button class="su-btn primary" data-next>Choose where your photos are</button>
             </div>
         </section>
 
         <section class="su-step" data-step="folder">
             <h2 class="su-h">Where are your photos?</h2>
-            <p class="su-sub">Pick the folder that holds them. Nothing is moved or changed — Azimuth Photo
-                reads your files where they live.</p>
+            <p class="su-sub">Pick a folder on this PC, an external drive, or your NAS. Nothing is moved
+                or changed — Azimuth Photo reads your files where they live.</p>
             <div class="su-roots" id="su-roots"></div>
             <div class="su-path">
                 <input id="su-path-input" spellcheck="false" autocomplete="off" placeholder="Type or browse to a folder…">
@@ -161,12 +161,12 @@
                 <button class="su-back" data-back>Back</button>
                 <span class="spacer"></span>
                 <button class="su-btn" id="su-native" hidden>Browse…</button>
-                <button class="su-btn primary" id="su-start" disabled>Start importing</button>
+                <button class="su-btn primary" id="su-start" disabled>Add this folder</button>
             </div>
         </section>
 
         <section class="su-step" data-step="import">
-            <h2 class="su-h">Building your library</h2>
+            <h2 class="su-h">Scanning your photos</h2>
             <p class="su-sub" id="su-import-folder"></p>
             <div class="su-count"><span id="su-found">0</span><small>photos found</small></div>
             <div class="su-bar" id="su-bar"><i></i></div>
@@ -178,18 +178,18 @@
                     <a href="https://github.com/Sean-Kenneth-Doherty/azimuth-photo/blob/main/docs/INSTALL.md" target="_blank" rel="noopener">install guide</a>.</p>
             </div>
             <div class="su-extras su-connect" id="su-connect-card" hidden>
-                <b>Have an Azimuth Photo server?</b>
-                <p>Connect this library to a server on your network, or keep using it here.</p>
+                <b>Use another Azimuth Photo library?</b>
+                <p>Connect to an existing library on your network, or keep using this one.</p>
                 <div class="su-connect-list" id="su-connect-hubs"></div>
                 <div class="su-connect-fields" id="su-connect-fields" hidden>
-                    <input id="su-connect-url" type="url" spellcheck="false" autocomplete="url" placeholder="Server address" hidden>
+                    <input id="su-connect-url" type="url" spellcheck="false" autocomplete="url" placeholder="Library address" hidden>
                     <input id="su-connect-code" type="text" spellcheck="false" autocomplete="one-time-code" maxlength="8" placeholder="8-character pair code" aria-label="Pair code">
                     <div class="su-connect-actions">
                         <button class="su-btn primary" id="su-connect-submit" type="button">Connect</button>
                         <button class="su-back" id="su-connect-cancel" type="button">Cancel</button>
                     </div>
                 </div>
-                <button class="su-connect-link" id="su-connect-manual" type="button">Enter server address manually</button>
+                <button class="su-connect-link" id="su-connect-manual" type="button">Enter library address manually</button>
                 <div class="su-error" id="su-connect-error"></div>
                 <div class="su-connect-success" id="su-connect-success" hidden></div>
             </div>
@@ -430,17 +430,17 @@
         discoveryStarted = true;
         let status;
         try { status = await json('/api/settings'); } catch { return; }
-        if (status?.sync?.mode !== 'satellite') return;
+        if (status?.sync?.mode !== 'satellite' || !status?.sync?.has_hub) return;
         connectCard.hidden = false;
-        connectHubs.textContent = 'Looking for servers on your network…';
+        connectHubs.textContent = 'Looking for Azimuth Photo libraries on your network…';
         try {
             const discovery = await json('/api/discover');
             const hubs = discovery.hubs || [];
             connectHubs.textContent = '';
             if (hubs.length) hubs.forEach(addDiscoveredHub);
-            else connectHubs.textContent = 'No servers found on your network.';
+            else connectHubs.textContent = 'No other libraries found on your network.';
         } catch {
-            connectHubs.textContent = 'Couldn’t look for servers right now.';
+            connectHubs.textContent = 'Couldn’t look for other libraries right now.';
         }
     }
 
@@ -455,7 +455,7 @@
         const hubUrl = (connectUrl.hidden ? selectedHubUrl : connectUrl.value.trim()).replace(/\/$/, '');
         const code = connectCode.value.trim().toUpperCase();
         if (!hubUrl || !code) {
-            connectError.textContent = 'Enter a server address and pair code.';
+            connectError.textContent = 'Enter a library address and pair code.';
             return;
         }
         const platform = navigator.userAgentData?.platform || navigator.platform || 'desktop';
@@ -489,8 +489,18 @@
     const keyCopy = document.getElementById('su-key-copy');
     const finishBtn = document.getElementById('su-finish');
 
+    async function completeSetup() {
+        try { await fetch('/api/setup/complete', { method: 'POST' }); } catch {}
+        window.location.assign('/d');
+    }
+
     document.getElementById('su-open').addEventListener('click', async () => {
         clearTimeout(pollTimer);
+        const status = await json('/api/settings').catch(() => null);
+        if (status?.sync?.mode === 'satellite' && !status?.sync?.has_hub) {
+            await completeSetup();
+            return;
+        }
         show('secure');
         try {
             const result = await json('/api/auth/key', {
@@ -501,7 +511,7 @@
             finishBtn.disabled = false;
         } catch (err) {
             keyError.textContent = 'Could not create an owner key: ' + String(err.message || err)
-                + '. You can set one later from the server machine.';
+                + '. You can set one later from the library computer.';
         }
     });
 
@@ -516,8 +526,7 @@
     });
 
     finishBtn.addEventListener('click', async () => {
-        try { await fetch('/api/setup/complete', { method: 'POST' }); } catch {}
-        window.location.assign('/d');
+        await completeSetup();
     });
 })();
 </script>

@@ -20,6 +20,7 @@ from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
 from data.repositories import imports as import_repository
+from features.catalog.folder_roots import quick_browse_roots
 from features.catalog import metadata as catalog_metadata
 from features.catalog import reveal as catalog_reveal
 
@@ -237,27 +238,6 @@ async def scan_folder():
     return {"folder": folder or ""}
 
 
-def quick_browse_roots() -> list[dict]:
-    home = os.path.expanduser("~")
-    candidates = [
-        ("Home", home),
-        ("Pictures", os.path.join(home, "Pictures")),
-        ("Media", "/media"),
-        ("Mounts", "/mnt"),
-        ("Run Media", os.path.join("/run/media", os.getenv("USER", ""))),
-        ("Volumes", "/Volumes"),
-    ]
-    roots = []
-    seen = set()
-    for label, path in candidates:
-        normalized = catalog_repository.normalize_source_path(path)
-        if normalized in seen or not os.path.isdir(normalized):
-            continue
-        seen.add(normalized)
-        roots.append({"label": label, "path": normalized})
-    return roots
-
-
 def folder_picker_start(path: str = "") -> str:
     candidate = catalog_repository.normalize_source_path(path or os.path.expanduser("~"))
     if os.path.isdir(candidate):
@@ -327,7 +307,7 @@ def folder_picker_commands(initial: str) -> list[tuple[str, list[str]]]:
                 "        root.attributes('-topmost', True)\n"
                 "    except Exception:\n"
                 "        pass\n"
-                "    path = filedialog.askdirectory(title='Select Catalog Folder', initialdir=sys.argv[1], mustexist=True)\n"
+                "    path = filedialog.askdirectory(title='Choose your photos folder', initialdir=sys.argv[1], mustexist=True)\n"
                 "    root.destroy()\n"
                 "    if path:\n"
                 "        print(path)\n"
