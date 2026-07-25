@@ -338,7 +338,7 @@ areas, but responsibility does not.
 
 | Verified boundary | Exact evidence | Status or unknown | Required acceptance proof |
 |---|---|---|---|
-| Snapshot discovery and retention | `119337ad1` integrates `e518de33c`; dual-prefix discovery uses the existing validated regex for current `azimuth-*` and frozen `photoarchive-*` names. Focused matrix: 50 passed, 1 skipped; all six prior failures pass. | Verified on the integration head; complete-suite rerun still pending | Preserve the focused passes in the next complete non-Playwright gate; mixed old/new directory continues to select the correct newest snapshot, protect pre-migration snapshots, prune only eligible snapshots, and restore both exact names. |
+| Snapshot discovery and retention | `119337ad1` integrates `e518de33c`; dual-prefix discovery uses the existing validated regex for current `azimuth-*` and frozen `photoarchive-*` names. Focused matrix: 50 passed, 1 skipped; the post-Core complete gate also resolves all six prior failures. | Verified on the integration head in focused and complete-suite order | Preserve mixed old/new behavior: select the correct newest snapshot, protect pre-migration snapshots, prune only eligible snapshots, and restore both exact names. |
 | Exact-name restore | Scratch probe created an Azimuth snapshot and `restore_backup()` validated/staged it while leaving the live DB untouched. | Verified preparation; application remains absent | Route and UI select the listed current snapshot, stage it, then installed-client apply preserves the previous live DB, removes stale sidecars safely, restarts, checks schema/catalog counts, and can roll back. |
 | Restore-drill scratch refusal | A scratch directory containing only `azimuth.db` was accepted; current guard checks only the prior DB filename and marker. | Verified P0 guard defect | Both catalog filenames, both owner-marker generations, WAL/SHM/journal, and configured live roots hard-refuse before any scratch creation or cleanup; refused bytes remain unchanged. |
 | Catalog plus sidecars | Synthetic WAL rename failure moved the main DB to `azimuth.db`, left the old WAL behind, and still returned the new DB path. | Verified failure-path behavior; impact on real uncheckpointed WAL not exercised | Force failure at each main/WAL/SHM/journal step; either all names commit after checkpoint/integrity proof or every name rolls back; reopen and compare rows, `quick_check`, user version, and sidecar state. |
@@ -822,9 +822,11 @@ areas, but responsibility does not.
 - **Desired outcome:** completed work lands in dependency order with manual
   overlap review and exact receipts.
 - **Current evidence:** named lane outputs are ready; several touch files changed
-  on the opposite history. REL-01 and REL-02 are committed and their targeted,
-  focused, and quick gates pass, but the complete non-Playwright gate is blocked
-  by the classified failures in [the defect register](#7-bug-and-known-defect-register).
+  on the opposite history. REL-01/REL-02 and the five-item initial Core cohort
+  are integrated with focused and quick gates green. The post-Core complete
+  non-Playwright gate improved from 24 failures to 18 by closing exactly the six
+  recorded recovery failures; all 18 remaining identities were already
+  classified and no new failure appeared.
 - **Prerequisite:** REL-01 and REL-02 plus an accepted disposition and green
   rerun for every active full-gate defect.
 - **Boundary:** Core trust/performance, customer trust, desktop proof, then
@@ -849,8 +851,11 @@ areas, but responsibility does not.
   three manual conflict resolutions: 12 reproduce on exact `main`, one on exact
   `develop`, and the remaining 11 pass in an isolated failing-node rerun. After
   recovery merge `119337ad1`, a targeted rerun of those original 24 nodes
-  improved from 13 failed/11 passed to 7 failed/17 passed; a new complete-suite
-  run remains required before changing the full-gate baseline.
+  improved from 13 failed/11 passed to 7 failed/17 passed. The complete
+  non-Playwright rerun on post-Core head `d90d89f4a` finished with 18 failed,
+  1,519 passed, 3 skipped, 2 deselected, and 399 passing subtests in 509.80
+  seconds. Exact set comparison found the six recovery failures resolved, all
+  other 18 unchanged, and zero new failure identities.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -994,6 +999,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 release audit | Application release version | Current integration head: Tauri/Cargo `0.1.0`; proved Windows branch artifact: `1.0.0-rc.1` | One authoritative version across tag, manifest, installer, engine, API, About, and updater | `blocked` |
 | 2026-07-25 release audit | Clean-source release evidence | Fresh Windows install passed; no accepted clean-clone build, upgrade/rollback/restore matrix, tag, or remote green run | Reproducible clean clone through signed clean-download smoke and recovery matrix | `blocked` |
 | 2026-07-25 REL-01/REL-02 gate | Complete non-Playwright pytest | 1,533 selected: 24 failed, 1,507 passed, 3 skipped, 2 deselected, 399 subtests passed in 560.64 s | Zero failures before any cohort merge | `blocked` |
+| 2026-07-25 post-Core gate on `d90d89f4a` | Complete non-Playwright pytest | 18 failed, 1,519 passed, 3 skipped, 2 deselected, 399 subtests passed in 509.80 s; exactly six recovery failures resolved, zero new identities | Zero failures before customer-facing cohorts; preserve all six recovery closures | `blocked` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1069,7 +1075,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RANK-05 | `parked` / P1 | Ranking | Pair rows can be treated as independent evidence despite shared human action | One-action migration/projection and grouped-training proof |
 | BUG-RANK-06 | `parked` / P1 | Ranking | 100,469 active photos lacked embeddings and ranking signal in audit | Coverage/provenance report and full-catalog projection evaluation |
 | BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate selects 1,425 tests while pytest selects 1,539; 114 selected tests are omitted | Before/after collection receipt and green complete unit gate |
-| BUG-TEST-02 | `active` / P0 | Release | Eleven tests fail only in the complete-suite order but pass together in an isolated failing-node rerun: caption owner release, first-run preview/ranking visibility, decode-budget cancellation, manual People work, and seven thumbnail bulk/priority/manual-work contracts | Reproduce with order/bisection receipt, eliminate leaked global/env/resource state, then pass isolated nodes and two complete non-Playwright runs |
+| BUG-TEST-02 | `active` / P0 | Release | The post-Core complete gate confirms the same eleven tests fail only in suite order but pass together in isolation: caption owner release, first-run preview/ranking visibility, decode-budget cancellation, manual People work, and seven thumbnail bulk/priority/manual-work contracts | Reproduce with order/bisection receipt, eliminate leaked global/env/resource state without weakening product assertions, then pass isolated nodes and two complete non-Playwright runs |
 | BUG-ARTIFACT-01 | `parked` / P1 | Release | Source tracks 74 pytest-temp paths, 13 database-like files, 15 benchmark-run paths, and three receipt logs; ignores do not prospectively contain all classes | Preserve/disposition inventory, no deletion in containment lane, and clean proof that new generated files remain untracked |
 | BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
 | BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
@@ -1089,7 +1095,6 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-WIN-ID-01 | `unverified` / P1 | Windows | OS app discovery exposed both `app.azimuthphoto.desktop` and older `com.seankennethdoherty.photoarchive` identities for the same running window; this may be a stale install or identifier-migration collision | Clean-machine install with old app removed; enumerate registry/app identity before and after; prove one running identity, one uninstall entry, one data home, and upgrade continuity |
 | BUG-WIN-CODEC-01 | `unverified` / P1 | Windows | Frozen-engine build emitted unresolved optional `imagecodecs` DLL warnings for JPEG-XS, JetRaw, and HEIF; no supported-format decode failure was reproduced | Declare supported Windows formats, inspect frozen imports/DLLs, then decode representative JPEG-XS/JetRaw/HEIF or explicitly classify unsupported formats; clean packaging log for supported set |
 | BUG-MAP-PERF-01 | `ready after integration` / P1 | Desktop | Full Map payload serialization, not its query, dominates the reported large-library profile | Reproducible cold/warm profiler plus bounded response-byte cache with byte equality, deterministic invalidation, memory bound, and no filtering |
-| BUG-RECOVERY-01 | `active` / P0 | Core | Resolved in focused proof on `119337ad1`: current-prefix snapshots now participate in list, retention, destination-ownership discovery, and automatic restore drill; six prior failures pass | Next complete non-Playwright gate preserves all six passes, then move this resolved defect to the historical log |
 | BUG-RECOVERY-02 | `ready after integration` / P0 | Core | Restore-drill scratch guard accepts a directory containing an Azimuth-named live catalog | Dual-generation catalog/marker/sidecar refusal with byte-preservation failure injection |
 | BUG-RECOVERY-03 | `ready after integration` / P0 | Core | Catalog rename can commit the main DB, fail a WAL sidecar rename, and still select the new DB | Atomic or fully reversible main/WAL/SHM/journal migration with row/integrity comparison at every injected failure |
 | BUG-RECOVERY-04 | `ready after integration` / P0 | Core | An existing empty Azimuth data root wins over a populated prior root, hiding the populated catalog from normal resolution | Cross-platform split-root matrix with explicit conflict UI and no new catalog initialization while an unadopted catalog exists |
