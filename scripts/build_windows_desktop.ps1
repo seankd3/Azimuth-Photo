@@ -21,6 +21,18 @@ if ($TauriConfig.version -ne $Version -or $CargoVersion -ne $Version) {
     throw "Version mismatch: VERSION=$Version, Tauri=$($TauriConfig.version), Cargo=$CargoVersion"
 }
 
+# `cargo tauri` is supplied by the Tauri CLI rather than the Rust toolchain.
+# Bootstrap the pinned major line on a clean Windows builder so the documented
+# installer command works without a separate developer-only setup step.
+& cargo tauri --version *> $null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "Installing the Tauri build CLI..."
+    & cargo install tauri-cli --version 2.11.4 --locked
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Tauri build CLI could not be installed."
+    }
+}
+
 Push-Location $RepoRoot
 try {
     & $Python "scripts/build_server.py"
