@@ -1,4 +1,5 @@
 import asyncio
+import shutil
 import os
 import shutil
 import threading
@@ -179,6 +180,24 @@ def get_cached_full_image_path(
     source_signature = build_source_signature(filepath, full_tier, image_id)
     row = get_disk_entry(full_tier, image_id, source_signature)
     return row["path"] if row is not None else None
+
+
+MINIMUM_FREE_BYTES_FOR_BACKGROUND_ORIGINALS = 2 * 1024 * 1024 * 1024
+
+
+def background_original_cache_allowed(
+    cache_root: str,
+    *,
+    disk_usage=shutil.disk_usage,
+    minimum_free_bytes: int = MINIMUM_FREE_BYTES_FOR_BACKGROUND_ORIGINALS,
+) -> bool:
+    """Keep a healthy free-space reserve for browsing previews and the OS."""
+
+    try:
+        return int(disk_usage(cache_root).free) >= int(minimum_free_bytes)
+    except OSError:
+        # An unavailable cache volume is never a reason to copy full originals.
+        return False
 
 
 async def schedule_full_image_cache(

@@ -2947,5 +2947,41 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
             conn.execute("SELECT 1")
 
 
+class PreviewWorkTruthTests(unittest.TestCase):
+    def test_work_state_distinguishes_active_blocked_idle_and_stalled(self):
+        active = {"enabled": True, "manual_pause": False, "state": "running", "last_generated_at": 990.0}
+        self.assertEqual(
+            thumbnail_status.work_state(active, preview_remaining=4, originals_remaining=0, recent_rate=2.0, now=1_000.0),
+            "active",
+        )
+        self.assertEqual(
+            thumbnail_status.work_state({**active, "state": "waiting"}, preview_remaining=4, originals_remaining=0, recent_rate=0.0, now=1_000.0),
+            "blocked",
+        )
+        self.assertEqual(
+            thumbnail_status.work_state({**active, "manual_pause": True}, preview_remaining=4, originals_remaining=0, recent_rate=0.0, now=1_000.0),
+            "idle",
+        )
+        self.assertEqual(
+            thumbnail_status.work_state(active, preview_remaining=4, originals_remaining=0, recent_rate=0.0, now=1_000.0 + thumbnail_status.STALL_AFTER_SECONDS),
+            "stalled",
+        )
+
+    def test_full_original_cache_keeps_free_space_for_preview_browsing(self):
+        self.assertFalse(
+            thumbnail_full_cache.background_original_cache_allowed(
+                "/cache",
+                disk_usage=lambda _path: mock.Mock(free=2 * 1024 * 1024 * 1024 - 1),
+            )
+        )
+        self.assertTrue(
+            thumbnail_full_cache.background_original_cache_allowed(
+                "/cache",
+                disk_usage=lambda _path: mock.Mock(free=2 * 1024 * 1024 * 1024),
+            )
+        )
+
+
+
 if __name__ == "__main__":
     unittest.main()
