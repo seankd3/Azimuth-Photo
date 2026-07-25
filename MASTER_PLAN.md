@@ -214,16 +214,18 @@ areas, but responsibility does not.
 
 #### CORE-01 — Integrate the verified safety and first-response cohort
 
-- **Status / priority / owner:** `done awaiting integration` · `P0` · Core
+- **Status / priority / owner:** `active` · `P0` · Core
   Library & Safety.
 - **Desired outcome:** scans never erase catalog truth on interruption; recovery
   reports current snapshots honestly; preview work reports truthful progress;
   filter facets avoid self-contention; the library serves before updater-bundle
   housekeeping.
-- **Current evidence:** committed outputs `a5dacedd9`, `e518de33c`,
-  `e6c98e937`, `a9e11f4ed`, and `fce783a7a`; branch-local focused proof was
-  reported green. Boot moved from 3759 ms to 1415 ms and filter facets from
-  37.8 ms to 29.2 ms in lane evidence.
+- **Current evidence:** scan safety, recovery truth, and preview honesty are
+  integrated as `b7405c86d`, `119337ad1`, and `22f841466`. Preview integration
+  passed 120 cache-status/thumbnail/interactive-benchmark tests plus quick;
+  filter-options `a9e11f4ed` and first-use `fce783a7a` remain serialized next.
+  Boot moved from 3759 ms to 1415 ms and filter facets from 37.8 ms to 29.2 ms
+  in branch-local evidence that still requires integration reruns.
 - **Prerequisite:** coordinator-approved `main` reconciliation; manual review of
   `backups.py`, thumbnail paths, and `app.py` overlaps; separate cohort gates.
 - **Boundary:** integrate only named commits; no scanner/cache/runtime redesign.
@@ -983,6 +985,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 Omarchy Windows-branch check | `test_windows_desktop_install` | 7/7 passed; range `git diff --check` passed | Same proof on controlled integration SHA | `done awaiting integration` |
 | 2026-07-25 Map/People profile | Complete Map response generation | Query layer fast; full-payload serialization dominates; absolute latency/bytes not accepted | Bounded byte-cache with exact-payload and invalidation proof; no feature filtering | `ready after integration` |
 | 2026-07-25 recovery integration | Recovery/system-backup/migration/rebrand/runtime/restore-drill matrix | 50 passed, 1 skipped on `119337ad1`; all six prior naming-generation failures pass | Preserve zero discovery/retention/drill failures in the complete gate; retain all safety passes | `active` |
+| 2026-07-25 preview integration | Preview correctness and performance-honesty contracts | 120 passed on `22f841466`; quick green; ETA uses current image-completion rate; full-original background caching preserves 2 GiB free space; benchmark history is opt-in | Preserve focused proof in full-suite order; collect a read-only live latency comparison before claiming a speed delta | `active` |
 | UI architecture covenant | Cull/Refine perceived response | Existing paths can poll or exceed 50 ms | Below 50 ms perceived; no spinner **covenant** | `active` |
 | 2026-07-25 test-discovery audit | Default selected automated coverage | 1,425 unittest; pytest selects 1,539/1,541 after two bench deselections; 114-test gap; non-Playwright selects 1,533/1,535 | Complete intended pytest unit selection | `parked` |
 | 2026-07-25 release audit | Application release version | Current integration head: Tauri/Cargo `0.1.0`; proved Windows branch artifact: `1.0.0-rc.1` | One authoritative version across tag, manifest, installer, engine, API, About, and updater | `blocked` |
@@ -1170,7 +1173,7 @@ not permission to merge it.
 |---|---|---|---|
 | CORE-01 | `scan-safety` / `a5dacedd9` | Interrupted/offline scan catalog safety | Core cohort after main reconciliation |
 | CORE-01/CORE-07 | `recovery-truth` / `e518de33c` → merge `119337ad1` | Dual-prefix snapshot discovery, retention, destination guard, and restore-drill truth | Integrated without conflicts; focused recovery matrix 50 passed, 1 skipped; quick green |
-| CORE-01 | `preview-honesty` / `e6c98e937` | Honest background preview state/ETA | Thumbnail overlap review and perf gate |
+| CORE-01 | `preview-honesty` / `e6c98e937` → merge `22f841466` | Honest background preview state/ETA and preview-first disk reserve | Integrated after manual heartbeat/watchdog/bulk-selection overlap review; 120 focused tests and quick green; no live latency claim |
 | CORE-01 | `perf-filter-options` / `a9e11f4ed` | Consolidated exact facet reads | Rerun correctness and latency |
 | CORE-01 | `first-use-boot` / `fce783a7a` | Defer updater bundle prep after library readiness | Review `app.py`; preserve untracked benchmark receipts |
 | MOB-01 | `mobile-field-resilience` / `462997293` | Offline/reconnect/terminal mobile write behavior | Customer-trust cohort |
