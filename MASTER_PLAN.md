@@ -153,8 +153,11 @@ This snapshot distinguishes locally reverified facts from thread/audit evidence.
 - Completed branch output exists for safety, performance, desktop trust, mobile
   resilience, and Windows onboarding. See the
   [lane-output map](#9-existing-lane-output-map).
-- `perf-people-map` had no branch delta when audited. `client-server-hardening`
-  contains older mixed history and requires provenance review before any reuse.
+- `origin/perf-people-map` now has receipt-only commit `d1f7e4cd0`; its local
+  worktree branch remains at `develop`, and the remote is 679/3 divergent from
+  current `develop`. Preserve the receipt but never merge the branch wholesale.
+  `client-server-hardening` contains older mixed history and requires provenance
+  review before any reuse.
 - No branch, worktree, bundle, benchmark, or dirty output may be removed until
   an inventory maps it to an accepted commit, archive, or explicit discard
   decision.
@@ -165,10 +168,17 @@ This snapshot distinguishes locally reverified facts from thread/audit evidence.
   found no evidence of a successful current public release or current green
   GitHub Actions run. This is an evidence gap, not proof that remote CI is
   absent.
-- The Windows branch has committed engine-bundle and onboarding work.
-  A single Windows/XPS packaging proof was active at the last check. The frozen
-  engine built, but NSIS install, first launch, local-folder, mapped-drive, and
-  UNC/NAS proof are not complete until that task returns terminal evidence.
+- **Verified 2026-07-25:** `origin/windows-install` is proof-complete at
+  `f8da9949e`. Unsigned current-user installer
+  `Azimuth Photo_1.0.0-rc.1_x64-setup.exe` is 107,918,017 bytes with SHA-256
+  `ABEBF263A502A5A1AC15B1015ED19A67E401E66F44F3A8BEBE83EADA8A500299`.
+  Silent install exited 0; a fresh standalone `AZIMUTH_HOME` reported release
+  `1.0.0-rc.1`, schema 31, native picker availability, and no hub. The actual
+  welcome UI, local-folder browse, mapped `Z:` to UNC/NAS browse in both UI and
+  API, Alt+F4 close, and relaunch against the same home all passed.
+- This proves install-to-library usability, not release readiness. The artifact
+  is unsigned; signing, updater, public publishing, clean-machine identity
+  cleanup, codec coverage, upgrade, and rollback remain separate gates.
 - No public release is allowed before privacy/history scrub, complete test
   discovery, clean-clone builds, install/upgrade/restore matrices, version
   alignment, signing/update decisions, and real artifact smoke.
@@ -401,6 +411,26 @@ areas, but responsibility does not.
 - **Acceptance evidence:** identical browser behavior, focused tests, smaller
   owner facade, no new circular imports or timing regression.
 
+#### DESK-08 — Cache the complete Map response bytes safely
+
+- **Status / priority / owner:** `ready after integration` · `P1` · Desktop
+  Workflow.
+- **Desired outcome:** a complete Map opens quickly for large libraries without
+  filtering away photos or repeatedly paying full-payload serialization cost.
+- **Current evidence:** the 2026-07-25 Map/People performance profile found the
+  query layer fast while serializing the complete Map response dominated. No
+  accepted absolute time or response-byte count accompanied that profile, so
+  this is an attribution, not a numeric baseline.
+- **Prerequisite:** accepted integration head, reproducible large Map fixture,
+  payload byte/shape measurement, and owner-defined invalidation events.
+- **Boundary:** bounded response-byte caching only; do not cap, filter, sample,
+  paginate, or change Map semantics to make the metric look faster. People
+  pagination remains the separate BUG-PEOPLE-01 decision.
+- **Acceptance evidence:** cached and uncached payloads are byte-equivalent;
+  create/edit/delete/location/privacy changes invalidate deterministically;
+  concurrent requests do not stampede; memory and response-size budgets are
+  recorded; cold/warm p50/p95/p99 improve without omitting a photo.
+
 ### Mobile and Companion
 
 #### MOB-01 — Integrate field resilience
@@ -601,19 +631,25 @@ areas, but responsibility does not.
 
 #### WIN-01 — Finish real Windows installer proof
 
-- **Status / priority / owner:** `active` · `P0` · Windows Distribution &
+- **Status / priority / owner:** `done awaiting integration` · `P0` · Windows
+  Distribution & Identity.
   Identity.
 - **Desired outcome:** a normal Windows user installs Azimuth Photo and opens a
   working first library from local, mapped-drive, and UNC/NAS folders.
-- **Current evidence:** engine bundle and onboarding commits exist; frozen engine
-  built; repaired Visual Studio toolchain launched a single background package
-  build. Terminal NSIS/install evidence remains pending.
-- **Prerequisite:** preserve and monitor the existing XPS build; do not duplicate.
-- **Boundary:** proof or narrow packaging defect only; no main/develop merge,
-  signing, updater, or identity redesign.
-- **Acceptance evidence:** installer artifact checksum, clean install, first
-  launch, local folder, mapped drive, UNC path, restart persistence, uninstall/
-  reinstall behavior, exact logs.
+- **Current evidence:** proof-complete `origin/windows-install` at `f8da9949e`;
+  the 107,918,017-byte installer and SHA-256 are recorded above. Unsigned
+  current-user install, fresh standalone home, release/schema, native picker,
+  actual welcome UI, local browse, mapped `Z:`/UNC NAS UI and API browse,
+  Alt+F4, and relaunch passed. Omarchy reran
+  `test_windows_desktop_install`: 7/7 passed; the branch range passed
+  `git diff --check`.
+- **Prerequisite:** controlled Windows integration cohort after the earlier
+  cohorts; preserve the artifact/proof receipt.
+- **Boundary:** integrate only the four named commits; this proof does not
+  authorize signing, updater, publishing, identifier migration, or format claims.
+- **Acceptance evidence:** achieved for unsigned install-to-library. Re-run the
+  same matrix on the integrated SHA; add uninstall/reinstall, signed download,
+  update, upgrade, and rollback only in their owning release gates.
 
 #### WIN-02 — Integrate bundled engine and folder onboarding
 
@@ -621,9 +657,10 @@ areas, but responsibility does not.
   Distribution & Identity.
 - **Desired outcome:** Tauri supervises a self-contained local Azimuth engine and
   onboarding hides hub/server mechanics.
-- **Current evidence:** `0ee6004db` and `ca651c201`; Linux-side Cargo and 43
-  focused Python tests reported green.
-- **Prerequisite:** WIN-01 terminal proof and final integration cohort.
+- **Current evidence:** `0ee6004db`, `ca651c201`, `8fd62ab98`, and `f8da9949e`;
+  real Windows proof above; Linux-side Cargo and focused Python proof reported
+  green.
+- **Prerequisite:** final controlled integration cohort.
 - **Boundary:** named commits only; legacy identifiers remain compatible during
   the migration window, produce no new non-Azimuth output, and remote sync
   remains unchanged.
@@ -650,8 +687,9 @@ areas, but responsibility does not.
   Identity.
 - **Desired outcome:** installer, engine, API, About, update manifest, tag, and
   changelog report one version; signed updates install safely.
-- **Current evidence:** release workflow exists; current tag/release evidence and
-  signing path are not proven.
+- **Current evidence:** the unsigned RC installer now proves current-user
+  installation and relaunch, but no signing, updater, tag, public download, or
+  release-channel proof exists.
 - **Prerequisite:** signing/public-release decisions, green CI, WIN-01/WIN-02,
   clean upgrade drill.
 - **Boundary:** no public artifact before release gates; secrets never enter git.
@@ -685,7 +723,10 @@ areas, but responsibility does not.
   identifiers reach their platform-appropriate Azimuth names without stranding
   installs or data.
 - **Current evidence:** Phase 1 compatibility code is on `main`; legacy wrappers
-  and names remain intentionally. Repo/service/XPS phases are incomplete.
+  and names remain intentionally. The installed app displays Azimuth Photo, but
+  its OS-level executable is still `photoarchive-desktop.exe`. This is verified
+  owned-name migration inventory, not authority for an immediate binary rename.
+  Repo/service/XPS phases remain incomplete.
 - **Prerequisite:** complete identifier inventory, runtime extraction, no active
   feature lanes, backup/restore drill, collision-proof path map, accepted
   integration, impact estimate, and explicit user selection of one path below.
@@ -877,6 +918,9 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 ranking audit | Cold Taste response | 18873.6 ms | Background/precomputed only; numeric build budget not yet ratified | `parked` |
 | 2026-07-25 ranking audit | Prepared-device network dependency | Interactive path still has remote/server-oriented seams | Zero network dependency for prepared browse/ranking **proposed** and product-required | `parked` |
 | 2026-07-25 catalog audit | Active photos with current embeddings | 44,715 of about 146,535 | Coverage plan with truthful per-device readiness; percentage target not yet approved | `parked` |
+| 2026-07-25 Windows install proof | Unsigned current-user installer and install-to-library journey | 107,918,017 bytes; SHA-256 `ABEBF263…A500299`; install exit 0; local + mapped `Z:`/UNC browse; close/relaunch passed | Preserve on integrated SHA; signing/updater/public release remain separate gates | `done awaiting integration` |
+| 2026-07-25 Omarchy Windows-branch check | `test_windows_desktop_install` | 7/7 passed; range `git diff --check` passed | Same proof on controlled integration SHA | `done awaiting integration` |
+| 2026-07-25 Map/People profile | Complete Map response generation | Query layer fast; full-payload serialization dominates; absolute latency/bytes not accepted | Bounded byte-cache with exact-payload and invalidation proof; no feature filtering | `ready after integration` |
 | UI architecture covenant | Cull/Refine perceived response | Existing paths can poll or exceed 50 ms | Below 50 ms perceived; no spinner **covenant** | `active` |
 | 2026-07-25 test-discovery audit | Default selected automated coverage | 1,423 unittest vs 1,539 pytest total / 1,537 after bench deselection | Complete intended pytest unit selection | `parked` |
 
@@ -959,8 +1003,10 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-ROUTE-02 | `unverified` / P2 | Desktop | `/api/quality/scan` exists without a customer entry point for old stacks | Product decision and end-to-end scoring/recovery proof if built |
 | BUG-DOC-01 | `ready after integration` / P1 | Desktop | UI architecture understates/outdates shipped Develop scope | Owner-approved doctrine and code-map correction |
 | BUG-DOC-02 | `unverified` / P1 | Release | Code map omits current families/modules and lists `importer.js` despite no known inbound import | Live inventory; import journey before any retirement |
-| BUG-WIN-01 | `active` / P0 | Windows | Real NSIS install/first-launch/local/mapped/UNC proof is incomplete | Terminal artifact/install evidence from the single XPS build |
-| BUG-ID-01 | `blocked` / P0 | Windows | Customer-visible pre-Azimuth branding may remain across shipped surfaces, while internal/persisted identifiers have not completed the approved Azimuth migration | Visible-brand audit reaches zero customer-facing occurrences; every internal finding is classified and then closed by the selected WIN-06 path |
+| BUG-ID-01 | `blocked` / P0 | Windows | Customer-visible pre-Azimuth branding may remain across shipped surfaces, while internal/persisted identifiers have not completed the approved Azimuth migration; the installed binary is verified as `photoarchive-desktop.exe` | Visible-brand audit reaches zero customer-facing occurrences; every internal finding is classified and then closed by the selected WIN-06 path; integrated installer exposes the approved executable name |
+| BUG-WIN-ID-01 | `unverified` / P1 | Windows | OS app discovery exposed both `app.azimuthphoto.desktop` and older `com.seankennethdoherty.photoarchive` identities for the same running window; this may be a stale install or identifier-migration collision | Clean-machine install with old app removed; enumerate registry/app identity before and after; prove one running identity, one uninstall entry, one data home, and upgrade continuity |
+| BUG-WIN-CODEC-01 | `unverified` / P1 | Windows | Frozen-engine build emitted unresolved optional `imagecodecs` DLL warnings for JPEG-XS, JetRaw, and HEIF; no supported-format decode failure was reproduced | Declare supported Windows formats, inspect frozen imports/DLLs, then decode representative JPEG-XS/JetRaw/HEIF or explicitly classify unsupported formats; clean packaging log for supported set |
+| BUG-MAP-PERF-01 | `ready after integration` / P1 | Desktop | Full Map payload serialization, not its query, dominates the reported large-library profile | Reproducible cold/warm profiler plus bounded response-byte cache with byte equality, deterministic invalidation, memory bound, and no filtering |
 | BUG-PRIV-01 | `unverified` / P0 | Release | Personal paths/IP/default-server and website/catalog export risk classes may exist in tree/history | Full current/history scan and clean release artifact review |
 | BUG-RUNTIME-01 | `active` / P0 | Core | Runtime databases, previews, models, backups, and venv coexist with source | Verified relocation/restore and source checkout stays runtime-clean |
 | BUG-REL-01 | `blocked` / P0 | Release | No accepted proof of current public CI, tag, or release | Green CI evidence, immutable tag, clean-download artifact smoke |
@@ -1050,13 +1096,15 @@ not permission to merge it.
 | DESK-01 | `client-gallery-resilience` / `de5987071` | Honest gallery failure/retry and focus | Isolated gallery browser proof |
 | DESK-01 | `health-clarity` / `aa7dfffb0` | Calm System/Library Health states | Backend payload compatibility review |
 | DESK-01/DESK-02 | `desktop-journey-proof` / `569492c17` | Loupe Escape focus-return scenario | Merge after desktop product cohort |
-| WIN-02 | `windows-install` / `0ee6004db` | Bundled local engine and desktop shell | Real Windows proof |
-| WIN-02 | `windows-install` / `ca651c201` | Local/mapped/UNC onboarding | Real Windows proof |
+| WIN-01/WIN-02 | `windows-install` / `0ee6004db` | Bundled local engine and desktop shell | Proof complete; controlled Windows cohort |
+| WIN-01/WIN-02 | `windows-install` / `ca651c201` | Local/mapped/UNC onboarding | Proof complete; controlled Windows cohort |
+| WIN-01/WIN-02 | `windows-install` / `8fd62ab98` | Bootstrap pinned Tauri CLI on Windows | Proof complete; controlled Windows cohort |
+| WIN-01/WIN-02 | `windows-install` / `f8da9949e` | PowerShell-safe Tauri CLI probe; branch proof tip | Proof complete; rerun integrated install matrix |
 | REL-01 | `main` / `458675e77` | Production fixes, Phase 1 rebrand compatibility, host/runtime work | Audited merge into isolated integration |
 | REL-01 | `develop` / `52742f941` | Collections/search/intelligence integration line | First parent of sprint integration |
 | RANK research | No implementation branch | Real-catalog latency, action/intelligence boundary, local-first contract | Preserve report; one future owner |
 | Quality foundation | No accepted commit | Complete pytest discovery, prospective ignores, docs/code-map truth | Start only after integration |
-| `perf-people-map` | No branch delta at audit | No integrable output | Close as stale unless owner supplies evidence |
+| DESK-08 / `perf-people-map` | `origin/perf-people-map` / `d1f7e4cd0` | QA-5000 KPI receipt only; reported Map serialization attribution is not a code fix | Preserve receipt; remote is 679/3 divergent from `develop`, so never merge wholesale |
 | `client-server-hardening` | Mixed older history | Potential heartbeat/workload ideas | Re-audit; never merge wholesale |
 
 Research/audit tasks for modularity, organization, rebrand, flows, Health,
