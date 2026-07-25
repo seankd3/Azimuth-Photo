@@ -862,8 +862,16 @@ areas, but responsibility does not.
   contract. Contract-only commit `50f1299a` now injects deterministic host
   budgets and a 16-GiB profile; the two nodes plus profile/model/memory/runtime
   coverage passed 51 tests with one mounted-corpus skip, and quick is green.
-  The complete non-Playwright gate has not yet been rerun, so 18 remains the
-  last complete-gate baseline rather than a claimed current failure count.
+  Deterministic P0 `BUG-AI-OWNER-01` was then isolated to exact `main`: its
+  mid-load race guard correctly stopped generic unload from stealing an active
+  loader's leases, but the now-terminal failed-load path relied on that same
+  guarded unload and retained both manual and GPU ownership. Exact `develop`
+  passes the node. Commit `22946846` releases only the failed attempt's owners
+  after forced cleanup; the exact node, 28 cross-worker lifecycle/resource
+  tests, the complete 29-test embedding-worker file, targeted Ruff, and quick
+  are green. The complete non-Playwright gate has not yet been rerun, so 18
+  remains the last complete-gate baseline rather than a claimed current failure
+  count.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -1009,6 +1017,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 REL-01/REL-02 gate | Complete non-Playwright pytest | 1,533 selected: 24 failed, 1,507 passed, 3 skipped, 2 deselected, 399 subtests passed in 560.64 s | Zero failures before any cohort merge | `blocked` |
 | 2026-07-25 post-Core gate on `d90d89f4a` | Complete non-Playwright pytest | 18 failed, 1,519 passed, 3 skipped, 2 deselected, 399 subtests passed in 509.80 s; exactly six recovery failures resolved, zero new identities | Zero failures before customer-facing cohorts; preserve all six recovery closures | `blocked` |
 | 2026-07-25 host-profile contract remediation on `50f1299a` | Two deterministic host-profile failures plus related profile/model/memory/runtime coverage | Before: exact integrated nodes failed 2/2 on live Omarchy because tests asserted static 6,815,744,000-byte VRAM and one RAW worker; after: 51 passed, 1 mounted-corpus skip; Ruff and quick green; no product code changed | Preserve adaptive host authority across deterministic 8-/16-/64-GiB and known-VRAM fixtures; complete non-Playwright gate must confirm both identities closed | `active` |
+| 2026-07-25 AI owner remediation on `22946846` | Failed search-model load ownership lifecycle | Exact `main` returns false with both manual and GPU owner still `embeddings`; exact `develop` passes. After: exact node 1 passed; cross-worker lifecycle/resource matrix 28 passed; complete embedding-worker file 29 passed; targeted Ruff and quick green | Complete non-Playwright gate confirms the identity closed; real packaged Linux/Windows model-deserialization failure remains to be exercised without delaying release of either lane | `active` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1090,7 +1099,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
 | BUG-CLEANCLONE-01 | `parked` / P0 | Release | Fresh Windows install is proved, but no reproducible clean-clone build or upgrade/rollback/restore matrix is accepted | Disposable clean-source build and cross-platform install/recovery matrix with exact receipts |
 | BUG-HOSTPROFILE-01 | `active` / P1 | Core | Root cause is two stale exact-`main` test contracts: unset model budgets were changed to adaptive host values while the test retained static fallback constants, and adaptive cgroup-aware RAW sizing replaced the raw-physical-memory one-worker threshold without updating that assertion. Exact `develop` predates the adaptive profile and lacks the new AI contract. Contract-only commit `50f1299a` injects deterministic host budgets and a 16-GiB profile; 51 related tests passed, 1 mounted-corpus test skipped, and quick is green with no runtime change | Complete non-Playwright rerun closes both failure identities; retain deterministic 8-/16-/64-GiB and known-VRAM policy coverage. Physical Windows profiles, the 64-GiB class, and host-probe fallback behavior remain unverified in this slice |
-| BUG-AI-OWNER-01 | `active` / P0 | Core | Deterministic exact-`main` search-model load failure leaves manual owner `embeddings` held | Injected load failure releases model and manual owners and permits the next interactive/background action |
+| BUG-AI-OWNER-01 | `active` / P0 | Core | Commit `a28a7efa5` correctly made generic unload preserve leases while a model may still be loading, but a terminal load exception then called only that guarded unload. Exact `main` returns false with both manual and GPU owner still `embeddings`, potentially blocking captions or other work until the 15-minute lease expires; exact `develop` passes. Commit `22946846` explicitly releases only the terminal failed attempt after forced cleanup, and the regression proves captions can immediately claim both lanes | Exact node, 28-test lifecycle/resource matrix, complete 29-test embedding-worker file, targeted Ruff, and quick are green. Complete non-Playwright rerun and a packaged real-model deserialization failure on Linux/Windows remain unverified |
 | BUG-PREGEN-WATCHDOG-01 | `active` / P0 | Core | Deterministic exact-`main` stall-watchdog test resets the executor twice despite fresh progress heartbeats | Slow-progress fixture completes with no cancellation/reset while a truly stalled fixture still recovers |
 | BUG-RUNTIME-02 | `active` / P0 | Core | Deterministic exact-`main` Develop-root test sends HDR, panorama, and RAW caches to `/home/sean/.cache/photoarchive/develop` while the selected disposable application root is elsewhere | All direct Develop modules resolve one selected Azimuth data root across new/legacy env precedence and never leak to a host-global cache |
 | BUG-SHORTCUT-01 | `active` / P1 | Desktop | Exact `develop` advertises `C / O / M / H` in the Library shortcut sheet while its binding-proof map still expects `O / M / Y / H` | Product-approved key set, matching visible sheet and live handlers, keyboard/accessibility proof |
@@ -1205,6 +1214,7 @@ not permission to merge it.
 | REL-01 | `main` / `458675e77` | Production fixes, Phase 1 rebrand compatibility, host/runtime work | Audited merge into isolated integration |
 | REL-01 | `develop` / `52742f941` | Collections/search/intelligence integration line | First parent of sprint integration |
 | BUG-HOSTPROFILE-01 | `sprint-integration` / `50f1299a` | Replaced two inherited machine-specific assertions with deterministic adaptive budget and 16-GiB RAW-worker contracts; no product code changed | Focused profile/model/memory/runtime matrix 51 passed, 1 mounted-corpus skip; Ruff and quick green; complete non-Playwright rerun pending |
+| BUG-AI-OWNER-01 | `sprint-integration` / `22946846` | Terminal search-model load failures release both embedding leases without weakening the mid-load unload race guard; captions can immediately take ownership | Exact node 1 passed; cross-worker lifecycle/resource matrix 28 passed; complete embedding-worker file 29 passed; targeted Ruff and quick green; complete non-Playwright rerun pending |
 | RANK research | No implementation branch | Real-catalog latency, action/intelligence boundary, local-first contract | Preserve report; one future owner |
 | Quality foundation | No accepted commit | Complete pytest discovery, prospective ignores, docs/code-map truth | Start only after integration |
 | DESK-08 / `perf-people-map` | `origin/perf-people-map` / `d1f7e4cd0` | QA-5000 KPI receipt only; reported Map serialization attribution is not a code fix | Preserve receipt; remote is 679/3 divergent from `develop`, so never merge wholesale |
