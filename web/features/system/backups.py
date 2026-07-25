@@ -292,7 +292,7 @@ def _assert_destination_matches_catalog(db_path: str, root: Path, *, source_imag
     try:
         large = [
             path
-            for path in root.glob("photoarchive-*.db.gz")
+            for path in _snapshot_paths(root)
             if path.is_file() and path.stat().st_size >= LARGE_HISTORICAL_BACKUP_BYTES
         ]
     except OSError as exc:
@@ -367,7 +367,7 @@ def backup_owner_warning(root: Path, db_path: str) -> str | None:
             )
         return None
 
-    existing = sorted(root.glob("photoarchive-*.db.gz"))
+    existing = _snapshot_paths(root)
     if existing:
         return (
             "Refusing backup: backup destination "
@@ -376,6 +376,17 @@ def backup_owner_warning(root: Path, db_path: str) -> str | None:
             "publish or prune until ownership is explicit."
         )
     return None
+
+
+def _snapshot_paths(root: Path) -> list[Path]:
+    """Return catalog snapshots across frozen and public names."""
+    try:
+        return sorted(
+            (path for path in Path(root).glob("*.db.gz") if BACKUP_NAME_RE.match(path.name)),
+            reverse=True,
+        )
+    except OSError:
+        return []
 
 
 def write_backup_owner_marker(root: Path, db_path: str) -> None:
@@ -628,7 +639,7 @@ def list_backups(db_path: str | None = None) -> list[dict[str, Any]]:
     root = backup_root()
     owner_warning = backup_owner_warning(root, db_path) if db_path else None
     items: list[dict[str, Any]] = []
-    for path in sorted(root.glob("photoarchive-*.db.gz"), reverse=True):
+    for path in _snapshot_paths(root):
         parsed = _parse_backup_name(path.name)
         if parsed is None:
             continue
@@ -652,7 +663,7 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
     """Keep 7 daily + 4 weekly snapshots; delete the rest. Returns pruned names."""
     root = root or backup_root()
     backups: list[tuple[datetime, Path]] = []
-    for path in root.glob("photoarchive-*.db.gz"):
+    for path in _snapshot_paths(root):
         parsed = _parse_backup_name(path.name)
         if parsed is not None:
             backups.append((parsed, path))
