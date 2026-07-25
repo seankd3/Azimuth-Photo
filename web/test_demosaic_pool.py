@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from core.host_profile import HostProfile, _GIB
 from thumbnails import demosaic_pool
 
 
@@ -26,15 +27,24 @@ class DemosaicPoolConfigTests(unittest.TestCase):
     def test_default_bounded_for_16gb(self):
         os.environ.pop("PHOTOARCHIVE_DEMOSAIC_PROCESSES", None)
         demosaic_pool.reset_for_tests()
-        n = demosaic_pool.default_demosaic_processes()
-        self.assertGreaterEqual(n, 1)
-        self.assertLessEqual(n, 6)
-        self.assertLessEqual(n, max(1, (os.cpu_count() or 4) - 1))
-        total_gib = (
-            int(os.sysconf("SC_PHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE")) / 1024**3
+        profile = HostProfile(
+            cpu_count=8,
+            ram_total_bytes=16 * _GIB,
+            ram_available_bytes=8 * _GIB,
+            cgroup_high_bytes=None,
+            cgroup_max_bytes=None,
+            vram_total_bytes=None,
+            vram_free_bytes=None,
+            has_cuda=False,
+            source="test",
         )
-        if total_gib < 24:
-            self.assertEqual(n, 1)
+        with mock.patch(
+            "core.host_profile.detect_host_profile",
+            return_value=profile,
+        ):
+            n = demosaic_pool.default_demosaic_processes()
+        self.assertEqual(n, profile.demosaic_workers())
+        self.assertEqual(n, 2)
 
     def test_ipc_mode_defaults_to_path(self):
         os.environ.pop("PHOTOARCHIVE_DEMOSAIC_IPC", None)

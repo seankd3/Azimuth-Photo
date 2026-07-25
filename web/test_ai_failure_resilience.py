@@ -31,14 +31,22 @@ class AiFailureResilienceTests(unittest.TestCase):
         )
 
     def test_model_pool_uses_safe_host_budgets_by_default(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
+        host_budgets = (7 * 1024**3, 8 * 1024**3)
+        with (
+            mock.patch.object(
+                model_pool,
+                "_host_default_budgets",
+                return_value=host_budgets,
+            ),
+            mock.patch.dict(os.environ, {}, clear=True),
+        ):
             self.assertEqual(
                 model_pool._env_budget_bytes(model_pool.ENV_VRAM_BUDGET),
-                model_pool.DEFAULT_VRAM_BUDGET_BYTES,
+                host_budgets[0],
             )
             self.assertEqual(
                 model_pool._env_budget_bytes(model_pool.ENV_RAM_BUDGET),
-                model_pool.DEFAULT_RAM_BUDGET_BYTES,
+                host_budgets[1],
             )
 
     def test_model_pool_allows_explicit_unlimited_opt_out(self):
