@@ -64,7 +64,7 @@ def newest_sealed_snapshot(backup_root: Path | None = None) -> Path:
     """Return the newest sealed snapshot under ``backup_root``."""
     root = Path(backup_root) if backup_root is not None else Path(resolve_runtime_paths().backup_dir)
     candidates: list[tuple[datetime, Path]] = []
-    for path in root.glob("photoarchive-*.db.gz"):
+    for path in backups._snapshot_paths(root):
         parsed = backups._parse_backup_name(path.name)
         if parsed is None or not path.is_file():
             continue
