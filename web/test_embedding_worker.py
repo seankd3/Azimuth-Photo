@@ -791,11 +791,30 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("load failed")
 
         embedding_worker._load_model = fail_load
+        try:
+            with unittest.mock.patch.object(
+                work_coordination,
+                "_write_gpu_owner_flag",
+            ):
+                self.assertFalse(
+                    await embedding_worker.ensure_model_loaded_for_search()
+                )
 
-        self.assertFalse(await embedding_worker.ensure_model_loaded_for_search())
-
-        self.assertIsNone(work_coordination.manual_owner())
-        self.assertIsNone(work_coordination.gpu_owner())
+                self.assertIsNone(work_coordination.manual_owner())
+                self.assertIsNone(work_coordination.gpu_owner())
+                self.assertEqual(
+                    work_coordination.claim_manual_owner("captions"),
+                    "captions",
+                )
+                self.assertEqual(
+                    work_coordination.claim_gpu_owner("captions"),
+                    "captions",
+                )
+        finally:
+            work_coordination.release_manual_owner("captions")
+            work_coordination.release_gpu_owner("captions")
+            work_coordination.release_manual_owner("embeddings")
+            work_coordination.release_gpu_owner("embeddings")
 
     async def test_start_search_model_load_warms_model_in_background_once(self):
         calls = []

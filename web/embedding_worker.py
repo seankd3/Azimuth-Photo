@@ -907,6 +907,10 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
         finally:
             if not loaded:
                 _unload_model(force=True)
+                # Generic unload preserves leases when no model became resident
+                # because another task may still be loading. This load attempt
+                # is now terminal, so its own leases must be released explicitly.
+                _release_embedding_owners()
 
 
 async def ensure_model_loaded_for_search() -> bool:
