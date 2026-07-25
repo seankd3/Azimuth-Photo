@@ -68,6 +68,15 @@ class ClientBundleIdentityTests(unittest.TestCase):
             warning.assert_called()
             self.assertIn("--output=", " ".join(str(part) for part in check_call.call_args[0][0]))
 
+    def test_pending_identity_does_not_advertise_an_unready_update(self):
+        client_bundle.mark_hub_client_identity_pending()
+
+        payload = version_payload()
+
+        self.assertEqual(payload["sha"], "unknown")
+        self.assertEqual(payload["bundle_sha256"], "")
+        self.assertTrue(client_bundle.hub_client_identity_pending())
+
     def test_version_payload_includes_frozen_identity_fields(self):
         identity = client_bundle.ClientIdentity(
             sha="c" * 40,

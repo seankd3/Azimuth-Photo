@@ -134,22 +134,26 @@ if satellite.is_satellite_mode():
 
 
 @app.on_event("startup")
-async def _init_hub_client_bundle_identity():
-    """Cache /api/version identity + git-archive once at hub boot (not per request)."""
+async def _prepare_hub_client_bundle_identity():
+    """Prepare the updater bundle after the library is ready to serve."""
 
     if satellite.is_satellite_mode():
         return
     from features.system import client_bundle
 
-    try:
-        await asyncio.to_thread(client_bundle.init_hub_client_identity)
-    except Exception:
-        # A missing git checkout must not take the hub down; /api/version still
-        # answers with sha=unknown and the bundle route returns 503.
-        import logging
+    client_bundle.mark_hub_client_identity_pending()
 
-        logging.getLogger(__name__).exception("hub client bundle identity init failed")
+    async def _prepare():
+        await asyncio.sleep(1.0)
+        try:
+            await asyncio.to_thread(client_bundle.init_hub_client_identity)
+        except Exception:
+            client_bundle.finish_hub_client_identity_attempt()
+            import logging
 
+            logging.getLogger(__name__).exception("hub client bundle identity init failed")
+
+    app.state.photoarchive_shell.track_background_task(_prepare())
 
 @app.on_event("startup")
 async def _start_hub_mdns():

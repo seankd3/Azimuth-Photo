@@ -19,6 +19,7 @@ log = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _lock = threading.Lock()
 _identity: "ClientIdentity | None" = None
+_identity_pending = False
 
 
 @dataclass(frozen=True)
@@ -141,9 +142,9 @@ def init_hub_client_identity(
     cache_dir: str | None = None,
     sha: str | None = None,
 ) -> ClientIdentity:
-    """Compute identity once at startup. Regenerates the archive only on sha change."""
+    """Compute identity once. Regenerates the archive only on SHA change."""
 
-    global _identity
+    global _identity, _identity_pending
     with _lock:
         resolved_sha = (sha or read_git_sha(root)).strip()
         if not resolved_sha:
@@ -154,8 +155,10 @@ def init_hub_client_identity(
                 bundle_path="",
             )
             _identity = identity
+            _identity_pending = False
             return identity
         if _identity is not None and _identity.sha == resolved_sha and Path(_identity.bundle_path).is_file():
+            _identity_pending = False
             return _identity
         path, digest = archive_head_bundle(sha=resolved_sha, root=root, cache_dir=cache_dir)
         prune_stale_bundles(keep_sha=resolved_sha, cache_dir=cache_dir)
@@ -166,7 +169,30 @@ def init_hub_client_identity(
             bundle_path=os.fspath(path),
         )
         _identity = identity
+        _identity_pending = False
         return identity
+
+
+def mark_hub_client_identity_pending() -> None:
+    """Keep updater clients idle while a hub prepares its next bundle."""
+
+    global _identity_pending
+    with _lock:
+        if _identity is None:
+            _identity_pending = True
+
+
+def finish_hub_client_identity_attempt() -> None:
+    """Release the pending state after a failed asynchronous preparation."""
+
+    global _identity_pending
+    with _lock:
+        _identity_pending = False
+
+
+def hub_client_identity_pending() -> bool:
+    with _lock:
+        return _identity is None and _identity_pending
 
 
 def get_hub_client_identity() -> ClientIdentity | None:
@@ -174,9 +200,10 @@ def get_hub_client_identity() -> ClientIdentity | None:
 
 
 def reset_hub_client_identity_for_tests() -> None:
-    global _identity
+    global _identity, _identity_pending
     with _lock:
         _identity = None
+        _identity_pending = False
 
 
 def identity_payload() -> dict[str, str | int]:
@@ -184,6 +211,12 @@ def identity_payload() -> dict[str, str | int]:
 
     identity = _identity
     if identity is None:
+        if hub_client_identity_pending():
+            return {
+                "sha": "unknown",
+                "bundle_sha256": "",
+                "schema_version": int(SCHEMA_VERSION),
+            }
         # Satellite / test processes: advertise running sha without building a hub bundle.
         env_sha = os.environ.get("PHOTOARCHIVE_CLIENT_SHA", "").strip()
         sha = env_sha or read_git_sha() or "unknown"
