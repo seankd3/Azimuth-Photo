@@ -4,7 +4,7 @@ from __future__ import annotations
 import unittest
 
 from core import host_profile
-from core.host_profile import HostProfile, _GIB, _MIB
+from core.host_profile import HostProfile, _GIB
 
 
 def _profile(**kwargs) -> HostProfile:
