@@ -869,9 +869,16 @@ areas, but responsibility does not.
   passes the node. Commit `22946846` releases only the failed attempt's owners
   after forced cleanup; the exact node, 28 cross-worker lifecycle/resource
   tests, the complete 29-test embedding-worker file, targeted Ruff, and quick
-  are green. The complete non-Playwright gate has not yet been rerun, so 18
-  remains the last complete-gate baseline rather than a claimed current failure
-  count.
+  are green. The post-repair complete non-Playwright checkpoint on `2b818a8b3`
+  selected 1,539 of 1,541 collected tests but could not complete: two attempts
+  aborted with signal 11 / exit 139. The captured attempt reached 253 progress
+  events, including the repaired model-budget node passing in full order and
+  the same known caption-cancellation and first-run order failures, then
+  segfaulted while a media-warm thread used the persistent thumbnail SQLite
+  connection as `BackendTestCase.asyncTearDown` closed it. The demosaic
+  host-profile and AI-owner nodes at collection positions 285 and 570 were not
+  reached. Therefore 18 remains the last complete-gate baseline rather than a
+  claimed current failure count.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -1018,6 +1025,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 post-Core gate on `d90d89f4a` | Complete non-Playwright pytest | 18 failed, 1,519 passed, 3 skipped, 2 deselected, 399 subtests passed in 509.80 s; exactly six recovery failures resolved, zero new identities | Zero failures before customer-facing cohorts; preserve all six recovery closures | `blocked` |
 | 2026-07-25 host-profile contract remediation on `50f1299a` | Two deterministic host-profile failures plus related profile/model/memory/runtime coverage | Before: exact integrated nodes failed 2/2 on live Omarchy because tests asserted static 6,815,744,000-byte VRAM and one RAW worker; after: 51 passed, 1 mounted-corpus skip; Ruff and quick green; no product code changed | Preserve adaptive host authority across deterministic 8-/16-/64-GiB and known-VRAM fixtures; complete non-Playwright gate must confirm both identities closed | `active` |
 | 2026-07-25 AI owner remediation on `22946846` | Failed search-model load ownership lifecycle | Exact `main` returns false with both manual and GPU owner still `embeddings`; exact `develop` passes. After: exact node 1 passed; cross-worker lifecycle/resource matrix 28 passed; complete embedding-worker file 29 passed; targeted Ruff and quick green | Complete non-Playwright gate confirms the identity closed; real packaged Linux/Windows model-deserialization failure remains to be exercised without delaying release of either lane | `active` |
+| 2026-07-25 post-repair checkpoint on `2b818a8b3` | Complete non-Playwright pytest | Current collect: 1,539 selected of 1,541, two deselected. Two full-command attempts aborted with signal 11 / exit 139; captured run stopped after 253 progress events with one repaired host-budget node passed, two known order failures, and no new assertion identity before a native SQLite/thread teardown crash. Demosaic and AI-owner nodes were not reached | Zero native aborts; both remaining repaired identities pass in full order; exact failure-set comparison then completes against the 18-failure baseline | `blocked` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1094,6 +1102,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RANK-06 | `parked` / P1 | Ranking | 100,469 active photos lacked embeddings and ranking signal in audit | Coverage/provenance report and full-catalog projection evaluation |
 | BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate selects 1,425 tests while pytest selects 1,539; 114 selected tests are omitted | Before/after collection receipt and green complete unit gate |
 | BUG-TEST-02 | `active` / P0 | Release | The post-Core complete gate confirms the same eleven tests fail only in suite order but pass together in isolation: caption owner release, first-run preview/ranking visibility, decode-budget cancellation, manual People work, and seven thumbnail bulk/priority/manual-work contracts | Reproduce with order/bisection receipt, eliminate leaked global/env/resource state without weakening product assertions, then pass isolated nodes and two complete non-Playwright runs |
+| BUG-TEST-CRASH-01 | `active` / P0 | Release | The post-repair full checkpoint aborts natively while `features/media/warm.py` runs `fast_disk_read_entry()` in a worker thread and `BackendTestCase.asyncTearDown` concurrently closes the same `thumbnail_cache_entries._persistent_conn` at line 167. Both full-command attempts ended with signal 11 / exit 139. `test_compare.py` is the smallest reproduced command: one of two isolated-marker runs crashed after 34 completed tests at `test_rating_updates_preserve_unaffected_ranking_count_cache`, while the repeat and one default-environment run passed; that exact node and a two-node prefetch pair also pass alone. The crash-path files are byte-unchanged from complete-gate baseline `d90d89f4a`, and the GPU-marker path was never written, classifying this as a pre-existing timing-sensitive teardown race rather than a host-profile/AI-owner regression or isolated-marker effect | Await/cancel media-warm background tasks before closing/resetting their persistent DB and temp root; prove the exact node and compare module repeatedly, then complete two non-Playwright gates with zero native aborts and no leaked threads/connections |
 | BUG-ARTIFACT-01 | `parked` / P1 | Release | Source tracks 74 pytest-temp paths, 13 database-like files, 15 benchmark-run paths, and three receipt logs; ignores do not prospectively contain all classes | Preserve/disposition inventory, no deletion in containment lane, and clean proof that new generated files remain untracked |
 | BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
 | BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
