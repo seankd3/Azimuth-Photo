@@ -28,12 +28,54 @@ def empty_filter_options() -> dict:
     }
 
 
-def _filter_rows(db_path: str, sql: str, params=(), staged_ids=None):
+def _filter_row_groups(db_path: str, base_where: str, params=(), staged_ids=None):
+    """Read all image facets from one materialized eligible-image set.
+
+    Running six full-library facet scans concurrently makes cold filter opening
+    compete with itself on a real archive. Materializing the already-filtered
+    image columns once keeps the answer exact while leaving the disk free for
+    browsing and preview work.
+    """
+    facet_sql = (
+        "WITH filtered AS MATERIALIZED ("
+        "SELECT i.id, i.date_taken, i.file_ext, i.camera_make, i.camera_model, i.lens "
+        "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+        f"WHERE {base_where}"
+        ") "
+        "SELECT kind, value, count FROM ("
+        "SELECT 'year' AS kind, SUBSTR(date_taken, 1, 4) AS value, COUNT(*) AS count "
+        "FROM filtered WHERE date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 GROUP BY value "
+        "UNION ALL "
+        "SELECT 'undated', '', COUNT(*) FROM filtered "
+        "WHERE date_taken IS NULL OR LENGTH(date_taken) < 4 "
+        "UNION ALL "
+        "SELECT 'file_type', file_ext, COUNT(*) FROM filtered "
+        "WHERE file_ext IS NOT NULL AND file_ext != '' GROUP BY file_ext "
+        "UNION ALL "
+        "SELECT 'camera', TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')), COUNT(*) "
+        "FROM filtered WHERE camera_make IS NOT NULL OR camera_model IS NOT NULL "
+        "GROUP BY 2 HAVING 2 != '' "
+        "UNION ALL "
+        "SELECT 'lens', lens, COUNT(*) FROM filtered WHERE lens IS NOT NULL AND lens != '' GROUP BY lens"
+        ")"
+    )
+    people_sql = (
+        "WITH filtered AS MATERIALIZED ("
+        "SELECT i.id FROM images i JOIN catalog_sources s ON s.id = i.source_id "
+        f"WHERE {base_where}"
+        ") "
+        "SELECT p.id, p.name, p.status, COUNT(DISTINCT pim.image_id) AS count "
+        "FROM people p JOIN person_image_membership pim ON pim.person_id = p.id "
+        "JOIN filtered ON filtered.id = pim.image_id "
+        "WHERE p.status != 'ignored' AND p.merged_into_person_id IS NULL "
+        "GROUP BY p.id HAVING count > 0 "
+        "ORDER BY count DESC, LOWER(COALESCE(NULLIF(p.name, ''), 'Person ' || p.id)) ASC, p.id ASC LIMIT 200"
+    )
     conn = connection.open_sync(db_path)
     try:
         if staged_ids is not None:
             stage_temp_ids_sync(conn, "temp_filter_scope_ids", staged_ids)
-        return conn.execute(sql, params).fetchall()
+        return conn.execute(facet_sql, params).fetchall(), conn.execute(people_sql, params).fetchall()
     finally:
         connection.close_sync(conn, db_path=db_path)
 
@@ -191,83 +233,26 @@ async def filter_options(
             "WHERE scope_ids.image_id = i.id)"
         )
     base_where = " AND ".join(conditions)
-    (
-        year_rows,
-        undated_rows,
-        file_type_rows,
-        camera_rows,
-        lens_rows,
-        people_rows,
-    ) = await asyncio.gather(
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT SUBSTR(date_taken, 1, 4) AS value, COUNT(*) AS count "
-            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
-            "AND date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 "
-            "GROUP BY value",
-            params,
-            staged_id_filter,
-        ),
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT COUNT(*) AS count "
-            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
-            "AND (date_taken IS NULL OR LENGTH(date_taken) < 4)",
-            params,
-            staged_id_filter,
-        ),
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT file_ext AS value, COUNT(*) AS count "
-            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
-            "AND file_ext IS NOT NULL AND file_ext != '' "
-            "GROUP BY value",
-            params,
-            staged_id_filter,
-        ),
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')) AS value, "
-            "COUNT(*) AS count "
-            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
-            "AND (camera_make IS NOT NULL OR camera_model IS NOT NULL) "
-            "GROUP BY value HAVING value != ''",
-            params,
-            staged_id_filter,
-        ),
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT lens AS value, COUNT(*) AS count "
-            f"FROM images i JOIN catalog_sources s ON s.id = i.source_id WHERE {base_where} "
-            "AND lens IS NOT NULL AND lens != '' "
-            "GROUP BY value",
-            params,
-            staged_id_filter,
-        ),
-        asyncio.to_thread(
-            _filter_rows,
-            db_path,
-            "SELECT p.id, p.name, p.status, COUNT(DISTINCT pim.image_id) AS count "
-            "FROM people p "
-            "JOIN person_image_membership pim ON pim.person_id = p.id "
-            "JOIN images i ON i.id = pim.image_id "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE p.status != 'ignored' "
-            "AND p.merged_into_person_id IS NULL "
-            f"AND {base_where} "
-            "GROUP BY p.id "
-            "HAVING count > 0 "
-            "ORDER BY count DESC, LOWER(COALESCE(NULLIF(p.name, ''), 'Person ' || p.id)) ASC, p.id ASC "
-            "LIMIT 200",
-            params,
-            staged_id_filter,
-        ),
+    facet_rows, people_rows = await asyncio.to_thread(
+        _filter_row_groups,
+        db_path,
+        base_where,
+        params,
+        staged_id_filter,
     )
+    facets: dict[str, list] = {"year": [], "file_type": [], "camera": [], "lens": []}
+    undated = 0
+    for row in facet_rows:
+        kind = str(row["kind"])
+        if kind == "undated":
+            undated = int(row["count"] or 0)
+        else:
+            facets.setdefault(kind, []).append(row)
+    year_rows = facets["year"]
+    file_type_rows = facets["file_type"]
+    camera_rows = facets["camera"]
+    lens_rows = facets["lens"]
+
 
     file_type_counts: Counter[str] = Counter()
     for row in file_type_rows:
@@ -287,7 +272,7 @@ async def filter_options(
                 key=lambda item: (-int(item[1] or 0), item[0]),
             )
         ],
-        "undated": int(undated_rows[0]["count"] or 0) if undated_rows else 0,
+        "undated": undated,
         "cameras": [
             {"camera": row["value"], "count": int(row["count"] or 0)}
             for row in sorted(
