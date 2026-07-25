@@ -819,8 +819,11 @@ areas, but responsibility does not.
 - **Desired outcome:** completed work lands in dependency order with manual
   overlap review and exact receipts.
 - **Current evidence:** named lane outputs are ready; several touch files changed
-  on the opposite history.
-- **Prerequisite:** REL-01 and REL-02.
+  on the opposite history. REL-01 and REL-02 are committed and their targeted,
+  focused, and quick gates pass, but the complete non-Playwright gate is blocked
+  by the classified failures in [the defect register](#7-bug-and-known-defect-register).
+- **Prerequisite:** REL-01 and REL-02 plus an accepted disposition and green
+  rerun for every active full-gate defect.
 - **Boundary:** Core trust/performance, customer trust, desktop proof, then
   Windows after live proof; never batch unrelated commits.
 - **Acceptance evidence:** SHA/conflict/test/perf receipt after every cohort and
@@ -836,6 +839,12 @@ areas, but responsibility does not.
   unittest versus 1,539 selected by pytest from 1,541 collected (two bench
   deselections). The non-Playwright selection is 1,533 of 1,535 collected.
   Therefore 114 selected pytest tests can be missed by the current default.
+  The first post-reconciliation complete non-Playwright run selected 1,533 tests
+  and finished with 24 failed, 1,507 passed, 3 skipped, 2 deselected, and 399
+  passing subtests in 560.64 seconds. Seven failures map to existing plan items;
+  17 are newly registered below. No deterministic failure was introduced by the
+  three manual conflict resolutions: 12 reproduce on exact `main`, one on exact
+  `develop`, and the remaining 11 pass in an isolated failing-node rerun.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -976,6 +985,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 test-discovery audit | Default selected automated coverage | 1,425 unittest; pytest selects 1,539/1,541 after two bench deselections; 114-test gap; non-Playwright selects 1,533/1,535 | Complete intended pytest unit selection | `parked` |
 | 2026-07-25 release audit | Application release version | Current integration head: Tauri/Cargo `0.1.0`; proved Windows branch artifact: `1.0.0-rc.1` | One authoritative version across tag, manifest, installer, engine, API, About, and updater | `blocked` |
 | 2026-07-25 release audit | Clean-source release evidence | Fresh Windows install passed; no accepted clean-clone build, upgrade/rollback/restore matrix, tag, or remote green run | Reproducible clean clone through signed clean-download smoke and recovery matrix | `blocked` |
+| 2026-07-25 REL-01/REL-02 gate | Complete non-Playwright pytest | 1,533 selected: 24 failed, 1,507 passed, 3 skipped, 2 deselected, 399 subtests passed in 560.64 s | Zero failures before any cohort merge | `blocked` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1051,10 +1061,17 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RANK-05 | `parked` / P1 | Ranking | Pair rows can be treated as independent evidence despite shared human action | One-action migration/projection and grouped-training proof |
 | BUG-RANK-06 | `parked` / P1 | Ranking | 100,469 active photos lacked embeddings and ranking signal in audit | Coverage/provenance report and full-catalog projection evaluation |
 | BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate selects 1,425 tests while pytest selects 1,539; 114 selected tests are omitted | Before/after collection receipt and green complete unit gate |
+| BUG-TEST-02 | `active` / P0 | Release | Eleven tests fail only in the complete-suite order but pass together in an isolated failing-node rerun: caption owner release, first-run preview/ranking visibility, decode-budget cancellation, manual People work, and seven thumbnail bulk/priority/manual-work contracts | Reproduce with order/bisection receipt, eliminate leaked global/env/resource state, then pass isolated nodes and two complete non-Playwright runs |
 | BUG-ARTIFACT-01 | `parked` / P1 | Release | Source tracks 74 pytest-temp paths, 13 database-like files, 15 benchmark-run paths, and three receipt logs; ignores do not prospectively contain all classes | Preserve/disposition inventory, no deletion in containment lane, and clean proof that new generated files remain untracked |
 | BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
 | BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
 | BUG-CLEANCLONE-01 | `parked` / P0 | Release | Fresh Windows install is proved, but no reproducible clean-clone build or upgrade/rollback/restore matrix is accepted | Disposable clean-source build and cross-platform install/recovery matrix with exact receipts |
+| BUG-HOSTPROFILE-01 | `active` / P1 | Core | Two deterministic exact-`main` tests disagree with live host-profile defaults: model VRAM budget is 7,559,142,440 versus static 6,815,744,000, and a below-24-GiB test expects one demosaic worker while detection returns two | One host-profile authority, deterministic mocked 16-GiB/known-VRAM fixtures, and explicit live-host policy tests |
+| BUG-AI-OWNER-01 | `active` / P0 | Core | Deterministic exact-`main` search-model load failure leaves manual owner `embeddings` held | Injected load failure releases model and manual owners and permits the next interactive/background action |
+| BUG-PREGEN-WATCHDOG-01 | `active` / P0 | Core | Deterministic exact-`main` stall-watchdog test resets the executor twice despite fresh progress heartbeats | Slow-progress fixture completes with no cancellation/reset while a truly stalled fixture still recovers |
+| BUG-RUNTIME-02 | `active` / P0 | Core | Deterministic exact-`main` Develop-root test sends HDR, panorama, and RAW caches to `/home/sean/.cache/photoarchive/develop` while the selected disposable application root is elsewhere | All direct Develop modules resolve one selected Azimuth data root across new/legacy env precedence and never leak to a host-global cache |
+| BUG-SHORTCUT-01 | `active` / P1 | Desktop | Exact `develop` advertises `C / O / M / H` in the Library shortcut sheet while its binding-proof map still expects `O / M / Y / H` | Product-approved key set, matching visible sheet and live handlers, keyboard/accessibility proof |
+| BUG-TEST-SHIM-01 | `active` / P1 | Release | Deterministic exact-`main` UI contract reads deprecated `photoarchive-browser-smoke` wrapper contents instead of the canonical Azimuth smoke implementation | Contract follows the canonical script while a separate compatibility test proves the wrapper delegates correctly |
 | BUG-LINT-01 | `ready after integration` / P1 | Release | Three current Ruff F401 errors block quick lint | Exact three-import atomic commit and Ruff green |
 | BUG-ROUTE-01 | `unverified` / P1 | Mobile | Mobile `writeRating()` targets nonexistent `/api/image/{id}/rating`; manual stars require product decision | Route/client decision, contract test, no conflict with Taste/Elo |
 | BUG-ROUTE-02 | `unverified` / P2 | Desktop | `/api/quality/scan` exists without a customer entry point for old stacks | Product decision and end-to-end scoring/recovery proof if built |
