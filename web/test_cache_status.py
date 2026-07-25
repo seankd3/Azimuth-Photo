@@ -1,10 +1,64 @@
 from core import capabilities as _capabilities
 from test_support import *  # noqa: F401,F403
 import contextlib
+import threading
 import unittest.mock
 
 
 class CacheStatusTests(BackendTestCase):
+    async def test_backend_teardown_waits_for_nested_thumbnail_work_before_db_close(self):
+        warm_started = threading.Event()
+        release_warm = threading.Event()
+        warm_finished = threading.Event()
+
+        def blocking_disk_read(*_args, **_kwargs):
+            warm_started.set()
+            release_warm.wait(timeout=2)
+            warm_finished.set()
+
+        class RecordingConnection:
+            closed = False
+
+            def close(self):
+                self.closed = True
+                if not warm_finished.is_set():
+                    raise AssertionError("thumbnail database closed before media warm finished")
+
+        old_prefetch = thumbnails.prefetch_images
+
+        async def schedule_nested_warm(*_args, **_kwargs):
+            asyncio.create_task(asyncio.to_thread(blocking_disk_read))
+            return 1
+
+        thumbnails.prefetch_images = schedule_nested_warm
+        connection = RecordingConnection()
+        thumbnail_cache_entries._persistent_conn = connection
+        try:
+            media_warm.schedule_thumbnail_prefetch(
+                [{"id": 1}],
+                "sm",
+                limit=1,
+            )
+            self.assertTrue(await asyncio.to_thread(warm_started.wait, 1))
+            for _ in range(10):
+                if not media_warm._background_tasks:
+                    break
+                await asyncio.sleep(0)
+            self.assertFalse(media_warm._background_tasks)
+            self.assertFalse(connection.closed)
+
+            release_timer = threading.Timer(0.05, release_warm.set)
+            release_timer.start()
+            await self._close_thumbnail_cache_after_background_tasks()
+            release_timer.join()
+
+            self.assertTrue(connection.closed)
+            self.assertTrue(warm_finished.is_set())
+        finally:
+            release_warm.set()
+            thumbnails.prefetch_images = old_prefetch
+            thumbnail_cache_entries._persistent_conn = None
+
     async def test_shutdown_cancels_media_warm_tasks(self):
         started = asyncio.Event()
 

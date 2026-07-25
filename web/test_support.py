@@ -146,6 +146,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         embedding_worker.start_search_model_load = lambda: False
 
     async def asyncTearDown(self):
+        await self._close_thumbnail_cache_after_background_tasks()
         compare_routes._schedule_pairing_propagation = self.old_schedule_pairing_propagation
         elo_propagation.embed_cache.get_matrix = self.old_get_matrix
         elo_propagation.embed_cache.get_index = self.old_get_index
@@ -163,8 +164,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         thumbnails.fast_disk_path_entry = self.old_fast_disk_path_entry
         thumbnails.fast_disk_read_entry = self.old_fast_disk_read_entry
         self._reset_shared_runtime_state()
-        if thumbnail_cache_entries._persistent_conn is not None:
-            thumbnail_cache_entries._persistent_conn.close()
         thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
         settings.SETTINGS_PATH = self.old_settings_path
         settings._settings = self.old_settings_state
@@ -183,26 +182,45 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         settings_status.invalidate_settings_response_cache()
         await self._cleanup_tempdir()
 
-    async def _cleanup_tempdir(self):
-        """Windows holds file locks while background tasks finish; retry briefly.
+    async def _close_thumbnail_cache_after_background_tasks(self):
+        """Keep the per-test thumbnail database alive until async work drains."""
+        await self._drain_test_tasks(
+            tuple(media_warm._background_tasks),
+            "media-warm background",
+        )
 
-        A bounded retry absorbs the teardown race (post-response prefetch or a
-        worker still closing its connection) without masking real leaks -- a
-        connection that never closes still fails after the retries.
+        # A media-warm wrapper can finish after handing thumbnail probes to
+        # asyncio/to_thread or an executor. Those child tasks are not retained
+        # in media_warm._background_tasks, but still share this test's database.
+        current = asyncio.current_task()
+        handed_off_tasks = tuple(
+            task
+            for task in asyncio.all_tasks()
+            if task is not current and not task.done()
+        )
+        await self._drain_test_tasks(handed_off_tasks, "handed-off background")
+
+        if thumbnail_cache_entries._persistent_conn is not None:
+            thumbnail_cache_entries._persistent_conn.close()
+
+    async def _drain_test_tasks(self, tasks, label):
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=8)
+            if pending:
+                raise AssertionError(
+                    f"{len(pending)} {label} task(s) did not finish "
+                    "before thumbnail database teardown"
+                )
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _cleanup_tempdir(self):
+        """Close tracked database handles before removing the per-test root.
+
+        Windows holds files open until every handle is closed, so retry briefly
+        after collecting dropped connections without masking persistent leaks.
         """
         import asyncio as _asyncio
         import gc as _gc
-
-        # Let in-flight background tasks (post-response prefetch, cache priming)
-        # finish their finally blocks NOW, while the loop is alive — a task
-        # cancelled by loop close mid-aiosqlite-close leaks its worker thread
-        # and the DB file stays locked on Windows forever.
-        # (Cancelling instead of waiting guts aiosqlite mid-operation and
-        # orphans its worker thread — the opposite of the goal.)
-        current = _asyncio.current_task()
-        pending = [t for t in _asyncio.all_tasks() if t is not current and not t.done()]
-        if pending:
-            await _asyncio.wait(pending, timeout=8)
 
         data_connection.open_async = self._orig_open_async
         for conn in list(self._tracked_conns):
