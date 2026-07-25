@@ -236,6 +236,14 @@ async def run_startup(
     mosaic_diverse_window: int,
     interaction_cache_warmup_delay_seconds: float,
 ) -> None:
+    # Automatic house manners: bulk seats until serve is proven.
+    try:
+        from core import memory_pressure as _memory_pressure
+
+        _memory_pressure.note_process_start()
+    except Exception:
+        log.exception("worker=memory_pressure startup calm failed to arm")
+
     if smoke_mode_enabled():
         await asyncio.to_thread(warm_templates)
         return

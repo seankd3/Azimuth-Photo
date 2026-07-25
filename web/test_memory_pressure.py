@@ -692,24 +692,93 @@ class DecodeBudgetDimensionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class AdaptiveWatermarkTests(unittest.TestCase):
-    def test_fallback_watermarks_are_fractions_of_detected_ram(self):
+    def test_fallback_fractions_match_module_constants(self):
         total = 16 * memory_pressure._GIB
-        with mock.patch.object(memory_pressure, "read_cgroup_limits", return_value=(None, None)), mock.patch.object(
-            memory_pressure, "_detect_total_ram_bytes", return_value=total
-        ):
-            soft, hard = memory_pressure._default_watermarks()
+        soft = max(1 * memory_pressure._GIB, int(total * memory_pressure._FALLBACK_SOFT_FRACTION))
+        hard = max(soft + 256 * 1024 * 1024, int(total * memory_pressure._FALLBACK_HARD_FRACTION))
         self.assertEqual(soft, int(total * 0.55))
         self.assertEqual(hard, int(total * 0.72))
 
-    def test_fallback_watermarks_scale_on_64gb_host(self):
+    def test_fallback_fractions_scale_on_64gb_host(self):
         total = 64 * memory_pressure._GIB
-        with mock.patch.object(memory_pressure, "read_cgroup_limits", return_value=(None, None)), mock.patch.object(
-            memory_pressure, "_detect_total_ram_bytes", return_value=total
-        ):
-            soft, hard = memory_pressure._default_watermarks()
+        soft = max(1 * memory_pressure._GIB, int(total * memory_pressure._FALLBACK_SOFT_FRACTION))
+        hard = max(soft + 256 * 1024 * 1024, int(total * memory_pressure._FALLBACK_HARD_FRACTION))
         self.assertEqual(soft, int(total * 0.55))
         self.assertEqual(hard, int(total * 0.72))
         self.assertGreater(soft, 30 * memory_pressure._GIB)
+
+
+class StartupCalmAndHostPressureTests(unittest.TestCase):
+    def setUp(self):
+        memory_pressure.reset_for_tests()
+        self.addCleanup(memory_pressure.reset_for_tests)
+
+    def test_startup_calm_pauses_bulk_without_unload(self):
+        memory_pressure.note_process_start(calm_seconds=30.0)
+        # Injected low process pressure must not skip calm on live path —
+        # use non-injected path with patched readers.
+        memory_pressure.set_memory_reader(
+            lambda: memory_pressure.MemoryReading(1024, 0, 1024, "proc")
+        )
+        memory_pressure.set_host_available_reader(lambda: 64 * memory_pressure._GIB)
+        pressure = memory_pressure.evaluate_memory_pressure()
+        self.assertTrue(pressure.pause_bulk)
+        self.assertEqual(pressure.signal, "startup_calm")
+        self.assertFalse(pressure.unload_models)
+        self.assertEqual(pressure.message, "Paused: starting up")
+
+    def test_startup_calm_expires(self):
+        memory_pressure.note_process_start(calm_seconds=0.0)
+        memory_pressure.set_memory_reader(
+            lambda: memory_pressure.MemoryReading(1024, 0, 1024, "proc")
+        )
+        memory_pressure.set_host_available_reader(lambda: 64 * memory_pressure._GIB)
+        pressure = memory_pressure.evaluate_memory_pressure()
+        self.assertFalse(pressure.pause_bulk)
+        self.assertEqual(pressure.level, "ok")
+
+    def test_host_low_available_pauses_even_when_cgroup_is_fine(self):
+        memory_pressure.set_memory_reader(
+            lambda: memory_pressure.MemoryReading(1024, 0, 1024, "proc")
+        )
+        # Far below host soft floor.
+        memory_pressure.set_host_available_reader(lambda: 256 * 1024 * 1024)
+        pressure = memory_pressure.evaluate_memory_pressure()
+        self.assertTrue(pressure.pause_bulk)
+        self.assertEqual(pressure.signal, "host")
+        self.assertTrue(pressure.unload_models)
+
+    def test_host_hysteresis_holds_until_resume_floor(self):
+        memory_pressure.set_memory_reader(
+            lambda: memory_pressure.MemoryReading(1024, 0, 1024, "proc")
+        )
+        soft = memory_pressure.HOST_SOFT_AVAILABLE_BYTES
+        resume = memory_pressure.HOST_RESUME_AVAILABLE_BYTES
+        memory_pressure.set_host_available_reader(lambda: soft - 1)
+        first = memory_pressure.evaluate_memory_pressure()
+        self.assertTrue(first.pause_bulk)
+        # Between soft and resume — still paused.
+        mid = soft + (resume - soft) // 2
+        memory_pressure.set_host_available_reader(lambda: mid)
+        still = memory_pressure.evaluate_memory_pressure()
+        self.assertTrue(still.pause_bulk)
+        memory_pressure.set_host_available_reader(lambda: resume)
+        clear = memory_pressure.evaluate_memory_pressure()
+        self.assertFalse(clear.pause_bulk)
+
+    def test_injected_rss_skips_host_and_calm(self):
+        memory_pressure.note_process_start(calm_seconds=60.0)
+        memory_pressure.set_host_available_reader(lambda: 1)
+        soft = memory_pressure.SOFT_WATERMARK_BYTES
+        # Below process soft watermark + calm armed + host starving, but inject
+        # is deterministic unit-test path.
+        pressure = memory_pressure.evaluate_memory_pressure(rss_bytes=1024)
+        self.assertFalse(pressure.pause_bulk)
+        over = memory_pressure.evaluate_memory_pressure(rss_bytes=soft + 1)
+        self.assertTrue(over.pause_bulk)
+        self.assertEqual(over.signal, "injected")
+
+
 
 
 if __name__ == "__main__":
