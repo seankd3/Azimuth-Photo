@@ -14,12 +14,15 @@ The number the speed doctrine gets held to: browse stays snappy while bulk work
 ./scripts/bench_interactive.py
 ./scripts/bench_interactive.py http://127.0.0.1:8000 --loops 10 --warmup 2
 ./scripts/bench_interactive.py http://127.0.0.1:8000 --with-load --check
+# Optional durable evidence; choose a path outside the checkout.
+./scripts/bench_interactive.py --history /tmp/azimuth-photo/interactive-history.jsonl
 ```
 
 Each measured cycle mimics real browsing: one library grid page, 20 `sm`
 thumbnails, one `md` preview, one search query, one rankings page. Warm-up
-cycles run but are excluded from p50/p95/p99. A JSON line is appended to
-`bench-runs/interactive-history.jsonl` so regressions are diffable over time.
+cycles run but are excluded from p50/p95/p99. The default run is fully read-only:
+it makes GET requests and writes no evidence. Pass `--history` to keep a JSONL
+record outside the checkout when a comparison needs to be retained.
 
 ### Load policy (stated choice)
 

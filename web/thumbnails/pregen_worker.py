@@ -22,6 +22,7 @@ log = logging.getLogger("thumbnails.pregen")
 
 PREGEN_YIELDED = -2
 PREGEN_PRESSURE = -3
+PREGEN_STORAGE_LIMITED = -4
 
 _PREGEN_DIAG = os.environ.get("PHOTOARCHIVE_PREGEN_DIAG", "").strip().lower() in {
     "1",
@@ -595,6 +596,7 @@ async def run_full_warm_batch(
     flush_write_queue,
     cache_metadata_backoff_active,
     full_tier_room,
+    background_original_cache_allowed,
     pregen_full_candidate_batch,
     reset_pregen_full_cursor,
     full_candidate_signature,
@@ -612,6 +614,8 @@ async def run_full_warm_batch(
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     if full_budget <= 0 or not cache_root:
         return 0
+    if not background_original_cache_allowed(cache_root):
+        return PREGEN_STORAGE_LIMITED
 
     if not await _flush_off_request_pool(flush_write_queue, prefetch_executor) and cache_metadata_backoff_active():
         return 0
@@ -900,6 +904,15 @@ async def run_prefetch_worker_loop(
                     set_pregen_state("paused", memory_pressure.PAUSE_MESSAGE)
                     no_progress_scan_passes = 0
                     await sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
+                    continue
+
+                if generated == PREGEN_STORAGE_LIMITED:
+                    set_pregen_state(
+                        "waiting",
+                        "Preview cache remains available; full originals are paused until disk space recovers.",
+                    )
+                    no_progress_scan_passes = 0
+                    await sleep(5)
                     continue
 
                 if generated == PREGEN_YIELDED:

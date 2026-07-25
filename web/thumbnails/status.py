@@ -1,4 +1,41 @@
+import time
 from collections.abc import Callable
+
+
+STALL_AFTER_SECONDS = 5 * 60
+
+
+def work_state(
+    pregen_state: dict,
+    *,
+    preview_remaining: int,
+    originals_remaining: int,
+    recent_rate: float,
+    now: float | None = None,
+) -> str:
+    """Describe whether cache work is progressing, waiting, or needs attention."""
+
+    if not bool(pregen_state.get("enabled")) or bool(pregen_state.get("manual_pause")):
+        return "idle"
+    if preview_remaining <= 0 and originals_remaining <= 0:
+        return "idle"
+
+    state = str(pregen_state.get("state") or "").lower()
+    if state in {"paused", "waiting", "error"}:
+        return "blocked"
+    if state != "running":
+        return "idle"
+
+    now = time.time() if now is None else now
+    last_progress = float(
+        pregen_state.get("last_progress_at")
+        or pregen_state.get("last_generated_at")
+        or pregen_state.get("started_at")
+        or 0.0
+    )
+    if last_progress > 0 and now - last_progress >= STALL_AFTER_SECONDS and recent_rate <= 0:
+        return "stalled"
+    return "active"
 
 
 def copy_disk_stats(disk: dict) -> dict:
@@ -247,20 +284,28 @@ def pregen_status(
     originals = original_status(stats, original_total, archive_estimates)
 
     recent_rate, overall_rate, diagnostics = pregen_rates()
-    thumbnail_rate = diagnostics.get("recent_thumbnails_written_per_min", 0.0)
-    preview_rate = max(recent_rate, overall_rate, thumbnail_rate / max(1, len(thumb_tiers)))
+    # ETA is a promise about images, not thumbnail files. A thumbnail may write
+    # several tiers, so using its write count (or a historic peak) overstates
+    # progress. Only a current image-completion rate earns an ETA.
+    preview_rate = recent_rate if recent_rate > 0 else 0.0
     eta_seconds = (
         int((preview_images_remaining / preview_rate) * 60)
         if preview_images_remaining > 0 and preview_rate > 0
         else None
     )
-    effective_rate = max(recent_rate, overall_rate)
+    effective_rate = recent_rate if recent_rate > 0 else 0.0
     original_eta_seconds = (
         int((originals["remaining"] / effective_rate) * 60)
         if remaining <= 0 and originals["remaining"] > 0 and effective_rate > 0
         else None
     )
     replacement_mode = any(phase["replacement_mode"] for phase in phases.values())
+    activity = work_state(
+        pregen_state,
+        preview_remaining=preview_images_remaining,
+        originals_remaining=originals["remaining"],
+        recent_rate=recent_rate,
+    )
     del pregen_background_decision, pregen_generate_batch_for_decision
 
     return {
@@ -275,6 +320,8 @@ def pregen_status(
         "originals_remaining": originals["remaining"],
         "recent_images_per_min": round(recent_rate, 2),
         "overall_images_per_min": round(overall_rate, 2),
+        "eta_rate_images_per_min": round(preview_rate, 2),
+        "work_state": activity,
         "recent_source_reads_per_min": round(diagnostics["recent_source_reads_per_min"], 2),
         "recent_thumbnails_written_per_min": round(diagnostics["recent_thumbnails_written_per_min"], 2),
         "recent_read_mbps": round(diagnostics["recent_read_mbps"], 2),

@@ -18,7 +18,13 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
-HISTORY = ROOT / "bench-runs" / "interactive-history.jsonl"
+# A benchmark should never dirty a checkout by default. Opt in to durable
+# evidence with --history (or AZIMUTH_BENCH_HISTORY) outside the checkout.
+HISTORY = (
+    Path(os.environ["AZIMUTH_BENCH_HISTORY"])
+    if os.environ.get("AZIMUTH_BENCH_HISTORY")
+    else None
+)
 VENV_PYTHON = WEB / ".venv" / "bin" / "python"
 
 if VENV_PYTHON.is_file() and Path(sys.executable).resolve() != VENV_PYTHON.resolve():
@@ -77,7 +83,7 @@ def _args() -> argparse.Namespace:
         "--history",
         type=Path,
         default=HISTORY,
-        help=f"JSONL history path (default: {HISTORY})",
+        help="optional JSONL evidence path; choose a location outside the checkout",
     )
     parser.add_argument(
         "--no-history",
@@ -136,13 +142,9 @@ def main() -> int:
         ],
     }, indent=2))
 
-    if not args.no_history:
+    if args.history is not None and not args.no_history:
         interactive.append_history(args.history, result)
-        try:
-            display = args.history.relative_to(ROOT)
-        except ValueError:
-            display = args.history
-        print(f"\nAppended {display}")
+        print("\nWrote the requested benchmark evidence.")
 
     if args.check and not result["budget_ok"]:
         print("\nFAIL: interactive latency budgets missed", file=sys.stderr)

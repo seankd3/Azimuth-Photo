@@ -1295,6 +1295,10 @@ def _bulk_tier_budgets() -> dict[str, int]:
     return pregen.bulk_tier_budgets(THUMB_TIERS, _background_tier_budget)
 
 
+def _background_original_cache_allowed(cache_root: str) -> bool:
+    return full_cache.background_original_cache_allowed(cache_root)
+
+
 def _full_tier_room(budget: int) -> int:
     return pregen.full_tier_room(
         budget,
@@ -1410,6 +1414,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         flush_write_queue=_flush_write_queue,
         cache_metadata_backoff_active=_cache_metadata_backoff_active,
         full_tier_room=_full_tier_room,
+        background_original_cache_allowed=_background_original_cache_allowed,
         pregen_full_candidate_batch=_pregen_full_candidate_batch,
         reset_pregen_full_cursor=_reset_pregen_full_cursor,
         full_candidate_signature=_full_candidate_signature,
