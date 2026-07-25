@@ -855,7 +855,15 @@ areas, but responsibility does not.
   non-Playwright rerun on post-Core head `d90d89f4a` finished with 18 failed,
   1,519 passed, 3 skipped, 2 deselected, and 399 passing subtests in 509.80
   seconds. Exact set comparison found the six recovery failures resolved, all
-  other 18 unchanged, and zero new failure identities.
+  other 18 unchanged, and zero new failure identities. The two deterministic
+  host-profile failures were then traced to stale test contracts rather than
+  runtime regressions: exact `main` contains both contradictions, while exact
+  `develop` predates the adaptive profile and does not contain the new AI
+  contract. Contract-only commit `50f1299a` now injects deterministic host
+  budgets and a 16-GiB profile; the two nodes plus profile/model/memory/runtime
+  coverage passed 51 tests with one mounted-corpus skip, and quick is green.
+  The complete non-Playwright gate has not yet been rerun, so 18 remains the
+  last complete-gate baseline rather than a claimed current failure count.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -1000,6 +1008,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 release audit | Clean-source release evidence | Fresh Windows install passed; no accepted clean-clone build, upgrade/rollback/restore matrix, tag, or remote green run | Reproducible clean clone through signed clean-download smoke and recovery matrix | `blocked` |
 | 2026-07-25 REL-01/REL-02 gate | Complete non-Playwright pytest | 1,533 selected: 24 failed, 1,507 passed, 3 skipped, 2 deselected, 399 subtests passed in 560.64 s | Zero failures before any cohort merge | `blocked` |
 | 2026-07-25 post-Core gate on `d90d89f4a` | Complete non-Playwright pytest | 18 failed, 1,519 passed, 3 skipped, 2 deselected, 399 subtests passed in 509.80 s; exactly six recovery failures resolved, zero new identities | Zero failures before customer-facing cohorts; preserve all six recovery closures | `blocked` |
+| 2026-07-25 host-profile contract remediation on `50f1299a` | Two deterministic host-profile failures plus related profile/model/memory/runtime coverage | Before: exact integrated nodes failed 2/2 on live Omarchy because tests asserted static 6,815,744,000-byte VRAM and one RAW worker; after: 51 passed, 1 mounted-corpus skip; Ruff and quick green; no product code changed | Preserve adaptive host authority across deterministic 8-/16-/64-GiB and known-VRAM fixtures; complete non-Playwright gate must confirm both identities closed | `active` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1080,7 +1089,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
 | BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
 | BUG-CLEANCLONE-01 | `parked` / P0 | Release | Fresh Windows install is proved, but no reproducible clean-clone build or upgrade/rollback/restore matrix is accepted | Disposable clean-source build and cross-platform install/recovery matrix with exact receipts |
-| BUG-HOSTPROFILE-01 | `active` / P1 | Core | Two deterministic exact-`main` tests disagree with live host-profile defaults: model VRAM budget is 7,559,142,440 versus static 6,815,744,000, and a below-24-GiB test expects one demosaic worker while detection returns two | One host-profile authority, deterministic mocked 16-GiB/known-VRAM fixtures, and explicit live-host policy tests |
+| BUG-HOSTPROFILE-01 | `active` / P1 | Core | Root cause is two stale exact-`main` test contracts: unset model budgets were changed to adaptive host values while the test retained static fallback constants, and adaptive cgroup-aware RAW sizing replaced the raw-physical-memory one-worker threshold without updating that assertion. Exact `develop` predates the adaptive profile and lacks the new AI contract. Contract-only commit `50f1299a` injects deterministic host budgets and a 16-GiB profile; 51 related tests passed, 1 mounted-corpus test skipped, and quick is green with no runtime change | Complete non-Playwright rerun closes both failure identities; retain deterministic 8-/16-/64-GiB and known-VRAM policy coverage. Physical Windows profiles, the 64-GiB class, and host-probe fallback behavior remain unverified in this slice |
 | BUG-AI-OWNER-01 | `active` / P0 | Core | Deterministic exact-`main` search-model load failure leaves manual owner `embeddings` held | Injected load failure releases model and manual owners and permits the next interactive/background action |
 | BUG-PREGEN-WATCHDOG-01 | `active` / P0 | Core | Deterministic exact-`main` stall-watchdog test resets the executor twice despite fresh progress heartbeats | Slow-progress fixture completes with no cancellation/reset while a truly stalled fixture still recovers |
 | BUG-RUNTIME-02 | `active` / P0 | Core | Deterministic exact-`main` Develop-root test sends HDR, panorama, and RAW caches to `/home/sean/.cache/photoarchive/develop` while the selected disposable application root is elsewhere | All direct Develop modules resolve one selected Azimuth data root across new/legacy env precedence and never leak to a host-global cache |
@@ -1195,6 +1204,7 @@ not permission to merge it.
 | WIN-01/WIN-02 | `windows-install` / `f8da9949e` | PowerShell-safe Tauri CLI probe; branch proof tip | Proof complete; rerun integrated install matrix |
 | REL-01 | `main` / `458675e77` | Production fixes, Phase 1 rebrand compatibility, host/runtime work | Audited merge into isolated integration |
 | REL-01 | `develop` / `52742f941` | Collections/search/intelligence integration line | First parent of sprint integration |
+| BUG-HOSTPROFILE-01 | `sprint-integration` / `50f1299a` | Replaced two inherited machine-specific assertions with deterministic adaptive budget and 16-GiB RAW-worker contracts; no product code changed | Focused profile/model/memory/runtime matrix 51 passed, 1 mounted-corpus skip; Ruff and quick green; complete non-Playwright rerun pending |
 | RANK research | No implementation branch | Real-catalog latency, action/intelligence boundary, local-first contract | Preserve report; one future owner |
 | Quality foundation | No accepted commit | Complete pytest discovery, prospective ignores, docs/code-map truth | Start only after integration |
 | DESK-08 / `perf-people-map` | `origin/perf-people-map` / `d1f7e4cd0` | QA-5000 KPI receipt only; reported Map serialization attribution is not a code fix | Preserve receipt; remote is 679/3 divergent from `develop`, so never merge wholesale |
