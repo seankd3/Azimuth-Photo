@@ -725,8 +725,10 @@ areas, but responsibility does not.
 - **Desired outcome:** installer, engine, API, About, update manifest, tag, and
   changelog report one version; signed updates install safely.
 - **Current evidence:** the unsigned RC installer now proves current-user
-  installation and relaunch, but no signing, updater, tag, public download, or
-  release-channel proof exists.
+  installation and relaunch. The accepted integration head still reports
+  `0.1.0` in both Tauri and Cargo while the proved Windows branch artifact is
+  `1.0.0-rc.1`; no signing, updater, tag, public download, or release-channel
+  proof exists.
 - **Prerequisite:** signing/public-release decisions, green CI, WIN-01/WIN-02,
   clean upgrade drill.
 - **Boundary:** no public artifact before release gates; secrets never enter git.
@@ -830,9 +832,10 @@ areas, but responsibility does not.
   Infrastructure.
 - **Desired outcome:** the default unit gate collects unittest and pytest-native
   tests, excluding only explicitly marked slow/bench/Playwright work.
-- **Current evidence:** audit measured 1,423 unittest cases versus 1,539 pytest
-  total / 1,537 after bench deselection; about 114 selected pytest-only tests can
-  be missed by the current default.
+- **Current evidence:** the current paused head collects 1,425 tests through
+  unittest versus 1,539 selected by pytest from 1,541 collected (two bench
+  deselections). The non-Playwright selection is 1,533 of 1,535 collected.
+  Therefore 114 selected pytest tests can be missed by the current default.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -847,8 +850,10 @@ areas, but responsibility does not.
   Infrastructure.
 - **Desired outcome:** DB accidents, timestamped bench output, `.bak-*`, backups,
   status JSON, and generated client bundles stop appearing as new source debris.
-- **Current evidence:** production status contains these classes; tracked
-  historical artifacts also exist.
+- **Current evidence:** the current tree tracks 74 paths under
+  `web/.pytest-tmp/`, 13 database-like files, 15 `bench-runs/` paths, and three
+  receipt logs. Existing ignores do not contain `web/.pytest-tmp/` or
+  `bench-runs/`; ignoring `receipts/` does not untrack existing files.
 - **Prerequisite:** preservation inventory; quality-foundation approval.
 - **Boundary:** prospective ignore rules only; no deletion, `git rm`, or cleanup
   in this task.
@@ -878,9 +883,11 @@ areas, but responsibility does not.
 - **Desired outcome:** public source, docs, artifacts, and history contain no
   personal absolute paths, private IP/default servers, credentials, catalog
   facts, personal website-export paths, or recoverable private media.
-- **Current evidence:** audits reported these risk classes; current docs still
-  include a concrete Tailnet IP example and personal machine paths. Full
-  current-tree/history scan has not been accepted.
+- **Current evidence:** a bounded current-tree scan found `/home/sean/` in 35
+  files/125 lines, Windows user-path forms in three files/seven lines,
+  `/mnt/expansion/` in 76 files/119 lines, and private `100.x` HTTP(S) endpoints
+  in 15 files/18 lines. These are review candidates, not all confirmed leaks.
+  Tailnet-hostname coverage and full-history scanning were not completed.
 - **Prerequisite:** preserved backup, agreed redaction/history policy, clean
   release candidate.
 - **Boundary:** audit first; no history rewrite without explicit user approval
@@ -895,8 +902,12 @@ areas, but responsibility does not.
   Infrastructure.
 - **Desired outcome:** Linux and Windows gates run on the accepted SHA; tags
   produce reproducible artifacts and release notes.
-- **Current evidence:** workflows exist, but no local tag and no accepted proof
-  of a current green remote run or published release.
+- **Current evidence:** CI runs pytest only on Ubuntu/Python 3.12 plus a Node 22
+  syntax job; it does not build or test Windows, macOS, native desktop, Android,
+  install, upgrade, or restore. The tag workflow still publishes a legacy-named
+  Docker package and Linux frozen server; its signed Windows job is hard-disabled
+  with `if: false`. There are zero local tags and no accepted green remote run,
+  published release, SBOM, provenance, attestation, or signing proof.
 - **Prerequisite:** GitHub access/status, complete test truth, versions/signing,
   release-candidate SHA.
 - **Boundary:** no tag or public release as a substitute for missing CI.
@@ -909,8 +920,10 @@ areas, but responsibility does not.
   Infrastructure.
 - **Desired outcome:** clean clone/build/install/first-run, local/NAS library,
   backup/restore, upgrade, rollback, offline, and mixed-version paths are proven.
-- **Current evidence:** older RC checklist contains partial/stale baselines;
-  current Windows proof and integration are incomplete.
+- **Current evidence:** the Windows RC proves a fresh installed artifact, not a
+  reproducible clean-clone build. CI intends a clean Ubuntu checkout/install,
+  but no accepted remote run or clean-clone receipt was found, and no current
+  clean upgrade/rollback/restore matrix exists.
 - **Prerequisite:** REL-03/REL-04/REL-08 and WIN-04.
 - **Boundary:** disposable homes/catalog copies only; never production originals
   or catalog.
@@ -960,7 +973,9 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 Map/People profile | Complete Map response generation | Query layer fast; full-payload serialization dominates; absolute latency/bytes not accepted | Bounded byte-cache with exact-payload and invalidation proof; no feature filtering | `ready after integration` |
 | 2026-07-25 rename/recovery audit | Backup/list/restore focused suite | `test_system_backups.py`: 15 passed, 3 failed; migration/rebrand/runtime/restore-drill set: 28 passed, 3 failed, 1 skipped | Zero naming-generation discovery/retention/restore failures after `e518de33c`; retain all safety passes | `done awaiting integration` |
 | UI architecture covenant | Cull/Refine perceived response | Existing paths can poll or exceed 50 ms | Below 50 ms perceived; no spinner **covenant** | `active` |
-| 2026-07-25 test-discovery audit | Default selected automated coverage | 1,423 unittest vs 1,539 pytest total / 1,537 after bench deselection | Complete intended pytest unit selection | `parked` |
+| 2026-07-25 test-discovery audit | Default selected automated coverage | 1,425 unittest; pytest selects 1,539/1,541 after two bench deselections; 114-test gap; non-Playwright selects 1,533/1,535 | Complete intended pytest unit selection | `parked` |
+| 2026-07-25 release audit | Application release version | Current integration head: Tauri/Cargo `0.1.0`; proved Windows branch artifact: `1.0.0-rc.1` | One authoritative version across tag, manifest, installer, engine, API, About, and updater | `blocked` |
+| 2026-07-25 release audit | Clean-source release evidence | Fresh Windows install passed; no accepted clean-clone build, upgrade/rollback/restore matrix, tag, or remote green run | Reproducible clean clone through signed clean-download smoke and recovery matrix | `blocked` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1035,7 +1050,11 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RANK-04 | `parked` / P1 | Ranking | Dual leaves one stale survivor after a successful choice | Atomic two-new-photo behavioral and timing proof |
 | BUG-RANK-05 | `parked` / P1 | Ranking | Pair rows can be treated as independent evidence despite shared human action | One-action migration/projection and grouped-training proof |
 | BUG-RANK-06 | `parked` / P1 | Ranking | 100,469 active photos lacked embeddings and ranking signal in audit | Coverage/provenance report and full-catalog projection evaluation |
-| BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate omits pytest-only selected tests | Before/after collection receipt and green complete unit gate |
+| BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate selects 1,425 tests while pytest selects 1,539; 114 selected tests are omitted | Before/after collection receipt and green complete unit gate |
+| BUG-ARTIFACT-01 | `parked` / P1 | Release | Source tracks 74 pytest-temp paths, 13 database-like files, 15 benchmark-run paths, and three receipt logs; ignores do not prospectively contain all classes | Preserve/disposition inventory, no deletion in containment lane, and clean proof that new generated files remain untracked |
+| BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
+| BUG-CI-01 | `blocked` / P0 | Release | CI is Ubuntu/Python plus Node syntax only; signed Windows release is disabled and no accepted current remote green run exists | Accepted workflow run on release SHA with Windows build/install gates and immutable artifact receipts |
+| BUG-CLEANCLONE-01 | `parked` / P0 | Release | Fresh Windows install is proved, but no reproducible clean-clone build or upgrade/rollback/restore matrix is accepted | Disposable clean-source build and cross-platform install/recovery matrix with exact receipts |
 | BUG-LINT-01 | `ready after integration` / P1 | Release | Three current Ruff F401 errors block quick lint | Exact three-import atomic commit and Ruff green |
 | BUG-ROUTE-01 | `unverified` / P1 | Mobile | Mobile `writeRating()` targets nonexistent `/api/image/{id}/rating`; manual stars require product decision | Route/client decision, contract test, no conflict with Taste/Elo |
 | BUG-ROUTE-02 | `unverified` / P2 | Desktop | `/api/quality/scan` exists without a customer entry point for old stacks | Product decision and end-to-end scoring/recovery proof if built |
@@ -1051,7 +1070,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RECOVERY-04 | `ready after integration` / P0 | Core | An existing empty Azimuth data root wins over a populated prior root, hiding the populated catalog from normal resolution | Cross-platform split-root matrix with explicit conflict UI and no new catalog initialization while an unadopted catalog exists |
 | BUG-RECOVERY-05 | `ready after integration` / P0 | Core | Recovery can prepare a valid restore but current and Windows-branch code have no managed apply path; documentation requires terminal file moves | Installed-client stop/promote/restart/health/rollback journey using disposable catalogs and no terminal |
 | BUG-RECOVERY-06 | `unverified` / P0 | Core | Live backup owner marker names the prior catalog path while the active DB uses the Azimuth filename; exact-path ownership may refuse the next backup after rename | Read-only warning confirmation, scratch identity migration, and successful scheduled snapshot without weakening foreign-root refusal |
-| BUG-PRIV-01 | `unverified` / P0 | Release | Personal paths/IP/default-server and website/catalog export risk classes may exist in tree/history | Full current/history scan and clean release artifact review |
+| BUG-PRIV-01 | `unverified` / P0 | Release | Bounded current-tree scan found 35 files with `/home/sean/`, three with Windows user paths, 76 with `/mnt/expansion/`, and 15 with private `100.x` HTTP(S) endpoints; full-history and Tailnet-hostname coverage remain unknown | Classify every hit, complete current/history scan, and inspect clean release artifacts |
 | BUG-RUNTIME-01 | `active` / P0 | Core | Runtime databases, previews, models, backups, and venv coexist with source | Verified relocation/restore and source checkout stays runtime-clean |
 | BUG-REL-01 | `blocked` / P0 | Release | No accepted proof of current public CI, tag, or release | Green CI evidence, immutable tag, clean-download artifact smoke |
 | BUG-MAP-01 | `unverified` / P2 | Desktop | Map may ignore the active Similar scope | Product decision plus scope-consistency test |
