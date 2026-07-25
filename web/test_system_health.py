@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 import tempfile
 import time
@@ -303,6 +304,64 @@ class HealthRouteTests(unittest.TestCase):
         self.assertEqual(data["overall"], "ok")
         self.assertEqual(data["checks"][0]["id"], "catalog_db")
 
+    def test_summary_endpoint_returns_only_fleet_signals(self):
+        with mock.patch.object(
+            health,
+            "collect_health",
+            return_value={
+                "overall": "warn",
+                "checked_at": 123.0,
+                "checks": [
+                    health._check(
+                        id="catalog_db",
+                        label="Catalog database",
+                        status="ok",
+                        detail="private catalog detail",
+                    ),
+                    health._check(
+                        id="workers",
+                        label="Background workers",
+                        status="warn",
+                        detail="private worker detail",
+                    ),
+                ],
+            },
+        ):
+            response = self.client.get("/api/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "status": "warn",
+                "checked_at": 123.0,
+                "checks": {"catalog_db": "ok", "workers": "warn"},
+            },
+        )
+
+    def test_summary_timeout_keeps_refresh_running_off_request(self):
+        async def scenario():
+            gate = asyncio.Event()
+
+            async def slow_refresh():
+                await gate.wait()
+                return {"overall": "ok", "checked_at": 123.0, "checks": []}
+
+            with mock.patch.object(health_routes, "_refresh_health", slow_refresh):
+                started = time.perf_counter()
+                result = await health_routes._health_snapshot(initial_wait_seconds=0.05)
+                elapsed = time.perf_counter() - started
+                task = health_routes._health_refresh_task
+                self.assertEqual(result["overall"], "warn")
+                self.assertTrue(result["status_stale"])
+                self.assertLess(elapsed, 0.2)
+                self.assertIsNotNone(task)
+                self.assertFalse(task.cancelled())
+                gate.set()
+                await task
+
+        asyncio.run(scenario())
+
 
 class HealthAuthTests(unittest.TestCase):
     def test_owner_auth_required_on_live_app(self):
@@ -335,7 +394,10 @@ class HealthAuthTests(unittest.TestCase):
             response = client.get("/api/health/details")
             self.assertEqual(response.status_code, 401)
             self.assertIn("Owner authentication required", response.json().get("error", ""))
+            summary = client.get("/api/health")
+            self.assertEqual(summary.status_code, 401)
             self.assertNotIn("/api/health/details", owner_auth.PUBLIC_PATHS)
+            self.assertNotIn("/api/health", owner_auth.PUBLIC_PATHS)
         finally:
             settings.SETTINGS_PATH = old_settings
             settings._settings = None

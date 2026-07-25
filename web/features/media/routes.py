@@ -15,7 +15,6 @@ from data.repositories import images as image_repository
 from features.sync import preview_mirror, satellite
 from features.sync.prefetch import (
     ThumbPrefetcher,
-    _foreground_urllib_request as _urllib_request,
     _urllib_request as _background_urllib_request,
 )
 import thumbnails
@@ -32,7 +31,9 @@ _db_path: DbPathProvider | None = None
 _mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
-_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 2.0
+# Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a
+# named constant so tests/docs can assert the non-blocking contract.
+_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 0.0
 # Bound how long an interactive thumb request may wait on a cold decode.
 # Beyond this the decode keeps running in the shared inflight map; the client
 # gets a fast 204 and retries — never a 10s "library isn't responding" toast.
@@ -275,36 +276,19 @@ def _schedule_remote_media_prefetch(image, tier: str) -> None:
 
 
 async def _remote_media_response(image, tier: str) -> Response:
+    """Never await the hub on the request path — paint pending, fill behind.
+
+    Local cache hits are served before this runs. On miss, return the same
+    pending/204 the client already understands and enqueue a hub fetch; SWR
+    refresh picks the tile up when it lands. Hub mode never reaches here for
+    local files.
+    """
+
     hub = satellite.hub_url().rstrip("/")
     if not hub:
         return _remote_media_pending_response(tier)
-    remote_id = int(image["hub_image_id"])
-    endpoint = _remote_media_endpoint(remote_id, tier)
-    try:
-        status_code, response_headers, data = await asyncio.wait_for(
-            _urllib_request("GET", hub + endpoint, headers=satellite.hub_request_headers()),
-            timeout=_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS,
-        )
-    except Exception:
-        _schedule_remote_media_prefetch(image, tier)
-        return _remote_media_pending_response(tier)
-    if not 200 <= status_code < 300:
-        if status_code >= 500:
-            _schedule_remote_media_prefetch(image, tier)
-            return _remote_media_pending_response(tier)
-        return JSONResponse(
-            {"error": "Hub media unavailable", "reason": "hub_media_unavailable"},
-            status_code=status_code,
-        )
-    if not data:
-        _schedule_remote_media_prefetch(image, tier)
-        return _remote_media_pending_response(tier)
-    signature = _cache_remote_media(image, tier, data)
-    media_type = next(
-        (value for key, value in response_headers.items() if key.lower() == "content-type"),
-        "image/jpeg",
-    )
-    return Response(content=data, media_type=media_type, headers=_cache_headers(signature))
+    _schedule_remote_media_prefetch(image, tier)
+    return _remote_media_pending_response(tier)
 
 
 @router.get("/api/thumb/{size}/{image_id}")

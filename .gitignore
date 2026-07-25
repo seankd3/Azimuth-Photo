@@ -50,3 +50,6 @@ desktop/src-tauri/gen/
 android/local.properties
 
 node_modules/
+
+# local pregen diagnosis artifacts
+.diag/

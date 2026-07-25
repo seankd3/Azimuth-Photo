@@ -640,8 +640,26 @@ def _run_sync_job(
             with _runner_lock:
                 _process = None
             if _stop_requested:
+                # Intentional pause/stop (SIGTERM etc.) — not a vault failure.
                 break
             if exit_code != 0:
+                # Negative codes are signals (e.g. -15 SIGTERM). If the hub or
+                # operator killed rclone without going through stop_sync, still
+                # avoid permanent "bad" health for a clean signal death — record
+                # a soft pause message instead of last_error sticky poison.
+                if exit_code < 0:
+                    message = (
+                        f"Cloud Backup interrupted (signal {-exit_code}) "
+                        f"while syncing {tree_name}"
+                    )
+                    _set_runtime(
+                        state="idle",
+                        message=message,
+                        finished_at=time.time(),
+                        current_tree=None,
+                    )
+                    _clear_desired_after_job()
+                    return
                 message = f"rclone exited {exit_code} while syncing {tree_name}"
                 record_sync_failure(message)
                 _set_runtime(
@@ -770,6 +788,17 @@ def stop_sync() -> dict[str, Any]:
     with _runner_lock:
         alive = _worker_thread is not None and _worker_thread.is_alive()
         if not alive and _runtime.get("state") not in {"running", "waiting", "stopping"}:
+            # Idle stop: clear sticky failure so health is not permanently bad
+            # after an old SIGTERM / interrupted run.
+            if _runtime.get("last_error") or load_persisted_status().get("last_error"):
+                _set_runtime(last_error=None, state="idle", message="Cloud Backup idle")
+                try:
+                    current = load_persisted_status()
+                    current["last_error"] = None
+                    current["last_error_at"] = None
+                    _write_persisted_status(current)
+                except Exception:
+                    log.debug("cloud_backup failed to clear sticky error on idle stop", exc_info=True)
             return status_payload()
         _stop_requested = True
         _runtime["state"] = "stopping"

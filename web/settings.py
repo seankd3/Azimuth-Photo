@@ -4,17 +4,37 @@ import os
 import threading
 
 from core.runtime_paths import resolve_runtime_paths
+from core import env_names
 
 WEB_DIR = os.path.dirname(__file__)
 SETTINGS_PATH = resolve_runtime_paths().settings_file
 SETTINGS_VERSION = 2
-DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
 LEGACY_2B_PRESET_KEY = "qwen3-vl-embedding-2b"
+# Module-level strings kept for imports; real defaults resolve via host_profile.
+DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
 DEFAULT_CAPTION_MODEL_PRESET_KEY = "qwen2.5-vl-7b-instruct-bnb-4bit"
 
 
+def recommended_embed_preset_key() -> str:
+    try:
+        from core.host_profile import detect_host_profile
+
+        return detect_host_profile().recommended_embed_preset()
+    except Exception:
+        return DEFAULT_EMBED_MODEL_PRESET_KEY
+
+
+def recommended_caption_preset_key() -> str:
+    try:
+        from core.host_profile import detect_host_profile
+
+        return detect_host_profile().recommended_caption_preset()
+    except Exception:
+        return DEFAULT_CAPTION_MODEL_PRESET_KEY
+
+
 def _default_import_root() -> str:
-    return os.path.join(os.path.expanduser("~"), "Pictures", "photoArchive Imports")
+    return os.path.join(os.path.expanduser("~"), "Pictures", "Azimuth Imports")
 
 
 def _default_model_dir(model_id: str) -> str:
@@ -34,7 +54,7 @@ DEFAULT_SETTINGS = {
     "thumb_quality": 92,
     "ssd_cache_dir": _default_thumb_cache_dir(),
     "ssd_cache_gb": 100,
-    "memory_cache_gb": 0.5,
+    "memory_cache_gb": 0.5,  # overwritten by default_memory_cache_gb() when unset
     "cache_profile": "original_heavy",
     "background_thumb_workers": 6,
     "pregen_generate_batch": 16,
@@ -291,6 +311,32 @@ def _system_memory_gb() -> float | None:
         return None
 
 
+def default_memory_cache_gb() -> float:
+    """Automatic RAM thumb-cache size from detected hardware.
+
+    Satellite: min(25% of total RAM, 8GB), floor 512MB.
+    Hub: modest host_profile cache so small boxes stay calm and big ones
+    keep more of the working set hot.
+    """
+
+    try:
+        from features.sync import satellite
+
+        if not satellite.is_satellite_mode():
+            try:
+                from core.host_profile import detect_host_profile
+
+                return detect_host_profile().hub_memory_cache_gb()
+            except Exception:
+                return 0.5
+    except Exception:
+        return 0.5
+    total = _system_memory_gb()
+    if total is None or total <= 0:
+        return 0.5
+    return max(0.5, min(float(total) * 0.25, 8.0))
+
+
 def _clamp(value: int, minimum: int, maximum: int) -> int:
     return max(minimum, min(maximum, value))
 
@@ -375,7 +421,7 @@ def _raw_uses_legacy_2b_default(raw: dict) -> bool:
 
 
 def normalize_settings(raw: dict | None) -> dict:
-    normalized = _copy_settings(DEFAULT_SETTINGS)
+    normalized = _copy_settings(_apply_host_factory_defaults(DEFAULT_SETTINGS))
     if not isinstance(raw, dict):
         return normalized
 
@@ -406,13 +452,23 @@ def normalize_settings(raw: dict | None) -> dict:
                 }
             except (TypeError, ValueError):
                 pass
+        else:
+            raw = {**raw, "memory_cache_gb": default_memory_cache_gb()}
 
     if _settings_version(raw) < SETTINGS_VERSION and _raw_uses_legacy_2b_default(raw):
         raw = {**raw, "embed_model_preset": DEFAULT_EMBED_MODEL_PRESET_KEY}
 
     preset = str(raw.get("embed_model_preset", normalized.get("embed_model_preset", ""))).strip()
     if preset not in EMBED_MODEL_PRESETS:
-        preset = DEFAULT_EMBED_MODEL_PRESET_KEY
+        # No valid saved preset — pick one that fits this machine.
+        preset = recommended_embed_preset_key()
+        if preset not in EMBED_MODEL_PRESETS:
+            preset = DEFAULT_EMBED_MODEL_PRESET_KEY
+    elif "embed_model_preset" not in raw and "embed_model_id" not in raw:
+        # Virgin / factory settings dict: adapt to host instead of forcing 8B.
+        preset = recommended_embed_preset_key()
+        if preset not in EMBED_MODEL_PRESETS:
+            preset = DEFAULT_EMBED_MODEL_PRESET_KEY
     normalized["embed_model_preset"] = preset
     preset_config = EMBED_MODEL_PRESETS[preset]
     raw = {
@@ -422,7 +478,7 @@ def normalize_settings(raw: dict | None) -> dict:
         "embed_model_dim": preset_config["dimension"],
         "embed_model_dir": (
             _default_model_dir(preset_config["model_id"])
-            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            if env_names.env_get("MODELS_DIR")
             else raw.get("embed_model_dir")
             if raw.get("embed_model_id") == preset_config["model_id"]
             and raw.get("embed_model_dir")
@@ -434,7 +490,13 @@ def normalize_settings(raw: dict | None) -> dict:
         raw.get("caption_model_preset", normalized.get("caption_model_preset", ""))
     ).strip()
     if caption_preset not in CAPTION_MODEL_PRESETS:
-        caption_preset = DEFAULT_CAPTION_MODEL_PRESET_KEY
+        caption_preset = recommended_caption_preset_key()
+        if caption_preset not in CAPTION_MODEL_PRESETS:
+            caption_preset = DEFAULT_CAPTION_MODEL_PRESET_KEY
+    elif "caption_model_preset" not in raw and "caption_model_id" not in raw:
+        caption_preset = recommended_caption_preset_key()
+        if caption_preset not in CAPTION_MODEL_PRESETS:
+            caption_preset = DEFAULT_CAPTION_MODEL_PRESET_KEY
     normalized["caption_model_preset"] = caption_preset
     caption_preset_config = CAPTION_MODEL_PRESETS[caption_preset]
     raw = {
@@ -443,7 +505,7 @@ def normalize_settings(raw: dict | None) -> dict:
         "caption_model_revision": caption_preset_config["revision"],
         "caption_model_dir": (
             _default_model_dir(caption_preset_config["model_id"])
-            if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+            if env_names.env_get("MODELS_DIR")
             else raw.get("caption_model_dir")
             if raw.get("caption_model_id") == caption_preset_config["model_id"]
             and raw.get("caption_model_dir")
@@ -462,7 +524,7 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["embed_model_revision"] = revision or "main"
 
     normalized["ssd_cache_dir"] = _resolve_cache_dir(
-        os.environ.get("PHOTOARCHIVE_THUMB_CACHE_DIR")
+        env_names.env_get("THUMB_CACHE_DIR")
         or raw.get("ssd_cache_dir", normalized["ssd_cache_dir"]),
         _default_thumb_cache_dir(),
     )
@@ -489,7 +551,7 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["face_model_id"] = face_model_id or DEFAULT_SETTINGS["face_model_id"]
     normalized["face_model_dir"] = _resolve_cache_dir(
         _default_model_dir("insightface")
-        if os.environ.get("PHOTOARCHIVE_MODELS_DIR")
+        if env_names.env_get("MODELS_DIR")
         else raw.get("face_model_dir", normalized["face_model_dir"]),
         _default_model_dir("insightface"),
     )
@@ -632,6 +694,39 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["settings_version"] = SETTINGS_VERSION
 
     return normalized
+
+
+def _apply_host_factory_defaults(base: dict) -> dict:
+    """Fill factory defaults that depend on the live host."""
+    out = dict(base)
+    try:
+        from core.host_profile import detect_host_profile
+
+        profile = detect_host_profile()
+        out["pregen_generate_batch"] = profile.pregen_batch_size()
+        out["background_thumb_workers"] = profile.background_thumb_workers()
+        embed_key = recommended_embed_preset_key()
+        if embed_key in EMBED_MODEL_PRESETS:
+            preset = EMBED_MODEL_PRESETS[embed_key]
+            out["embed_model_preset"] = embed_key
+            out["embed_model_id"] = preset["model_id"]
+            out["embed_model_revision"] = preset["revision"]
+            out["embed_model_dim"] = preset["dimension"]
+            out["embed_model_dir"] = _default_model_dir(preset["model_id"])
+            out["embed_batch_size"] = profile.embed_batch_size(embed_key)
+        cap_key = recommended_caption_preset_key()
+        if cap_key in CAPTION_MODEL_PRESETS:
+            cpreset = CAPTION_MODEL_PRESETS[cap_key]
+            out["caption_model_preset"] = cap_key
+            out["caption_model_id"] = cpreset["model_id"]
+            out["caption_model_revision"] = cpreset["revision"]
+            out["caption_model_dir"] = _default_model_dir(cpreset["model_id"])
+            out["caption_model_quantization"] = cpreset["quantization"]
+            out["caption_prompt_version"] = cpreset["prompt_version"]
+        out["memory_cache_gb"] = default_memory_cache_gb()
+    except Exception:
+        pass
+    return out
 
 
 def load_settings(force: bool = False) -> dict:

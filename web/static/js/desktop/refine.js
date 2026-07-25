@@ -137,11 +137,38 @@ async function refreshPropagation() {
     }
 }
 
+let healsThisRender = 0;
+const HEAL_BUDGET = 24;
+
 function setImagesLoadedHandlers() {
+    healsThisRender = 0;
     for (const img of document.querySelectorAll('#refine-stage .ref-card img')) {
         const markLoaded = () => img.classList.add('loaded');
+        const heal = () => {
+            const card = img.closest('.ref-card');
+            const index = card ? Number(card.dataset.index) : NaN;
+            if (Number.isInteger(index)) healFailedCell(index);
+        };
         img.addEventListener('load', markLoaded, { once: true });
+        img.addEventListener('error', heal, { once: true });
         if (img.complete && img.naturalWidth > 0) markLoaded();
+        else if (img.complete && img.src) heal();
+    }
+}
+
+function healFailedCell(index) {
+    // A tile whose thumb failed to load must never sit as a blank card —
+    // swap in a probe-screened replacement; with none left, the honest
+    // skeleton stays (rare now that the pool is gated on servable files).
+    // The per-render budget bounds heal->swap->fail chains.
+    if (!open || healsThisRender >= HEAL_BUDGET) return;
+    healsThisRender += 1;
+    const next = takeReplacement();
+    if (next) {
+        swapCell(index, next);
+        maybeFillReplacements();
+    } else {
+        fillReplacements();
     }
 }
 
@@ -382,13 +409,21 @@ function swapCell(index, img) {
         card.classList.remove('replacing');
         if (image) image.classList.add('loaded');
     };
+    const fail = () => {
+        // Never present a failed load as loaded — heal with the next
+        // screened replacement instead of leaving a blank card.
+        card.classList.remove('replacing');
+        if (image) image.classList.remove('loaded');
+        healFailedCell(index);
+    };
     if (image) {
         image.classList.remove('loaded');
         image.alt = img.filename || '';
         image.addEventListener('load', finish, { once: true });
-        image.addEventListener('error', finish, { once: true });
+        image.addEventListener('error', fail, { once: true });
         image.src = imageUrl(img);
-        if (image.complete) finish();
+        if (image.complete && image.naturalWidth > 0) finish();
+        else if (image.complete) fail();
     } else {
         finish();
     }

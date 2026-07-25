@@ -10,7 +10,7 @@ from raw_thumb_ops import (
     demosaic_raw_for_thumbnail,
     demosaic_tier_jpegs as _demosaic_tier_jpegs_local,
     exiftool_raw_flip as _exiftool_raw_flip,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F401 - compatibility facade for thumbnails.__init__
     resize_to_long_side_exact,
     thumbnail_jpeg_bytes,
 )
@@ -98,6 +98,12 @@ def partition_raw_thumbnail_tiers(
         else:
             uncovered.append(size)
     return covered, uncovered
+
+
+# Still-frame thumbnail pipeline only. Videos live in the catalog for
+# playback/backup, but Pillow cannot decode them — skip quietly so bulk
+# pregen does not thrash retries on every .mp4/.mov in Personal Photos.
+VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
 
 
 def load_source_image(
@@ -274,7 +280,7 @@ def _encode_size_ladder(
     filepath: str,
     hot: bool,
     sizes: dict[str, int],
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     encode_and_cache_thumbnail,
     build_source_signature=None,
     size_signatures: dict[str, str] | None = None,
@@ -450,7 +456,7 @@ def generate_missing_thumbnails(
     sizes: dict[str, int],
     load_source_image,
     queue_orientation,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     build_source_signature,
     encode_and_cache_thumbnail,
     mark_source_missing_from_error,
@@ -622,7 +628,7 @@ def generate_thumbnail_set(
     load_source_image,
     load_source_image_from_bytes,
     queue_orientation,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
     encode_and_cache_thumbnail,
     cache_full_image_sync,
     cache_full_image_bytes_sync,
@@ -660,13 +666,18 @@ def generate_thumbnail_set(
     if not needed_sizes and not full_item:
         return metrics
 
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in VIDEO_THUMB_EXTENSIONS:
+        # Not a still image — do not count as a source-read failure or schedule retries.
+        log(f"Thumbnail skip video (no still pipeline): {filepath}")
+        return metrics
+
     img = None
     current = None
     file_bytes = source_data
     owned_sources: list[Image.Image] = []
     try:
         if needed_sizes:
-            ext = os.path.splitext(filepath)[1].lower()
             use_raw_split = (
                 raw_extensions is not None
                 and ext in raw_extensions
@@ -936,7 +947,7 @@ def load_embedding_image(
     memory_get,
     read_disk_thumbnail,
     load_source_image,
-    resize_to_long_side,
+    resize_to_long_side,  # noqa: F811 - injected facade dependency
 ) -> Image.Image | None:
     """Load an embedding input, preferring cached md thumbnails over originals."""
     data = memory_get_fast("md", image_id)

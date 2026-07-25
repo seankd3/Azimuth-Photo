@@ -129,18 +129,19 @@ class ModelPoolTests(unittest.TestCase):
 
     def test_pin_while_hot_blocks_bulk_eviction(self) -> None:
         # Budget 100: interactive search (70) + bulk captions (70) cannot both
-        # fit, but pin keeps search resident (load-anyway warning path).
+        # fit. Pin blocks eviction so bulk load is refused (no load-anyway OOM).
         self.pool.acquire(**self._fake("search", vram=70), interactive=True)
         self.clock.advance(1)
-        self.pool.acquire(**self._fake("captions", vram=70), interactive=False)
-        self.assertIn("search", self.pool.resident_names())
-        self.assertIn("captions", self.pool.resident_names())
+        with self.assertRaises(RuntimeError):
+            self.pool.acquire(**self._fake("captions", vram=70), interactive=False)
+        self.assertEqual(self.pool.resident_names(), ["search"])
         self.assertEqual(self.unloads, [])
 
-        # After pin window, next bulk load can evict search (LRU among unpinned).
+        # After pin window, bulk load can evict search and fit.
         self.clock.advance(11)
         self.pool.acquire(**self._fake("people", vram=70), interactive=False)
         self.assertNotIn("search", self.pool.resident_names())
+        self.assertIn("people", self.pool.resident_names())
         self.assertIn("search", self.unloads)
 
     def test_pressure_unload_all(self) -> None:

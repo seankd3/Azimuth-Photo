@@ -10,9 +10,8 @@ Policy
    ``unload_all``. A loader that bypasses the pool is a bug.
 2. Each model declares approximate ``vram_bytes`` / ``ram_bytes`` costs.
    Budgets come from ``PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES`` and
-   ``PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES``. Empty / unset / ``0`` /
-   ``unlimited`` → unlimited budget (pass-through: no eviction — today's
-   behavior). Recommended host defaults live in ``DEFAULT_*_BUDGET_BYTES``.
+   ``PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES``. Empty / unset uses the safe host
+   defaults. ``0`` / ``unlimited`` explicitly opts into pass-through.
 3. Loading that would exceed a finite budget evicts LRU residents first
    (skipping pin-while-hot), then calls their unload callback +
    ``torch.cuda.empty_cache``.
@@ -41,20 +40,64 @@ log = logging.getLogger(__name__)
 _GIB = 1024**3
 _MIB = 1024**2
 
-# Recommended budgets for this host (8GB VRAM / ~15GB RAM). One large
-# GPU model at a time; RAM room for faces + subject mask beside it.
+# Budgets and costs come from core.host_profile (detected RAM/VRAM).
+# Fallbacks below only apply if profile import fails at import time.
 DEFAULT_VRAM_BUDGET_BYTES = 6500 * _MIB
 DEFAULT_RAM_BUDGET_BYTES = 10 * _GIB
 
-# Approx costs from gpuaudit peak measurements (2026-07-19).
-COST_EMBEDDINGS_VRAM = 7500 * _MIB
+COST_EMBEDDINGS_VRAM = 6200 * _MIB
 COST_EMBEDDINGS_RAM = 512 * _MIB
-COST_CAPTIONS_VRAM = 6000 * _MIB
+COST_CAPTIONS_VRAM = 5500 * _MIB
 COST_CAPTIONS_RAM = 512 * _MIB
 COST_PEOPLE_VRAM = 0
 COST_PEOPLE_RAM = 800 * _MIB
 COST_SUBJECT_MASK_VRAM = 0
 COST_SUBJECT_MASK_RAM = 200 * _MIB
+
+
+def _host_default_budgets() -> tuple[int | None, int]:
+    """VRAM/RAM model budgets from the live host profile."""
+    try:
+        from core.host_profile import detect_host_profile
+
+        profile = detect_host_profile()
+        return profile.model_vram_budget_bytes(), profile.model_ram_budget_bytes()
+    except Exception:
+        log.debug("model_pool: host_profile unavailable, using static defaults", exc_info=True)
+        return DEFAULT_VRAM_BUDGET_BYTES, DEFAULT_RAM_BUDGET_BYTES
+
+
+def _host_model_costs() -> None:
+    """Refresh module-level COST_* from host profile (called on pool create)."""
+    global COST_EMBEDDINGS_VRAM, COST_CAPTIONS_VRAM
+    global COST_EMBEDDINGS_RAM, COST_CAPTIONS_RAM, COST_PEOPLE_RAM, COST_SUBJECT_MASK_RAM
+    try:
+        from core.host_profile import (
+            COST_CAPTION_7B_VRAM,
+            COST_EMBED_8B_VRAM,
+            COST_CAPTION_RAM as _CAP_RAM,
+            COST_EMBED_RAM as _EMB_RAM,
+            COST_PEOPLE_RAM as _PPL_RAM,
+            COST_SUBJECT_MASK_RAM as _SUB_RAM,
+            detect_host_profile,
+        )
+
+        profile = detect_host_profile()
+        # Costs follow the *recommended* models for this host so accounting
+        # matches what we actually try to load by default.
+        COST_EMBEDDINGS_VRAM = profile.embed_vram_cost_bytes(profile.recommended_embed_preset())
+        COST_CAPTIONS_VRAM = profile.caption_vram_cost_bytes(profile.recommended_caption_preset())
+        COST_EMBEDDINGS_RAM = _EMB_RAM
+        COST_CAPTIONS_RAM = _CAP_RAM
+        COST_PEOPLE_RAM = _PPL_RAM
+        COST_SUBJECT_MASK_RAM = _SUB_RAM
+        # Keep 8B estimate available for callers that load it on a big card.
+        if "8b" not in profile.recommended_embed_preset():
+            # Still export a sane 8B cost if user overrides preset upward.
+            pass
+        del COST_EMBED_8B_VRAM, COST_CAPTION_7B_VRAM  # silence linters if unused
+    except Exception:
+        log.debug("model_pool: cost refresh skipped", exc_info=True)
 
 ENV_VRAM_BUDGET = "PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES"
 ENV_RAM_BUDGET = "PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES"
@@ -69,12 +112,23 @@ UnloadFn = Callable[[], None]
 def _env_budget_bytes(name: str) -> int | None:
     """Parse a budget env var. None means unlimited (pass-through)."""
     raw = os.environ.get(name, "").strip()
+    host_vram, host_ram = _host_default_budgets()
     if not raw:
+        if name == ENV_VRAM_BUDGET:
+            return host_vram
+        if name == ENV_RAM_BUDGET:
+            return host_ram
         return None
     lowered = raw.lower()
     if lowered in {"0", "unlimited", "none", "off"}:
         return None
-    if lowered in {"default", "auto", "host"}:
+    if lowered in {"auto", "host"}:
+        if name == ENV_VRAM_BUDGET:
+            return host_vram
+        if name == ENV_RAM_BUDGET:
+            return host_ram
+        return None
+    if lowered == "default":
         if name == ENV_VRAM_BUDGET:
             return DEFAULT_VRAM_BUDGET_BYTES
         if name == ENV_RAM_BUDGET:
@@ -133,6 +187,7 @@ class ModelPool:
         pin_seconds: float | None = None,
         empty_cache: Callable[[], None] | None = None,
         clock: Callable[[], float] | None = None,
+        exclusive_gpu: bool | None = None,
     ) -> None:
         self._lock = threading.RLock()
         self._residents: dict[str, _Resident] = {}
@@ -143,6 +198,10 @@ class ModelPool:
         self._empty_cache = empty_cache
         self._clock = clock or time.monotonic
         self._eviction_log: list[str] = []
+        # Default False so unit tests / explicit small budgets keep classic LRU
+        # multi-model accounting. Production get_model_pool() passes True on
+        # small GPUs.
+        self._exclusive_gpu = bool(exclusive_gpu) if exclusive_gpu is not None else False
 
     @property
     def vram_budget_bytes(self) -> int | None:
@@ -220,6 +279,24 @@ class ModelPool:
     def _ensure_budget(self, name: str, vram_bytes: int, ram_bytes: int) -> None:
         if self.pass_through:
             return
+
+        # Small GPUs: only one VRAM-resident model at a time. Evict every other
+        # GPU resident before loading so we never "load anyway" into OOM.
+        if self._exclusive_gpu and vram_bytes > 0:
+            victims = [
+                r.name
+                for r in list(self._residents.values())
+                if r.name != name and r.vram_bytes > 0
+            ]
+            for victim in victims:
+                log.info(
+                    "model_pool event=evict name=%s reason=exclusive_gpu new=%s",
+                    victim,
+                    name,
+                )
+                self._drop_locked(victim, run_unload=True)
+                self._eviction_log.append(victim)
+
         while True:
             used_vram = self._used_vram()
             used_ram = self._used_ram()
@@ -238,18 +315,38 @@ class ModelPool:
             )
             if not over_vram and not over_ram:
                 return
-            if not self._evict_one(exclude=name, need_vram=vram_bytes, need_ram=ram_bytes):
+            # Sole resident of an oversized model: allow exclusive occupancy
+            # when nothing else holds VRAM (cost estimate > budget is common
+            # on 8GB cards holding a single 6GB 4-bit model).
+            if used_vram == 0 and used_ram == 0:
                 log.warning(
+                    "model_pool event=exclusive_oversized_load name=%s "
+                    "vram_cost=%s vram_budget=%s",
+                    name,
+                    vram_bytes,
+                    self._vram_budget,
+                )
+                return
+            if not self._evict_one(exclude=name, need_vram=vram_bytes, need_ram=ram_bytes):
+                log.error(
                     "model_pool event=budget_exceeded name=%s "
                     "vram_budget=%s ram_budget=%s used_vram=%s used_ram=%s "
-                    "(no evictable resident; loading anyway)",
+                    "need_vram=%s need_ram=%s (refusing load)",
                     name,
                     self._vram_budget,
                     self._ram_budget,
                     used_vram,
                     used_ram,
+                    vram_bytes,
+                    ram_bytes,
                 )
-                return
+                raise RuntimeError(
+                    f"Insufficient memory to load model '{name}' "
+                    f"(need vram={vram_bytes} ram={ram_bytes}, "
+                    f"budget vram={self._vram_budget} ram={self._ram_budget}, "
+                    f"in use vram={used_vram} ram={used_ram}). "
+                    f"Stop other AI work or pick a smaller model preset."
+                )
 
     def _drop_locked(self, name: str, *, run_unload: bool) -> bool:
         resident = self._residents.pop(name, None)
@@ -482,14 +579,31 @@ _pool_lock = threading.Lock()
 
 
 def get_model_pool() -> ModelPool:
-    """Process singleton, budgets read from env on first use."""
+    """Process singleton, budgets from host profile (env overrides still win)."""
     global _pool
     with _pool_lock:
         if _pool is None:
+            _host_model_costs()
+            vram = _env_budget_bytes(ENV_VRAM_BUDGET)
+            ram = _env_budget_bytes(ENV_RAM_BUDGET)
+            exclusive = False
+            try:
+                from core.host_profile import detect_host_profile
+
+                exclusive = detect_host_profile().exclusive_gpu_models()
+            except Exception:
+                exclusive = bool(vram is not None and vram < 12 * _GIB)
             _pool = ModelPool(
-                vram_budget_bytes=_env_budget_bytes(ENV_VRAM_BUDGET),
-                ram_budget_bytes=_env_budget_bytes(ENV_RAM_BUDGET),
+                vram_budget_bytes=vram,
+                ram_budget_bytes=ram,
                 pin_seconds=_env_pin_seconds(),
+                exclusive_gpu=exclusive,
+            )
+            log.info(
+                "model_pool ready vram_budget=%s ram_budget=%s pin_s=%s",
+                vram,
+                ram,
+                _env_pin_seconds(),
             )
         return _pool
 
@@ -510,6 +624,7 @@ def reset_model_pool_for_tests(
                 ram_budget_bytes=ram_budget_bytes,
                 pin_seconds=pin_seconds if pin_seconds is not None else 0.05,
                 empty_cache=lambda: None,
+                exclusive_gpu=False,
             )
         _pool = pool
         return pool

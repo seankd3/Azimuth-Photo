@@ -1,0 +1,479 @@
+#!/usr/bin/env node
+"use strict";
+
+const { spawn } = require("node:child_process");
+const fs = require("node:fs/promises");
+const net = require("node:net");
+const os = require("node:os");
+const path = require("node:path");
+
+const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
+const CHROME_BIN = process.env.CHROME_BIN || "google-chrome-stable";
+const CHROME_DEVTOOLS_TIMEOUT_MS = 45000;
+const PAGE_LOAD_TIMEOUT_MS = 15000;
+const PAGE_READY_TIMEOUT_MS = 10000;
+const PAGE_PATHS = ["/", "/d", "/m"];
+const FAILING_RESOURCE_TYPES = new Set(["Document", "Script", "Stylesheet", "Fetch", "XHR"]);
+
+const PAGE_SENTINELS = {
+    "/": ["#topbar", "#grid-flow", "#ctxbar", "#panel-left", "#panel-right"],
+    "/d": ["#topbar", "#grid-flow", "#ctxbar", "#panel-left", "#panel-right"],
+    "/m": ["#m-tabs", "#m-timeline", "#m-tabbar", "#m-scopebar"],
+};
+
+const PAGE_WORKFLOW_SELECTORS = {
+    "/": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
+    "/d": ["#scope-input", "#view-switch", "#btn-refine", "#system-btn", "#loupe", "#refine"],
+    "/m": ["#m-zoomctl", "#m-scrub", "#m-sel-actions", "#m-viewer", "#m-toast"],
+};
+
+const VISIBLE_PAGE_STATE_SCRIPT = `(() => {
+    const defineGetter = (target, property, value) => {
+        try {
+            Object.defineProperty(target, property, {
+                configurable: true,
+                get: () => value,
+            });
+        } catch (_error) {
+            // Headless smoke only needs this as a best-effort visibility nudge.
+        }
+    };
+    defineGetter(Document.prototype, "hidden", false);
+    defineGetter(Document.prototype, "visibilityState", "visible");
+    if (globalThis.document) {
+        defineGetter(globalThis.document, "hidden", false);
+        defineGetter(globalThis.document, "visibilityState", "visible");
+    }
+})();`;
+
+function usage() {
+    console.error("Usage: photoarchive-browser-smoke [--base-url URL]");
+}
+
+function parseArgs(argv) {
+    let baseUrl = DEFAULT_BASE_URL;
+    for (let index = 0; index < argv.length; index += 1) {
+        const arg = argv[index];
+        if (arg === "--base-url") {
+            baseUrl = argv[index + 1];
+            index += 1;
+        } else if (arg === "--help" || arg === "-h") {
+            usage();
+            process.exit(0);
+        } else {
+            usage();
+            throw new Error(`Unknown argument: ${arg}`);
+        }
+    }
+    if (!baseUrl) {
+        throw new Error("--base-url requires a URL");
+    }
+    return { baseUrl: baseUrl.replace(/\/+$/, "") };
+}
+
+function wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function timeout(ms, message) {
+    return new Promise((_, reject) => {
+        setTimeout(() => reject(new Error(message)), ms);
+    });
+}
+
+async function findFreePort() {
+    return new Promise((resolve, reject) => {
+        const server = net.createServer();
+        server.once("error", reject);
+        server.listen(0, "127.0.0.1", () => {
+            const address = server.address();
+            server.close(() => resolve(address.port));
+        });
+    });
+}
+
+async function waitForDebugger(port, child, launchError, stderr) {
+    const endpoint = `http://127.0.0.1:${port}/json/version`;
+    const started = Date.now();
+    while (Date.now() - started < CHROME_DEVTOOLS_TIMEOUT_MS) {
+        if (launchError.error) {
+            throw launchError.error;
+        }
+        if (child.exitCode !== null) {
+            throw new Error(`Chrome exited before DevTools was ready.\n${stderr.text.trim()}`);
+        }
+        try {
+            const response = await fetch(endpoint);
+            if (response.ok) {
+                const version = await response.json();
+                if (version.webSocketDebuggerUrl) {
+                    return version.webSocketDebuggerUrl;
+                }
+            }
+        } catch (_error) {
+            // Chrome is still starting.
+        }
+        await wait(100);
+    }
+    throw new Error(`Timed out waiting for Chrome DevTools at ${endpoint}`);
+}
+
+async function launchChrome() {
+    if (typeof fetch !== "function") {
+        throw new Error("This smoke harness requires a Node runtime with built-in fetch support.");
+    }
+    if (typeof WebSocket !== "function") {
+        throw new Error("This smoke harness requires a Node runtime with built-in WebSocket support.");
+    }
+
+    const port = await findFreePort();
+    const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "photoarchive-browser-smoke-"));
+    const args = [
+        "--headless=new",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-background-networking",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--no-sandbox",
+        "--remote-debugging-address=127.0.0.1",
+        `--remote-debugging-port=${port}`,
+        `--user-data-dir=${userDataDir}`,
+        "about:blank",
+    ];
+
+    const child = spawn(CHROME_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
+    const launchError = { error: null };
+    const stderr = { text: "" };
+    child.once("error", (error) => {
+        launchError.error = error;
+    });
+    child.stderr.on("data", (chunk) => {
+        stderr.text = (stderr.text + chunk.toString()).slice(-4000);
+    });
+
+    try {
+        const wsUrl = await waitForDebugger(port, child, launchError, stderr);
+        return { child, userDataDir, wsUrl };
+    } catch (error) {
+        await stopChrome({ child, userDataDir });
+        throw error;
+    }
+}
+
+async function stopChrome(chrome) {
+    if (!chrome) {
+        return;
+    }
+    const { child, userDataDir } = chrome;
+    if (child && child.exitCode === null && child.signalCode === null) {
+        child.kill("SIGTERM");
+        const exited = await waitForExit(child, 2000);
+        if (!exited && child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+            await waitForExit(child, 2000);
+        }
+    }
+    if (userDataDir) {
+        await fs.rm(userDataDir, {
+            recursive: true,
+            force: true,
+            maxRetries: 5,
+            retryDelay: 100,
+        });
+    }
+}
+
+function waitForExit(child, ms) {
+    if (child.exitCode !== null || child.signalCode !== null) {
+        return Promise.resolve(true);
+    }
+    return Promise.race([
+        new Promise((resolve) => child.once("exit", () => resolve(true))),
+        wait(ms).then(() => false),
+    ]);
+}
+
+class CdpConnection {
+    constructor(socket) {
+        this.socket = socket;
+        this.nextId = 1;
+        this.pending = new Map();
+        this.listeners = new Set();
+        socket.addEventListener("message", (event) => this.handleMessage(event));
+        socket.addEventListener("close", () => this.rejectPending(new Error("Chrome DevTools socket closed")));
+        socket.addEventListener("error", () => this.rejectPending(new Error("Chrome DevTools socket error")));
+    }
+
+    static async connect(wsUrl) {
+        const socket = new WebSocket(wsUrl);
+        await new Promise((resolve, reject) => {
+            socket.addEventListener("open", resolve, { once: true });
+            socket.addEventListener("error", reject, { once: true });
+        });
+        return new CdpConnection(socket);
+    }
+
+    handleMessage(event) {
+        const text = typeof event.data === "string" ? event.data : Buffer.from(event.data).toString("utf8");
+        const message = JSON.parse(text);
+        if (message.id && this.pending.has(message.id)) {
+            const pending = this.pending.get(message.id);
+            this.pending.delete(message.id);
+            clearTimeout(pending.timer);
+            if (message.error) {
+                pending.reject(new Error(`${pending.method}: ${message.error.message}`));
+            } else {
+                pending.resolve(message.result || {});
+            }
+            return;
+        }
+        for (const listener of this.listeners) {
+            listener(message);
+        }
+    }
+
+    rejectPending(error) {
+        for (const pending of this.pending.values()) {
+            clearTimeout(pending.timer);
+            pending.reject(error);
+        }
+        this.pending.clear();
+    }
+
+    send(method, params = {}, sessionId = null, timeoutMs = 15000) {
+        const id = this.nextId;
+        this.nextId += 1;
+        const payload = { id, method, params };
+        if (sessionId) {
+            payload.sessionId = sessionId;
+        }
+        const request = JSON.stringify(payload);
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pending.delete(id);
+                reject(new Error(`${method} timed out`));
+            }, timeoutMs);
+            this.pending.set(id, { method, resolve, reject, timer });
+            this.socket.send(request);
+        });
+    }
+
+    onEvent(listener) {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    }
+
+    waitForEvent(method, sessionId, timeoutMs) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+                unsubscribe();
+                reject(new Error(`${method} timed out`));
+            }, timeoutMs);
+            const unsubscribe = this.onEvent((message) => {
+                if (message.method !== method) {
+                    return;
+                }
+                if (sessionId && message.sessionId !== sessionId) {
+                    return;
+                }
+                clearTimeout(timer);
+                unsubscribe();
+                resolve(message.params || {});
+            });
+        });
+    }
+
+    close() {
+        this.socket.close();
+    }
+}
+
+async function evaluate(cdp, sessionId, expression, description) {
+    const response = await cdp.send("Runtime.evaluate", {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+    }, sessionId);
+    if (response.exceptionDetails) {
+        const details = response.exceptionDetails;
+        const text = details.exception?.description || details.text || "evaluation failed";
+        throw new Error(`${description}: ${text}`);
+    }
+    return response.result?.value;
+}
+
+function readinessExpression(pagePath) {
+    return `(() => {
+        const selectors = ${JSON.stringify(PAGE_SENTINELS[pagePath] || [])};
+        const missing = selectors.filter((selector) => !document.querySelector(selector));
+        return {
+            ready: document.readyState !== "loading" && !!document.body && missing.length === 0,
+            readyState: document.readyState,
+            missing,
+            title: document.title,
+        };
+    })()`;
+}
+
+function workflowExpression(pagePath) {
+    return `(() => {
+        const selectors = ${JSON.stringify(PAGE_WORKFLOW_SELECTORS[pagePath] || [])};
+        const missing = selectors.filter((selector) => !document.querySelector(selector));
+        const bodyText = document.body ? document.body.innerText || "" : "";
+        const forbiddenText = [];
+        if (/\\bDeep Search\\b/i.test(bodyText)) forbiddenText.push("Deep Search");
+        const forbiddenSelectors = [
+            '[id*="deep-search" i]',
+            '[id*="deep_search" i]',
+            '[class*="deep-search" i]',
+            '[class*="deep_search" i]',
+            '[name*="deep_search" i]',
+            '[data-action*="deep-search" i]',
+        ];
+        const forbiddenUi = forbiddenSelectors
+            .flatMap((selector) => Array.from(document.querySelectorAll(selector)))
+            .map((el) => el.id || el.name || el.className || el.tagName)
+            .slice(0, 8);
+        return { ok: missing.length === 0 && forbiddenText.length === 0 && forbiddenUi.length === 0, missing, forbiddenText, forbiddenUi };
+    })()`;
+}
+
+async function waitForReady(cdp, sessionId, pagePath) {
+    const started = Date.now();
+    let last = null;
+    while (Date.now() - started < PAGE_READY_TIMEOUT_MS) {
+        last = await evaluate(cdp, sessionId, readinessExpression(pagePath), `${pagePath} readiness`);
+        if (last.ready) {
+            return last;
+        }
+        await wait(150);
+    }
+    throw new Error(`${pagePath} did not become ready: ${JSON.stringify(last)}`);
+}
+
+async function waitForExpression(cdp, sessionId, expression, description, timeoutMs = PAGE_READY_TIMEOUT_MS) {
+    const started = Date.now();
+    let last = null;
+    while (Date.now() - started < timeoutMs) {
+        last = await evaluate(cdp, sessionId, expression, description);
+        if (last?.ok) {
+            return last;
+        }
+        await wait(150);
+    }
+    throw new Error(`${description} timed out: ${JSON.stringify(last)}`);
+}
+
+async function verifyWorkflow(cdp, sessionId, pagePath) {
+    const result = await evaluate(cdp, sessionId, workflowExpression(pagePath), `${pagePath} workflow checks`);
+    if (!result?.ok) {
+        throw new Error(`${pagePath} workflow checks failed: ${JSON.stringify(result)}`);
+    }
+    return result;
+}
+
+function pageUrl(baseUrl, pagePath) {
+    return new URL(pagePath, `${baseUrl}/`).href;
+}
+
+function recordPageFailures(cdp, sessionId, failures) {
+    return cdp.onEvent((message) => {
+        if (message.sessionId !== sessionId) {
+            return;
+        }
+        if (message.method === "Runtime.exceptionThrown") {
+            const details = message.params?.exceptionDetails;
+            failures.push(details?.exception?.description || details?.text || "Uncaught page exception");
+        }
+        if (message.method === "Runtime.consoleAPICalled" && message.params?.type === "error") {
+            const text = (message.params.args || []).map((arg) => arg.value || arg.description || "").join(" ");
+            failures.push(text || "console.error");
+        }
+        if (message.method === "Network.responseReceived") {
+            const { response, type } = message.params || {};
+            if (response?.status >= 400 && FAILING_RESOURCE_TYPES.has(type)) {
+                failures.push(`${response.status} ${response.url}`);
+            }
+        }
+        if (message.method === "Network.loadingFailed") {
+            const { canceled, errorText, type } = message.params || {};
+            if (!canceled && FAILING_RESOURCE_TYPES.has(type)) {
+                failures.push(`${type} failed: ${errorText}`);
+            }
+        }
+    });
+}
+
+async function smokePage(cdp, baseUrl, pagePath) {
+    const failures = [];
+    const context = await cdp.send("Target.createBrowserContext");
+    const created = await cdp.send("Target.createTarget", {
+        url: "about:blank",
+        browserContextId: context.browserContextId,
+    });
+    const attached = await cdp.send("Target.attachToTarget", {
+        targetId: created.targetId,
+        flatten: true,
+    });
+    const sessionId = attached.sessionId;
+    const unsubscribe = recordPageFailures(cdp, sessionId, failures);
+
+    try {
+        await cdp.send("Runtime.enable", {}, sessionId);
+        await cdp.send("Log.enable", {}, sessionId);
+        await cdp.send("Network.enable", {}, sessionId);
+        await cdp.send("Page.enable", {}, sessionId);
+        await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: VISIBLE_PAGE_STATE_SCRIPT }, sessionId);
+
+        const loadEvent = cdp
+            .waitForEvent("Page.loadEventFired", sessionId, PAGE_LOAD_TIMEOUT_MS)
+            .catch((error) => error);
+        const navigation = await cdp.send("Page.navigate", { url: pageUrl(baseUrl, pagePath) }, sessionId);
+        if (navigation.errorText) {
+            throw new Error(`${pagePath} navigation failed: ${navigation.errorText}`);
+        }
+        const loaded = await Promise.race([
+            loadEvent,
+            timeout(PAGE_LOAD_TIMEOUT_MS, `${pagePath} load timed out`),
+        ]);
+        if (loaded instanceof Error) {
+            throw loaded;
+        }
+        const ready = await waitForReady(cdp, sessionId, pagePath);
+        await verifyWorkflow(cdp, sessionId, pagePath);
+        await wait(250);
+        if (failures.length > 0) {
+            throw new Error(`${pagePath} browser failures:\n- ${failures.join("\n- ")}`);
+        }
+        console.log(`page ok: ${pagePath} (${ready.title || "untitled"})`);
+    } finally {
+        unsubscribe();
+        await cdp.send("Target.closeTarget", { targetId: created.targetId }).catch(() => {});
+        await cdp.send("Target.disposeBrowserContext", { browserContextId: context.browserContextId }).catch(() => {});
+    }
+}
+
+async function main() {
+    const { baseUrl } = parseArgs(process.argv.slice(2));
+    let chrome = null;
+    let cdp = null;
+    try {
+        chrome = await launchChrome();
+        cdp = await CdpConnection.connect(chrome.wsUrl);
+        for (const pagePath of PAGE_PATHS) {
+            await smokePage(cdp, baseUrl, pagePath);
+        }
+        console.log(`Azimuth Photo browser smoke: PASS (${PAGE_PATHS.length} pages)`);
+    } finally {
+        if (cdp) {
+            cdp.close();
+        }
+        await stopChrome(chrome);
+    }
+}
+
+main().catch((error) => {
+    console.error(`Azimuth Photo browser smoke: FAIL\n${error.stack || error.message}`);
+    process.exitCode = 1;
+});

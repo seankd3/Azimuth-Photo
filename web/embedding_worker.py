@@ -281,20 +281,43 @@ def _unload_model(*, force: bool = False) -> asyncio.Task | None:
 
     Active interactive search pins the pool resident; pressure/pause/idle
     paths must not yank VRAM mid-turn. Shutdown passes ``force=True``.
+
+    Critical race: while a load is in-flight the pool has no resident yet.
+    A concurrent pause/pressure unload used to treat "not resident" as
+    "clear globals + release owners", which stole the in-flight load's
+    work-coordination leases. Retain then failed with
+    "Could not start search model residency heartbeat" and left a pinned
+    zombie model that could not be unloaded.
     """
     from core.model_pool import get_model_pool
+
+    global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
 
     pool = get_model_pool()
     if not force and pool.is_pinned("embeddings"):
         log.info("embedding_worker event=unload_blocked reason=pinned")
         return None
 
+    had_local = _model is not None
+    had_resident = "embeddings" in pool.resident_names()
+
     # Cancel first so we can return the task to callers that await it;
     # pool unload also cancels via _drop, but the task handle is needed here.
     residency_task = _cancel_search_model_residency_task()
-    if not pool.unload("embeddings", force=force):
-        # Drop without a second cancel — residency already cancelled above.
-        global _model, _loaded_model_dir, _loaded_model_id, _loaded_model_revision
+    unloaded = pool.unload("embeddings", force=force)
+    if unloaded:
+        # unload_fn (_drop_embedding_residency) already cleared globals + owners.
+        return residency_task
+
+    # Pinned after the early check (race) — leave ownership alone.
+    if not force and pool.is_pinned("embeddings"):
+        log.info("embedding_worker event=unload_blocked reason=pinned")
+        return residency_task
+
+    # Only clear globals/owners when we actually held a model. An in-flight
+    # load has neither locals nor a pool resident; releasing owners here
+    # would steal its leases.
+    if had_local or had_resident or _model is not None:
         _model = None
         _loaded_model_dir = None
         _loaded_model_id = None
@@ -390,6 +413,11 @@ def _start_search_model_residency_task() -> bool:
 
 
 def _retain_search_model_residency(config: dict, model_id: str) -> bool:
+    # Re-claim after a long model load. Concurrent pause/pressure unloads used
+    # to release leases while the pool had no resident yet; reclaiming here
+    # makes residency resilient to that race and to any other mid-load steal.
+    work_coordination.claim_manual_owner("embeddings")
+    work_coordination.claim_gpu_owner("embeddings")
     if work_coordination.lost_ownership("embeddings", gpu=True):
         _set_worker_status(
             "waiting_for_turn",
@@ -669,12 +697,21 @@ def _load_model(model_dir: str, model_id: str, interactive: bool = False):
         log.info(f"{model_id} loaded from {model_dir} device={device}")
         return model
 
+    try:
+        from core.host_profile import detect_host_profile
+
+        profile = detect_host_profile()
+        vram_cost = profile.embed_vram_cost_bytes(model_id)
+        ram_cost = COST_EMBEDDINGS_RAM
+    except Exception:
+        vram_cost = COST_EMBEDDINGS_VRAM
+        ram_cost = COST_EMBEDDINGS_RAM
     return get_model_pool().acquire(
         "embeddings",
         load_fn=_load,
         unload_fn=_drop_embedding_residency,
-        vram_bytes=COST_EMBEDDINGS_VRAM,
-        ram_bytes=COST_EMBEDDINGS_RAM,
+        vram_bytes=vram_cost,
+        ram_bytes=ram_cost,
         interactive=interactive,
     )
 
@@ -858,6 +895,8 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
             _loaded_model_revision = model_revision
             _clear_model_load_failure()
             if not _retain_search_model_residency(config, model_id):
+                # Force so pin-while-hot cannot leave a resident without a heartbeat.
+                _unload_model(force=True)
                 raise RuntimeError("Could not start search model residency heartbeat")
             loaded = True
             return True
@@ -867,7 +906,7 @@ async def _ensure_model_loaded_for_config(config: dict, reason: str) -> bool:
             return False
         finally:
             if not loaded:
-                _unload_model()
+                _unload_model(force=True)
 
 
 async def ensure_model_loaded_for_search() -> bool:
@@ -1345,11 +1384,12 @@ async def _run_embedding_worker_loop():
                             _loaded_model_revision = model_revision
                             _clear_model_load_failure()
                             if not _retain_search_model_residency(config, model_id):
+                                _unload_model(force=True)
                                 raise RuntimeError(
                                     "Could not start search model residency heartbeat"
                                 )
                         except Exception as exc:
-                            _unload_model()
+                            _unload_model(force=True)
                             _note_model_load_failure(model_dir, model_id, model_revision, exc)
                             await asyncio.sleep(min(MODEL_LOAD_FAILURE_RETRY_SECONDS, 30))
                             continue

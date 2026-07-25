@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from collections.abc import Awaitable, Callable
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 MAX_BATCH_IMAGE_IDS = 10_000
+ACTIVITY_STATUS_INITIAL_WAIT_SECONDS = 0.15
 
 
 def _batch_image_ids_too_large(image_ids) -> bool:
@@ -162,6 +164,44 @@ async def api_settings():
         get_refreshing=_get_refreshing,
         set_refreshing=_set_refreshing,
     )
+
+
+@router.get("/api/background-work/status")
+async def api_background_work_status():
+    """One bounded snapshot for the desktop and mobile activity widgets."""
+
+    from features.captions import routes as caption_routes
+
+    _configured()
+    ai_status, cache_status, people_status, captions = await asyncio.gather(
+        settings_status._bounded_status(
+            _build_ai_status(),
+            settings_status._stale_ai_status,
+            ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
+        ),
+        settings_status._bounded_status(
+            _build_cache_status(ahead=0),
+            settings_status._stale_cache_status,
+            ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
+        ),
+        settings_status._bounded_status(
+            _people_status_payload(),
+            settings_status._stale_people_status,
+            ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
+        ),
+        settings_status._bounded_status(
+            caption_routes.caption_status_payload(),
+            settings_status._stale_caption_status,
+            ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
+        ),
+    )
+    return {
+        "ai": ai_status,
+        "cache": cache_status,
+        "people": people_status,
+        "captions": captions,
+        "metadata": catalog_metadata.catalog_metadata_status(),
+    }
 
 
 @router.get("/api/ui/settings")

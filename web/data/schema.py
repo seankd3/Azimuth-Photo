@@ -233,6 +233,10 @@ CREATE TABLE IF NOT EXISTS comparisons (
 CREATE INDEX IF NOT EXISTS idx_images_status ON images(status);
 CREATE INDEX IF NOT EXISTS idx_images_content_hash
 ON images(content_hash) WHERE content_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_active_content_hash_size
+ON images(content_hash, file_size)
+WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL
+AND content_hash IS NOT NULL AND trim(content_hash) != '';
 CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id
 ON images(hub_image_id) WHERE hub_image_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_images_hub_remote
@@ -489,6 +493,53 @@ CREATE TABLE IF NOT EXISTS image_captions (
 
 CREATE INDEX IF NOT EXISTS idx_image_captions_image
 ON image_captions(image_id);
+
+CREATE TABLE IF NOT EXISTS image_understanding (
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    model_key TEXT NOT NULL,
+    visible_text TEXT NOT NULL DEFAULT '',
+    entities TEXT NOT NULL DEFAULT '[]',
+    attributes TEXT NOT NULL DEFAULT '{}',
+    search_text TEXT NOT NULL DEFAULT '',
+    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
+    PRIMARY KEY (model_key, image_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_understanding_image
+ON image_understanding(image_id);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS image_understanding_fts
+USING fts5(visible_text, entities, attributes, search_text, tokenize='unicode61');
+
+CREATE TRIGGER IF NOT EXISTS image_understanding_fts_ai
+AFTER INSERT ON image_understanding
+WHEN new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+BEGIN
+    DELETE FROM image_understanding_fts WHERE rowid = new.image_id;
+    INSERT INTO image_understanding_fts(rowid, visible_text, entities, attributes, search_text)
+    VALUES (new.image_id, new.visible_text, new.entities, new.attributes, new.search_text);
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_understanding_fts_ad
+AFTER DELETE ON image_understanding
+WHEN old.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+BEGIN
+    DELETE FROM image_understanding_fts WHERE rowid = old.image_id;
+END;
+
+CREATE TRIGGER IF NOT EXISTS image_understanding_fts_au
+AFTER UPDATE OF visible_text, entities, attributes, search_text, model_key ON image_understanding
+BEGIN
+    DELETE FROM image_understanding_fts
+    WHERE rowid IN (old.image_id, new.image_id)
+    AND (
+        old.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+        OR new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1)
+    );
+    INSERT INTO image_understanding_fts(rowid, visible_text, entities, attributes, search_text)
+    SELECT new.image_id, new.visible_text, new.entities, new.attributes, new.search_text
+    WHERE new.model_key = (SELECT model_key FROM caption_fts_model WHERE id = 1);
+END;
 
 CREATE TABLE IF NOT EXISTS image_tags (
     model_key TEXT NOT NULL,
@@ -1019,6 +1070,12 @@ COMPAT_INDEX_SQL = (
         "CREATE INDEX IF NOT EXISTS idx_images_content_hash "
         "ON images(content_hash) WHERE content_hash IS NOT NULL"
     ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_images_active_content_hash_size "
+        "ON images(content_hash, file_size) "
+        "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL "
+        "AND content_hash IS NOT NULL AND trim(content_hash) != ''"
+    ),
     "CREATE INDEX IF NOT EXISTS idx_comparisons_action_id ON comparisons(action_id)",
     "CREATE INDEX IF NOT EXISTS idx_comparisons_loser ON comparisons(loser_id)",
     "CREATE INDEX IF NOT EXISTS idx_images_source_id ON images(source_id)",
@@ -1232,6 +1289,8 @@ REQUIRED_TABLES = {
     "search_query_embeddings",
     "caption_fts_model",
     "image_captions",
+    "image_understanding",
+    "image_understanding_fts",
     "image_tags",
     "image_captions_fts",
     "caption_scan_images",
@@ -1385,6 +1444,7 @@ REQUIRED_INDEXES = {
     "idx_images_source_missing_rating_signal",
     "idx_images_active_visible_orientation_elo",
     "idx_images_visible_comparisons_elo",
+    "idx_images_active_content_hash_size",
     "idx_images_missing_file_ext_source_size",
     "idx_images_active_camera_sort_desc",
     "idx_images_active_gps_markers",
@@ -1392,6 +1452,7 @@ REQUIRED_INDEXES = {
     "idx_embeddings_by_model_image_id",
     "idx_search_query_embeddings_used",
     "idx_image_captions_image",
+    "idx_image_understanding_image",
     "idx_image_tags_model_tag_image",
     "idx_image_tags_image_model",
     "idx_caption_scan_images_status",

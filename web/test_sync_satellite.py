@@ -196,6 +196,28 @@ class SatelliteSyncTests(BackendTestCase):
         worker._clear_backoff()
         self.assertEqual(worker.status()["backoff_seconds"], 0)
 
+    async def test_hub_health_is_sampled_without_polling_every_cycle(self):
+        calls = []
+
+        async def request(method, url, *, body=None, headers=None):
+            calls.append((method, url))
+            return 200, {}, json.dumps({
+                "status": "warn",
+                "checks": {"workers": "warn", "catalog_db": "ok"},
+            }).encode()
+
+        worker = SyncWorker(db_path=__import__("db").DB_PATH, hub="http://hub", request=request)
+
+        await worker._refresh_hub_health()
+        await worker._refresh_hub_health()
+
+        self.assertEqual(calls, [("GET", "http://hub/api/health")])
+        self.assertEqual(worker.status()["hub_system_health"], "warn")
+        self.assertEqual(
+            worker.status()["hub_health_checks"],
+            {"workers": "warn", "catalog_db": "ok"},
+        )
+
     async def test_sync_chip_now_pause_resume_mutate_the_worker_state(self):
         class Worker:
             def __init__(self):

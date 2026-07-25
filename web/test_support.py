@@ -226,6 +226,10 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
 
     def _reset_shared_runtime_state(self):
         thumbnails._clear_memory_cache()
+        # Each test gets a fresh DB; a disk-path index built against an earlier
+        # test's DB would hide this test's cache rows from fast_disk_has.
+        from thumbnails import cache_entries as _tce
+        _tce._clear_disk_index()
         thumbnails._thumbnail_retry_after.clear()
         thumbnails._inflight.clear()
         media_warm._thumbnail_prefetch_inflight.clear()
@@ -310,6 +314,12 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             await conn.commit()
         finally:
             await conn.close()
+        # Honor the row=>file invariant the app enforces: a cache_entries row
+        # must point at a real file (admit-time gates stat it).
+        stub = os.path.join(self.tempdir.name, f"{size}-{image_id}.jpg")
+        if not os.path.exists(stub):
+            with open(stub, "wb") as fh:
+                fh.write(b"stub")
 
     def _stub_text_search(self, image_ids, scores):
         matrix = np.array([[score, 0.0] for score in scores], dtype=np.float32)

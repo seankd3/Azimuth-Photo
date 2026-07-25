@@ -57,8 +57,8 @@ async function boot() {
     initShortcutSheet();
     initKeyboard();
     initQuickGuide();
-    await initPanel();
     initLenses();
+    await initPanel();
     // Thumb Cache API on HTTPS/localhost; no-op on plain HTTP. Disable: ?pa_sw=0
     scheduleServiceWorkerRegistration();
 }

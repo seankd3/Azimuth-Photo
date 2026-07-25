@@ -94,3 +94,7 @@ Everything ships with a fallback so a half-migrated machine still boots:
 
 Claude auto-memory slugs (internal), git history, `elo_ratings.json`/`blacklist.json`
 artifacts, the `photoarchive` tag on old backups. Old GitHub URLs keep redirecting.
+
+## Status 2026-07-23
+
+Phase 1 **started in tree**: `core/env_names.py` (AZIMUTH_* first, PHOTOARCHIVE_* fallback), `core/rebrand_migrate.py` (catalog + Pictures dir renames), runtime_paths defaults use Azimuth Photo / azimuthphoto / azimuth.db with legacy fallbacks, `scripts/azimuth-*` scripts + `photoarchive-*` shims. Phase 2 (omarchy path + systemd) and Phase 3 (XPS field paths) still pending.

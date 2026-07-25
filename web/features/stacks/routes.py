@@ -13,6 +13,8 @@ from pydantic import BaseModel, Field
 
 from data.repositories import stacks as stack_repository
 from features.stacks import builders
+from features.stacks import identical
+from features.trash import service as trash_service
 
 
 router = APIRouter()
@@ -43,6 +45,10 @@ class RepresentativeBody(BaseModel):
 
 class RebuildBody(BaseModel):
     kinds: list[str] | None = Field(default=None, max_length=16)
+
+
+class IdenticalCleanupBody(BaseModel):
+    token: str = Field(min_length=1, max_length=64)
 
 
 def configure(*, db_path: DbPath, invalidate_rankings_cache: Invalidate | None = None) -> None:
@@ -116,6 +122,58 @@ async def api_stacks(kind: str = "", limit: int = 50, offset: int = 0):
 @router.get("/api/stacks/rebuild/status")
 async def api_stacks_rebuild_status():
     return {"rebuild_status": dict(_rebuild_status)}
+
+
+@router.get("/api/stacks/identical")
+async def api_identical_stacks(limit: int = 25, offset: int = 0):
+    return await asyncio.to_thread(
+        identical.list_candidates,
+        _configured_db_path(),
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/api/stacks/identical/status")
+async def api_identical_status():
+    return {"verification_status": identical.verification_status()}
+
+
+@router.get("/api/stacks/identical/summary")
+async def api_identical_summary():
+    return {"summary": await asyncio.to_thread(identical.candidate_summary, _configured_db_path())}
+
+
+@router.post("/api/stacks/identical/verify", status_code=202)
+async def api_verify_identical_stacks(background_tasks: BackgroundTasks):
+    token = identical.queue_verification()
+    if token is None:
+        return JSONResponse({"error": "Identical-file verification is already running"}, status_code=409)
+    background_tasks.add_task(identical.run_verification, _configured_db_path(), token)
+    return {"accepted": True, "verification_status": identical.verification_status()}
+
+
+@router.post("/api/stacks/identical/cleanup")
+async def api_cleanup_identical_stacks(body: IdenticalCleanupBody):
+    try:
+        image_ids, skipped_groups = await asyncio.to_thread(
+            identical.validated_cleanup_ids,
+            body.token,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    if not image_ids:
+        return JSONResponse(
+            {"error": "No verified copies are still safe to move", "skipped_groups": skipped_groups},
+            status_code=409,
+        )
+    result = await trash_service.trash_images(_configured_db_path(), image_ids)
+    result["skipped_groups"] = skipped_groups
+    result["requested"] = len(image_ids)
+    if result.get("trashed"):
+        _invalidate()
+    identical.finish_cleanup(body.token)
+    return result
 
 
 @router.get("/api/stacks/representatives")

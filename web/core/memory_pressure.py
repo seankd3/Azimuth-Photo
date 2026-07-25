@@ -8,10 +8,14 @@ Signal (periodic poll, not PSI watch):
   1. cgroup ``memory.current`` + ``memory.swap.current`` when readable
   2. else ``VmRSS`` + ``VmSwap`` from ``/proc/self/status``
   3. else ``VmRSS`` alone
+  4. **host** ``MemAvailable`` — roommates (grind, agents) count too
+  5. **startup calm** — after boot/restart, bulk waits until serve is proven
 
-Defaults sit under systemd ``MemoryHigh`` / ``MemoryMax`` (8G / 12G on
-this host) with headroom so normal browse (≈1G RSS + modest swap) stays
-calm. Existing ``PHOTOARCHIVE_MEMORY_*_BYTES`` env knobs still win.
+Defaults come from ``host_profile`` (cgroup limits or fraction-of-RAM)
+so any machine size shares one formula. Env knobs still win.
+
+No operator controls: intent (feature settings) is separate; permission is
+recomputed automatically from these signals.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import gc
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable
@@ -34,8 +39,9 @@ PAUSE_MESSAGE = "Paused: memory pressure"
 # Headroom under cgroup MemoryHigh / MemoryMax when deriving defaults.
 _HIGH_HEADROOM_BYTES = 2 * _GIB
 _MAX_HEADROOM_BYTES = 2 * _GIB
-_FALLBACK_SOFT_BYTES = 6 * _GIB
-_FALLBACK_HARD_BYTES = 10 * _GIB
+# Fallback when no cgroup limits: soft=55% / hard=72% of detected total RAM.
+_FALLBACK_SOFT_FRACTION = 0.55
+_FALLBACK_HARD_FRACTION = 0.72
 
 
 def _env_bytes(name: str, default: int) -> int:
@@ -110,31 +116,102 @@ def read_cgroup_limits() -> tuple[int | None, int | None]:
     )
 
 
-def _default_watermarks() -> tuple[int, int]:
-    """Soft/hard defaults with headroom under MemoryHigh / MemoryMax."""
+def _detect_total_ram_bytes() -> int | None:
+    """Total system RAM — psutil first, then sysconf."""
+
+    try:
+        import psutil
+
+        total = int(psutil.virtual_memory().total)
+        if total > 0:
+            return total
+    except Exception:
+        pass
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        phys_pages = os.sysconf("SC_PHYS_PAGES")
+        if page_size > 0 and phys_pages > 0:
+            return int(page_size) * int(phys_pages)
+    except (AttributeError, OSError, ValueError):
+        pass
+    return None
+
+
+def _default_watermarks() -> tuple[int, int, int]:
+    """Soft/hard/resume from host_profile (proportional headroom, any box size)."""
+    try:
+        from core.host_profile import detect_host_profile
+
+        return detect_host_profile().memory_watermarks()
+    except Exception:
+        log.debug("memory_pressure: host_profile unavailable", exc_info=True)
     high, maximum = read_cgroup_limits()
-    soft = (high - _HIGH_HEADROOM_BYTES) if high is not None else _FALLBACK_SOFT_BYTES
-    hard = (maximum - _MAX_HEADROOM_BYTES) if maximum is not None else _FALLBACK_HARD_BYTES
-    soft = max(2 * _GIB, int(soft))
-    hard = max(soft + _GIB, int(hard))
-    return soft, hard
+    if high is not None or maximum is not None:
+        soft = (high - _HIGH_HEADROOM_BYTES) if high is not None else None
+        hard = (maximum - _MAX_HEADROOM_BYTES) if maximum is not None else None
+        if soft is None and hard is not None:
+            soft = int(hard * _FALLBACK_SOFT_FRACTION / _FALLBACK_HARD_FRACTION)
+        if hard is None and soft is not None:
+            hard = int(soft * _FALLBACK_HARD_FRACTION / _FALLBACK_SOFT_FRACTION)
+        soft = max(1 * _GIB, int(soft or 1 * _GIB))
+        hard = max(soft + 256 * 1024 * 1024, int(hard or soft + 256 * 1024 * 1024))
+        resume = min(soft, max(soft * 85 // 100, soft - 512 * 1024 * 1024))
+        return soft, hard, resume
+
+    total = _detect_total_ram_bytes() or (16 * _GIB)
+    soft = max(1 * _GIB, int(total * _FALLBACK_SOFT_FRACTION))
+    hard = max(soft + 256 * 1024 * 1024, int(total * _FALLBACK_HARD_FRACTION))
+    resume = min(soft, max(soft * 85 // 100, soft - 512 * 1024 * 1024))
+    return soft, hard, resume
 
 
-_DEFAULT_SOFT, _DEFAULT_HARD = _default_watermarks()
+_DEFAULT_SOFT, _DEFAULT_HARD, _DEFAULT_RESUME = _default_watermarks()
 SOFT_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
 HARD_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_HARD_BYTES", _DEFAULT_HARD)
 RESUME_WATERMARK_BYTES = _env_bytes(
     "PHOTOARCHIVE_MEMORY_RESUME_BYTES",
-    max(SOFT_WATERMARK_BYTES - (512 * 1024 * 1024), SOFT_WATERMARK_BYTES * 85 // 100),
+    _DEFAULT_RESUME,
 )
 
 # Idle model residency TTL (seconds). Used by workers / pool idle shed.
 MODEL_IDLE_TTL_SECONDS = _env_float("PHOTOARCHIVE_MODEL_IDLE_TTL_SECONDS", 120.0)
 
+# After restart/heal: bulk work waits this long so the library proves Ready
+# before models reload. Automatic — no operator step.
+STARTUP_CALM_SECONDS = _env_float("PHOTOARCHIVE_STARTUP_CALM_SECONDS", 120.0)
+
+# Host MemAvailable floors (the room, not only our cgroup). Below soft →
+# pause bulk; below hard → pause + shed models. Resume needs soft + slack.
+def _default_host_floors() -> tuple[int, int, int]:
+    total = _detect_total_ram_bytes() or (16 * _GIB)
+    # Loyal on shared boxes: keep ~12%/6% free before bulk runs.
+    soft = max(int(1.5 * _GIB), int(total * 0.12))
+    hard = max(int(0.75 * _GIB), int(total * 0.06))
+    hard = min(hard, soft - 256 * 1024 * 1024) if soft > hard else hard
+    if hard >= soft:
+        hard = max(256 * 1024 * 1024, soft // 2)
+    resume = soft + 512 * 1024 * 1024
+    return soft, hard, resume
+
+
+_DEFAULT_HOST_SOFT, _DEFAULT_HOST_HARD, _DEFAULT_HOST_RESUME = _default_host_floors()
+HOST_SOFT_AVAILABLE_BYTES = _env_bytes(
+    "PHOTOARCHIVE_HOST_SOFT_AVAILABLE_BYTES", _DEFAULT_HOST_SOFT
+)
+HOST_HARD_AVAILABLE_BYTES = _env_bytes(
+    "PHOTOARCHIVE_HOST_HARD_AVAILABLE_BYTES", _DEFAULT_HOST_HARD
+)
+HOST_RESUME_AVAILABLE_BYTES = _env_bytes(
+    "PHOTOARCHIVE_HOST_RESUME_AVAILABLE_BYTES", _DEFAULT_HOST_RESUME
+)
+
 _lock = threading.Lock()
 _paused = False
+_host_paused = False
+_startup_calm_until_mono = 0.0
 _rss_reader: Callable[[], int] | None = None
 _memory_reader: Callable[[], "MemoryReading"] | None = None
+_host_available_reader: Callable[[], int | None] | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +254,59 @@ class MemoryPressure:
         }
 
 
+
+def note_process_start(*, calm_seconds: float | None = None) -> None:
+    """Begin automatic startup calm (bulk seated until mono deadline)."""
+    global _startup_calm_until_mono
+    seconds = STARTUP_CALM_SECONDS if calm_seconds is None else max(0.0, float(calm_seconds))
+    _startup_calm_until_mono = time.monotonic() + seconds
+    log.info(
+        "worker=memory_pressure event=startup_calm_begin seconds=%.1f",
+        seconds,
+    )
+
+
+def startup_calm_remaining() -> float:
+    """Seconds of startup calm left (0 when clear)."""
+    return max(0.0, _startup_calm_until_mono - time.monotonic())
+
+
+def startup_calm_active() -> bool:
+    return startup_calm_remaining() > 0.0
+
+
+def set_host_available_reader(reader: Callable[[], int | None] | None) -> None:
+    """Inject host MemAvailable reader (tests). ``None`` restores live reads."""
+    global _host_available_reader
+    _host_available_reader = reader
+
+
+def read_host_available_bytes() -> int | None:
+    """Host free memory (MemAvailable / psutil). ``None`` if unreadable."""
+    if _host_available_reader is not None:
+        try:
+            value = _host_available_reader()
+            if value is None:
+                return None
+            return max(0, int(value))
+        except Exception:
+            return None
+    try:
+        import psutil
+
+        return max(0, int(psutil.virtual_memory().available))
+    except Exception:
+        pass
+    try:
+        with open("/proc/meminfo", encoding="utf-8") as fh:
+            for line in fh:
+                if line.startswith("MemAvailable:"):
+                    return max(0, int(line.split()[1]) * 1024)
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 def set_rss_reader(reader: Callable[[], int] | None) -> None:
     """Inject an RSS/pressure reader (tests). ``None`` restores live reads.
 
@@ -210,11 +340,15 @@ def set_memory_reader(reader: Callable[[], MemoryReading] | None) -> None:
 
 
 def reset_for_tests() -> None:
-    global _paused, _rss_reader, _memory_reader
+    global _paused, _host_paused, _startup_calm_until_mono
+    global _rss_reader, _memory_reader, _host_available_reader
     with _lock:
         _paused = False
+        _host_paused = False
+        _startup_calm_until_mono = 0.0
         _rss_reader = None
         _memory_reader = None
+        _host_available_reader = None
 
 
 def _read_proc_status_kb(keys: tuple[str, ...]) -> dict[str, int]:
@@ -286,13 +420,17 @@ def evaluate_memory_pressure(
     rss_bytes: int | None = None,
     pressure_bytes: int | None = None,
     swap_bytes: int | None = None,
+    host_available_bytes: int | None = None,
 ) -> MemoryPressure:
     """Classify combined pressure against soft/hard watermarks with hysteresis.
 
     ``rss_bytes`` remains a test/compat override for the *pressure* figure when
-    ``pressure_bytes`` is omitted (existing call sites).
+    ``pressure_bytes`` is omitted (existing call sites). Injected rss/pressure
+    paths skip host + startup-calm so unit tests stay deterministic.
     """
-    global _paused
+    global _paused, _host_paused
+
+    injected = pressure_bytes is not None or rss_bytes is not None
 
     if pressure_bytes is not None:
         reading = MemoryReading(
@@ -330,22 +468,76 @@ def evaluate_memory_pressure(
         else:
             _paused = False
             level = "ok"
-        paused = _paused
+        cgroup_paused = _paused
+
+    signal = reading.source
+    message = ""
+    unload = False
+    paused = cgroup_paused
+    if cgroup_paused:
+        unload = True
+        message = PAUSE_MESSAGE
+        level_out = level
+    else:
+        level_out = "ok"
+
+    # Startup calm: automatic post-boot/post-heal bulk seat (live path only).
+    if not injected and startup_calm_active():
+        paused = True
+        unload = False
+        level_out = "soft"
+        signal = "startup_calm"
+        message = "Paused: starting up"
+
+    # Host room: roommates count (live path, or explicit host override).
+    if not injected or host_available_bytes is not None:
+        if host_available_bytes is not None:
+            host_avail: int | None = max(0, int(host_available_bytes))
+        elif not injected:
+            host_avail = read_host_available_bytes()
+        else:
+            host_avail = None
+        host_soft = max(1, int(HOST_SOFT_AVAILABLE_BYTES))
+        host_hard = max(1, min(int(HOST_HARD_AVAILABLE_BYTES), host_soft))
+        host_resume = max(host_soft, int(HOST_RESUME_AVAILABLE_BYTES))
+        if host_avail is not None:
+            with _lock:
+                if host_avail < host_hard:
+                    _host_paused = True
+                    host_level = "hard"
+                elif host_avail < host_soft:
+                    _host_paused = True
+                    host_level = "soft"
+                elif _host_paused and host_avail < host_resume:
+                    host_level = "soft"
+                else:
+                    _host_paused = False
+                    host_level = "ok"
+                host_is_paused = _host_paused
+            if host_is_paused:
+                paused = True
+                unload = True
+                # Prefer host signal when it is the reason (or worse than cgroup).
+                if not cgroup_paused or host_level == "hard":
+                    level_out = host_level
+                    signal = "host"
+                    message = PAUSE_MESSAGE
 
     return MemoryPressure(
         rss_bytes=reading.rss_bytes,
         swap_bytes=reading.swap_bytes,
         pressure_bytes=pressure_value,
-        signal=reading.source,
+        signal=signal,
         soft_bytes=soft,
         hard_bytes=hard,
         resume_bytes=resume,
-        level=level if paused else "ok",
+        level=level_out if paused else "ok",
         pause_bulk=paused,
         # Soft pause must shed ML residency too — waiting at soft with models
         # still resident is not a stable wait state under a cgroup swap cap.
-        unload_models=paused,
-        message=PAUSE_MESSAGE if paused else "",
+        # Startup calm is the exception: nothing loaded yet; do not thrash.
+        unload_models=unload,
+        message=message if paused else "",
     )
 
 

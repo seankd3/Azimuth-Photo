@@ -80,6 +80,9 @@ Refine is the ranking overlay for the current scope.
 
 Stacks group related photos behind one cover.
 
+The review model is **Identical, Bursts, Versions, Similar, and Manual**. See
+[`STACKS_V2.md`](STACKS_V2.md) for the decision and verified-cleanup contract.
+
 - Builders detect burst sequences, export variants, and cross-source
   duplicates.
 - The grid can collapse stack members by default or show expanded stacks.

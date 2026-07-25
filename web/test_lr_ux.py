@@ -217,6 +217,17 @@ class LrStatusUxTests(unittest.IsolatedAsyncioTestCase):
         later = await lr_status.new_export_batch(self.db_path, since=time.time() + 10)
         self.assertIsNone(later)
 
+    async def test_bridge_status_stays_lightweight(self):
+        """Frequent sync heartbeats must not carry the ranked-photo snapshot."""
+
+        status = await lr_status.bridge_status_payload(self.db_path)
+
+        self.assertNotIn("shoot_context", status)
+        self.assertEqual(
+            set(status),
+            {"last_delta_at", "age_hours", "stale", "health_line", "new_exports"},
+        )
+
     async def test_health_line_after_24h(self):
         with lr_status._lock:
             lr_status._state["last_delta_at"] = time.time() - (25 * 3600)

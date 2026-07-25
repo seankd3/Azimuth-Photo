@@ -226,6 +226,107 @@ class PregenStallWatchdogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bulk_decode_budget.used_bytes, 0)
         self.assertGreaterEqual(len(resets), 1)
 
+    async def test_stall_watchdog_spares_batch_with_recent_progress(self):
+        """Slow-but-working batches must not be cancelled by the stall watchdog."""
+        from thumbnails import pregen_worker
+        from thumbnails.decode_budget import bulk_decode_budget
+
+        old_poll = pregen_worker.PREGEN_STALL_WATCHDOG_POLL_SECONDS
+        pregen_worker.PREGEN_STALL_WATCHDOG_POLL_SECONDS = 0.05
+        now = time.time()
+        status = {
+            "state": "paused",
+            "started_at": now - 30.0,
+            # last successful write is old — would false-positive without progress heartbeat
+            "last_generated_at": now - 30.0,
+            "last_progress_at": now,  # decode actively making progress
+            "message": "",
+        }
+        events: list[str] = []
+        prefetching = True
+        cancel_reasons: list[str] = []
+        stall_trips: list[str] = []
+
+        async def slow_working_batch(generate_batch=None):
+            events.append("batch-start")
+            # Keep progress fresh while "demosaicing" — beats every 50ms,
+            # well inside the 400ms stall window.
+            for _ in range(10):
+                status["last_progress_at"] = time.time()
+                await asyncio.sleep(0.05)
+            events.append("batch-done")
+            return 2
+
+        def set_state(state, message="", **_kwargs):
+            status["state"] = state
+            status["message"] = message
+            if "stalled batch" in message:
+                stall_trips.append(message)
+            if state == "running" and status["started_at"] is None:
+                status["started_at"] = time.time()
+            events.append(f"state:{state}")
+
+        async def sleeper(seconds):
+            await asyncio.sleep(min(float(seconds), 0.05))
+
+        async def stop_soon():
+            await asyncio.sleep(0.7)
+            nonlocal prefetching
+            prefetching = False
+
+        stopper = asyncio.create_task(stop_soon())
+        try:
+            await pregen_worker.run_prefetch_worker_loop(
+                is_prefetching=lambda: prefetching,
+                is_manual_paused=lambda: False,
+                is_manual_mode=lambda: True,
+                pregen_on_idle=lambda: True,
+                cache_target_total=lambda: asyncio.sleep(0, result=10),
+                current_monotonic=time.monotonic,
+                set_pregen_state=set_state,
+                sleep=sleeper,
+                flush_write_queue=lambda: True,
+                flush_orientation_updates=lambda: asyncio.sleep(0),
+                should_pause_for_priority=lambda: False,
+                background_decision=lambda: mock.Mock(
+                    pause=False,
+                    reason="manual",
+                    mode="manual",
+                    sleep_seconds=0.0,
+                    thumbnail_pause_seconds=0.0,
+                ),
+                generate_batch_for_decision=lambda _d: 8,
+                pregen_status=status,
+                disk_allocations={"sm": 64 * 1024 * 1024, "md": 0, "lg": 0, "full": 0},
+                full_tier="full",
+                background_tier_budget=lambda size: 64 * 1024 * 1024 if size == "sm" else 0,
+                run_pregen_bulk_batch=slow_working_batch,
+                run_full_warm_batch=lambda **_k: asyncio.sleep(0, result=0),
+                get_pregen_status=lambda _t: {
+                    "phases": {"sm": {"count": 0, "total": 10}},
+                    "originals": {"count": 0, "utilization_pct": 0.0},
+                },
+                no_progress_scan_limit=lambda: 12,
+                batch_pause_seconds=lambda: 0.01,
+                # Stall window >> progress heartbeat; old last_generated_at alone
+                # would false-positive without last_progress_at.
+                stall_watchdog_seconds=0.4,
+                reset_prefetch_executor=lambda: cancel_reasons.append("executor"),
+            )
+        finally:
+            await stopper
+            pregen_worker.PREGEN_STALL_WATCHDOG_POLL_SECONDS = old_poll
+
+        self.assertIn("batch-start", events)
+        self.assertIn("batch-done", events)
+        self.assertEqual(
+            cancel_reasons,
+            [],
+            "watchdog must not reset executor for a progressing batch",
+        )
+        self.assertEqual(stall_trips, [], "watchdog must not declare a stall")
+        self.assertEqual(bulk_decode_budget.used_bytes, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

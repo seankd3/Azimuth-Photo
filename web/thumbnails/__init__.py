@@ -86,6 +86,7 @@ _pregen_status = {
     "active_phase": None,
     "started_at": None,
     "last_generated_at": None,
+    "last_progress_at": None,
     "generated_this_session": 0,
     "last_error": "",
     "priority_scope": None,
@@ -180,6 +181,23 @@ def _cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
 
 def cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
     return _cleanup_stale_cache_temps(max_age_seconds=max_age_seconds)
+
+
+def sweep_missing_cache_entries(
+    *,
+    batch_size: int = 500,
+    max_batches: int | None = None,
+) -> dict:
+    """Drop phantom cache_entries rows whose files no longer exist."""
+
+    return thumbnail_maintenance.sweep_missing_cache_entries(
+        meta_lock=_meta_lock,
+        db_connect=_db_connect,
+        remove_cache_entry_locked=thumbnail_cache_entries._remove_cache_entry_locked,
+        invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
+        batch_size=batch_size,
+        max_batches=max_batches,
+    )
 
 
 SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
@@ -1211,13 +1229,16 @@ async def _pregen_bulk_candidate_batch(limit: int):
     # Anti-join against cache_entries so a long already-warmed prefix cannot
     # starve selection. Walk-all remains only for stale-replacement mode, where
     # rows still have cache_entries but need signature refresh.
+    #
+    # Preview bulk selects THUMB tiers only. Including ``full`` whenever the
+    # full allocation is non-zero pollutes the keyset with thumb-complete rows
+    # (esp. once full room is 0, or for RAWs that cannot warm full). Those
+    # unactionable rows advance the cursor inside tiny priority scan windows
+    # and strand real thumb-pending work behind false "no progress" passes.
+    # Originals use ``_pregen_full_candidate_batch`` / ``run_full_warm_batch``.
     missing_sizes = [
         size for size in THUMB_TIERS if _background_tier_budget(size) > 0
     ]
-    # Bulk waves also warm originals when the full tier has budget — keep those
-    # rows selectable even when every preview tier is already present.
-    if int(_disk_allocations.get(FULL_TIER, 0) or 0) > 0:
-        missing_sizes.append(FULL_TIER)
     if _replace_stale_thumbnails or not missing_sizes:
         return await pregen.candidate_batch(
             data_providers.get_db,
@@ -1371,6 +1392,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         record_pregen_result=_record_pregen_result,
         activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
         prefetch_workers=_prefetch_workers_count,
+        note_progress=lambda: _pregen_status.__setitem__("last_progress_at", _current_time()),
     )
 
 
@@ -1671,10 +1693,11 @@ def _pregen_background_decision():
 
 
 def _pregen_should_pause_for_priority() -> bool:
-    return pregen.should_pause_for_priority(
-        get_idle_seconds(),
-        settle_seconds=PREGENERATE_IDLE_SECONDS,
-    )
+    # Full-tilt (owner directive 2026-07-20): the server's bulk preview backfill
+    # is the one-and-only behavior and NEVER throttles for priority/activity.
+    # Interactivity is handled by the satellite's local cache + on-demand thumbnail
+    # requests that bypass the bulk gate — neither slows this backfill.
+    return False
 
 
 def current_prefetch_executor():

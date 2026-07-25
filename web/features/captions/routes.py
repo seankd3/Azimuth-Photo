@@ -1,5 +1,7 @@
 from collections.abc import Awaitable, Callable
+import asyncio
 import logging
+import time
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -8,6 +10,7 @@ from pydantic import BaseModel, Field
 import caption_worker
 import settings
 from core import capabilities
+from core.background import track_background_task
 
 
 router = APIRouter()
@@ -22,6 +25,14 @@ _get_image_caption: AsyncMaybeDictBuilder | None = None
 _owner_update_caption: AsyncMaybeDictBuilder | None = None
 _get_tags: AsyncListBuilder | None = None
 _invalidate_settings_response_cache: InvalidateStatus | None = None
+_caption_counts_cache: dict[str, object] = {
+    "data": None,
+    "key": None,
+    "expires": 0.0,
+}
+_caption_counts_refreshing = False
+_CAPTION_COUNTS_TTL_SECONDS = 10.0
+_CAPTION_COUNTS_INITIAL_WAIT_SECONDS = 0.05
 
 
 class CaptionBody(BaseModel):
@@ -44,6 +55,7 @@ def configure(
     _owner_update_caption = owner_update_caption
     _get_tags = get_tags
     _invalidate_settings_response_cache = invalidate_settings_response_cache
+    invalidate_caption_status_cache()
 
 
 def _configured() -> None:
@@ -55,6 +67,70 @@ def _caption_routes_configured() -> None:
     _configured()
     if _get_image_caption is None or _owner_update_caption is None or _get_tags is None:
         raise RuntimeError("Caption routes are not configured")
+
+
+def invalidate_caption_status_cache() -> None:
+    global _caption_counts_refreshing
+    _caption_counts_cache.update({"data": None, "key": None, "expires": 0.0})
+    _caption_counts_refreshing = False
+
+
+def _minimal_caption_counts(worker: dict) -> dict:
+    return {
+        "captioned": 0,
+        "pending_cached_images": int(worker.get("pending_cached_images") or 0),
+        "done": 0,
+        "error": 0,
+        "pending": 0,
+        "scan": {},
+    }
+
+
+def _schedule_caption_counts_refresh(caption_config: dict) -> asyncio.Task | None:
+    global _caption_counts_refreshing
+    if _caption_counts_refreshing:
+        return None
+    _caption_counts_refreshing = True
+    model_key = str(caption_config["model_key"])
+
+    async def refresh() -> None:
+        global _caption_counts_refreshing
+        try:
+            counts = await _get_caption_status_counts(caption_config=caption_config)
+            _caption_counts_cache.update({
+                "data": dict(counts or {}),
+                "key": model_key,
+                "expires": time.monotonic() + _CAPTION_COUNTS_TTL_SECONDS,
+            })
+        except Exception:
+            log.exception("worker=caption operation=status-refresh failed")
+        finally:
+            _caption_counts_refreshing = False
+
+    return track_background_task(refresh())
+
+
+async def _cached_caption_counts(caption_config: dict, worker: dict) -> tuple[dict, bool]:
+    model_key = str(caption_config["model_key"])
+    cached = _caption_counts_cache.get("data")
+    matches = _caption_counts_cache.get("key") == model_key
+    fresh = float(_caption_counts_cache.get("expires") or 0.0) > time.monotonic()
+    if not matches or not fresh:
+        refresh_task = _schedule_caption_counts_refresh(caption_config)
+        # Preserve already-cheap stored counts on a cold start, but never let a
+        # contended catalog turn status polling into foreground work. asyncio.wait
+        # leaves a slow refresh running instead of cancelling its SQLite cleanup.
+        if not matches and refresh_task is not None:
+            await asyncio.wait(
+                {refresh_task},
+                timeout=_CAPTION_COUNTS_INITIAL_WAIT_SECONDS,
+            )
+        cached = _caption_counts_cache.get("data")
+        matches = _caption_counts_cache.get("key") == model_key
+        fresh = float(_caption_counts_cache.get("expires") or 0.0) > time.monotonic()
+    if matches and isinstance(cached, dict):
+        return dict(cached), not fresh
+    return _minimal_caption_counts(worker), True
 
 
 async def caption_status_payload() -> dict:
@@ -72,7 +148,7 @@ async def caption_status_payload() -> dict:
             "message": capability["message"],
             "last_error": "",
         }
-    counts = await _get_caption_status_counts(caption_config=caption_config)
+    counts, counts_stale = await _cached_caption_counts(caption_config, worker)
     return {
         "capability": capability,
         "active": capability["available"]
@@ -89,6 +165,8 @@ async def caption_status_payload() -> dict:
         "gpu_policy": "single_gpu_owner_sequential_with_embeddings",
         "worker": worker,
         "counts": counts,
+        "counts_stale": counts_stale,
+        "status_stale": counts_stale,
     }
 
 

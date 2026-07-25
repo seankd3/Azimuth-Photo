@@ -1,6 +1,6 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
-    disconnectLightroom, getAiStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
+    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
     getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
     installAiModel, listDevices,
     pauseAiEmbeddings,
@@ -107,6 +107,11 @@ const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
+const compactNumberFormatter = new Intl.NumberFormat('en-US', {
+    notation: 'compact',
+    maximumFractionDigits: 1,
+});
+const fmtCompact = (n) => compactNumberFormatter.format(Number(n || 0)).toLowerCase();
 
 function bytes(value) {
     const n = Number(value) || 0;
@@ -370,6 +375,32 @@ function statusText(name, data) {
     return `${fmt(counts.detected_faces || counts.people || 0)} faces · ${worker.state || 'idle'}`;
 }
 
+function activityStatusText(name, data) {
+    if (data && data.status_stale) return 'Refreshing…';
+    if (name === 'AI') {
+        return `${fmtCompact(data.embedded)} / ${fmtCompact(data.total_images)} · ${data.worker_state || 'idle'}`;
+    }
+    if (name === 'Cache') {
+        const pregen = (data && data.pregen) || {};
+        const preview = pregen.preview || {};
+        return `${fmtCompact(preview.count)} / ${fmtCompact(preview.total)} · ${pregen.state || 'idle'}`;
+    }
+    if (name === 'Captions') {
+        const worker = (data && data.worker) || {};
+        const counts = (data && data.counts) || {};
+        return `${fmtCompact(counts.captioned)} done · ${fmtCompact(counts.pending_cached_images)} left · ${worker.state || 'idle'}`;
+    }
+    if (name === 'Metadata') {
+        const worker = (data && data.worker) || {};
+        const state = data && data.manual_pause ? 'paused' : worker.state || (data && data.active ? 'running' : 'idle');
+        const pending = Number((data && (data.pending || data.remaining)) || 0);
+        return `${state}${pending ? ` · ${fmtCompact(pending)} left` : ''}`;
+    }
+    const worker = (data && data.worker) || {};
+    const counts = (data && data.counts) || {};
+    return `${fmtCompact(counts.detected_faces || counts.people)} faces · ${worker.state || 'idle'}`;
+}
+
 function renderActivity() {
     const widget = document.getElementById('activity-widget');
     const pop = document.getElementById('activity-popover');
@@ -398,24 +429,18 @@ function renderActivity() {
         ['Captions', values.captions, captionStatus || {}],
         ['Metadata', values.metadata, metadataStatus || {}],
     ].map(([name, value, data]) => (
-        `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(statusText(name, data))}</span></div>`
+        `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(activityStatusText(name, data))}</span></div>`
     )).join('');
 }
 
 async function refreshActivity() {
     if (document.hidden) return;
-    const [ai, cache, people, captions, metadata] = await Promise.all([
-        getAiStatus().catch(() => null),
-        getCacheStatus().catch(() => null),
-        getPeopleStatus().catch(() => null),
-        getCaptionStatus().catch(() => null),
-        getMetadataStatus().catch(() => null),
-    ]);
-    aiStatus = ai || aiStatus;
-    cacheStatus = cache || cacheStatus;
-    peopleStatus = people || peopleStatus;
-    captionStatus = captions || captionStatus;
-    metadataStatus = metadata || metadataStatus;
+    const status = await getBackgroundWorkStatus().catch(() => null);
+    aiStatus = status?.ai || aiStatus;
+    cacheStatus = status?.cache || cacheStatus;
+    peopleStatus = status?.people || peopleStatus;
+    captionStatus = status?.captions || captionStatus;
+    metadataStatus = status?.metadata || metadataStatus;
     renderActivity();
     if (open) patchDrawerStatus();
 }
@@ -853,7 +878,14 @@ function settingToggle(field, label) {
         + '<i></i></label>';
 }
 
+function hubComputeSettingsVisible() {
+    if (remoteAccess && remoteAccess.hub_mode === false) return false;
+    if (pairStatus && pairStatus.mode && pairStatus.mode !== 'hub') return false;
+    return true;
+}
+
 function renderAiSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     const rawPresets = settingsPageData && settingsPageData.embedding_model_presets || [];
     const presets = rawPresets.map((preset) => ({
         value: preset.key,
@@ -920,6 +952,7 @@ function renderThumbnailSettings() {
 }
 
 function renderPeopleSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     return detailsSection('People recognition', 'Keep face grouping useful without changing your original photos.',
         `<div class="setting-status" data-setting-status="people">${esc(peopleLine())}</div>`
         + settingToggle('people_scan_enabled', 'Scan for people automatically')
@@ -934,6 +967,7 @@ function renderPeopleSettings() {
 }
 
 function renderCaptionSettings() {
+    if (!hubComputeSettingsVisible()) return '';
     const rawPresets = settingsPageData && settingsPageData.caption_model_presets || [];
     const presets = rawPresets.map((preset) => ({ value: preset.key, label: preset.label || preset.key }));
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
@@ -1050,7 +1084,7 @@ function renderCurrentSystemSurface() {
 
 export function renderSystemSections() {
     return {
-        library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + renderCloudBackup(catalog) + renderAbout(),
+        library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + (hubComputeSettingsVisible() ? renderCloudBackup(catalog) : '') + renderAbout(),
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),

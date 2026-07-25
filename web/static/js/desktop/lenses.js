@@ -55,7 +55,14 @@ function activate(lens) {
         syncChrome(next);
         return;
     }
-    if (current) LENSES[current].unmount();
+    if (current) {
+        LENSES[current].unmount();
+    } else {
+        // The HTML ships Grid active for first paint. If a tool lens wins the
+        // startup race before Grid mounts, clear that static class so two
+        // lenses can never remain visible together.
+        for (const view of document.querySelectorAll('.view.active')) view.classList.remove('active');
+    }
     current = next;
     syncChrome(next);
     LENSES[next].mount();

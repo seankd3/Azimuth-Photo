@@ -23,6 +23,20 @@ log = logging.getLogger("thumbnails.pregen")
 PREGEN_YIELDED = -2
 PREGEN_PRESSURE = -3
 
+_PREGEN_DIAG = os.environ.get("PHOTOARCHIVE_PREGEN_DIAG", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
+def _diag(message: str, **fields) -> None:
+    if not _PREGEN_DIAG:
+        return
+    details = " ".join(f"{key}={value!r}" for key, value in fields.items())
+    log.info("pregendiag %s %s", message, details)
+
 # Capture the real sleep at import time. Tests often replace `asyncio.sleep`
 # (via `thumbnails.asyncio.sleep = …`); the stall watchdog must not share that
 # hook or it busy-loops at 100% CPU and starves the worker.
@@ -104,6 +118,7 @@ async def run_pregen_bulk_batch(
     record_pregen_result,
     activity_burst_items: int,
     prefetch_workers: int = 1,
+    note_progress=None,
 ) -> int:
     """Warm previews with a continuously-refilled in-flight decode pump.
 
@@ -129,7 +144,13 @@ async def run_pregen_bulk_batch(
     full_room = {"bytes": full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
 
     pending: deque[dict] = deque()
+    # Limit actionable pages per batch, but tolerate a much wider desert of
+    # rows whose requested tiers are already warm.  Treating empty pages as
+    # actionable pages was the false-complete loop that stranded backfill.
     max_scan_batches = 4
+    max_empty_scan_batches = 64
+    candidates_scanned = 0
+    empty_scan_batches = 0
     loop = asyncio.get_running_loop()
     priority_processed_ids: set[int] = set()
     priority_scanned_batches = 0
@@ -197,6 +218,7 @@ async def run_pregen_bulk_batch(
     async def fetch_more(room_left: int) -> int:
         """Fill ``pending`` with up to ``room_left`` new candidates."""
         nonlocal priority_scanned_batches, scanned_batches, reached_end
+        nonlocal candidates_scanned, empty_scan_batches
         nonlocal priority_mode, normal_mode, candidates_exhausted, queued_total
         async with fetch_lock:
             added_total = 0
@@ -255,7 +277,10 @@ async def run_pregen_bulk_batch(
                     set_priority_scope(None)
                     normal_mode = True
 
-                if scanned_batches >= max_scan_batches:
+                if (
+                    scanned_batches >= max_scan_batches
+                    or empty_scan_batches >= max_empty_scan_batches
+                ):
                     break
 
                 rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
@@ -270,15 +295,30 @@ async def run_pregen_bulk_batch(
                         candidates_exhausted = True
                         break
 
+                candidates_scanned += len(rows)
+
                 items = await loop.run_in_executor(
                     prefetch_executor,
                     partial(collect_candidates, rows, room_left=need),
                 )
                 pending.extend(items)
                 added = len(items)
-                scanned_batches += 1
+                if added > 0:
+                    scanned_batches += 1
+                    empty_scan_batches = 0
+                else:
+                    empty_scan_batches += 1
                 added_total += added
                 queued_total += added
+                _diag(
+                    "bulk_scan_page",
+                    rows=len(rows),
+                    pending_found_page=added,
+                    pending_total=len(pending),
+                    empty_scan_batches=empty_scan_batches,
+                    scanned_batches=scanned_batches,
+                    scan_batch=candidate_scan_batch,
+                )
                 if len(rows) < candidate_scan_batch:
                     reset_pregen_bulk_cursor()
                     reached_end = True
@@ -296,8 +336,28 @@ async def run_pregen_bulk_batch(
     await fetch_more(seed_target)
 
     if not pending:
-        if scanned_batches >= max_scan_batches and not reached_end:
+        if (
+            (scanned_batches >= max_scan_batches or empty_scan_batches >= max_empty_scan_batches)
+            and not reached_end
+        ):
+            _diag(
+                "bulk_batch",
+                decision="no_progress_scan",
+                candidates_scanned=candidates_scanned,
+                candidates_pending_found=0,
+                empty_scan_batches=empty_scan_batches,
+                scanned_batches=scanned_batches,
+                generated_this_batch=0,
+            )
             return -1
+        _diag(
+            "bulk_batch",
+            decision="no_candidates",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=0,
+            reached_end=reached_end,
+            generated_this_batch=0,
+        )
         return 0
 
     completed = 0
@@ -305,7 +365,9 @@ async def run_pregen_bulk_batch(
     submitted = 0
     pressure_abort = False
     wave_timed_out = False
-    in_flight: dict[asyncio.Future, int] = {}
+    # Keep the budget epoch with each hold. A watchdog reset invalidates old
+    # holds, so their late completion cannot subtract from a newer batch.
+    in_flight: dict[asyncio.Future, tuple[int, int]] = {}
     flush_task: asyncio.Task | None = None
     top_up_task: asyncio.Task | None = None
     # Keep ~2× in-flight candidates buffered so DB scans overlap decode.
@@ -346,9 +408,11 @@ async def run_pregen_bulk_batch(
             pressure_abort = True
             return False
         weight = await bulk_decode_budget.acquire(_item_decode_estimate(item))
+        epoch = bulk_decode_budget.epoch
         if memory_pressure.evaluate_memory_pressure().pause_bulk:
             # Pressure rose while waiting on the decode budget.
-            await bulk_decode_budget.release(weight)
+            if bulk_decode_budget.release_nowait(weight, epoch=epoch):
+                bulk_decode_budget.wake_waiters_soon()
             memory_pressure.gate_bulk_work()
             pressure_abort = True
             return False
@@ -366,7 +430,9 @@ async def run_pregen_bulk_batch(
                 need_metadata=bool(item.get("need_metadata")),
             ),
         )
-        in_flight[task] = weight
+        in_flight[task] = (epoch, weight)
+        if note_progress is not None:
+            note_progress()
         submitted += 1
         return True
 
@@ -411,7 +477,7 @@ async def run_pregen_bulk_batch(
                     wave_timed_out = True
                     break
                 for task in done:
-                    weight = in_flight.pop(task)
+                    epoch, weight = in_flight.pop(task)
                     finished += 1
                     try:
                         completed += record_pregen_result(await task)
@@ -420,7 +486,10 @@ async def run_pregen_bulk_batch(
                     except Exception as exc:
                         log.warning("pregen pump item failed: %s", exc)
                     finally:
-                        await bulk_decode_budget.release(weight)
+                        if bulk_decode_budget.release_nowait(weight, epoch=epoch):
+                            bulk_decode_budget.wake_waiters_soon()
+                    if note_progress is not None:
+                        note_progress()
                     if finished % 8 == 0:
                         _kick_flush()
                     if memory_pressure.evaluate_memory_pressure().pause_bulk:
@@ -460,11 +529,15 @@ async def run_pregen_bulk_batch(
             with contextlib.suppress(asyncio.CancelledError):
                 await top_up_task
         # Drain cancelled in-flight so decode budget weights release.
-        for task, weight in list(in_flight.items()):
+        released_any = False
+        for task, (epoch, weight) in list(in_flight.items()):
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            await bulk_decode_budget.release(weight)
+            if bulk_decode_budget.release_nowait(weight, epoch=epoch):
+                released_any = True
             in_flight.pop(task, None)
+        if released_any:
+            bulk_decode_budget.wake_waiters_soon()
         if flush_task is not None:
             with contextlib.suppress(Exception):
                 await flush_task
@@ -472,11 +545,39 @@ async def run_pregen_bulk_batch(
             await _flush_off_request_pool(flush_write_queue, prefetch_executor)
 
     if pressure_abort:
+        _diag(
+            "bulk_batch",
+            decision="memory_pause",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return PREGEN_PRESSURE
     if wave_timed_out and completed <= 0:
+        _diag(
+            "bulk_batch",
+            decision="wave_timeout",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return -1
     if completed <= 0:
+        _diag(
+            "bulk_batch",
+            decision="no_progress_generate",
+            candidates_scanned=candidates_scanned,
+            candidates_pending_found=len(pending),
+            generated_this_batch=completed,
+        )
         return -1
+    _diag(
+        "bulk_batch",
+        decision="ran_batch",
+        candidates_scanned=candidates_scanned,
+        candidates_pending_found=len(pending),
+        generated_this_batch=completed,
+    )
     return completed
 
 
@@ -912,4 +1013,3 @@ async def run_prefetch_worker_loop(
         watchdog_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watchdog_task
-

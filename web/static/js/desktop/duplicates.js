@@ -1,13 +1,13 @@
 import {
-    createStack, getStackRebuildStatus, listStacks, rebuildStacks, restoreImages, setStackRepresentative,
-    previewThumbUrl, thumbUrl, trashImages, unstack, writeFlags,
+    cleanupIdenticalStacks, createStack, getIdenticalSummary, getIdenticalVerificationStatus, getStackRebuildStatus,
+    listIdenticalStacks, listStacks, rebuildStacks, restoreImages, setStackRepresentative,
+    previewThumbUrl, thumbUrl, trashImages, unstack, verifyIdenticalStacks, writeFlags,
 } from './api.js';
 import { applyFlags } from './selection.js';
 import {
     byId, emit, on, rememberImages, setActiveLens,
 } from './state.js';
 import { showToast } from './toast.js';
-import { confirmAction } from './trash.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
@@ -18,12 +18,13 @@ import {
 const DEFAULT_THRESHOLD = 0.95;
 const LIMIT = 100;
 const STACK_LIMIT = 50;
+const IDENTICAL_LIMIT = 25;
 const TIMEOUT_MS = 30000;
 const STACK_KINDS = [
-    ['all', '', 'All'],
+    ['identical', 'identical', 'Identical'],
     ['burst', 'burst', 'Bursts'],
-    ['variant', 'variant', 'Variants'],
-    ['crosssource', 'crosssource', 'Cross-source'],
+    ['versions', 'versions', 'Versions'],
+    ['similar', 'crosssource', 'Similar'],
     ['manual', 'manual', 'Manual'],
 ];
 
@@ -33,9 +34,11 @@ let open = false;
 let threshold = DEFAULT_THRESHOLD;
 let groups = [];
 let mode = 'stacks';
-let stackKind = '';
+let stackKind = 'identical';
 let stacks = [];
 let stackCounts = {};
+let identicalSummary = null;
+let identicalStatus = null;
 let stackTotal = 0;
 let stackOffset = 0;
 let stackDone = false;
@@ -45,8 +48,7 @@ let stackSentinel = null;
 let stackObserver = null;
 let loading = false;
 let stackRescanning = false;
-let bulkNonCoverIds = null;
-let bulkCountGeneration = 0;
+let identicalPollTimer = null;
 
 const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
@@ -149,6 +151,7 @@ function fieldValues(image) {
         size: bytesLabel(image?.file_size),
         date: dateLabel(image?.date_taken),
         folder: folderLabel(image),
+        source: image?.source_name || '—',
     };
 }
 
@@ -167,7 +170,7 @@ function largestFileKeeper(group) {
 function groupDiffs(group) {
     const values = group.images.map(fieldValues);
     const differs = {};
-    for (const field of ['filename', 'type', 'dimensions', 'size', 'date', 'folder']) {
+    for (const field of ['filename', 'type', 'dimensions', 'size', 'date', 'folder', 'source']) {
         differs[field] = new Set(values.map((value) => value[field])).size > 1;
     }
     const winners = {
@@ -357,11 +360,12 @@ function photoHtml(image, diff) {
         + '</button>'
         + '<div class="dupe-facts">'
         + `<div class="dupe-name ${diff.differs.filename ? 'diff' : 'muted'}" title="${esc(values.filename)}">${esc(values.filename)}</div>`
-        + `<div class="dupe-type ${metaClass('type', image, diff)}">${esc(values.type)}</div>`
-        + metaRow('dimensions', 'Dimensions', values.dimensions, image, diff)
-        + metaRow('size', 'File size', values.size, image, diff)
-        + metaRow('date', 'Taken', values.date, image, diff)
-        + metaRow('folder', 'Folder', values.folder, image, diff)
+        + (diff.differs.type ? `<div class="dupe-type ${metaClass('type', image, diff)}">${esc(values.type)}</div>` : '')
+        + (diff.differs.dimensions ? metaRow('dimensions', 'Dimensions', values.dimensions, image, diff) : '')
+        + (diff.differs.size ? metaRow('size', 'File size', values.size, image, diff) : '')
+        + (diff.differs.date ? metaRow('date', 'Taken', values.date, image, diff) : '')
+        + (diff.differs.folder ? metaRow('folder', 'Folder', values.folder, image, diff) : '')
+        + (diff.differs.source ? metaRow('source', 'Source', values.source, image, diff) : '')
         + '</div>'
         + '<div class="dupe-actions" aria-label="Flag photo">'
         + `<button data-flag="picked" data-id="${image.id}" aria-label="Pick ${esc(image.filename || image.id)}">${icon('star')}</button>`
@@ -505,8 +509,10 @@ function representativeId(stack) {
 
 function stackKindLabel(kind) {
     return ({
+        identical: 'Identical',
         burst: 'Burst',
         variant: 'Variant',
+        version: 'Version',
         crosssource: 'Cross-source',
         manual: 'Manual',
     })[kind] || 'Stack';
@@ -522,8 +528,8 @@ function renderStackSkeleton() {
 function renderKindChips() {
     const host = root.querySelector('#stacks-kind-chips');
     if (!host) return;
-    host.innerHTML = STACK_KINDS.map(([id, value, label]) => {
-        const count = id === 'all' ? stackCounts.all : stackCounts[value];
+    host.innerHTML = STACK_KINDS.map(([, value, label]) => {
+        const count = stackCounts[value];
         const active = stackKind === value;
         return `<button class="filter-pill ${active ? 'active' : ''}" data-kind="${esc(value)}">${esc(label)} <span>${count == null ? '…' : fmt(count)}</span></button>`;
     }).join('');
@@ -553,11 +559,12 @@ function stackPhotoHtml(stack, image, diff) {
         + '</button>'
         + '<div class="dupe-facts">'
         + `<div class="dupe-name ${diff.differs.filename ? 'diff' : 'muted'}" title="${esc(values.filename)}">${esc(values.filename)}</div>`
-        + `<div class="dupe-type ${metaClass('type', image, diff)}">${esc(values.type)}</div>`
-        + metaRow('dimensions', 'Dimensions', values.dimensions, image, diff)
-        + metaRow('size', 'File size', values.size, image, diff)
-        + metaRow('date', 'Taken', values.date, image, diff)
-        + metaRow('folder', 'Folder', values.folder, image, diff)
+        + (diff.differs.type ? `<div class="dupe-type ${metaClass('type', image, diff)}">${esc(values.type)}</div>` : '')
+        + (diff.differs.dimensions ? metaRow('dimensions', 'Dimensions', values.dimensions, image, diff) : '')
+        + (diff.differs.size ? metaRow('size', 'File size', values.size, image, diff) : '')
+        + (diff.differs.date ? metaRow('date', 'Taken', values.date, image, diff) : '')
+        + (diff.differs.folder ? metaRow('folder', 'Folder', values.folder, image, diff) : '')
+        + (diff.differs.source ? metaRow('source', 'Source', values.source, image, diff) : '')
         + '</div>'
         + '<div class="dupe-actions stack-member-actions" aria-label="Stack photo actions">'
         + (isCover ? `<span class="stack-cover-text">${icon('image')} Cover</span>` : `<button data-set-cover="${image.id}" data-stack-id="${stack.id}" aria-label="Make cover" data-tip="Make cover">${icon('image')}</button>`)
@@ -565,6 +572,53 @@ function stackPhotoHtml(stack, image, diff) {
         + `<button data-flag="rejected" data-id="${image.id}" aria-label="Reject ${esc(image.filename || image.id)}">${icon('x')}</button>`
         + `<button data-flag="unflagged" data-id="${image.id}" aria-label="Clear flag for ${esc(image.filename || image.id)}">${icon('circle')}</button>`
         + '</div></article>';
+}
+
+function identicalPhotoHtml(group, image, diff) {
+    const verification = group.verification || { state: 'candidate' };
+    const keeperId = Number(verification.keeper_id || group.representative?.id || 0);
+    const isKeeper = Number(image.id) === keeperId;
+    const aspect = Number(image.width) && Number(image.height)
+        ? Math.max(.65, Math.min(2.2, Number(image.width) / Number(image.height)))
+        : 1.5;
+    const values = fieldValues(image);
+    const modified = Number(image.file_modified_at) > 0
+        ? new Date(Number(image.file_modified_at) * 1000).toISOString().slice(0, 10)
+        : 'Unknown';
+    const badge = isKeeper
+        ? `<span class="stack-cover-badge identical-keeper">${icon('image')} Oldest · ${esc(modified)}</span>`
+        : (verification.state === 'ready' ? '<span class="identical-copy-badge">Verified copy</span>' : '');
+    return `<article class="dupe-photo identical-photo ${isKeeper ? 'is-keeper' : ''}" style="--dupe-ar:${aspect}">`
+        + `<button class="dupe-thumb" data-open-id="${image.id}" data-identical-key="${esc(group.key)}" aria-label="Open ${esc(image.filename || image.id)} in Loupe">`
+        + `<img src="${esc(thumbUrl('md', image.id))}" loading="lazy" decoding="async" alt="${esc(image.filename || '')}">`
+        + badge
+        + '</button>'
+        + '<div class="dupe-facts">'
+        + `<div class="dupe-name ${diff.differs.filename ? 'diff' : 'muted'}" title="${esc(values.filename)}">${esc(values.filename)}</div>`
+        + metaRow('date', 'File modified', modified, image, { differs: { date: true }, winners: { date: isKeeper ? image.id : 0 } })
+        + (diff.differs.folder ? metaRow('folder', 'Folder', values.folder, image, diff) : '')
+        + (diff.differs.source ? metaRow('source', 'Source', values.source, image, diff) : '')
+        + (diff.differs.size ? metaRow('size', 'File size', values.size, image, diff) : '')
+        + '</div></article>';
+}
+
+function identicalRowHtml(group) {
+    const members = stackMembers(group);
+    const diff = groupDiffs({ images: members });
+    const verification = group.verification || { state: 'candidate' };
+    const stateCopy = verification.state === 'ready'
+        ? `Byte-identical · ${fmt(verification.removable_count || members.length - 1)} safe to remove`
+        : verification.state === 'exception'
+            ? `Needs review · ${verification.reason || 'could not verify every file'}`
+            : 'Candidate match · full-byte verification required';
+    const stateClass = verification.state === 'ready' ? 'ready' : verification.state === 'exception' ? 'exception' : 'candidate';
+    return `<section class="dupe-row stack-row identical-row" data-identical="${esc(group.key)}">`
+        + '<div class="dupe-row-head">'
+        + `<div><b>${fmt(members.length)} copies</b><span>${bytesLabel(group.potential_reclaim_bytes)} potentially recoverable</span></div>`
+        + `<span class="identical-state ${stateClass}">${esc(stateCopy)}</span>`
+        + '</div>'
+        + `<div class="dupe-photos">${members.map((image) => identicalPhotoHtml(group, image, diff)).join('')}</div>`
+        + '</section>';
 }
 
 function stackRowHtml(stack) {
@@ -583,57 +637,102 @@ function stackRowHtml(stack) {
         + '</section>';
 }
 
+function syncStackTools() {
+    const identical = stackKind === 'identical';
+    const verifyButton = root.querySelector('#stacks-verify-identical');
+    const cleanupButton = root.querySelector('#stacks-cleanup-identical');
+    const rescanButton = root.querySelector('#stacks-rescan');
+    verifyButton.hidden = !identical;
+    cleanupButton.hidden = !identical;
+    rescanButton.hidden = identical || stackKind === 'manual';
+    if (!identical) return;
+    const status = identicalStatus || {};
+    const running = status.state === 'running';
+    const complete = status.state === 'complete';
+    verifyButton.disabled = running;
+    verifyButton.textContent = running
+        ? `Verifying ${fmt(status.scanned_groups || 0)} / ${fmt(status.total_groups || 0)}`
+        : complete ? 'Verify again' : 'Verify identicals';
+    const removable = Number(status.removable_count) || 0;
+    cleanupButton.textContent = removable
+        ? `Move ${fmt(removable)} verified copies to Trash`
+        : 'Nothing verified yet';
+    cleanupButton.disabled = !complete || !removable;
+}
+
+function identicalHeroHtml() {
+    const summary = identicalSummary || {};
+    const status = identicalStatus || {};
+    const active = Number(summary.active_images) || 0;
+    const hashed = Number(summary.hashed_images) || 0;
+    const coverage = active ? Math.round((hashed / active) * 1000) / 10 : 0;
+    const running = status.state === 'running';
+    const complete = status.state === 'complete';
+    const hasEstimate = Number(summary.potential_removable_count) > 0;
+    const title = complete
+        ? `${fmt(status.removable_count || 0)} verified copies · ${bytesLabel(status.reclaim_bytes)} recoverable`
+        : hasEstimate
+            ? `${fmt(summary.potential_removable_count)} candidate copies · ${bytesLabel(summary.potential_reclaim_bytes)} potential`
+            : `${fmt(summary.total_groups || stackTotal)}${summary.pending ? '+' : ''} candidate groups`;
+    const detail = running
+        ? `Reading every byte before Azimuth makes a cleanup plan · ${fmt(status.scanned_groups || 0)} of ${fmt(status.total_groups || 0)} groups checked`
+        : complete
+            ? `${fmt(status.ready_groups || 0)} groups are safe · ${fmt(status.exception_groups || 0)} deferred for review`
+            : hasEstimate
+                ? `${coverage}% of the library has a fast identity. Candidates remain read-only until every byte is verified.`
+                : 'Loading the archive-wide storage estimate. Candidates remain read-only until every byte is verified.';
+    return `<section class="identical-hero ${running ? 'is-running' : ''}">`
+        + `<div><span class="identical-eyebrow">IDENTICAL</span><h3>${esc(title)}</h3><p>${esc(detail)}</p></div>`
+        + (running ? `<progress max="${Math.max(1, Number(status.total_groups) || 1)}" value="${Number(status.scanned_groups) || 0}"></progress>` : '')
+        + '</section>';
+}
+
+async function loadIdenticalSummary() {
+    const summary = await getIdenticalSummary();
+    if (!summary || !open || stackKind !== 'identical') return;
+    identicalSummary = summary;
+    stackTotal = Number(summary.total_groups) || stackTotal;
+    stackCounts.identical = stackTotal;
+    root.querySelector('#duplicates-count').textContent = `${fmt(stackTotal)} group${stackTotal === 1 ? '' : 's'}`;
+    renderKindChips();
+    const current = root.querySelector('.identical-hero');
+    if (current) current.outerHTML = identicalHeroHtml();
+}
+
 function renderStacks({ append = false } = {}) {
+    const pendingCount = stackKind === 'identical' && identicalSummary?.pending;
     root.querySelector('#duplicates-count').textContent = stackRescanning
         ? `Rescanning... ${fmt(stackTotal)} stack${stackTotal === 1 ? '' : 's'} shown`
-        : `${fmt(stackTotal)} stack${stackTotal === 1 ? '' : 's'}`;
-    root.querySelector('#stacks-keep-covers').disabled = !stackTotal || stackLoading || stackRescanning;
+        : `${fmt(stackTotal)}${pendingCount ? '+' : ''} group${stackTotal === 1 ? '' : 's'}`;
     root.querySelector('#stacks-rescan').disabled = stackRescanning;
+    syncStackTools();
     renderKindChips();
     const body = root.querySelector('#duplicates-body');
     const banner = stackRescanning ? '<div class="stack-status-banner">Rescanning stacks. Review actions are paused until fresh results are ready.</div>' : '';
     if (!append) {
         if (!stacks.length && !stackLoading) {
-            body.innerHTML = banner + '<div class="grid-empty dupe-empty"><h3>No stacks in this view.</h3><p>Add photos first, or try another kind after the library is scanned.</p></div><div id="stacks-sentinel"></div>';
+            body.innerHTML = (stackKind === 'identical' ? identicalHeroHtml() : banner)
+                + '<div class="grid-empty dupe-empty"><h3>No groups in this view.</h3><p>Try another stack type, or rescan after adding photos.</p></div><div id="stacks-sentinel"></div>';
         } else {
-            body.innerHTML = banner + stacks.map(stackRowHtml).join('') + `<div id="stacks-sentinel">${stackLoading && stacks.length ? 'Loading more stacks...' : ''}</div>`;
+            const rows = stackKind === 'identical' ? stacks.map(identicalRowHtml) : stacks.map(stackRowHtml);
+            body.innerHTML = (stackKind === 'identical' ? identicalHeroHtml() : banner)
+                + rows.join('') + `<div id="stacks-sentinel">${stackLoading && stacks.length ? 'Loading more groups...' : ''}</div>`;
         }
     } else {
         const sentinel = root.querySelector('#stacks-sentinel');
-        sentinel?.insertAdjacentHTML('beforebegin', stacks.slice(Math.max(0, stacks.length - STACK_LIMIT)).map(stackRowHtml).join(''));
-        if (sentinel) sentinel.textContent = stackLoading && stacks.length ? 'Loading more stacks...' : '';
+        const pageSize = stackKind === 'identical' ? IDENTICAL_LIMIT : STACK_LIMIT;
+        const added = stacks.slice(Math.max(0, stacks.length - pageSize));
+        sentinel?.insertAdjacentHTML('beforebegin', added.map(stackKind === 'identical' ? identicalRowHtml : stackRowHtml).join(''));
+        if (sentinel) sentinel.textContent = stackLoading && stacks.length ? 'Loading more groups...' : '';
     }
     bindStackSentinel();
 }
 
-function invalidateBulkNonCoverCount() {
-    bulkNonCoverIds = null;
-    bulkCountGeneration += 1;
-    const button = root?.querySelector('#stacks-keep-covers');
-    if (button) button.textContent = 'Trash non-covers';
-}
-
-async function refreshBulkNonCoverCount() {
-    if (!root || mode !== 'stacks' || stackLoading || stackRescanning || !stackTotal) return;
-    const generation = bulkCountGeneration + 1;
-    bulkCountGeneration = generation;
-    bulkNonCoverIds = null;
-    const button = root.querySelector('#stacks-keep-covers');
-    if (!button) return;
-    button.textContent = 'Counting...';
-    button.disabled = true;
-    const imageIds = await collectNonCoverIdsForCurrentFilter();
-    if (generation !== bulkCountGeneration || !root?.isConnected || mode !== 'stacks') return;
-    bulkNonCoverIds = imageIds;
-    button.textContent = imageIds.length ? `Trash ${fmt(imageIds.length)} photos` : 'No non-covers';
-    button.disabled = !imageIds.length || stackLoading || stackRescanning;
-}
-
 async function loadStackCounts() {
     const seq = stackGeneration;
-    const entries = await Promise.all(STACK_KINDS.map(async ([id, value]) => {
+    const entries = await Promise.all(STACK_KINDS.filter(([, value]) => value !== 'identical').map(async ([, value]) => {
         const data = await listStacks({ kind: value, limit: 1, offset: 0 });
-        return [id === 'all' ? 'all' : value, Number(data?.total) || 0];
+        return [value, Number(data?.total) || 0];
     }));
     if (seq !== stackGeneration || !root?.isConnected || !open || mode !== 'stacks') return;
     stackCounts = Object.fromEntries(entries);
@@ -654,17 +753,28 @@ async function loadStackPage({ reset = false } = {}) {
     stackLoading = true;
     const requestOffset = stackOffset;
     try {
-        const data = await listStacks({ kind: requestKind, limit: STACK_LIMIT, offset: requestOffset });
+        const data = requestKind === 'identical'
+            ? await listIdenticalStacks({ limit: IDENTICAL_LIMIT, offset: requestOffset })
+            : await listStacks({ kind: requestKind, limit: STACK_LIMIT, offset: requestOffset });
         if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
         if (!data) throw new Error('Stacks response was empty');
-        const incoming = data.stacks || [];
+        const incoming = requestKind === 'identical' ? data.groups || [] : data.stacks || [];
+        if (requestKind === 'identical') {
+            identicalSummary = data.summary || null;
+            identicalStatus = data.verification_status || null;
+            stackCounts.identical = Number(data.total) || incoming.length;
+        }
         stackTotal = Number(data.total) || incoming.length;
         for (const stack of incoming) rememberImages(stackMembers(stack));
         stacks = reset ? incoming : stacks.concat(incoming);
         stackOffset += incoming.length;
-        stackDone = incoming.length < STACK_LIMIT || stackOffset >= stackTotal;
+        const pageSize = requestKind === 'identical' ? IDENTICAL_LIMIT : STACK_LIMIT;
+        stackDone = requestKind === 'identical'
+            ? data.has_more === false
+            : incoming.length < pageSize || stackOffset >= stackTotal;
         stackLoading = false;
         renderStacks({ append: !reset });
+        if (reset && requestKind === 'identical') loadIdenticalSummary();
     } catch {
         if (seq !== stackGeneration || !root?.isConnected || !open || requestMode !== mode || mode !== 'stacks' || requestKind !== stackKind) return;
         root.querySelector('#duplicates-body').innerHTML = '<div class="load-error dupe-error"><h4>Couldn\'t load stacks</h4><p>The archive did not respond. Try again.</p><button class="btn" id="stacks-retry">Try again</button></div>';
@@ -698,13 +808,11 @@ function resetStackObserver() {
 async function reloadStacks() {
     stackGeneration += 1;
     stackLoading = false;
-    invalidateBulkNonCoverCount();
     const seq = stackGeneration;
     resetStackObserver();
-    await loadStackCounts();
-    if (seq !== stackGeneration || mode !== 'stacks') return;
     await loadStackPage({ reset: true });
-    if (seq === stackGeneration && mode === 'stacks') refreshBulkNonCoverCount();
+    if (seq !== stackGeneration || mode !== 'stacks') return;
+    loadStackCounts();
 }
 
 function findStack(stackId) {
@@ -719,13 +827,10 @@ function removeFinishedStack(stackId) {
     stacks = stacks.filter((stack) => Number(stack.id) !== id);
     if (stacks.length === previousLength) return;
     stackTotal = Math.max(0, stackTotal - 1);
-    if (stackCounts.all != null) stackCounts.all = Math.max(0, stackCounts.all - 1);
     if (finished?.kind && stackCounts[finished.kind] != null) {
         stackCounts[finished.kind] = Math.max(0, stackCounts[finished.kind] - 1);
     }
-    invalidateBulkNonCoverCount();
     renderStacks();
-    refreshBulkNonCoverCount();
 }
 
 async function setCover(stackId, imageId) {
@@ -795,57 +900,68 @@ async function keepCoverForStack(stackId) {
     });
 }
 
-async function collectNonCoverIdsForCurrentFilter() {
-    const ids = [];
-    let offset = 0;
-    while (true) {
-        const data = await listStacks({ kind: stackKind, limit: 200, offset });
-        const incoming = data?.stacks || [];
-        for (const stack of incoming) {
-            const repId = representativeId(stack);
-            ids.push(...stackMembers(stack).map((image) => Number(image.id)).filter((id) => id && id !== repId));
-        }
-        offset += incoming.length;
-        if (!incoming.length || incoming.length < 200 || offset >= Number(data?.total || 0)) break;
-    }
-    return [...new Set(ids)];
+function scheduleIdenticalPoll() {
+    if (identicalPollTimer) clearTimeout(identicalPollTimer);
+    identicalPollTimer = setTimeout(pollIdenticalVerification, 1200);
 }
 
-async function keepCoversEverywhere() {
-    const button = root.querySelector('#stacks-keep-covers');
+async function pollIdenticalVerification() {
+    identicalPollTimer = null;
+    if (!open || mode !== 'stacks' || stackKind !== 'identical') return;
+    const status = await getIdenticalVerificationStatus();
+    if (!status) {
+        showToast('Couldn’t read verification progress');
+        return;
+    }
+    identicalStatus = status;
+    syncStackTools();
+    if (status.state === 'running') {
+        scheduleIdenticalPoll();
+        return;
+    }
+    if (status.state === 'complete') {
+        await loadStackPage({ reset: true });
+        showToast(`Verified ${fmt(status.ready_groups || 0)} identical groups · ${fmt(status.exception_groups || 0)} deferred`);
+        return;
+    }
+    if (status.state === 'error') showToast(status.error || 'Identical verification failed');
+}
+
+async function startIdenticalVerification() {
+    const button = root.querySelector('#stacks-verify-identical');
     button.disabled = true;
-    if (!bulkNonCoverIds) {
-        button.textContent = 'Counting...';
-        bulkNonCoverIds = await collectNonCoverIdsForCurrentFilter();
-    }
-    const imageIds = bulkNonCoverIds || [];
-    button.textContent = imageIds.length ? `Trash ${fmt(imageIds.length)} photos` : 'No non-covers';
-    button.disabled = !imageIds.length;
-    if (!imageIds.length) {
-        showToast('No other photos in this filter');
-        return;
-    }
-    const confirmed = await confirmAction({
-        title: 'Move photos to Trash',
-        message: `Move ${fmt(imageIds.length)} photo${imageIds.length === 1 ? '' : 's'} to Trash?`,
-        confirmLabel: 'Move to Trash',
-    });
-    if (!confirmed) {
+    button.textContent = 'Starting verification...';
+    const result = await verifyIdenticalStacks();
+    if (!result?.ok) {
         button.disabled = false;
+        button.textContent = 'Verify identicals';
+        showToast(result?.data?.error || 'Couldn’t start identical verification');
         return;
     }
-    const result = await trashImages(imageIds);
+    identicalStatus = result.data?.verification_status || { state: 'running' };
+    syncStackTools();
+    scheduleIdenticalPoll();
+}
+
+async function cleanupVerifiedIdenticals() {
+    const token = identicalStatus?.token;
+    const button = root.querySelector('#stacks-cleanup-identical');
+    if (!token || !button) return;
+    button.disabled = true;
+    button.textContent = 'Moving verified copies...';
+    const result = await cleanupIdenticalStacks(token);
     const { imageIds: trashedIds, errors } = imageMutationOutcome(result, 'trashed');
     if (!trashedIds.length) {
-        button.disabled = false;
-        showToast(mutationFailureReason(errors, 'Couldn’t move photos to Trash'));
+        syncStackTools();
+        showToast(result?.data?.error || mutationFailureReason(errors, 'Couldn’t move verified copies'));
         return;
     }
+    const skippedGroups = Array.isArray(result?.data?.skipped_groups) ? result.data.skipped_groups.length : 0;
     try {
         emit('trash:changed', { imageIds: trashedIds });
-        invalidateBulkNonCoverCount();
+        identicalStatus = null;
         await reloadStacks();
-        showToast(`Trashed ${fmt(trashedIds.length)} non-cover photos${mutationPartialSuffix(errors, 'trashed')}`, {
+        showToast(`Moved ${fmt(trashedIds.length)} verified copies to Trash${skippedGroups ? ` · ${fmt(skippedGroups)} changed groups deferred` : ''}${mutationPartialSuffix(errors, 'trashed')}`, {
             undo: async () => {
                 const restored = await restoreImages(trashedIds);
                 const restoredOutcome = imageMutationOutcome(restored, 'restored');
@@ -855,7 +971,7 @@ async function keepCoversEverywhere() {
                 }
                 emit('trash:changed', { imageIds: restoredOutcome.imageIds });
                 if (open && mode === 'stacks') await reloadStacks();
-                showToast(`Restored${mutationPartialSuffix(restoredOutcome.errors, 'restored')}`);
+                showToast(`Restored ${fmt(restoredOutcome.imageIds.length)} copies${mutationPartialSuffix(restoredOutcome.errors, 'restored')}`);
             },
         });
     } finally {
@@ -895,18 +1011,12 @@ async function rescanStacks() {
     poll();
 }
 
-function switchMode(nextMode) {
+function switchMode() {
     stackGeneration += 1;
     stackLoading = false;
     resetStackObserver();
-    mode = nextMode === 'adhoc' ? 'adhoc' : 'stacks';
-    root.querySelector('#stacks-review-tools').hidden = mode !== 'stacks';
-    root.querySelector('#duplicates-adhoc-tools').hidden = mode !== 'adhoc';
-    for (const button of root.querySelectorAll('[data-stack-mode]')) {
-        button.classList.toggle('active', button.dataset.stackMode === mode);
-    }
-    if (mode === 'stacks') reloadStacks();
-    else loadDuplicates();
+    mode = 'stacks';
+    reloadStacks();
 }
 
 function viewHtml() {
@@ -914,12 +1024,7 @@ function viewHtml() {
         + '<div id="duplicates-panel">'
         + '<header id="duplicates-head">'
         + '<div><b>Stacks</b><span id="duplicates-count" class="num"></span></div>'
-        + '<div class="seg-compact" role="group" aria-label="Stacks mode"><button class="active" data-stack-mode="stacks">Review</button><button data-stack-mode="adhoc">Ad-hoc scan</button></div>'
-        + '<div id="stacks-review-tools"><button class="btn btn-danger" id="stacks-keep-covers" disabled>Trash non-covers</button><button class="btn" id="stacks-rescan">Rescan stacks</button></div>'
-        + '<div id="duplicates-adhoc-tools" hidden>'
-        + '<label class="dupe-threshold"><span>Similarity</span><output id="duplicates-threshold-value">95%</output><input id="duplicates-threshold" class="ctl-range" type="range" min="0.90" max="0.99" step="0.01" value="0.95"></label>'
-        + '<button class="btn primary" id="duplicates-keep-all" disabled>Keep highest rated everywhere</button>'
-        + '</div>'
+        + '<div id="stacks-review-tools"><button class="btn primary" id="stacks-verify-identical">Verify identicals</button><button class="btn btn-danger" id="stacks-cleanup-identical" disabled>Nothing verified yet</button><button class="btn" id="stacks-rescan" hidden>Rescan stacks</button></div>'
         + `<button class="icon-btn" id="duplicates-close" data-tip="Grid (G / Esc)" aria-label="Return to Grid">${icon('x')}</button>`
         + '</header>'
         + '<div id="stacks-kind-chips"></div>'
@@ -934,29 +1039,15 @@ function ensureView() {
     root = wrap.firstElementChild;
     document.getElementById('view-duplicates').appendChild(root);
     root.querySelector('#duplicates-close').addEventListener('click', closeDuplicates);
-    root.querySelector('#stacks-keep-covers').addEventListener('click', keepCoversEverywhere);
+    root.querySelector('#stacks-verify-identical').addEventListener('click', startIdenticalVerification);
+    root.querySelector('#stacks-cleanup-identical').addEventListener('click', cleanupVerifiedIdenticals);
     root.querySelector('#stacks-rescan').addEventListener('click', rescanStacks);
-    for (const button of root.querySelectorAll('[data-stack-mode]')) {
-        button.addEventListener('click', () => switchMode(button.dataset.stackMode));
-    }
     root.querySelector('#stacks-kind-chips').addEventListener('click', (event) => {
         const button = event.target.closest('[data-kind]');
         if (!button) return;
         if (stackKind === (button.dataset.kind || '')) return;
         stackKind = button.dataset.kind || '';
         reloadStacks();
-    });
-    root.querySelector('#duplicates-keep-all').addEventListener('click', () => {
-        applyKeepBest(groups.flatMap(groupChanges), 'Kept highest rated everywhere');
-    });
-    root.querySelector('#duplicates-threshold').addEventListener('input', (event) => {
-        const value = Number(event.target.value) || DEFAULT_THRESHOLD;
-        root.querySelector('#duplicates-threshold-value').textContent = `${Math.round(value * 100)}%`;
-    });
-    root.querySelector('#duplicates-threshold').addEventListener('change', (event) => {
-        threshold = Number(event.target.value) || DEFAULT_THRESHOLD;
-        root.querySelector('#duplicates-threshold-value').textContent = thresholdLabel();
-        if (open) loadDuplicates();
     });
     root.querySelector('#duplicates-body').addEventListener('click', (event) => {
         const setCoverButton = event.target.closest('[data-set-cover][data-stack-id]');
@@ -987,7 +1078,9 @@ function ensureView() {
         const openButton = event.target.closest('[data-open-id]');
         if (openButton) {
             const id = Number(openButton.dataset.openId);
-            const stack = openButton.dataset.stackOpen ? findStack(openButton.dataset.stackOpen) : null;
+            const stack = openButton.dataset.stackOpen
+                ? findStack(openButton.dataset.stackOpen)
+                : stacks.find((item) => item.key === openButton.dataset.identicalKey);
             const images = stack ? stackMembers(stack) : uniqueImages(allImages());
             emit('loupe:open', { id, index: images.findIndex((image) => Number(image.id) === id), images });
             return;
@@ -1046,6 +1139,8 @@ export function unmountDuplicates() {
     open = false;
     if (abortController) abortController.abort();
     abortController = null;
+    if (identicalPollTimer) clearTimeout(identicalPollTimer);
+    identicalPollTimer = null;
     resetStackObserver();
     root.hidden = true;
     document.getElementById('view-duplicates').classList.remove('active');

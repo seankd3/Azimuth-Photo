@@ -1,9 +1,53 @@
 from test_support import *  # noqa: F401,F403
+import asyncio
 import contextlib
 from unittest import mock
 
+import httpx
+
+from features.people import routes as people_routes
+
 
 class PeopleTests(BackendTestCase):
+    async def test_people_status_never_cancels_slow_catalog_counts(self):
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def slow_counts():
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return {"people": 8, "detected_faces": 42}
+
+        people_routes.invalidate_people_status_cache()
+        try:
+            with mock.patch.object(
+                people_routes,
+                "_get_people_status_counts",
+                side_effect=slow_counts,
+            ):
+                first = await people_routes.people_status_payload()
+                await asyncio.wait_for(started.wait(), timeout=1)
+                second = await people_routes.people_status_payload()
+
+                self.assertTrue(first["status_stale"])
+                self.assertTrue(second["status_stale"])
+                self.assertEqual(calls, 1)
+
+                release.set()
+                for _ in range(20):
+                    if not people_routes._people_status_counts_refreshing:
+                        break
+                    await asyncio.sleep(0)
+                refreshed = await people_routes.people_status_payload()
+                self.assertFalse(refreshed["status_stale"])
+                self.assertEqual(refreshed["counts"]["detected_faces"], 42)
+        finally:
+            release.set()
+            people_routes.invalidate_people_status_cache()
+
     async def test_people_immediate_claim_does_not_report_waiting(self):
         old_status = dict(face_worker._status)
         face_worker._set_status(state="scanning")
@@ -103,13 +147,9 @@ class PeopleTests(BackendTestCase):
             face_worker._status.update(old_status)
             work_coordination.release_manual_owner("people")
     async def _request(self, method, path, **kwargs):
-        from fastapi.testclient import TestClient
-
-        def send():
-            with TestClient(__import__("app").app) as client:
-                return client.request(method, path, **kwargs)
-
-        return await asyncio.to_thread(send)
+        transport = httpx.ASGITransport(app=__import__("app").app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            return await client.request(method, path, **kwargs)
 
     async def _face(self, image_id, *, vector):
         scan = await db.store_face_scan_result(

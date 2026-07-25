@@ -14,6 +14,7 @@ from typing import Any
 import ai_models
 import settings
 from core import memory_pressure, work_coordination
+from core.ai_failures import is_gpu_resource_error
 from workers.caption_health import CaptionOomCircuit
 
 
@@ -27,10 +28,14 @@ MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
 MODEL_LOAD_FAILURE_PAUSE_THRESHOLD = 3
 CAPTION_PROMPT = (
     "Describe this photo for private photo-library search. Return only JSON with "
-    "keys caption and tags. caption must be 2-3 rich sentences mentioning "
+    "keys caption, tags, visible_text, entities, and attributes. caption must be "
+    "2-3 rich sentences mentioning "
     "subjects, scene, setting, lighting, mood, notable objects/actions, and "
     "photographic style. tags must be 8-15 lowercase strings covering subjects, "
-    "scene, style, lighting, and colors."
+    "scene, style, lighting, and colors. visible_text must transcribe only clearly "
+    "legible words. entities must be concrete people-types, animals, places, objects, "
+    "and activities. attributes must be a JSON object with setting, time, weather, "
+    "lighting, mood, style, and dominant_colors when evident. Never guess identities."
 )
 
 def _new_caption_executor() -> ThreadPoolExecutor:
@@ -198,13 +203,7 @@ def _record_model_load_failure(error: Exception) -> bool:
 
 
 def _is_cuda_oom_error(error) -> bool:
-    name = type(error).__name__.lower()
-    text = str(error).lower()
-    return (
-        "outofmemoryerror" in name
-        or "cuda out of memory" in text
-        or ("cuda" in text and "out of memory" in text)
-    )
+    return is_gpu_resource_error(error)
 
 
 def _clear_cuda_cache() -> None:
@@ -350,8 +349,28 @@ def parse_caption_response(text: str) -> dict[str, Any]:
         caption = str(data.get("caption") or "").strip()
         tags = data.get("tags") if isinstance(data.get("tags"), list) else []
         tags = [str(tag or "").strip().lower() for tag in tags if str(tag or "").strip()]
-        return {"caption": caption or raw, "tags": tags[:15], "raw": raw, "parsed": True}
-    return {"caption": raw, "tags": [], "raw": raw, "parsed": False}
+        visible_text = str(data.get("visible_text") or "").strip()
+        entities = data.get("entities") if isinstance(data.get("entities"), list) else []
+        entities = [str(entity or "").strip().lower() for entity in entities if str(entity or "").strip()]
+        attributes = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+        return {
+            "caption": caption or raw,
+            "tags": tags[:15],
+            "understanding": {
+                "visible_text": visible_text,
+                "entities": entities[:30],
+                "attributes": attributes,
+            },
+            "raw": raw,
+            "parsed": True,
+        }
+    return {
+        "caption": raw,
+        "tags": [],
+        "understanding": {},
+        "raw": raw,
+        "parsed": False,
+    }
 
 
 def _caption_cached_preview(cache_path: str, config: dict[str, Any]) -> dict[str, Any]:
@@ -453,7 +472,11 @@ async def _run_caption_worker_loop() -> None:
             pending = await _configured(
                 _count_images_needing_captions,
                 "count_images_needing_captions",
-            )(caption_config=caption_config, cache_root=str(app_config.get("ssd_cache_dir") or ""))
+            )(
+                caption_config=caption_config,
+                cache_root=str(app_config.get("ssd_cache_dir") or ""),
+                include_understanding_backfill=True,
+            )
             _set_status(pending_cached_images=pending, last_error="")
             if pending <= 0:
                 _release_worker_owners()
@@ -476,6 +499,7 @@ async def _run_caption_worker_loop() -> None:
                 cache_root=str(app_config.get("ssd_cache_dir") or ""),
                 cache_size="md",
                 limit=batch_size,
+                include_understanding_backfill=True,
             )
             if not rows:
                 _release_worker_owners()
@@ -537,6 +561,7 @@ async def _run_caption_worker_loop() -> None:
                             caption_config=caption_config,
                             caption=parsed["caption"],
                             tags=parsed["tags"],
+                            understanding=parsed.get("understanding"),
                             quality="parsed" if parsed.get("parsed") else "raw_fallback",
                             status="done",
                         )

@@ -3,6 +3,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from contextlib import closing
@@ -532,6 +533,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             "active_phase": None,
             "started_at": None,
             "last_generated_at": None,
+            "last_progress_at": None,
             "generated_this_session": 0,
             "last_error": "",
         }
@@ -692,6 +694,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             "active_phase": None,
             "started_at": None,
             "last_generated_at": None,
+            "last_progress_at": None,
             "generated_this_session": 7,
             "last_error": "",
         }
@@ -743,6 +746,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             self.assertEqual(facade_return, 4)
             self.assertEqual(thumbnails._pregen_status["generated_this_session"], 9)
             self.assertEqual(thumbnails._pregen_status["last_generated_at"], 55.5)
+            self.assertEqual(thumbnails._pregen_status["last_progress_at"], 55.5)
             self.assertEqual(facade_batches[0][0], 2)
             self.assertEqual(facade_batches[0][1]["thumbnails_written"], 3)
             self.assertEqual(facade_batches[0][1]["source_bytes"], 1024)
@@ -753,14 +757,16 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
                 failure_only_result,
                 direct_status,
                 record_batch=direct_record_batch,
-                now_provider=lambda: self.fail("failure-only result should not update generation time"),
+                # Failures bump last_progress_at (stall heartbeat) but not last_generated_at.
+                now_provider=lambda: 66.6,
             )
 
             thumbnails._pregen_status = dict(base_status)
             facade_batches = []
-            thumbnails._current_time = lambda: self.fail(
-                "failure-only result should not update generation time"
+            thumbnails._record_pregen_batch = (
+                lambda count, **kwargs: facade_batches.append((count, kwargs))
             )
+            thumbnails._current_time = lambda: 66.6
 
             facade_return = thumbnails._record_pregen_result(failure_only_result)
 
@@ -770,6 +776,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
             self.assertEqual(facade_return, 0)
             self.assertEqual(thumbnails._pregen_status["generated_this_session"], 7)
             self.assertIsNone(thumbnails._pregen_status["last_generated_at"])
+            self.assertEqual(thumbnails._pregen_status["last_progress_at"], 66.6)
             self.assertEqual(facade_batches[0][0], 0)
             self.assertEqual(facade_batches[0][1]["source_read_failures"], 1)
         finally:
@@ -843,6 +850,59 @@ class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
         self.assertEqual(invalidations, ["invalidated"])
         self.assertFalse(os.path.exists(old_tmp))
         self.assertTrue(os.path.exists(fresh_tmp))
+
+    def test_phantom_cache_sweep_deletes_rows_for_missing_files(self):
+        events = []
+        missing_row = {
+            "rowid": 1,
+            "cache_root": "/cache",
+            "size": "sm",
+            "image_id": 7,
+            "path": "/cache/sm/7.jpg",
+        }
+        live_row = {
+            "rowid": 2,
+            "cache_root": "/cache",
+            "size": "sm",
+            "image_id": 8,
+            "path": "/cache/sm/8.jpg",
+        }
+
+        class FakeConnection:
+            def __init__(self):
+                self.calls = 0
+
+            def execute(self, sql, params=()):
+                self.calls += 1
+                events.append(("execute", sql.split()[0], tuple(params)))
+
+                class FakeCursor:
+                    def fetchall(inner_self):
+                        if self.calls == 1:
+                            return [missing_row, live_row]
+                        return []
+
+                return FakeCursor()
+
+            def commit(self):
+                events.append(("commit",))
+
+            def close(self):
+                events.append(("close",))
+
+        removed = []
+        result = thumbnail_maintenance.sweep_missing_cache_entries(
+            meta_lock=threading.Lock(),
+            db_connect=FakeConnection,
+            remove_cache_entry_locked=lambda _conn, row: removed.append(dict(row)),
+            invalidate_disk_stats_cache=lambda: events.append(("invalidate",)),
+            path_exists=lambda path: path.endswith("8.jpg"),
+            batch_size=50,
+        )
+        self.assertEqual(result["scanned"], 2)
+        self.assertEqual(result["removed"], 1)
+        self.assertEqual(removed[0]["image_id"], 7)
+        self.assertIn(("invalidate",), events)
 
     def test_cache_purge_helper_owns_memory_disk_and_source_invalidation(self):
         cache_file = os.path.join(self._legacy_cache_root(), "sm", "42.jpg")
@@ -2519,7 +2579,13 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 2))
         self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 3))
 
-    def test_bulk_warmup_handles_full_only_work_in_same_cursor_pass(self):
+    def test_bulk_warmup_defers_full_only_work_to_full_phase(self):
+        """Preview bulk anti-joins thumbs only; full-only rows use the full phase.
+
+        Including ``full`` in the bulk missing_sizes OR-clause pollutes the
+        keyset with thumb-complete rows once full room is exhausted (or for
+        RAWs that cannot warm full), which strands sparse thumb-pending work.
+        """
         thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
         thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
         path = self._make_image()
@@ -2527,10 +2593,66 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         self._add_catalog_original(1, path)
         thumbnails._generate_thumbnail_set_sync(path, 1, signatures, source_bytes=file_size)
 
-        warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
+        bulk_warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=10))
+        self.assertEqual(bulk_warmed, 0)
+        self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
 
-        self.assertEqual(warmed, 1)
+        full_warmed = asyncio.run(thumbnails._run_full_warm_batch(generate_batch=10))
+        self.assertEqual(full_warmed, 1)
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
+
+    def test_bulk_candidate_batch_excludes_full_only_rows(self):
+        """Bulk preview selection must not return thumb-complete full-missing rows."""
+        thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
+        cached = self._make_image("a-cached.jpg")
+        pending = self._make_image("z-pending.jpg")
+        self._add_catalog_original(1, cached)
+        self._add_catalog_original(2, pending)
+        self._mark_preview_tiers_cached(1, cached)
+
+        thumbnails._reset_pregen_bulk_cursor()
+        rows = asyncio.run(thumbnails._pregen_bulk_candidate_batch(10))
+        self.assertEqual([int(row["id"]) for row in rows], [2])
+
+    def test_bulk_candidate_skips_full_only_desert_under_priority_scan(self):
+        """Full-missing thumb-complete desert must not starve later thumb work.
+
+        Reproduces the prod stall shape: full allocation non-zero but no usable
+        full room, priority mode shrinks scan_batch to activity_burst_items,
+        and a long full-only desert sits ahead of real thumb-pending images.
+        """
+        old_scan_batch = thumbnails.PREGENERATE_SCAN_BATCH
+        old_activity = thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS
+        old_full = thumbnails._disk_allocations.get(thumbnails.FULL_TIER, 0)
+        try:
+            thumbnails.PREGENERATE_SCAN_BATCH = 1024
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS = 2
+            # Non-zero full allocation (old bug OR'd it into anti-join) but too
+            # small for any original → full_candidate_signature always None.
+            thumbnails._disk_allocations[thumbnails.FULL_TIER] = 100
+            thumbnails._last_user_activity = thumbnails.time.monotonic()
+
+            for index in range(40):
+                image_id = index + 1
+                path = self._make_image(f"a-full-desert/{index:03d}.jpg")
+                self._add_catalog_original(image_id, path)
+                self._mark_preview_tiers_cached(image_id, path)
+
+            pending_id = 41
+            pending_path = self._make_image("z-pending/pending.jpg")
+            self._add_catalog_original(pending_id, pending_path)
+
+            thumbnails._reset_pregen_bulk_cursor()
+            preview_priority.clear_scopes()
+            warmed = asyncio.run(thumbnails._run_pregen_bulk_batch(generate_batch=1))
+
+            self.assertGreater(warmed, 0)
+            self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", pending_id))
+        finally:
+            thumbnails.PREGENERATE_SCAN_BATCH = old_scan_batch
+            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS = old_activity
+            thumbnails._disk_allocations[thumbnails.FULL_TIER] = old_full
+            thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
 
     def test_bulk_warmup_treats_failure_only_batch_as_no_progress(self):
         path = self._make_original_file("bad.jpg", 128)
@@ -2596,16 +2718,17 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         finally:
             thumbnails.PREGENERATE_GENERATE_BATCH = old_batch
 
-    def test_pregeneration_yields_after_activity_then_resumes_when_idle(self):
+    def test_pregeneration_never_yields_for_activity_fulltilt(self):
+        # Full-tilt: the server backfill never throttles for priority/activity.
         thumbnails.note_user_activity()
-
-        self.assertTrue(thumbnails._pregen_should_pause_for_priority())
+        self.assertFalse(thumbnails._pregen_should_pause_for_priority())
         thumbnails._last_user_activity = (
             thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
         )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
 
-    def test_pregeneration_makes_a_bounded_burst_during_continuous_activity(self):
+    def test_pregeneration_full_batch_during_activity_fulltilt(self):
+        # Full-tilt: activity does NOT bound the batch — all pending warm.
         path = self._make_image()
         for image_id in range(1, 6):
             self._add_catalog_original(image_id, path)
@@ -2619,10 +2742,7 @@ class ThumbnailBulkWarmupTests(unittest.TestCase):
         ]
 
         self.assertGreater(warmed, 0)
-        self.assertEqual(
-            len(cached),
-            thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS,
-        )
+        self.assertEqual(len(cached), 5)
 
     def test_prefetch_worker_reports_activity_yield_instead_of_complete(self):
         old_sleep = thumbnails.asyncio.sleep

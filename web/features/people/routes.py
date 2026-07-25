@@ -11,8 +11,8 @@ import face_worker
 import settings
 import thumbnails
 from core import capabilities
+from core.background import track_background_task
 from core.requests import json_object, positive_int
-from data import connection as data_connection
 
 
 router = APIRouter()
@@ -54,6 +54,7 @@ def configure(
     _assign_face = assign_face
     _ignore_face = ignore_face
     _ignore_person = ignore_person
+    invalidate_people_status_cache()
 
 
 def _configured():
@@ -73,6 +74,14 @@ def _configured():
 
 _people_status_counts_cache: dict[str, object] = {"counts": None, "expires": 0.0}
 _people_status_counts_cache_ttl_seconds = 10.0
+_people_status_counts_refreshing = False
+_PEOPLE_COUNTS_INITIAL_WAIT_SECONDS = 0.05
+
+
+def invalidate_people_status_cache() -> None:
+    global _people_status_counts_refreshing
+    _people_status_counts_cache.update({"counts": None, "expires": 0.0})
+    _people_status_counts_refreshing = False
 
 
 def _minimal_people_counts(worker: dict) -> dict:
@@ -88,30 +97,45 @@ def _minimal_people_counts(worker: dict) -> dict:
     }
 
 
+def _schedule_people_counts_refresh() -> asyncio.Task | None:
+    global _people_status_counts_refreshing
+    if _people_status_counts_refreshing:
+        return None
+    _people_status_counts_refreshing = True
+
+    async def refresh() -> None:
+        global _people_status_counts_refreshing
+        try:
+            counts = await _get_people_status_counts()
+            _people_status_counts_cache["counts"] = dict(counts or {})
+            _people_status_counts_cache["expires"] = (
+                time.monotonic() + _people_status_counts_cache_ttl_seconds
+            )
+        finally:
+            _people_status_counts_refreshing = False
+
+    return track_background_task(refresh())
+
+
 async def _fast_people_counts(worker: dict) -> tuple[dict, bool]:
     if _get_people_status_counts is None:
         _configured()
         review = await _get_people_review(limit=12)
         return dict(review.get("counts", {}) if isinstance(review, dict) else {}), False
 
-    try:
-        with data_connection.sqlite_timeout(0.25):
-            counts = await asyncio.wait_for(_get_people_status_counts(), timeout=0.75)
-    except Exception as exc:
-        if not (
-            data_connection.is_sqlite_locked_error(exc)
-            or isinstance(exc, TimeoutError)
-            or isinstance(exc, asyncio.TimeoutError)
-        ):
-            raise
-        cached = _people_status_counts_cache.get("counts")
-        counts = dict(cached) if isinstance(cached, dict) else _minimal_people_counts(worker)
-        return counts, True
+    cached = _people_status_counts_cache.get("counts")
+    fresh = float(_people_status_counts_cache.get("expires") or 0.0) > time.monotonic()
+    if fresh and isinstance(cached, dict):
+        return dict(cached), False
 
-    counts = dict(counts or {})
-    _people_status_counts_cache["counts"] = counts
-    _people_status_counts_cache["expires"] = time.time() + _people_status_counts_cache_ttl_seconds
-    return counts, False
+    refresh_task = _schedule_people_counts_refresh()
+    if cached is None and refresh_task is not None:
+        await asyncio.wait({refresh_task}, timeout=_PEOPLE_COUNTS_INITIAL_WAIT_SECONDS)
+        cached = _people_status_counts_cache.get("counts")
+        fresh = float(_people_status_counts_cache.get("expires") or 0.0) > time.monotonic()
+    if isinstance(cached, dict):
+        return dict(cached), not fresh
+    return _minimal_people_counts(worker), True
 
 
 async def people_status_payload(review: dict | None = None) -> dict:

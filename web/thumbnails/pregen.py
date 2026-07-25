@@ -303,6 +303,7 @@ def set_state(
 ) -> None:
     if now_provider is None:
         now_provider = time.time
+    entering_running = state == "running" and pregen_state.get("state") != "running"
     pregen_state["enabled"] = enabled
     pregen_state["manual_mode"] = manual_mode
     pregen_state["manual_pause"] = manual_pause
@@ -312,6 +313,10 @@ def set_state(
     pregen_state["last_error"] = error
     if pregen_state["started_at"] is None and state == "running":
         pregen_state["started_at"] = now_provider()
+    if entering_running:
+        # Fresh running phase counts as progress so a slow first demosaic after
+        # resume is not immediately treated as a stall against a stale anchor.
+        pregen_state["last_progress_at"] = now_provider()
 
 
 def history_entry(
@@ -388,6 +393,9 @@ def record_result(result: dict, pregen_state: dict, *, record_batch, now_provide
     useful_work = thumbnails_written + originals_written
 
     if completed or thumbnails_written or source_read_failures:
+        # Any finished attempt is progress for the stall watchdog (including
+        # failures). Successful writes also advance last_generated_at.
+        pregen_state["last_progress_at"] = now_provider()
         if useful_work:
             pregen_state["last_generated_at"] = now_provider()
             pregen_state["generated_this_session"] += completed

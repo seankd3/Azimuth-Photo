@@ -33,9 +33,21 @@ _shutdown = False
 
 
 def default_demosaic_processes() -> int:
-    """Bound for a 16GB box: ~0.5–1GB working set per demosaic worker."""
+    """Size the pool from host_profile (RAM ceiling + cores)."""
+    try:
+        from core.host_profile import detect_host_profile
+
+        return detect_host_profile().demosaic_workers()
+    except Exception:
+        pass
     ncores = max(1, os.cpu_count() or 4)
-    return max(1, min(ncores - 1, 6))
+    try:
+        total_bytes = int(os.sysconf("SC_PHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
+    except (AttributeError, OSError, TypeError, ValueError):
+        total_bytes = 16 * 1024**3
+    # ~3GB peak per worker; budget half of RAM.
+    memory_workers = max(1, int((total_bytes // 2) // (3 * 1024**3)))
+    return max(1, min(ncores - 1 if ncores > 1 else 1, memory_workers, 6))
 
 
 def configured_demosaic_processes() -> int:

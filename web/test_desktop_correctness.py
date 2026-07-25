@@ -51,6 +51,21 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("suggestion.change_summary", collections)
         self.assertNotIn("suggestion.confidence", collections)
 
+    def test_lenses_mount_before_slow_library_panel_bootstrap(self):
+        bootstrap = read("bootstrap.js")
+        self.assertLess(
+            bootstrap.index("initLenses();"),
+            bootstrap.index("await initPanel();"),
+        )
+
+    def test_lens_startup_clears_static_grid_before_mounting_a_tool(self):
+        lenses = read("lenses.js")
+        self.assertIn("for (const view of document.querySelectorAll('.view.active'))", lenses)
+        self.assertLess(
+            lenses.index("document.querySelectorAll('.view.active')"),
+            lenses.index("LENSES[next].mount();"),
+        )
+
     def test_develop_keyboard_close_unmounts_even_while_grid_is_active(self):
         keyboard = read("keyboard.js")
         develop = read("develop", "develop.js")
@@ -271,7 +286,7 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("fmt(trashedIds.length)", trash_action)
         self.assertIn("mutationPartialSuffix(errors, 'trashed')", trash_action)
 
-        for function_name in ("keepCoverForStack", "keepCoversEverywhere"):
+        for function_name in ("keepCoverForStack", "cleanupVerifiedIdenticals"):
             start = duplicates.index(f"async function {function_name}(")
             action = duplicates[start:duplicates.index("\n}\n", start)]
             self.assertLess(
@@ -318,9 +333,9 @@ class DesktopCorrectnessTests(unittest.TestCase):
             self.assertIn("result?.partial", refine)
             self.assertIn("Undo partial — ranking drifted", refine)
 
-    def test_keep_covers_button_is_reenabled_if_stack_reload_fails(self):
+    def test_identical_cleanup_button_is_reenabled_if_stack_reload_fails(self):
         duplicates = read("duplicates.js")
-        action_start = duplicates.index("async function keepCoversEverywhere()")
+        action_start = duplicates.index("async function cleanupVerifiedIdenticals()")
         action = duplicates[action_start:duplicates.index("\n}\n", action_start)]
 
         self.assertIn("await reloadStacks();", action)
@@ -619,6 +634,33 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("workerStateIsActive({ worker: pregen })", drawer)
         self.assertIn("cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress", active_progress)
         self.assertIn("|| cachePregenStateIsActive(cacheStatus)", activity)
+
+    def test_activity_popover_uses_compact_nonblocking_status_copy(self):
+        drawer = read("drawer.js")
+        activity_status = drawer[
+            drawer.index("function activityStatusText"):
+            drawer.index("function renderActivity")
+        ]
+        activity = drawer[
+            drawer.index("function renderActivity"):
+            drawer.index("async function refreshActivity")
+        ]
+
+        self.assertIn("data.status_stale", activity_status)
+        self.assertIn("fmtCompact", activity_status)
+        self.assertIn("done ·", activity_status)
+        self.assertIn("left ·", activity_status)
+        self.assertIn("activityStatusText(name, data)", activity)
+        self.assertNotIn("statusText(name, data)", activity)
+
+    def test_satellites_hide_hub_only_compute_controls(self):
+        drawer = read("drawer.js")
+
+        self.assertIn("function hubComputeSettingsVisible()", drawer)
+        self.assertIn("remoteAccess.hub_mode === false", drawer)
+        self.assertIn("pairStatus.mode !== 'hub'", drawer)
+        self.assertIn("if (!hubComputeSettingsVisible()) return '';", drawer)
+        self.assertIn("hubComputeSettingsVisible() ? renderCloudBackup(catalog) : ''", drawer)
 
     def test_import_scan_never_rechecks_a_user_cleared_key(self):
         import_stage = read("import_stage.js")
