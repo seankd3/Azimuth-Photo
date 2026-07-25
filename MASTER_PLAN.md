@@ -90,17 +90,15 @@ The following are product covenants, not optional backlog ideas:
 9. **Elegant ownership.** Product behavior lives in focused owner modules.
    Compatibility facades remain thin; large facades are strangled in bounded
    phases, never rewritten wholesale.
-10. **Azimuth everywhere, migrated safely.** The end state is Azimuth Photo
-    across the product, repository, application paths, services, scripts,
-    environment variables, databases, packages, stored keys, and owned internal
-    identifiers. The naming contract is `Azimuth Photo` in product language,
-    `AzimuthPhoto` where a platform requires one token, `azimuth-photo` for
-    lowercase slugs/executables, and `azimuth_photo` for underscore-style code.
-    No prior product identifier remains in active code, paths, packages,
-    generated artifacts, documentation, or normal operation after cutover.
-    Existing installations stay safe through tested discovery, migration,
-    rollback, and mixed-version behavior; transitional recognition is deleted
-    after every preserved installation has been proven on Azimuth naming.
+10. **Azimuth Photo is the customer identity; internal migration is deliberate.**
+    Customer-visible product language, artwork, packages, documentation, and
+    normal workflows use **Azimuth Photo** with no prior branding. New identifiers
+    follow `AzimuthPhoto` where a platform requires one token, `azimuth-photo`
+    for lowercase slugs/executables, and `azimuth_photo` for underscore-style
+    code. Persisted and operational identifiers—including database discovery,
+    stored keys, environment variables, services, and installed paths—change
+    only through the explicit WIN-06 decision gate. Do not infer either permanent
+    compatibility or immediate destructive removal.
 
 Related product doctrine:
 [product vision](docs/product-vision.md),
@@ -676,27 +674,31 @@ areas, but responsibility does not.
 - **Acceptance evidence:** platform asset inventory, high-DPI/Windows shell
   proof, PWA/Android parity, no customer-visible old mark, accessibility contrast.
 
-#### WIN-06 — Complete the Azimuth-everywhere migration
+#### WIN-06 — Decide and execute the internal Azimuth identifier migration
 
 - **Status / priority / owner:** `blocked` · `P0` · Windows Distribution &
   Identity.
-- **Desired outcome:** the repository becomes `azimuth-photo`; the application,
-  service, scripts, environment variables, databases, data directories,
-  packages, stored keys, and owned internal identifiers use Azimuth names
-  without stranding old installs or data.
+- **Desired outcome:** customer-visible Azimuth Photo is complete while the user
+  explicitly chooses how repository/remotes, application paths, services,
+  scripts, environment variables, databases, data directories, packages, stored
+  keys, and owned internal identifiers migrate without stranding installs or
+  data.
 - **Current evidence:** Phase 1 compatibility code is on `main`; legacy wrappers
   and names remain intentionally. Repo/service/XPS phases are incomplete.
-- **Prerequisite:** runtime extraction, no active feature lanes, backup/restore
-  drill, collision-proof path map, current integration acceptance, and scheduled
-  service window. These are safety gates, not reasons to defer the outcome.
-- **Boundary:** one migration phase at a time; active outputs switch to Azimuth
-  naming, while narrowly scoped transitional readers protect preserved installs
-  during cutover. No sweeping search/replace.
-- **Acceptance evidence:** new/old/mixed env precedence, first/second boot,
-  DB/WAL/backup discovery, rollback, pre-migration client compatibility,
-  announced service cutover, all normal operation using Azimuth names, zero
-  prior-name occurrences in the active tree and built artifacts, then deletion
-  of transitional readers after the migration window.
+- **Prerequisite:** complete identifier inventory, runtime extraction, no active
+  feature lanes, backup/restore drill, collision-proof path map, accepted
+  integration, impact estimate, and explicit user selection of one path below.
+- **Boundary:** no persisted/internal rename before the decision; no sweeping
+  search/replace; no permanent compatibility promise by default; customer-visible
+  prior branding remains a defect regardless of the selected internal path.
+- **Acceptance evidence:** the decision packet maps every identifier and
+  installation population, compares data-loss/rollback/support cost, records the
+  approved path, and then proves that path's full matrix.
+
+| Evaluated path | Behavior | Required proof before selection | Completion evidence |
+|---|---|---|---|
+| **A — Tested compatibility bridge for one stable release** | New installs and writes use Azimuth identifiers; narrowly scoped readers discover both identifier generations for exactly one stable release | New/old/mixed precedence, first/second boot, DB/WAL/backup discovery, upgrade/rollback, pre-migration client behavior, bridge-removal design | Stable-release support window completes with migration counts and no stranded install; user separately confirms bridge retirement or extension |
+| **B — Backed-up zero-legacy cutover** | A scheduled migration converts all selected persisted and operational identifiers; normal operation retains no compatibility bridge after successful cutover | Verified backups, scratch restore, collision-proof move map, disk sizing, service/remotes/toolkit coordination, atomic failure and rollback drills | Announced cutover succeeds; restored catalog and originals reconcile; services/restarts/upgrade pass; selected active tree, artifacts, paths, databases, and runtime output meet the approved zero-legacy inventory |
 
 ### Release and Quality Infrastructure
 
@@ -907,7 +909,7 @@ checks. A faster incomplete query is a regression.
 
 - Do not start Ranking implementation, Dual implementation, quality-foundation,
   facade refactors, monorepo reorganization, runtime relocation, identity asset
-  rollout, or the approved Azimuth-everywhere migration before their
+  rollout, or internal identifier migration before their decision and
   prerequisites above.
 - Do not modify production `main`, runtime data, services, original roots, or
   existing dirty worktrees during integration.
@@ -956,7 +958,7 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-DOC-01 | `ready after integration` / P1 | Desktop | UI architecture understates/outdates shipped Develop scope | Owner-approved doctrine and code-map correction |
 | BUG-DOC-02 | `unverified` / P1 | Release | Code map omits current families/modules and lists `importer.js` despite no known inbound import | Live inventory; import journey before any retirement |
 | BUG-WIN-01 | `active` / P0 | Windows | Real NSIS install/first-launch/local/mapped/UNC proof is incomplete | Terminal artifact/install evidence from the single XPS build |
-| BUG-ID-01 | `blocked` / P0 | Windows | Pre-Azimuth identifiers remain in tracked source paths, compatibility surfaces, runtime-adjacent names, and operational tooling | Zero prior-name occurrences in the accepted active tree, packages, built artifacts, service definitions, app paths, environment variables, and normal runtime output after a backed-up migration |
+| BUG-ID-01 | `unverified` / P0 | Windows | Customer-visible pre-Azimuth branding may remain across shipped surfaces; internal/persisted occurrences are migration inventory rather than automatically a defect | Current-tree and built-artifact visible-brand audit reaches zero customer-facing occurrences; internal findings map to WIN-06 without changing them |
 | BUG-PRIV-01 | `unverified` / P0 | Release | Personal paths/IP/default-server and website/catalog export risk classes may exist in tree/history | Full current/history scan and clean release artifact review |
 | BUG-RUNTIME-01 | `active` / P0 | Core | Runtime databases, previews, models, backups, and venv coexist with source | Verified relocation/restore and source checkout stays runtime-clean |
 | BUG-REL-01 | `blocked` / P0 | Release | No accepted proof of current public CI, tag, or release | Green CI evidence, immutable tag, clean-download artifact smoke |
@@ -977,10 +979,12 @@ should not be re-added here unless reproduced on the accepted integration head.
 ### Approved product direction
 
 - Customer-visible product name is **Azimuth Photo**.
-- The final repository, application paths, services, scripts, environment
-  variables, database names, packages, stored keys, and owned internal
-  identifiers will also use Azimuth names. Transitional readers may exist only
-  inside the backed-up migration window and must then be deleted.
+- Customer-visible language, artwork, package identity, documentation, and
+  workflows must contain no prior branding.
+- New technical identifiers use the platform-appropriate Azimuth form. Existing
+  persisted and operational identifiers do not change until WIN-06 selects and
+  proves either the one-stable-release bridge or the backed-up zero-legacy
+  cutover.
 - Windows desktop is the primary distribution/client surface; mobile is a
   first-class companion.
 - Local/NAS folders must be effortless.
@@ -992,9 +996,8 @@ should not be re-added here unless reproduced on the accepted integration head.
 - Learning/projection should cover the full eligible catalog, not only the
   current refinement scope.
 - Originals and durable user evidence take precedence over caches and cleanup.
-- Existing installs remain protected until the complete Azimuth migration is
-  proven; the accepted end state has no prior product identifier in active
-  operation.
+- Existing installs remain protected during any chosen migration. Neither
+  permanent compatibility nor immediate zero-legacy removal is approved yet.
 
 ### User approval required before significant change
 
@@ -1005,7 +1008,7 @@ should not be re-added here unless reproduced on the accepted integration head.
 | Manual 0–5 star behavior | May conflict with Taste/Elo and Lightroom semantics | Route/client audit only |
 | Sidecar/XMP automatic-write policy | Touches user-adjacent files and Lightroom interoperability | Read-only inventory, isolated round-trip proof |
 | Runtime data relocation | Moves the live catalog/cache and affects service recovery | Scratch backup/restore and target sizing |
-| Azimuth migration cutover window | The direction is approved, but execution affects systemd, toolkit, remotes, live data, scripts, and mixed-version clients | Collision-proof map, preservation inventory, aliases, precedence/fallback tests |
+| Internal Azimuth identifier migration path | Persisted names affect systemd, toolkit, remotes, live data, scripts, restore behavior, and mixed-version clients | Evaluate **A:** one-stable-release tested bridge versus **B:** backed-up zero-legacy cutover; inventory, preservation map, precedence/rollback tests, and explicit user choice |
 | Cloud/server capability defaults | Determines what data leaves devices and why | Capability model and no-upload tests |
 | Public license/release/signing policy | Creates external obligations and update trust | CI/reproducibility/signing research without secrets |
 | Light Meridian final assets | Changes the durable public identity | Inventory and platform rendering proofs |
@@ -1018,8 +1021,8 @@ should not be re-added here unless reproduced on the accepted integration head.
   the normal local UI authority.
 - The bundled local engine can remain internal implementation if it is invisible
   and fully managed by the Windows client.
-- Existing transitional readers and stored names are migration inputs, not
-  product architecture. They must have measurable deletion criteria.
+- Do not assume existing transitional readers and stored names must remain
+  forever or disappear immediately. Their treatment follows the WIN-06 decision.
 - Existing sidecars/XMP are an interoperability layer, not a complete backup of
   ranking actions or catalog structure.
 - Earlier lane test reports are credible evidence for review, not substitutes
