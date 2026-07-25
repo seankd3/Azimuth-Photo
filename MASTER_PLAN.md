@@ -307,6 +307,43 @@ areas, but responsibility does not.
   and UNC source tests; interruption/failure injection; full digest gates every
   destructive "protected copy" claim.
 
+#### CORE-07 — Close the rename/recovery safety boundary
+
+- **Status / priority / owner:** `ready after integration` · `P0` · Core Library
+  & Safety.
+- **Desired outcome:** every valid current or pre-migration snapshot remains
+  discoverable, protected by retention, drillable, and restorable while catalog,
+  WAL, owner marker, staging files, and data roots migrate atomically or roll
+  back without hiding the user's library.
+- **Current evidence:** the bounded 2026-07-25 audit found six focused failures
+  on the paused head, all caused by writers creating `azimuth-*.db.gz` while
+  discovery/retention/drill paths search only the prior prefix. Exact-name
+  restore of an Azimuth snapshot did prepare a validated catalog without
+  replacing the live DB. Commit `e518de33c` is a narrow completed fix for
+  dual-prefix discovery, but it is not integrated.
+- **Prerequisite:** approved reconciliation, then integrate and review
+  `e518de33c` before any runtime-root or internal-identifier migration.
+- **Boundary:** tests and scratch copies only; no live restore, owner-marker
+  rewrite, catalog/WAL move, data-root move, backup deletion, or service restart
+  during the fix/audit lane.
+- **Acceptance evidence:** all current failures pass; both naming generations
+  are listed, retained, drilled, and restorable; scratch refusal recognizes both
+  live catalog/marker generations; catalog plus WAL/SHM/journal move as one
+  recoverable unit; split-root precedence never hides the populated catalog;
+  owner identity survives a catalog/path rename; and an installed client applies
+  a prepared restore with stop/replace/restart/rollback proof.
+
+| Verified boundary | Exact evidence | Status or unknown | Required acceptance proof |
+|---|---|---|---|
+| Snapshot discovery and retention | `_timestamp_name()` writes `azimuth-*.db.gz`; current list, retention, destination guard, and restore drill use prior-prefix globs. `test_system_backups.py`: 15 passed, 3 failed. Migration/runtime/rebrand/drill set: 28 passed, 3 failed, 1 skipped. All six failures are listing or retention of the current prefix. | `done awaiting integration` via `e518de33c` | Integrate the named commit; rerun both focused sets; mixed old/new directory returns correct newest snapshot, protects pre-migration snapshots, prunes only eligible snapshots, and restores both exact names. |
+| Exact-name restore | Scratch probe created an Azimuth snapshot and `restore_backup()` validated/staged it while leaving the live DB untouched. | Verified preparation; application remains absent | Route and UI select the listed current snapshot, stage it, then installed-client apply preserves the previous live DB, removes stale sidecars safely, restarts, checks schema/catalog counts, and can roll back. |
+| Restore-drill scratch refusal | A scratch directory containing only `azimuth.db` was accepted; current guard checks only the prior DB filename and marker. | Verified P0 guard defect | Both catalog filenames, both owner-marker generations, WAL/SHM/journal, and configured live roots hard-refuse before any scratch creation or cleanup; refused bytes remain unchanged. |
+| Catalog plus sidecars | Synthetic WAL rename failure moved the main DB to `azimuth.db`, left the old WAL behind, and still returned the new DB path. | Verified failure-path behavior; impact on real uncheckpointed WAL not exercised | Force failure at each main/WAL/SHM/journal step; either all names commit after checkpoint/integrity proof or every name rolls back; reopen and compare rows, `quick_check`, user version, and sidecar state. |
+| Split data roots | With a populated prior XDG root and an empty existing Azimuth root, resolver selected the empty Azimuth catalog path and left the populated catalog untouched. | Verified precedence defect in scratch; Windows/macOS impact unknown | Old-only, new-only, both-identical, both-divergent, empty-new/populated-old, cross-volume, low-space, permission-failure, first/second boot, and rollback matrix on Linux/Windows/macOS. Never initialize over an undiscovered catalog. |
+| Backup ownership across rename | Live owner marker records the prior catalog path while the active catalog is `web/azimuth.db`; current owner comparison is exact-path equality. No live backup attempt was made. | Verified mismatch evidence; actual scheduler refusal is `unverified` | Read-only warning probe, then scratch rewrite/adoption test that authenticates catalog identity, refuses foreign roots, preserves every snapshot, and resumes scheduled backup after path migration. |
+| Schema upgrade and rollback | Existing tests prove populated catalogs refuse schema migration when pre-migration backup fails; schema work uses transactions/local table-rebuild backups. | Backup gate verified; complete downgrade/application path unknown | Old release catalog → current upgrade → injected failure at each phase → restore pre-migration snapshot → old and new app boot checks; catalog counts, direct choices, edits, sources, and user version reconcile. |
+| Prepared-restore application | Current and `origin/windows-install` trees stage/status/discard prepared restores; repository search found no apply path, while docs require manual server stop and file moves. | Verified product/recovery gap | One explicit customer action stops the managed engine, preserves the failed DB and sidecars, atomically promotes the staged DB, restarts, verifies health, and offers rollback without terminal instructions. |
+
 ### Desktop Workflow
 
 #### DESK-01 — Integrate customer-trust desktop outputs
@@ -921,6 +958,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 Windows install proof | Unsigned current-user installer and install-to-library journey | 107,918,017 bytes; SHA-256 `ABEBF263…A500299`; install exit 0; local + mapped `Z:`/UNC browse; close/relaunch passed | Preserve on integrated SHA; signing/updater/public release remain separate gates | `done awaiting integration` |
 | 2026-07-25 Omarchy Windows-branch check | `test_windows_desktop_install` | 7/7 passed; range `git diff --check` passed | Same proof on controlled integration SHA | `done awaiting integration` |
 | 2026-07-25 Map/People profile | Complete Map response generation | Query layer fast; full-payload serialization dominates; absolute latency/bytes not accepted | Bounded byte-cache with exact-payload and invalidation proof; no feature filtering | `ready after integration` |
+| 2026-07-25 rename/recovery audit | Backup/list/restore focused suite | `test_system_backups.py`: 15 passed, 3 failed; migration/rebrand/runtime/restore-drill set: 28 passed, 3 failed, 1 skipped | Zero naming-generation discovery/retention/restore failures after `e518de33c`; retain all safety passes | `done awaiting integration` |
 | UI architecture covenant | Cull/Refine perceived response | Existing paths can poll or exceed 50 ms | Below 50 ms perceived; no spinner **covenant** | `active` |
 | 2026-07-25 test-discovery audit | Default selected automated coverage | 1,423 unittest vs 1,539 pytest total / 1,537 after bench deselection | Complete intended pytest unit selection | `parked` |
 
@@ -1007,6 +1045,12 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-WIN-ID-01 | `unverified` / P1 | Windows | OS app discovery exposed both `app.azimuthphoto.desktop` and older `com.seankennethdoherty.photoarchive` identities for the same running window; this may be a stale install or identifier-migration collision | Clean-machine install with old app removed; enumerate registry/app identity before and after; prove one running identity, one uninstall entry, one data home, and upgrade continuity |
 | BUG-WIN-CODEC-01 | `unverified` / P1 | Windows | Frozen-engine build emitted unresolved optional `imagecodecs` DLL warnings for JPEG-XS, JetRaw, and HEIF; no supported-format decode failure was reproduced | Declare supported Windows formats, inspect frozen imports/DLLs, then decode representative JPEG-XS/JetRaw/HEIF or explicitly classify unsupported formats; clean packaging log for supported set |
 | BUG-MAP-PERF-01 | `ready after integration` / P1 | Desktop | Full Map payload serialization, not its query, dominates the reported large-library profile | Reproducible cold/warm profiler plus bounded response-byte cache with byte equality, deterministic invalidation, memory bound, and no filtering |
+| BUG-RECOVERY-01 | `done awaiting integration` / P0 | Core | Current-prefix snapshots are created but absent from list, retention, destination-ownership discovery, and automatic restore drill on the paused head | Integrate `e518de33c`; mixed-prefix listing/retention/drill and the six currently failing focused tests pass |
+| BUG-RECOVERY-02 | `ready after integration` / P0 | Core | Restore-drill scratch guard accepts a directory containing an Azimuth-named live catalog | Dual-generation catalog/marker/sidecar refusal with byte-preservation failure injection |
+| BUG-RECOVERY-03 | `ready after integration` / P0 | Core | Catalog rename can commit the main DB, fail a WAL sidecar rename, and still select the new DB | Atomic or fully reversible main/WAL/SHM/journal migration with row/integrity comparison at every injected failure |
+| BUG-RECOVERY-04 | `ready after integration` / P0 | Core | An existing empty Azimuth data root wins over a populated prior root, hiding the populated catalog from normal resolution | Cross-platform split-root matrix with explicit conflict UI and no new catalog initialization while an unadopted catalog exists |
+| BUG-RECOVERY-05 | `ready after integration` / P0 | Core | Recovery can prepare a valid restore but current and Windows-branch code have no managed apply path; documentation requires terminal file moves | Installed-client stop/promote/restart/health/rollback journey using disposable catalogs and no terminal |
+| BUG-RECOVERY-06 | `unverified` / P0 | Core | Live backup owner marker names the prior catalog path while the active DB uses the Azimuth filename; exact-path ownership may refuse the next backup after rename | Read-only warning confirmation, scratch identity migration, and successful scheduled snapshot without weakening foreign-root refusal |
 | BUG-PRIV-01 | `unverified` / P0 | Release | Personal paths/IP/default-server and website/catalog export risk classes may exist in tree/history | Full current/history scan and clean release artifact review |
 | BUG-RUNTIME-01 | `active` / P0 | Core | Runtime databases, previews, models, backups, and venv coexist with source | Verified relocation/restore and source checkout stays runtime-clean |
 | BUG-REL-01 | `blocked` / P0 | Release | No accepted proof of current public CI, tag, or release | Green CI evidence, immutable tag, clean-download artifact smoke |
@@ -1087,7 +1131,7 @@ not permission to merge it.
 | Queue entry | Branch / commit | Output | Integration condition |
 |---|---|---|---|
 | CORE-01 | `scan-safety` / `a5dacedd9` | Interrupted/offline scan catalog safety | Core cohort after main reconciliation |
-| CORE-01 | `recovery-truth` / `e518de33c` | Current snapshot/vault recovery truth | Manual `backups.py` review |
+| CORE-01/CORE-07 | `recovery-truth` / `e518de33c` | Dual-prefix snapshot discovery, retention, destination guard, and restore-drill truth | Integrate after reconciliation; rerun six currently failing naming tests plus mixed-prefix recovery proof |
 | CORE-01 | `preview-honesty` / `e6c98e937` | Honest background preview state/ETA | Thumbnail overlap review and perf gate |
 | CORE-01 | `perf-filter-options` / `a9e11f4ed` | Consolidated exact facet reads | Rerun correctness and latency |
 | CORE-01 | `first-use-boot` / `fce783a7a` | Defer updater bundle prep after library readiness | Review `app.py`; preserve untracked benchmark receipts |
