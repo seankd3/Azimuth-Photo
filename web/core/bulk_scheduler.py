@@ -33,8 +33,8 @@ _desired_path_override: Path | None = None
 
 
 def sequencing_enabled() -> bool:
-    """PHOTOARCHIVE_BULK_SEQUENCING — default on."""
-    raw = str(os.environ.get("PHOTOARCHIVE_BULK_SEQUENCING", "1")).strip().lower()
+    """AZIMUTH_BULK_SEQUENCING — default on."""
+    raw = str(os.environ.get("AZIMUTH_BULK_SEQUENCING", "1")).strip().lower()
     return raw not in {"0", "false", "no", "off"}
 
 

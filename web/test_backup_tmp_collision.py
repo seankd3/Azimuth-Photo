@@ -31,17 +31,17 @@ class TmpCollisionTests(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         home = Path(self._tmp.name)
-        self.db = _make_catalog(home / "photoarchive.db")
+        self.db = _make_catalog(home / "azimuth.db")
         self.root = home / "backups"
         self.root.mkdir()
-        self._old_env = os.environ.get("PHOTOARCHIVE_BACKUP_DIR")
-        os.environ["PHOTOARCHIVE_BACKUP_DIR"] = str(self.root)
+        self._old_env = os.environ.get("AZIMUTH_BACKUP_DIR")
+        os.environ["AZIMUTH_BACKUP_DIR"] = str(self.root)
 
     def tearDown(self):
         if self._old_env is None:
-            os.environ.pop("PHOTOARCHIVE_BACKUP_DIR", None)
+            os.environ.pop("AZIMUTH_BACKUP_DIR", None)
         else:
-            os.environ["PHOTOARCHIVE_BACKUP_DIR"] = self._old_env
+            os.environ["AZIMUTH_BACKUP_DIR"] = self._old_env
         self._tmp.cleanup()
 
     def test_snapshot_survives_foreign_same_second_tmp(self):
@@ -60,11 +60,11 @@ class TmpCollisionTests(unittest.TestCase):
             holder.close()
 
     def test_orphaned_tmp_swept_fresh_tmp_kept(self):
-        stale = self.root / ".photoarchive-20260101-040000.999.tmp.db"
+        stale = self.root / ".azimuth-20260101-040000.999.tmp.db"
         stale.write_bytes(b"x" * 64)
         old = time.time() - backups.ORPHANED_TMP_MAX_AGE_SECONDS - 60
         os.utime(stale, (old, old))
-        fresh = self.root / ".photoarchive-20260719-040000.998.tmp.db"
+        fresh = self.root / ".azimuth-20260719-040000.998.tmp.db"
         fresh.write_bytes(b"y" * 64)
 
         result = backups.create_snapshot(str(self.db))

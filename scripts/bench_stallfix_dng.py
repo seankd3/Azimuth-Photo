@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Sustained demosaic-heavy pregen proof for the stallfix death-spiral patch.
 
-Runs an isolated PHOTOARCHIVE_HOME against real R5 DNGs (full demosaic path),
+Runs an isolated AZIMUTH_HOME against real R5 DNGs (full demosaic path),
 with a deliberately tight stall watchdog, and measures PERSISTENCE (physical
 preview files on disk) + decode-budget balance — not just the gen counter.
 
@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -44,7 +43,7 @@ def _iter_dngs(path: Path):
 def _physical_thumb_count(cache_dir: Path) -> int:
     if not cache_dir.is_dir():
         return 0
-    marker = ".photoarchive-cache"
+    marker = ".azimuth-cache"
     total = 0
     for _root, _dirs, files in os.walk(cache_dir):
         total += sum(1 for name in files if name != marker)
@@ -127,12 +126,12 @@ def main() -> int:
         print(f"need ≥8 DNGs under {args.root}, found {len(dngs)}", file=sys.stderr)
         return 2
 
-    scratch = Path(tempfile.mkdtemp(prefix="pa-stallfix-dng-"))
+    scratch = Path(tempfile.mkdtemp(prefix="azimuth-stallfix-dng-"))
     home = scratch / "home"
     cache = home / "cache" / "thumbs"
     home.mkdir(parents=True)
     cache.mkdir(parents=True)
-    catalog_db = home / "data" / "catalog" / "photoarchive.db"
+    catalog_db = home / "data" / "catalog" / "azimuth.db"
     print(f"scratch={scratch}", flush=True)
     print(f"dngs={len(dngs)} under {args.root}", flush=True)
     print(f"stall_watchdog={args.stall_seconds}s (tight demosaic-sensitive)", flush=True)
@@ -140,15 +139,15 @@ def main() -> int:
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_HOME": str(home),
-            "PHOTOARCHIVE_THUMB_CACHE_DIR": str(cache),
-            "PHOTOARCHIVE_HOST": "127.0.0.1",
-            "PHOTOARCHIVE_PORT": str(args.port),
-            "PHOTOARCHIVE_MODE": "standalone",
-            "PHOTOARCHIVE_ACCESS": "local",
-            "PHOTOARCHIVE_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
+            "AZIMUTH_HOME": str(home),
+            "AZIMUTH_THUMB_CACHE_DIR": str(cache),
+            "AZIMUTH_HOST": "127.0.0.1",
+            "AZIMUTH_PORT": str(args.port),
+            "AZIMUTH_MODE": "standalone",
+            "AZIMUTH_ACCESS": "local",
+            "AZIMUTH_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
             # Tight watchdog — proves progress heartbeat prevents false cancel.
-            "PHOTOARCHIVE_PREGEN_STALL_SECONDS": str(args.stall_seconds),
+            "AZIMUTH_PREGEN_STALL_SECONDS": str(args.stall_seconds),
             "PYTHONPATH": str(WEB),
         }
     )

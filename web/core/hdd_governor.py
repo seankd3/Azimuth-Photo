@@ -14,7 +14,7 @@ import os
 import threading
 from contextlib import asynccontextmanager, contextmanager
 
-_CONCURRENCY = max(1, int(os.environ.get("PHOTOARCHIVE_BULK_HDD_CONCURRENCY", "1")))
+_CONCURRENCY = max(1, int(os.environ.get("AZIMUTH_BULK_HDD_CONCURRENCY", "1")))
 _thread_sem = threading.Semaphore(_CONCURRENCY)
 _holds = 0
 _holds_lock = threading.Lock()

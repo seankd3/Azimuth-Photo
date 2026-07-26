@@ -208,7 +208,7 @@ class HealthAggregationTests(unittest.TestCase):
         now = time.time()
         recent = [
             {
-                "name": "photoarchive-20260719-010000.db.gz",
+                "name": "azimuth-20260719-010000.db.gz",
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now - 3600)),
                 "bytes": 100,
             }
@@ -222,7 +222,7 @@ class HealthAggregationTests(unittest.TestCase):
 
         stale = [
             {
-                "name": "photoarchive-20260101-010000.db.gz",
+                "name": "azimuth-20260101-010000.db.gz",
                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(now - 10 * 86400)),
                 "bytes": 100,
             }

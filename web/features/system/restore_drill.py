@@ -1,6 +1,6 @@
 """Restore drill: prove a sealed catalog snapshot is actually restorable.
 
-Picks the newest sealed ``photoarchive-*.db.gz``, restores into a throwaway
+Picks the newest sealed ``azimuth-*.db.gz``, restores into a throwaway
 scratch directory, reuses the backup pipeline's verify helpers, spot-checks
 random image rows, then deletes the scratch — success or failure.
 """
@@ -29,9 +29,9 @@ log = logging.getLogger(__name__)
 
 DEFAULT_SPOT_ROWS = 5
 DEFAULT_NTFY_URL = "http://127.0.0.1:8091/azimuth-alerts"
-DEFAULT_LOG_PATH = Path("/var/tmp/pa-restore-drill.log")
-DEFAULT_STATE_PATH = Path("/var/tmp/pa-restore-drill.state")
-LIVE_DB_NAME = "photoarchive.db"
+DEFAULT_LOG_PATH = Path("/var/tmp/azimuth-restore-drill.log")
+DEFAULT_STATE_PATH = Path("/var/tmp/azimuth-restore-drill.state")
+LIVE_DB_NAME = "azimuth.db"
 LOG_KEEP_LINES = 5000
 
 SPOT_IMAGE_SQL = """
@@ -235,7 +235,7 @@ def run_restore_drill(
     else:
         parent = Path(scratch_parent) if scratch_parent is not None else Path(tempfile.gettempdir())
         parent.mkdir(parents=True, exist_ok=True)
-        scratch_dir = Path(tempfile.mkdtemp(prefix="pa-restore-drill-", dir=str(parent)))
+        scratch_dir = Path(tempfile.mkdtemp(prefix="azimuth-restore-drill-", dir=str(parent)))
         # Fresh empty dir should always be safe; still enforce the contract.
         assert_scratch_is_safe(scratch_dir)
         cleanup = True

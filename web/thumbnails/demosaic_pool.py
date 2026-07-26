@@ -51,8 +51,8 @@ def default_demosaic_processes() -> int:
 
 
 def configured_demosaic_processes() -> int:
-    """``PHOTOARCHIVE_DEMOSAIC_PROCESSES`` — 0 disables the pool (in-process)."""
-    raw = os.environ.get("PHOTOARCHIVE_DEMOSAIC_PROCESSES", "").strip()
+    """``AZIMUTH_DEMOSAIC_PROCESSES`` — 0 disables the pool (in-process)."""
+    raw = os.environ.get("AZIMUTH_DEMOSAIC_PROCESSES", "").strip()
     if not raw:
         return default_demosaic_processes()
     try:
@@ -63,7 +63,7 @@ def configured_demosaic_processes() -> int:
 
 def demosaic_ipc_mode() -> str:
     """``path`` (default) or ``bytes``. Path avoids doubling 25–45MB over IPC."""
-    mode = os.environ.get("PHOTOARCHIVE_DEMOSAIC_IPC", "path").strip().lower()
+    mode = os.environ.get("AZIMUTH_DEMOSAIC_IPC", "path").strip().lower()
     return mode if mode in ("path", "bytes") else "path"
 
 

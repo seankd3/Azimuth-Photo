@@ -19,7 +19,7 @@ Profile-aware denoise for Develop, per `darktable-study/SYNTHESIS.md` P1 #6.
 
 ## Fixture cameras covered
 
-Queried distinct RAW `camera_model` values from the photo-archive catalog DB.
+Queried distinct RAW `camera_model` values from the azimuth-photo catalog DB.
 Shipped profiles where darktable has calibration; phones / action cams fall back.
 
 | Catalog model | Profile model | Rows |

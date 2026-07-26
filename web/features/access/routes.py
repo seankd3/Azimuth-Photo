@@ -14,7 +14,7 @@ router = APIRouter()
 
 def _server_port(request: Request) -> int:
     try:
-        return int(os.getenv("PHOTOARCHIVE_PORT") or 0) or int(request.url.port or 8000)
+        return int(os.getenv("AZIMUTH_PORT") or 0) or int(request.url.port or 8000)
     except (TypeError, ValueError):
         return int(request.url.port or 8000)
 
@@ -57,11 +57,11 @@ async def api_remote_access(request: Request):
         "error": "Remote access is available in hub mode only",
     }
     return {
-        "access_mode": os.getenv("PHOTOARCHIVE_ACCESS", "local"),
+        "access_mode": os.getenv("AZIMUTH_ACCESS", "local"),
         "current_url": str(request.base_url).rstrip("/"),
         "hub_mode": hub_mode,
         "mode": "hub" if hub_mode else (
-            "satellite" if os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip() else "standalone"
+            "satellite" if os.environ.get("AZIMUTH_HUB_URL", "").strip() else "standalone"
         ),
         "tailscale": probe,
     }

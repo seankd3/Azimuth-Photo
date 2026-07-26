@@ -4,15 +4,15 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_ID="app.azimuthphoto.mobile"
 MAIN_ACTIVITY="${APP_ID}/.MainActivity"
-PORT="${PHOTOARCHIVE_PORT:-8000}"
-ARTIFACT_DIR="${PHOTOARCHIVE_ANDROID_E2E_ARTIFACTS:-$ROOT/outputs/android-e2e}"
+PORT="${AZIMUTH_PORT:-8000}"
+ARTIFACT_DIR="${AZIMUTH_ANDROID_E2E_ARTIFACTS:-$ROOT/outputs/android-e2e}"
 REQUIRE_DEVICE=0
 ADB="${ADB:-}"
-DEVICE_SERIAL="${PHOTOARCHIVE_ANDROID_DEVICE:-}"
+DEVICE_SERIAL="${AZIMUTH_ANDROID_DEVICE:-}"
 
 usage() {
     cat <<'USAGE'
-Usage: photoarchive-android-e2e [--require-device] [--adb PATH] [--device SERIAL]
+Usage: azimuth-android-e2e [--require-device] [--adb PATH] [--device SERIAL]
 
 Starts or verifies the Omarchy Azimuth Photo server, builds the Android APK
 against the verified Tailscale URL, and, when adb plus a device are available,
@@ -23,10 +23,10 @@ Without a connected device, it still runs a no-phone Android smoke test through
 Robolectric against the live local Azimuth Photo server.
 
 Environment:
-  PHOTOARCHIVE_PORT                  Server port, default 8000.
-  PHOTOARCHIVE_ANDROID_SERVER_URL    Override tested server URL.
-  PHOTOARCHIVE_ANDROID_DEVICE        adb serial to target.
-  PHOTOARCHIVE_ANDROID_E2E_ARTIFACTS Artifact directory.
+  AZIMUTH_PORT                  Server port, default 8000.
+  AZIMUTH_ANDROID_SERVER_URL    Override tested server URL.
+  AZIMUTH_ANDROID_DEVICE        adb serial to target.
+  AZIMUTH_ANDROID_E2E_ARTIFACTS Artifact directory.
 USAGE
 }
 
@@ -79,8 +79,8 @@ tailscale_ip() {
 }
 
 server_url() {
-    if [[ -n "${PHOTOARCHIVE_ANDROID_SERVER_URL:-}" ]]; then
-        printf '%s\n' "$PHOTOARCHIVE_ANDROID_SERVER_URL"
+    if [[ -n "${AZIMUTH_ANDROID_SERVER_URL:-}" ]]; then
+        printf '%s\n' "$AZIMUTH_ANDROID_SERVER_URL"
         return
     fi
     local dns
@@ -115,7 +115,7 @@ require_server() {
     fi
 
     echo "Starting Azimuth Photo for Android e2e..."
-    PHOTOARCHIVE_ACCESS=tailscale PHOTOARCHIVE_PORT="$PORT" "$ROOT/scripts/photoarchive-server" start >/tmp/photoarchive-android-e2e-server.log 2>&1 || true
+    AZIMUTH_ACCESS=tailscale AZIMUTH_PORT="$PORT" "$ROOT/scripts/azimuth-server" start >/tmp/azimuth-android-e2e-server.log 2>&1 || true
 
     for _ in {1..80}; do
         if curl -fsS --max-time 4 "$health_url" >"$ARTIFACT_DIR/server-health.json"; then
@@ -125,7 +125,7 @@ require_server() {
     done
 
     echo "Azimuth Photo did not become reachable at $health_url" >&2
-    cat /tmp/photoarchive-android-e2e-server.log >&2 || true
+    cat /tmp/azimuth-android-e2e-server.log >&2 || true
     exit 1
 }
 
@@ -136,7 +136,7 @@ require_local_server() {
     fi
 
     echo "Starting local Azimuth Photo for no-phone Android smoke..."
-    PHOTOARCHIVE_ACCESS=local PHOTOARCHIVE_PORT="$PORT" "$ROOT/scripts/photoarchive-server" start >/tmp/photoarchive-android-local-server.log 2>&1 || true
+    AZIMUTH_ACCESS=local AZIMUTH_PORT="$PORT" "$ROOT/scripts/azimuth-server" start >/tmp/azimuth-android-local-server.log 2>&1 || true
 
     for _ in {1..80}; do
         if curl -fsS --max-time 4 "$local_url" >"$ARTIFACT_DIR/server-local-health.json"; then
@@ -146,7 +146,7 @@ require_local_server() {
     done
 
     echo "Azimuth Photo did not become reachable at $local_url" >&2
-    cat /tmp/photoarchive-android-local-server.log >&2 || true
+    cat /tmp/azimuth-android-local-server.log >&2 || true
     exit 1
 }
 
@@ -195,8 +195,8 @@ run_device_smoke() {
     sleep 7
 
     eval "$adb_cmd exec-out screencap -p" >"$ARTIFACT_DIR/screenshot.png" || true
-    eval "$adb_cmd shell uiautomator dump /sdcard/photoarchive-window.xml" >"$ARTIFACT_DIR/uiautomator.log" || true
-    eval "$adb_cmd exec-out cat /sdcard/photoarchive-window.xml" >"$ARTIFACT_DIR/window.xml" || true
+    eval "$adb_cmd shell uiautomator dump /sdcard/azimuth-window.xml" >"$ARTIFACT_DIR/uiautomator.log" || true
+    eval "$adb_cmd exec-out cat /sdcard/azimuth-window.xml" >"$ARTIFACT_DIR/window.xml" || true
     eval "$adb_cmd logcat -d -t 400" >"$ARTIFACT_DIR/logcat.txt" || true
 
     if grep -Eiq 'Offline|Cannot reach|Import failed|crash|fatal exception' "$ARTIFACT_DIR/window.xml" "$ARTIFACT_DIR/logcat.txt"; then
@@ -213,7 +213,7 @@ run_device_smoke() {
 run_no_phone_smoke() {
     require_local_server
     echo "Running no-phone Android app smoke against http://127.0.0.1:${PORT}..."
-    PHOTOARCHIVE_ANDROID_SERVER_URL="http://127.0.0.1:${PORT}" "$ROOT/scripts/photoarchive-android-build" \
+    AZIMUTH_ANDROID_SERVER_URL="http://127.0.0.1:${PORT}" "$ROOT/scripts/azimuth-android-build" \
         -PAzimuth PhotoDefaultServerUrl="http://127.0.0.1:${PORT}" \
         :app:testDebugUnitTest \
         >"$ARTIFACT_DIR/no-phone-smoke.log" 2>&1 || {
@@ -230,12 +230,12 @@ echo "Host health check:   $HEALTH_URL"
 require_server "$HEALTH_URL"
 run_no_phone_smoke
 
-PHOTOARCHIVE_ANDROID_SERVER_URL="$SERVER_URL" "$ROOT/scripts/photoarchive-android-build" \
+AZIMUTH_ANDROID_SERVER_URL="$SERVER_URL" "$ROOT/scripts/azimuth-android-build" \
     -PAzimuth PhotoDefaultServerUrl="$SERVER_URL" \
     :app:assembleDebug
 
-cp "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" "$ROOT/outputs/photoarchive-android-debug.apk"
-sha256sum "$ROOT/outputs/photoarchive-android-debug.apk" >"$ARTIFACT_DIR/apk.sha256"
+cp "$ROOT/android/app/build/outputs/apk/debug/app-debug.apk" "$ROOT/outputs/azimuth-android-debug.apk"
+sha256sum "$ROOT/outputs/azimuth-android-debug.apk" >"$ARTIFACT_DIR/apk.sha256"
 
 ADB_BIN="$(find_adb 2>/dev/null || true)"
 ADB_BIN="$(printf '%s' "$ADB_BIN" | head -n 1)"

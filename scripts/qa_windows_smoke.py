@@ -26,7 +26,7 @@ def main() -> int:
         environ={
             "USERPROFILE": r"C:\Users\Azimuth",
             "LOCALAPPDATA": r"C:\Users\Azimuth\AppData\Local",
-            "PHOTOARCHIVE_EXPORT_DIR": r"D:\Azimuth\Exports",
+            "AZIMUTH_EXPORT_DIR": r"D:\Azimuth\Exports",
         },
         platform_name="win32",
         home=r"C:\Users\Azimuth",

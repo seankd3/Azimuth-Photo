@@ -12,10 +12,10 @@ from features.catalog import reveal
 
 class RevealPathValidationTests(unittest.TestCase):
     def setUp(self):
-        self.root = tempfile.mkdtemp(prefix="pa-reveal-root-")
+        self.root = tempfile.mkdtemp(prefix="azimuth-reveal-root-")
         self.nested = os.path.join(self.root, "Trip", "Day")
         os.makedirs(self.nested)
-        self.outside = tempfile.mkdtemp(prefix="pa-reveal-out-")
+        self.outside = tempfile.mkdtemp(prefix="azimuth-reveal-out-")
 
     def tearDown(self):
         shutil.rmtree(self.root, ignore_errors=True)

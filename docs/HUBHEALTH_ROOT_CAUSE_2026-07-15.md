@@ -37,7 +37,7 @@ Thread 1714129 (active): "caption-gpu_0"
     _preprocess_image_like_inputs (.../transformers/image_processing_utils.py:312)
     preprocess (.../transformers/image_processing_utils.py:400)
     __call__ (.../transformers/models/qwen2_5_vl/processing_qwen2_5_vl.py:90)
-    _caption_cached_preview (/home/sean/Projects/photo-archive/web/caption_worker.py:308)
+    _caption_cached_preview (/home/sean/Projects/azimuth-photo/web/caption_worker.py:308)
     run (.../concurrent/futures/thread.py:59)
 ```
 
@@ -119,6 +119,6 @@ Accepted suite (shared box exclusions requested by the lane):
 Native quick check:
 
 ```text
-./scripts/photoarchive-check --quick
+./scripts/azimuth-check --quick
 exit 0
 ```

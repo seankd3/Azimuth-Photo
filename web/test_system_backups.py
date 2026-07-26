@@ -85,7 +85,7 @@ class BackupUnitTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name) / "backups"
         self.root.mkdir()
-        self.db_path = Path(self.tempdir.name) / "photoarchive.db"
+        self.db_path = Path(self.tempdir.name) / "azimuth.db"
         _make_catalog(self.db_path)
         self._root_patch = mock.patch.object(backups, "backup_root", return_value=self.root)
         self._root_patch.start()
@@ -134,21 +134,21 @@ class BackupUnitTests(unittest.TestCase):
         self.assertEqual(self.db_path.read_bytes(), live_before)
 
     def test_restore_rejects_invalid_catalog_and_cleans_temps(self):
-        name = "photoarchive-20260710-120000.db.gz"
+        name = "azimuth-20260710-120000.db.gz"
         with gzip.open(self.root / name, "wb") as gz:
             gz.write(b"not a sqlite database")
 
         with self.assertRaises(backups.RestoreValidationError):
             backups.restore_backup(str(self.db_path), name)
 
-        self.assertFalse((self.db_path.parent / "photoarchive.restored.db").exists())
-        self.assertFalse((self.db_path.parent / "photoarchive.restored.json").exists())
-        self.assertFalse((self.db_path.parent / ".photoarchive.restored.db.tmp").exists())
+        self.assertFalse((self.db_path.parent / "azimuth.restored.db").exists())
+        self.assertFalse((self.db_path.parent / "azimuth.restored.json").exists())
+        self.assertFalse((self.db_path.parent / ".azimuth.restored.db.tmp").exists())
 
-    def test_restore_requires_photoarchive_tables(self):
+    def test_restore_requires_azimuth_tables(self):
         empty_db = Path(self.tempdir.name) / "empty.db"
         sqlite3.connect(empty_db).close()
-        name = "photoarchive-20260710-121500.db.gz"
+        name = "azimuth-20260710-121500.db.gz"
         with open(empty_db, "rb") as raw, gzip.open(self.root / name, "wb") as gz:
             gz.write(raw.read())
 
@@ -161,7 +161,7 @@ class BackupUnitTests(unittest.TestCase):
         # 20 daily-ish backups spanning > 4 weeks.
         for days_ago in range(0, 40):
             when = now - timedelta(days=days_ago)
-            name = f"photoarchive-{when.strftime('%Y%m%d-%H%M%S')}.db.gz"
+            name = f"azimuth-{when.strftime('%Y%m%d-%H%M%S')}.db.gz"
             path = self.root / name
             with gzip.open(path, "wb") as gz:
                 gz.write(b"sqlite-fake")
@@ -237,7 +237,7 @@ class BackupUnitTests(unittest.TestCase):
 
     @pytest.mark.contract
     def test_verification_failure_publishes_nothing(self):
-        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        before = {path.name for path in self.root.glob("azimuth-*.db.gz")}
         real_verify = backups._verify_backup_artifact
 
         def corrupt_then_verify(dest_db, source_db, *, snapshot_images):
@@ -248,7 +248,7 @@ class BackupUnitTests(unittest.TestCase):
             with self.assertRaises(backups.BackupVerificationError):
                 backups.create_snapshot(str(self.db_path))
 
-        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        after = {path.name for path in self.root.glob("azimuth-*.db.gz")}
         self.assertEqual(after, before)
         self.assertFalse(list(self.root.glob(".*.tmp.db")))
         self.assertFalse(list(self.root.glob(".*.tmp.gz")))
@@ -261,7 +261,7 @@ class BackupUnitTests(unittest.TestCase):
     def test_corrupt_gzip_before_publish_is_refused(self):
         """B1: decompress-verify the .gz against the verified tmp DB before os.replace."""
 
-        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        before = {path.name for path in self.root.glob("azimuth-*.db.gz")}
 
         def corrupt_gz(path: Path) -> None:
             path.write_bytes(b"not-a-gzip-payload")
@@ -274,21 +274,21 @@ class BackupUnitTests(unittest.TestCase):
         finally:
             backups._gzip_publish_hook = previous
 
-        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        after = {path.name for path in self.root.glob("azimuth-*.db.gz")}
         self.assertEqual(after, before)
         self.assertFalse(list(self.root.glob(".*.tmp.db")))
         self.assertFalse(list(self.root.glob(".*.tmp.gz")))
 
     @pytest.mark.contract
     def test_empty_catalog_refuses_shared_historical_backup_dir(self):
-        historical = self.root / "photoarchive-20260101-040000.db.gz"
+        historical = self.root / "azimuth-20260101-040000.db.gz"
         historical.write_bytes(b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1))
         # Empty catalog: _make_catalog inserts sources but zero images.
         with self.assertRaisesRegex(backups.BackupMisconfigurationError, "misconfigured"):
             backups.create_snapshot(str(self.db_path))
         published = [
             path
-            for path in self.root.glob("photoarchive-*.db.gz")
+            for path in self.root.glob("azimuth-*.db.gz")
             if path.name != historical.name
         ]
         self.assertEqual(published, [])
@@ -308,9 +308,9 @@ class BackupUnitTests(unittest.TestCase):
         self.assertEqual(payload["catalog_path"], str(self.db_path.resolve()))
 
         # Plant an extra same-day older snapshot that a successful second run would prune.
-        vulnerable = self.root / "photoarchive-20260701-030000.db.gz"
+        vulnerable = self.root / "azimuth-20260701-030000.db.gz"
         vulnerable.write_bytes(b"keep-me" * 64)
-        before = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        before = {path.name for path in self.root.glob("azimuth-*.db.gz")}
 
         other_db = Path(self.tempdir.name) / "other-instance.db"
         _make_catalog(other_db, files=[(str(Path(self.tempdir.name) / "other.bin"), b"other-bytes")])
@@ -322,7 +322,7 @@ class BackupUnitTests(unittest.TestCase):
                     when=datetime(2026, 7, 1, 5, 0, 0),
                 )
 
-        after = {path.name for path in self.root.glob("photoarchive-*.db.gz")}
+        after = {path.name for path in self.root.glob("azimuth-*.db.gz")}
         self.assertEqual(after, before)
         self.assertTrue(vulnerable.is_file())
         self.assertEqual(vulnerable.read_bytes(), b"keep-me" * 64)
@@ -351,7 +351,7 @@ class BackupUnitTests(unittest.TestCase):
                 with self.assertRaises(backups.BackupMisconfigurationError):
                     backups.restore_backup(str(other_db), first["name"])
         # No staging artifacts beside the foreign catalog.
-        staging = other_db.with_name("photoarchive.restored.db")
+        staging = other_db.with_name("azimuth.restored.db")
         self.assertFalse(staging.exists())
 
 
@@ -364,7 +364,7 @@ class BackupIsolationTests(unittest.TestCase):
             home = Path(tmp) / "scratch-home"
             foreign = Path(tmp) / "prod-backups"
             foreign.mkdir()
-            (foreign / "photoarchive-20260101-040000.db.gz").write_bytes(
+            (foreign / "azimuth-20260101-040000.db.gz").write_bytes(
                 b"x" * (backups.LARGE_HISTORICAL_BACKUP_BYTES + 1)
             )
             web = Path(tmp) / "web"
@@ -373,9 +373,9 @@ class BackupIsolationTests(unittest.TestCase):
                 web,
                 {
                     "HOME": str(Path(tmp) / "user"),
-                    "PHOTOARCHIVE_HOME": str(home),
-                    "PHOTOARCHIVE_BACKUP_DIR": str(foreign),
-                    "PHOTOARCHIVE_SMOKE_MODE": "1",
+                    "AZIMUTH_HOME": str(home),
+                    "AZIMUTH_BACKUP_DIR": str(foreign),
+                    "AZIMUTH_SMOKE_MODE": "1",
                 },
                 "linux",
                 str(Path(tmp) / "user"),
@@ -393,7 +393,7 @@ class IntegrityUnitTests(unittest.TestCase):
         for i in range(5):
             path = self.files_dir / f"img-{i}.bin"
             payloads.append((str(path), f"payload-{i}".encode() * 64))
-        self.db_path = Path(self.tempdir.name) / "photoarchive.db"
+        self.db_path = Path(self.tempdir.name) / "azimuth.db"
         _make_catalog(self.db_path, files=payloads)
         # Force image 5 onto offline source.
         conn = sqlite3.connect(self.db_path)
@@ -448,7 +448,7 @@ class BackupRouteTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name) / "backups"
         self.root.mkdir()
-        self.db_path = Path(self.tempdir.name) / "photoarchive.db"
+        self.db_path = Path(self.tempdir.name) / "azimuth.db"
         files_dir = Path(self.tempdir.name) / "files"
         files_dir.mkdir()
         payloads = [(str(files_dir / f"r{i}.bin"), f"route-{i}".encode() * 32) for i in range(3)]
@@ -546,14 +546,14 @@ class BackupRouteTests(unittest.TestCase):
     def test_restore_endpoint_reports_validation_and_storage_failures(self):
         missing = self.client.post(
             "/api/system/backup/restore",
-            json={"name": "photoarchive-20260710-130000.db.gz"},
+            json={"name": "azimuth-20260710-130000.db.gz"},
         )
         self.assertEqual(missing.status_code, 404)
 
         invalid = self.client.post("/api/system/backup/restore", json={"name": "../catalog.db"})
         self.assertEqual(invalid.status_code, 400)
 
-        corrupt_name = "photoarchive-20260710-131500.db.gz"
+        corrupt_name = "azimuth-20260710-131500.db.gz"
         with gzip.open(self.root / corrupt_name, "wb") as gz:
             gz.write(b"not sqlite")
         corrupt = self.client.post("/api/system/backup/restore", json={"name": corrupt_name})
@@ -590,7 +590,7 @@ class BackupRouteTests(unittest.TestCase):
 class CatalogRecoveryTests(unittest.TestCase):
     def test_corrupt_catalog_at_boot_is_reported_without_reinitializing_it(self):
         with tempfile.TemporaryDirectory() as tempdir:
-            corrupt = Path(tempdir) / "photoarchive.db"
+            corrupt = Path(tempdir) / "azimuth.db"
             corrupt.write_bytes(b"not a sqlite catalog")
             original_path = db.DB_PATH
             db.DB_PATH = str(corrupt)

@@ -102,12 +102,12 @@ class VersionEndpointTests(unittest.TestCase):
         import db as db_module
         from thumbnails import cache_entries as thumbnail_cache_entries
 
-        self._tmp = tempfile.TemporaryDirectory(prefix="pa-version-")
+        self._tmp = tempfile.TemporaryDirectory(prefix="azimuth-version-")
         self._old_db = db_module.DB_PATH
-        self._old_smoke = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
+        self._old_smoke = os.environ.get("AZIMUTH_SMOKE_MODE")
         self._old_conn = thumbnail_cache_entries._persistent_conn
         thumbnail_cache_entries._persistent_conn = None
-        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        os.environ["AZIMUTH_SMOKE_MODE"] = "1"
         db_module.DB_PATH = os.path.join(self._tmp.name, "version.db")
         self._db = db_module
         self._thumb = thumbnail_cache_entries
@@ -122,9 +122,9 @@ class VersionEndpointTests(unittest.TestCase):
         self._thumb._persistent_conn = self._old_conn
         self._db.DB_PATH = self._old_db
         if self._old_smoke is None:
-            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+            os.environ.pop("AZIMUTH_SMOKE_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self._old_smoke
+            os.environ["AZIMUTH_SMOKE_MODE"] = self._old_smoke
         self._tmp.cleanup()
 
     def test_version_endpoint_reports_the_versioned_contract_shape(self):

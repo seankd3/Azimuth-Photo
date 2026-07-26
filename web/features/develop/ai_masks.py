@@ -33,7 +33,7 @@ U2NET_MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0
 # SHA-256 of the pinned release asset above.  Do not accept a model merely by name.
 U2NET_MODEL_SHA256 = "8d10d2f3bb75ae3b6d527c77944fc5e7dcd94b29809d47a739a7a728a912b491"
 U2NET_MODEL_PATH = MODEL_DIRECTORY / "u2net.onnx"
-MASK_ALGORITHM_VERSION = "pa-aimask-v1"
+MASK_ALGORITHM_VERSION = "azimuth-aimask-v1"
 U2NET_INPUT_SIZE = 320
 
 

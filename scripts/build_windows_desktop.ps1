@@ -40,7 +40,7 @@ try {
         throw "The bundled Azimuth Photo engine build failed."
     }
 
-    $Engine = Join-Path $RepoRoot "dist/photoarchive-server/photoarchive-server.exe"
+    $Engine = Join-Path $RepoRoot "dist/azimuth-server/azimuth-server.exe"
     if (-not (Test-Path $Engine -PathType Leaf)) {
         throw "The bundled Azimuth Photo engine was not created at $Engine"
     }

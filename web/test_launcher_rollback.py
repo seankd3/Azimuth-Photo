@@ -147,7 +147,7 @@ class TwoFailedBootsRollbackTests(unittest.TestCase):
 
     def test_ready_timeout_env_defaults_to_120(self):
         self.assertEqual(launcher.ready_timeout_seconds({}), 120.0)
-        self.assertEqual(launcher.ready_timeout_seconds({"PHOTOARCHIVE_READY_TIMEOUT": "90"}), 90.0)
+        self.assertEqual(launcher.ready_timeout_seconds({"AZIMUTH_READY_TIMEOUT": "90"}), 90.0)
 
 
 if __name__ == "__main__":

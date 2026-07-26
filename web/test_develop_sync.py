@@ -66,12 +66,12 @@ class DevelopSyncHttpTests(unittest.TestCase):
 
     def setUp(self):
         worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
-        self.tempdir = tempfile.TemporaryDirectory(prefix=f"pa-develop-sync-{worker}-")
+        self.tempdir = tempfile.TemporaryDirectory(prefix=f"azimuth-develop-sync-{worker}-")
         self.old_db_path = db.DB_PATH
         self.old_cache_dir = rawproc.BASE_CACHE_DIR
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
-        self.old_smoke = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
-        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        self.old_smoke = os.environ.get("AZIMUTH_SMOKE_MODE")
+        os.environ["AZIMUTH_SMOKE_MODE"] = "1"
         db.DB_PATH = os.path.join(self.tempdir.name, "develop-sync.db")
         rawproc.BASE_CACHE_ROOT = __import__("pathlib").Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
@@ -95,9 +95,9 @@ class DevelopSyncHttpTests(unittest.TestCase):
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()
         if self.old_smoke is None:
-            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+            os.environ.pop("AZIMUTH_SMOKE_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke
+            os.environ["AZIMUTH_SMOKE_MODE"] = self.old_smoke
         try:
             self.tempdir.cleanup()
         except Exception:

@@ -39,8 +39,8 @@ def _seed_catalog(db_path: Path, cache_root: Path) -> None:
         db_path.unlink()
 
     env = os.environ.copy()
-    env["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    env["PHOTOARCHIVE_DB_PATH"] = str(db_path)
+    env["AZIMUTH_SMOKE_MODE"] = "1"
+    env["AZIMUTH_DB_PATH"] = str(db_path)
     env["PYTHONPATH"] = str(WEB_ROOT)
 
     script = r"""
@@ -118,10 +118,10 @@ def test_quiet_source_sidebar_toggle_screenshot():
     _seed_catalog(db_path, cache_root)
     env = os.environ.copy()
     env.update({
-        "PHOTOARCHIVE_SMOKE_MODE": "1",
-        "PHOTOARCHIVE_DB_PATH": str(db_path),
-        "PHOTOARCHIVE_CACHE_DIR": str(cache_root),
-        "PHOTOARCHIVE_PORT": str(port),
+        "AZIMUTH_SMOKE_MODE": "1",
+        "AZIMUTH_DB_PATH": str(db_path),
+        "AZIMUTH_CACHE_DIR": str(cache_root),
+        "AZIMUTH_PORT": str(port),
         "PYTHONPATH": str(WEB_ROOT),
     })
     server = subprocess.Popen(

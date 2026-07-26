@@ -22,7 +22,7 @@ From the repository root:
 The script:
 
 1. verifies `VERSION`, Cargo, and Tauri versions agree;
-2. builds `dist\photoarchive-server\photoarchive-server.exe` and its supporting
+2. builds `dist\azimuth-server\azimuth-server.exe` and its supporting
    onedir files;
 3. bundles that complete directory into the desktop app;
 4. creates a per-user NSIS installer without requiring administrator access.

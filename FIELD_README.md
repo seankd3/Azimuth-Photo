@@ -9,19 +9,16 @@ back to the hub automatically. Big picture: [docs/TOPOLOGY.md](docs/TOPOLOGY.md)
 From `web/` (Git Bash):
 
 ```bash
-PHOTOARCHIVE_MODE=satellite \
-PHOTOARCHIVE_HUB_URL='http://100.102.150.104:8000' \
-PHOTOARCHIVE_HOME='C:\Azimuth PhotoField' \
-PHOTOARCHIVE_THUMB_CACHE_DIR='C:\Azimuth PhotoField\thumbs' \
-PHOTOARCHIVE_DEVELOP_CACHE_DIR='C:\Azimuth PhotoField\develop' \
-PHOTOARCHIVE_EXPORT_DIR='C:\Azimuth PhotoField\exports' \
+AZIMUTH_MODE=satellite \
+AZIMUTH_HUB_URL='http://100.102.150.104:8000' \
+AZIMUTH_HOME='C:\Azimuth Photo' \
 ./.venv/Scripts/python -m uvicorn app:app --host 127.0.0.1 --port 8010
 ```
 
 Then open http://127.0.0.1:8010/d — or use the Tauri tray app (`desktop/`)
 which runs this for you.
 
-Do **not** set `PHOTOARCHIVE_SMOKE_MODE` — it's a test-only flag that disables
+Do **not** set `AZIMUTH_SMOKE_MODE` — it's a test-only flag that disables
 DB init and all background workers (thumbnails never generate, sync never runs).
 
 ## Stop
@@ -33,20 +30,23 @@ Get-NetTCPConnection -LocalPort 8010 -State Listen |
 
 ## Where things are
 
-- Repo: this folder (origin = omarchy over ssh; branch `main`)
+- Repo: `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo`
+  (`main`, GitHub origin)
 - Venv: `web\.venv` (Python 3.12; base requirements + tifffile/imagecodecs + CPU torch + ai-search)
-- All data: `C:\Azimuth PhotoField\` (catalog DB, thumbs, develop cache, exports, server.log)
-- Card offload staging: `D:\CardOffload\`
+- Runtime data: `C:\Azimuth Photo\` (catalog, previews, Develop cache,
+  models, logs, and transfer receipts)
+- Originals waiting for verified hub offload: the configured XPS source
+  folders, including `C:\Pictures`
 
-## Update to the latest hub code
+## Update
 
 ```bash
-git pull   # after a deploy on omarchy, main has the new build
+git pull --ff-only
 ```
 
 ## Windows gotchas
 
-- Keep all import sources on one drive per source (multi-drive fixes landed,
-  but D:\ staging → import is the proven path).
+- Let the catalog scan finish before starting **Free up space**. Only files
+  represented by a verified sync identity can be removed locally.
 - Sync/AI workers self-skip if their deps are absent; embeddings can hold
   write locks — writes retry, but if the app feels locked up, it's usually that.

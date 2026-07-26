@@ -1,7 +1,7 @@
 """Shared ML device selection for Azimuth Photo workers.
 
 One policy for every model loader: prefer CUDA when it is available and
-allowed, honor ``PHOTOARCHIVE_ML_DEVICE=cpu|cuda``, and never crash when
+allowed, honor ``AZIMUTH_ML_DEVICE=cpu|cuda``, and never crash when
 CUDA is missing — callers get the same CPU path they had before.
 """
 
@@ -11,7 +11,7 @@ import os
 from typing import Any
 
 
-ENV_NAME = "PHOTOARCHIVE_ML_DEVICE"
+ENV_NAME = "AZIMUTH_ML_DEVICE"
 
 
 def _env_override() -> str | None:

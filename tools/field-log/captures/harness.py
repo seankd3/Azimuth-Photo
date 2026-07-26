@@ -14,7 +14,7 @@ import argparse, os, sys, time, subprocess, shutil, json, urllib.request, urllib
 from pathlib import Path
 
 SB = Path(__file__).resolve().parents[1]
-REPO = SB / "repo" / "photo-archive"
+REPO = SB / "repo" / "azimuth-photo"
 SAMPLE = SB / "sample-photos"
 WORKTREES = SB / "_worktrees"
 SCRATCH = SB / "_scratch"
@@ -165,11 +165,11 @@ def scan_and_wait(base, folder, timeout=240):
 
 def start_server(wt, port, home, extra_env=None, log_path=None, server_py=None):
     env = dict(os.environ)
-    env["PHOTOARCHIVE_HOME"] = str(home)
-    env["PHOTOARCHIVE_THUMB_CACHE_DIR"] = str(home / "thumbs")
-    env["PHOTOARCHIVE_DEVELOP_CACHE_DIR"] = str(home / "develop")
-    env["PHOTOARCHIVE_MODELS_DIR"] = str(home / "models")
-    env["PHOTOARCHIVE_PORT"] = str(port)
+    env["AZIMUTH_HOME"] = str(home)
+    env["AZIMUTH_THUMB_CACHE_DIR"] = str(home / "thumbs")
+    env["AZIMUTH_DEVELOP_CACHE_DIR"] = str(home / "develop")
+    env["AZIMUTH_MODELS_DIR"] = str(home / "models")
+    env["AZIMUTH_PORT"] = str(port)
     env["PYTHONUNBUFFERED"] = "1"
     if extra_env:
         env.update(extra_env)
@@ -249,7 +249,7 @@ def capture_era(label, commit, shots, port=8809, smoke=True, extra_env=None, sca
     wt = ensure_worktree(label, commit)
     home = SCRATCH / label
     if home.exists(): shutil.rmtree(home, ignore_errors=True)
-    env = {"PHOTOARCHIVE_SMOKE_MODE": "1"} if smoke else {}
+    env = {"AZIMUTH_SMOKE_MODE": "1"} if smoke else {}
     if extra_env: env.update(extra_env)
     log_path = SB / "captures" / f"{label}.server.log"
     proc, logf = start_server(wt, port, home, env, log_path, server_py=server_py)

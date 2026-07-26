@@ -7,10 +7,10 @@
 import { emit } from './state.js';
 import { showToast } from './toast.js';
 
-const STORAGE_KEY = 'pa-m-write-queue-v1';
+const STORAGE_KEY = 'azimuth-mobile-write-queue-v1';
 const BASE_RETRY_MS = 500;
 const MAX_RETRY_MS = 30000;
-const WRITE_SYNC_TAG = 'pa-write-queue';
+const WRITE_SYNC_TAG = 'azimuth-write-queue';
 
 let queue = [];
 let retryTimer = null;

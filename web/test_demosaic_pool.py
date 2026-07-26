@@ -14,18 +14,18 @@ from thumbnails import demosaic_pool
 class DemosaicPoolConfigTests(unittest.TestCase):
     def tearDown(self):
         demosaic_pool.reset_for_tests()
-        os.environ.pop("PHOTOARCHIVE_DEMOSAIC_PROCESSES", None)
-        os.environ.pop("PHOTOARCHIVE_DEMOSAIC_IPC", None)
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "0"
+        os.environ.pop("AZIMUTH_DEMOSAIC_PROCESSES", None)
+        os.environ.pop("AZIMUTH_DEMOSAIC_IPC", None)
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "0"
 
     def test_zero_disables_pool(self):
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "0"
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "0"
         demosaic_pool.reset_for_tests()
         self.assertFalse(demosaic_pool.is_enabled())
         self.assertIsNone(demosaic_pool.ensure_pool())
 
     def test_default_bounded_for_16gb(self):
-        os.environ.pop("PHOTOARCHIVE_DEMOSAIC_PROCESSES", None)
+        os.environ.pop("AZIMUTH_DEMOSAIC_PROCESSES", None)
         demosaic_pool.reset_for_tests()
         profile = HostProfile(
             cpu_count=8,
@@ -47,9 +47,9 @@ class DemosaicPoolConfigTests(unittest.TestCase):
         self.assertEqual(n, 2)
 
     def test_ipc_mode_defaults_to_path(self):
-        os.environ.pop("PHOTOARCHIVE_DEMOSAIC_IPC", None)
+        os.environ.pop("AZIMUTH_DEMOSAIC_IPC", None)
         self.assertEqual(demosaic_pool.demosaic_ipc_mode(), "path")
-        os.environ["PHOTOARCHIVE_DEMOSAIC_IPC"] = "bytes"
+        os.environ["AZIMUTH_DEMOSAIC_IPC"] = "bytes"
         self.assertEqual(demosaic_pool.demosaic_ipc_mode(), "bytes")
 
 
@@ -64,8 +64,8 @@ class DemosaicPoolParityTests(unittest.TestCase):
 
     def tearDown(self):
         demosaic_pool.reset_for_tests()
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "0"
-        os.environ.pop("PHOTOARCHIVE_DEMOSAIC_IPC", None)
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "0"
+        os.environ.pop("AZIMUTH_DEMOSAIC_IPC", None)
 
     def test_process_pool_jpeg_matches_inprocess(self):
         if not self.available:
@@ -80,8 +80,8 @@ class DemosaicPoolParityTests(unittest.TestCase):
             92,
             source_data=None,
         )
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "2"
-        os.environ["PHOTOARCHIVE_DEMOSAIC_IPC"] = "path"
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "2"
+        os.environ["AZIMUTH_DEMOSAIC_IPC"] = "path"
         demosaic_pool.reset_for_tests()
         pooled = demosaic_pool.run_demosaic_tier_jpegs(
             str(self.sample),
@@ -104,7 +104,7 @@ class DemosaicPoolParityTests(unittest.TestCase):
     def test_broken_pool_recreates_and_surfaces_failure(self):
         from concurrent.futures.process import BrokenProcessPool
 
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "2"
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "2"
         demosaic_pool.reset_for_tests()
         self.assertIsNotNone(demosaic_pool.ensure_pool())
 
@@ -130,10 +130,10 @@ class DemosaicPoolParityTests(unittest.TestCase):
 class DemosaicPoolBulkGateTests(unittest.TestCase):
     def tearDown(self):
         demosaic_pool.reset_for_tests()
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "0"
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "0"
 
     def test_interactive_bypasses_bulk_slot(self):
-        os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "2"
+        os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "2"
         demosaic_pool.reset_for_tests()
         demosaic_pool.ensure_pool()
         # Saturate the single bulk slot (workers=2 → bulk_limit=1).

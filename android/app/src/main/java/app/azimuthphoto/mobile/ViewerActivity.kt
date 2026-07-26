@@ -29,7 +29,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
-import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.AzimuthPhotoTheme
 import app.azimuthphoto.mobile.ui.ViewerScreen
 import coil.compose.AsyncImage
 
@@ -53,7 +53,7 @@ class ViewerActivity : ComponentActivity() {
         }
         val review = !secure && intent.action in REVIEW_ACTIONS
         setContent {
-            PhotoArchiveTheme {
+            AzimuthPhotoTheme {
                 if (review) {
                     ReviewViewer(uri = uri, mimeType = mimeType, onClose = ::finish)
                 } else {

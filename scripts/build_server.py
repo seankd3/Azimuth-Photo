@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Build the frozen Azimuth Photo server (PyInstaller onedir).
 
-Output: dist/photoarchive-server/
+Output: dist/azimuth-server/
 
 Uses a SEPARATE build venv — never the shared web/.venv symlink. Default build
-venv: ~/.cache/photoarchive-pkg-venv (needs symlink support; override with
-PHOTOARCHIVE_BUILD_VENV). Heavy PyInstaller workpath defaults to
+venv: ~/.cache/azimuth-pkg-venv (needs symlink support; override with
+AZIMUTH_BUILD_VENV). Heavy PyInstaller workpath defaults to
 /mnt/expansion/tmp/pkg-pyinstaller.
 
   python3.12 scripts/build_server.py           # bootstrap venv + build
@@ -28,11 +28,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 DIST = ROOT / "dist"
-SPEC_WORK = Path(os.environ.get("PHOTOARCHIVE_BUILD_WORK", "/mnt/expansion/tmp/pkg-pyinstaller"))
+SPEC_WORK = Path(os.environ.get("AZIMUTH_BUILD_WORK", "/mnt/expansion/tmp/pkg-pyinstaller"))
 DEFAULT_VENV = Path(
     os.environ.get(
-        "PHOTOARCHIVE_BUILD_VENV",
-        str(Path.home() / ".cache" / "photoarchive-pkg-venv"),
+        "AZIMUTH_BUILD_VENV",
+        str(Path.home() / ".cache" / "azimuth-pkg-venv"),
     )
 )
 
@@ -105,7 +105,7 @@ HIDDEN_IMPORTS = [
 
 
 def _python_for_venv() -> str:
-    preferred = os.environ.get("PHOTOARCHIVE_BUILD_PYTHON")
+    preferred = os.environ.get("AZIMUTH_BUILD_PYTHON")
     if preferred:
         return preferred
     if os.name == "nt":
@@ -182,7 +182,7 @@ def run_pyinstaller(vpy: Path) -> Path:
         "-m",
         "PyInstaller",
         str(entry),
-        "--name=photoarchive-server",
+        "--name=azimuth-server",
         "--onedir",
         "--noconfirm",
         "--clean",
@@ -213,11 +213,11 @@ def run_pyinstaller(vpy: Path) -> Path:
     print("[build_server] running PyInstaller…")
     subprocess.check_call(args)
 
-    out = DIST / "photoarchive-server"
-    exe = out / ("photoarchive-server.exe" if os.name == "nt" else "photoarchive-server")
+    out = DIST / "azimuth-server"
+    exe = out / ("azimuth-server.exe" if os.name == "nt" else "azimuth-server")
     if not exe.exists():
         # Some PyInstaller layouts nest the binary one level deeper.
-        candidates = list(out.rglob("photoarchive-server*"))
+        candidates = list(out.rglob("azimuth-server*"))
         raise SystemExit(f"build finished but binary missing at {exe}; found: {candidates[:8]}")
     print(f"[build_server] ok -> {exe}")
     return out

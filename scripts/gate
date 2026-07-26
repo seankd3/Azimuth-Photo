@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# photo-archive test gates — parallel by default, honest exits, no pipe swallowing.
+# azimuth-photo test gates — parallel by default, honest exits, no pipe swallowing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WEB="$ROOT/web"
-RESULTS_DIR="${PHOTOARCHIVE_GATE_RESULTS:-$ROOT/receipts/gate}"
+RESULTS_DIR="${AZIMUTH_GATE_RESULTS:-$ROOT/receipts/gate}"
 mkdir -p "$RESULTS_DIR"
 
 # System Node first (Cursor's bundled node rejects --experimental-default-type).
@@ -14,17 +14,17 @@ export TMPDIR="${TMPDIR:-/tmp}"
 export TMP="${TMP:-$TMPDIR}"
 export TEMP="${TEMP:-$TMPDIR}"
 # Keep QA scratch off the no-symlink expansion volume when TMPDIR is local.
-if [[ -z "${PHOTOARCHIVE_QA_SCRATCH:-}" ]]; then
-  export PHOTOARCHIVE_QA_SCRATCH="$TMPDIR/azimuth-photo/qa-harness"
+if [[ -z "${AZIMUTH_QA_SCRATCH:-}" ]]; then
+  export AZIMUTH_QA_SCRATCH="$TMPDIR/azimuth-photo/qa-harness"
 fi
-mkdir -p "$TMPDIR" "$PHOTOARCHIVE_QA_SCRATCH"
+mkdir -p "$TMPDIR" "$AZIMUTH_QA_SCRATCH"
 
 if [[ -x "$WEB/.venv/bin/python" ]]; then
   PYTHON="$WEB/.venv/bin/python"
-elif [[ -x "$ROOT/../photo-archive/web/.venv/bin/python" ]]; then
-  PYTHON="$ROOT/../photo-archive/web/.venv/bin/python"
+elif [[ -x "$ROOT/../azimuth-photo/web/.venv/bin/python" ]]; then
+  PYTHON="$ROOT/../azimuth-photo/web/.venv/bin/python"
 else
-  echo "gate: need web/.venv (or shared photo-archive/web/.venv)" >&2
+  echo "gate: need web/.venv (or shared azimuth-photo/web/.venv)" >&2
   exit 2
 fi
 

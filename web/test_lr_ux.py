@@ -73,8 +73,8 @@ class LrConnectTests(unittest.TestCase):
         (plugin_src / "Info.lua").write_text("return {}\n", encoding="utf-8")
         (plugin_src / "AzimuthSyncCore.lua").write_text("-- core\n", encoding="utf-8")
         self.env = {
-            "PHOTOARCHIVE_LR_MODULES_DIR": str(self.modules),
-            "PHOTOARCHIVE_LR_FORCE_DETECT": "1",
+            "AZIMUTH_LR_MODULES_DIR": str(self.modules),
+            "AZIMUTH_LR_FORCE_DETECT": "1",
             "APPDATA": str(self.root / "AppData"),
         }
 
@@ -121,7 +121,7 @@ class LrConnectTests(unittest.TestCase):
         self.assertFalse(again["removed"])
 
     def test_button_hidden_when_lr_not_detected(self):
-        env = {**self.env, "PHOTOARCHIVE_LR_FORCE_DETECT": "0"}
+        env = {**self.env, "AZIMUTH_LR_FORCE_DETECT": "0"}
         status = lr_connect.connect_status(environ=env, platform_name="win32", path_exists=lambda _p: False)
         self.assertFalse(status["show_button"])
         self.assertFalse(status["detected"])
@@ -134,8 +134,8 @@ class LrConnectRouteTests(unittest.IsolatedAsyncioTestCase):
         self.modules = self.root / "Modules"
         self.repo = Path(__file__).resolve().parents[1]
         self.env_patch = {
-            "PHOTOARCHIVE_LR_MODULES_DIR": str(self.modules),
-            "PHOTOARCHIVE_LR_FORCE_DETECT": "1",
+            "AZIMUTH_LR_MODULES_DIR": str(self.modules),
+            "AZIMUTH_LR_FORCE_DETECT": "1",
         }
         self._old_env = {key: os.environ.get(key) for key in self.env_patch}
         os.environ.update(self.env_patch)

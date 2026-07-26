@@ -6,7 +6,7 @@ This guide gets Azimuth Photo from a fresh clone to a usable local catalog.
 
 ```bash
 git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
-cd photo-archive
+cd azimuth-photo
 cd web
 python -m venv .venv
 source .venv/bin/activate
@@ -19,7 +19,7 @@ cd ..
 From the repo root:
 
 ```bash
-./scripts/photoarchive-server start
+./scripts/azimuth-server start
 ```
 
 Open:
@@ -31,14 +31,14 @@ http://127.0.0.1:8000
 The helper also supports:
 
 ```bash
-./scripts/photoarchive-server status
-./scripts/photoarchive-server logs
-./scripts/photoarchive-server restart
-./scripts/photoarchive-server stop
+./scripts/azimuth-server status
+./scripts/azimuth-server logs
+./scripts/azimuth-server restart
+./scripts/azimuth-server stop
 ```
 
 By default it uses `127.0.0.1:8000`. Override the host or port with
-`PHOTOARCHIVE_HOST` and `PHOTOARCHIVE_PORT`.
+`AZIMUTH_HOST` and `AZIMUTH_PORT`.
 
 ## App Data
 
@@ -49,14 +49,14 @@ A clean install keeps the catalog and generated data outside the source tree:
 - macOS uses `~/Library/Application Support/Azimuth Photo` and
   `~/Library/Caches/Azimuth Photo`.
 
-Existing installations continue using their current `web/photoarchive.db`,
+Existing installations continue using their current `web/azimuth.db`,
 `.thumbcache`, `.models`, `.embedcache`, settings, logs, Develop cache, and
 backup folders. Startup never moves, copies, or rebuilds them.
 
-Set `PHOTOARCHIVE_HOME` to keep a new installation under one chosen root, or
-use a granular override such as `PHOTOARCHIVE_DB_PATH`,
-`PHOTOARCHIVE_THUMB_CACHE_DIR`, `PHOTOARCHIVE_MODELS_DIR`,
-`PHOTOARCHIVE_DEVELOP_CACHE_DIR`, or `PHOTOARCHIVE_BACKUP_DIR`. Environment
+Set `AZIMUTH_HOME` to keep a new installation under one chosen root, or
+use a granular override such as `AZIMUTH_DB_PATH`,
+`AZIMUTH_THUMB_CACHE_DIR`, `AZIMUTH_MODELS_DIR`,
+`AZIMUTH_DEVELOP_CACHE_DIR`, or `AZIMUTH_BACKUP_DIR`. Environment
 overrides are deployment choices and take precedence over saved settings.
 
 ## First Catalog
@@ -111,7 +111,7 @@ disk. After installation, indexing runs locally in the background.
 - If the server helper says the virtualenv is missing, rerun the install steps
   in `web/`.
 - If the port is busy, stop the old server or run with
-  `PHOTOARCHIVE_PORT=8001`.
+  `AZIMUTH_PORT=8001`.
 - If the grid feels slow while the app is building, pause any Background work
   row you do not need right now.
 - If semantic search is unavailable, check System's AI model and embedding

@@ -147,7 +147,7 @@ async def _snapshot_image_ids_for_collection(collection_id: int) -> list[int] | 
 
 
 def _share_url(request: Request, token: str) -> str:
-    base = (os.environ.get("PHOTOARCHIVE_SHARE_BASE_URL") or str(request.base_url)).strip()
+    base = (os.environ.get("AZIMUTH_SHARE_BASE_URL") or str(request.base_url)).strip()
     return f"{base.rstrip('/')}/s/{token}"
 
 
@@ -629,7 +629,7 @@ async def public_share_download_all(token: str, request: Request):
     collection = await _resolve_token(token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    handle = tempfile.NamedTemporaryFile(prefix="photoarchive-share-", suffix=".zip", delete=False)
+    handle = tempfile.NamedTemporaryFile(prefix="azimuth-share-", suffix=".zip", delete=False)
     handle.close()
     try:
         result = await asyncio.to_thread(_zip_share, collection, request, handle.name)

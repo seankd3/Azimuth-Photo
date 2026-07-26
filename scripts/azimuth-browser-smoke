@@ -127,7 +127,7 @@ async function launchChrome() {
     }
 
     const port = await findFreePort();
-    const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "photoarchive-browser-smoke-"));
+    const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), "azimuth-browser-smoke-"));
     const args = [
         "--headless=new",
         "--no-first-run",

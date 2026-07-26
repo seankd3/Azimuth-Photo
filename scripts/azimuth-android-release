@@ -2,13 +2,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APK="$ROOT/outputs/photoarchive-android-debug.apk"
-ARTIFACT_DIR="${PHOTOARCHIVE_ANDROID_RELEASE_ARTIFACTS:-$ROOT/outputs/android-release}"
-DOWNLOAD_URL="${PHOTOARCHIVE_ANDROID_DOWNLOAD_URL:-https://omarchy.tail0eeded.ts.net/photoarchive-apk/photoarchive.apk}"
+APK="$ROOT/outputs/azimuth-android-debug.apk"
+ARTIFACT_DIR="${AZIMUTH_ANDROID_RELEASE_ARTIFACTS:-$ROOT/outputs/android-release}"
+DOWNLOAD_URL="${AZIMUTH_ANDROID_DOWNLOAD_URL:-https://omarchy.tail0eeded.ts.net/azimuth-apk/azimuth.apk}"
 
 mkdir -p "$ARTIFACT_DIR"
 
-"$ROOT/scripts/photoarchive-android-e2e" >"$ARTIFACT_DIR/release.log" 2>&1 || {
+"$ROOT/scripts/azimuth-android-e2e" >"$ARTIFACT_DIR/release.log" 2>&1 || {
     cat "$ARTIFACT_DIR/release.log" >&2
     exit 1
 }

@@ -30,13 +30,12 @@ List or isolate scenarios without changing their behavior:
 The command exits nonzero when any scenario fails. Every result names the
 surface and last user action. Failures include console errors, failed browser
 requests, HTTP 500 responses, timeout detail, and a screenshot. The complete
-machine-readable report is
-`/mnt/expansion/tmp/az1/qa-harness/report.json` by default.
+machine-readable report is written below the configured QA scratch directory.
 
-Set `PHOTOARCHIVE_QA_SCRATCH` when CI does not mount `/mnt/expansion/tmp`.
-Do not install packages into `web/.venv`; the lane venv is a symlink and already
-contains Playwright. Chromium always launches with `--no-sandbox` and
-`--disable-dev-shm-usage`.
+Set `AZIMUTH_QA_SCRATCH` to retain artifacts; SSD-backed temporary storage is
+preferred. Do not install packages during a gate run. Use `AZIMUTH_VENV` or the
+checkout's existing `web/.venv`, which should already contain Playwright.
+Chromium always launches with `--no-sandbox` and `--disable-dev-shm-usage`.
 
 ## What it covers
 
@@ -74,7 +73,7 @@ all other request failures still fail the scenario.
 ## Fixture and isolation
 
 `web/qa/` owns the harness. It builds a versioned fixture under a temporary
-`PHOTOARCHIVE_HOME` with:
+`AZIMUTH_HOME` with:
 
 - 4,003 active images across primary, removable, and `hub://` mirror sources,
   exposed as 4,000 Grid entries by the seeded four-photo collapsed stack;
@@ -91,7 +90,7 @@ The pristine SQLite catalog is reused across scenarios and runs. Before each
 run it is copied back into place and the six Trash files are restored, so a red
 scenario cannot contaminate the next invocation. The server binds a kernel-
 selected localhost probe port and is stopped as a process group. The harness
-never addresses `:8000`, the `photoarchive` service, or a production path.
+never addresses `:8000`, the `azimuth` service, or a production path.
 
 ## Pre-deploy behavior
 

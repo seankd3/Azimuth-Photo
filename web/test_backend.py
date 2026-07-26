@@ -113,7 +113,7 @@ class BackendIntegrationTests(BackendTestCase):
             finally:
                 cancelled.set()
 
-        shell = app_module.app.state.photoarchive_shell
+        shell = app_module.app.state.azimuth_shell
         task = shell.track_background_task(waits_forever())
         self.assertIn(task, shell.background_tasks)
         await asyncio.sleep(0)

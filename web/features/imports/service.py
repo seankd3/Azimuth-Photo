@@ -61,7 +61,7 @@ def destination_plan(
     shoot_name: str = "",
 ) -> dict:
     normalized_mode = mode if mode in {"date_shoot", "manual", "preset"} else "date_shoot"
-    root = normalize_server_dir(import_root, os.path.join(os.path.expanduser("~"), "Pictures", "photoArchive Imports"))
+    root = normalize_server_dir(import_root, os.path.join(os.path.expanduser("~"), "Pictures", "Azimuth Imports"))
     date_label = import_date(shoot_date)
     shoot_label = safe_name(shoot_name, "")
     batch_name = f"{date_label} - {shoot_label}" if shoot_label else date_label

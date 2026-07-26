@@ -8,7 +8,7 @@ import { openSheet } from './selection.js';
 import { queueLength } from './write_queue.js';
 import { showToast } from './toast.js';
 
-const STORAGE_KEY = 'pa-m-offline-photos-v1';
+const STORAGE_KEY = 'azimuth-mobile-offline-photos-v1';
 const SIZES = ['sm', 'md', 'lg'];
 
 function loadIndex() {
@@ -37,10 +37,10 @@ function cacheVersion() {
 
 async function thumbCache() {
     if (!('caches' in window)) return null;
-    const expected = `pa-mobile-${cacheVersion()}-thumbs`;
+    const expected = `azimuth-mobile-${cacheVersion()}-thumbs`;
     const names = await caches.keys();
     const active = names.find((name) => name === expected)
-        || names.find((name) => name.startsWith(`pa-mobile-${cacheVersion()}`) && name.endsWith('-thumbs'))
+        || names.find((name) => name.startsWith(`azimuth-mobile-${cacheVersion()}`) && name.endsWith('-thumbs'))
         || expected;
     return caches.open(active);
 }
@@ -64,7 +64,7 @@ export function offlineSummary() {
 async function removeCached(imageId) {
     if ('caches' in window) {
         const names = await caches.keys();
-        const thumbnailCaches = names.filter((name) => name.startsWith('pa-mobile-') && name.endsWith('-thumbs'));
+        const thumbnailCaches = names.filter((name) => name.startsWith('azimuth-mobile-') && name.endsWith('-thumbs'));
         await Promise.all(thumbnailCaches.map(async (name) => {
             const cache = await caches.open(name);
             await Promise.all(urlsFor(imageId).map((url) => cache.delete(url)));

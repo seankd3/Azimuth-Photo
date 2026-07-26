@@ -21,7 +21,7 @@ ORIENTATION_POISON_THRESHOLD = 3
 
 # Keep catalog bulk IO off asyncio's default pool so interactive to_thread
 # (thumb cache probes, source inspect on real misses) is not starved.
-_CATALOG_WORKERS = max(1, int(os.environ.get("PHOTOARCHIVE_CATALOG_METADATA_WORKERS", "2")))
+_CATALOG_WORKERS = max(1, int(os.environ.get("AZIMUTH_CATALOG_METADATA_WORKERS", "2")))
 _catalog_executor: ThreadPoolExecutor | None = None
 
 

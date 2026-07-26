@@ -1,6 +1,6 @@
 # Azimuth Photo Develop Module — Architecture Spec (v1, frozen)
 
-Branch: `develop`, worktree `/home/sean/Projects/pa-develop`. Goal: a Lightroom-Classic-class
+Branch: `main`, checkout `/home/sean/Projects/azimuth-photo`. Goal: a Lightroom-Classic-class
 non-destructive RAW develop module inside Azimuth Photo. This spec is the single source of
 truth; the WebGL renderer and the Python export renderer MUST implement the same math.
 Reference for raw-handling ideas: `/home/sean/Projects/darktable-ref` (read, never copy GPL code verbatim —
@@ -9,8 +9,9 @@ learn the approach, write original code).
 ## 0. Assets & constraints
 - RAWs: `/mnt/expansion/Photos/RAWS/<year>/<YYYY-MM-DD>/...` — 82k DNG, 7k CR3, 1.2k CR2.
 - 59k `.xmp` sidecars beside the raws with full `crs:*` Lightroom develop settings.
-- Root disk 92% full → ALL new caches go under `/mnt/expansion/Azimuth PhotoCache/develop/`.
-- Dev server: port 8022, `PHOTOARCHIVE_SMOKE_MODE=1` for tests as usual.
+- Active Develop caches use the configured SSD runtime cache; preserved old
+  generated data lives separately on the Expansion archive.
+- Dev server: port 8022, `AZIMUTH_SMOKE_MODE=1` for tests as usual.
 - rawpy + numpy are in `web/.venv`. `darktable-cli` exists system-wide (fallback/export experiments only).
 
 ## 1. Edit state — canonical JSON
@@ -64,7 +65,7 @@ Module `web/features/develop/rawproc.py`.
   Resize longest edge → 2048 (LANCZOS via PIL on 16-bit per channel — use numpy resize path if PIL 16-bit RGB is lossy: resize float32 then back).
 - meta: as-shot temp/tint estimate. Derive from `raw.camera_whitebalance` R/B ratio → correlated
   temp via standard mired approximation; if unavailable default 5500/0. Also `daylight_whitebalance` for scaling.
-- Base cache: `/mnt/expansion/Azimuth PhotoCache/develop/base/{image_id}.bin.gz` — gzipped
+- Base cache: `~/.cache/azimuth-photo/develop/base/{image_id}.bin.gz` — gzipped
   little-endian uint16 interleaved RGB + 16-byte header (magic 'PABASE1\0', u32 width, u32 height) and a
   sibling `{image_id}.json` (meta: as-shot WB, dims). Plus `{image_id}.jpg` — fast 8-bit sRGB preview
   (quality 88, gamma-encoded from the same data with a 2.2-ish sRGB curve) for instant paint while the .bin streams.
@@ -76,7 +77,7 @@ Module `web/features/develop/rawproc.py`.
   - `POST /api/develop/{image_id}/reset` → settings back to origin XMP snapshot (or {})
   - `POST /api/develop/{image_id}/export` body `{format:'jpeg'|'tiff16', quality, max_px?}` →
     full-res render via the Python pipeline (§5), file written to
-    `/mnt/expansion/Azimuth PhotoCache/develop/exports/`, response streams the file.
+    the configured temporary export directory, and the response streams the file.
 - Decode of first-hit is slow (seconds): base generation happens on-demand with a small in-process
   LRU + single-flight lock, and `POST /api/develop/pregen` accepts a list of image_ids for warm-ahead
   (filmstrip neighbors). No new worker daemon in v1.
@@ -209,8 +210,8 @@ matches canvas within tolerance; suite green; screenshots captured. Honest notes
 - rawpy 0.27 decode of a 38MB DNG: **1.2s warm**, but cold file read off /mnt/expansion is **17–45s**
   (HDD at ~2MB/s under caption/embedding worker contention). Decode cost is I/O, not CPU.
 - Therefore: base cache (**.bin.gz + .jpg + .json**) lives on the root SSD at
-  `/home/sean/.cache/photoarchive-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
-  check on each write). Exports stay on `/mnt/expansion/Azimuth PhotoCache/develop/exports/`.
+  `/home/sean/.cache/azimuth-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
+  check on each write). Exports stay in the configured runtime export directory.
 - UI: first-open of an uncached raw takes ~20–60s — show an honest staged progress state
   ("Reading RAW from disk…" → "Developing preview…"), never a dead spinner. Filmstrip warm-ahead
   (pregen ±2 neighbors) is mandatory, fire it on every photo switch.
@@ -297,7 +298,7 @@ present) and lens profile fields (stored for §17).
 
 ## 14. AI masks service
 `web/features/develop/ai_masks.py`: onnxruntime (CPU) with u2net (subject; use rembg's u2net.onnx, download
-once to /mnt/expansion/Azimuth PhotoCache/develop/models/) and skyseg (use u2net trained variant or
+once to the configured model directory) and skyseg (use u2net trained variant or
 semantic-segmentation ONNX for sky; if no good off-the-shelf sky model, v1 sky = gradient+color heuristic:
 luminance/position/blue prior refined by guided filter — honest about it in code).
 Endpoints: `POST /api/develop/{id}/ai-mask {kind: "subject"|"sky"}` → runs on the base preview (jpg),
@@ -364,7 +365,7 @@ edited/original and duplicates never pit an edit against its own raw."
 - Develop export endpoint: when exporting a render of a RAW that belongs to (or gains) a version stack,
   the exported file (if registered into the library later) joins the same stack — v1: exports are
   download-only, so instead add "Save to library" option on export that registers the JPEG under
-  /mnt/expansion/Azimuth PhotoCache/develop/library-exports/ as an image AND stacks it with its raw.
+  the configured library-export directory as an image AND stacks it with its RAW.
 - Refine/duplicates: version-stack members are excluded from pairing against each other (same idiom
   as existing stack exclusions — verify how burst stacks are excluded and mirror it).
 - Flags: existing stack flag semantics apply unchanged.

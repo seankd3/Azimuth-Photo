@@ -489,7 +489,7 @@ def create_app_shell(
         templates=templates,
         static_assets=static_assets,
     )
-    app.state.photoarchive_shell = shell
+    app.state.azimuth_shell = shell
     from core import wiring
 
     wiring.configure_database_backed_providers()

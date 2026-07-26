@@ -4,7 +4,7 @@
 Usage:
   ./scripts/bench_pregen_cr3_idle.py [--root DIR] [--count 200] [--seconds 90]
 
-Creates an isolated PHOTOARCHIVE_HOME, indexes a real shoot folder that has
+Creates an isolated AZIMUTH_HOME, indexes a real shoot folder that has
 ≥count CR3s, prunes non-CR3 rows from the catalog (shoot folders often mix in
 DNG/TIFF that take the demosaic path), starts pregen, polls
 /api/cache/pregen/status every 3s (the ops-board regression), and reports
@@ -100,7 +100,7 @@ def _physical_thumb_count(cache_dir: Path) -> int:
     """Count on-disk preview cache files (excludes cache marker)."""
     if not cache_dir.is_dir():
         return 0
-    marker = ".photoarchive-cache"
+    marker = ".azimuth-cache"
     total = 0
     for _root, _dirs, files in os.walk(cache_dir):
         total += sum(1 for name in files if name != marker)
@@ -176,7 +176,7 @@ def main() -> int:
         return 2
 
     cr3_total = sum(_cr3_count(path) for path in source_dirs)
-    scratch = Path(tempfile.mkdtemp(prefix="pa-snappy-cr3-pregen-"))
+    scratch = Path(tempfile.mkdtemp(prefix="azimuth-snappy-cr3-pregen-"))
     home = scratch / "home"
     cache = home / "cache" / "thumbs"
     home.mkdir(parents=True)
@@ -186,19 +186,19 @@ def main() -> int:
         + ", ".join(f"{path} ({_cr3_count(path)} CR3s)" for path in source_dirs),
         flush=True,
     )
-    catalog_db = home / "data" / "catalog" / "photoarchive.db"
+    catalog_db = home / "data" / "catalog" / "azimuth.db"
 
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_HOME": str(home),
-            "PHOTOARCHIVE_THUMB_CACHE_DIR": str(cache),
-            "PHOTOARCHIVE_HOST": "127.0.0.1",
-            "PHOTOARCHIVE_PORT": str(args.port),
-            "PHOTOARCHIVE_MODE": "standalone",
-            "PHOTOARCHIVE_ACCESS": "local",
+            "AZIMUTH_HOME": str(home),
+            "AZIMUTH_THUMB_CACHE_DIR": str(cache),
+            "AZIMUTH_HOST": "127.0.0.1",
+            "AZIMUTH_PORT": str(args.port),
+            "AZIMUTH_MODE": "standalone",
+            "AZIMUTH_ACCESS": "local",
             # Do NOT set SMOKE_MODE — that skips init_db.
-            "PHOTOARCHIVE_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
+            "AZIMUTH_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
             "PYTHONPATH": str(WEB),
         }
     )

@@ -21,10 +21,10 @@ _lr_import_attempted = False
 
 
 def _auto_import_enabled() -> bool:
-    if os.environ.get("PHOTOARCHIVE_SKIP_LR_PRESET_IMPORT", "").strip() in {"1", "true", "yes"}:
+    if os.environ.get("AZIMUTH_SKIP_LR_PRESET_IMPORT", "").strip() in {"1", "true", "yes"}:
         return False
     # Smoke/unit runs stay fast; explicit /import-lightroom still works.
-    if os.environ.get("PHOTOARCHIVE_SMOKE_MODE", "").strip() in {"1", "true", "yes"}:
+    if os.environ.get("AZIMUTH_SMOKE_MODE", "").strip() in {"1", "true", "yes"}:
         return False
     return True
 

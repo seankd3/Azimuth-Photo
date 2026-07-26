@@ -34,8 +34,8 @@ class StagedImportTests(BackendTestCase):
     async def test_duplicate_at_destination_registers_before_card_clear(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             dcim = root / "CARD" / "DCIM"
             camera = dcim / "100CANON"
@@ -62,9 +62,9 @@ class StagedImportTests(BackendTestCase):
             self.assertIn(str(stranded), registered)
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_staged_import_registers_aspect_at_insert(self):
         # Placeholder cards need final geometry from the first render
@@ -75,8 +75,8 @@ class StagedImportTests(BackendTestCase):
 
         root = Path(self.tempdir.name)
         originals = root / "originals"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             dcim = root / "CARD" / "DCIM"
             camera = dcim / "100CANON"
@@ -104,9 +104,9 @@ class StagedImportTests(BackendTestCase):
             self.assertAlmostEqual(float(row["aspect_ratio"]), 400 / 300, places=3)
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_alpha_png_preview_encodes_as_jpeg(self):
         from PIL import Image
@@ -124,8 +124,8 @@ class StagedImportTests(BackendTestCase):
 
         root = Path(self.tempdir.name)
         originals = root / "library"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             shoot = root / "dump"
             shoot.mkdir()
@@ -163,17 +163,17 @@ class StagedImportTests(BackendTestCase):
             self.assertIn("Film Scans", str(landed["roll12-frame08.tif"]))
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_category_correction_is_remembered_for_the_source(self):
         from PIL import Image
 
         root = Path(self.tempdir.name)
         originals = root / "library"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             scans_dir = root / "scanner-drops"
             scans_dir.mkdir()
@@ -195,9 +195,9 @@ class StagedImportTests(BackendTestCase):
             self.assertEqual(rescan.entries[0]["category"], "film")
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_junk_directories_and_appledouble_files_are_fenced_out(self):
         from PIL import Image
@@ -219,8 +219,8 @@ class StagedImportTests(BackendTestCase):
     async def test_card_copy_collisions_duplicates_clear_and_rerun(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             camera = root / "CARD" / "DCIM"
             first_dir, second_dir = camera / "100CANON", camera / "101CANON"
@@ -285,15 +285,15 @@ class StagedImportTests(BackendTestCase):
             self.assertEqual(no_op.status()["skipped_duplicates"], 0)
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_cancel_mid_job_persists_partial_batch_without_clearing_uncopied_card_file(self):
         root = Path(self.tempdir.name)
         originals = root / "originals"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(originals)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
         try:
             camera = root / "CARD" / "DCIM" / "100CANON"
             camera.mkdir(parents=True)
@@ -336,9 +336,9 @@ class StagedImportTests(BackendTestCase):
             self.assertTrue(second.exists(), "an uncopied card original must never be cleared")
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_scan_hints_are_incremental_and_add_keeps_files_in_place(self):
         root = Path(self.tempdir.name)
@@ -354,8 +354,8 @@ class StagedImportTests(BackendTestCase):
         await db.insert_images_batch([(old.name, str(old), ".jpg", old.stat().st_size, old.stat().st_mtime)], source_id=source["id"])
         await db.add_or_restore_source(str(incoming))
 
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(root / "originals")
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(root / "originals")
         try:
             scan = await staging.start_scan(str(incoming), False)
             await asyncio.wait_for(staging._tasks[scan.id], timeout=10)
@@ -370,9 +370,9 @@ class StagedImportTests(BackendTestCase):
             self.assertEqual(job.skipped_duplicates, 0)
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_routes_reject_paths_and_previews_without_scan_keys(self):
         root = Path(self.tempdir.name)

@@ -257,7 +257,7 @@ class SearchTests(BackendTestCase):
 
         with unittest.mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             library_service._rankings_response_cache.clear()
             satellite_result = await search_routes.api_search(q="sunset", limit=2)
@@ -331,7 +331,7 @@ class SearchTests(BackendTestCase):
         embedding_worker.encode_text = lambda _query, _config=None: None
         query_constraints._text_search_resolution_cache.clear()
 
-        result = await app_module.app.state.photoarchive_shell.runtime_services.resolve_text_search("sunset")
+        result = await app_module.app.state.azimuth_shell.runtime_services.resolve_text_search("sunset")
 
         self.assertEqual(result["search_mode"], "metadata")
         self.assertEqual(result["id_filter"], {match})
@@ -1023,7 +1023,7 @@ class SearchTests(BackendTestCase):
 
         with unittest.mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             satellite_result = await search_routes.api_similar(source_image, limit=2)
 

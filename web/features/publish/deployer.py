@@ -22,7 +22,7 @@ from features.publish.builder import BundleSummary
 
 HOOK_TIMEOUT_SECONDS = 15 * 60
 HOOK_OUTPUT_LINES = 40
-HOOK_ENV = "PHOTOARCHIVE_PUBLISH_HOOK"
+HOOK_ENV = "AZIMUTH_PUBLISH_HOOK"
 
 
 def configured_publish_hook() -> str:

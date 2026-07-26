@@ -6,7 +6,7 @@ States (DISTRIBUTION_SPEC / docs/FIELD_HTTPS.md):
   up         — Running with a MagicDNS name (or Tailscale IPv4)
 
 Serve is never applied automatically — only via ``apply_serve()`` on user click.
-``PHOTOARCHIVE_TS_DRYRUN=1`` (and tests) skip the real CLI and return a dry-run result.
+``AZIMUTH_TS_DRYRUN=1`` (and tests) skip the real CLI and return a dry-run result.
 """
 
 from __future__ import annotations
@@ -48,7 +48,7 @@ def set_runner(runner: Runner | None) -> None:
 
 
 def dry_run_enabled() -> bool:
-    return os.environ.get("PHOTOARCHIVE_TS_DRYRUN", "").strip().lower() in {
+    return os.environ.get("AZIMUTH_TS_DRYRUN", "").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -57,14 +57,14 @@ def dry_run_enabled() -> bool:
 
 
 def force_state() -> str | None:
-    raw = os.environ.get("PHOTOARCHIVE_TS_FORCE_STATE", "").strip().lower()
+    raw = os.environ.get("AZIMUTH_TS_FORCE_STATE", "").strip().lower()
     return raw if raw in {"absent", "logged-out", "up"} else None
 
 
 def is_hub_mode() -> bool:
     """Hub mode only — Remote access panel stays hidden for standalone/satellite."""
-    mode = os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower()
-    hub = os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip()
+    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
+    hub = os.environ.get("AZIMUTH_HUB_URL", "").strip()
     if hub:
         return False
     if mode in {"satellite", "standalone"}:
@@ -86,7 +86,7 @@ def https_url_for(dns_name: str) -> str:
     name = (dns_name or "").strip().rstrip(".")
     if not name:
         return ""
-    raw = os.getenv("PHOTOARCHIVE_HTTPS_PORT", str(SERVE_HTTPS_PORT)).strip()
+    raw = os.getenv("AZIMUTH_HTTPS_PORT", str(SERVE_HTTPS_PORT)).strip()
     if raw in ("", "443"):
         return f"https://{name}"
     return f"https://{name}:{raw}"
@@ -151,7 +151,7 @@ def probe(*, timeout: float = 2.0) -> dict[str, Any]:
             "error": "Tailscale is installed but not logged in",
         }
     if forced == "up":
-        dns = "photoarchive.example.ts.net"
+        dns = "azimuth.example.ts.net"
         https = https_url_for(dns)
         return {
             "state": "up",

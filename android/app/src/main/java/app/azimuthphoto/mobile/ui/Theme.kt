@@ -28,7 +28,7 @@ private val DarkScheme = darkColorScheme(
 )
 
 @Composable
-fun PhotoArchiveTheme(content: @Composable () -> Unit) {
+fun AzimuthPhotoTheme(content: @Composable () -> Unit) {
     // The archive is dark-first by design, matching the desktop app.
     MaterialTheme(colorScheme = DarkScheme, content = content)
 }

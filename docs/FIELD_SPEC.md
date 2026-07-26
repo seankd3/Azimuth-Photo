@@ -6,8 +6,8 @@ the background; the full hub library stays browsable remotely through a read-thr
 
 ## Roles
 - **hub**: the existing prod instance (omarchy :8000). Authoritative catalog. Default mode.
-- **satellite**: same codebase on a laptop. `PHOTOARCHIVE_MODE=satellite`,
-  `PHOTOARCHIVE_HUB_URL=http://100.102.150.104:8000`. Own SQLite catalog, own caches,
+- **satellite**: same codebase on a laptop. `AZIMUTH_MODE=satellite`,
+  `AZIMUTH_HUB_URL=http://100.102.150.104:8000`. Own SQLite catalog, own caches,
   own originals dir for field imports. AI models optional (smoke-degraded is fine).
 
 ## Identity

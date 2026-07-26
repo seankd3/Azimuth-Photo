@@ -39,8 +39,8 @@ from typing import Any, Iterator
 WEB_DIR = Path(__file__).resolve().parents[1]
 PYTHON = WEB_DIR / ".venv" / "bin" / "python"
 DEFAULT_DB = Path("/mnt/expansion/tmp/perf.db")
-DEFAULT_DEVELOP_CACHE = Path("/mnt/expansion/tmp/photoarchive-perf-develop")
-DEFAULT_THUMB_CACHE = Path("/mnt/expansion/tmp/photoarchive-perf-thumbs")
+DEFAULT_DEVELOP_CACHE = Path("/mnt/expansion/tmp/azimuth-perf-develop")
+DEFAULT_THUMB_CACHE = Path("/mnt/expansion/tmp/azimuth-perf-thumbs")
 BASE_HEADER = struct.Struct("<8sII")
 
 
@@ -92,9 +92,9 @@ def _server(
     environment = os.environ.copy()
     environment.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DEVELOP_CACHE_DIR": str(develop_cache),
-            "PHOTOARCHIVE_THUMB_CACHE_DIR": str(thumb_cache),
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DEVELOP_CACHE_DIR": str(develop_cache),
+            "AZIMUTH_THUMB_CACHE_DIR": str(thumb_cache),
             "PYTHONUNBUFFERED": "1",
         }
     )
@@ -107,7 +107,7 @@ def _server(
         "library_service._schedule_result_thumbnail_memory_warm=None; "
         f"uvicorn.run(app, host='127.0.0.1', port={port}, log_level='warning')"
     )
-    log = tempfile.NamedTemporaryFile(prefix="photoarchive-perf-server-", suffix=".log", delete=False)
+    log = tempfile.NamedTemporaryFile(prefix="azimuth-perf-server-", suffix=".log", delete=False)
     log_path = Path(log.name)
     log.close()
     output = log_path.open("wb")
@@ -404,7 +404,7 @@ def benchmark_raw(
     raw_image_id: int,
     develop_cache: Path,
 ) -> dict[str, Any]:
-    os.environ["PHOTOARCHIVE_DEVELOP_CACHE_DIR"] = str(develop_cache)
+    os.environ["AZIMUTH_DEVELOP_CACHE_DIR"] = str(develop_cache)
     sys.path.insert(0, str(WEB_DIR))
     import numpy as np
     from features.develop.pipeline import apply_pipeline
@@ -465,8 +465,8 @@ def benchmark_pregen(
     develop_cache: Path,
     thumb_cache: Path,
 ) -> dict[str, Any]:
-    os.environ["PHOTOARCHIVE_DEVELOP_CACHE_DIR"] = str(develop_cache)
-    os.environ["PHOTOARCHIVE_THUMB_CACHE_DIR"] = str(thumb_cache)
+    os.environ["AZIMUTH_DEVELOP_CACHE_DIR"] = str(develop_cache)
+    os.environ["AZIMUTH_THUMB_CACHE_DIR"] = str(thumb_cache)
     sys.path.insert(0, str(WEB_DIR))
     import db
     import settings

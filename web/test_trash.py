@@ -27,7 +27,7 @@ class TrashTests(BackendTestCase):
                     response = client.post(
                         "/api/trash/empty",
                         json={"hub_image_ids": []},
-                        headers={"X-PhotoArchive-Trash-Forwarded": "1"},
+                        headers={"X-AzimuthPhoto-Trash-Forwarded": "1"},
                     )
                     elapsed = time.perf_counter() - started
                 finally:
@@ -447,7 +447,7 @@ class TrashTests(BackendTestCase):
             observed_calls.append((hub_url, hub_image_ids))
             return {"deleted_count": 1, "freed_bytes": 4321, "errors": [], "skipped_offline": 0}
 
-        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://probe-hub"}
+        env = {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://probe-hub"}
         with patch.dict(os.environ, env, clear=False), patch(
             "features.trash.remote.empty_hub_trash", side_effect=fake_empty_hub
         ):
@@ -477,7 +477,7 @@ class TrashTests(BackendTestCase):
         await trash_service.trash_images(db.DB_PATH, [local_id])
         mirror_id = await self._mirrored_trash(hub_image_id=501)
 
-        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1"}
+        env = {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://127.0.0.1:1"}
         with patch.dict(os.environ, env, clear=False):
             response = await asyncio.to_thread(lambda: TestClient(app_module.app).post("/api/trash/empty"))
 
@@ -515,7 +515,7 @@ class TrashTests(BackendTestCase):
         hub_url = f"http://127.0.0.1:{server.server_port}"
         contract.reset_hub_contract_cache()
         try:
-            env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": hub_url}
+            env = {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": hub_url}
             with patch.dict(os.environ, env, clear=False):
                 response = await asyncio.to_thread(
                     lambda: TestClient(app_module.app).post("/api/trash/empty")
@@ -580,7 +580,7 @@ class TrashTests(BackendTestCase):
     async def test_trashed_mirror_thumbnail_returns_pending_without_hub_await(self):
         mirror_id = await self._mirrored_trash(hub_image_id=888)
 
-        with patch.dict(os.environ, {"PHOTOARCHIVE_HUB_URL": "http://stub-hub"}, clear=False), patch(
+        with patch.dict(os.environ, {"AZIMUTH_HUB_URL": "http://stub-hub"}, clear=False), patch(
             "features.media.routes._schedule_remote_media_prefetch"
         ) as enqueue:
             response = await media_routes.serve_thumbnail(HeaderRequest(), "sm", mirror_id)
@@ -609,7 +609,7 @@ class TrashTests(BackendTestCase):
         finally:
             await conn.close()
 
-        env = {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://old-hub"}
+        env = {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://old-hub"}
         with patch.dict(os.environ, env, clear=False), patch(
             "features.trash.remote.empty_hub_trash"
         ) as forward:

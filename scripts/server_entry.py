@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Azimuth Photo server entrypoint for frozen binaries and source/Docker runs.
 
-Honors all existing PHOTOARCHIVE_* environment variables. With none set it
+Honors all existing AZIMUTH_* environment variables. With none set it
 uses platform-default data dirs (see web/core/runtime_paths.py) and serves
-on 127.0.0.1:8000. Docker/compose should set PHOTOARCHIVE_HOST=0.0.0.0 and
-PHOTOARCHIVE_HOME=/data.
+on 127.0.0.1:8000. Docker/compose should set AZIMUTH_HOST=0.0.0.0 and
+AZIMUTH_HOME=/data.
 """
 
 from __future__ import annotations
@@ -36,32 +36,32 @@ def ensure_sys_path() -> Path:
 
 
 def _default_host() -> str:
-    return os.environ.get("PHOTOARCHIVE_HOST") or "127.0.0.1"
+    return os.environ.get("AZIMUTH_HOST") or "127.0.0.1"
 
 
 def _default_port() -> int:
-    raw = os.environ.get("PHOTOARCHIVE_PORT") or "8000"
+    raw = os.environ.get("AZIMUTH_PORT") or "8000"
     try:
         return int(raw)
     except ValueError as exc:
-        raise SystemExit(f"Invalid PHOTOARCHIVE_PORT={raw!r}") from exc
+        raise SystemExit(f"Invalid AZIMUTH_PORT={raw!r}") from exc
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="photoarchive-server",
+        prog="azimuth-server",
         description="Azimuth Photo library server (hub / standalone / satellite).",
     )
     parser.add_argument(
         "--host",
         default=None,
-        help="Bind address (default: PHOTOARCHIVE_HOST or 127.0.0.1)",
+        help="Bind address (default: AZIMUTH_HOST or 127.0.0.1)",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help="Bind port (default: PHOTOARCHIVE_PORT or 8000)",
+        help="Bind port (default: AZIMUTH_PORT or 8000)",
     )
     return parser
 
@@ -72,8 +72,8 @@ def main(argv: list[str] | None = None) -> int:
     port = args.port if args.port is not None else _default_port()
 
     # Keep env and CLI aligned so runtime_paths / status probes see the same values.
-    os.environ.setdefault("PHOTOARCHIVE_HOST", host)
-    os.environ.setdefault("PHOTOARCHIVE_PORT", str(port))
+    os.environ.setdefault("AZIMUTH_HOST", host)
+    os.environ.setdefault("AZIMUTH_PORT", str(port))
 
     ensure_sys_path()
 
@@ -89,7 +89,7 @@ def main(argv: list[str] | None = None) -> int:
         port=port,
         proxy_headers=True,
         forwarded_allow_ips="*",
-        log_level=os.environ.get("PHOTOARCHIVE_LOG_LEVEL", "info"),
+        log_level=os.environ.get("AZIMUTH_LOG_LEVEL", "info"),
     )
     return 0
 

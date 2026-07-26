@@ -4,13 +4,13 @@
  * Usage:
  *   NODE_PATH=.../node_modules node scripts/remote-access-playwright-proof.cjs [baseUrl]
  *
- * Expects PHOTOARCHIVE_TS_DRYRUN=1 on the server. Screenshots → /tmp/dist1/remote-*.png
+ * Expects AZIMUTH_TS_DRYRUN=1 on the server. Screenshots → /tmp/dist1/remote-*.png
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE = (process.argv[2] || process.env.PHOTOARCHIVE_PROBE_URL || 'http://127.0.0.1:8133').replace(/\/$/, '');
+const BASE = (process.argv[2] || process.env.AZIMUTH_PROBE_URL || 'http://127.0.0.1:8133').replace(/\/$/, '');
 const OUT = '/tmp/dist1';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -35,7 +35,7 @@ async function closeDrawer(page) {
 }
 
 function basePayload(state, extras = {}) {
-  const dns = 'photoarchive.example.ts.net';
+  const dns = 'azimuth.example.ts.net';
   const https = `https://${dns}:8443`;
   return {
     access_mode: 'local',
@@ -116,7 +116,7 @@ async function main() {
     report.screenshots.push(await captureState(page, 'logged-out', basePayload('logged-out')));
     report.screenshots.push(await captureState(page, 'up-before-apply', basePayload('up')));
 
-    // Live dry-run Apply: server is forced to "up" with PHOTOARCHIVE_TS_DRYRUN=1.
+    // Live dry-run Apply: server is forced to "up" with AZIMUTH_TS_DRYRUN=1.
     await page.goto(`${BASE}/d`, { waitUntil: 'networkidle', timeout: 60000 });
     const live = await page.request.get(`${BASE}/api/remote-access`);
     report.live = await live.json();

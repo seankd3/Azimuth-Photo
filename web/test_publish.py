@@ -72,7 +72,7 @@ class PublishBuilderTests(BackendTestCase):
             "share_brand_name": "Northstar Studio",
             "publish_site_base_url": "https://photos.example.test",
         })
-        templates = app_module.app.state.photoarchive_shell.templates
+        templates = app_module.app.state.azimuth_shell.templates
         cache = Path(self.tempdir.name) / "cache"
         cache.mkdir()
         (cache / "sm-101.jpg").write_bytes(b"sm-a")
@@ -147,7 +147,7 @@ class PublishBuilderTests(BackendTestCase):
         self.assertEqual({call[1] for call in thumbs.calls}, {"sm", "md", "lg"})
 
     async def test_bundle_skips_one_unreadable_member_instead_of_aborting_publish(self):
-        templates = app_module.app.state.photoarchive_shell.templates
+        templates = app_module.app.state.azimuth_shell.templates
         cache = Path(self.tempdir.name) / "skip-cache"
         cache.mkdir()
 
@@ -593,7 +593,7 @@ class PublishRouteTests(BackendTestCase):
         self.tasks = []
         publish_routes._jobs.clear()
         publish_routes._scheduled_hook_retries.clear()
-        templates = app_module.app.state.photoarchive_shell.templates
+        templates = app_module.app.state.azimuth_shell.templates
         self.cache = Path(self.tempdir.name) / "cache"
         self.cache.mkdir()
         settings.save_settings({

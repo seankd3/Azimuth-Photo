@@ -70,7 +70,7 @@ changes:
 
 ```bash
 cd web
-PHOTOARCHIVE_SMOKE_MODE=1 .venv/bin/python -m pytest -q -s test_perf_budgets.py
+AZIMUTH_SMOKE_MODE=1 .venv/bin/python -m pytest -q -s test_perf_budgets.py
 ```
 
 Use the reported medians to update the table and `BUDGET_MS` together. Set each

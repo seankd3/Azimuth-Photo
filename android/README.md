@@ -1,6 +1,6 @@
 # Azimuth Photo — Android
 
-A native Google-Photos replacement for the self-hosted Azimuth Photo archive. It is
+A native Google-Photos replacement for the self-hosted Azimuth Azimuth Photo. It is
 your phone's photo app: it shows your camera roll, quietly backs every shot up to your
 own server over Tailscale, lets you browse your entire archive (years of DSLR RAWs,
 exported edits, everything) from anywhere, and can free space by aging backed-up media

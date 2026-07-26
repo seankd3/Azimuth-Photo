@@ -106,11 +106,11 @@ class PreviewsHoldDiskTests(unittest.TestCase):
 class SequencingEnvTests(unittest.TestCase):
     def test_default_on(self):
         with mock.patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("PHOTOARCHIVE_BULK_SEQUENCING", None)
+            os.environ.pop("AZIMUTH_BULK_SEQUENCING", None)
             self.assertTrue(bulk_scheduler.sequencing_enabled())
 
     def test_explicit_off(self):
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "0"}):
+        with mock.patch.dict(os.environ, {"AZIMUTH_BULK_SEQUENCING": "0"}):
             self.assertFalse(bulk_scheduler.sequencing_enabled())
 
 
@@ -155,7 +155,7 @@ class DecideVaultStartTests(unittest.TestCase):
     def test_desired_with_previews_waits(self):
         bulk_scheduler.set_vault_desired(True)
         bulk_scheduler.configure(previews_pending=lambda: True)
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}):
+        with mock.patch.dict(os.environ, {"AZIMUTH_BULK_SEQUENCING": "1"}):
             decision = bulk_scheduler.decide_vault_start(manual_override=False)
         self.assertEqual(decision["action"], "wait")
         self.assertEqual(decision["message"], bulk_scheduler.VAULT_WAIT_MESSAGE)
@@ -169,7 +169,7 @@ class DecideVaultStartTests(unittest.TestCase):
 
     def test_manual_override_warns_when_previews_pending(self):
         bulk_scheduler.configure(previews_pending=lambda: True)
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}):
+        with mock.patch.dict(os.environ, {"AZIMUTH_BULK_SEQUENCING": "1"}):
             decision = bulk_scheduler.decide_vault_start(manual_override=True)
         self.assertEqual(decision["action"], "run")
         self.assertIn("share the disk", decision["message"])

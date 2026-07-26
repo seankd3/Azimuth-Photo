@@ -89,7 +89,7 @@ _tasks: dict[str, asyncio.Task] = {}
 
 
 def originals_root() -> Path:
-    configured = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR") or settings.get_settings().get("import_root")
+    configured = os.environ.get("AZIMUTH_ORIGINALS_DIR") or settings.get_settings().get("import_root")
     return Path(str(configured or settings.DEFAULT_SETTINGS["import_root"])).expanduser().resolve()
 
 

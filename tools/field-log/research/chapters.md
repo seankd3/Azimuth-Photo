@@ -24,10 +24,10 @@ Key running doctrines (recur across eras): **fastest photo app ever** (profile-f
 - **Capture:** M1 — `60cb19f39`, mosaic compare + rankings page.
 
 ## Ch 2 — The Mind Awakens (Apr 21, 2026) · one astonishing day (~16 commits)
-- **Arc in a day:** CLIP active learning → unified bottom bar → AI panel + *effective Elo pairing* + AI-ranked sort → **Library page** (justified grid, AI search, ViT-L/14) → **Qwen3-VL-Embedding-8B** (SOTA search) → **rename PhotoRanker → photoArchive** (fa1594a8f) → lightbox, Find Similar, duplicate detection, EXIF, k-means auto-collections, folder browse, batch export → **Qwen3-VL-2B int4** (c0d7f5441, "fits GPU alongside other apps").
+- **Arc in a day:** CLIP active learning → unified bottom bar → AI panel + *effective Elo pairing* + AI-ranked sort → **Library page** (justified grid, AI search, ViT-L/14) → **Qwen3-VL-Embedding-8B** (SOTA search) → **rename PhotoRanker → Azimuth Photo** (fa1594a8f) → lightbox, Find Similar, duplicate detection, EXIF, k-means auto-collections, folder browse, batch export → **Qwen3-VL-2B int4** (c0d7f5441, "fits GPU alongside other apps").
 - **The dream:** the computer should *understand* the pictures. Not tags you typed — embeddings. Search "golden hour over water" and it just works. Rank one photo and its look-alikes move with it.
 - **Trade-offs:** 8B was state-of-the-art but hogged the GPU; dropped to 2B-int4 so it could live beside Sean's other resident models on one 8GB card. The first appearance of a theme that never leaves: **sharing one small GPU is a design constraint, not an afterthought.**
-- **Capture:** M2 — `c0d7f5441`, the newborn photoArchive Library + AI panel.
+- **Capture:** M2 — `c0d7f5441`, the newborn Azimuth Photo Library + AI panel.
 
 ## Ch 3 — The Need for Speed (Apr 22–25, 2026) · the doctrine is born
 - **Benchmark cascade (real commit subjects):**
@@ -49,7 +49,7 @@ Key running doctrines (recur across eras): **fastest photo app ever** (profile-f
 - **Capture:** M4 — `149d8ba55`, post-refactor library with the background-work panel (visually near M3 + a work banner — decide after seeing M3).
 
 ## Ch 5 — The Companion (Jun 2026) · Android is born · 32 commits
-- **Commits:** 59240aab8 *self-hosted Android companion* → f9a9d27a9 *Build Android photo archive app* → a native Kotlin/Compose burst (Jun 20–21): ZoomableImageView (pinch/swipe), fullscreen PhotoViewer, A/B CompareView, flag/EXIF/share/save, grid flag badges, haptics, edge-feedback, e2e + no-phone smoke gates.
+- **Commits:** 59240aab8 *self-hosted Android companion* → f9a9d27a9 *Build Android Azimuth Photo app* → a native Kotlin/Compose burst (Jun 20–21): ZoomableImageView (pinch/swipe), fullscreen PhotoViewer, A/B CompareView, flag/EXIF/share/save, grid flag badges, haptics, edge-feedback, e2e + no-phone smoke gates.
 - **The product vision (625a0d49f):** three faces, one library. **mobile = Google Photos; desktop = Lightroom Classic.** The fleet (XPS UI · omarchy hub · Pixel client) becomes the architecture.
 - **Also:** persistent collections foundation, collection picker.
 - **Capture:** (Android build is heavy — likely narrate + use later Android shots; primary web captures continue.)
@@ -61,7 +61,7 @@ Key running doctrines (recur across eras): **fastest photo app ever** (profile-f
 - **Capture:** M5 — `9b444ff57`/Jul-8, the `/d` desktop hero. (Committed Jul-8 screenshots exist: library-grid, loupe, loupe-lights-out, refine-mosaic, mobile-library — period-accurate for this era.)
 
 ## Ch 7 — The Darkroom (Jul 9–11, 2026) · the crown of engineering · dev1→dev7
-This is the technical peak. photoArchive stops being a *manager* and becomes an *editor* aiming to beat Lightroom, darktable, Affinity — pillar by pillar (master plan 5a71428cb).
+This is the technical peak. Azimuth Photo stops being a *manager* and becomes an *editor* aiming to beat Lightroom, darktable, Affinity — pillar by pillar (master plan 5a71428cb).
 
 - **Develop core (8d8e97cfb, 874b8a705):** schema v21, rawpy linear base + SSD LRU cache + pregen; WebGL2 live pipeline (RGBA16F), Lightroom-ordered panels, scrubby sliders, interactive tone curve, HSL/B&W, histogram w/ clipping, crop, before/after, autosave + history. **The "twin" contract:** every op exists twice — numpy (export truth) and GLSL (live preview) — pinned to a shared `PARITY_TABLE`. *53 ops exact, pixel deltas <0.4/255.*
 - **Lossy-DNG decode (e68b0973e):** LibRaw can't unpack JPEG-XL / DNG 1.7. Decode the LinearRaw SubIFD pyramid via tifffile+imagecodecs with full DNG color math (black/white levels, AsShotNeutral WB, ForwardMatrix→XYZ D50, Bradford→linear sRGB, BaselineExposure). **2048px in 0.4s.**
@@ -80,7 +80,7 @@ This is the technical peak. photoArchive stops being a *manager* and becomes an 
 - **Lesson:** the XPS is a *satellite* that must never wait on the omarchy *hub*; sync is an oplog that converges, not a request that blocks (local-first doctrine, made concrete).
 
 ## Ch 9 — Azimuth (Jul 12) · the rebrand
-- c5fc4579a / 6c3b13f85: **photoArchive → Azimuth Photo** (brand layer: wordmark, PWA manifest, Android launcher, Tauri productName). Bundle ids → `app.azimuthphoto.*` (5eb678c3c). Identifiers/paths/DB names deliberately unchanged, sequenced behind in-flight lanes (RENAME_PLAN c20a33cc2).
+- c5fc4579a / 6c3b13f85: **Azimuth Photo identity established** across the wordmark, PWA manifest, Android launcher, and Tauri product name. Bundle IDs moved to `app.azimuthphoto.*` (5eb678c3c); the later consolidation completed the operational identifiers and storage layout.
 - **Distribution:** Docker image + compose + **Unraid template** (a911715ce), INSTALL.md for NAS hosts. Full **Google-Photos-replacement Android client** (d37e68792: timeline, auto-backup, archive browse, free-up-space). DISTRIBUTION_SPEC (installers, first-run wizard, pairing/mDNS, guided Tailscale).
 - **Lesson (from a real commit):** d4ea3fa30 — "commit the phone client source (was untracked on every machine — git is the backup)." The OneDrive path isn't a backup; git is.
 
@@ -143,7 +143,7 @@ This is the technical peak. photoArchive stops being a *manager* and becomes an 
 |---|---|---|---|
 | G1 | d97f2aae5 | 2023 PhotoRanker | tkinter two-up compare |
 | M1 | 60cb19f39 | Feb 2026 web | mosaic compare, rankings |
-| M2 | c0d7f5441 | Apr-21 photoArchive born | Library grid, AI search panel |
+| M2 | c0d7f5441 | Apr-21 Azimuth Photo born | Library grid, AI search panel |
 | M3 | b28564460 | Apr-25 mature | Library, loupe |
 | M4 | 149d8ba55 | May-18 post-refactor | Library + background-work panel |
 | M5 | 9b444ff57 | Jul-08 "/d" one | desktop grid, refine mosaic, loupe |

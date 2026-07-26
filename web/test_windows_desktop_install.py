@@ -65,7 +65,7 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
         )
         self.assertEqual(
             config["bundle"]["resources"],
-            {"../../dist/photoarchive-server/": "photoarchive-server/"},
+            {"../../dist/azimuth-server/": "azimuth-server/"},
         )
 
     def test_installed_launch_has_no_personal_or_remote_fallback(self):
@@ -75,9 +75,9 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
 
         self.assertNotIn(r"C:\Users\smast", combined)
         self.assertNotIn("100.102.150.104", combined)
-        self.assertNotIn("PHOTOARCHIVE_HUB_URL", combined)
+        self.assertNotIn("AZIMUTH_HUB_URL", combined)
         self.assertNotIn("python.exe", combined.lower())
-        self.assertIn('.env("PHOTOARCHIVE_MODE", "standalone")', engine)
+        self.assertIn('.env("AZIMUTH_MODE", "standalone")', engine)
         self.assertIn("BaseDirectory::Resource", engine)
 
     def test_unsigned_build_script_builds_engine_before_nsis(self):
@@ -88,7 +88,7 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
             script.index('"scripts/build_server.py"'),
             script.index("cargo tauri build --bundles nsis"),
         )
-        self.assertIn("photoarchive-server.exe", script)
+        self.assertIn("azimuth-server.exe", script)
         self.assertIn("*-setup.exe", script)
 
     def test_splash_is_customer_facing(self):

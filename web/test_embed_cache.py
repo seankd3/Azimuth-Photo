@@ -23,7 +23,7 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         embed_cache._caches = {}
         embed_cache.configure(
             active_embedding_model_key=lambda: "fast-model",
-            db_path=lambda: "/tmp/photoarchive-test.db",
+            db_path=lambda: "/tmp/azimuth-test.db",
         )
 
     async def asyncTearDown(self):
@@ -126,7 +126,7 @@ class EmbedCacheTests(unittest.IsolatedAsyncioTestCase):
         embed_cache._load_embeddings_sync = self.old_load_embeddings_sync
 
         with tempfile.TemporaryDirectory() as tempdir:
-            db_path = os.path.join(tempdir, "photoarchive.db")
+            db_path = os.path.join(tempdir, "azimuth.db")
             conn = sqlite3.connect(db_path)
             try:
                 conn.executescript(

@@ -1,7 +1,7 @@
 // Android Back integration for the mobile shell.
 // Each transient UI layer pushes one history state; Back closes the top layer.
 
-const APP_STATE = 'photoarchive-mobile';
+const APP_STATE = 'azimuth-mobile';
 
 const handlers = new Map();
 let layers = [];

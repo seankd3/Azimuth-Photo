@@ -124,7 +124,7 @@ def _catalog_copy(catalog_path: str):
     source = os.path.abspath(catalog_path)
     if not os.path.isfile(source):
         raise ValueError(f"Lightroom catalog does not exist: {source}")
-    with tempfile.TemporaryDirectory(prefix="photoarchive-lrcat-") as directory:
+    with tempfile.TemporaryDirectory(prefix="azimuth-lrcat-") as directory:
         copied = os.path.join(directory, os.path.basename(source))
         shutil.copy2(source, copied)
         for suffix in ("-wal", "-shm"):

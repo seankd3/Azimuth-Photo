@@ -84,9 +84,9 @@ class ApiShapeTests(unittest.TestCase):
         self.old_get_vector = embed_cache.get_vector
         self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
         self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
-        self.old_smoke_mode = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
+        self.old_smoke_mode = os.environ.get("AZIMUTH_SMOKE_MODE")
 
-        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        os.environ["AZIMUTH_SMOKE_MODE"] = "1"
         db.DB_PATH = os.path.join(self.tempdir.name, "api-shapes.db")
         thumbnail_cache_entries._persistent_conn = None
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
@@ -129,9 +129,9 @@ class ApiShapeTests(unittest.TestCase):
         settings.SETTINGS_PATH = self.old_settings_path
         settings._settings = self.old_settings_state
         if self.old_smoke_mode is None:
-            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+            os.environ.pop("AZIMUTH_SMOKE_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = self.old_smoke_mode
+            os.environ["AZIMUTH_SMOKE_MODE"] = self.old_smoke_mode
         thumbnails._clear_disk_index()
         db.DB_PATH = self.old_db_path
         db.invalidate_stats_cache()
@@ -319,7 +319,7 @@ class ApiShapeTests(unittest.TestCase):
 
         with mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             from features.library import service as library_service
             library_service._rankings_response_cache.clear()
@@ -436,7 +436,7 @@ class ApiShapeTests(unittest.TestCase):
 
         with mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             satellite_groups = self.client.get("/api/date-groups").json()["groups"]
         self.assertEqual(
@@ -477,7 +477,7 @@ class ApiShapeTests(unittest.TestCase):
         db.invalidate_stats_cache()
         with mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             satellite = self.client.get("/api/map/markers").json()
 

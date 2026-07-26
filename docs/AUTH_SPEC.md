@@ -62,7 +62,7 @@ client IP the same way `browser_origin._is_trusted_proxy` does — do not trust
 
 Owner auth alone is not enough for a setting that executes shell. Remove `publish_hook`
 from API-writable settings altogether: it becomes server-side-only configuration
-(`PHOTOARCHIVE_PUBLISH_HOOK` env var or the settings file edited on disk). The settings
+(`AZIMUTH_PUBLISH_HOOK` env var or the settings file edited on disk). The settings
 API returns it read-only (masked) and rejects writes with a clear message. Deployer reads
 the env/file value. Document in docs/data-and-privacy.md.
 

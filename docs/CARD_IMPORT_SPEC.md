@@ -56,7 +56,7 @@ Per-file pipeline (copy may parallelize per card-folder; verify strictly per fil
 - Hub-mode card import (plugging a card into omarchy directly) is out of scope.
 
 ## Acceptance
-- ./scripts/photoarchive-check --unit green.
+- ./scripts/azimuth-check --unit green.
 - New unit test (temp dir as fake card, temp originals root): mixed CR3/JPG/MP4 set including
   (a) two different files with the same filename in different card folders → both land, one
   suffixed; (b) an exact duplicate of an already-imported file → skipped, card copy still

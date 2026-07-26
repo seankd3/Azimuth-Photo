@@ -13,7 +13,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.catalog_path = os.path.join(self.tempdir.name, "2023-v13.lrcat")
-        self.db_path = os.path.join(self.tempdir.name, "photoarchive.db")
+        self.db_path = os.path.join(self.tempdir.name, "azimuth.db")
         self._make_library()
         self._make_catalog()
 

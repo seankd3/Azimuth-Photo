@@ -19,7 +19,7 @@ Interactive browse-under-bulk (GET-only, prod-safe) lives in
 
 Runs are written to `bench-runs/<timestamp>-<sha>.json`. The command prints
 deltas against both the previous run and committed `baseline.json`. Set
-`PHOTOARCHIVE_BENCH_URL` to make a GET-only pass against another instance;
+`AZIMUTH_BENCH_URL` to make a GET-only pass against another instance;
 real-instance runs omit cold-start, cold-cache, and RSS metrics they cannot
 measure honestly.
 
@@ -34,8 +34,8 @@ metric is more than 25% above that reference.
 First build or refresh the benchmark fixture:
 
 ```bash
-PHOTOARCHIVE_QA_SCRATCH=/mnt/expansion/tmp/azimuth-profile \
-PHOTOARCHIVE_QA_ACTIVE_IMAGE_COUNT=5003 \
+AZIMUTH_QA_SCRATCH=/mnt/expansion/tmp/azimuth-profile \
+AZIMUTH_QA_ACTIVE_IMAGE_COUNT=5003 \
 web/.venv/bin/python -c 'from qa.fixture import reset_fixture; reset_fixture()'
 ```
 
@@ -44,11 +44,11 @@ reject attaching to an already-running sibling process:
 
 ```bash
 cd web
-PHOTOARCHIVE_QA_SCRATCH=/mnt/expansion/tmp/azimuth-profile \
-PHOTOARCHIVE_QA_ACTIVE_IMAGE_COUNT=5003 \
-PHOTOARCHIVE_HOME=/mnt/expansion/tmp/azimuth-profile/fixture-home \
-PHOTOARCHIVE_THUMB_CACHE_DIR=/mnt/expansion/tmp/azimuth-profile/fixture-home/cache/previews \
-PHOTOARCHIVE_SMOKE_MODE=1 PHOTOARCHIVE_MODE=standalone PHOTOARCHIVE_ACCESS=local \
+AZIMUTH_QA_SCRATCH=/mnt/expansion/tmp/azimuth-profile \
+AZIMUTH_QA_ACTIVE_IMAGE_COUNT=5003 \
+AZIMUTH_HOME=/mnt/expansion/tmp/azimuth-profile/fixture-home \
+AZIMUTH_THUMB_CACHE_DIR=/mnt/expansion/tmp/azimuth-profile/fixture-home/cache/previews \
+AZIMUTH_SMOKE_MODE=1 AZIMUTH_MODE=standalone AZIMUTH_ACCESS=local \
 py-spy top -- .venv/bin/python -m uvicorn app:app --host 127.0.0.1 --port 18081
 ```
 
@@ -81,7 +81,7 @@ HTTP and cache state like this:
 cd web
 py-spy record --rate 200 \
   --output /mnt/expansion/tmp/azimuth-flamegraphs/suggestions.svg -- \
-  .venv/bin/python -c "import asyncio; from features.collections import suggestions as s; p='/mnt/expansion/tmp/azimuth-profile/fixture-home/data/catalog/photoarchive.db'; [(s.invalidate_cache(), asyncio.run(s.collection_suggestions(p, db_signature=str(i)))) for i in range(20)]"
+  .venv/bin/python -c "import asyncio; from features.collections import suggestions as s; p='/mnt/expansion/tmp/azimuth-profile/fixture-home/data/catalog/azimuth.db'; [(s.invalidate_cache(), asyncio.run(s.collection_suggestions(p, db_signature=str(i)))) for i in range(20)]"
 ```
 
 Record the fixture size, command, wall timing, and dominant stacks beside any

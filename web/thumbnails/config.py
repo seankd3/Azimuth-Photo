@@ -14,13 +14,13 @@ SIZES = {
 }
 THUMB_QUALITY = 92
 CACHE_VERSION = "v3"
-CACHE_MARKER = ".photoarchive-cache"
+CACHE_MARKER = ".azimuth-cache"
 CACHE_PROFILE = "original_heavy"
 SSD_CACHE_DIR = os.getenv(
-    "PHOTOARCHIVE_THUMB_CACHE_DIR",
+    "AZIMUTH_THUMB_CACHE_DIR",
     resolve_runtime_paths().thumb_cache_dir,
 )
-SSD_CACHE_BYTES = int(os.getenv('PHOTOARCHIVE_SSD_CACHE_BYTES', str(10 * 1024 * 1024 * 1024)))
+SSD_CACHE_BYTES = int(os.getenv('AZIMUTH_SSD_CACHE_BYTES', str(10 * 1024 * 1024 * 1024)))
 MEMORY_CACHE_BYTES = 512 * 1024 * 1024
 PREGENERATE_ON_IDLE = True
 PREGENERATE_IDLE_SECONDS = 1.0
@@ -35,12 +35,12 @@ MANUAL_PREGEN_FOREGROUND_SETTLE_SECONDS = 5.0
 # Cap concurrent user-facing cold decodes so a grid of cold thumbs queues
 # instead of saturating the pool and starving status/health probes.
 ON_DEMAND_HEAVY_DECODE_LIMIT = int(
-    os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")
+    os.environ.get("AZIMUTH_ON_DEMAND_DECODE_LIMIT", "2")
 )
 # Process-pool size for GIL-bound RAW demosaic (0 = in-process). Default
-# min(ncores-1, 6) — see thumbnails.demosaic_pool / PROCDEMOSAIC.md.
-DEMOSAIC_PROCESSES_ENV = "PHOTOARCHIVE_DEMOSAIC_PROCESSES"
-DEMOSAIC_IPC_ENV = "PHOTOARCHIVE_DEMOSAIC_IPC"
+# min(ncores-1, 6); implementation details live in thumbnails.demosaic_pool.
+DEMOSAIC_PROCESSES_ENV = "AZIMUTH_DEMOSAIC_PROCESSES"
+DEMOSAIC_IPC_ENV = "AZIMUTH_DEMOSAIC_IPC"
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
 # Thumb URLs are /api/thumb/{size}/{id} (not content-hashed), so immutable is unsafe.
 # Long max-age + ETag: browsers skip the network for a week, then revalidate cheaply.

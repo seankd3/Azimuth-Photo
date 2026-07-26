@@ -3,7 +3,7 @@ import unittest
 
 import numpy as np
 
-os.environ.setdefault("PHOTOARCHIVE_SMOKE_MODE", "1")
+os.environ.setdefault("AZIMUTH_SMOKE_MODE", "1")
 
 from features.develop import film
 

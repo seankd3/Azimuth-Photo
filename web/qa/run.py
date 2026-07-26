@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
                     if server_options:
                         manifest = reset_fixture()
                     with ProbeServer(log_path=archive.server_log, **server_options) as server:
-                        print(f"Probe server: {server.base_url} ({label}, isolated PHOTOARCHIVE_HOME)", flush=True)
+                        print(f"Probe server: {server.base_url} ({label}, isolated AZIMUTH_HOME)", flush=True)
                         harness = BrowserHarness(browser, server.base_url, manifest, server.old_hub)
                         for scenario in scenario_group:
                             start = _log_offset(archive.server_log)

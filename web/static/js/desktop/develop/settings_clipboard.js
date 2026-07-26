@@ -9,8 +9,8 @@
 
 import { SYNC_GROUPS } from './export_dialog.js';
 
-const CLIPBOARD_KEY = 'photoarchive.develop.settings-clipboard.v1';
-const LAST_SAVED_KEY = 'photoarchive.develop.last-saved-image.v1';
+const CLIPBOARD_KEY = 'azimuth.develop.settings-clipboard.v1';
+const LAST_SAVED_KEY = 'azimuth.develop.last-saved-image.v1';
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));

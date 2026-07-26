@@ -36,13 +36,13 @@ def _env_bytes(name: str, default: int) -> int:
 # Soft cap on concurrent demosaic/decode working sets in the bulk path.
 # Full-res RAW postprocess alone can peak near this for one 40–60MP frame.
 MAX_INFLIGHT_DECODE_BYTES = _env_bytes(
-    "PHOTOARCHIVE_BULK_DECODE_BYTES",
+    "AZIMUTH_BULK_DECODE_BYTES",
     768 * 1024 * 1024,
 )
 MIN_DECODE_ESTIMATE_BYTES = 16 * 1024 * 1024
 # Acquire waits forever only if holders never release — bound the wait so a
 # leaked weight cannot freeze the pregen loop indefinitely.
-DECODE_BUDGET_WAIT_SECONDS = float(os.environ.get("PHOTOARCHIVE_DECODE_BUDGET_WAIT_SECONDS", "30"))
+DECODE_BUDGET_WAIT_SECONDS = float(os.environ.get("AZIMUTH_DECODE_BUDGET_WAIT_SECONDS", "30"))
 
 
 def estimate_decode_bytes(

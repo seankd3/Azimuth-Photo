@@ -92,11 +92,11 @@ if satellite.is_satellite_mode():
         if not satellite.has_hub():
             return False
         async with _sync_worker_lock:
-            if getattr(app.state, "photoarchive_sync_worker", None) is not None:
+            if getattr(app.state, "azimuth_sync_worker", None) is not None:
                 return True
             await satellite.ensure_sync_state(_db.DB_PATH)
             updater = None
-            install_root = os.environ.get("PHOTOARCHIVE_INSTALL_ROOT", "").strip()
+            install_root = os.environ.get("AZIMUTH_INSTALL_ROOT", "").strip()
             if install_root:
                 from features.sync import client_update
 
@@ -116,8 +116,8 @@ if satellite.is_satellite_mode():
 
                 consume_rollback_notice_into_status(updater)
             configure_worker(worker)
-            app.state.photoarchive_sync_worker = worker
-            app.state.photoarchive_shell.track_background_task(worker.run())
+            app.state.azimuth_sync_worker = worker
+            app.state.azimuth_shell.track_background_task(worker.run())
             return True
 
     satellite.register_sync_starter(_start_sync_worker)
@@ -128,7 +128,7 @@ if satellite.is_satellite_mode():
 
     @app.on_event("shutdown")
     async def _stop_satellite_sync_worker():
-        worker = getattr(app.state, "photoarchive_sync_worker", None)
+        worker = getattr(app.state, "azimuth_sync_worker", None)
         if worker is not None:
             worker.stop()
 
@@ -153,7 +153,7 @@ async def _prepare_hub_client_bundle_identity():
 
             logging.getLogger(__name__).exception("hub client bundle identity init failed")
 
-    app.state.photoarchive_shell.track_background_task(_prepare())
+    app.state.azimuth_shell.track_background_task(_prepare())
 
 @app.on_event("startup")
 async def _start_hub_mdns():
@@ -164,11 +164,11 @@ async def _start_hub_mdns():
     hub_id = await pairing.get_hub_id(_db.DB_PATH)
     name = (
         str(_settings.get_settings().get("share_brand_name") or "").strip()
-        or os.environ.get("PHOTOARCHIVE_LIBRARY_NAME", "").strip()
+        or os.environ.get("AZIMUTH_LIBRARY_NAME", "").strip()
         or socket.gethostname()
         or "Azimuth Photo"
     )
-    port = int(os.environ.get("PHOTOARCHIVE_PORT") or 8000)
+    port = int(os.environ.get("AZIMUTH_PORT") or 8000)
     await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)
 
 

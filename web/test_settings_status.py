@@ -360,7 +360,7 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(normalized["embed_model_dim"], 4096)
 
     async def test_satellite_memory_cache_defaults_to_fraction_of_ram(self):
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "satellite"}, clear=False), mock.patch.object(
+        with mock.patch.dict(os.environ, {"AZIMUTH_MODE": "satellite"}, clear=False), mock.patch.object(
             settings, "_system_memory_gb", return_value=64.0
         ):
             normalized = settings.normalize_settings({})
@@ -368,7 +368,7 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(normalized["memory_cache_gb"], 8.0)
 
     async def test_hub_memory_cache_keeps_half_gb_default(self):
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "hub"}, clear=False), mock.patch.object(
+        with mock.patch.dict(os.environ, {"AZIMUTH_MODE": "hub"}, clear=False), mock.patch.object(
             settings, "_system_memory_gb", return_value=64.0
         ):
             normalized = settings.normalize_settings({})

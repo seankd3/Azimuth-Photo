@@ -41,10 +41,10 @@ def _seed_catalog(db_path: Path, source_dir: Path) -> None:
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(db_path),
-            "PHOTOARCHIVE_MODE": "satellite",
-            "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DB_PATH": str(db_path),
+            "AZIMUTH_MODE": "satellite",
+            "AZIMUTH_HUB_URL": "http://stub-hub",
             "PYTHONPATH": str(WEB_ROOT),
         }
     )
@@ -141,13 +141,13 @@ def satellite_server():
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(db_path),
-            "PHOTOARCHIVE_MODE": "satellite",
-            "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
-            "PHOTOARCHIVE_PORT": str(port),
-            "PHOTOARCHIVE_HOST": "127.0.0.1",
-            "PHOTOARCHIVE_ACCESS": "local",
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DB_PATH": str(db_path),
+            "AZIMUTH_MODE": "satellite",
+            "AZIMUTH_HUB_URL": "http://stub-hub",
+            "AZIMUTH_PORT": str(port),
+            "AZIMUTH_HOST": "127.0.0.1",
+            "AZIMUTH_ACCESS": "local",
             "TMPDIR": str(scratch),
             "PYTHONPATH": str(WEB_ROOT),
         }

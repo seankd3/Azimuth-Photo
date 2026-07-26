@@ -119,7 +119,7 @@ def start_model_install(config: dict | None = None) -> dict:
             target=_install_model_sync,
             args=(config["model_id"], config["revision"], config["model_dir"]),
             daemon=True,
-            name="photoarchive-model-install",
+            name="azimuth-model-install",
         )
         thread.start()
         _install_state["running"] = True

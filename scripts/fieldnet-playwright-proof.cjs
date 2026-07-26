@@ -12,7 +12,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE = (process.argv[2] || process.env.PHOTOARCHIVE_PROBE_URL || 'http://127.0.0.1:8132').replace(/\/$/, '');
+const BASE = (process.argv[2] || process.env.AZIMUTH_PROBE_URL || 'http://127.0.0.1:8132').replace(/\/$/, '');
 const OUT = '/tmp/dev13';
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -119,7 +119,7 @@ async function main() {
     // must retain it (Background Sync is optional and may be unavailable headless).
     report.queueBefore = await page.evaluate(() => {
       try {
-        return JSON.parse(localStorage.getItem('pa-m-write-queue-v1') || '[]').length;
+        return JSON.parse(localStorage.getItem('azimuth-mobile-write-queue-v1') || '[]').length;
       } catch {
         return -1;
       }
@@ -146,7 +146,7 @@ async function main() {
     // Also write via the same STORAGE_KEY contract the app uses, then verify
     // the badge/DOM path by injecting into the live page module graph.
     await page.evaluate(() => {
-      const key = 'pa-m-write-queue-v1';
+      const key = 'azimuth-mobile-write-queue-v1';
       const existing = JSON.parse(localStorage.getItem(key) || '[]');
       if (!existing.some((item) => item && item.url === '/api/image/1/flag')) {
         existing.push({
@@ -167,7 +167,7 @@ async function main() {
 
     report.queueAfterOffline = await page.evaluate(() => {
       try {
-        return JSON.parse(localStorage.getItem('pa-m-write-queue-v1') || '[]');
+        return JSON.parse(localStorage.getItem('azimuth-mobile-write-queue-v1') || '[]');
       } catch {
         return [];
       }

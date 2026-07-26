@@ -106,7 +106,7 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("'/static/js/mobile/write_queue.js'", service_worker)
         self.assertIn("searchParams.get('v')", service_worker)
         self.assertIn("thumbStaleWhileRevalidate", service_worker)
-        self.assertIn("pa-write-queue", service_worker)
+        self.assertIn("azimuth-write-queue", service_worker)
         self.assertNotIn("style" + ".css", service_worker)
         self.assertNotIn("app" + ".js", service_worker)
         self.assertNotIn("/static/js/" + "legacy/", service_worker)
@@ -130,7 +130,7 @@ class UiContractsTests(BackendTestCase):
             browser_smoke = fh.read()
 
         self.assertIn("Usage: azimuth-browser-smoke", browser_smoke)
-        self.assertNotIn("Usage: photoarchive-browser-smoke", browser_smoke)
+        self.assertNotIn("Usage: azimuth-browser-smoke", browser_smoke)
         self.assertIn('const PAGE_PATHS = ["/", "/d", "/m"]', browser_smoke)
         self.assertIn('"#topbar"', browser_smoke)
         self.assertIn('"#grid-flow"', browser_smoke)
@@ -140,7 +140,7 @@ class UiContractsTests(BackendTestCase):
 
     async def test_deprecated_browser_smoke_shim_delegates_to_azimuth(self):
         base_dir = os.path.dirname(os.path.dirname(__file__))
-        with open(os.path.join(base_dir, "scripts", "photoarchive-browser-smoke"), encoding="utf-8") as fh:
+        with open(os.path.join(base_dir, "scripts", "azimuth-browser-smoke"), encoding="utf-8") as fh:
             compatibility_shim = fh.read()
 
         self.assertIn("# Deprecated shim", compatibility_shim)
@@ -268,7 +268,7 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("retrying automatically", panel)
 
     async def test_template_context_versions_static_assets(self):
-        context = app_module.app.state.photoarchive_shell.template_context(HeaderRequest())
+        context = app_module.app.state.azimuth_shell.template_context(HeaderRequest())
 
         self.assertIn("static_version", context)
         self.assertTrue(str(context["static_version"]).isdigit())

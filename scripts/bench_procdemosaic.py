@@ -64,8 +64,8 @@ def run_thread_pool(paths: list[Path], workers: int) -> float:
 
 
 def run_process_pool(paths: list[Path], workers: int, ipc: str) -> tuple[float, int]:
-    os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = str(workers)
-    os.environ["PHOTOARCHIVE_DEMOSAIC_IPC"] = ipc
+    os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = str(workers)
+    os.environ["AZIMUTH_DEMOSAIC_IPC"] = ipc
     from thumbnails import demosaic_pool
 
     demosaic_pool.reset_for_tests()
@@ -154,8 +154,8 @@ def main() -> int:
     from raw_thumb_ops import demosaic_tier_jpegs
     from thumbnails import demosaic_pool
 
-    os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "2"
-    os.environ["PHOTOARCHIVE_DEMOSAIC_IPC"] = "path"
+    os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "2"
+    os.environ["AZIMUTH_DEMOSAIC_IPC"] = "path"
     demosaic_pool.reset_for_tests()
     local = demosaic_tier_jpegs(str(paths[0]), ["md", "lg"], SIZES, QUALITY)
     pooled = demosaic_pool.run_demosaic_tier_jpegs(
@@ -169,7 +169,7 @@ def main() -> int:
     print(f"parity md+lg bytes match: {match}")
     demosaic_pool.shutdown_pool(wait=True)
 
-    # Emit a compact JSON-ish summary line for PROCDEMOSAIC.md
+    # Emit a compact JSON summary for benchmark history.
     print("---")
     print(
         f"SUMMARY serial_rate={rate(len(paths), serial_wall):.1f} "

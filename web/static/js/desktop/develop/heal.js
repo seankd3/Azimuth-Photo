@@ -4,7 +4,7 @@
 export const RETOUCH_SETTINGS_KEY = 'pa_RetouchSpots';
 const clone = (value) => JSON.parse(JSON.stringify(value || {}));
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
-const spotId = () => globalThis.crypto?.randomUUID?.() || `pa-heal-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const spotId = () => globalThis.crypto?.randomUUID?.() || `azimuth-heal-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 
 function newSpot(dst) {
     return { id: spotId(), src_x: dst.x, src_y: dst.y, dst_x: dst.x, dst_y: dst.y, radius: .035, feather: .5, opacity: 1, mode: 'heal' };

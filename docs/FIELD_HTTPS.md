@@ -10,7 +10,8 @@ content). Use a **tailnet-only** Serve on `:8443` in front of the app on `:8000`
 
 ## Exact commands (Omarchy)
 
-App listens on the Tailscale IPv4 at `:8000` (systemd `photoarchive.service`).
+App listens on the Tailscale IPv4 at `:8000` (systemd
+`azimuth-photo.service`).
 Front it with HTTPS:
 
 ```bash
@@ -48,7 +49,7 @@ Optional env on the uvicorn process if you change the Serve port:
 
 ```bash
 # Default is 8443. Use 443 or empty to omit the port in advertised URLs.
-export PHOTOARCHIVE_HTTPS_PORT=8443
+export AZIMUTH_HTTPS_PORT=8443
 ```
 
 `GET /api/remote-access` then includes `tailscale.https_url` for the mobile
@@ -67,7 +68,7 @@ secure-origin banner.
 
 Cache busting matches the app idiom: CSS/JS use `?v={{ static_version }}`
 (mtime stamp). The SW registers as `/sw.js?v=<same stamp>` and derives
-`CACHE_VERSION = pa-mobile-<stamp>`, so a deploy replaces the shell cache.
+`CACHE_VERSION = azimuth-mobile-<stamp>`, so a deploy replaces the shell cache.
 
 ## App-side origin adjustments (HTTP stays working)
 
@@ -86,7 +87,7 @@ Guards:
    `/api/remote-access`, falling back to `https://<hostname>:8443/...`
    (`web/static/js/mobile/https_origin.js`).
 3. **Write queue** always uses localStorage; Background Sync is best-effort on
-   secure origins only (`write_queue.js` + `sw.js` sync tag `pa-write-queue`).
+   secure origins only (`write_queue.js` + `sw.js` sync tag `azimuth-write-queue`).
 
 No `base` href rewrite and no hard-coded production hostname in fetch URLs.
 

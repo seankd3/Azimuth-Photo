@@ -8,10 +8,10 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 ## Runtime topology
 
 - Entry point: `web/app.py` imports `core.app_factory.create_app()`; the factory mounts `/static`, templates, feature routers, middleware, and lifecycle hooks.
-- Repo launcher: `scripts/photoarchive-server` runs
+- Repo launcher: `scripts/azimuth-server` runs
   `web/.venv/bin/uvicorn app:app --host HOST --port PORT`; default is `127.0.0.1:8000`,
-  `PHOTOARCHIVE_ACCESS=tailscale` binds the Tailscale IPv4.
-- Service: `/etc/systemd/system/photoarchive.service` runs as `sean` from `web/`,
+  `AZIMUTH_ACCESS=tailscale` binds the Tailscale IPv4.
+- Service: `/etc/systemd/system/azimuth-photo.service` runs as `sean` from `web/`,
   waits for Tailscale, binds its IPv4 on `:8000`, restarts on failure; Tailscale
   Serve supplies the phone-facing HTTPS `:8443` URL.
 - Runtime paths: `web/core/runtime_paths.py` selects platform-native data,
@@ -151,14 +151,14 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
   Contract/API shape coverage is in `test_modular_contracts.py` and
   `test_api_shapes.py`; browser expectations are `test_ui_contracts.py` and
   `test_browser_smoke.py`.
-- Preferred quick check: `./scripts/photoarchive-check --quick` (diff check,
+- Preferred quick check: `./scripts/azimuth-check --quick` (diff check,
   compile with `web/.venv/bin/python`, and `node --check` for all JS).
-- Unit suite: `./scripts/photoarchive-check --unit` or from `web/`,
+- Unit suite: `./scripts/azimuth-check --unit` or from `web/`,
   `.venv/bin/python -m unittest`; focused areas are listed by
-  `./scripts/photoarchive-check --list-areas`.
+  `./scripts/azimuth-check --list-areas`.
 - Browser smoke: run a server, then
   `./scripts/azimuth-browser-smoke --base-url http://127.0.0.1:8000`;
-  `PHOTOARCHIVE_SMOKE_MODE=1` skips DB initialization and heavyweight workers.
+  `AZIMUTH_SMOKE_MODE=1` skips DB initialization and heavyweight workers.
 - Durable desktop E2E gate: `./scripts/qa.sh` builds or reuses an isolated
   4,000-photo fixture and click-drives the named `/d` scenarios. See
   [`QA_HARNESS.md`](QA_HARNESS.md) for coverage, artifacts, and isolation.
@@ -167,7 +167,7 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
 
 - Use `web/.venv/bin/python` and its uvicorn, not whichever base `python` or
   globally installed packages happen to be first on `PATH`.
-- `PHOTOARCHIVE_SMOKE_MODE=1` is for lightweight startup/smoke tests only; it
+- `AZIMUTH_SMOKE_MODE=1` is for lightweight startup/smoke tests only; it
   warms templates and skips archive initialization, cache configuration, and
   worker startup.
 - After a service restart, explicitly inspect Background Work: embedding and
@@ -179,5 +179,5 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
   stale counts, or incorrect visible-image filtering.
 - Do not use plain `:8000` for phone/PWA verification: use the Tailscale HTTPS
   `https://omarchy.tail0eeded.ts.net:8443/m` endpoint.
-- Concurrent lanes share this worktree: touch only the files your task owns,
-  and expect untracked in-flight files (sync/, watched folders, shortcut sheet).
+- The canonical checkouts stay on `main`; do not create persistent lanes or
+  worktrees. Test artifacts and runtime data belong outside the checkout.

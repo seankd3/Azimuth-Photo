@@ -42,7 +42,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("searchParams.get('v')", service_worker)
         self.assertIn("thumbStaleWhileRevalidate", service_worker)
         self.assertIn("'/static/js/mobile/write_queue.js'", service_worker)
-        self.assertIn("pa-write-queue", service_worker)
+        self.assertIn("azimuth-write-queue", service_worker)
         self.assertIn('"display": "standalone"', manifest)
         self.assertIn('"theme_color": "#141517"', manifest)
         self.assertIn("/static/icons/icon.svg", manifest)

@@ -15,7 +15,7 @@ import aiosqlite
 
 from core.path_groups import safe_commonpath
 
-_sqlite_timeout_seconds = contextvars.ContextVar("photoarchive_sqlite_timeout_seconds", default=None)
+_sqlite_timeout_seconds = contextvars.ContextVar("azimuth_sqlite_timeout_seconds", default=None)
 
 # User-facing writes: short busy retries so a transient embedding/thumb lock
 # never surfaces as HTTP 500. Do not blanket-wrap background workers.

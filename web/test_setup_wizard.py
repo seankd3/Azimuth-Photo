@@ -10,7 +10,7 @@ from features.pages import routes as pages_routes
 from features.sync import satellite
 
 
-MODE_KEYS = ("PHOTOARCHIVE_MODE", "PHOTOARCHIVE_HUB_URL", "PHOTOARCHIVE_DEVICE_TOKEN")
+MODE_KEYS = ("AZIMUTH_MODE", "AZIMUTH_HUB_URL", "AZIMUTH_DEVICE_TOKEN")
 
 
 class ModeEnv:
@@ -41,7 +41,7 @@ class ModePredicateTests(unittest.TestCase):
 
     def test_satellite_without_hub_is_standalone(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_MODE"] = "satellite"
+            os.environ["AZIMUTH_MODE"] = "satellite"
             self.assertTrue(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
             self.assertEqual(
@@ -50,21 +50,21 @@ class ModePredicateTests(unittest.TestCase):
 
     def test_standalone_alias(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+            os.environ["AZIMUTH_MODE"] = "standalone"
             self.assertTrue(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
 
     def test_hub_url_alone_implies_satellite(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_HUB_URL"] = "http://hub:8000/"
+            os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000/"
             self.assertTrue(satellite.is_satellite_mode())
             self.assertTrue(satellite.has_hub())
             self.assertEqual(satellite.hub_url(), "http://hub:8000")
 
     def test_explicit_hub_mode_wins_over_hub_url(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_MODE"] = "hub"
-            os.environ["PHOTOARCHIVE_HUB_URL"] = "http://hub:8000"
+            os.environ["AZIMUTH_MODE"] = "hub"
+            os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000"
             self.assertFalse(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
 
@@ -81,7 +81,7 @@ class SetupGateTests(BackendTestCase):
         pages_routes.reset_setup_cache()
         self._smoke = mock.patch.dict(os.environ, {}, clear=False)
         self._smoke.start()
-        os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+        os.environ.pop("AZIMUTH_SMOKE_MODE", None)
 
     async def asyncTearDown(self):
         self._smoke.stop()
@@ -92,7 +92,7 @@ class SetupGateTests(BackendTestCase):
         self.assertTrue(pages_routes.needs_setup())
 
     async def test_smoke_mode_never_needs_setup(self):
-        os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
+        os.environ["AZIMUTH_SMOKE_MODE"] = "1"
         pages_routes.reset_setup_cache()
         self.assertFalse(pages_routes.needs_setup())
 
@@ -156,7 +156,7 @@ class WizardHubCardContracts(unittest.TestCase):
 class AttachHubTests(BackendTestCase):
     async def test_attach_persists_and_starts_sync(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+            os.environ["AZIMUTH_MODE"] = "standalone"
             started = []
 
             async def starter():
@@ -185,7 +185,7 @@ class AttachHubTests(BackendTestCase):
 
     async def test_attach_rejects_bad_url(self):
         with ModeEnv():
-            os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+            os.environ["AZIMUTH_MODE"] = "standalone"
             with self.assertRaises(ValueError):
                 await satellite.attach_hub("hub:8000")
             self.assertFalse(satellite.has_hub())

@@ -38,7 +38,7 @@ _REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 0.0
 # Beyond this the decode keeps running in the shared inflight map; the client
 # gets a fast 204 and retries — never a 10s "library isn't responding" toast.
 _ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS = float(
-    os.environ.get("PHOTOARCHIVE_ON_DEMAND_FOREGROUND_TIMEOUT", "1.5")
+    os.environ.get("AZIMUTH_ON_DEMAND_FOREGROUND_TIMEOUT", "1.5")
 )
 _remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 _local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}

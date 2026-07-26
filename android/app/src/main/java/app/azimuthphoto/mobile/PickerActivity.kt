@@ -36,7 +36,7 @@ import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.ui.MediaGrid
 import app.azimuthphoto.mobile.ui.Panel
-import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.AzimuthPhotoTheme
 
 class PickerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,7 +45,7 @@ class PickerActivity : ComponentActivity() {
         val allowMultiple = intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
         val accept = mimePredicate(intent)
         setContent {
-            PhotoArchiveTheme {
+            AzimuthPhotoTheme {
                 PickerScreen(
                     allowMultiple = allowMultiple,
                     accept = accept,

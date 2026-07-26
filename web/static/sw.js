@@ -6,7 +6,7 @@
  *   Cache API. Only 200 image/* responses stored (never 204, never JSON).
  * - Network-only for every other /api request: rankings, counts, writes.
  * - Navigations fall back to the cached /m shell when offline.
- * - Background Sync tag `pa-write-queue` wakes open clients so
+ * - Background Sync tag `azimuth-write-queue` wakes open clients so
  *   write_queue.js can drain its localStorage queue (SW cannot read
  *   localStorage — the page queue remains the source of truth).
  *
@@ -20,15 +20,15 @@
 const CACHE_VERSION = (() => {
     try {
         const version = new URL(self.location.href).searchParams.get('v');
-        return version ? `pa-mobile-${version}` : 'pa-mobile-dev';
+        return version ? `azimuth-mobile-${version}` : 'azimuth-mobile-dev';
     } catch {
-        return 'pa-mobile-dev';
+        return 'azimuth-mobile-dev';
     }
 })();
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
 const THUMB_CACHE_MAX_ENTRIES = 4000;
-const WRITE_SYNC_TAG = 'pa-write-queue';
+const WRITE_SYNC_TAG = 'azimuth-write-queue';
 
 const SHELL_URLS = [
     '/m',

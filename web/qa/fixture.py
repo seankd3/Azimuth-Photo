@@ -90,7 +90,7 @@ def reset_fixture() -> dict:
     # Import gates own both destinations, including the legacy chooser path.
     # Clearing them prevents one QA run from affecting another's collision or
     # cancellation result.
-    for path in (FIXTURE_HOME / "Pictures" / "photoArchive Imports", FIXTURE_HOME / "import-library"):
+    for path in (FIXTURE_HOME / "Pictures" / "Azimuth Imports", FIXTURE_HOME / "import-library"):
         if path.exists():
             shutil.rmtree(path)
     return manifest

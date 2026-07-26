@@ -76,7 +76,7 @@ def default_raw_import_root(
 ) -> str:
     environment = os.environ if environ is None else environ
     family = _family(platform_name or sys.platform)
-    explicit = str(environment.get("PHOTOARCHIVE_RAW_IMPORT_ROOT") or "").strip()
+    explicit = str(environment.get("AZIMUTH_RAW_IMPORT_ROOT") or "").strip()
     if explicit:
         return _path_module(family).normpath(explicit)
     return user_pictures_dir(environ=environment, platform_name=platform_name, home=home)
@@ -92,7 +92,7 @@ def lightroom_catalog_roots(
     family = _family(platform_name or sys.platform)
     explicit = _environment_roots(
         environment,
-        "PHOTOARCHIVE_LIGHTROOM_CATALOG_DIRS",
+        "AZIMUTH_LIGHTROOM_CATALOG_DIRS",
         family=family,
     )
     if explicit is not None:
@@ -117,7 +117,7 @@ def lightroom_preset_roots(
     family = _family(platform_name or sys.platform)
     explicit = _environment_roots(
         environment,
-        "PHOTOARCHIVE_LIGHTROOM_PRESET_DIRS",
+        "AZIMUTH_LIGHTROOM_PRESET_DIRS",
         family=family,
     )
     if explicit is not None:

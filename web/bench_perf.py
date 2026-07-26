@@ -144,7 +144,7 @@ def print_query_plan(name: str, sql: str, params: tuple = ()):
 
 
 def bench_quick_http(iterations: int):
-    base = os.environ.get("PHOTOARCHIVE_BENCH_URL", "http://127.0.0.1:8000").rstrip("/")
+    base = os.environ.get("AZIMUTH_BENCH_URL", "http://127.0.0.1:8000").rstrip("/")
     endpoints = [
         "/api/rankings?limit=60",
         "/api/rankings?q=nonexistentsearchterm&limit=60",
@@ -711,7 +711,7 @@ async def bench_compare_rating_loop(iterations: int):
     print("\nCompare rating loop timings")
     reset_app_caches()
     old_schedule = compare_routes._schedule_pairing_propagation
-    human_delay = float(os.environ.get("PHOTOARCHIVE_BENCH_COMPARE_DELAY", "0") or 0)
+    human_delay = float(os.environ.get("AZIMUTH_BENCH_COMPARE_DELAY", "0") or 0)
 
     def close_scheduled(coro):
         coro.close()

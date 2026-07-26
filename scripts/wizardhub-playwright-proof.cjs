@@ -11,7 +11,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
 
-const BASE = (process.argv[2] || process.env.PHOTOARCHIVE_PROBE_URL || 'http://127.0.0.1:8141').replace(/\/$/, '');
+const BASE = (process.argv[2] || process.env.AZIMUTH_PROBE_URL || 'http://127.0.0.1:8141').replace(/\/$/, '');
 const OUT = '/mnt/expansion/tmp/dist2';
 fs.mkdirSync(OUT, { recursive: true });
 

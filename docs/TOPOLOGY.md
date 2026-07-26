@@ -1,102 +1,142 @@
-# Where Everything Lives
+# Azimuth Photo topology
 
-One repo, many faces. This page is the map — if you're ever confused about
-where code, data, or a running instance lives, start here.
+This is the canonical map for code, runtime data, generated data, and original
+photos. There is one product, one repository, one active branch, and one clean
+checkout on each development machine.
 
-## The one repo
+## Code
 
-Everything is a single git repository: `photo-archive`. The canonical remote
-is **GitHub** (`Sean-Kenneth-Doherty/azimuth-photo`) — omarchy pushes there on
-every deploy, so it's the offsite backup. The laptop's clone points its origin
-at the omarchy checkout over ssh (fast on the tailnet); work flows
-laptop → omarchy → GitHub.
+The GitHub repository is `Sean-Kenneth-Doherty/azimuth-photo`. Both machines use
+its `main` branch directly:
 
-```
-photo-archive/
-├── web/        the app itself — FastAPI server + desktop web UI (/d) + mobile UI (/m)
-├── desktop/    Tauri Windows shell (native tray app that runs the satellite for you)
-├── android/    Kotlin/Compose phone client
-├── docs/       specs and this map
-└── scripts/    deploy.sh and friends
-```
+| Machine | Canonical checkout |
+| --- | --- |
+| Omarchy | `/home/sean/Projects/azimuth-photo` |
+| XPS | `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo` |
 
-The same `web/` code runs in two modes:
+The repository contains every maintained product surface:
 
-- **Hub** — the always-on library server (omarchy). Owns the originals and the
-  master catalog.
-- **Satellite** — the exact same server run on a laptop with
-  `PHOTOARCHIVE_MODE=satellite` + `PHOTOARCHIVE_HUB_URL`. Mirrors the whole hub
-  catalog locally, imports/culls/edits at local speed, and syncs everything
-  back automatically (originals by content hash, edits/flags via the oplog).
-
-## Branch model
-
-| Branch | Meaning |
-|---|---|
-| `main` | What production runs. Only `scripts/deploy.sh` should move it. |
-| `develop` | Integration branch. All work lands here first. |
-| `wt-lane-a..d` | Four reusable lane slots for parallel agent work. Reset to `develop` between waves; never long-lived. |
-
-## Checkouts (working copies)
-
-**omarchy** (`ssh omarchy`, Austin — the hub):
-
-| Path | Branch | Role |
-|---|---|---|
-| `~/Projects/photo-archive` | `main` | **Production.** The `photoarchive` systemd service serves from here on :8000. Don't edit here — deploy into it. |
-| `~/Projects/pa-develop` | `develop` | Main dev worktree. Human + primary-agent work happens here. |
-| `~/Projects/pa-lane-a..d` | `wt-lane-a..d` | Lane worktrees for parallel agents. Each is isolated; venvs are symlinks into pa-develop. Merged into `develop` when green, then reset. |
-
-**XPS laptop** (Windows — the field machine):
-
-| Path | Role |
-|---|---|
-| `...\Projects\photography\photoarchive-field` | Clone of the repo (origin = omarchy over ssh). Runs the **satellite** on :8010 — see [FIELD_README.md](../FIELD_README.md). Also where the Tauri shell in `desktop/` gets built. |
-
-**Pixel phone**: no checkout — it's a client. Mobile web UI at `/m` (installable PWA), plus the Android app in `android/`.
-
-## Data (never in git)
-
-| Where | What |
-|---|---|
-| omarchy `/mnt/expansion/Photos/` | The originals. The archive. |
-| omarchy `/mnt/expansion/Azimuth PhotoCache/` | Thumbnails, develop base caches, exports. |
-| omarchy `~/Projects/photo-archive/web/photoarchive.db` | The master catalog (SQLite). `deploy.sh` backs it up before every deploy (keeps 5). |
-| XPS `C:\Azimuth PhotoField\` | All satellite data: catalog DB, thumbs, develop cache, exports. |
-| XPS `D:\CardOffload\` | Card-offload staging (robocopy + push scripts live there). |
-
-## How to run each face
-
-- **Hub (prod)**: already running — systemd `photoarchive` on omarchy :8000.
-- **Satellite (laptop)**: see [FIELD_README.md](../FIELD_README.md) for the
-  one command. Or the Tauri tray app (`desktop/`) once built — it launches and
-  supervises the satellite for you.
-- **Dev server**: from any worktree, `cd web && .venv/bin/python -m uvicorn
-  app:app --port 8022` (pick a free port; never :8000).
-- **Tests**: `cd web && PHOTOARCHIVE_SMOKE_MODE=1 .venv/bin/python -m pytest -q`
-  (smoke mode is for **tests only** — never run a real instance with it; it
-  disables the DB init and all background workers).
-
-## How to deploy
-
-One command, from omarchy:
-
-```bash
-~/Projects/photo-archive/scripts/deploy.sh
+```text
+azimuth-photo/
+├── web/              FastAPI hub/satellite, desktop web UI, and mobile PWA
+├── desktop/          Windows Tauri shell
+├── android/          Android client
+├── clients/          External integrations, including Lightroom
+├── site/             Public website and Field Log output
+├── tools/field-log/  Field Log source and capture tooling
+├── scripts/          Build, check, run, and deployment commands
+├── deploy/           Service and restore-drill units
+└── docs/             Current product and operating documentation
 ```
 
-It merges `develop` → runs the full test suite (aborts on red) → backs up the
-DB → pushes `main` → restarts the service → health-checks → resumes background
-workers. That's the only sanctioned path to `main`.
+Do not create integration branches, lane branches, or development worktrees.
+Owned changes are committed directly to `main`. The Field Log may create
+temporary detached checkouts under its ignored scratch directory while
+reproducing historical versions; those are disposable test fixtures, not
+development copies.
 
-## Docs index
+## Machine roles
 
-| Doc | What it covers |
-|---|---|
-| [TOPOLOGY.md](TOPOLOGY.md) | This map. |
-| [CODEBASE_MAP.md](CODEBASE_MAP.md) | Inside `web/`: modules, routes, features — the map for agents working in the code. |
-| [MASTER_PLAN.md](MASTER_PLAN.md) | Product roadmap and program of work. |
-| [DEVELOP_SPEC.md](DEVELOP_SPEC.md) | The Develop (raw editing) module: pipeline math, edit state, GL/numpy twins. |
-| [FIELD_SPEC.md](FIELD_SPEC.md) / [FIELD_SPEC_V2.md](FIELD_SPEC_V2.md) | Satellite/hub sync: content-hash upload, catalog mirror, oplog convergence. |
-| [FIELD_HTTPS.md](FIELD_HTTPS.md) | Fronting the hub with Tailscale HTTPS (enables PWA/offline on phone). |
-| [CARD_IMPORT_SPEC.md](CARD_IMPORT_SPEC.md) | Card import wizard + watched folders. |
+| Machine | Role |
+| --- | --- |
+| Omarchy | Always-on hub, authoritative catalog, background indexing, and durable-original intake |
+| XPS | Interactive desktop client, local catalog mirror, SSD caches, imports, and recent-original working set |
+| Pixel | Android client and phone-photo source |
+
+The same `web/` application runs as a hub on Omarchy and as a satellite on the
+XPS. Catalog changes converge through the sync log; original files upload by
+content identity and are byte-verified before the XPS can offer to remove its
+local copy.
+
+## Storage tiers
+
+Code and runtime data are deliberately separate. A source checkout must never
+be used as a database, cache, model, log, or backup directory.
+
+### Omarchy
+
+Fast SSD storage uses the platform-native Azimuth Photo roots:
+
+| Data | Location |
+| --- | --- |
+| Catalog and models | `/home/sean/.local/share/azimuth-photo/` |
+| Settings | `/home/sean/.config/azimuth-photo/` |
+| Preview, embedding, and active Develop caches | `/home/sean/.cache/azimuth-photo/` |
+| Logs and process state | `/home/sean/.local/state/azimuth-photo/` |
+| Python environment | `/home/sean/.local/share/azimuth-photo/venv/` |
+
+The 20 TB Expansion drive is the durable, slow tier:
+
+| Data | Location |
+| --- | --- |
+| Originals | `/mnt/expansion/Photos/` |
+| Incoming upload staging | `/mnt/expansion/Photos/_intake/` |
+| Durable catalog backups | `/mnt/expansion/Azimuth Photo/Omarchy/backups/` |
+| Preserved generated-cache history | `/mnt/expansion/Azimuth Photo/Omarchy/cache-archive/` |
+| Consolidation and historical archives | `/mnt/expansion/Azimuth Photo/Archive/` |
+
+The hub service explicitly sets the intake, original, and backup paths. The
+Expansion drive is not used for the live catalog, models, indexes, thumbnails,
+or other latency-sensitive metadata.
+
+### XPS
+
+The Windows satellite uses `C:\Azimuth Photo\` as its portable runtime home:
+
+```text
+C:\Azimuth Photo\
+├── data\catalog\azimuth.db
+├── data\models\
+├── config\settings.json
+├── cache\previews\
+├── cache\embeddings\
+├── cache\develop\
+├── state\logs\
+└── state\transfer\
+```
+
+The laptop keeps a complete catalog mirror, browsable previews, selected
+full-resolution cache entries, and recent originals. Older originals can be
+removed only through **Free up space**, after the hub has accepted the upload,
+verified the complete file hash, registered the original, and confirmed the
+same bytes immediately before local deletion.
+
+Code, tests, and service configuration must be complete and verified before any
+existing library migration begins. Migration then runs as resumable,
+collision-proof batches with a durable receipt per file; no bulk transfer is
+part of a normal code deploy.
+
+## Slow-drive rules
+
+- Bulk HDD work is serialized. It must never create a random-seek storm.
+- Interactive browsing reads SSD/RAM previews whenever possible.
+- The preview cache owns explicit byte budgets and evicts by recency.
+- Recent full-resolution cache entries make recently viewed RAWs available
+  without waking the archive drive.
+- Models, embeddings, the catalog, and live indexes stay on SSD.
+- Originals on the Expansion drive are never reorganized or deleted by a
+  development cleanup.
+- Generated data may be moved into the named cache archive, but is not silently
+  discarded during consolidation.
+
+## Runtime modes
+
+The hub listens on Omarchy port `8000`. The XPS satellite listens on loopback
+port `8010`. Never use `AZIMUTH_SMOKE_MODE=1` for either real instance; it is
+test-only and disables normal initialization and background work.
+
+Key deployment variables:
+
+```text
+AZIMUTH_MODE
+AZIMUTH_HOME
+AZIMUTH_HUB_URL
+AZIMUTH_SYNC_INTAKE_DIR
+AZIMUTH_SYNC_RAWS_DIR
+AZIMUTH_BACKUP_DIR
+AZIMUTH_SSD_CACHE_BYTES
+```
+
+See [getting-started.md](getting-started.md) for local setup,
+[development.md](development.md) for checks, and [recovery.md](recovery.md)
+for catalog restore procedures.

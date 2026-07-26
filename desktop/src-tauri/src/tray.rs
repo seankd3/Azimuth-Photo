@@ -2,7 +2,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{App, AppHandle, Manager};
 
-const TRAY_ID: &str = "photoarchive";
+const TRAY_ID: &str = "azimuth";
 
 pub fn setup(app: &App) -> tauri::Result<()> {
     let open_item = MenuItem::with_id(app, "open", "Open Azimuth Photo", true, None::<&str>)?;

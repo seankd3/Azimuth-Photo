@@ -128,8 +128,8 @@ def _prepare_cold_fixture(database: Path, develop_cache: Path) -> None:
 
 
 def _fixture_context(scratch: Path) -> tuple[dict, Any]:
-    os.environ["PHOTOARCHIVE_QA_SCRATCH"] = str(scratch)
-    os.environ["PHOTOARCHIVE_QA_ACTIVE_IMAGE_COUNT"] = str(BENCH_IMAGE_COUNT)
+    os.environ["AZIMUTH_QA_SCRATCH"] = str(scratch)
+    os.environ["AZIMUTH_QA_ACTIVE_IMAGE_COUNT"] = str(BENCH_IMAGE_COUNT)
 
     # Imports intentionally follow the environment override: qa.config owns all
     # fixture paths and ProbeServer owns the isolated uvicorn lifecycle.
@@ -295,7 +295,7 @@ def _real_metrics(base_url: str, *, iterations: int) -> tuple[dict[str, float], 
 
 
 def run(*, scratch: Path, iterations: int = DEFAULT_ITERATIONS) -> tuple[dict[str, float], dict]:
-    real_url = os.environ.get("PHOTOARCHIVE_BENCH_URL", "").strip()
+    real_url = os.environ.get("AZIMUTH_BENCH_URL", "").strip()
     if real_url:
         return _real_metrics(real_url, iterations=iterations)
     return _fixture_metrics(scratch=scratch, iterations=iterations)

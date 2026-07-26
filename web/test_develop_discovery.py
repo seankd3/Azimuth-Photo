@@ -19,7 +19,7 @@ class DevelopDiscoveryTests(unittest.TestCase):
         )
         self.assertEqual(
             discovery.default_raw_import_root(
-                environ={"HOME": "/home/alex", "PHOTOARCHIVE_RAW_IMPORT_ROOT": "/photos/raw"},
+                environ={"HOME": "/home/alex", "AZIMUTH_RAW_IMPORT_ROOT": "/photos/raw"},
                 platform_name="linux",
             ),
             "/photos/raw",
@@ -61,14 +61,14 @@ class DevelopDiscoveryTests(unittest.TestCase):
     def test_explicit_lightroom_roots_replace_discovery(self):
         self.assertEqual(
             discovery.lightroom_catalog_roots(
-                environ={"PHOTOARCHIVE_LIGHTROOM_CATALOG_DIRS": "/one:/two:/one"},
+                environ={"AZIMUTH_LIGHTROOM_CATALOG_DIRS": "/one:/two:/one"},
                 platform_name="linux",
             ),
             ("/one", "/two"),
         )
         self.assertEqual(
             discovery.lightroom_preset_roots(
-                environ={"PHOTOARCHIVE_LIGHTROOM_PRESET_DIRS": r"D:\Presets;E:\More"},
+                environ={"AZIMUTH_LIGHTROOM_PRESET_DIRS": r"D:\Presets;E:\More"},
                 platform_name="win32",
                 home=r"C:\Users\Alex",
             ),
@@ -116,9 +116,9 @@ class DevelopDiscoveryTests(unittest.TestCase):
     def test_direct_cache_modules_respect_selected_develop_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             environment = os.environ.copy()
-            environment.pop("PHOTOARCHIVE_DEVELOP_CACHE_DIR", None)
+            environment.pop("AZIMUTH_DEVELOP_CACHE_DIR", None)
             environment["AZIMUTH_DEVELOP_CACHE_DIR"] = str(Path(tmp) / "inherited-default")
-            environment["PHOTOARCHIVE_HOME"] = str(Path(tmp) / "app")
+            environment["AZIMUTH_HOME"] = str(Path(tmp) / "app")
             script = (
                 "from features.develop import ai_masks, hdr, pano, rawproc; "
                 "print(ai_masks.DEVELOP_CACHE_ROOT); print(hdr.HDR_CACHE_DIR); "
@@ -143,7 +143,7 @@ class DevelopDiscoveryTests(unittest.TestCase):
             environment = os.environ.copy()
             environment.pop("AZIMUTH_DEVELOP_CACHE_DIR", None)
             root = Path(tmp) / "configured-develop"
-            environment["PHOTOARCHIVE_DEVELOP_CACHE_DIR"] = str(root)
+            environment["AZIMUTH_DEVELOP_CACHE_DIR"] = str(root)
             script = (
                 "from features.develop import ai_masks, hdr, pano, rawproc; "
                 "print(ai_masks.DEVELOP_CACHE_ROOT); print(hdr.HDR_CACHE_DIR); "

@@ -218,7 +218,7 @@ def identity_payload() -> dict[str, str | int]:
                 "schema_version": int(SCHEMA_VERSION),
             }
         # Satellite / test processes: advertise running sha without building a hub bundle.
-        env_sha = os.environ.get("PHOTOARCHIVE_CLIENT_SHA", "").strip()
+        env_sha = os.environ.get("AZIMUTH_CLIENT_SHA", "").strip()
         sha = env_sha or read_git_sha() or "unknown"
         return {
             "sha": sha,

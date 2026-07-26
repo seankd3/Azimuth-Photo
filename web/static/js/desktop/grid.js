@@ -983,7 +983,7 @@ export function initGrid() {
             image && changedIds.has(Number(image.id)) && (image.flag || 'unflagged') !== scope.flag
         ))) loadFirstPage();
     });
-    document.addEventListener('photoarchive:cull-applied', () => {
+    document.addEventListener('azimuth:cull-applied', () => {
         if (mounted) loadFirstPage();
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));

@@ -271,7 +271,7 @@ async function startImport() {
         showToast(`Imported ${fmt(imported)} photo${imported === 1 ? '' : 's'}`);
         closeImport();
         emit('import:changed', data);
-        document.dispatchEvent(new CustomEvent('photoarchive:import-complete', { detail: data }));
+        document.dispatchEvent(new CustomEvent('azimuth:import-complete', { detail: data }));
         if (data.batch_id) {
             setScope({
                 import_batch: String(data.batch_id),

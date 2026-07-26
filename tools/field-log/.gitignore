@@ -1,4 +1,4 @@
-# local clone of the app (regenerable: git clone omarchy:Projects/photo-archive)
+# Local clone of the app (regenerable from the canonical Azimuth Photo remote).
 repo/
 # sample photos (regenerable from the archive; not ours to redistribute)
 sample-photos/

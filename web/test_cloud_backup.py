@@ -250,7 +250,7 @@ class RunnerStateMachineTests(unittest.TestCase):
         # Keep the temp desired path from setUp; only rewire the previews probe.
         bulk_scheduler.configure(previews_pending=lambda: True)
 
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}), mock.patch.object(
+        with mock.patch.dict(os.environ, {"AZIMUTH_BULK_SEQUENCING": "1"}), mock.patch.object(
             cloud, "rclone_available", return_value=True
         ), mock.patch.object(cloud, "list_remotes", return_value=["localvault"]), mock.patch.object(
             cloud, "_run_sync_job", side_effect=fake_job
@@ -285,7 +285,7 @@ class RunnerStateMachineTests(unittest.TestCase):
         # Keep the temp desired path; only rewire the previews probe.
         bulk_scheduler.configure(previews_pending=lambda: True)
 
-        with mock.patch.dict(os.environ, {"PHOTOARCHIVE_BULK_SEQUENCING": "1"}), mock.patch.object(
+        with mock.patch.dict(os.environ, {"AZIMUTH_BULK_SEQUENCING": "1"}), mock.patch.object(
             cloud, "rclone_available", return_value=True
         ), mock.patch.object(cloud, "list_remotes", return_value=["localvault"]), mock.patch.object(
             cloud, "_run_sync_job", side_effect=fake_job

@@ -514,7 +514,7 @@ class CollectionTests(BackendTestCase):
         third = await self._image(source["id"], "share-picked-c.jpg", elo=1500)
         await db.set_image_flag(first, "picked")
         await db.set_image_flag(second, "picked")
-        templates = app_module.app.state.photoarchive_shell.templates
+        templates = app_module.app.state.azimuth_shell.templates
         share_routes.configure(
             templates=templates,
             create_or_rotate_share=lambda collection_id, **kwargs: db.create_or_rotate_share(

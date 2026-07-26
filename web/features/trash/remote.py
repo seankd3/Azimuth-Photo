@@ -11,7 +11,7 @@ from data.repositories import catalog as catalog_repository
 from features.sync import satellite
 
 
-FORWARDED_HEADER = "X-PhotoArchive-Trash-Forwarded"
+FORWARDED_HEADER = "X-AzimuthPhoto-Trash-Forwarded"
 _REQUEST_TIMEOUT_SECONDS = 5
 _TOTAL_EMPTY_TIMEOUT_SECONDS = 15
 

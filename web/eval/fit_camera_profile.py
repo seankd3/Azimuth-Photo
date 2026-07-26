@@ -22,7 +22,7 @@ from pathlib import Path
 WEB_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(WEB_ROOT))
 os.chdir(WEB_ROOT)
-os.environ.setdefault("PHOTOARCHIVE_SMOKE_MODE", "1")
+os.environ.setdefault("AZIMUTH_SMOKE_MODE", "1")
 
 import numpy as np
 from PIL import Image

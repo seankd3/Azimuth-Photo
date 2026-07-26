@@ -296,7 +296,7 @@ def _ensure_export_storage(estimated_size: int) -> None:
 def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
     estimated_size = _estimate_zip_size(images, size)
     _ensure_export_storage(estimated_size)
-    temp = tempfile.NamedTemporaryFile(prefix="photoarchive-export-", suffix=".zip", delete=False)
+    temp = tempfile.NamedTemporaryFile(prefix="azimuth-export-", suffix=".zip", delete=False)
     temp_path = temp.name
     temp.close()
     written = 0

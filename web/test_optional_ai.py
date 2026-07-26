@@ -177,7 +177,7 @@ assert app.app.title == 'Azimuth Photo'
             def mark_dependencies_unavailable(self, _status):
                 raise AssertionError("satellite must not arm hub workers")
 
-        with patch.dict(os.environ, {"PHOTOARCHIVE_MODE": "satellite"}), patch.object(
+        with patch.dict(os.environ, {"AZIMUTH_MODE": "satellite"}), patch.object(
             background.capabilities,
             "capability_status",
             side_effect=lambda key: available[key],

@@ -17,7 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.backup.BackupScheduler
-import app.azimuthphoto.mobile.ui.PhotoArchiveTheme
+import app.azimuthphoto.mobile.ui.AzimuthPhotoTheme
 import kotlinx.coroutines.delay
 
 /** Share target: receiving media starts a backup pass and briefly confirms it. */
@@ -28,7 +28,7 @@ class ShareActivity : ComponentActivity() {
         val count = sharedItemCount()
         BackupScheduler.runNow(this)
         setContent {
-            PhotoArchiveTheme {
+            AzimuthPhotoTheme {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Surface(
                         shape = MaterialTheme.shapes.large,

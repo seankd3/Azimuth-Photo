@@ -13,7 +13,7 @@ it until the signed desktop job is enabled.
 
    ```bash
    cd web
-   PHOTOARCHIVE_SMOKE_MODE=1 .venv/bin/python -m pytest -q
+   AZIMUTH_SMOKE_MODE=1 .venv/bin/python -m pytest -q
    ```
 
 3. Commit the release preparation, then create and push an annotated tag:
@@ -25,7 +25,7 @@ it until the signed desktop job is enabled.
    ```
 
 The tag triggers the release workflow. It builds and pushes
-`ghcr.io/<owner>/photo-archive:v0.1.0` plus `:latest`, builds the Linux frozen
+`ghcr.io/<owner>/azimuth-photo:v0.1.0` plus `:latest`, builds the Linux frozen
 server with `scripts/build_server.py`, attaches
 `azimuth-photo-server-v0.1.0.tar.gz`, and asks GitHub Releases to generate
 notes from commits since the previous release tag.
@@ -40,7 +40,7 @@ docker compose up -d
 Or, for a direct image pull, replace the tag then recreate the container:
 
 ```bash
-docker pull ghcr.io/<owner>/photo-archive:v0.1.0
+docker pull ghcr.io/<owner>/azimuth-photo:v0.1.0
 ```
 
 ## Desktop signing and updates

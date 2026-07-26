@@ -78,16 +78,16 @@ def perf_catalog():
     old_persistent_conn = thumbnail_cache_entries._persistent_conn
     old_prefetch = library_service._schedule_thumbnail_prefetch
     old_memory_warm = library_service._schedule_result_thumbnail_memory_warm
-    old_smoke_mode = os.environ.get("PHOTOARCHIVE_SMOKE_MODE")
-    old_mode = os.environ.get("PHOTOARCHIVE_MODE")
+    old_smoke_mode = os.environ.get("AZIMUTH_SMOKE_MODE")
+    old_mode = os.environ.get("AZIMUTH_MODE")
 
     db.DB_PATH = os.path.join(tempdir.name, "perf.db")
     settings.SETTINGS_PATH = os.path.join(tempdir.name, "settings.local.json")
     settings._settings = None
     thumbnails.SSD_CACHE_DIR = os.path.join(tempdir.name, "thumbs")
     thumbnail_cache_entries._persistent_conn = None
-    os.environ["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    os.environ.pop("PHOTOARCHIVE_MODE", None)
+    os.environ["AZIMUTH_SMOKE_MODE"] = "1"
+    os.environ.pop("AZIMUTH_MODE", None)
     thumbnails._clear_disk_index()
     _clear_query_caches()
     asyncio.run(db.init_db())
@@ -177,13 +177,13 @@ def perf_catalog():
         settings._settings = old_settings_state
         db.DB_PATH = old_db_path
         if old_smoke_mode is None:
-            os.environ.pop("PHOTOARCHIVE_SMOKE_MODE", None)
+            os.environ.pop("AZIMUTH_SMOKE_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_SMOKE_MODE"] = old_smoke_mode
+            os.environ["AZIMUTH_SMOKE_MODE"] = old_smoke_mode
         if old_mode is None:
-            os.environ.pop("PHOTOARCHIVE_MODE", None)
+            os.environ.pop("AZIMUTH_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_MODE"] = old_mode
+            os.environ["AZIMUTH_MODE"] = old_mode
         _clear_query_caches()
         tempdir.cleanup()
 

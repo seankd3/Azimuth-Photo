@@ -20,7 +20,7 @@ from features.share import routes as share_routes
 class ShareTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        templates = app_module.app.state.photoarchive_shell.templates
+        templates = app_module.app.state.azimuth_shell.templates
         share_routes.configure(
             templates=templates,
             create_or_rotate_share=lambda collection_id, **kwargs: db.create_or_rotate_share(
@@ -294,7 +294,7 @@ class ShareTests(BackendTestCase):
             with TestClient(app_module.app) as client:
                 return client.get(f"/s/{share['token']}/download-all")
 
-        pattern = f"{tempfile.gettempdir()}/photoarchive-share-*.zip"
+        pattern = f"{tempfile.gettempdir()}/azimuth-share-*.zip"
         before = set(glob.glob(pattern))
         response = await asyncio.to_thread(probe)
 

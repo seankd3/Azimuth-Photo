@@ -168,8 +168,8 @@ class StagedImportTaxonomyTests(BackendTestCase):
     async def test_four_destination_routings_on_copy(self):
         root = Path(self.tempdir.name)
         library = root / "Photos"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(library)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(library)
         try:
             sources = root / "incoming"
             camera = sources / "CARD" / "DCIM" / "100CANON"
@@ -222,15 +222,15 @@ class StagedImportTaxonomyTests(BackendTestCase):
                     )
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
     async def test_phone_jpeg_from_card_scan_not_under_raws_when_phone_path(self):
         root = Path(self.tempdir.name)
         library = root / "Photos"
-        old_root = os.environ.get("PHOTOARCHIVE_ORIGINALS_DIR")
-        os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = str(library)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(library)
         try:
             phone_dump = root / "Google Photos" / "Camera"
             phone_dump.mkdir(parents=True)
@@ -248,9 +248,9 @@ class StagedImportTaxonomyTests(BackendTestCase):
             self.assertFalse((library / "RAWS" / "Personal Photos").exists())
         finally:
             if old_root is None:
-                os.environ.pop("PHOTOARCHIVE_ORIGINALS_DIR", None)
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
-                os.environ["PHOTOARCHIVE_ORIGINALS_DIR"] = old_root
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
 
 class HubPhoneUnderRawsRegressionTests(unittest.TestCase):

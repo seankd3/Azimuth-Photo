@@ -9,7 +9,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel } from '../people_labels.js';
 
-const RECENT_KEY = 'pa-m-recent-searches';
+const RECENT_KEY = 'azimuth-mobile-recent-searches';
 
 let root = null;
 let built = false;

@@ -108,7 +108,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         self.old_settings_path = settings.SETTINGS_PATH
         self.old_settings_state = settings._settings
 
-        db.DB_PATH = os.path.join(self.tempdir.name, "photoarchive-test.db")
+        db.DB_PATH = os.path.join(self.tempdir.name, "azimuth-test.db")
         thumbnail_cache_entries._persistent_conn = None
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         settings._settings = None

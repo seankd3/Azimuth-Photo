@@ -17,7 +17,7 @@ db3b4ad3a|2026-02-07|Sean-Kenneth-Doherty|Add web-based PhotoRanker with mosaic 
 ac6f16000|2026-04-21|Sean-Kenneth-Doherty|Add AI panel, effective Elo pairing, AI-ranked sort, and fix rankings init
 fe8e1e655|2026-04-21|Sean-Kenneth-Doherty|Add Library page with justified grid, AI search, and ViT-L/14 upgrade
 feb0bc4d9|2026-04-21|Sean-Kenneth-Doherty|Switch to Qwen3-VL-Embedding-8B for state-of-the-art image search
-fa1594a8f|2026-04-21|Sean-Kenneth-Doherty|Rename project from PhotoRanker to photoArchive
+fa1594a8f|2026-04-21|Sean-Kenneth-Doherty|Rename project from PhotoRanker to Azimuth Photo
 9869a75c0|2026-04-21|Sean-Kenneth-Doherty|Library: edge-to-edge layout with infinite scroll
 b50a2fdce|2026-04-21|Sean-Kenneth-Doherty|Add lightbox navigation, thumbnail slider, filters, and tier indicators
 ef8925e5b|2026-04-21|Sean-Kenneth-Doherty|Add Find Similar: visually similar image search from lightbox
@@ -397,7 +397,7 @@ dd76b5a7f|2026-05-24|Sean-Kenneth-Doherty|Show Compare empty state over mosaic
 14d9fa971|2026-05-25|Sean-Kenneth-Doherty|Stabilize library and background workflows
 70d3d7e31|2026-06-01|Sean-Kenneth-Doherty|Add Tailscale console imports
 59240aab8|2026-06-01|Sean-Kenneth-Doherty|Add self-hosted Android companion app
-f9a9d27a9|2026-06-20|Sean-Kenneth-Doherty|Build Android photo archive app
+f9a9d27a9|2026-06-20|Sean-Kenneth-Doherty|Build Android Azimuth Photo app
 46a0ddc65|2026-06-21|Sean-Kenneth-Doherty|Add Android end-to-end gate
 1cfd83abf|2026-06-21|Sean-Kenneth-Doherty|Add shared mobile workflow pointer
 1d0e70a8f|2026-06-21|Sean-Kenneth-Doherty|Add no-phone Android smoke gate
@@ -547,7 +547,7 @@ e68b0973e|2026-07-10|Sean-Kenneth-Doherty|Lossy DNG (JPEG XL, LR14 DNG 1.7) deco
 be7cf070e|2026-07-10|Sean-Kenneth-Doherty|Dead-code sweep: 331 lines removed across 15 files — unused settings keys/helpers, definition-only exports, retired Shared-view CSS families; every deletion proven zero-reference incl dynamic patterns, ambiguous candidates skipped
 7dacbacdf|2026-07-10|Sean-Kenneth-Doherty|Crop overlay resyncs on every render and window resize (was frozen to pre-load placeholder canvas geometry when opened mid-decode)
 83a4f6346|2026-07-10|Sean-Kenneth-Doherty|Color science v1.5-v1.7 (verified against Sean LR exports, pixel-matched): lossy-DNG MapPolynomial decode (was up to 3EV over-bright); DNG-correct camera-space WB matrix (M diag M-inv, dual-illuminant interpolation, iterative CCT) with Planckian fallback; base profile curve+sat fit against LR references (B&W pair near-indistinguishable); grok lane OKLab vibrance + log-EV regions + sharpen threshold; base cache v3; 467 tests green
-d6bf9ffca|2026-07-10|Sean-Kenneth-Doherty|Lightroom catalog (.lrcat) import: picks/ratings/real collections from the per-year 2020-2023 catalogs — copy-first read-only opens, Windows-path suffix matching, photoArchive flags never overwritten, dry-run + status routes; keywords deliberately skipped (tag store is caption-model-owned)
+d6bf9ffca|2026-07-10|Sean-Kenneth-Doherty|Lightroom catalog (.lrcat) import: picks/ratings/real collections from the per-year 2020-2023 catalogs — copy-first read-only opens, Windows-path suffix matching, Azimuth Photo flags never overwritten, dry-run + status routes; keywords deliberately skipped (tag store is caption-model-owned)
 1cf028ba0|2026-07-10|Sean-Kenneth-Doherty|GL base texture was uploaded Y-flipped (row 0 = GL bottom) — UNPACK_FLIP_Y on source upload; export route ensures base meta exists so the WB color profile is never silently skipped
 fa749e6a1|2026-07-10|Sean-Kenneth-Doherty|Phase 2 spec (frozen): Adobe-schema mask model + twin rendering contract, AI mask service, lrcat Lua-table develop import, presets, per-camera profile fitting, lens corrections, HDR merge
 e77da3532|2026-07-10|Sean-Kenneth-Doherty|Masks engine: Adobe-schema corrections rendered in both twins — brush dabs/linear/radial/luminance-range/color-range rasterizers (JS+numpy match 2e-6), R8 atlas + 16-correction shader loop, rubylith overlay, local adjustment math (Adobe scalings verified empirically: LocalExposure=value*4EV, dabs x/width y/height)
@@ -652,7 +652,7 @@ e2bb088b0|2026-07-12|Sean-Kenneth-Doherty|Merge remote-tracking branch 'origin/d
 866645a39|2026-07-12|Sean-Kenneth-Doherty|Merge remote-tracking branch 'origin/develop'
 17b59e396|2026-07-12|Sean-Kenneth-Doherty|Fix the missing stop in native raw decode: restore LibRaw's discarded WB common gain (DNGPIPE-6)
 0655399d6|2026-07-12|Sean-Kenneth-Doherty|Lens vignetting math fix (DNGPIPE-3): reciprocal PA gain + corner-normalized radius, both twins; corrected DNG acceptance harness (imported-settings comparison, split reporting)
-171c874ea|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'develop' of https://github.com/Sean-Kenneth-Doherty/photo-archive into develop
+171c874ea|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'develop' of https://github.com/Sean-Kenneth-Doherty/azimuth-photo into develop
 c87724a36|2026-07-12|Sean-Kenneth-Doherty|HDR/pano merge-path predicates defer to their modules' cache dirs (single source of truth; fixes v4-routing of merge EXRs under test overrides)
 b51dd609f|2026-07-12|Sean-Kenneth-Doherty|Merge remote-tracking branch 'origin/develop'
 eb75b50ad|2026-07-12|Sean-Kenneth-Doherty|desktop: fold Tauri Windows shell into the main repo (was a standalone checkout on the XPS); drop stale SMOKE_MODE from the spawned satellite env
@@ -664,14 +664,14 @@ d4ea3fa30|2026-07-12|Sean Kenneth Doherty|android: commit the phone client sourc
 15e446ce2|2026-07-12|Sean-Kenneth-Doherty|docs: DISTRIBUTION_SPEC v1 — installers, standalone-first app, first-run wizard, pairing/mDNS, guided Tailscale
 1c700746c|2026-07-12|Sean-Kenneth-Doherty|feat: guided Tailscale remote-access panel (hub mode)
 eedfcc885|2026-07-12|Sean-Kenneth-Doherty|test: standalone seeds a fresh empty hub (N=3)
-c6031debf|2026-07-12|Sean-Kenneth-Doherty|desktop: read sidecar paths from %APPDATA%/photoarchive/shell.json
+c6031debf|2026-07-12|Sean-Kenneth-Doherty|desktop: read sidecar paths from %APPDATA%/azimuth/shell.json
 8e3b1ef81|2026-07-12|Sean-Kenneth-Doherty|pkg: frozen server entrypoint + PyInstaller onedir builder
 a911715ce|2026-07-12|Sean-Kenneth-Doherty|pkg: Docker image, compose example, and Unraid template
 302475b93|2026-07-12|Sean-Kenneth-Doherty|docs: INSTALL.md for Docker, NAS hosts, and bare binary
 d37e68792|2026-07-12|Sean Kenneth Doherty|android: full Google Photos-replacement client — timeline, auto-backup, archive browse, free-up-space
 d4c09eb6d|2026-07-12|Sean-Kenneth-Doherty|scripts: Playwright proof for guided remote-access states
 49dfd999b|2026-07-12|Sean-Kenneth-Doherty|feat(sync): devices table, pair codes, and hub identity
-53a893e0d|2026-07-12|Sean-Kenneth-Doherty|feat(sync): mDNS announce/browse for photoArchive hubs
+53a893e0d|2026-07-12|Sean-Kenneth-Doherty|feat(sync): mDNS announce/browse for Azimuth Photo hubs
 2d03c9365|2026-07-12|Sean-Kenneth-Doherty|feat(sync): device tokens on sync calls plus optional hub enforcement
 f0fc013dd|2026-07-12|Sean-Kenneth-Doherty|feat(settings): Devices panel, Connect to server, pairing tests
 20fb821eb|2026-07-12|Sean-Kenneth-Doherty|fix: create runtime dirs on clean install startup
@@ -683,21 +683,21 @@ d7f7340b7|2026-07-12|Sean-Kenneth-Doherty|Allow sync uploads to land under a nam
 857278ccd|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'xps-inbox' into develop
 644de4fe6|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'wt-lane-a' into develop
 a33fea90d|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'wt-lane-c' into develop
-c5fc4579a|2026-07-12|Sean-Kenneth-Doherty|Rebrand: photoArchive is now Azimuth Photo (brand layer only)
+c5fc4579a|2026-07-12|Sean-Kenneth-Doherty|Rebrand: establish the Azimuth Photo brand layer
 2c9449075|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'wt-lane-d' into develop
 bd9be64ea|2026-07-12|Sean-Kenneth-Doherty|test: cache-status people-resume case mocks the optional-pack capability check (only passed before via cross-file mock leakage; new lane test files changed the ordering)
-6c3b13f85|2026-07-12|Sean-Kenneth-Doherty|rebrand: photoArchive -> Azimuth Photo across user-facing surfaces (titles, wordmark, PWA manifest, Android launcher label, Tauri productName, README, UI copy); identifiers/paths/env/DB names unchanged
+6c3b13f85|2026-07-12|Sean-Kenneth-Doherty|rebrand: establish Azimuth Photo across user-facing surfaces (titles, wordmark, PWA manifest, Android launcher label, Tauri productName, README, UI copy); identifiers/paths/env/DB names unchanged
 904d5bd37|2026-07-12|Sean-Kenneth-Doherty|Merge branch 'sync-folder'
 5eb678c3c|2026-07-12|Sean-Kenneth-Doherty|rebrand: bundle identifiers -> app.azimuthphoto.* (Android applicationId/namespace/package tree, Tauri identifier, e2e APP_ID); pre-release, old installs orphaned deliberately
 5672619f6|2026-07-12|Sean-Kenneth-Doherty|catalog: invalidate rankings/stats caches at scan COMPLETION — a grid query during the scan re-primed a stale empty response, so the first landing after an import showed 0 photos
 c3664b6f4|2026-07-12|Sean Kenneth Doherty|android: RAW+JPEG stacking, Personal Photos routing, Azimuth rebrand, dataSync service fix
 e5899ae69|2026-07-12|Sean-Kenneth-Doherty|wizard review fixes: XSS-safe folder names in the setup browser, Enter never fires on focused buttons, sync-worker start is lock-guarded
 18fb95bff|2026-07-12|Sean-Kenneth-Doherty|Merge main (parallel brand-layer rebrand c5fc4579) into develop; reconcile with develop rebrand commits
-c20a33cc2|2026-07-12|Sean-Kenneth-Doherty|docs: RENAME_PLAN — phased Azimuth migration for env vars, scripts, db, paths, service, XPS (Sean approved renaming everything; sequenced behind in-flight lanes)
+c20a33cc2|2026-07-12|Sean-Kenneth-Doherty|docs: phased Azimuth identity migration for env vars, scripts, database, paths, service, and XPS
 a560f1b10|2026-07-12|Sean-Kenneth-Doherty|Merge remote-tracking branch 'origin/develop'
 f9b992c3d|2026-07-12|Sean-Kenneth-Doherty|Add staged import engine
 3605ac817|2026-07-12|Sean-Kenneth-Doherty|Cover staged import safety cases
-c749a0e16|2026-07-12|Sean Kenneth Doherty|Merge branch 'main' of 100.102.150.104:Projects/photo-archive into wiz
+c749a0e16|2026-07-12|Sean Kenneth Doherty|Merge branch 'main' of 100.102.150.104:Projects/azimuth-photo into wiz
 c79f185a1|2026-07-12|Sean-Kenneth-Doherty|test: add standing browse performance budgets
 a3e1e0db0|2026-07-12|Sean-Kenneth-Doherty|Add wizard server connection card
 bd000eb06|2026-07-12|Sean-Kenneth-Doherty|Add convergent collection oplog identities
@@ -732,7 +732,7 @@ cb0b70e99|2026-07-13|Sean-Kenneth-Doherty|docs: DELIGHT_SPEC — Wave 2 polish (
 b56afb4a8|2026-07-13|Sean-Kenneth-Doherty|Harden Azimuth Photo update notice
 a0c42f9a9|2026-07-13|Sean Kenneth Doherty|backup-before-migrate: take a protected snapshot before any schema upgrade
 b1020350d|2026-07-13|Sean-Kenneth-Doherty|Merge branch 'wt-lane-a' into develop
-f95023b26|2026-07-13|Sean-Kenneth-Doherty|fix: updater endpoint + docs point at the azimuth-photo GitHub repo (was the pre-rename photo-archive name — auto-update latest.json would have 404d)
+f95023b26|2026-07-13|Sean-Kenneth-Doherty|fix: updater endpoint and docs point at the canonical Azimuth Photo GitHub repo
 64e05b7e5|2026-07-13|Sean Kenneth Doherty|develop: fix flat/dark/desaturated base preview (the edit-view 'vomit')
 635c172dd|2026-07-13|Sean-Kenneth-Doherty|Merge branch 'xps-inbox' into develop
 cdcea874f|2026-07-13|Sean-Kenneth-Doherty|feat: reveal catalog folders in the OS file manager
@@ -1111,7 +1111,7 @@ d0d3b924b|2026-07-16|Sean-Kenneth-Doherty|fix(catalog): restore virtual copies o
 8a5efe57d|2026-07-16|Sean-Kenneth-Doherty|fix(library): omit archive quality for smart collections
 fd92e6f05|2026-07-16|Sean-Kenneth-Doherty|test: make history-race gate formatting-insensitive
 30ebeed38|2026-07-16|Sean-Kenneth-Doherty|Merge qfix-seams2: smart-collection class closure (compare pools, timeline/cull/facets via server resolve) + rating survival across develop merges, watched-rematch VC cascade, drawer wait visibility
-5572bc5a8|2026-07-16|Sean-Kenneth-Doherty|fix(brand): first-run welcome card says Azimuth Photo, not photoArchive
+5572bc5a8|2026-07-16|Sean-Kenneth-Doherty|fix(brand): align the first-run welcome card with Azimuth Photo
 920c4ff4d|2026-07-16|Sean-Kenneth-Doherty|fix(previews): recalculate cache budget after first import
 4a3386e09|2026-07-16|Sean-Kenneth-Doherty|fix(onboarding): start visibility pipeline on first import
 2174eab27|2026-07-16|Sean-Kenneth-Doherty|fix(metadata): keep RAW imports active during orientation scan
@@ -1496,7 +1496,7 @@ e8c6f7e3a|2026-07-19|Sean-Kenneth-Doherty|test: cover restore drill success, cor
 5c07f6344|2026-07-19|Sean-Kenneth-Doherty|backup: per-process tmp names + orphaned-tmp sweep — nightly 04:00 cross-instance collision left prod with zero sealed snapshots
 778604ed8|2026-07-19|Sean-Kenneth-Doherty|lr: best-of-shoot collections + context-aware whisper (stars stay global)
 086612b27|2026-07-19|Sean-Kenneth-Doherty|merge bestof: per-shoot local excellence for LR
-347fe2a6a|2026-07-19|Sean-Kenneth-Doherty|ml: shared device selection (PHOTOARCHIVE_ML_DEVICE) across all model loaders
+347fe2a6a|2026-07-19|Sean-Kenneth-Doherty|ml: shared device selection (AZIMUTH_ML_DEVICE) across all model loaders
 5d0f3aedf|2026-07-19|Sean-Kenneth-Doherty|satellite: local SSD preview mirror — LRU-capped, versioned, burst-fill on idle
 6463cafce|2026-07-19|Sean-Kenneth-Doherty|perf: interactive-latency benchmark + initial p95 budgets
 0dd9a5adc|2026-07-19|Sean-Kenneth-Doherty|merge gpuaudit
@@ -1504,7 +1504,7 @@ e8c6f7e3a|2026-07-19|Sean-Kenneth-Doherty|test: cover restore drill success, cor
 8c8068114|2026-07-19|Sean-Kenneth-Doherty|merge latencybench
 2e0a60a74|2026-07-19|Sean-Kenneth-Doherty|ml: ModelPool — LRU residency by declared cost, pin-while-hot, single-flight, pressure shed
 3bf97376f|2026-07-19|Sean-Kenneth-Doherty|lr: best-of-shoot collections + context-aware whisper (stars stay global)
-1fb4d7f61|2026-07-19|Sean-Kenneth-Doherty|ml: shared device selection (PHOTOARCHIVE_ML_DEVICE) across all model loaders
+1fb4d7f61|2026-07-19|Sean-Kenneth-Doherty|ml: shared device selection (AZIMUTH_ML_DEVICE) across all model loaders
 68affff37|2026-07-19|Sean-Kenneth-Doherty|satellite: local SSD preview mirror — LRU-capped, versioned, burst-fill on idle
 9655bfdf8|2026-07-19|Sean-Kenneth-Doherty|perf: interactive-latency benchmark + initial p95 budgets
 94b3cf15f|2026-07-19|Sean-Kenneth-Doherty|backup: in-app Cloud Backup — universal rclone vault (settings, runner, nightly, panel)
@@ -1522,8 +1522,8 @@ b62a37c6b|2026-07-19|Sean-Kenneth-Doherty|chore(lint): eslint zero-warning clean
 0fa84bd51|2026-07-19|Sean-Kenneth-Doherty|merge healthpanel: System Health surface (union with cloud backup panel; late-status re-render kept)
 778258eb5|2026-07-19|Sean-Kenneth-Doherty|chore(lint): add luacheck config for Lightroom plugin
 7f3e1f57c|2026-07-19|Sean-Kenneth-Doherty|chore(lint): luacheck zero-warning cleanup
-dddd0a5f6|2026-07-19|Sean-Kenneth-Doherty|merge testspeed: parallel suite, tiered gates, pa-ci net
-3d50fedf7|2026-07-19|Sean-Kenneth-Doherty|chore(lint): ship scripts/lint and wire into photoarchive-check
+dddd0a5f6|2026-07-19|Sean-Kenneth-Doherty|merge testspeed: parallel suite and tiered verification gates
+3d50fedf7|2026-07-19|Sean-Kenneth-Doherty|chore(lint): ship scripts/lint and wire into azimuth-check
 076217f81|2026-07-19|Sean-Kenneth-Doherty|feat(develop): shared guided-filter primitive (classic + EIGF)
 490ee9acb|2026-07-19|Sean-Kenneth-Doherty|feat(develop): edge-aware refine on combined local masks
 1d551b2b7|2026-07-19|Sean-Kenneth-Doherty|test(develop): guided-filter math, RAW before/after, perf vs gaussian

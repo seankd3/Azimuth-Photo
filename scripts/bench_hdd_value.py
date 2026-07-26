@@ -161,15 +161,15 @@ def _start_server(home: Path, cache: Path, port: int, *, concurrency: int) -> tu
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_HOME": str(home),
-            "PHOTOARCHIVE_THUMB_CACHE_DIR": str(cache),
-            "PHOTOARCHIVE_HOST": "127.0.0.1",
-            "PHOTOARCHIVE_PORT": str(port),
-            "PHOTOARCHIVE_MODE": "standalone",
-            "PHOTOARCHIVE_ACCESS": "local",
-            "PHOTOARCHIVE_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
-            "PHOTOARCHIVE_BULK_HDD_CONCURRENCY": str(concurrency),
-            "PHOTOARCHIVE_PREGENERATE_GENERATE_BATCH": "8",
+            "AZIMUTH_HOME": str(home),
+            "AZIMUTH_THUMB_CACHE_DIR": str(cache),
+            "AZIMUTH_HOST": "127.0.0.1",
+            "AZIMUTH_PORT": str(port),
+            "AZIMUTH_MODE": "standalone",
+            "AZIMUTH_ACCESS": "local",
+            "AZIMUTH_SSD_CACHE_BYTES": str(20 * 1024 * 1024 * 1024),
+            "AZIMUTH_BULK_HDD_CONCURRENCY": str(concurrency),
+            "AZIMUTH_PREGENERATE_GENERATE_BATCH": "8",
             "PYTHONPATH": str(WEB),
         }
     )
@@ -370,12 +370,12 @@ def main() -> int:
     read_once = _unit_read_once(args.count, source)
     print(f"read_once={json.dumps(read_once)}", flush=True)
 
-    scratch = Path(tempfile.mkdtemp(prefix="pa-hddgov-bench-"))
+    scratch = Path(tempfile.mkdtemp(prefix="azimuth-hddgov-bench-"))
     home = scratch / "home"
     cache = home / "cache" / "thumbs"
     home.mkdir(parents=True)
     cache.mkdir(parents=True)
-    catalog_db = home / "data" / "catalog" / "photoarchive.db"
+    catalog_db = home / "data" / "catalog" / "azimuth.db"
     cache_db = cache / "cache.db"
 
     results: dict = {"source": str(source), "read_once": read_once}

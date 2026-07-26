@@ -2,7 +2,7 @@
 
 Run the desktop QA matrix from a Windows clone of Azimuth Photo. Nothing here
 contacts the hub or mutates a real archive — probe servers are loopback-only
-with an isolated PHOTOARCHIVE_HOME.
+with an isolated AZIMUTH_HOME.
 
 ## One-time setup
 
@@ -14,8 +14,8 @@ web/.venv/Scripts/python.exe -m pip install -r web/requirements.txt
 Set runtime roots first if the Windows install does not use its normal defaults:
 
 ```bash
-export PHOTOARCHIVE_EXPORT_DIR='D:\Azimuth\Exports'
-export PHOTOARCHIVE_LIBRARY_EXPORT_DIR='D:\Pictures\Azimuth Photo Exports'
+export AZIMUTH_EXPORT_DIR='D:\Azimuth\Exports'
+export AZIMUTH_LIBRARY_EXPORT_DIR='D:\Pictures\Azimuth Exports'
 ```
 
 ## Fast smoke (<60s)
@@ -44,7 +44,7 @@ pytest command above.
 
 The runner uses `web\.venv\Scripts\python.exe`, starts only loopback probe
 servers, and stores fixture data plus durable evidence in the platform temporary
-directory by default. Set `PHOTOARCHIVE_QA_SCRATCH` to retain it elsewhere, and
+directory by default. Set `AZIMUTH_QA_SCRATCH` to retain it elsewhere, and
 set `QA_WAIT_MULTIPLIER` (for example `2`) when the machine is under load.
 
 Each invocation creates `qa-harness\runs\<UTC timestamp>-<git sha>\` with its

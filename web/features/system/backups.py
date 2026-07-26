@@ -2,7 +2,7 @@
 
 Snapshots use SQLite's online BACKUP API (safe against a live WAL db), then
 gzip-compress to the selected backup root. Restore never hot-swaps the live catalog —
-it writes ``photoarchive.restored.db`` beside it and returns human instructions.
+it writes ``azimuth.restored.db`` beside it and returns human instructions.
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from data import connection as data_connection
 
 log = logging.getLogger(__name__)
 
-BACKUP_NAME_RE = re.compile(r"^(?:photoarchive|azimuth)-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
-OWNER_MARKER_NAME = ".photoarchive-backup-owner"
+BACKUP_NAME_RE = re.compile(r"^azimuth-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
+OWNER_MARKER_NAME = ".azimuth-backup-owner"
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 # Pre-migration snapshots are the rollback safety net for a schema upgrade; they
@@ -121,9 +121,9 @@ def backup_run_status() -> dict[str, Any]:
 
 def _smoke_or_custom_home(environ: dict[str, str] | None = None) -> bool:
     env = os.environ if environ is None else environ
-    if (env.get("PHOTOARCHIVE_SMOKE_MODE") or "").strip() in {"1", "true", "yes"}:
+    if (env.get("AZIMUTH_SMOKE_MODE") or "").strip() in {"1", "true", "yes"}:
         return True
-    return bool((env.get("PHOTOARCHIVE_HOME") or "").strip())
+    return bool((env.get("AZIMUTH_HOME") or "").strip())
 
 
 def backup_root_for(db_path: str | None = None) -> Path:
@@ -131,7 +131,7 @@ def backup_root_for(db_path: str | None = None) -> Path:
 
     Destination is always taken from the same runtime resolution as the live
     catalog. Scratch/smoke homes stay inside their own data tree even when a
-    process-level PHOTOARCHIVE_BACKUP_DIR points at production.
+    process-level AZIMUTH_BACKUP_DIR points at production.
     """
     paths = resolve_runtime_paths()
     root = Path(paths.backup_dir)
@@ -142,7 +142,7 @@ def backup_root_for(db_path: str | None = None) -> Path:
             # Backing up a non-configured catalog file: keep artifacts beside it.
             root = target.parent / "backups"
     if _smoke_or_custom_home():
-        home = (os.environ.get("PHOTOARCHIVE_HOME") or "").strip()
+        home = (os.environ.get("AZIMUTH_HOME") or "").strip()
         if home:
             home_root = Path(home).resolve()
             try:
@@ -726,10 +726,10 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
 
 def _restore_paths(db_path: str) -> tuple[Path, Path, Path, Path, Path]:
     live = Path(db_path).resolve()
-    staging = live.with_name("photoarchive.restored.db")
-    metadata = live.with_name("photoarchive.restored.json")
-    tmp = live.with_name(".photoarchive.restored.db.tmp")
-    metadata_tmp = live.with_name(".photoarchive.restored.json.tmp")
+    staging = live.with_name("azimuth.restored.db")
+    metadata = live.with_name("azimuth.restored.json")
+    tmp = live.with_name(".azimuth.restored.db.tmp")
+    metadata_tmp = live.with_name(".azimuth.restored.json.tmp")
     return live, staging, metadata, tmp, metadata_tmp
 
 
@@ -968,7 +968,12 @@ def _verify_gzip_matches_db(tmp_gz: Path, tmp_db: Path) -> None:
 
 
 def _fsync_file(path: Path) -> None:
-    with open(path, "rb") as handle:
+    # Windows rejects FlushFileBuffers on a read-only descriptor. Reopen the
+    # finished artifact without truncation so both NTFS and POSIX filesystems
+    # receive a real durability barrier.
+    mode = "rb+" if os.name == "nt" else "rb"
+    with open(path, mode) as handle:
+        handle.flush()
         os.fsync(handle.fileno())
 
 

@@ -20,7 +20,7 @@ def _parser() -> argparse.ArgumentParser:
 
 def _default_runs_root() -> Path:
     scratch = Path(
-        os.environ.get("PHOTOARCHIVE_QA_SCRATCH", Path(tempfile.gettempdir()) / "azimuth-photo" / "qa-harness")
+        os.environ.get("AZIMUTH_QA_SCRATCH", Path(tempfile.gettempdir()) / "azimuth-photo" / "qa-harness")
     )
     return scratch.resolve() / "runs"
 

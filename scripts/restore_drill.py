@@ -37,7 +37,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--backup-root",
         type=Path,
         default=None,
-        help="Directory of sealed photoarchive-*.db.gz snapshots (default: runtime backup_dir)",
+        help="Directory of sealed azimuth-*.db.gz snapshots (default: runtime backup_dir)",
     )
     parser.add_argument(
         "--snapshot",

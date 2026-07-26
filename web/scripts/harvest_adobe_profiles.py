@@ -28,7 +28,7 @@ from features.develop.adobe_profiles import (  # noqa: E402
 )
 
 
-DEFAULT_DB = Path("/home/sean/Projects/photo-archive/web/photoarchive.db")
+DEFAULT_DB = Path("/home/sean/Projects/azimuth-photo/web/azimuth.db")
 DEFAULT_OUTPUT = WEB_ROOT / "features" / "develop" / "profiles" / "adobe"
 RAW_EXTENSIONS = (".dng", ".cr2", ".cr3")
 MAX_PROFILE_BYTES = 2 * 1024 * 1024

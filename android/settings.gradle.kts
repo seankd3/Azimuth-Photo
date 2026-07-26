@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "photoArchive"
+rootProject.name = "Azimuth Photo"
 include(":app")

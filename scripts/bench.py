@@ -8,15 +8,26 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
-RUN_DIR = ROOT / "bench-runs"
-BASELINE = ROOT / "baseline.json"
-SCRATCH = Path("/mnt/expansion/tmp/azimuth-bench")
+RUN_DIR = Path(
+    os.environ.get(
+        "AZIMUTH_BENCH_RUNS",
+        str(Path.home() / ".local" / "state" / "azimuth-photo" / "benchmarks"),
+    )
+)
+BASELINE = ROOT / "web" / "perf" / "baseline.json"
+SCRATCH = Path(
+    os.environ.get(
+        "AZIMUTH_BENCH_SCRATCH",
+        str(Path(tempfile.gettempdir()) / "azimuth-bench"),
+    )
+)
 VENV_PYTHON = WEB / ".venv" / "bin" / "python"
 BASELINE_SAMPLE_RUNS = 5
 
@@ -38,9 +49,17 @@ def _sha() -> str:
 def _args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true", help="fail when a baseline metric regresses by more than 25%%")
-    parser.add_argument("--write-baseline", action="store_true", help="replace baseline.json with this fixture run")
+    parser.add_argument(
+        "--write-baseline",
+        action="store_true",
+        help="replace web/perf/baseline.json with this fixture run",
+    )
     parser.add_argument("--iterations", type=int, default=standing.DEFAULT_ITERATIONS)
-    parser.add_argument("--trend", action="store_true", help="print the KPI history from bench-runs/ and exit")
+    parser.add_argument(
+        "--trend",
+        action="store_true",
+        help="print KPI history from the runtime benchmark directory and exit",
+    )
     return parser.parse_args()
 
 
@@ -87,8 +106,8 @@ def main() -> int:
         return _trend()
     if args.iterations < 3:
         raise SystemExit("--iterations must be at least 3")
-    if args.write_baseline and os.environ.get("PHOTOARCHIVE_BENCH_URL"):
-        raise SystemExit("baseline.json must come from the isolated fixture, not a real URL")
+    if args.write_baseline and os.environ.get("AZIMUTH_BENCH_URL"):
+        raise SystemExit("web/perf/baseline.json must come from the isolated fixture")
 
     measured_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     sha = _sha()
@@ -139,13 +158,13 @@ def main() -> int:
         BASELINE.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
         baseline = result
     report.print_table(result, previous=previous, baseline=baseline)
-    print(f"\nWrote {output.relative_to(ROOT)}")
+    print(f"\nWrote {output}")
     if args.write_baseline:
         print(f"Wrote {BASELINE.relative_to(ROOT)}")
 
     failures = report.regressions(metrics, baseline)
     if args.check and baseline is None:
-        print("\nFAIL: baseline.json is missing or invalid", file=sys.stderr)
+        print("\nFAIL: web/perf/baseline.json is missing or invalid", file=sys.stderr)
         return 2
     if args.check and failures:
         print("\nFAIL: >25% benchmark regressions", file=sys.stderr)

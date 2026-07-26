@@ -24,7 +24,7 @@ PREGEN_YIELDED = -2
 PREGEN_PRESSURE = -3
 PREGEN_STORAGE_LIMITED = -4
 
-_PREGEN_DIAG = os.environ.get("PHOTOARCHIVE_PREGEN_DIAG", "").strip().lower() in {
+_PREGEN_DIAG = os.environ.get("AZIMUTH_PREGEN_DIAG", "").strip().lower() in {
     "1",
     "true",
     "yes",
@@ -45,12 +45,12 @@ _REAL_ASYNCIO_SLEEP = asyncio.sleep
 
 # state=running with no generation or heartbeat for this long → recover.
 PREGEN_STALL_WATCHDOG_SECONDS = float(
-    os.environ.get("PHOTOARCHIVE_PREGEN_STALL_SECONDS", str(5 * 60))
+    os.environ.get("AZIMUTH_PREGEN_STALL_SECONDS", str(5 * 60))
 )
 PREGEN_STALL_WATCHDOG_POLL_SECONDS = 15.0
 # No-completion ceiling so one stuck demosaic cannot pin the bulk loop forever.
 PREGEN_WAVE_TIMEOUT_SECONDS = float(
-    os.environ.get("PHOTOARCHIVE_PREGEN_WAVE_TIMEOUT_SECONDS", "120")
+    os.environ.get("AZIMUTH_PREGEN_WAVE_TIMEOUT_SECONDS", "120")
 )
 
 

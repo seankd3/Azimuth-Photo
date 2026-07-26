@@ -73,7 +73,7 @@ def _make_catalog(path: Path, *, with_develop: bool = True) -> Path:
 def _seal_fixture_snapshot(catalog: Path, backup_root: Path) -> Path:
     """Build a sealed .db.gz the same way production publishes (gzip of a sealed db)."""
     backup_root.mkdir(parents=True, exist_ok=True)
-    name = "photoarchive-20260719-120000.db.gz"
+    name = "azimuth-20260719-120000.db.gz"
     dest = backup_root / name
     with open(catalog, "rb") as raw, gzip.open(dest, "wb", compresslevel=6) as gz:
         gz.write(raw.read())
@@ -96,7 +96,7 @@ def _run_drill(args: list[str], *, env: dict[str, str] | None = None) -> subproc
 
 @pytest.fixture()
 def fixture_backup(tmp_path: Path) -> tuple[Path, Path]:
-    catalog = _make_catalog(tmp_path / "photoarchive.db")
+    catalog = _make_catalog(tmp_path / "azimuth.db")
     backup_root = tmp_path / "backups"
     snapshot = _seal_fixture_snapshot(catalog, backup_root)
     return backup_root, snapshot
@@ -124,7 +124,7 @@ def test_restore_drill_success_exit_zero(fixture_backup: tuple[Path, Path], tmp_
     assert "spot_checked=3" in result.stdout
     scratch_parent = tmp_path / "scratch-parent"
     if scratch_parent.exists():
-        leftovers = list(scratch_parent.glob("pa-restore-drill-*"))
+        leftovers = list(scratch_parent.glob("azimuth-restore-drill-*"))
         assert leftovers == [], leftovers
 
 
@@ -155,11 +155,11 @@ def test_restore_drill_prod_dir_refusal_preserves_target(
 
     marked = tmp_path / "looks-like-backup-root"
     marked.mkdir()
-    (marked / ".photoarchive-backup-owner").write_text(
-        json.dumps({"catalog_path": "/prod/photoarchive.db"}),
+    (marked / ".azimuth-backup-owner").write_text(
+        json.dumps({"catalog_path": "/prod/azimuth.db"}),
         encoding="utf-8",
     )
-    marker_before = (marked / ".photoarchive-backup-owner").read_text(encoding="utf-8")
+    marker_before = (marked / ".azimuth-backup-owner").read_text(encoding="utf-8")
     result = _run_drill(
         [
             "--backup-root",
@@ -172,13 +172,13 @@ def test_restore_drill_prod_dir_refusal_preserves_target(
     )
     assert result.returncode == 2, result.stderr
     assert "Refusing scratch" in result.stderr
-    assert ".photoarchive-backup-owner" in result.stderr
+    assert ".azimuth-backup-owner" in result.stderr
     assert marked.is_dir()
-    assert (marked / ".photoarchive-backup-owner").read_text(encoding="utf-8") == marker_before
+    assert (marked / ".azimuth-backup-owner").read_text(encoding="utf-8") == marker_before
 
     live = tmp_path / "looks-like-catalog"
     live.mkdir()
-    (live / "photoarchive.db").write_bytes(b"live")
+    (live / "azimuth.db").write_bytes(b"live")
     result_live = _run_drill(
         [
             "--backup-root",
@@ -190,15 +190,15 @@ def test_restore_drill_prod_dir_refusal_preserves_target(
         ]
     )
     assert result_live.returncode == 2, result_live.stderr
-    assert "photoarchive.db" in result_live.stderr
-    assert (live / "photoarchive.db").read_bytes() == b"live"
+    assert "azimuth.db" in result_live.stderr
+    assert (live / "azimuth.db").read_bytes() == b"live"
 
 
 def test_restore_drill_picks_newest_sealed(tmp_path: Path) -> None:
-    catalog = _make_catalog(tmp_path / "photoarchive.db")
+    catalog = _make_catalog(tmp_path / "azimuth.db")
     backup_root = tmp_path / "backups"
-    older = backup_root / "photoarchive-20260710-040000.db.gz"
-    newer = backup_root / "photoarchive-20260718-040000.db.gz"
+    older = backup_root / "azimuth-20260710-040000.db.gz"
+    newer = backup_root / "azimuth-20260718-040000.db.gz"
     backup_root.mkdir(parents=True, exist_ok=True)
     payload = catalog.read_bytes()
     for path in (older, newer):
@@ -216,4 +216,4 @@ def test_restore_drill_picks_newest_sealed(tmp_path: Path) -> None:
         ]
     )
     assert result.returncode == 0, result.stderr
-    assert "photoarchive-20260718-040000.db.gz" in result.stdout
+    assert "azimuth-20260718-040000.db.gz" in result.stdout

@@ -67,26 +67,29 @@ class PathGroupTests(unittest.TestCase):
 
 
 class DevelopExportPathTests(unittest.TestCase):
-    def test_omarchy_legacy_defaults_match_shipped_paths(self):
+    def test_large_develop_cache_keeps_user_exports_in_pictures(self):
         with tempfile.TemporaryDirectory() as tmp:
             web = Path(tmp) / "web"
             web.mkdir()
-            (web / "photoarchive.db").touch()
+            (web / "azimuth.db").touch()
             for name in (".thumbcache", ".models", ".embedcache", ".run"):
                 (web / name).mkdir()
             paths = resolve_runtime_paths(
                 web,
                 {
                     "HOME": "/home/sean",
-                    "PHOTOARCHIVE_DEVELOP_CACHE_DIR": "/mnt/expansion/PhotoArchiveCache/develop",
+                    "AZIMUTH_DEVELOP_CACHE_DIR": "/mnt/expansion/Azimuth Photo/Omarchy/cache/develop",
                 },
                 "linux",
                 "/home/sean",
             )
-        self.assertEqual(paths.temporary_export_dir, "/mnt/expansion/PhotoArchiveCache/develop/exports")
+        self.assertEqual(
+            paths.temporary_export_dir,
+            "/mnt/expansion/Azimuth Photo/Omarchy/cache/develop/exports",
+        )
         self.assertEqual(
             paths.library_export_dir,
-            "/mnt/expansion/PhotoArchiveCache/develop/library-exports",
+            "/home/sean/Pictures/Azimuth Exports",
         )
 
     def test_export_dirs_honor_env_overrides(self):
@@ -97,14 +100,14 @@ class DevelopExportPathTests(unittest.TestCase):
                 web,
                 {
                     "HOME": "/home/sean",
-                    "PHOTOARCHIVE_EXPORT_DIR": "/tmp/pa-exports",
-                    "PHOTOARCHIVE_LIBRARY_EXPORT_DIR": "/tmp/pa-library",
+                    "AZIMUTH_EXPORT_DIR": "/tmp/azimuth-exports",
+                    "AZIMUTH_LIBRARY_EXPORT_DIR": "/tmp/azimuth-library",
                 },
                 "linux",
                 "/home/sean",
             )
-        self.assertEqual(paths.temporary_export_dir, "/tmp/pa-exports")
-        self.assertEqual(paths.library_export_dir, "/tmp/pa-library")
+        self.assertEqual(paths.temporary_export_dir, "/tmp/azimuth-exports")
+        self.assertEqual(paths.library_export_dir, "/tmp/azimuth-library")
 
     def test_render_module_reads_runtime_paths(self):
         export, library = develop_render._resolved_export_dirs()
@@ -118,8 +121,8 @@ class DevelopExportPathTests(unittest.TestCase):
         paths = resolve_runtime_paths(
             environ={
                 "USERPROFILE": r"C:\Users\Alex",
-                "PHOTOARCHIVE_EXPORT_DIR": r"D:\Azimuth\Exports",
-                "PHOTOARCHIVE_LIBRARY_EXPORT_DIR": r"E:\Photos\Develop Exports",
+                "AZIMUTH_EXPORT_DIR": r"D:\Azimuth\Exports",
+                "AZIMUTH_LIBRARY_EXPORT_DIR": r"E:\Photos\Develop Exports",
             },
             platform_name="win32",
             home=r"C:\Users\Alex",

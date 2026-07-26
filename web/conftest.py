@@ -29,7 +29,7 @@ def pytest_configure(config):
     )
     # Unit tests stay in-process unless a test explicitly enables the pool.
     # Spawning demosaic workers per test case is slow and unrelated to most asserts.
-    os.environ.setdefault("PHOTOARCHIVE_DEMOSAIC_PROCESSES", "0")
+    os.environ.setdefault("AZIMUTH_DEMOSAIC_PROCESSES", "0")
 
 
 def _worker_tag() -> str:
@@ -46,7 +46,7 @@ def free_port() -> int:
 
 def worker_scratch(label: str) -> Path:
     """Per-worker scratch under TMPDIR (never a shared fixed path)."""
-    root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()) / "pa-pytest"
+    root = Path(os.environ.get("TMPDIR") or tempfile.gettempdir()) / "azimuth-pytest"
     path = root / _worker_tag() / label
     path.mkdir(parents=True, exist_ok=True)
     return path

@@ -9,8 +9,8 @@ Policy
 1. Every loader goes through ``acquire``; every unload through ``unload`` /
    ``unload_all``. A loader that bypasses the pool is a bug.
 2. Each model declares approximate ``vram_bytes`` / ``ram_bytes`` costs.
-   Budgets come from ``PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES`` and
-   ``PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES``. Empty / unset uses the safe host
+   Budgets come from ``AZIMUTH_MODEL_BUDGET_VRAM_BYTES`` and
+   ``AZIMUTH_MODEL_BUDGET_RAM_BYTES``. Empty / unset uses the safe host
    defaults. ``0`` / ``unlimited`` explicitly opts into pass-through.
 3. Loading that would exceed a finite budget evicts LRU residents first
    (skipping pin-while-hot), then calls their unload callback +
@@ -99,9 +99,9 @@ def _host_model_costs() -> None:
     except Exception:
         log.debug("model_pool: cost refresh skipped", exc_info=True)
 
-ENV_VRAM_BUDGET = "PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES"
-ENV_RAM_BUDGET = "PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES"
-ENV_PIN_SECONDS = "PHOTOARCHIVE_MODEL_PIN_SECONDS"
+ENV_VRAM_BUDGET = "AZIMUTH_MODEL_BUDGET_VRAM_BYTES"
+ENV_RAM_BUDGET = "AZIMUTH_MODEL_BUDGET_RAM_BYTES"
+ENV_PIN_SECONDS = "AZIMUTH_MODEL_PIN_SECONDS"
 
 PIN_WHILE_HOT_SECONDS = 30.0
 

@@ -90,7 +90,7 @@ def _self_cgroup_dir() -> Path | None:
                 line = line.strip()
                 if not line:
                     continue
-                # Unified hierarchy: ``0::/system.slice/photoarchive.service``
+                # Unified hierarchy: ``0::/system.slice/azimuth-photo.service``
                 parts = line.split(":", 2)
                 if len(parts) != 3:
                     continue
@@ -166,19 +166,19 @@ def _default_watermarks() -> tuple[int, int, int]:
 
 
 _DEFAULT_SOFT, _DEFAULT_HARD, _DEFAULT_RESUME = _default_watermarks()
-SOFT_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
-HARD_WATERMARK_BYTES = _env_bytes("PHOTOARCHIVE_MEMORY_HARD_BYTES", _DEFAULT_HARD)
+SOFT_WATERMARK_BYTES = _env_bytes("AZIMUTH_MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
+HARD_WATERMARK_BYTES = _env_bytes("AZIMUTH_MEMORY_HARD_BYTES", _DEFAULT_HARD)
 RESUME_WATERMARK_BYTES = _env_bytes(
-    "PHOTOARCHIVE_MEMORY_RESUME_BYTES",
+    "AZIMUTH_MEMORY_RESUME_BYTES",
     _DEFAULT_RESUME,
 )
 
 # Idle model residency TTL (seconds). Used by workers / pool idle shed.
-MODEL_IDLE_TTL_SECONDS = _env_float("PHOTOARCHIVE_MODEL_IDLE_TTL_SECONDS", 120.0)
+MODEL_IDLE_TTL_SECONDS = _env_float("AZIMUTH_MODEL_IDLE_TTL_SECONDS", 120.0)
 
 # After restart/heal: bulk work waits this long so the library proves Ready
 # before models reload. Automatic — no operator step.
-STARTUP_CALM_SECONDS = _env_float("PHOTOARCHIVE_STARTUP_CALM_SECONDS", 120.0)
+STARTUP_CALM_SECONDS = _env_float("AZIMUTH_STARTUP_CALM_SECONDS", 120.0)
 
 # Host MemAvailable floors (the room, not only our cgroup). Below soft →
 # pause bulk; below hard → pause + shed models. Resume needs soft + slack.
@@ -196,13 +196,13 @@ def _default_host_floors() -> tuple[int, int, int]:
 
 _DEFAULT_HOST_SOFT, _DEFAULT_HOST_HARD, _DEFAULT_HOST_RESUME = _default_host_floors()
 HOST_SOFT_AVAILABLE_BYTES = _env_bytes(
-    "PHOTOARCHIVE_HOST_SOFT_AVAILABLE_BYTES", _DEFAULT_HOST_SOFT
+    "AZIMUTH_HOST_SOFT_AVAILABLE_BYTES", _DEFAULT_HOST_SOFT
 )
 HOST_HARD_AVAILABLE_BYTES = _env_bytes(
-    "PHOTOARCHIVE_HOST_HARD_AVAILABLE_BYTES", _DEFAULT_HOST_HARD
+    "AZIMUTH_HOST_HARD_AVAILABLE_BYTES", _DEFAULT_HOST_HARD
 )
 HOST_RESUME_AVAILABLE_BYTES = _env_bytes(
-    "PHOTOARCHIVE_HOST_RESUME_AVAILABLE_BYTES", _DEFAULT_HOST_RESUME
+    "AZIMUTH_HOST_RESUME_AVAILABLE_BYTES", _DEFAULT_HOST_RESUME
 )
 
 _lock = threading.Lock()

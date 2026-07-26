@@ -119,7 +119,7 @@ browsing beyond the staged scan. Hub-side physical card slots out of scope.
 
 ## Acceptance
 
-- `./scripts/photoarchive-check --area imports` (create the area if missing → routes +
+- `./scripts/azimuth-check --area imports` (create the area if missing → routes +
   test_imports.py + new test_import_staging.py) green; full `--unit` green (321+ tests).
 - CARD_IMPORT_SPEC acceptance list holds against the new engine (fake card temp dir:
   Canon-9999 filename collisions both land, exact dupe skipped + still cleared, clear-card

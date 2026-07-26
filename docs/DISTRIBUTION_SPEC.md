@@ -8,9 +8,9 @@ prerequisite. Frozen 2026-07-12.
 
 | Mode | How it's selected | What it means |
 |---|---|---|
-| `hub` | `PHOTOARCHIVE_MODE=hub` (default when unset and no hub URL) | Always-on library server. Owns originals + master catalog. |
-| `standalone` | No `PHOTOARCHIVE_HUB_URL` set, `PHOTOARCHIVE_MODE=satellite` or `standalone` | Full local library. Satellite semantics (local imports, local everything) with the sync worker idle. **This is the desktop app's default.** |
-| `satellite` | `PHOTOARCHIVE_HUB_URL` set | Standalone + sync: mirrors the hub catalog, uploads by content hash, oplog convergence. |
+| `hub` | `AZIMUTH_MODE=hub` (default when unset and no hub URL) | Always-on library server. Owns originals + master catalog. |
+| `standalone` | No `AZIMUTH_HUB_URL` set, `AZIMUTH_MODE=satellite` or `standalone` | Full local library. Satellite semantics (local imports, local everything) with the sync worker idle. **This is the desktop app's default.** |
+| `satellite` | `AZIMUTH_HUB_URL` set | Standalone + sync: mirrors the hub catalog, uploads by content hash, oplog convergence. |
 
 Rules:
 - `standalone` is not a new code path — it is satellite mode with sync
@@ -32,17 +32,17 @@ Rules:
   `web/app.py` + all base deps (rawpy, tifffile, imagecodecs, PIL, numpy,
   fastapi/uvicorn, zeroconf). **No torch, no AI models in the artifact.** AI
   workers already self-skip when deps are absent; that is the contract.
-- Build script: `scripts/build_server.py` → `dist/photoarchive-server/`.
+- Build script: `scripts/build_server.py` → `dist/azimuth-server/`.
   Must run on Linux and Windows (the Tauri app bundles the Windows build as
   its sidecar).
-- Entrypoint honors all existing `PHOTOARCHIVE_*` env vars; with none set it
+- Entrypoint honors all existing `AZIMUTH_*` env vars; with none set it
   uses platform-default data dirs (existing `runtime_paths` behavior) and
   serves on :8000.
 
 ### Docker image
 - `Dockerfile` at repo root. `python:3.12-slim`, base requirements only,
   non-root user. Volumes: `/photos` (originals, read-write), `/data`
-  (catalog + caches → `PHOTOARCHIVE_HOME=/data`). Expose 8000. HEALTHCHECK
+  (catalog + caches → `AZIMUTH_HOME=/data`). Expose 8000. HEALTHCHECK
   on the existing health endpoint.
 - `docker-compose.yml` example at repo root (photos volume, data volume,
   restart unless-stopped).
@@ -53,9 +53,9 @@ Rules:
 ## Artifact 2 — Azimuth Photo (the app)
 
 - Tauri shell (`desktop/`) switches from the hardcoded dev venv to a bundled
-  sidecar: `dist/photoarchive-server/` shipped inside the app resources.
+  sidecar: `dist/azimuth-server/` shipped inside the app resources.
   Config/paths must come from a small JSON the shell reads
-  (`%APPDATA%/photoarchive/shell.json`), not compile-time constants — dev
+  (`%APPDATA%/azimuth/shell.json`), not compile-time constants — dev
   machines can point it at a venv, installed apps use the sidecar.
 - First launch with no library: open straight into the first-run wizard (below).
 - Auto-update: wire the Tauri updater config but leave signing keys/endpoint
@@ -79,7 +79,7 @@ radius, existing button/input idioms — read the CSS variables, invent nothing)
    away immediately — do not block on completion.
 4. **Optional extras card** (shown once import is running): "AI features"
    (semantic search, faces, auto-cull) with a download-on-demand button that
-   pip-installs into a managed venv under `PHOTOARCHIVE_HOME` or, in Docker,
+   pip-installs into a managed venv under `AZIMUTH_HOME` or, in Docker,
    points at the `-ai` variant docs. Skippable, default off.
 
 No other questions. Library name, ports, cache budgets — all defaults,
@@ -102,7 +102,7 @@ changeable in Settings later.
 
 ## Discovery (mDNS)
 
-- Hub announces `_photoarchive._tcp.local` (name = configured library name or
+- Hub announces `_azimuth._tcp.local` (name = configured library name or
   hostname, port, hub_id) via `zeroconf` — a worker-thread announce, hub mode
   only, env-disableable.
 - Satellite/app: `GET /api/discover` does a 2s browse and returns found hubs.
@@ -131,7 +131,7 @@ changeable in Settings later.
 
 ## Acceptance (each lane proves its own)
 
-- Frozen binary: `dist/photoarchive-server/photoarchive-server --help` runs on
+- Frozen binary: `dist/azimuth-server/azimuth-server --help` runs on
   a machine with no Python; serves /d; imports a folder.
 - Docker: `docker compose up` → healthcheck green → /setup renders → import a
   mounted folder → grid shows it.

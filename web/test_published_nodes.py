@@ -14,7 +14,7 @@ class PublishedNodeTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         wiring.configure_publish_routes(
-            templates=app_module.app.state.photoarchive_shell.templates,
+            templates=app_module.app.state.azimuth_shell.templates,
         )
 
     async def _resolve_smart(self, _query):

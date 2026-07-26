@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Azimuth performance benchmark — reproducible hot-path timings for the bottleneck loop.
 
-Runs against the live app (default http://100.102.150.104:8000) and the .thumbcache.
-Emits a one-line summary, appends a JSONL row to bench/history.jsonl, and (with --md)
-a row to docs/BENCHMARKS.md. Pass --label "what changed" to tag the run.
+Runs against the live app (default http://100.102.150.104:8000) and its
+configured preview cache. Emits a one-line summary and appends a JSONL row
+outside the checkout. With ``--md``, it also updates a Markdown report beside
+that history file. Pass ``--label "what changed"`` to tag the run.
 
 Usage:
   scripts/perfbench.py --label "baseline post mem-flap fix" --md
@@ -17,15 +18,28 @@ Interactive latency is the comparable-over-time signal; preview rate depends on 
 import argparse
 import json
 import os
+from pathlib import Path
+import sqlite3
 import statistics
 import subprocess
+import sys
 import time
 import urllib.request
 
 HUB = os.environ.get("PERFBENCH_HUB", "http://100.102.150.104:8000")
-THUMBCACHE = os.path.expanduser("~/Projects/photo-archive/web/.thumbcache")
-DB = os.path.expanduser("~/Projects/photo-archive/web/photoarchive.db")
-REPO = os.path.expanduser("~/Projects/photo-archive")
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "web"))
+from core.runtime_paths import resolve_runtime_paths  # noqa: E402
+
+RUNTIME = resolve_runtime_paths()
+THUMBCACHE = Path(RUNTIME.thumb_cache_dir)
+DB = Path(RUNTIME.catalog_db)
+HISTORY = Path(
+    os.environ.get(
+        "AZIMUTH_PERFBENCH_HISTORY",
+        str(Path(RUNTIME.state_dir) / "benchmarks" / "perfbench.jsonl"),
+    )
+)
 
 
 def _time_get(path: str, timeout: float = 15.0) -> float | None:
@@ -52,22 +66,22 @@ def _stat(path: str, samples: int = 20, warmup: int = 3) -> dict:
 
 def _sample_thumb_id() -> int | None:
     try:
-        out = subprocess.run(
-            ["sqlite3", "-readonly", DB,
-             "SELECT image_id FROM cache_entries WHERE size='sm' LIMIT 1"],
-            capture_output=True, text=True, timeout=10,
-        ).stdout.strip()
-        return int(out) if out else None
-    except Exception:
+        uri = f"{DB.resolve().as_uri()}?mode=ro"
+        with sqlite3.connect(uri, uri=True, timeout=10) as conn:
+            row = conn.execute(
+                "SELECT image_id FROM cache_entries WHERE size='sm' LIMIT 1"
+            ).fetchone()
+        return int(row[0]) if row else None
+    except (OSError, sqlite3.Error, TypeError, ValueError):
         return None
 
 
 def _count_thumbs() -> int:
     n = 0
     for tier in ("sm", "md", "lg"):
-        d = os.path.join(THUMBCACHE, tier)
-        if os.path.isdir(d):
-            for _root, _dirs, files in os.walk(d):
+        directory = THUMBCACHE / tier
+        if directory.is_dir():
+            for _root, _dirs, files in os.walk(directory):
                 n += len(files)
     return n
 
@@ -81,7 +95,7 @@ def _preview_rate(window_s: int) -> int:
 
 def _git_commit() -> str:
     try:
-        return subprocess.run(["git", "-C", REPO, "rev-parse", "--short", "HEAD"],
+        return subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True, timeout=10).stdout.strip()
     except Exception:
         return "?"
@@ -92,8 +106,8 @@ def main():
     ap.add_argument("--label", default="")
     ap.add_argument("--samples", type=int, default=20)
     ap.add_argument("--rate-window", type=int, default=60)
-    ap.add_argument("--md", action="store_true", help="append a row to docs/BENCHMARKS.md")
-    ap.add_argument("--epoch", type=float, default=None, help="unix ts (scripts have no clock)")
+    ap.add_argument("--md", action="store_true", help="update the external Markdown history")
+    ap.add_argument("--epoch", type=float, default=None, help="override the Unix timestamp")
     args = ap.parse_args()
 
     tid = _sample_thumb_id()
@@ -106,7 +120,7 @@ def main():
         metrics["warm_thumb_sm"] = _stat(f"/api/thumb/sm/{tid}", args.samples)
     preview_rate = _preview_rate(args.rate_window)
 
-    ts = args.epoch if args.epoch is not None else 0
+    ts = args.epoch if args.epoch is not None else time.time()
     commit = _git_commit()
     try:
         load1 = round(os.getloadavg()[0],1)
@@ -119,9 +133,9 @@ def main():
         "load1": load1,
     }
 
-    os.makedirs(os.path.join(REPO, "bench"), exist_ok=True)
-    with open(os.path.join(REPO, "bench", "history.jsonl"), "a") as fh:
-        fh.write(json.dumps(row) + "\n")
+    HISTORY.parent.mkdir(parents=True, exist_ok=True)
+    with HISTORY.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
 
     def cell(m):
         v = metrics.get(m)
@@ -133,18 +147,17 @@ def main():
     print(line)
 
     if args.md:
-        md = os.path.join(REPO, "docs", "BENCHMARKS.md")
-        os.makedirs(os.path.dirname(md), exist_ok=True)
+        md = HISTORY.with_suffix(".md")
         header = ("# Azimuth Benchmarks\n\n"
                   "Reproducible hot-path timings tracked over time (newest first). "
-                  "Run `scripts/perfbench.py --label \"...\" --md`. p50/p95 in ms; preview = files/min.\n\n"
+                  "Run `scripts/perfbench.py --label \"...\" --md`. "
+                  "p50/p95 in ms; preview = files/min.\n\n"
                   "| commit | label | preview/min | rankings | counts | folders | warm thumb |\n"
                   "|--------|-------|------------:|---------:|-------:|--------:|-----------:|\n")
         newrow = (f"| `{commit}` | {args.label} | {preview_rate} | {cell('rankings')} | "
                   f"{cell('counts')} | {cell('folders_tree')} | {cell('warm_thumb_sm')} |\n")
-        if os.path.exists(md):
-            with open(md) as fh:
-                content = fh.read()
+        if md.exists():
+            content = md.read_text(encoding="utf-8")
             if content.startswith("# Azimuth Benchmarks"):
                 idx = content.find("|--------|")
                 nl = content.find("\n", idx)
@@ -153,8 +166,7 @@ def main():
                 content = header + newrow
         else:
             content = header + newrow
-        with open(md, "w") as fh:
-            fh.write(content)
+        md.write_text(content, encoding="utf-8")
         print(f"appended row to {md}")
 
 

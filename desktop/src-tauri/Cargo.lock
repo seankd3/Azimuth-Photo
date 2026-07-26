@@ -2439,7 +2439,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "photoarchive-desktop"
+name = "azimuth-photo"
 version = "1.0.0-rc.1"
 dependencies = [
  "open",

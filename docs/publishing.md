@@ -99,7 +99,7 @@ Point nginx at `/srv/www` and serve `/g/<slug>/` directly. The site must route `
 Set:
 
 ```text
-publish_dir=/home/sean/photoarchive-publish/g
+publish_dir=/home/sean/azimuth-publish/g
 publish_hook=rsync -az --delete ./ user@example.com:/var/www/photos/g/
 publish_site_base_url=https://photos.example.com
 ```

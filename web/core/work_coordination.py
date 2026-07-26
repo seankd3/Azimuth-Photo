@@ -28,8 +28,8 @@ _gpu_owner: str | None = None
 _gpu_owner_updated_at = 0.0
 _gpu_waiters: set[str] = set()
 _gpu_owner_flag_path = os.environ.get(
-    "PHOTOARCHIVE_GPU_OWNER_FLAG",
-    "/tmp/photoarchive-gpu-owner.flag",
+    "AZIMUTH_GPU_OWNER_FLAG",
+    "/tmp/azimuth-gpu-owner.flag",
 )
 
 

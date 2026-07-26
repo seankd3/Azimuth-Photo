@@ -1,4 +1,4 @@
-const SPRITE_ID = 'pa-icon-sprite';
+const SPRITE_ID = 'azimuth-icon-sprite';
 
 export function mountIconSprite() {
     if (document.getElementById(SPRITE_ID)) return Promise.resolve();

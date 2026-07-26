@@ -13,8 +13,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(__file__))
-os.environ.setdefault("PHOTOARCHIVE_SMOKE_MODE", "1")
-os.environ.setdefault("PHOTOARCHIVE_SKIP_LR_PRESET_IMPORT", "1")
+os.environ.setdefault("AZIMUTH_SMOKE_MODE", "1")
+os.environ.setdefault("AZIMUTH_SKIP_LR_PRESET_IMPORT", "1")
 
 import app as app_module  # noqa: E402
 import db  # noqa: E402

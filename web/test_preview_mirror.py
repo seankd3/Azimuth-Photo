@@ -20,9 +20,9 @@ class PreviewMirrorTests(BackendTestCase):
         await super().asyncSetUp()
         self.old_cache_dir = thumbnails.SSD_CACHE_DIR
         self.old_allocations = dict(thumbnails._disk_allocations)
-        self.old_mirror_env = os.environ.get("PHOTOARCHIVE_MIRROR_MAX_BYTES")
-        self.old_mode = os.environ.get("PHOTOARCHIVE_MODE")
-        self.old_hub = os.environ.get("PHOTOARCHIVE_HUB_URL")
+        self.old_mirror_env = os.environ.get("AZIMUTH_MIRROR_MAX_BYTES")
+        self.old_mode = os.environ.get("AZIMUTH_MODE")
+        self.old_hub = os.environ.get("AZIMUTH_HUB_URL")
         self.old_last_request = preview_mirror.last_request_at()
 
         thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "thumbs")
@@ -41,8 +41,8 @@ class PreviewMirrorTests(BackendTestCase):
         with thumbnails._disk_index_lock:
             thumbnail_cache_entries._disk_index_built = True
 
-        os.environ["PHOTOARCHIVE_MODE"] = "satellite"
-        os.environ["PHOTOARCHIVE_HUB_URL"] = "http://hub.test"
+        os.environ["AZIMUTH_MODE"] = "satellite"
+        os.environ["AZIMUTH_HUB_URL"] = "http://hub.test"
         preview_mirror._last_request_at = 0.0
 
         source = await self._source("hub")
@@ -83,17 +83,17 @@ class PreviewMirrorTests(BackendTestCase):
         thumbnails._disk_allocations.clear()
         thumbnails._disk_allocations.update(self.old_allocations)
         if self.old_mirror_env is None:
-            os.environ.pop("PHOTOARCHIVE_MIRROR_MAX_BYTES", None)
+            os.environ.pop("AZIMUTH_MIRROR_MAX_BYTES", None)
         else:
-            os.environ["PHOTOARCHIVE_MIRROR_MAX_BYTES"] = self.old_mirror_env
+            os.environ["AZIMUTH_MIRROR_MAX_BYTES"] = self.old_mirror_env
         if self.old_mode is None:
-            os.environ.pop("PHOTOARCHIVE_MODE", None)
+            os.environ.pop("AZIMUTH_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_MODE"] = self.old_mode
+            os.environ["AZIMUTH_MODE"] = self.old_mode
         if self.old_hub is None:
-            os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
+            os.environ.pop("AZIMUTH_HUB_URL", None)
         else:
-            os.environ["PHOTOARCHIVE_HUB_URL"] = self.old_hub
+            os.environ["AZIMUTH_HUB_URL"] = self.old_hub
         preview_mirror._last_request_at = self.old_last_request
         await super().asyncTearDown()
 
@@ -115,7 +115,7 @@ class PreviewMirrorTests(BackendTestCase):
         self.assertFalse(os.path.exists(thumbnails._thumbnail_disk_path("md", self.image_id)))
 
     def test_lru_eviction_at_byte_cap(self):
-        os.environ["PHOTOARCHIVE_MIRROR_MAX_BYTES"] = "1000000"
+        os.environ["AZIMUTH_MIRROR_MAX_BYTES"] = "1000000"
         for image_id, stamp in ((101, 1.0), (102, 2.0), (103, 3.0)):
             data = b"x" * 50
             version = f"pv:id:{image_id}"
@@ -132,7 +132,7 @@ class PreviewMirrorTests(BackendTestCase):
             finally:
                 conn.close()
 
-        os.environ["PHOTOARCHIVE_MIRROR_MAX_BYTES"] = "120"
+        os.environ["AZIMUTH_MIRROR_MAX_BYTES"] = "120"
         reclaimed = preview_mirror.enforce_byte_cap(max_bytes=120)
         self.assertGreater(reclaimed, 0)
         self.assertIsNone(thumbnails.fast_disk_path_entry("sm", 101))

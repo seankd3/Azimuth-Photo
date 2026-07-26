@@ -30,7 +30,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- A self-hosted, local-first home for serious photo archives: browse, filter, cull, rank, search, and share without handing originals to a cloud service.
+- A self-hosted, local-first home for serious Azimuth Photos: browse, filter, cull, rank, search, and share without handing originals to a cloud service.
 - A fast desktop library with a virtualized grid, real folder tree, timeline, filters, and reversible Trash.
 - Refine ranking with quick Mosaic and Duel choices, so the archive learns which photographs matter most to you.
 - Private share galleries, static website publishing, and safe ZIP exports for getting work to clients and collaborators.

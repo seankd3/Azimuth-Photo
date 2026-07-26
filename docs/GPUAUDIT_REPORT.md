@@ -4,7 +4,7 @@ Host: omarchy · GPU: RTX 2060 SUPER 8GB · torch 2.12.0+cu130 · branch `gpuaud
 
 ## Verdict
 
-Torch search/caption paths were **already on CUDA**. Face detection and Develop subject masks were **hardcoded CPU**, and installed `onnxruntime` has **no CUDA EP**, so they stay CPU until that package changes (non-goal). Phase 2 adds one shared device helper + wires every loader; env override `PHOTOARCHIVE_ML_DEVICE=cpu|cuda`.
+Torch search/caption paths were **already on CUDA**. Face detection and Develop subject masks were **hardcoded CPU**, and installed `onnxruntime` has **no CUDA EP**, so they stay CPU until that package changes (non-goal). Phase 2 adds one shared device helper + wires every loader; env override `AZIMUTH_ML_DEVICE=cpu|cuda`.
 
 ## Phase 1 — audit (before code changes)
 
@@ -22,7 +22,7 @@ Receipts: `receipts/gpuaudit-phase1-before.json`, `receipts/gpuaudit-phase1-befo
 
 ## Phase 2 — fix
 
-- **`web/core/ml_device.py`**: single policy — prefer CUDA if available AND allowed; `PHOTOARCHIVE_ML_DEVICE=cpu|cuda`; ORT providers; InsightFace `ctx_id`; HF `device_map`; `empty_cuda_cache()`.
+- **`web/core/ml_device.py`**: single policy — prefer CUDA if available AND allowed; `AZIMUTH_ML_DEVICE=cpu|cuda`; ORT providers; InsightFace `ctx_id`; HF `device_map`; `empty_cuda_cache()`.
 - Wired: `embedding_worker`, `caption_worker`, `face_worker`, `ai_masks`.
 - `memory_pressure.request_model_unload` still drops all three residencies, then `empty_cuda_cache`.
 - Lazy load/unload unchanged; no eager import loads; no new deps.
@@ -60,6 +60,6 @@ No new skips.
 ## Env
 
 ```bash
-PHOTOARCHIVE_ML_DEVICE=cpu   # force CPU even if CUDA present
-PHOTOARCHIVE_ML_DEVICE=cuda  # prefer CUDA; falls back to CPU if unavailable
+AZIMUTH_ML_DEVICE=cpu   # force CPU even if CUDA present
+AZIMUTH_ML_DEVICE=cuda  # prefer CUDA; falls back to CPU if unavailable
 ```

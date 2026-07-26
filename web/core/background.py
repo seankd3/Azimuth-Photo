@@ -65,7 +65,7 @@ def track_background_task(coro) -> asyncio.Task:
 
 
 def smoke_mode_enabled() -> bool:
-    return os.environ.get("PHOTOARCHIVE_SMOKE_MODE") == "1"
+    return os.environ.get("AZIMUTH_SMOKE_MODE") == "1"
 
 
 async def _gather_logged(worker_name: str, *awaitables) -> None:

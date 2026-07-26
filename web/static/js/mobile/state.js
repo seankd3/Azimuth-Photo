@@ -2,7 +2,7 @@
 // and a tiny event bus that keeps the modules decoupled.
 
 const listeners = new Map();
-const VIEW_PREFS_KEY = 'pa-m-view-prefs';
+const VIEW_PREFS_KEY = 'azimuth-mobile-view-prefs';
 const VIEW_PREF_DEFAULTS = {
     sort: 'date_taken',
     collapseStacks: false,

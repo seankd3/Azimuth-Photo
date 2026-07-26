@@ -371,7 +371,7 @@ async def public_gallery_download_all(token: str, request: Request):
     gallery = await _public_gallery(token, request)
     if gallery is None or not gallery["allow_download_all"]:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    handle = tempfile.NamedTemporaryFile(prefix="photoarchive-gallery-", suffix=".zip", delete=False)
+    handle = tempfile.NamedTemporaryFile(prefix="azimuth-gallery-", suffix=".zip", delete=False)
     handle.close()
     try:
         result = await asyncio.to_thread(zip_gallery, gallery, handle.name)

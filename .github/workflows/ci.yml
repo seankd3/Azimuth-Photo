@@ -23,7 +23,7 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r web/requirements.txt
       - run: python -m pip install pytest
-      - run: cd web && PHOTOARCHIVE_SMOKE_MODE=1 python -m pytest -q
+      - run: cd web && AZIMUTH_SMOKE_MODE=1 python -m pytest -q
 
   javascript:
     name: JavaScript syntax

@@ -24,7 +24,7 @@ const sliderValue = (number) => `${number > 0 ? '+' : ''}${number.toFixed(2)}`;
 const percentValue = (value, fallback = 1) => Math.round(clamp(number(value, fallback)) * 100);
 
 function correctionId() {
-    return globalThis.crypto?.randomUUID?.() || `pa-mask-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    return globalThis.crypto?.randomUUID?.() || `azimuth-mask-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
 function kindOf(mask) {

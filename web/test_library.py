@@ -672,7 +672,7 @@ class LibraryTests(BackendTestCase):
 
         with unittest.mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             library_service._rankings_response_cache.clear()
             satellite_result = await library_routes.api_rankings(limit=10, sort="elo")
@@ -791,7 +791,7 @@ class LibraryTests(BackendTestCase):
 
         with unittest.mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ), unittest.mock.patch.object(
             library_service,
             "_ranking_taste_blend_context",
@@ -845,7 +845,7 @@ class LibraryTests(BackendTestCase):
         library_service._rankings_response_cache.clear()
         with unittest.mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://stub-hub"},
+            {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},
         ):
             result = await library_routes.api_rankings(
                 limit=10,

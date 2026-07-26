@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec /home/sean/Projects/mobile-app-toolkit/bin/mobile-app photo-archive "$@"
+exec /home/sean/Projects/mobile-app-toolkit/bin/mobile-app azimuth-photo "$@"

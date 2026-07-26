@@ -12,8 +12,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "web"))
 
-os.environ["PHOTOARCHIVE_DEMOSAIC_PROCESSES"] = "6"
-os.environ["PHOTOARCHIVE_DEMOSAIC_IPC"] = "path"
+os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "6"
+os.environ["AZIMUTH_DEMOSAIC_IPC"] = "path"
 
 
 def _child_rss_mb(parent_pid: int) -> list[tuple[int, float]]:

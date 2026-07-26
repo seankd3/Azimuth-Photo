@@ -13,7 +13,6 @@ import json
 import os
 import statistics
 import sys
-import tempfile
 import time
 from pathlib import Path
 
@@ -21,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 sys.path.insert(0, str(WEB))
 
-os.environ.setdefault("PHOTOARCHIVE_SMOKE_MODE", "1")
+os.environ.setdefault("AZIMUTH_SMOKE_MODE", "1")
 
 
 def percentile(samples: list[float], fraction: float) -> float:
@@ -46,7 +45,6 @@ async def main_async(loops: int, label: str) -> dict:
     from PIL import Image
     from anyio import to_thread
 
-    import db
     import thumbnails
     from features.library import service as library_service
     from features.media import routes as media_routes

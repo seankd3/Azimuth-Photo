@@ -127,7 +127,7 @@ def library_root_from_raws(raws_root: Path | str) -> Path:
 
 
 def default_library_root(*, intake_root: Path | None = None, raws_root: Path | None = None) -> Path:
-    configured = os.environ.get("PHOTOARCHIVE_LIBRARY_DIR")
+    configured = os.environ.get("AZIMUTH_LIBRARY_DIR")
     if configured:
         return Path(configured).expanduser().resolve()
     if raws_root is not None:
@@ -201,7 +201,7 @@ SCANNER_MAKES = (
 )
 EXPORT_SOFTWARE = (
     "lightroom", "adobe photoshop", "capture one", "darktable", "rawtherapee",
-    "affinity photo", "luminar", "azimuth", "photoarchive", "gimp",
+    "affinity photo", "luminar", "azimuth", "gimp",
 )
 
 # User-facing category per source kind, and the destination tree per category.

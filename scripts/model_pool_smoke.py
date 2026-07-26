@@ -20,9 +20,9 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 sys.path.insert(0, str(WEB))
 
 # Tight host budget: one large GPU model at a time on the 8GB card.
-os.environ.setdefault("PHOTOARCHIVE_MODEL_BUDGET_VRAM_BYTES", "default")
-os.environ.setdefault("PHOTOARCHIVE_MODEL_BUDGET_RAM_BYTES", "default")
-os.environ.setdefault("PHOTOARCHIVE_MODEL_PIN_SECONDS", "0")
+os.environ.setdefault("AZIMUTH_MODEL_BUDGET_VRAM_BYTES", "default")
+os.environ.setdefault("AZIMUTH_MODEL_BUDGET_RAM_BYTES", "default")
+os.environ.setdefault("AZIMUTH_MODEL_PIN_SECONDS", "0")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,9 +67,9 @@ def main() -> int:
     )
     pool.clear_eviction_log()
 
-    caption_dir = Path("/home/sean/Projects/photo-archive/web/.models/Qwen--Qwen2.5-VL-3B-Instruct")
-    embed_dir = Path("/home/sean/Projects/photo-archive/web/.models/Qwen--Qwen3-VL-Embedding-2B")
-    face_dir = Path("/home/sean/Projects/photo-archive/web/.models/insightface")
+    caption_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/Qwen--Qwen2.5-VL-3B-Instruct")
+    embed_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/Qwen--Qwen3-VL-Embedding-2B")
+    face_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/insightface")
     for path, label in (
         (caption_dir, "caption"),
         (embed_dir, "embeddings"),

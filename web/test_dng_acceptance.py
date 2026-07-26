@@ -1,7 +1,7 @@
 """§30.3 corpus acceptance against Adobe-rendered embedded DNG previews.
 
 The smoke suite skips this intentionally expensive, corpus-dependent gate. Run:
-    PHOTOARCHIVE_RUN_DNG_ACCEPTANCE=1 .venv/bin/python -m pytest -q -s test_dng_acceptance.py
+    AZIMUTH_RUN_DNG_ACCEPTANCE=1 .venv/bin/python -m pytest -q -s test_dng_acceptance.py
 """
 
 from __future__ import annotations
@@ -17,17 +17,17 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw, ImageOps
 
-if os.environ.get("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE") != "1":
+if os.environ.get("AZIMUTH_RUN_DNG_ACCEPTANCE") != "1":
     # Skip before the heavy imports: importer pulls scanner/image_headers,
     # which binds libc at import time and cannot even collect on Windows.
-    pytest.skip("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE not set", allow_module_level=True)
+    pytest.skip("AZIMUTH_RUN_DNG_ACCEPTANCE not set", allow_module_level=True)
 
 from features.develop import adobe_profiles, dng_pipeline, importer, lossydng, pipeline, rawproc, xmp_write
 
 pytestmark = pytest.mark.slow
 
-PROD_DB = Path(os.environ.get("PHOTOARCHIVE_ACCEPTANCE_DB", "/home/sean/Projects/photo-archive/web/photoarchive.db"))
-EVIDENCE_DIR = Path(os.environ.get("PHOTOARCHIVE_DNG_EVIDENCE_DIR", "/mnt/expansion/tmp-lanes/color/evidence"))
+PROD_DB = Path(os.environ.get("AZIMUTH_ACCEPTANCE_DB", "/home/sean/Projects/azimuth-photo/web/azimuth.db"))
+EVIDENCE_DIR = Path(os.environ.get("AZIMUTH_DNG_EVIDENCE_DIR", "/mnt/expansion/tmp-lanes/color/evidence"))
 SAMPLE_SIZE = 40
 PREVIEW_EDGE = 512
 MEAN_L_LIMIT = 0.035
@@ -200,7 +200,7 @@ def test_clean_split_finds_nested_look_tone_edits():
 
 
 @pytest.mark.skipif(
-    os.environ.get("PHOTOARCHIVE_RUN_DNG_ACCEPTANCE") != "1",
+    os.environ.get("AZIMUTH_RUN_DNG_ACCEPTANCE") != "1",
     reason="40-DNG Adobe-preview acceptance is opt-in and excluded from smoke",
 )
 def test_40_dng_adobe_preview_acceptance():

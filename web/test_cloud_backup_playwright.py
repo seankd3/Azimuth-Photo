@@ -45,9 +45,9 @@ def _seed() -> None:
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
-            "PHOTOARCHIVE_SETTINGS_PATH": str(SETTINGS_PATH),
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DB_PATH": str(DB_PATH),
+            "AZIMUTH_SETTINGS_PATH": str(SETTINGS_PATH),
             "PYTHONPATH": str(WEB_ROOT),
             "RCLONE_CONFIG": str(RCLONE_CONF),
         }
@@ -110,11 +110,11 @@ def test_cloud_backup_panel_renders_and_saves_config():
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
-            "PHOTOARCHIVE_CACHE_DIR": str(CACHE_ROOT),
-            "PHOTOARCHIVE_SETTINGS_PATH": str(SETTINGS_PATH),
-            "PHOTOARCHIVE_PORT": str(PORT),
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DB_PATH": str(DB_PATH),
+            "AZIMUTH_CACHE_DIR": str(CACHE_ROOT),
+            "AZIMUTH_SETTINGS_PATH": str(SETTINGS_PATH),
+            "AZIMUTH_PORT": str(PORT),
             "PYTHONPATH": str(WEB_ROOT),
             "RCLONE_CONFIG": str(RCLONE_CONF),
         }

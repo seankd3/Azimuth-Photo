@@ -342,7 +342,7 @@ async def api_save_settings(request: Request):
         return JSONResponse(
             {
                 "error": "publish_hook is server-side configuration. Set the "
-                "PHOTOARCHIVE_PUBLISH_HOOK environment variable or edit the "
+                "AZIMUTH_PUBLISH_HOOK environment variable or edit the "
                 "settings file on the server."
             },
             status_code=400,

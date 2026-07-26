@@ -35,7 +35,7 @@ The SQLite catalog and downloaded models live in the platform data directory;
 settings live in its config directory; previews, embedding snapshots, and
 Develop intermediates live in its cache directory; process files and logs live
 in its state directory. Durable library exports default to
-`~/Pictures/Azimuth Photo Exports`.
+`~/Pictures/Azimuth Exports`.
 
 Older installations are detected from their exact runtime paths and remain
 there. In particular, Azimuth Photo does not automatically move or rebuild an
@@ -44,7 +44,7 @@ backup folder. This protects large established libraries and makes an upgrade
 behaviorally identical until the owner explicitly chooses new storage.
 
 All runtime files stay on the machine running the app and remain ignored by
-git. `PHOTOARCHIVE_HOME` selects one managed root; granular environment
+git. `AZIMUTH_HOME` selects one managed root; granular environment
 overrides can select the catalog, settings, previews, models, embedding cache,
 Develop cache, exports, backups, run directory, and log directory separately.
 
@@ -66,7 +66,7 @@ static assets, `/api/version`, and pairing-code redemption (single-use,
 expiring, rate-limited) are the only routes reachable without a credential.
 
 The after-publish hook (`publish_hook`) executes a shell command, so it is
-server-side configuration only: set the `PHOTOARCHIVE_PUBLISH_HOOK` environment
+server-side configuration only: set the `AZIMUTH_PUBLISH_HOOK` environment
 variable or edit the settings file on the server. The settings API rejects
 writes to it and never returns the configured command.
 

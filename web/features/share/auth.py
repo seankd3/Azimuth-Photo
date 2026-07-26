@@ -18,7 +18,7 @@ from core.requests import RequestBodyTooLarge, read_body_limited
 COOKIE_NAME = "pa_s"
 VIEW_COOKIE_NAME = "pa_v"
 VISITOR_COOKIE_NAME = "pa_sv"
-SECRET_ENV = "PHOTOARCHIVE_SHARE_SECRET"
+SECRET_ENV = "AZIMUTH_SHARE_SECRET"
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1

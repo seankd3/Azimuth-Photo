@@ -39,7 +39,7 @@ def write_cache_marker(cache_root: str, cache_marker: str) -> None:
     if not cache_root:
         return
     with open(cache_marker_path(cache_root, cache_marker), "w", encoding="utf-8") as marker:
-        marker.write("photoArchive thumbnail cache\n")
+        marker.write("Azimuth Photo thumbnail cache\n")
 
 
 def cache_dir_safe_to_clear(

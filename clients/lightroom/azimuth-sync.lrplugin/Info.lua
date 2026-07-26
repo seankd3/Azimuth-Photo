@@ -8,7 +8,7 @@ return {
   LrSdkMinimumVersion = 10.0,
   LrToolkitIdentifier = "com.azimuth.sync",
   LrPluginName = "Azimuth Sync",
-  LrPluginInfoUrl = "https://github.com/seankennethdoherty/photo-archive",
+  LrPluginInfoUrl = "https://github.com/seankennethdoherty/azimuth-photo",
   LrLibraryMenuItems = {
     {
       title = "Azimuth Sync",

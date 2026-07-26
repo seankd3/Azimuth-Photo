@@ -154,16 +154,16 @@ class PairConnectTests(unittest.TestCase):
         self.old_db_path = db.DB_PATH
         self.old_settings_path = settings.SETTINGS_PATH
         self.old_settings = settings._settings
-        self.old_env = {key: os.environ.get(key) for key in ("PHOTOARCHIVE_MODE", "PHOTOARCHIVE_HUB_URL", "PHOTOARCHIVE_DEVICE_TOKEN")}
+        self.old_env = {key: os.environ.get(key) for key in ("AZIMUTH_MODE", "AZIMUTH_HUB_URL", "AZIMUTH_DEVICE_TOKEN")}
         self.old_stored = (satellite._stored_hub_url, satellite._stored_device_token)
         self.old_starter = satellite._sync_starter
         db.DB_PATH = self.db_path
         settings.SETTINGS_PATH = self.settings_path
         settings._settings = None
         settings.save_settings(settings.DEFAULT_SETTINGS)
-        os.environ["PHOTOARCHIVE_MODE"] = "standalone"
-        os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
-        os.environ.pop("PHOTOARCHIVE_DEVICE_TOKEN", None)
+        os.environ["AZIMUTH_MODE"] = "standalone"
+        os.environ.pop("AZIMUTH_HUB_URL", None)
+        os.environ.pop("AZIMUTH_DEVICE_TOKEN", None)
         satellite._stored_hub_url = ""
         satellite._stored_device_token = ""
         asyncio.run(db.init_db())

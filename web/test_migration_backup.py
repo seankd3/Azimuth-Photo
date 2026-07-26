@@ -30,7 +30,7 @@ class MigrationBackupTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / "backups"
         self.root.mkdir()
-        self.db = os.path.join(self.tmp.name, "photoarchive.db")
+        self.db = os.path.join(self.tmp.name, "azimuth.db")
         _make_db(self.db, 20)
         self._patch = mock.patch.object(backups, "backup_root", return_value=self.root)
         self._patch.start()
@@ -102,7 +102,7 @@ class MigrationBackupTests(unittest.TestCase):
 class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.db = os.path.join(self.tmp.name, "photoarchive.db")
+        self.db = os.path.join(self.tmp.name, "azimuth.db")
         _make_db(self.db, 20)
 
     async def asyncTearDown(self):

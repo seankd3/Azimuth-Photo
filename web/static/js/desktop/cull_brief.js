@@ -151,7 +151,7 @@ async function undoAccept(receipt = state.lastAccept) {
         state.index = Math.min(receipt.index, state.suggestions.length - 1);
         updateBanner();
         renderReview();
-        document.dispatchEvent(new CustomEvent('photoarchive:cull-undone', { detail: receipt }));
+        document.dispatchEvent(new CustomEvent('azimuth:cull-undone', { detail: receipt }));
         showToast('Cull decision restored');
         return true;
     } catch {
@@ -186,7 +186,7 @@ async function acceptCurrent() {
     receipt.commit = postJson('/api/quality/autocull/apply', { stack_ids: [suggestion.stack_id] })
         .then((result) => {
             if (!result?.ok) throw new Error(result?.error || 'Couldn’t apply this suggestion');
-            document.dispatchEvent(new CustomEvent('photoarchive:cull-applied', { detail: result }));
+            document.dispatchEvent(new CustomEvent('azimuth:cull-applied', { detail: result }));
             return true;
         })
         .catch((error) => {
@@ -321,8 +321,8 @@ export function initCullBrief() {
         else if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); undoAccept(); }
         else if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeReview(); }
     });
-    document.addEventListener('photoarchive:import-complete', refreshCullBriefWithErrorState);
+    document.addEventListener('azimuth:import-complete', refreshCullBriefWithErrorState);
     setTimeout(refreshCullBriefWithErrorState, 3000);
 }
 
-window.__photoArchiveCullBrief = { init: initCullBrief, refresh: refreshCullBrief };
+window.__azimuthCullBrief = { init: initCullBrief, refresh: refreshCullBrief };

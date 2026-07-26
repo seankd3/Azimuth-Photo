@@ -13,7 +13,7 @@ from core import work_coordination
 # excess work on an async semaphore so status/health stay responsive.
 _ON_DEMAND_LIMIT = max(
     1,
-    int(os.environ.get("PHOTOARCHIVE_ON_DEMAND_DECODE_LIMIT", "2")),
+    int(os.environ.get("AZIMUTH_ON_DEMAND_DECODE_LIMIT", "2")),
 )
 _on_demand_decode_sem: asyncio.Semaphore | None = None
 

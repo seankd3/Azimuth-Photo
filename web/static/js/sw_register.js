@@ -1,5 +1,5 @@
 /**
- * Register (or disable) the photo-archive service worker.
+ * Register (or disable) the azimuth-photo service worker.
  *
  * Disable without redeploy:
  *   - URL query: ?pa_sw=0  (also ?pa_sw=off / false / no)
@@ -44,7 +44,7 @@ async function unregisterAll() {
     await Promise.all(registrations.map((registration) => registration.unregister()));
 }
 
-export async function registerPhotoArchiveServiceWorker() {
+export async function registerAzimuthPhotoServiceWorker() {
     if (!('serviceWorker' in navigator) || !window.isSecureContext) return { ok: false, reason: 'unsupported' };
 
     if (!isServiceWorkerDesired()) {
@@ -66,7 +66,7 @@ export async function registerPhotoArchiveServiceWorker() {
 
 export function scheduleServiceWorkerRegistration() {
     const run = () => {
-        registerPhotoArchiveServiceWorker().catch(() => {});
+        registerAzimuthPhotoServiceWorker().catch(() => {});
     };
     if (document.readyState === 'complete') run();
     else window.addEventListener('load', run, { once: true });

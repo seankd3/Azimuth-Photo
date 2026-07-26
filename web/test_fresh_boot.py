@@ -5,7 +5,7 @@ how a startup handler that assumed schema existed bricked every fresh install
 without a single red test (fix 5a1b5017). An in-process TestClient boot does
 NOT reproduce real handler ordering (verified: it stays green with 5a1b5017
 reverted), so this gate boots the app the way installs actually do: a
-subprocess server_entry against a virgin PHOTOARCHIVE_HOME.
+subprocess server_entry against a virgin AZIMUTH_HOME.
 
 Doctrine this enforces (docs/background-work-behavior.md): startup handlers
 have NO ordering guarantee relative to init_db — and under SMOKE_MODE init_db
@@ -42,13 +42,13 @@ class FreshHomeBootSmoke(unittest.TestCase):
     def test_fresh_smoke_mode_home_boots_clean_without_any_schema(self):
         # SMOKE_MODE skips init_db entirely: the strictest schema-tolerance
         # probe — any startup handler that queries the catalog dies here.
-        self._boot_fresh_home({"PHOTOARCHIVE_SMOKE_MODE": "1", "PHOTOARCHIVE_ACCESS": "local"})
+        self._boot_fresh_home({"AZIMUTH_SMOKE_MODE": "1", "AZIMUTH_ACCESS": "local"})
 
     def test_fresh_satellite_home_boots_clean_with_unreachable_hub(self):
         # Law 1: a satellite must boot and serve even when its hub is down.
         self._boot_fresh_home({
-            "PHOTOARCHIVE_MODE": "satellite",
-            "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1",
+            "AZIMUTH_MODE": "satellite",
+            "AZIMUTH_HUB_URL": "http://127.0.0.1:1",
         })
 
     def _boot_fresh_home(self, extra_env: dict):
@@ -57,12 +57,12 @@ class FreshHomeBootSmoke(unittest.TestCase):
             env = {
                 key: value
                 for key, value in os.environ.items()
-                if not key.startswith("PHOTOARCHIVE_")
+                if not key.startswith("AZIMUTH_")
             }
             env.update({
-                "PHOTOARCHIVE_HOME": home,
-                "PHOTOARCHIVE_PORT": str(port),
-                "PHOTOARCHIVE_HOST": "127.0.0.1",
+                "AZIMUTH_HOME": home,
+                "AZIMUTH_PORT": str(port),
+                "AZIMUTH_HOST": "127.0.0.1",
                 "PYTHONPATH": str(WEB_ROOT),
             })
             env.update(extra_env)

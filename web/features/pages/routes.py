@@ -97,7 +97,7 @@ def needs_setup() -> bool:
     global _setup_known_done
     if _setup_known_done:
         return False
-    if os.environ.get("PHOTOARCHIVE_SMOKE_MODE"):
+    if os.environ.get("AZIMUTH_SMOKE_MODE"):
         return False
     import settings as app_settings
 

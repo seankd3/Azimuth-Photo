@@ -94,7 +94,7 @@ class XmpWriteTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
-        self.db_path = str(self.root / "photoarchive.db")
+        self.db_path = str(self.root / "azimuth.db")
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.executescript(
                 """

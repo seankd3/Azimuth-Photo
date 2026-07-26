@@ -81,15 +81,15 @@ class ProbeServer:
         env.update(fixture_environment())
         if self.old_hub is not None:
             self.old_hub.start()
-            env.update({"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": self.old_hub.base_url})
+            env.update({"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": self.old_hub.base_url})
         elif self.offline_hub:
             # This is intentionally a dead local port, never a real paired hub.
-            env.update({"PHOTOARCHIVE_MODE": "satellite", "PHOTOARCHIVE_HUB_URL": "http://127.0.0.1:1"})
+            env.update({"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://127.0.0.1:1"})
         else:
             # The general desktop matrix exercises direct-owner behavior. The
             # offline satellite flow below gets its own isolated process.
-            env.update({"PHOTOARCHIVE_MODE": "hub"})
-        env.update({"PHOTOARCHIVE_HOST": "127.0.0.1", "PHOTOARCHIVE_PORT": str(self.port)})
+            env.update({"AZIMUTH_MODE": "hub"})
+        env.update({"AZIMUTH_HOST": "127.0.0.1", "AZIMUTH_PORT": str(self.port)})
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_file = self.log_path.open("a", encoding="utf-8")
         self._log_file.write(f"\n--- ProbeServer {self.base_url} starting ---\n")

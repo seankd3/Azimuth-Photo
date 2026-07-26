@@ -390,5 +390,5 @@ def begin_merge(db_path: str, image_ids: Iterable[int]) -> bool:
         finally:
             _set_status(running=False, finished_at=time.time(), seconds=round(time.monotonic() - started, 3))
 
-    threading.Thread(target=worker, name="photoarchive-hdr-merge", daemon=True).start()
+    threading.Thread(target=worker, name="azimuth-hdr-merge", daemon=True).start()
     return True

@@ -11,7 +11,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cd ..
-./scripts/photoarchive-server start
+./scripts/azimuth-server start
 ```
 
 That is the fast core install: library browsing, metadata search, Refine,
@@ -118,7 +118,7 @@ scan, captions, and metadata background work.
 Run the repo-root verification script so the project virtualenv is used:
 
 ```bash
-./scripts/photoarchive-check
+./scripts/azimuth-check
 ```
 
 That script runs `git diff --check`, Python compilation with
@@ -127,16 +127,16 @@ That script runs `git diff --check`, Python compilation with
 List focused check areas:
 
 ```bash
-./scripts/photoarchive-check --list-areas
+./scripts/azimuth-check --list-areas
 ```
 
 Use the smallest named area that matches the files you touched:
 
 ```bash
-./scripts/photoarchive-check --area background-work
-./scripts/photoarchive-check --area ai-search
-./scripts/photoarchive-check --area previews
-./scripts/photoarchive-check --area people-work
+./scripts/azimuth-check --area background-work
+./scripts/azimuth-check --area ai-search
+./scripts/azimuth-check --area previews
+./scripts/azimuth-check --area people-work
 ```
 
 The older aliases still work for compatibility: `frontend`, `search`, `cache`,
@@ -146,13 +146,13 @@ Agent verification ladder:
 
 | Change | Check |
 | --- | --- |
-| One JavaScript file | `./scripts/photoarchive-check --quick` plus `node --check web/static/js/path/to/file.js` |
-| Desktop/mobile shell UI | `./scripts/photoarchive-check --area background-work` |
-| Search or AI embedding behavior | `./scripts/photoarchive-check --area ai-search` |
-| Previews or cache behavior | `./scripts/photoarchive-check --area previews` |
-| People background work | `./scripts/photoarchive-check --area people-work` |
-| Narrow handoff | `./scripts/photoarchive-check --quick` plus the relevant area |
-| Broad handoff or changed browser behavior | `./scripts/photoarchive-check --unit` or `./scripts/photoarchive-check --full` |
+| One JavaScript file | `./scripts/azimuth-check --quick` plus `node --check web/static/js/path/to/file.js` |
+| Desktop/mobile shell UI | `./scripts/azimuth-check --area background-work` |
+| Search or AI embedding behavior | `./scripts/azimuth-check --area ai-search` |
+| Previews or cache behavior | `./scripts/azimuth-check --area previews` |
+| People background work | `./scripts/azimuth-check --area people-work` |
+| Narrow handoff | `./scripts/azimuth-check --quick` plus the relevant area |
+| Broad handoff or changed browser behavior | `./scripts/azimuth-check --unit` or `./scripts/azimuth-check --full` |
 
 Run unit tests directly from `web/` when you need a narrower loop:
 
@@ -208,13 +208,11 @@ curl http://127.0.0.1:8000/api/cache/status
 ## Runtime Files
 
 `core.runtime_paths` owns catalog, settings, preview, model, embedding,
-Develop, export, backup, run, and log locations. Its resolver is read-only;
-directory creation is explicit and never migrates data. Clean installs use
-platform-native roots. A checkout containing established legacy runtime data
-continues using `web/photoarchive.db`, `web/.thumbcache/`, `web/.models/`,
-`web/.embedcache/`, `web/settings.local.json`, and `web/.run/` exactly where
-they are.
+Develop, export, backup, transfer, run, and log locations. Its resolver is
+read-only; directory creation is explicit and never migrates data. Clean
+installs use platform-native roots. Source checkouts are never runtime-storage
+fallbacks.
 
-Do not commit runtime data. Use `PHOTOARCHIVE_HOME` for a single custom root or
-the documented granular `PHOTOARCHIVE_*_DIR` / `PHOTOARCHIVE_DB_PATH`
+Do not commit runtime data. Use `AZIMUTH_HOME` for a single custom root or
+the documented granular `AZIMUTH_*_DIR` / `AZIMUTH_DB_PATH`
 overrides for test and deployment isolation.

@@ -271,7 +271,7 @@ async def _seed_discovery_surfaces(conn, preview_path: Path, now: float) -> None
 
 
 async def _seed() -> None:
-    # Imports must happen after PHOTOARCHIVE_HOME is present in the worker env.
+    # Imports must happen after AZIMUTH_HOME is present in the worker env.
     import db
     import thumbnails
     from core.runtime_paths import ensure_runtime_dirs, resolve_runtime_paths

@@ -2,7 +2,7 @@
 """Distill measured noise-calibration rows used by Develop.
 
 Source data is darktable's measured calibration dataset.  Cameras are the
-bodies present in the photo-archive fixture library that darktable already
+bodies present in the azimuth-photo fixture library that darktable already
 calibrated — adding another body is a data change (MODEL_SPECS / aliases),
 not a code change in the lookup path.
 """

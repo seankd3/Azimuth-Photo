@@ -44,7 +44,7 @@ DOCUMENTED_PUBLIC_PREFIXES = ("/static/", "/s/")
 def clean_auth(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "SETTINGS_PATH", str(tmp_path / "settings.local.json"))
     monkeypatch.setattr(settings, "_settings", None)
-    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "photoarchive-test.db"))
+    monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "azimuth-test.db"))
     owner_service.clear_unlock_failures()
     owner_service._verified_bearer_cache.clear()
     pair_routes.reset_redeem_throttle_for_tests()
@@ -231,10 +231,10 @@ def test_publish_hook_api_write_rejected_and_read_masked(clean_auth):
 
 
 def test_publish_hook_env_and_settings_file_still_configure_deployer(clean_auth, monkeypatch):
-    monkeypatch.delenv("PHOTOARCHIVE_PUBLISH_HOOK", raising=False)
+    monkeypatch.delenv("AZIMUTH_PUBLISH_HOOK", raising=False)
     settings.save_settings({**settings.get_settings(), "publish_hook": "scripts/deploy.sh"})
     assert PublishConfig.from_settings().publish_hook == "scripts/deploy.sh"
-    monkeypatch.setenv("PHOTOARCHIVE_PUBLISH_HOOK", "systemctl restart site")
+    monkeypatch.setenv("AZIMUTH_PUBLISH_HOOK", "systemctl restart site")
     assert PublishConfig.from_settings().publish_hook == "systemctl restart site"
     assert configured_publish_hook() == "systemctl restart site"
 

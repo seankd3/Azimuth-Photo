@@ -1279,8 +1279,8 @@ async def _refine_sample(
 def _mosaic_pool_tier() -> str:
     """Refine tiles render the md tier, so candidate pools must be gated on md
     servability — an sm-visible image with no md file paints a blank cell.
-    Rollback override: PHOTOARCHIVE_REFINE_VISIBLE_TIER=sm."""
-    tier = os.environ.get("PHOTOARCHIVE_REFINE_VISIBLE_TIER", "md").strip().lower()
+    Rollback override: AZIMUTH_REFINE_VISIBLE_TIER=sm."""
+    tier = os.environ.get("AZIMUTH_REFINE_VISIBLE_TIER", "md").strip().lower()
     return tier if tier in ("sm", "md") else "md"
 
 

@@ -9,12 +9,12 @@ cd web
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
 cd ..
-./scripts/photoarchive-server start
+./scripts/azimuth-server start
 ```
 
-Use `./scripts/photoarchive-check --quick` for a fast local pass. Run the relevant tests for every behavior change; `docs/development.md` is the source of truth for setup, ownership, and verification.
+Use `./scripts/azimuth-check --quick` for a fast local pass. Run the relevant tests for every behavior change; `docs/development.md` is the source of truth for setup, ownership, and verification.
 
-`PHOTOARCHIVE_SMOKE_MODE=1` exists for tests only. Do not use it for normal local development or a running archive: it deliberately skips archive initialization.
+`AZIMUTH_SMOKE_MODE=1` exists for tests only. Do not use it for normal local development or a running archive: it deliberately skips archive initialization.
 
 ## Keep the product clear
 

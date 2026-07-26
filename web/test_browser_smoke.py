@@ -8,8 +8,8 @@ from pathlib import Path
 pytestmark = pytest.mark.slow
 
 @unittest.skipUnless(
-    os.environ.get("PHOTOARCHIVE_BROWSER_SMOKE") == "1",
-    "set PHOTOARCHIVE_BROWSER_SMOKE=1 to run the opt-in browser smoke test",
+    os.environ.get("AZIMUTH_BROWSER_SMOKE") == "1",
+    "set AZIMUTH_BROWSER_SMOKE=1 to run the opt-in browser smoke test",
 )
 @unittest.skipIf(os.name == "nt", "uses the Linux google-chrome-stable binary")
 class BrowserSmokeTests(unittest.TestCase):
@@ -20,9 +20,9 @@ class BrowserSmokeTests(unittest.TestCase):
         if not shutil.which("google-chrome-stable"):
             self.skipTest("google-chrome-stable is required for browser smoke")
 
-        base_url = os.environ.get("PHOTOARCHIVE_SMOKE_URL", "http://127.0.0.1:8000")
+        base_url = os.environ.get("AZIMUTH_SMOKE_URL", "http://127.0.0.1:8000")
         script = Path(__file__).resolve().parents[1] / "scripts" / "azimuth-browser-smoke"
-        # When targeting a local dev server, start it with PHOTOARCHIVE_SMOKE_MODE=1
+        # When targeting a local dev server, start it with AZIMUTH_SMOKE_MODE=1
         # so the browser gate skips archive DB startup and heavyweight model workers.
         result = subprocess.run(
             [node, str(script), "--base-url", base_url],

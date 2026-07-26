@@ -44,8 +44,8 @@ def _seed_catalog() -> None:
         DB_PATH.unlink()
 
     env = os.environ.copy()
-    env["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    env["PHOTOARCHIVE_DB_PATH"] = str(DB_PATH)
+    env["AZIMUTH_SMOKE_MODE"] = "1"
+    env["AZIMUTH_DB_PATH"] = str(DB_PATH)
     env["PYTHONPATH"] = str(WEB_ROOT)
 
     script = r"""
@@ -90,7 +90,7 @@ async def main():
 asyncio.run(main())
 """ % (str(DB_PATH), str(CACHE_ROOT), HASH_RAW, HASH_EDIT)
     subprocess.check_call(
-        ["/home/sean/Projects/photo-archive/web/.venv/bin/python", "-c", script],
+        ["/home/sean/Projects/azimuth-photo/web/.venv/bin/python", "-c", script],
         cwd=str(WEB_ROOT),
         env=env,
     )
@@ -113,16 +113,16 @@ def test_lr_ux_connect_and_ranking_chip_screenshots():
     _seed_catalog()
     env = os.environ.copy()
     env.update({
-        "PHOTOARCHIVE_SMOKE_MODE": "1",
-        "PHOTOARCHIVE_MODE": "satellite",
-        "PHOTOARCHIVE_DB_PATH": str(DB_PATH),
-        "PHOTOARCHIVE_CACHE_DIR": str(CACHE_ROOT),
-        "PHOTOARCHIVE_PORT": str(PORT),
-        "PHOTOARCHIVE_LR_MODULES_DIR": str(MODULES),
-        "PHOTOARCHIVE_LR_FORCE_DETECT": "1",
+        "AZIMUTH_SMOKE_MODE": "1",
+        "AZIMUTH_MODE": "satellite",
+        "AZIMUTH_DB_PATH": str(DB_PATH),
+        "AZIMUTH_CACHE_DIR": str(CACHE_ROOT),
+        "AZIMUTH_PORT": str(PORT),
+        "AZIMUTH_LR_MODULES_DIR": str(MODULES),
+        "AZIMUTH_LR_FORCE_DETECT": "1",
         "PYTHONPATH": str(WEB_ROOT),
     })
-    py = "/home/sean/Projects/photo-archive/web/.venv/bin/python"
+    py = "/home/sean/Projects/azimuth-photo/web/.venv/bin/python"
     server = subprocess.Popen(
         [py, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=str(WEB_ROOT),

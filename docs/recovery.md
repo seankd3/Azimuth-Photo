@@ -16,18 +16,18 @@ This check does not repair or replace anything automatically.
 ## Restore a snapshot
 
 1. In Library Health, choose a catalog snapshot and select **Prepare restore**.
-   This validates the gzip archive and writes `photoarchive.restored.db` beside
+   This validates the gzip archive and writes `azimuth.restored.db` beside
    the live catalog. It never overwrites the live catalog.
 2. Stop the Azimuth Photo server.
 3. In the catalog directory, retain the failed catalog with a dated name, then
    put the prepared catalog in its place:
 
    ```bash
-   mv photoarchive.db "photoarchive.corrupt-$(date +%Y%m%d-%H%M%S).db"
-   mv photoarchive.restored.db photoarchive.db
+   mv azimuth.db "azimuth.corrupt-$(date +%Y%m%d-%H%M%S).db"
+   mv azimuth.restored.db azimuth.db
    ```
 
-   Use the configured catalog location (`PHOTOARCHIVE_DB_PATH`) when it differs
+   Use the configured catalog location (`AZIMUTH_DB_PATH`) when it differs
    from the default runtime location.
 4. Start the server and confirm Library Health reports an `ok` catalog check.
    Keep the renamed corrupt file until the recovered catalog has been reviewed.

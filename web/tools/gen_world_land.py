@@ -7,10 +7,11 @@ rings, and emits SVG path strings.
 """
 import json
 import math
+from pathlib import Path
 import sys
 
 SRC = "/tmp/ne_110m_land.geojson"
-OUT = "/home/sean/Projects/pa-develop/web/static/js/desktop/world_land.js"
+OUT = Path(__file__).resolve().parents[1] / "static" / "js" / "desktop" / "world_land.js"
 TOLERANCE = 1.2
 MIN_POINTS = 6
 

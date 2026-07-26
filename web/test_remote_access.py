@@ -24,12 +24,12 @@ class TailscaleProbeTests(unittest.TestCase):
         self._old_env = {
             key: os.environ.get(key)
             for key in (
-                "PHOTOARCHIVE_MODE",
-                "PHOTOARCHIVE_HUB_URL",
-                "PHOTOARCHIVE_TS_DRYRUN",
-                "PHOTOARCHIVE_TS_FORCE_STATE",
-                "PHOTOARCHIVE_HTTPS_PORT",
-                "PHOTOARCHIVE_PORT",
+                "AZIMUTH_MODE",
+                "AZIMUTH_HUB_URL",
+                "AZIMUTH_TS_DRYRUN",
+                "AZIMUTH_TS_FORCE_STATE",
+                "AZIMUTH_HTTPS_PORT",
+                "AZIMUTH_PORT",
             )
         }
         for key in list(self._old_env):
@@ -46,22 +46,22 @@ class TailscaleProbeTests(unittest.TestCase):
 
     def test_hub_mode_predicate(self):
         self.assertTrue(ts.is_hub_mode())
-        os.environ["PHOTOARCHIVE_MODE"] = "hub"
+        os.environ["AZIMUTH_MODE"] = "hub"
         self.assertTrue(ts.is_hub_mode())
-        os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+        os.environ["AZIMUTH_MODE"] = "standalone"
         self.assertFalse(ts.is_hub_mode())
-        os.environ["PHOTOARCHIVE_MODE"] = "satellite"
+        os.environ["AZIMUTH_MODE"] = "satellite"
         self.assertFalse(ts.is_hub_mode())
-        os.environ.pop("PHOTOARCHIVE_MODE", None)
-        os.environ["PHOTOARCHIVE_HUB_URL"] = "http://hub.example"
+        os.environ.pop("AZIMUTH_MODE", None)
+        os.environ["AZIMUTH_HUB_URL"] = "http://hub.example"
         self.assertFalse(ts.is_hub_mode())
 
     def test_force_states(self):
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "absent"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "absent"
         self.assertEqual(ts.probe()["state"], "absent")
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "logged-out"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "logged-out"
         self.assertEqual(ts.probe()["state"], "logged-out")
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "up"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "up"
         up = ts.probe()
         self.assertEqual(up["state"], "up")
         self.assertTrue(up["https_url"].startswith("https://"))
@@ -106,8 +106,8 @@ class TailscaleProbeTests(unittest.TestCase):
         self.assertEqual(result["https_url"], "https://studio.tailnet.ts.net:8443")
 
     def test_apply_serve_dry_run_never_invokes_cli(self):
-        os.environ["PHOTOARCHIVE_TS_DRYRUN"] = "1"
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "up"
+        os.environ["AZIMUTH_TS_DRYRUN"] = "1"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "up"
         calls: list[tuple] = []
 
         def runner(argv, timeout):
@@ -119,11 +119,11 @@ class TailscaleProbeTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["dry_run"])
         self.assertIn("tailscale serve --bg --https=8443", result["command"])
-        self.assertEqual(result["https_url"], "https://photoarchive.example.ts.net:8443")
+        self.assertEqual(result["https_url"], "https://azimuth.example.ts.net:8443")
         self.assertEqual(calls, [])
 
     def test_apply_serve_runs_exact_argv_when_live(self):
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "up"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "up"
         calls: list[list[str]] = []
 
         def runner(argv, timeout):
@@ -143,13 +143,13 @@ class TailscaleProbeTests(unittest.TestCase):
 class RemoteAccessRouteTests(unittest.TestCase):
     def setUp(self):
         self._old = {key: os.environ.get(key) for key in (
-            "PHOTOARCHIVE_MODE", "PHOTOARCHIVE_HUB_URL", "PHOTOARCHIVE_TS_DRYRUN",
-            "PHOTOARCHIVE_TS_FORCE_STATE", "PHOTOARCHIVE_PORT",
+            "AZIMUTH_MODE", "AZIMUTH_HUB_URL", "AZIMUTH_TS_DRYRUN",
+            "AZIMUTH_TS_FORCE_STATE", "AZIMUTH_PORT",
         )}
         for key in list(self._old):
             os.environ.pop(key, None)
-        os.environ["PHOTOARCHIVE_PORT"] = "8133"
-        os.environ["PHOTOARCHIVE_TS_DRYRUN"] = "1"
+        os.environ["AZIMUTH_PORT"] = "8133"
+        os.environ["AZIMUTH_TS_DRYRUN"] = "1"
         ts.set_runner(None)
         app = FastAPI()
         app.include_router(access_routes.router)
@@ -165,7 +165,7 @@ class RemoteAccessRouteTests(unittest.TestCase):
                 os.environ[key] = value
 
     def test_get_includes_hub_mode_and_states(self):
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "logged-out"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "logged-out"
         response = self.client.get("/api/remote-access")
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -176,7 +176,7 @@ class RemoteAccessRouteTests(unittest.TestCase):
         self.assertIn("8133", body["tailscale"]["serve_command"])
 
     def test_hidden_semantics_for_standalone(self):
-        os.environ["PHOTOARCHIVE_MODE"] = "standalone"
+        os.environ["AZIMUTH_MODE"] = "standalone"
         response = self.client.get("/api/remote-access")
         self.assertEqual(response.status_code, 200)
         body = response.json()
@@ -184,7 +184,7 @@ class RemoteAccessRouteTests(unittest.TestCase):
         self.assertEqual(body["mode"], "standalone")
 
     def test_post_serve_dry_run(self):
-        os.environ["PHOTOARCHIVE_TS_FORCE_STATE"] = "up"
+        os.environ["AZIMUTH_TS_FORCE_STATE"] = "up"
         response = self.client.post("/api/remote-access/serve")
         self.assertEqual(response.status_code, 200)
         body = response.json()

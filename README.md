@@ -5,12 +5,18 @@
 [![CI](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
 
-Azimuth Photo is a self-hosted library for serious photo archives — and it is **fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images without uploading a single byte to anyone else's cloud.
+Azimuth Photo is a self-hosted library for serious photographers — and it is
+**fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos
+at lightning speed from your own computer, NAS, or server. Cull, rank, search,
+and share tens of thousands of images without uploading a single byte to anyone
+else's cloud.
 
 It runs on your own hardware. Your originals stay under your control: scanning,
 AI, sharing, and publishing use catalog data and generated derivatives; the one
-explicit file-moving action is Trash, which moves originals into a restorable
-`.trash` area until you empty it.
+explicit destructive library action is Trash, which moves originals into a
+restorable `.trash` area until you empty it. A laptop satellite can also offer
+**Free up space**, but only after the hub confirms the same complete file bytes
+immediately before the laptop copy is removed.
 
 > **▶ Try it live — no install: [azimuthphoto.com](https://azimuthphoto.com)**
 > The homepage isn't screenshots. It's the real library grid, the keyboard loupe, the Elo
@@ -118,7 +124,10 @@ An installable PWA at `/m`: fast timeline with pinch density, pull-to-refresh, o
 - **Backend**: FastAPI + SQLite (WAL). Feature-sliced modules with dependency-injected routes, additive-only schema migrations, and a contract-tested public API surface.
 - **Frontend**: browser-native ES modules. No bundler, no build step, no framework — the desktop app is plain modern JavaScript with a virtualized grid.
 - **Workers**: cache pregeneration, embedding indexer, face scanner, VLM captioner, and metadata indexing run as background jobs. GPU-heavy work is sequenced, and AI/People/caption paths work from app-generated derivatives rather than editing originals.
-- **Local-first**: the catalog, caches, and models all live beside the app. Offline drives degrade gracefully; cached views keep working and rescans wait for the drive to return.
+- **Local-first**: the catalog, caches, and models live in platform-native
+  runtime directories, separate from the source checkout. Offline drives
+  degrade gracefully; cached views keep working and rescans wait for the drive
+  to return.
 
 ## Quickstart
 
@@ -128,7 +137,7 @@ cd azimuth-photo
 cd web
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cd ..
-./scripts/photoarchive-server start
+./scripts/azimuth-server start
 ```
 
 Open `http://localhost:8000`, add a source folder in the system drawer, and let the scanners run. AI features (semantic search, captions, faces) activate when you install the local models from Background Work — everything works without them, and gets smarter with them.
@@ -139,6 +148,8 @@ Choose the install path that fits your library in [Install Azimuth Photo](docs/I
 
 ## Docs
 
+- [Documentation index](docs/README.md)
+- [Code, machine, and storage topology](docs/TOPOLOGY.md)
 - [Features in depth](docs/features.md)
 - [Development guide](docs/development.md)
 - [Background work & AI model behavior](docs/background-work-behavior.md)
@@ -151,4 +162,8 @@ Choose the install path that fits your library in [Install Azimuth Photo](docs/I
 
 ## Where everything lives
 
-One repo, many faces — hub server, desktop web UI (`/d`), mobile PWA (`/m`), laptop satellite mode, native Windows shell (`desktop/`), Android app (`android/`). The full map of checkouts, branches, data directories, and how to run or deploy each face is in [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
+One repo, many faces — hub server, desktop web UI (`/d`), mobile PWA (`/m`),
+laptop satellite mode, native Windows shell (`desktop/`), Android app
+(`android/`), public site (`site/`), and Field Log (`tools/field-log/`). The
+complete map of code, machine roles, data directories, and storage tiers is in
+[docs/TOPOLOGY.md](docs/TOPOLOGY.md).

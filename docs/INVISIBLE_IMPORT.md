@@ -44,7 +44,7 @@ The staged-import canvas (import_stage.js) becomes satellite-aware:
 - Commit bar in satellite mode says "Import" exactly as today — no new words.
   After commit, the drain is queued automatically; the peek chip absorbs sync
   ("Backing up — 74 to go") after the import job completes.
-- Field-instance divergences to erase: legacy "photoArchive Imports" local root
+- Field-instance divergences to erase: legacy "Azimuth Imports" local root
   naming; flat local YYYY/YYYY-MM-DD placement vs hub taxonomy trees (align local
   layout with the hub's category trees so freeup/rescan reasoning is symmetric).
 

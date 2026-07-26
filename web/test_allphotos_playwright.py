@@ -40,10 +40,10 @@ def _seed_catalog(db_path: Path, cache_root: Path) -> None:
         db_path.unlink()
 
     env = os.environ.copy()
-    env["PHOTOARCHIVE_SMOKE_MODE"] = "1"
-    env["PHOTOARCHIVE_DB_PATH"] = str(db_path)
-    env["PHOTOARCHIVE_MODE"] = "satellite"
-    env["PHOTOARCHIVE_HUB_URL"] = "http://stub-hub"
+    env["AZIMUTH_SMOKE_MODE"] = "1"
+    env["AZIMUTH_DB_PATH"] = str(db_path)
+    env["AZIMUTH_MODE"] = "satellite"
+    env["AZIMUTH_HUB_URL"] = "http://stub-hub"
     env["PYTHONPATH"] = str(WEB_ROOT)
 
     script = r"""
@@ -134,13 +134,13 @@ def allphotos_server():
     env = os.environ.copy()
     env.update(
         {
-            "PHOTOARCHIVE_SMOKE_MODE": "1",
-            "PHOTOARCHIVE_DB_PATH": str(db_path),
-            "PHOTOARCHIVE_MODE": "satellite",
-            "PHOTOARCHIVE_HUB_URL": "http://stub-hub",
-            "PHOTOARCHIVE_PORT": str(port),
-            "PHOTOARCHIVE_HOST": "127.0.0.1",
-            "PHOTOARCHIVE_ACCESS": "local",
+            "AZIMUTH_SMOKE_MODE": "1",
+            "AZIMUTH_DB_PATH": str(db_path),
+            "AZIMUTH_MODE": "satellite",
+            "AZIMUTH_HUB_URL": "http://stub-hub",
+            "AZIMUTH_PORT": str(port),
+            "AZIMUTH_HOST": "127.0.0.1",
+            "AZIMUTH_ACCESS": "local",
             "TMPDIR": str(scratch),
             "PYTHONPATH": str(WEB_ROOT),
         }
