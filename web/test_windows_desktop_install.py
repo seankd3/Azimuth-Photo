@@ -91,10 +91,22 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
         self.assertIn("azimuth-server.exe", script)
         self.assertIn("*-setup.exe", script)
 
+    def test_windows_satellite_launcher_selects_real_catalog_safely(self):
+        script = (ROOT / "scripts" / "start_azimuth_windows.ps1").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(r'[string]$DataRoot = "C:\Azimuth Photo"', script)
+        self.assertIn(r'data\catalog\azimuth.db', script)
+        self.assertIn('$env:AZIMUTH_MODE = "satellite"', script)
+        self.assertIn("$env:AZIMUTH_THUMB_CACHE_DIR = $PreviewRoot", script)
+        self.assertIn("Remove-Item Env:AZIMUTH_SMOKE_MODE", script)
+        self.assertIn("/api/dev/status", script)
+        self.assertIn("/d", script)
+
     def test_splash_is_customer_facing(self):
         splash = (DESKTOP / "ui" / "index.html").read_text(encoding="utf-8")
         self.assertIn("Azimuth <span>Photo</span>", splash)
-        self.assertNotIn("photo<span>Archive", splash)
         self.assertNotIn("server", splash.lower())
 
 

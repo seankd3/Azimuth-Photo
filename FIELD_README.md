@@ -6,17 +6,15 @@ back to the hub automatically. Big picture: [docs/TOPOLOGY.md](docs/TOPOLOGY.md)
 
 ## Start
 
-From `web/` (Git Bash):
+From the repo (PowerShell):
 
-```bash
-AZIMUTH_MODE=satellite \
-AZIMUTH_HUB_URL='http://100.102.150.104:8000' \
-AZIMUTH_HOME='C:\Azimuth Photo' \
-./.venv/Scripts/python -m uvicorn app:app --host 127.0.0.1 --port 8010
+```powershell
+.\scripts\start_azimuth_windows.ps1
 ```
 
-Then open http://127.0.0.1:8010/d — or use the Tauri tray app (`desktop/`)
-which runs this for you.
+The launcher selects the real `C:\Azimuth Photo` catalog, reuses the running
+server when possible, waits until it is healthy, and opens the desktop surface
+in an app window at http://127.0.0.1:8010/d.
 
 Do **not** set `AZIMUTH_SMOKE_MODE` — it's a test-only flag that disables
 DB init and all background workers (thumbnails never generate, sync never runs).
@@ -32,7 +30,8 @@ Get-NetTCPConnection -LocalPort 8010 -State Listen |
 
 - Repo: `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo`
   (`main`, GitHub origin)
-- Venv: `web\.venv` (Python 3.12; base requirements + tifffile/imagecodecs + CPU torch + ai-search)
+- Venv: `web\.venv` (Python 3.12; base runtime + development tools; optional
+  AI packs are installed separately)
 - Runtime data: `C:\Azimuth Photo\` (catalog, previews, Develop cache,
   models, logs, and transfer receipts)
 - Originals waiting for verified hub offload: the configured XPS source
