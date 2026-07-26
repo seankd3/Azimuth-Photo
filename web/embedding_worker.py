@@ -104,7 +104,14 @@ _worker_status = {
 _embedding_history = deque()
 _embed_retry_after: dict[int, float] = {}
 _embedding_oom_circuit = CaptionOomCircuit(threshold=3)
-_embedding_manual_pause = True
+def _initial_manual_pause() -> bool:
+    try:
+        return not bool(settings.get_settings().get("embedding_scan_enabled", True))
+    except Exception:
+        return True
+
+
+_embedding_manual_pause = _initial_manual_pause()
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
 _embedding_pause_reason = ""
 _unembedded_candidate_cursor = {"model_key": "", "after_id": 0}
@@ -621,8 +628,16 @@ def _pause_reason_for_message(message: str) -> str:
     return USER_PAUSE_REASON
 
 
-def pause_embedding_worker(message: str = "Search is stopped.") -> dict:
+def pause_embedding_worker(
+    message: str = "Search is stopped.",
+    *,
+    persist: bool = True,
+) -> dict:
     global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
+    if persist:
+        app_config = settings.get_settings()
+        if bool(app_config.get("embedding_scan_enabled", True)):
+            settings.save_settings({**app_config, "embedding_scan_enabled": False})
     _embedding_manual_pause = True
     _embedding_manual_pause_message = message
     _embedding_pause_reason = _pause_reason_for_message(message)
@@ -632,13 +647,16 @@ def pause_embedding_worker(message: str = "Search is stopped.") -> dict:
     return get_worker_status()
 
 
-def resume_embedding_worker() -> dict:
+def resume_embedding_worker(*, persist: bool = True) -> dict:
     global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
+    if persist:
+        app_config = settings.get_settings()
+        if not bool(app_config.get("embedding_scan_enabled", True)):
+            settings.save_settings({**app_config, "embedding_scan_enabled": True})
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""
     _embedding_pause_reason = ""
     _embedding_oom_circuit.reset()
-    work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
     _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
     return get_worker_status()

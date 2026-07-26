@@ -26,6 +26,8 @@ if not log.handlers:
 WORKER_SLEEP_SECONDS = 20
 MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
 MODEL_LOAD_FAILURE_PAUSE_THRESHOLD = 3
+OOM_COOLDOWN_BASE_SECONDS = 15 * 60
+OOM_COOLDOWN_MAX_SECONDS = 2 * 60 * 60
 CAPTION_PROMPT = (
     "Describe this photo for private photo-library search. Return only JSON with "
     "keys caption, tags, visible_text, entities, and attributes. caption must be "
@@ -62,6 +64,8 @@ _caption_manual_pause = _initial_manual_pause()
 _caption_manual_pause_message = "Captions are stopped until you start them from Background Work."
 _model_load_failure_count = 0
 _load_failure_cooldown_until = 0.0
+_oom_cooldown_until = 0.0
+_oom_cooldown_count = 0
 _status = {
     "state": "idle",
     "message": "Captions have not scanned cached previews yet.",
@@ -81,6 +85,7 @@ _status = {
     "session_captioned": 0,
     "session_started_at": None,
     "oom_backoffs": 0,
+    "retry_at": None,
     "model_load_failures": 0,
     "source_files_preserved": True,
     "source_media_read": "app_owned_cached_previews_only",
@@ -139,8 +144,6 @@ def mark_dependencies_unavailable(capability: dict[str, Any]) -> None:
 
 
 def manual_pause_active() -> bool:
-    if _load_failure_cooldown_until and time.time() < _load_failure_cooldown_until:
-        return True
     return _caption_manual_pause
 
 
@@ -154,26 +157,65 @@ def _enter_paused(message: str) -> None:
     _set_status(state="paused", ready=False, message=message, last_error="")
 
 
-def pause_caption_worker(message: str = "Captions are stopped.") -> dict[str, Any]:
+def pause_caption_worker(
+    message: str = "Captions are stopped.",
+    *,
+    persist: bool = True,
+) -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message
+    if persist:
+        app_config = settings.get_settings()
+        if bool(app_config.get("caption_scan_enabled", True)):
+            settings.save_settings({**app_config, "caption_scan_enabled": False})
     _caption_manual_pause = True
     _caption_manual_pause_message = message
     _enter_paused(message)
     return get_worker_status()
 
 
-def resume_caption_worker() -> dict[str, Any]:
+def resume_caption_worker(*, persist: bool = True) -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
+    global _load_failure_cooldown_until, _oom_cooldown_until, _oom_cooldown_count
     app_config = settings.get_settings()
-    if not bool(app_config.get("caption_scan_enabled", False)):
+    if persist and not bool(app_config.get("caption_scan_enabled", True)):
         settings.save_settings({**app_config, "caption_scan_enabled": True})
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
     _model_load_failure_count = 0
+    _load_failure_cooldown_until = 0.0
+    _oom_cooldown_until = 0.0
+    _oom_cooldown_count = 0
     _oom_circuit.reset()
-    work_coordination.claim_manual_owner("captions")
-    _set_status(state="idle", message="Captions will scan cached previews.", model_load_failures=0)
+    _set_status(
+        state="idle",
+        message="Captions will scan cached previews.",
+        model_load_failures=0,
+        retry_at=None,
+    )
     return get_worker_status()
+
+
+def _enter_oom_cooldown() -> None:
+    """Defer after repeated OOMs without forgetting the user's automatic intent."""
+
+    global _oom_cooldown_until, _oom_cooldown_count
+    _oom_cooldown_count += 1
+    seconds = min(
+        OOM_COOLDOWN_MAX_SECONDS,
+        OOM_COOLDOWN_BASE_SECONDS * (2 ** max(0, _oom_cooldown_count - 1)),
+    )
+    _oom_cooldown_until = time.time() + seconds
+    _release_worker_owners()
+    _set_status(
+        state="cooldown",
+        ready=False,
+        message=(
+            "Captions are making room for other work and will retry "
+            f"automatically in about {max(1, round(seconds / 60))} minutes."
+        ),
+        retry_at=_oom_cooldown_until,
+        last_error="",
+    )
 
 
 def _reset_model_load_failures() -> None:
@@ -431,6 +473,7 @@ async def run_caption_worker() -> None:
 
 
 async def _run_caption_worker_loop() -> None:
+    global _oom_cooldown_count
     _set_status(running=True, session_started_at=time.time())
     batch_size = 1
     while True:
@@ -451,6 +494,23 @@ async def _run_caption_worker_loop() -> None:
                     _caption_manual_pause_message or "Captions are stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
+                continue
+
+            retry_at = max(_oom_cooldown_until, _load_failure_cooldown_until)
+            if retry_at and time.time() < retry_at:
+                remaining = max(1, int(retry_at - time.time()))
+                _release_worker_owners()
+                _set_status(
+                    state="cooldown",
+                    ready=False,
+                    message=(
+                        "Captions are making room for other work and will retry "
+                        f"automatically in about {max(1, round(remaining / 60))} minutes."
+                    ),
+                    retry_at=retry_at,
+                    last_error="",
+                )
+                await asyncio.sleep(min(remaining, WORKER_SLEEP_SECONDS))
                 continue
 
             pressure = memory_pressure.gate_bulk_work()
@@ -567,6 +627,9 @@ async def _run_caption_worker_loop() -> None:
                         )
                         captioned += 1
                         _oom_circuit.reset()
+                        if _oom_cooldown_count:
+                            _oom_cooldown_count = 0
+                            _set_status(retry_at=None)
                     except Exception as exc:
                         is_oom = _is_cuda_oom_error(exc)
                         pause_after_error = False
@@ -588,10 +651,7 @@ async def _run_caption_worker_loop() -> None:
                         )
                         _set_status(last_error=str(exc))
                         if pause_after_error:
-                            pause_caption_worker(
-                                "Captions paused after repeated GPU out-of-memory failures. "
-                                "Free GPU memory, then start Captions again."
-                            )
+                            _enter_oom_cooldown()
                             break
                 if _caption_manual_pause:
                     continue

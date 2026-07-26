@@ -349,6 +349,9 @@ async def api_save_settings(request: Request):
         )
     current = settings.get_settings()
     saved = settings.save_settings({**current, **body})
+    from core.intelligence_campaign import apply_saved_worker_intent
+
+    apply_saved_worker_intent(current, saved)
     model_changed = any(
         current.get(field) != saved.get(field)
         for field in ("embed_model_id", "embed_model_revision", "embed_model_dir", "embed_model_dim")

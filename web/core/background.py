@@ -104,14 +104,22 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
         try:
             import embedding_worker
 
-            embedding_worker.pause_embedding_worker(
-                "Search is stopped until you start it from Background Work."
-            )
+            if settings.get_settings().get("embedding_scan_enabled", True):
+                embedding_worker.resume_embedding_worker(persist=False)
+            else:
+                embedding_worker.pause_embedding_worker(
+                    "Search is stopped until you start it from Background Work.",
+                    persist=False,
+                )
             track_background_task(_start_background_daemon(embedding_worker.run_embedding_worker))
         except ImportError:
             log.exception("worker=embedding startup import failed")
 
     if statuses["people"]["available"]:
+        if settings.get_settings().get("people_scan_enabled", True):
+            face_worker.resume_face_worker(persist=False)
+        else:
+            face_worker.pause_face_worker(persist=False)
         track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
     else:
         face_worker.mark_dependencies_unavailable(statuses["people"])
@@ -120,10 +128,11 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
         try:
             if not settings.get_settings().get("caption_scan_enabled"):
                 caption_worker.pause_caption_worker(
-                    "Captions are stopped until you start them from Background Work."
+                    "Captions are stopped until you start them from Background Work.",
+                    persist=False,
                 )
             else:
-                caption_worker.resume_caption_worker()
+                caption_worker.resume_caption_worker(persist=False)
             track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
         except Exception:
             log.exception("worker=caption startup failed; caption worker was not scheduled")

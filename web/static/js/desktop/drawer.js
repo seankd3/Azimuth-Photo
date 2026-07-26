@@ -93,6 +93,7 @@ const SETTING_DEFS = {
     face_similarity_threshold: { type: 'number', min: 0.1, max: 0.9, step: 0.01 },
     face_merge_suggestion_threshold: { type: 'number', min: 0.1, max: 0.95, step: 0.01 },
     people_scan_enabled: { type: 'checkbox' },
+    embedding_scan_enabled: { type: 'checkbox' },
     people_auto_install: { type: 'checkbox' },
     caption_scan_enabled: { type: 'checkbox' },
     caption_model_preset: { type: 'select' },
@@ -900,6 +901,7 @@ function renderAiSettings() {
         + '<div class="setting-status warn">Changing model preset rebuilds the search index and can take a while.</div>'
         + presetSelect
         + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
+        + settingToggle('embedding_scan_enabled', 'Understand new photos automatically')
         + settingInput('search_similarity_threshold', 'Search threshold', { hint: 'Higher is stricter for visual/text search matches.' })
         + settingToggle('refine_semantic_pairing', 'Use semantic pairing in Refine')
         + '<div class="setting-actions">'
@@ -973,7 +975,7 @@ function renderCaptionSettings() {
     const selectedPreset = rawPresets.find((preset) => preset.key === settingValue('caption_model_preset'));
     return detailsSection('Captions', 'Generate searchable photo descriptions in the background.',
         `<div class="setting-status" data-setting-status="captions">${esc(captionLine())}</div>`
-        + settingToggle('caption_scan_enabled', 'Caption cached photos automatically')
+        + settingToggle('caption_scan_enabled', 'Understand photos automatically')
         + settingSelect('caption_model_preset', 'Caption model', presets.length ? presets : [
             { value: settingValue('caption_model_preset'), label: settingValue('caption_model_preset') || 'Current model' },
         ])
