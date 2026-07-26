@@ -117,17 +117,27 @@ This snapshot distinguishes locally reverified facts from thread/audit evidence.
   `52742f94181d792c869f021ff4374b910fa219ab`.
 - **Verified 2026-07-25:** `develop...main` is 5/55 unique commits. Neither side
   can be treated as a fast-forward or discarded history.
-- **Verified 2026-07-25:** `pa-sprint-integration / sprint-integration` started
-  from the exact `develop` SHA above. The merge of `main` is paused and
-  uncommitted after resolving only three audited textual conflicts:
-  the pre-migration check-command shim, `web/core/query_constraints.py`, and
-  `web/test_desktop_correctness.py`.
-- The intended resolutions preserve the Azimuth check shim, `main`'s
-  nonblocking committed-search fallback, and both sets of desktop correctness
-  tests. The merge must not be committed without coordinator review.
-- Production is not a clean source tree. The latest check found 38 status
-  entries, including runtime/generated state and an active intelligence task's
-  edits. No integration or cleanup task may normalize that checkout.
+- **Verified 2026-07-25:** the clean `sprint-integration` worktree is at
+  `6362924baa8317684dd9bc6221e376d3aa91eb3b`, with no `MERGE_HEAD`.
+  Reconciliation commit `cbb0fb677532ef3f932f04f70c18fd3adf5174eb`
+  has first parent `c48cde379a0ddf39cca42204b9b5679fc40ba9b2`
+  from the `develop` line and exact second parent
+  `458675e7797261c6ca658a9d2c16d21dad6206d9` from `main`.
+- The reviewed reconciliation preserved the Azimuth check shim, `main`'s
+  nonblocking committed-search fallback, and both desktop correctness test
+  families. The five Core integrations are also present:
+  `b7405c86d`, `119337ad1`, `22f841466`, `91b1d66bc`, and `84650c100`.
+- **Latest complete-gate baseline:** two frozen-source non-Playwright gates on
+  code commit `ade6c49486619bb470515af177a54bea38d17ae3`
+  each produced 3 failed, 1,539 passed, 3 skipped, 2 deselected, and 399 passing
+  subtests, in 505.80 and 447.50 seconds. The only failures in both runs are
+  caption cancellation, first-run preview/ranking visibility, and decode-budget
+  cancellation under `BUG-TEST-02B`. `BUG-TEST-02A` closed all eight
+  memory-gated identities without changing production pause behavior.
+- **Last production-checkout evidence, not reverified by this documentation
+  pass:** 38 status entries included runtime/generated state and an active
+  intelligence task's edits. No integration or cleanup task may normalize that
+  checkout.
 
 ### Runtime state inside the checkout
 
@@ -179,6 +189,11 @@ This snapshot distinguishes locally reverified facts from thread/audit evidence.
 - This proves install-to-library usability, not release readiness. The artifact
   is unsigned; signing, updater, public publishing, clean-machine identity
   cleanup, codec coverage, upgrade, and rollback remain separate gates.
+- **Coordinator-reported external work, receipt pending:** a detached Windows
+  process-version slice and installed-app migration are active outside this
+  worktree. No commit, diff, artifact, or clean-machine receipt is present here,
+  so neither is integrated completion. Their evidence must land under WIN-04
+  and WIN-06 before changing either status.
 - No public release is allowed before privacy/history scrub, complete test
   discovery, clean-clone builds, install/upgrade/restore matrices, version
   alignment, signing/update decisions, and real artifact smoke.
@@ -212,9 +227,9 @@ areas, but responsibility does not.
 
 ### Core Library and Safety
 
-#### CORE-01 — Integrate the verified safety and first-response cohort
+#### CORE-01 — Preserve the integrated safety and first-response cohort
 
-- **Status / priority / owner:** `active` · `P0` · Core
+- **Status / priority / owner:** `done awaiting integration` · `P0` · Core
   Library & Safety.
 - **Desired outcome:** scans never erase catalog truth on interruption; recovery
   reports current snapshots honestly; preview work reports truthful progress;
@@ -228,12 +243,15 @@ areas, but responsibility does not.
   from 61.9 ms to 26.9 ms. First-use integration passed 72 focused tests plus
   quick; branch-local QA-5000 evidence moved first HTTP from 3759 ms to
   1415.29 ms, but no production-runtime benchmark was run during integration.
-- **Prerequisite:** coordinator-approved `main` reconciliation; manual review of
-  `backups.py`, thumbnail paths, and `app.py` overlaps; separate cohort gates.
-- **Boundary:** integrate only named commits; no scanner/cache/runtime redesign.
-- **Acceptance evidence:** targeted scan/recovery/preview/library/client-bundle
-  tests, quick gate after each merge, full non-Playwright pytest after cohort,
-  exact benchmark rerun with no correctness or latency regression.
+- **Prerequisite:** achieved in the isolated lane: coordinator-approved `main`
+  reconciliation, manual overlap review, and serial cohort gates. Merge to
+  `develop` still requires separate coordinator review.
+- **Boundary:** preserve only the named commits; no scanner/cache/runtime
+  redesign or adjacent defect repair.
+- **Acceptance evidence:** achieved for lane integration: focused and quick
+  proof after every merge plus repeated complete gates. Before `develop`,
+  preserve the latest three-identity BUG-TEST-02B baseline and rerun the exact
+  benchmark receipts without correctness or latency regression.
 
 #### CORE-02 — Move runtime state out of the source checkout
 
@@ -313,7 +331,7 @@ areas, but responsibility does not.
 
 #### CORE-07 — Close the rename/recovery safety boundary
 
-- **Status / priority / owner:** `active` · `P0` · Core Library
+- **Status / priority / owner:** `ready after integration` · `P0` · Core Library
   & Safety.
 - **Desired outcome:** every valid current or pre-migration snapshot remains
   discoverable, protected by retention, drillable, and restorable while catalog,
@@ -346,6 +364,53 @@ areas, but responsibility does not.
 | Backup ownership across rename | Live owner marker records the prior catalog path while the active catalog is `web/azimuth.db`; current owner comparison is exact-path equality. No live backup attempt was made. | Verified mismatch evidence; actual scheduler refusal is `unverified` | Read-only warning probe, then scratch rewrite/adoption test that authenticates catalog identity, refuses foreign roots, preserves every snapshot, and resumes scheduled backup after path migration. |
 | Schema upgrade and rollback | Existing tests prove populated catalogs refuse schema migration when pre-migration backup fails; schema work uses transactions/local table-rebuild backups. | Backup gate verified; complete downgrade/application path unknown | Old release catalog → current upgrade → injected failure at each phase → restore pre-migration snapshot → old and new app boot checks; catalog counts, direct choices, edits, sources, and user version reconcile. |
 | Prepared-restore application | Current and `origin/windows-install` trees stage/status/discard prepared restores; repository search found no apply path, while docs require manual server stop and file moves. | Verified product/recovery gap | One explicit customer action stops the managed engine, preserves the failed DB and sidecars, atomically promotes the staged DB, restarts, verifies health, and offers rollback without terminal instructions. |
+
+#### CORE-08 — Prove source onboarding and lifecycle across real storage
+
+- **Status / priority / owner:** `ready after integration` · `P0` · Core Library
+  & Safety.
+- **Desired outcome:** adding local, removable, mapped-drive, or UNC/NAS folders
+  is effortless, and disconnect, reconnect, rename, drive-letter remap, and
+  credential recovery never duplicate a library or make absent files look
+  deleted.
+- **Current evidence:** the Windows branch proves first local browse and one
+  mapped `Z:`/UNC NAS happy path. CORE-06 records the broader source-alias
+  safety gap; portable source/library identity in CORE-04 is not implemented.
+- **Prerequisite:** accepted integration, CORE-06 destructive-path audit, and
+  the additive stable identity contract from CORE-04. WIN-02 supplies the
+  installed picker and managed-engine surface.
+- **Boundary:** source discovery, lifecycle, identity, and recovery only; never
+  move originals, merge nested roots, deduplicate assets, or mark an unavailable
+  source as deleted.
+- **Acceptance evidence:** a physical Windows matrix covers local NTFS,
+  removable media, mapped drive, and UNC with read-only, offline-at-launch,
+  hot-disconnect, reconnect, credential expiry, drive-letter change, share/path
+  rename, Unicode/long paths, and restart. Each source reattaches to the same
+  stable identity without duplicate assets, false Trash/missing transitions,
+  silent catalog reset, or original writes; every failure state offers a clear
+  retry, locate, or keep-offline action.
+- **Related existing coverage:** CORE-04, CORE-06, CORE-07, WIN-01, WIN-02, and
+  the installed daily-workflow proof in WIN-07.
+
+#### CORE-09 — Strangle backend facades behind explicit owner boundaries
+
+- **Status / priority / owner:** `parked` · `P2` · Core Library & Safety.
+- **Desired outcome:** application composition, database access, thumbnail
+  ownership, and other broad backend facades coordinate focused modules instead
+  of accumulating product behavior.
+- **Current evidence:** the architecture and quality audits identify broad
+  composition/database/thumbnail seams, while recent lifecycle repairs show
+  that ownership order is behavior. No wholesale backend rewrite is approved.
+- **Prerequisite:** accepted integration, stable complete gate, owner map, and a
+  quiet feature boundary for each extraction.
+- **Boundary:** one responsibility per strangler step behind the existing public
+  facade; no repository-wide layer framework, schema redesign, route rewrite,
+  or simultaneous behavior change.
+- **Acceptance evidence:** each step names the old and new owner, freezes the
+  public contract, adds no dependency cycle, preserves query shapes, lifecycle
+  order, complete-gate identities, and declared performance budgets, and leaves
+  the facade smaller by the moved responsibility. New feature logic is rejected
+  from the facade once its owner module exists.
 
 ### Desktop Workflow
 
@@ -475,6 +540,36 @@ areas, but responsibility does not.
   create/edit/delete/location/privacy changes invalidate deterministically;
   concurrent requests do not stampede; memory and response-size budgets are
   recorded; cold/warm p50/p95/p99 improve without omitting a photo.
+
+#### DESK-09 — Establish the professional format, color, sidecar, and export covenant
+
+- **Status / priority / owner:** `ready after integration` · `P1` · Desktop
+  Workflow.
+- **Desired outcome:** photographers know which originals Azimuth Photo can
+  faithfully ingest, preview, edit, round-trip, and export, with predictable
+  color and metadata behavior and no mutation of originals.
+- **Current evidence:** Develop exists, sidecar/XMP policy remains
+  decision-gated, and the Windows frozen-engine build warned about optional
+  JPEG-XS, JetRaw, and HEIF codec DLLs without proving a user-facing decode
+  failure. No canonical supported-format, ICC/color, sidecar, or export parity
+  matrix is accepted.
+- **Prerequisite:** accepted integration, product approval of automatic sidecar
+  writes, WIN-02 packaged engine, WIN-04 artifact truth, and an explicit
+  supported/unsupported format declaration.
+- **Boundary:** define and prove the professional covenant before expanding it;
+  unsupported formats fail honestly. Do not silently rewrite originals,
+  flatten non-destructive edits, invent color-management claims, or treat an
+  optional codec warning as a reproduced failure.
+- **Acceptance evidence:** representative packaged-Windows corpus covers every
+  declared RAW/raster/video format and an explicit unsupported set; orientation,
+  timestamps, ratings/labels, keywords, EXIF/XMP, virtual-copy lineage, and ICC
+  input/display/output profiles round-trip as specified; edits survive restart;
+  export dimensions, color space, quality, metadata, and filenames match the
+  selected recipe; original hashes remain unchanged; missing-codec and corrupt
+  inputs produce actionable UI.
+- **Related existing coverage:** DESK-06 owns Develop doctrine, WIN-04 owns
+  shipped artifacts, BUG-WIN-CODEC-01 owns the focused codec risk, CORE-05 owns
+  data-protection language, and CORE-07 owns recovery.
 
 ### Mobile and Companion
 
@@ -678,7 +773,6 @@ areas, but responsibility does not.
 
 - **Status / priority / owner:** `done awaiting integration` · `P0` · Windows
   Distribution & Identity.
-  Identity.
 - **Desired outcome:** a normal Windows user installs Azimuth Photo and opens a
   working first library from local, mapped-drive, and UNC/NAS folders.
 - **Current evidence:** proof-complete `origin/windows-install` at `f8da9949e`;
@@ -736,7 +830,9 @@ areas, but responsibility does not.
   installation and relaunch. The accepted integration head still reports
   `0.1.0` in both Tauri and Cargo while the proved Windows branch artifact is
   `1.0.0-rc.1`; no signing, updater, tag, public download, or release-channel
-  proof exists.
+  proof exists. A detached process-version slice is coordinator-reported as
+  active, but its commit, diff, artifact, and installed proof have not reached
+  this worktree and therefore do not change the status.
 - **Prerequisite:** signing/public-release decisions, green CI, WIN-01/WIN-02,
   clean upgrade drill.
 - **Boundary:** no public artifact before release gates; secrets never enter git.
@@ -773,7 +869,10 @@ areas, but responsibility does not.
   and names remain intentionally. The installed app displays Azimuth Photo, but
   its OS-level executable is still `photoarchive-desktop.exe`. This is verified
   owned-name migration inventory, not authority for an immediate binary rename.
-  Repo/service/XPS phases remain incomplete.
+  Repo/service/XPS phases remain incomplete. A detached installed-app migration
+  slice is coordinator-reported as active, but it remains bounded external work
+  awaiting a commit, inventory delta, upgrade/rollback proof, and clean-machine
+  receipt.
 - **Prerequisite:** complete identifier inventory, runtime extraction, no active
   feature lanes, backup/restore drill, collision-proof path map, accepted
   integration, impact estimate, and explicit user selection of one path below.
@@ -790,39 +889,76 @@ areas, but responsibility does not.
 | **A — Tested compatibility bridge for one stable release** | New installs and writes use Azimuth identifiers; narrowly scoped readers discover both identifier generations for exactly one stable release | New/old/mixed precedence, first/second boot, DB/WAL/backup discovery, upgrade/rollback, pre-migration client behavior, bridge-removal design | Stable-release support window completes with migration counts and no stranded install; bridge is then removed and the Azimuth-only state passes the release matrix |
 | **B — Backed-up zero-legacy cutover** | A scheduled migration converts all selected persisted and operational identifiers; normal operation retains no compatibility bridge after successful cutover | Verified backups, scratch restore, collision-proof move map, disk sizing, service/remotes/toolkit coordination, atomic failure and rollback drills | Announced cutover succeeds; restored catalog and originals reconcile; services/restarts/upgrade pass; selected active tree, artifacts, paths, databases, and runtime output meet the approved zero-legacy inventory |
 
+#### WIN-07 — Prove the installed no-server daily workflow
+
+- **Status / priority / owner:** `ready after integration` · `P0` · Windows
+  Distribution & Identity.
+- **Desired outcome:** an installed Windows customer can complete a normal
+  professional session—browse, search, Cull, Refine, organize, edit, export,
+  close, and restart—while every optional server is absent.
+- **Current evidence:** WIN-01 proves install, welcome, local and mapped/UNC
+  browse, close, and relaunch. It does not yet prove search, culling, Refine,
+  organization, Develop/export, durable restart state, or a deliberately
+  unavailable server.
+- **Prerequisite:** controlled integration of WIN-02, CORE-08 source lifecycle,
+  DESK-02 journey stability, DESK-09 format/export covenant, and the
+  capability/egress contract in REL-11.
+- **Boundary:** installed daily workflow and managed local engine only; no
+  remote compute requirement, developer URL, terminal recovery, cloud-default
+  behavior, or claim that one browse proof covers the full client.
+- **Acceptance evidence:** on a clean physical XPS home with network denied and
+  no server configured, browse/search/Cull/Refine/organize/edit/export all
+  operate on local storage and a mapped/UNC source where applicable; direct
+  actions and edits survive Alt+F4, reboot, source disconnect/reconnect, and app
+  upgrade; export bytes and metadata match DESK-09; no step exposes Python,
+  ports, URLs, or a server dependency. A second run enables then revokes one
+  optional server capability and proves the local workflow remains complete.
+- **Related existing coverage:** WIN-01/WIN-02 supply installation and managed
+  engine, DESK-03 and RANK-01 through RANK-08 own Dual/ranking semantics, and
+  REL-09 owns clean-environment release repetition.
+
 ### Release and Quality Infrastructure
 
 #### REL-01 — Reconcile `main` and `develop`
 
-- **Status / priority / owner:** `active` · `P0` · Release & Quality
+- **Status / priority / owner:** `done awaiting integration` · `P0` · Release & Quality
   Infrastructure.
 - **Desired outcome:** one reviewable integration history contains production
   fixes and develop Collections/search work without losing either contract.
-- **Current evidence:** 5/55 divergence; merge paused after exactly three
-  conflict resolutions.
-- **Prerequisite:** coordinator review of the product-section map and merge diff.
-- **Boundary:** no further merge work and no commit until approval; production
-  remains untouched.
-- **Acceptance evidence:** exact parent SHAs, conflict receipt, shim/fallback/both
-  test sets present, targeted search/desktop tests, quick and full gates.
+- **Current evidence:** reviewed merge `cbb0fb677` has exact parents
+  `c48cde379` and production `458675e77`. Of 123 staged paths, 120 matched
+  `main`; `desktop.css`, `lenses.js`, and `test_desktop_correctness.py`
+  intentionally combined Collections with production startup/search behavior.
+  The shim and query fallback match `main`. Targeted search/desktop proof passed
+  88/88 with Node 22.
+- **Prerequisite:** achieved in the isolated integration lane; merge to
+  `develop` still requires a separate coordinator review.
+- **Boundary:** preserve the reviewed merge exactly; production remains
+  untouched.
+- **Acceptance evidence:** achieved for lane reconciliation: exact parents,
+  conflict receipt, intended contracts, targeted proof, quick and repeated full
+  gates. Inherited whitespace in `STALLFIX.md` and blank EOF in
+  `scripts/azimuth-android-build` remain recorded hygiene, not hidden conflict
+  edits.
 
 #### REL-02 — Fix the three pre-existing Ruff errors separately
 
-- **Status / priority / owner:** `ready after integration` · `P1` · Release &
+- **Status / priority / owner:** `done awaiting integration` · `P1` · Release &
   Quality Infrastructure.
 - **Desired outcome:** quick lint gate is green without hiding the integration
   diff.
-- **Current evidence:** unused `shutil` in `web/core/rebrand_migrate.py`, unused
-  `_MIB` in `web/test_host_profile.py`, and unused `os` in
-  `web/test_rebrand_migrate.py`.
-- **Prerequisite:** approved REL-01 merge commit.
+- **Current evidence:** atomic commit `f6103b511` removed only unused `shutil`
+  from `web/core/rebrand_migrate.py`, `_MIB` from `web/test_host_profile.py`,
+  and `os` from `web/test_rebrand_migrate.py`; Ruff, focused proof, and quick
+  are green.
+- **Prerequisite:** achieved after the approved REL-01 merge commit.
 - **Boundary:** remove only the three unused imports in one atomic commit.
-- **Acceptance evidence:** Ruff green, focused rebrand/host tests, commit contains
-  only those paths.
+- **Acceptance evidence:** achieved in the isolated lane; preserve the exact
+  three-import diff and green gates during review for `develop`.
 
 #### REL-03 — Merge completed cohorts serially
 
-- **Status / priority / owner:** `parked` · `P0` · Release & Quality
+- **Status / priority / owner:** `active` · `P0` · Release & Quality
   Infrastructure.
 - **Desired outcome:** completed work lands in dependency order with manual
   overlap review and exact receipts.
@@ -845,7 +981,7 @@ areas, but responsibility does not.
   Infrastructure.
 - **Desired outcome:** the default unit gate collects unittest and pytest-native
   tests, excluding only explicitly marked slow/bench/Playwright work.
-- **Current evidence:** the current paused head collects 1,425 tests through
+- **Current evidence:** the current integration line collects 1,425 tests through
   unittest versus 1,539 selected by pytest from 1,541 collected (two bench
   deselections). The non-Playwright selection is 1,533 of 1,535 collected.
   Therefore 114 selected pytest tests can be missed by the current default.
@@ -857,7 +993,6 @@ areas, but responsibility does not.
   `develop`, and the remaining 11 pass in an isolated failing-node rerun. After
   recovery merge `119337ad1`, a targeted rerun of those original 24 nodes
   improved from 13 failed/11 passed to 7 failed/17 passed. The complete
-  non-Playwright rerun on post-Core head `d90d89f4a` finished with 18 failed,
   1,519 passed, 3 skipped, 2 deselected, and 399 passing subtests in 509.80
   seconds. Exact set comparison found the six recovery failures resolved, all
   other 18 unchanged, and zero new failure identities. The two deterministic
@@ -1113,6 +1248,70 @@ areas, but responsibility does not.
 - **Acceptance evidence:** collision-proof path map, retained histories, build/
   deploy ownership, clean clone, no runtime/data movement hidden inside source
   reorganization.
+
+#### REL-11 — Enforce the runtime privacy and optional-server capability contract
+
+- **Status / priority / owner:** `ready after integration` · `P0` · Release &
+  Quality Infrastructure.
+- **Desired outcome:** local operation is complete by default, and every server
+  or network capability states what data it can read, derive, retain, and send,
+  to which destination, for how long, with visible consent and revocation.
+- **Current evidence:** privacy is product doctrine and REL-07 inventories
+  repository/history leakage, but no accepted runtime dataflow, capability,
+  egress, secret-storage, revocation, or remote-deletion contract exists.
+- **Prerequisite:** accepted integration, server-role decision, stable
+  library/asset identity from CORE-04, and platform security review. REL-07
+  remains the separate source/history scrub.
+- **Boundary:** runtime authority, consent, egress, credentials, and revocation;
+  do not make a server mandatory, upload media implicitly, conflate cache with
+  backup, or claim remote deletion without a receipt.
+- **Acceptance evidence:** versioned dataflow/threat model names every local and
+  optional remote store; each capability is off by default and independently
+  enableable/revocable; packet capture with all capabilities off shows zero
+  unapproved egress or telemetry; credentials use OS-protected storage; a
+  prepared device retains browse/search/Cull/Refine/ranking after server removal;
+  revocation stops new transfer, invalidates credentials, reports retained
+  remote data, and proves export/deletion behavior without losing local work.
+- **Related existing coverage:** REL-07 owns public-tree/history privacy,
+  RANK-07 owns portable intelligence artifacts, MOB-03 owns offline mutation
+  semantics, WIN-07 owns the installed no-server journey, and CORE-05 owns
+  customer data-protection language.
+
+#### REL-12 — Ratify daily-workflow performance SLOs
+
+- **Status / priority / owner:** `ready after integration` · `P1` · Release &
+  Quality Infrastructure.
+- **Desired outcome:** release decisions use one repeatable cold/warm,
+  local/NAS, idle/contention matrix for the workflows photographers repeat all
+  day, without hiding incomplete results behind fast medians.
+- **Current evidence:** the baseline below contains focused boot, filter,
+  ranking, Map, and synthetic-query measurements from different fixtures and
+  machines. There is no single installed-client journey matrix or ratified SLO
+  for launch, grid, scroll, Loupe, search, Develop, or export.
+- **Prerequisite:** accepted integration, WIN-07 journey, CORE-08 storage
+  matrix, fixed reference hardware/catalogs, and correctness oracles. RANK-08
+  remains the owner of ranking-specific profiling; DESK-08 remains the owner of
+  Map response-byte optimization.
+- **Boundary:** measurement, SLO ratification, and release gating only; no
+  feature filtering, silent sample reduction, warmed-only claim, budget
+  widening, or query optimization inside this item.
+- **Acceptance evidence:** store versioned machine/catalog/storage/commit
+  receipts with cold/warm p50, p95, p99, worst, bytes, CPU, memory, network, and
+  correctness for every row below; ratify every blank target before the owning
+  implementation starts; pass both idle and declared-contention runs on local
+  SSD and representative mapped/UNC NAS.
+
+| Daily workflow | Required matrix | Target authority |
+|---|---|---|
+| Installed launch → first usable library | Cold/warm; empty/146k-class catalog; local/NAS; online/offline | Current branch-local evidence is 1415.29 ms; release SLO remains **proposed** until ratified |
+| Grid first useful content and sustained scroll | Cold/warm thumbnails; local/NAS; cache hit/miss; source reconnect | Numeric render/frame SLO remains **proposed**; zero omitted or misordered photos is required |
+| Loupe open and next/previous | Cached/uncached preview; RAW/raster; local/NAS | Numeric p95/p99 remains **proposed**; no lower-quality substitution presented as final |
+| Search and filter facets | Cold/warm; common/rare query; local/NAS; 146k-class catalog | Preserve exact results; ratify p95/p99 from controlled filter/query baselines |
+| Cull/Refine/Dual action → visible acknowledgement | Mouse/keyboard; warm/cold candidate buffer; restart/undo | At or below 50 ms acknowledgement and no spinner is a **covenant**; Dual p95 ≤50 ms and p99 <100 ms are **proposed** |
+| Develop adjustment → preview | Common adjustment, mask, HDR/panorama handoff; representative RAWs | Numeric p95/p99 remains **proposed**; input is never dropped and originals remain unchanged |
+| Export start acknowledgement and completion | One/batch; JPEG/TIFF/declared formats; local/NAS destination | Start acknowledgement ≤50 ms is **proposed**; completion budget is recipe/hardware-specific and must be ratified |
+| People and complete Map open | Cold/warm; full payload; mutation/invalidation; 146k-class catalog | No filtering or hidden markers; numeric SLO follows DESK-08 profiler and byte baseline |
+| Prepared local daily workflow | Server absent, network denied, then optional capability revoked | Zero required network dependency is a product covenant |
 
 ## 5. Benchmarks and quality baseline
 
