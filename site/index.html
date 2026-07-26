@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Azimuth Photo — Your own photo cloud, with Lightroom Classic instincts</title>
+<meta name="description" content="Azimuth Photo is a fast, self-hosted photo library. Browse terabytes at lightning speed, rank your best work with Elo, search semantically — all on your own hardware. Open source, free.">
+<meta property="og:title" content="Azimuth Photo">
+<meta property="og:description" content="Your own photo cloud — with Lightroom Classic instincts. Self-hosted, blazing fast, open source.">
+<meta property="og:image" content="https://azimuthphoto.com/assets/photos/lg/4303.jpg">
+<meta property="og:url" content="https://azimuthphoto.com">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;450;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a class="wordmark" href="#top">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"/><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"/><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"/></g></svg>
+      <span>AZIMUTH</span><span class="wm-dim">PHOTO</span>
+    </a>
+    <div class="nav-links">
+      <a href="#library"><span class="idx">01</span>Library</a>
+      <a href="#loupe"><span class="idx">02</span>Loupe</a>
+      <a href="#ranking"><span class="idx">03</span>Ranking</a>
+      <a href="#search"><span class="idx">04</span>Search</a>
+      <a href="/log/"><span class="idx">05</span>Field&nbsp;Log</a>
+      <a class="nav-cta" href="https://github.com/Sean-Kenneth-Doherty/azimuth-photo" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GITHUB
+      </a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="compass" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>SELF-HOSTED PHOTO SYSTEM&nbsp;&nbsp;·&nbsp;&nbsp;OPEN SOURCE&nbsp;&nbsp;·&nbsp;&nbsp;AZ 000.0°–359.9°</p>
+    <h1 class="reveal d1">Your own photo cloud.<br><span class="dim">Lightroom Classic instincts.</span></h1>
+    <p class="lede reveal d2">Browse terabytes of photographs at lightning speed from your own computer, NAS, or server. Cull, rank, search, and share tens of thousands of images — without uploading a single byte to anyone else's cloud.</p>
+    <div class="hero-actions reveal d3">
+      <a class="btn btn-primary" href="https://github.com/Sean-Kenneth-Doherty/azimuth-photo" target="_blank" rel="noopener">GET AZIMUTH PHOTO</a>
+      <a class="btn btn-ghost" href="#library">TRY IT BELOW <span class="arrow">↓</span></a>
+    </div>
+    <p class="live-note mono reveal d3"><span class="pulse"></span>EVERY PANEL BELOW IS LIVE — REAL PHOTOS, REAL CATALOG DATA, REAL MATH. NO PICTURES OF THE APP.</p>
+  </div>
+</header>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 045°</span></div>
+
+<!-- ——— 01 · LIBRARY (interactive grid) ——— -->
+<section class="feature" id="library">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>01 — THE LIBRARY</p>
+    <h2 class="reveal d1">50,000 photos feel like fifty.<br><span class="dim">Here are 36 real ones — filter them.</span></h2>
+    <p class="section-lede reveal d2">This is the author's <em>Selected Landscapes</em> collection, straight from the live catalog — real files, real EXIF, real Elo. Filters compose, counts answer instantly, and every frame opens in the loupe below.</p>
+  </div>
+  <div class="widget reveal d2">
+    <div class="widget-bar mono">
+      <span class="wb-title">LIBRARY — SELECTED LANDSCAPES</span>
+      <span class="wb-meta" id="grid-count"></span>
+    </div>
+    <div class="widget-toolbar" id="grid-filters"></div>
+    <div class="lib-grid" id="lib-grid"></div>
+    <div class="widget-foot mono"><span>SOURCE: LIVE CATALOG EXPORT · photoarchive.db → collection_id 2</span><span>CLICK ANY FRAME → LOUPE</span></div>
+  </div>
+</section>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 090°</span></div>
+
+<!-- ——— 02 · LOUPE (interactive) ——— -->
+<section class="feature" id="loupe">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>02 — THE LOUPE</p>
+    <h2 class="reveal d1">A canvas, not a modal.<br><span class="dim">Keyboard-first. Try the keys.</span></h2>
+    <p class="section-lede reveal d2">Metadata, Elo ranking, and a histogram computed live from the pixels stay beside the image. Use <span class="key">←</span> <span class="key">→</span> to move, <span class="key">P</span> pick / <span class="key">X</span> reject / <span class="key">U</span> clear, and <span class="key">L</span> for lights-out — when it's just you and the photograph.</p>
+  </div>
+  <div class="widget loupe-widget reveal d2" id="loupe-widget" tabindex="0">
+    <div class="widget-bar mono">
+      <span class="wb-title" id="loupe-title">LOUPE</span>
+      <span class="wb-meta" id="loupe-pos"></span>
+    </div>
+    <div class="loupe-body">
+      <button class="loupe-nav prev" id="loupe-prev" aria-label="Previous photo">‹</button>
+      <div class="loupe-stage" id="loupe-stage"><img id="loupe-img" alt="Loupe photograph"></div>
+      <button class="loupe-nav next" id="loupe-next" aria-label="Next photo">›</button>
+      <aside class="loupe-panel" id="loupe-panel">
+        <div class="lp-block">
+          <h4 class="mono">HISTOGRAM <span class="lp-live">LIVE FROM PIXELS</span></h4>
+          <canvas id="loupe-hist" width="256" height="72"></canvas>
+        </div>
+        <div class="lp-block">
+          <h4 class="mono">RANKING</h4>
+          <div class="lp-elo"><span class="mono" id="loupe-elo"></span><span class="lp-elo-sub" id="loupe-elo-sub"></span></div>
+          <div class="lp-row"><span>Comparisons</span><span class="mono" id="loupe-cmp"></span></div>
+          <div class="lp-row"><span>Flag</span><span class="mono" id="loupe-flag">—</span></div>
+        </div>
+        <div class="lp-block">
+          <h4 class="mono">METADATA</h4>
+          <div class="lp-row"><span>File</span><span class="mono lp-file" id="loupe-file"></span></div>
+          <div class="lp-row"><span>Taken</span><span class="mono" id="loupe-date"></span></div>
+          <div class="lp-row"><span>Camera</span><span class="mono" id="loupe-cam"></span></div>
+          <div class="lp-row"><span>Lens</span><span class="mono" id="loupe-lens"></span></div>
+        </div>
+        <div class="lp-keys mono">
+          <button data-k="ArrowLeft">←</button><button data-k="ArrowRight">→</button>
+          <button data-k="p">P</button><button data-k="x">X</button><button data-k="u">U</button>
+          <button data-k="l" class="lp-key-l">L · LIGHTS OUT</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 180°</span></div>
+
+<!-- ——— 03 · REFINE (interactive Elo) ——— -->
+<section class="feature" id="ranking">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>03 — RANKING, NOT RATING</p>
+    <h2 class="reveal d1">Pick the best one.<br><span class="dim">That's it. That's the interface.</span></h2>
+    <p class="section-lede reveal d2">This is <strong>Refine</strong>, running the real Elo update right here in the page. Click your favorite — the winner takes rating from the frames it beat, a fresh contender steps in, and the standings shift live. In the app, every pick also propagates through visually similar photos.</p>
+  </div>
+  <div class="widget reveal d2">
+    <div class="widget-bar mono">
+      <span class="wb-title">REFINE — PICK THE BEST FRAME</span>
+      <span class="wb-meta" id="refine-stats"></span>
+    </div>
+    <div class="refine-mosaic" id="refine-mosaic"></div>
+    <div class="refine-board" id="refine-board">
+      <div class="widget-bar mono thin"><span class="wb-title">STANDINGS — TOP 8 OF THIS SESSION</span><span class="wb-meta">K = 24 · REAL ELO MATH</span></div>
+      <ol id="refine-list"></ol>
+    </div>
+  </div>
+</section>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 270°</span></div>
+
+<!-- ——— 04 · SEARCH (real engine results) ——— -->
+<section class="feature" id="search">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>04 — SEARCH</p>
+    <h2 class="reveal d1">Three engines, fused.<br><span class="dim">These results came from the real ones.</span></h2>
+    <p class="section-lede reveal d2">Metadata, semantic embeddings, and VLM captions — all indexed locally, on your own GPU. The rankings below were produced by the live archive's search engines against this collection; pick a query and watch the frames reorder.</p>
+  </div>
+  <div class="widget reveal d2">
+    <div class="widget-bar mono">
+      <span class="wb-title">SEARCH — FUSED RESULTS</span>
+      <span class="wb-meta" id="search-meta"></span>
+    </div>
+    <div class="widget-toolbar search-toolbar">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <div class="search-chips" id="search-chips"></div>
+    </div>
+    <div class="search-grid" id="search-grid"></div>
+    <div class="widget-foot mono"><span>RANKINGS CAPTURED FROM THE LIVE /api/search ENGINES — NOT STAGED</span><span id="search-src"></span></div>
+  </div>
+</section>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 315°</span></div>
+
+<!-- ——— WHY / positioning ——— -->
+<section class="why">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>WHY IT EXISTS</p>
+    <h2 class="reveal d1">Google Photos owns your library.<br>Lightroom was never its home.<br><span class="dim">Take the best instincts of both.</span></h2>
+    <div class="cols reveal d2">
+      <div class="col">
+        <h3 class="mono">FROM GOOGLE PHOTOS</h3>
+        <p>Instant timeline. Semantic search — “sunset over water” just works. Face grouping, an installable phone app, shareable links.</p>
+      </div>
+      <div class="col">
+        <h3 class="mono">FROM LIGHTROOM CLASSIC</h3>
+        <p>A real folder tree. Pick / reject culling, stacks, a keyboard-first loupe, filters that compose, and density you can feel.</p>
+      </div>
+      <div class="col col-accent">
+        <h3 class="mono">FROM NEITHER</h3>
+        <p><strong>Elo photo ranking.</strong> Quick this-or-that picks teach the archive which photos are your best — you just tried it above.</p>
+      </div>
+    </div>
+    <div class="stats-row reveal d3">
+      <div class="stat"><span class="num mono">47,781</span><span class="lbl">photos in the author's own working archive</span></div>
+      <div class="stat"><span class="num mono">0 BYTES</span><span class="lbl">uploaded to anyone else's cloud</span></div>
+      <div class="stat"><span class="num mono">$0</span><span class="lbl">forever — open source, self-hosted, yours</span></div>
+    </div>
+  </div>
+</section>
+
+<div class="ruler" aria-hidden="true"><span class="mono">AZ 337°</span></div>
+
+<!-- ——— THE STORY / FIELD LOG tie-in ——— -->
+<section class="why story" id="story">
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>BUILT IN THE OPEN</p>
+    <h2 class="reveal d1">It began as a weekend toy that asked<br><span class="dim">“which photo is better?”</span></h2>
+    <p class="section-lede reveal d2">Three years and <strong>1,562 commits</strong> later, that toy is an AI-native darkroom with a <strong>physically-modeled film emulation engine</strong>. The whole build history — every idea, trade-off, benchmark, and near-disaster — is a Factorio-style development log, with live demos you can play with and screenshots captured by running the actual software at each point in time.</p>
+    <div class="stats-row reveal d3">
+      <div class="stat"><span class="num mono">1,562</span><span class="lbl">commits, from a 228-line script to a darkroom</span></div>
+      <div class="stat"><span class="num mono">&lt;0.4<span class="dim2">/255</span></span><span class="lbl">the GL preview and numpy export must agree</span></div>
+      <div class="stat"><span class="num mono">53</span><span class="lbl">real film scans behind the emulation engine</span></div>
+    </div>
+    <div class="hero-actions reveal d3" style="margin-top:34px">
+      <a class="btn btn-primary" href="/log/">READ THE FIELD LOG <span class="arrow">→</span></a>
+    </div>
+  </div>
+</section>
+
+<section class="cta">
+  <div class="compass compass-cta" aria-hidden="true"></div>
+  <div class="section-inner">
+    <p class="kicker mono reveal"><span class="tick"></span>FIND YOUR BEARING</p>
+    <h2 class="reveal d1">Your photos are your own.<br><span class="dim">The app ships empty and hungry.</span></h2>
+    <p class="lede reveal d2">Runs on your own hardware — computer, NAS, or server. Everything you just used was real: real frames, real catalog data, real math.</p>
+    <div class="hero-actions reveal d3">
+      <a class="btn btn-primary" href="https://github.com/Sean-Kenneth-Doherty/azimuth-photo" target="_blank" rel="noopener">GET STARTED ON GITHUB</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="section-inner footer-inner">
+    <span class="mono">AZIMUTH PHOTO — az·i·muth : the bearing to your best work.</span>
+    <span class="mono dim2">© 2026 · OPEN SOURCE · BUILT BY A PHOTOGRAPHER, FOR PHOTOGRAPHERS</span>
+  </div>
+</footer>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

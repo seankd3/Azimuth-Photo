@@ -1,0 +1,2 @@
+# local build inputs — regenerate with tools/build_search_data.py over ssh
+assets/collection_raw.json
