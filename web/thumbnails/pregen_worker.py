@@ -43,7 +43,7 @@ def _diag(message: str, **fields) -> None:
 # hook or it busy-loops at 100% CPU and starves the worker.
 _REAL_ASYNCIO_SLEEP = asyncio.sleep
 
-# state=running with no generation for this long → ERROR + reset iteration.
+# state=running with no generation or heartbeat for this long → recover.
 PREGEN_STALL_WATCHDOG_SECONDS = float(
     os.environ.get("PHOTOARCHIVE_PREGEN_STALL_SECONDS", str(5 * 60))
 )
@@ -793,9 +793,10 @@ async def run_prefetch_worker_loop(
             if not watchdog_enabled or pregen_status.get("state") != "running":
                 continue
             last = pregen_status.get("last_generated_at")
+            progress = pregen_status.get("last_progress_at")
             started = pregen_status.get("started_at")
             now_wall = time.time()
-            anchor = float(last or started or 0.0)
+            anchor = max(float(last or 0.0), float(progress or 0.0), float(started or 0.0))
             if anchor <= 0:
                 continue
             stalled_for = now_wall - anchor
@@ -803,7 +804,7 @@ async def run_prefetch_worker_loop(
                 continue
             leaked = await bulk_decode_budget.reset_and_notify()
             log.error(
-                "pregen stall watchdog: state=running with no generation for "
+                "pregen stall watchdog: state=running with no progress for "
                 "%.0fs (limit=%.0fs); resetting decode budget (leaked=%s bytes) "
                 "and cancelling stuck batch",
                 stalled_for,
