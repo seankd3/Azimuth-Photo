@@ -12,15 +12,26 @@ android {
         applicationId = "app.azimuthphoto.mobile"
         minSdk = 33
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "1.0"
         vectorDrawables { useSupportLibrary = true }
+    }
+
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("AZIMUTH_KEYSTORE") ?: "${System.getProperty("user.home")}/.azimuth/release.keystore")
+            storePassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"
+            keyAlias = "azimuth"
+            keyPassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"
+        }
     }
 
     buildTypes {
         debug { isMinifyEnabled = false }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
@@ -51,6 +62,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.navigation:navigation-compose:2.8.1")
+    implementation("androidx.core:core-splashscreen:1.0.1")
 
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
@@ -63,6 +75,7 @@ dependencies {
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("androidx.media3:media3-exoplayer:1.4.1")
     implementation("androidx.media3:media3-ui:1.4.1")
+    implementation("org.osmdroid:osmdroid-android:6.1.20") // Places map, no API key
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

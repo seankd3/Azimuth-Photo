@@ -1,6 +1,7 @@
 package app.azimuthphoto.mobile.backup
 
 import org.bouncycastle.crypto.digests.Blake2bDigest
+import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -17,13 +18,17 @@ object Hashing {
     fun contentHash(stream: InputStream, fileSize: Long): String {
         val digest = Blake2bDigest(DIGEST_BYTES * 8)
         val buf = ByteArray(256 * 1024)
-        var remaining = PREFIX_BYTES
+        val expected = minOf(fileSize, PREFIX_BYTES.toLong())
+        var remaining = expected
+        var readBytes = 0L
         while (remaining > 0) {
-            val n = stream.read(buf, 0, minOf(buf.size, remaining))
+            val n = stream.read(buf, 0, minOf(buf.size.toLong(), remaining).toInt())
             if (n <= 0) break
             digest.update(buf, 0, n)
             remaining -= n
+            readBytes += n
         }
+        if (readBytes < expected) throw IOException("short read")
         val sizeBytes = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(fileSize).array()
         digest.update(sizeBytes, 0, 8)
         val out = ByteArray(DIGEST_BYTES)

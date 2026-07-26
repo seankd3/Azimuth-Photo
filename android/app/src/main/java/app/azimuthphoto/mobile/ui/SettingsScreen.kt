@@ -1,5 +1,6 @@
 package app.azimuthphoto.mobile.ui
 
+import android.app.Activity
 import android.content.Intent
 import android.provider.Settings
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -36,19 +38,34 @@ import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.BackupWorker
 import app.azimuthphoto.mobile.backup.FreeUpSpace
 import app.azimuthphoto.mobile.data.SettingsStore
+import app.azimuthphoto.mobile.data.ArchiveApi
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onOpenTrash: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     val progress by BackupWorker.progress.collectAsState()
     var counts by remember { mutableStateOf<Map<String, Int>>(emptyMap()) }
-    LaunchedEffect(progress) { counts = BackupDb.get(context).countByState() }
+    var freedCount by remember { mutableStateOf<Int?>(null) }
+    var freePreview by remember { mutableStateOf<FreeUpSpace.Preview?>(null) }
+    LaunchedEffect(progress) {
+        counts = withContext(Dispatchers.IO) { BackupDb.get(context).countByState() }
+    }
 
     val s = settings ?: return
     var serverUrl by remember(s.serverUrl) { mutableStateOf(s.serverUrl) }
+    var deviceToken by remember(s.deviceToken) { mutableStateOf(s.deviceToken) }
+    var reachability by remember(s.serverUrl) { mutableStateOf<String?>(null) }
+    LaunchedEffect(s.serverUrl) {
+        reachability = runCatching {
+            val count = ArchiveApi(s.serverUrl).stats(timeoutSeconds = 3).photoCount
+            if (count != null) "Connected — ${"%,d".format(count)} photos" else "Connected"
+        }.getOrElse { "Unreachable" }
+    }
 
     Column(
         Modifier
@@ -86,28 +103,55 @@ fun SettingsScreen() {
             scope.launch { SettingsStore.setBackupVideos(context, it) }
         }
         ToggleRow("Wi-Fi only", s.wifiOnly) {
-            scope.launch { SettingsStore.setWifiOnly(context, it) }
+            scope.launch {
+                SettingsStore.setWifiOnly(context, it)
+                BackupScheduler.ensureScheduled(context)
+            }
+        }
+        ToggleRow("Only while charging", s.chargingOnly) {
+            scope.launch {
+                SettingsStore.setChargingOnly(context, it)
+                BackupScheduler.ensureScheduled(context)
+            }
         }
         TextButton(onClick = { BackupScheduler.runNow(context) }) { Text("Back up now") }
+
+        TextButton(onClick = onOpenTrash) { Text("Trash") }
 
         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = PanelHigh)
 
         SectionTitle("Free up space")
         ToggleRow(
-            "Remove backed-up media after ${s.keepDays} days",
+            "Remove backed-up photos once they're old enough",
             s.freeUpSpaceEnabled,
         ) { enabled ->
             scope.launch { SettingsStore.setFreeUpSpace(context, enabled) }
         }
+        Text(
+            "Keep recent photos on device for:",
+            style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+        )
         Row(verticalAlignment = Alignment.CenterVertically) {
-            listOf(30, 90, 365).forEach { days ->
+            listOf(30 to "1 month", 90 to "3 months", 365 to "1 year").forEach { (days, label) ->
                 TextButton(onClick = { scope.launch { SettingsStore.setKeepDays(context, days) } }) {
                     Text(
-                        "$days d",
+                        label,
                         color = if (s.keepDays == days) Accent else TextSecondary,
                     )
                 }
             }
+        }
+        TextButton(onClick = {
+            scope.launch {
+                val preview = FreeUpSpace.preview(context as Activity)
+                if (preview.count == 0) freedCount = 0 else freePreview = preview
+            }
+        }) { Text("Free up now") }
+        freedCount?.let {
+            Text(
+                if (it == 0) "Nothing to free up yet" else "Freed up $it items",
+                style = MaterialTheme.typography.bodySmall, color = TextSecondary,
+            )
         }
         if (!FreeUpSpace.hasManageMedia(context)) {
             Text(
@@ -126,6 +170,12 @@ fun SettingsScreen() {
         HorizontalDivider(Modifier.padding(vertical = 14.dp), color = PanelHigh)
 
         SectionTitle("Server")
+        Text(
+            reachability ?: "Checking connection",
+            style = MaterialTheme.typography.bodySmall,
+            color = if (reachability?.startsWith("Connected") == true) Positive else TextSecondary,
+        )
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = serverUrl,
             onValueChange = { serverUrl = it },
@@ -133,10 +183,45 @@ fun SettingsScreen() {
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
         )
-        TextButton(onClick = { scope.launch { SettingsStore.setServerUrl(context, serverUrl) } }) {
+        OutlinedTextField(
+            value = deviceToken,
+            onValueChange = { deviceToken = it },
+            label = { Text("Device token (optional)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = {
+            scope.launch {
+                SettingsStore.setServerUrl(context, serverUrl)
+                SettingsStore.setDeviceToken(context, deviceToken)
+            }
+        }) {
             Text("Save")
         }
         Spacer(Modifier.height(40.dp))
+    }
+
+    freePreview?.let { preview ->
+        AlertDialog(
+            onDismissRequest = { freePreview = null },
+            containerColor = Panel,
+            title = { Text("Free up ${formatBytes(preview.bytes)}?") },
+            text = {
+                Text(
+                    "Removes ${preview.count} backed-up ${if (preview.count == 1) "item" else "items"} " +
+                        "from this device. They stay safe on your archive and can be downloaded again anytime.",
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    freePreview = null
+                    scope.launch { freedCount = FreeUpSpace.run(context as Activity) }
+                }) { Text("Free up", color = Accent) }
+            },
+            dismissButton = {
+                TextButton(onClick = { freePreview = null }) { Text("Cancel") }
+            },
+        )
     }
 }
 

@@ -1,0 +1,296 @@
+package app.azimuthphoto.mobile.data
+
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+
+/** A face cluster from the hub (people are grouped by the desktop's face model). */
+@Serializable
+data class Person(
+    val id: Long,
+    val name: String = "",
+    val label: String = "",
+    val status: String = "",
+    val photo_count: Int = 0,
+    val face_count: Int = 0,
+    val representative_image_id: Long? = null,
+    val face_thumb_url: String = "",
+    val thumb_url: String = "",
+) {
+    /** The user's name if set, otherwise the auto label ("Person 3271"). */
+    val displayName: String get() = name.ifBlank { label.ifBlank { "Unnamed" } }
+    val named: Boolean get() = name.isNotBlank()
+}
+
+@Serializable
+private data class PeopleResponse(val sections: Map<String, List<Person>> = emptyMap())
+
+/** A user collection (album) with cover + publish/share state. */
+@Serializable
+data class Collection(
+    val id: Long,
+    val uuid: String = "",
+    val name: String = "",
+    val description: String = "",
+    val image_count: Int = 0,
+    val cover_image_id: Long? = null,
+    val cover_filename: String = "",
+    val visibility: String = "private",
+    val published: Boolean = false,
+    val publish_slug: String = "",
+    val smart: Boolean = false,
+)
+
+@Serializable
+private data class CollectionsResponse(val collections: List<Collection> = emptyList())
+
+@Serializable
+data class MapMarker(
+    val id: Long,
+    val filename: String = "",
+    val lat: Double,
+    val lng: Double,
+    val thumb_url: String = "",
+)
+
+@Serializable
+private data class MarkersResponse(val markers: List<MapMarker> = emptyList())
+
+@Serializable
+data class Tag(val tag: String, val count: Int = 0)
+
+@Serializable
+private data class TagsResponse(val tags: List<Tag> = emptyList())
+
+@Serializable
+data class Caption(
+    val image_id: Long = 0,
+    val caption: String = "",
+    val tags: List<String> = emptyList(),
+    val has_caption: Boolean = false,
+)
+
+// ---- Filter facets (from /api/filter-options, each with library-wide counts) ----
+@Serializable data class YearFacet(val year: String = "", val count: Int = 0)
+@Serializable data class FileTypeFacet(val ext: String = "", val count: Int = 0)
+@Serializable data class CameraFacet(val camera: String = "", val count: Int = 0)
+@Serializable data class LensFacet(val lens: String = "", val count: Int = 0)
+
+@Serializable
+data class FilterOptions(
+    val years: List<YearFacet> = emptyList(),
+    val file_types: List<FileTypeFacet> = emptyList(),
+    val cameras: List<CameraFacet> = emptyList(),
+    val lenses: List<LensFacet> = emptyList(),
+)
+
+/**
+ * The desktop-parity library surface: people/faces, collections/albums, places,
+ * captions/tags, and visual-similar. Read paths need no auth; write paths accept
+ * an optional X-Device-Token. Response shapes for write endpoints are verified
+ * against the live hub by each feature's builder.
+ */
+class LibraryApi(private val baseUrl: String, private val deviceToken: String? = null) {
+
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    private val json = Json { ignoreUnknownKeys = true }
+    private val jsonType = "application/json".toMediaType()
+
+    private fun builder(path: String) = Request.Builder().url("$baseUrl$path")
+        .apply { deviceToken?.let { header("X-Device-Token", it) } }
+
+    private fun get(path: String): String =
+        http.newCall(builder(path).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("GET $path -> HTTP ${resp.code}")
+            resp.body?.string() ?: throw IOException("GET $path -> empty body")
+        }
+
+    private fun postJson(path: String, body: String): String =
+        http.newCall(builder(path).post(body.toRequestBody(jsonType)).build()).execute().use { resp ->
+            if (!resp.isSuccessful) throw IOException("POST $path -> HTTP ${resp.code}")
+            resp.body?.string().orEmpty()
+        }
+
+    // ---- Absolute media URLs (share the hub's thumb/full endpoints) ----
+    // Blank paths return blank so Coil shows a placeholder, never the hub homepage.
+    fun thumb(url: String): String = when {
+        url.isBlank() -> ""
+        url.startsWith("http") -> url
+        else -> "$baseUrl$url"
+    }
+    fun imageThumb(imageId: Long, size: String = "sm"): String = "$baseUrl/api/thumb/$size/$imageId"
+    fun imageLarge(imageId: Long): String = "$baseUrl/api/thumb/lg/$imageId"
+
+    // ---- People / faces ----
+    suspend fun people(): List<Person> = withContext(Dispatchers.IO) {
+        val sections = json.decodeFromString<PeopleResponse>(get("/api/people")).sections
+        // Flatten every section (most_seen, named, …), keep one entry per id, most photos first.
+        sections.values.flatten().associateBy { it.id }.values.sortedByDescending { it.photo_count }
+    }
+
+    suspend fun personPhotos(personId: Long, offset: Int = 0, limit: Int = 200): List<ArchiveImage> =
+        withContext(Dispatchers.IO) {
+            val body = get("/api/rankings?sort=date_taken&people=$personId&limit=$limit&offset=$offset")
+            json.decodeFromString<RankingsPage>(body).images
+        }
+
+    suspend fun labelPerson(personId: Long, name: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching { postJson("/api/people/$personId/label", """{"name":${json.encodeToString(name)}}""") }
+            .isSuccess
+    }
+
+    suspend fun ignorePerson(personId: Long): Boolean = withContext(Dispatchers.IO) {
+        runCatching { postJson("/api/people/$personId/ignore", "{}") }.isSuccess
+    }
+
+    /** Verify payload against the hub before relying on this. */
+    suspend fun mergePeople(sourceId: Long, targetId: Long): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            postJson("/api/people/merge", """{"source_person_id":$sourceId,"target_person_id":$targetId}""")
+        }.isSuccess
+    }
+
+    // ---- Collections / albums ----
+    suspend fun collections(): List<Collection> = withContext(Dispatchers.IO) {
+        json.decodeFromString<CollectionsResponse>(get("/api/user-collections")).collections
+    }
+
+    /** A collection's photos — the dedicated route returns full image objects. */
+    suspend fun collectionPhotos(id: Long): List<ArchiveImage> = withContext(Dispatchers.IO) {
+        val obj = json.parseToJsonElement(get("/api/collections/$id/images")).jsonObject
+        (obj["images"] as? JsonArray)?.let {
+            json.decodeFromString<List<ArchiveImage>>(it.toString())
+        } ?: emptyList()
+    }
+
+    suspend fun createCollection(name: String): Long? = withContext(Dispatchers.IO) {
+        runCatching {
+            val out = postJson("/api/user-collections", """{"name":${json.encodeToString(name)}}""")
+            // Verified live: the new id is nested under "collection".
+            json.parseToJsonElement(out).jsonObject["collection"]?.jsonObject
+                ?.get("id")?.toString()?.trim('"')?.toLongOrNull()
+        }.getOrNull()
+    }
+
+    suspend fun addToCollection(collectionId: Long, imageIds: List<Long>): Boolean =
+        withContext(Dispatchers.IO) {
+            // Verified live: the payload key is "image_ids".
+            runCatching {
+                postJson("/api/user-collections/$collectionId/images", """{"image_ids":${imageIds}}""")
+            }.isSuccess
+        }
+
+    /** Returns the public URL when publishing succeeds (null when the hub has no publish dir set). */
+    suspend fun publish(collectionId: Long): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val obj = json.parseToJsonElement(
+                postJson("/api/user-collections/$collectionId/publish", "{}"),
+            ).jsonObject
+            (obj["url"]?.toString()?.trim('"')?.takeIf { it != "null" })
+                ?: obj["publish"]?.jsonObject?.let {
+                    (it["url"] ?: it["publish_slug"])?.toString()?.trim('"')?.takeIf { s -> s != "null" }
+                }
+        }.getOrNull()
+    }
+
+    suspend fun share(collectionId: Long): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            // Verified live: the share URL is nested under "share".
+            val obj = json.parseToJsonElement(
+                postJson("/api/user-collections/$collectionId/share", "{}"),
+            ).jsonObject
+            obj["share"]?.jsonObject?.get("url")?.toString()?.trim('"')?.takeIf { it.isNotBlank() && it != "null" }
+        }.getOrNull()
+    }
+
+    suspend fun renameCollection(collectionId: Long, name: String): Boolean = withContext(Dispatchers.IO) {
+        runCatching {
+            postJson("/api/user-collections/$collectionId/rename", """{"name":${json.encodeToString(name)}}""")
+        }.isSuccess
+    }
+
+    suspend fun deleteCollection(collectionId: Long): Boolean = withContext(Dispatchers.IO) {
+        runCatching { postJson("/api/user-collections/$collectionId/delete", "{}") }.isSuccess
+    }
+
+    suspend fun removeFromCollection(collectionId: Long, imageIds: List<Long>): Boolean =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                postJson("/api/user-collections/$collectionId/images/remove", """{"image_ids":${imageIds}}""")
+            }.isSuccess
+        }
+
+    /**
+     * A smart collection is a saved search: the hub re-runs [SearchFilters.toSmartQuery]
+     * live, so the collection tracks the library. Returns the new collection id.
+     */
+    suspend fun createSmartCollection(name: String, filters: SearchFilters): Long? =
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val body =
+                    """{"name":${json.encodeToString(name)},"query":${filters.toSmartQuery()}}"""
+                val out = postJson("/api/user-collections", body)
+                json.parseToJsonElement(out).jsonObject["collection"]?.jsonObject
+                    ?.get("id")?.toString()?.trim('"')?.toLongOrNull()
+            }.getOrNull()
+        }
+
+    // ---- Search / filters ----
+    suspend fun filterOptions(): FilterOptions = withContext(Dispatchers.IO) {
+        json.decodeFromString<FilterOptions>(get("/api/filter-options"))
+    }
+
+    /** The full-power library search: every /api/rankings filter, with totals for live counts. */
+    suspend fun search(filters: SearchFilters, offset: Int = 0, limit: Int = 120): RankingsPage =
+        withContext(Dispatchers.IO) {
+            json.decodeFromString<RankingsPage>(
+                get("/api/rankings?" + filters.toQueryString(offset, limit)),
+            )
+        }
+
+    // ---- Places ----
+    suspend fun markers(limit: Int = 5000): List<MapMarker> = withContext(Dispatchers.IO) {
+        json.decodeFromString<MarkersResponse>(get("/api/map/markers?limit=$limit")).markers
+    }
+
+    // ---- Tags / captions / similar ----
+    suspend fun tags(): List<Tag> = withContext(Dispatchers.IO) {
+        json.decodeFromString<TagsResponse>(get("/api/tags")).tags
+    }
+
+    suspend fun tagPhotos(tag: String, offset: Int = 0, limit: Int = 200): List<ArchiveImage> =
+        withContext(Dispatchers.IO) {
+            val q = java.net.URLEncoder.encode(tag, "UTF-8")
+            json.decodeFromString<RankingsPage>(
+                get("/api/rankings?sort=date_taken&tag=$q&limit=$limit&offset=$offset"),
+            ).images
+        }
+
+    suspend fun caption(imageId: Long): Caption = withContext(Dispatchers.IO) {
+        runCatching { json.decodeFromString<Caption>(get("/api/image/$imageId/caption")) }
+            .getOrDefault(Caption(image_id = imageId))
+    }
+
+    suspend fun similar(imageId: Long, limit: Int = 60): List<ArchiveImage> = withContext(Dispatchers.IO) {
+        runCatching {
+            val el = json.parseToJsonElement(get("/api/similar/$imageId?limit=$limit"))
+            val arr = (el as? JsonObject)?.get("images") as? JsonArray ?: (el as? JsonArray)
+            arr?.let { json.decodeFromString<List<ArchiveImage>>(it.toString()) } ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+}

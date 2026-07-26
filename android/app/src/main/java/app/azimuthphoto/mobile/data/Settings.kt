@@ -15,6 +15,7 @@ private val Context.dataStore by preferencesDataStore(name = "settings")
 
 data class AppSettings(
     val serverUrl: String,
+    val deviceToken: String = "",
     val backupEnabled: Boolean,
     val wifiOnly: Boolean,
     val backupVideos: Boolean,
@@ -23,39 +24,71 @@ data class AppSettings(
     val freeUpSpaceEnabled: Boolean,
     /** Backed-up media older than this many days is quietly removed from the device. */
     val keepDays: Int,
+    val gridColumns: Int,
+    val recentSearches: List<String>,
+    val onboarded: Boolean,
+    val serverConfigured: Boolean,
+    val chargingOnly: Boolean,
 )
 
 object SettingsStore {
     const val DEFAULT_SERVER_URL = "http://100.102.150.104:8000"
 
     private val SERVER_URL = stringPreferencesKey("server_url")
+    private val DEVICE_TOKEN = stringPreferencesKey("device_token")
     private val BACKUP_ENABLED = booleanPreferencesKey("backup_enabled")
     private val WIFI_ONLY = booleanPreferencesKey("wifi_only")
     private val BACKUP_VIDEOS = booleanPreferencesKey("backup_videos")
     private val BACKUP_BUCKETS = stringSetPreferencesKey("backup_buckets")
     private val FREE_UP_SPACE = booleanPreferencesKey("free_up_space")
     private val KEEP_DAYS = intPreferencesKey("keep_days")
+    private val GRID_COLUMNS = intPreferencesKey("grid_columns")
+    private val RECENT_SEARCHES = stringPreferencesKey("recent_searches")
+    private val ONBOARDED = booleanPreferencesKey("onboarded")
+    private val SERVER_CONFIGURED = booleanPreferencesKey("server_configured")
+    private val CHARGING_ONLY = booleanPreferencesKey("charging_only")
 
     fun flow(context: Context): Flow<AppSettings> =
         context.dataStore.data.map { p ->
             AppSettings(
                 serverUrl = (p[SERVER_URL] ?: DEFAULT_SERVER_URL).trimEnd('/'),
+                deviceToken = p[DEVICE_TOKEN] ?: "",
                 backupEnabled = p[BACKUP_ENABLED] ?: true,
                 wifiOnly = p[WIFI_ONLY] ?: false,
                 backupVideos = p[BACKUP_VIDEOS] ?: true,
                 backupBuckets = p[BACKUP_BUCKETS] ?: emptySet(),
                 freeUpSpaceEnabled = p[FREE_UP_SPACE] ?: false,
                 keepDays = p[KEEP_DAYS] ?: 30,
+                gridColumns = (p[GRID_COLUMNS] ?: 4).coerceIn(3, 5),
+                recentSearches = p[RECENT_SEARCHES]
+                    ?.split(SEARCH_SEPARATOR)
+                    ?.filter { it.isNotBlank() }
+                    ?: emptyList(),
+                onboarded = p[ONBOARDED] ?: false,
+                serverConfigured = p[SERVER_CONFIGURED] ?: false,
+                chargingOnly = p[CHARGING_ONLY] ?: false,
             )
         }
 
     suspend fun current(context: Context): AppSettings = flow(context).first()
 
     suspend fun setServerUrl(context: Context, url: String) =
-        context.dataStore.edit { it[SERVER_URL] = url.trim().trimEnd('/') }
+        context.dataStore.edit {
+            it[SERVER_URL] = url.trim().trimEnd('/')
+            it[SERVER_CONFIGURED] = true
+        }
+
+    suspend fun setDeviceToken(context: Context, token: String) =
+        context.dataStore.edit { it[DEVICE_TOKEN] = token.trim() }
 
     suspend fun setBackupEnabled(context: Context, enabled: Boolean) =
         context.dataStore.edit { it[BACKUP_ENABLED] = enabled }
+
+    suspend fun setChargingOnly(context: Context, enabled: Boolean) =
+        context.dataStore.edit { it[CHARGING_ONLY] = enabled }
+
+    suspend fun setOnboarded(context: Context, onboarded: Boolean) =
+        context.dataStore.edit { it[ONBOARDED] = onboarded }
 
     suspend fun setWifiOnly(context: Context, wifiOnly: Boolean) =
         context.dataStore.edit { it[WIFI_ONLY] = wifiOnly }
@@ -71,4 +104,23 @@ object SettingsStore {
 
     suspend fun setKeepDays(context: Context, days: Int) =
         context.dataStore.edit { it[KEEP_DAYS] = days }
+
+    suspend fun setGridColumns(context: Context, columns: Int) =
+        context.dataStore.edit { it[GRID_COLUMNS] = columns.coerceIn(3, 5) }
+
+    suspend fun addRecentSearch(context: Context, query: String) {
+        val clean = query.trim()
+        if (clean.isEmpty()) return
+        context.dataStore.edit { preferences ->
+            val existing = preferences[RECENT_SEARCHES]
+                ?.split(SEARCH_SEPARATOR)
+                ?.filter { it.isNotBlank() }
+                .orEmpty()
+            preferences[RECENT_SEARCHES] = (listOf(clean) + existing.filterNot {
+                it.equals(clean, ignoreCase = true)
+            }).take(8).joinToString(SEARCH_SEPARATOR)
+        }
+    }
+
+    private const val SEARCH_SEPARATOR = "\u001F"
 }

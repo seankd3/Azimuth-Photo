@@ -1,17 +1,23 @@
 package app.azimuthphoto.mobile.backup
 
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.ServiceInfo
 import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import app.azimuthphoto.mobile.App
+import app.azimuthphoto.mobile.MainActivity
 import app.azimuthphoto.mobile.R
 import app.azimuthphoto.mobile.data.DeviceMedia
 import app.azimuthphoto.mobile.data.MediaItem
 import app.azimuthphoto.mobile.data.SettingsStore
+import android.util.Log
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.IOException
@@ -33,8 +39,9 @@ data class BackupProgress(
  */
 class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = uploadMutex.withLock {
         val context = applicationContext
+        setForeground(foregroundInfo("Preparing backup"))
         // Content-URI triggers are one-shot; re-arm so the next photo also wakes us.
         BackupScheduler.scheduleContentTrigger(context)
         val settings = SettingsStore.current(context)
@@ -42,26 +49,30 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         if (settings.wifiOnly && isMetered(context)) return Result.retry()
 
         val db = BackupDb.get(context)
-        val client = SyncClient(settings.serverUrl)
+        val client = SyncClient(settings.serverUrl, settings.deviceToken.takeIf { it.isNotBlank() })
         val known = db.allStates()
 
         val all = DeviceMedia.queryAll(context)
-        val candidates = all.filter { item ->
+        val eligible = all.filter { item ->
             val stateOk = known[item.id] != BackupDb.STATE_UPLOADED &&
                 known[item.id] != BackupDb.STATE_PRESENT
             val typeOk = !item.isVideo || settings.backupVideos
             val bucketOk = settings.backupBuckets.isEmpty() ||
                 item.bucketId in settings.backupBuckets
-            stateOk && typeOk && bucketOk && item.sizeBytes > 0
+            stateOk && typeOk && bucketOk
         }
+        val zeroSizeSkipped = eligible.count { it.sizeBytes <= 0 }
+        if (zeroSizeSkipped > 0) Log.i(TAG, "Skipped $zeroSizeSkipped zero-size media items")
+        val candidates = eligible.filter { it.sizeBytes > 0 }
         if (candidates.isEmpty()) {
             publish(BackupProgress(running = false))
             return Result.success()
         }
 
-        setForeground(foregroundInfo("Backing up ${candidates.size} items"))
         var done = 0
         var failures = 0
+        var hasTransientFailure = false
+        setForeground(foregroundInfo("Backing up 0 / ${candidates.size}", candidates.size, done))
 
         for (batch in candidates.chunked(MANIFEST_BATCH)) {
             // Hash the batch, declare it, then upload only what the hub is missing.
@@ -71,8 +82,9 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     publish(BackupProgress(true, candidates.size, done, item.displayName))
                     hashed.add(item to manifestItemFor(context, item))
                 } catch (e: Exception) {
-                    failures++
                     db.upsert(item.id, "", item.sizeBytes, BackupDb.STATE_FAILED)
+                    done++
+                    failures++
                 }
             }
             if (hashed.isEmpty()) continue
@@ -80,35 +92,55 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             val response = try {
                 client.manifest(hashed.map { it.second })
             } catch (e: IOException) {
-                publish(BackupProgress(false, candidates.size, done, lastError = e.message))
-                return Result.retry()
+                if (classifyBackupFailure(e) == BackupFailure.TRANSIENT) hasTransientFailure = true
+                for ((item, manifest) in hashed) {
+                    db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
+                    done++
+                    failures++
+                }
+                publish(BackupProgress(true, candidates.size, done, lastError = e.message))
+                continue
             }
-            val knownHashes = response.known.map { it.content_hash }.toSet()
+            val knownHashes = response.known.associate { it.content_hash to it.image_id }
 
             for ((item, manifest) in hashed) {
                 try {
                     if (manifest.content_hash in knownHashes) {
-                        db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_PRESENT)
+                        db.upsert(
+                            item.id,
+                            manifest.content_hash,
+                            item.sizeBytes,
+                            BackupDb.STATE_PRESENT,
+                            knownHashes[manifest.content_hash],
+                        )
                     } else {
                         publish(BackupProgress(true, candidates.size, done, item.displayName))
-                        client.upload(manifest.content_hash, item.sizeBytes, {
+                        val hubImageId = client.upload(manifest.content_hash, item.sizeBytes, {
                             context.contentResolver.openInputStream(item.uri)
                                 ?: throw IOException("cannot open ${item.uri}")
                         })
-                        db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_UPLOADED)
+                        db.upsert(
+                            item.id,
+                            manifest.content_hash,
+                            item.sizeBytes,
+                            BackupDb.STATE_UPLOADED,
+                            hubImageId,
+                        )
                     }
                 } catch (e: IOException) {
-                    failures++
+                    if (classifyBackupFailure(e) == BackupFailure.TRANSIENT) hasTransientFailure = true
                     db.upsert(item.id, manifest.content_hash, item.sizeBytes, BackupDb.STATE_FAILED)
+                    failures++
                 }
                 done++
-                setForeground(foregroundInfo("Backing up $done / ${candidates.size}"))
+                setForeground(foregroundInfo("Backing up $done / ${candidates.size}", candidates.size, done))
             }
         }
 
         publish(BackupProgress(running = false, total = candidates.size, done = done))
+        if (failures > 0) postFailureSummary(failures)
         FreeUpSpace.runIfEnabled(context)
-        return if (failures > 0) Result.retry() else Result.success()
+        return if (hasTransientFailure) Result.retry() else Result.success()
     }
 
     private suspend fun manifestItemFor(context: Context, item: MediaItem): ManifestItem {
@@ -138,11 +170,13 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         progressFlow.value = progress
     }
 
-    private fun foregroundInfo(text: String): ForegroundInfo {
+    private fun foregroundInfo(text: String, total: Int = 0, done: Int = 0): ForegroundInfo {
         val notification = NotificationCompat.Builder(applicationContext, App.BACKUP_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle("Azimuth Photo backup")
             .setContentText(text)
+            .setContentIntent(mainActivityIntent())
+            .setProgress(total, done, false)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
@@ -151,14 +185,45 @@ class BackupWorker(context: Context, params: WorkerParameters) : CoroutineWorker
         )
     }
 
+    private fun postFailureSummary(failures: Int) {
+        val notification = NotificationCompat.Builder(applicationContext, App.BACKUP_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setContentTitle("Azimuth Photo backup")
+            .setContentText("Backup finished — $failures items failed, will retry")
+            .setContentIntent(mainActivityIntent())
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        applicationContext.getSystemService(NotificationManager::class.java)
+            .notify(FAILURE_NOTIFICATION_ID, notification)
+    }
+
+    private fun mainActivityIntent(): PendingIntent = PendingIntent.getActivity(
+        applicationContext,
+        0,
+        Intent(applicationContext, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
+
     companion object {
         /** Phone shots live in their own tree on the hub. */
         const val PHONE_FOLDER = "Personal Photos"
         const val MANIFEST_BATCH = 50
         const val NOTIFICATION_ID = 100
+        const val FAILURE_NOTIFICATION_ID = 101
+        private const val TAG = "BackupWorker"
+        private val uploadMutex = Mutex()
 
         /** Live progress for the UI; survives across worker runs in-process. */
         val progressFlow: MutableStateFlow<BackupProgress> = MutableStateFlow(BackupProgress())
         val progress: StateFlow<BackupProgress> get() = progressFlow
     }
 }
+
+internal enum class BackupFailure { PERMANENT, TRANSIENT }
+
+internal fun classifyBackupFailure(error: IOException): BackupFailure =
+    if (error is HubHttpException && error.code in 400..499) BackupFailure.PERMANENT
+    else BackupFailure.TRANSIENT

@@ -31,8 +31,21 @@ data class KnownItem(val content_hash: String, val image_id: Long)
 @Serializable
 data class ManifestResponse(val missing: List<String>, val known: List<KnownItem>)
 
+@Serializable
+private data class SyncOpResponse(
+    val offset: Long? = null,
+    val image_id: Long? = null,
+    val error: String? = null,
+)
+
+class HubHttpException(val code: Int, detail: String? = null) :
+    IOException("hub failed: HTTP $code${detail?.let { " $it" } ?: ""}")
+
 /** Client for the hub's FIELD_SPEC sync endpoints (manifest + resumable chunked upload). */
-class SyncClient(private val baseUrl: String) {
+class SyncClient(
+    private val baseUrl: String,
+    private val deviceToken: String? = null,
+) {
 
     private val http = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -47,44 +60,44 @@ class SyncClient(private val baseUrl: String) {
     fun manifest(items: List<ManifestItem>): ManifestResponse {
         val body = json.encodeToString(ManifestRequest(items)).toRequestBody(jsonType)
         http.newCall(
-            Request.Builder().url("$baseUrl/api/sync/manifest").post(body).build()
+            requestBuilder("$baseUrl/api/sync/manifest").post(body).build()
         ).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("manifest failed: HTTP ${resp.code}")
+            if (!resp.isSuccessful) throw hubException("manifest", resp)
             return json.decodeFromString(resp.body!!.string())
         }
     }
 
     fun uploadOffset(contentHash: String): Long {
         http.newCall(
-            Request.Builder().url("$baseUrl/api/sync/upload/$contentHash/status").build()
+            requestBuilder("$baseUrl/api/sync/upload/$contentHash/status").build()
         ).execute().use { resp ->
-            if (!resp.isSuccessful) throw IOException("status failed: HTTP ${resp.code}")
-            return Regex("\"offset\"\\s*:\\s*(\\d+)")
-                .find(resp.body!!.string())?.groupValues?.get(1)?.toLong() ?: 0L
+            if (!resp.isSuccessful) throw hubException("status", resp)
+            return parseSyncResponse(resp.body!!.string()).offset
+                ?: throw IOException("status response without offset")
         }
     }
 
     /**
      * Upload the stream in sequential chunks, resuming from the hub's committed offset.
      * The stream must start at byte 0; already-committed bytes are skipped locally.
-     * Returns the hub image_id once complete, or null if the hub didn't report one.
+     * Returns the hub image_id once complete.
      */
     fun upload(
         contentHash: String,
         totalBytes: Long,
         openStream: () -> InputStream,
         onProgress: (Long) -> Unit = {},
-    ): Long? {
+    ): Long {
         var offset = uploadOffset(contentHash)
         var stream = openStream()
+        var realigns = 0
         try {
             stream.skipFully(offset)
             val buf = ByteArray(CHUNK_BYTES)
             while (offset < totalBytes) {
                 val want = minOf(CHUNK_BYTES.toLong(), totalBytes - offset).toInt()
                 stream.readFully(buf, want)
-                val request = Request.Builder()
-                    .url("$baseUrl/api/sync/upload/$contentHash")
+                val request = requestBuilder("$baseUrl/api/sync/upload/$contentHash")
                     .header("X-Offset", offset.toString())
                     .header("X-Total-Bytes", totalBytes.toString())
                     .post(buf.copyOf(want).toRequestBody(binType))
@@ -93,31 +106,50 @@ class SyncClient(private val baseUrl: String) {
                     when {
                         resp.code == 409 -> {
                             // Offset mismatch: hub tells us its committed offset; reopen and realign.
-                            val actual = Regex("\"offset\"\\s*:\\s*(\\d+)")
-                                .find(resp.body!!.string())?.groupValues?.get(1)?.toLong()
+                            if (++realigns > MAX_REALIGNS) {
+                                throw IOException("too many upload realigns")
+                            }
+                            val actual = parseSyncResponse(resp.body!!.string()).offset
                                 ?: throw IOException("409 without offset")
-                            stream.close()
-                            stream = openStream()
-                            stream.skipFully(actual)
+                            stream = stream.realign(openStream, actual)
                             offset = actual
                         }
                         !resp.isSuccessful ->
-                            throw IOException("upload failed: HTTP ${resp.code} ${resp.body?.string()?.take(200)}")
+                            throw hubException("upload", resp)
                         else -> {
-                            val text = resp.body!!.string()
-                            val imageId = Regex("\"image_id\"\\s*:\\s*(\\d+)")
-                                .find(text)?.groupValues?.get(1)?.toLong()
+                            val response = parseSyncResponse(resp.body!!.string())
+                            val imageId = response.image_id
                             if (imageId != null) return imageId
-                            offset += want
+                            val actual = response.offset ?: offset + want
+                            if (actual != offset + want) stream = stream.realign(openStream, actual)
+                            offset = actual
                             onProgress(offset)
                         }
                     }
                 }
             }
-            return null
+            throw IOException("upload reached end without hub finalize")
         } finally {
             stream.close()
         }
+    }
+
+    private fun requestBuilder(url: String): Request.Builder = Request.Builder()
+        .url(url)
+        .apply { deviceToken?.let { header("X-Device-Token", it) } }
+
+    private fun parseSyncResponse(body: String): SyncOpResponse = try {
+        json.decodeFromString(body)
+    } catch (e: Exception) {
+        throw IOException("invalid sync response", e)
+    }
+
+    private fun hubException(operation: String, response: okhttp3.Response): HubHttpException =
+        HubHttpException(response.code, "$operation ${response.body?.string()?.take(200).orEmpty()}")
+
+    private fun InputStream.realign(openStream: () -> InputStream, offset: Long): InputStream {
+        close()
+        return openStream().also { it.skipFully(offset) }
     }
 
     private fun InputStream.skipFully(count: Long) {
@@ -142,5 +174,6 @@ class SyncClient(private val baseUrl: String) {
 
     companion object {
         const val CHUNK_BYTES = 4 * 1024 * 1024
+        private const val MAX_REALIGNS = 5
     }
 }

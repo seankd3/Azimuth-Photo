@@ -1,8 +1,10 @@
 package app.azimuthphoto.mobile.data
 
 import android.content.ContentUris
+import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.provider.MediaStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,13 +31,23 @@ data class MediaItem(
 
     val isRaw: Boolean get() = displayName.endsWith(".dng", ignoreCase = true)
 
-    /** RAW+JPEG twins share this key (same shot, same folder, different extension). */
-    val shotKey: String get() = "$bucketId/${displayName.substringBeforeLast('.').lowercase()}"
+    /**
+     * RAW+JPEG twins share this key. Pixel names the pair with per-format
+     * suffixes — PXL_….RAW-01.jpg / PXL_….RAW-02.ORIGINAL.dng (Top Shot uses
+     * TS-nnn-…) — so strip those after dropping the extension.
+     */
+    val shotKey: String
+        get() = rawShotKey(bucketId, displayName)
 }
 
 data class MediaBucket(val id: String, val name: String, val count: Int)
 
 object DeviceMedia {
+
+    /** Hide a RAW twin when its rendered JPEG is present; keep solo DNGs visible. */
+    fun collapseRawPairs(items: List<MediaItem>): List<MediaItem> {
+        return collapseRawPairsBy(items, MediaItem::isRaw, MediaItem::shotKey)
+    }
 
     private val PROJECTION = arrayOf(
         MediaStore.Files.FileColumns._ID,
@@ -60,15 +72,47 @@ object DeviceMedia {
 
     /** All device photos & videos, newest first. */
     suspend fun queryAll(context: Context, sinceAddedSec: Long = 0): List<MediaItem> =
+        query(context, sinceAddedSec, trashedOnly = false)
+
+    /** MediaStore items currently in the system trash. */
+    suspend fun queryTrashed(context: Context): List<MediaItem> =
+        query(context, sinceAddedSec = 0, trashedOnly = true)
+
+    private suspend fun query(
+        context: Context,
+        sinceAddedSec: Long,
+        trashedOnly: Boolean,
+    ): List<MediaItem> =
         withContext(Dispatchers.IO) {
             val items = ArrayList<MediaItem>(4096)
             val selection = if (sinceAddedSec > 0) {
                 "$MEDIA_SELECTION AND ${MediaStore.Files.FileColumns.DATE_ADDED} > $sinceAddedSec"
             } else MEDIA_SELECTION
-            context.contentResolver.query(
-                COLLECTION, PROJECTION, selection, null,
-                "${MediaStore.Files.FileColumns.DATE_TAKEN} DESC, ${MediaStore.Files.FileColumns._ID} DESC",
-            )?.use { c ->
+            val sortOrder = "CASE WHEN ${MediaStore.Files.FileColumns.DATE_TAKEN} > 0 THEN " +
+                    "${MediaStore.Files.FileColumns.DATE_TAKEN} ELSE " +
+                    "${MediaStore.Files.FileColumns.DATE_ADDED}*1000 END DESC, " +
+                    "${MediaStore.Files.FileColumns._ID} DESC"
+            val cursor = if (trashedOnly) {
+                context.contentResolver.query(
+                    COLLECTION,
+                    PROJECTION,
+                    Bundle().apply {
+                        putString(ContentResolver.QUERY_ARG_SQL_SELECTION, selection)
+                        putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, sortOrder)
+                        putInt(MediaStore.QUERY_ARG_MATCH_TRASHED, MediaStore.MATCH_ONLY)
+                    },
+                    null,
+                )
+            } else {
+                context.contentResolver.query(
+                    COLLECTION,
+                    PROJECTION,
+                    selection,
+                    null,
+                    sortOrder,
+                )
+            }
+            cursor?.use { c ->
                 val iId = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
                 val iType = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
                 val iTaken = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_TAKEN)
@@ -111,6 +155,20 @@ object DeviceMedia {
             items
         }
 
+    suspend fun resolveId(context: Context, uri: Uri): Long? = withContext(Dispatchers.IO) {
+        runCatching {
+            context.contentResolver.query(
+                uri,
+                arrayOf(MediaStore.MediaColumns._ID),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getLong(0) else null
+            }
+        }.getOrNull()
+    }
+
     /** Distinct buckets (folders) with counts, for the backup-folder picker. */
     suspend fun queryBuckets(context: Context): List<MediaBucket> =
         withContext(Dispatchers.IO) {
@@ -133,4 +191,20 @@ object DeviceMedia {
             counts.map { (id, v) -> MediaBucket(id, v.first, v.second) }
                 .sortedByDescending { it.count }
         }
+}
+
+private val PIXEL_PAIR_SUFFIX = Regex("\\.(raw|ts-\\d+)-\\d+(\\.original)?$")
+
+internal fun rawShotKey(bucketId: String, displayName: String): String {
+    val base = displayName.substringBeforeLast('.').lowercase().replace(PIXEL_PAIR_SUFFIX, "")
+    return "$bucketId/$base"
+}
+
+internal fun <T> collapseRawPairsBy(
+    items: List<T>,
+    isRaw: (T) -> Boolean,
+    shotKey: (T) -> String,
+): List<T> {
+    val renderedShots = items.asSequence().filterNot(isRaw).map(shotKey).toHashSet()
+    return items.filterNot { isRaw(it) && shotKey(it) in renderedShots }
 }
