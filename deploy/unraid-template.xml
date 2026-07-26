@@ -1,14 +1,14 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Azimuth Photo</Name>
-  <Repository>photoarchive:latest</Repository>
+  <Repository>azimuth:latest</Repository>
   <Registry/>
   <Network>bridge</Network>
   <MyIP/>
   <Shell>sh</Shell>
   <Privileged>false</Privileged>
-  <Support>https://github.com/Sean-Kenneth-Doherty/photo-archive</Support>
-  <Project>https://github.com/Sean-Kenneth-Doherty/photo-archive</Project>
+  <Support>https://github.com/Sean-Kenneth-Doherty/azimuth-photo</Support>
+  <Project>https://github.com/Sean-Kenneth-Doherty/azimuth-photo</Project>
   <Overview>
     Azimuth Photo library server — point it at your photo folders and open the web UI.
     Catalog and caches live under /data. Originals stay in /photos (or any mounted path).
@@ -17,7 +17,7 @@
   <Category>MediaApp:Photos</Category>
   <WebUI>http://[IP]:[PORT:8000]/WebUI>
   <TemplateURL/>
-  <Icon>https://raw.githubusercontent.com/Sean-Kenneth-Doherty/photo-archive/main/web/static/icons/icon.svg</Icon>
+  <Icon>https://raw.githubusercontent.com/Sean-Kenneth-Doherty/azimuth-photo/main/web/static/icons/icon.svg</Icon>
   <ExtraParams/>
   <PostArgs/>
   <CPUset/>
@@ -27,9 +27,9 @@
   <Requires/>
   <Config Name="Web UI Port" Target="8000" Default="8000" Mode="tcp" Description="Azimuth Photo web UI" Type="Port" Display="always" Required="true" Mask="false">8000</Config>
   <Config Name="Photos" Target="/photos" Default="/mnt/user/photos" Mode="rw" Description="Folder of original photos" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/photos</Config>
-  <Config Name="App Data" Target="/data" Default="/mnt/user/appdata/photoarchive" Mode="rw" Description="Catalog, caches, and settings" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/photoarchive</Config>
-  <Config Name="PHOTOARCHIVE_HOME" Target="PHOTOARCHIVE_HOME" Default="/data" Mode="rw" Description="Where Azimuth Photo stores its catalog" Type="Variable" Display="advanced" Required="false" Mask="false">/data</Config>
-  <Config Name="PHOTOARCHIVE_HOST" Target="PHOTOARCHIVE_HOST" Default="0.0.0.0" Mode="rw" Description="Bind address" Type="Variable" Display="advanced" Required="false" Mask="false">0.0.0.0</Config>
-  <Config Name="PHOTOARCHIVE_PORT" Target="PHOTOARCHIVE_PORT" Default="8000" Mode="rw" Description="Listen port inside the container" Type="Variable" Display="advanced" Required="false" Mask="false">8000</Config>
-  <Config Name="PHOTOARCHIVE_MODE" Target="PHOTOARCHIVE_MODE" Default="hub" Mode="rw" Description="hub (always-on library) or satellite" Type="Variable" Display="advanced" Required="false" Mask="false">hub</Config>
+  <Config Name="App Data" Target="/data" Default="/mnt/user/appdata/azimuth" Mode="rw" Description="Catalog, caches, and settings" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/azimuth</Config>
+  <Config Name="AZIMUTH_HOME" Target="AZIMUTH_HOME" Default="/data" Mode="rw" Description="Where Azimuth Photo stores its catalog" Type="Variable" Display="advanced" Required="false" Mask="false">/data</Config>
+  <Config Name="AZIMUTH_HOST" Target="AZIMUTH_HOST" Default="0.0.0.0" Mode="rw" Description="Bind address" Type="Variable" Display="advanced" Required="false" Mask="false">0.0.0.0</Config>
+  <Config Name="AZIMUTH_PORT" Target="AZIMUTH_PORT" Default="8000" Mode="rw" Description="Listen port inside the container" Type="Variable" Display="advanced" Required="false" Mask="false">8000</Config>
+  <Config Name="AZIMUTH_MODE" Target="AZIMUTH_MODE" Default="hub" Mode="rw" Description="hub (always-on library) or satellite" Type="Variable" Display="advanced" Required="false" Mask="false">hub</Config>
 </Container>

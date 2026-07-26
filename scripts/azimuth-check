@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PYTHON="$ROOT/web/.venv/bin/python"
+VENV="${AZIMUTH_VENV:-$ROOT/web/.venv}"
+PYTHON="$VENV/bin/python"
 NODE_BIN="${NODE:-node}"
 MODE="unit"
 AREA=""
@@ -37,11 +38,11 @@ declare -A AREA_DESCRIPTIONS=(
 
 usage() {
     cat <<'USAGE'
-Usage: photoarchive-check [--quick|--unit|--full] [--area AREA] [--list-areas]
+Usage: azimuth-check [--quick|--unit|--full] [--area AREA] [--list-areas]
 
   --quick   Run scripts/lint, diff whitespace checks, Python compile, and JS syntax.
   --unit    Run quick checks (incl. lint) plus the unit suite. This is the default.
-  --full    Run unit checks plus the opt-in browser smoke test against PHOTOARCHIVE_SMOKE_URL.
+  --full    Run unit checks plus the opt-in browser smoke test against AZIMUTH_SMOKE_URL.
   --area    After quick checks, run a focused unit subset for one subsystem.
   --list-areas
             Print available focused areas and their target test modules.
@@ -97,7 +98,7 @@ while (($#)); do
 done
 
 if [[ ! -x "$PYTHON" ]]; then
-    echo "Missing $PYTHON. Run: cd web && python -m venv .venv && .venv/bin/pip install -r requirements.txt" >&2
+    echo "Missing $PYTHON. Set AZIMUTH_VENV or run the documented setup." >&2
     exit 1
 fi
 
@@ -151,7 +152,7 @@ run_unit_checks() {
 }
 
 run_background_work_smoke_if_available() {
-    local base_url="${PHOTOARCHIVE_SMOKE_URL:-http://127.0.0.1:8000}"
+    local base_url="${AZIMUTH_SMOKE_URL:-http://127.0.0.1:8000}"
     if "$PYTHON" - "$base_url" <<'PY'
 import sys
 import urllib.request
@@ -172,7 +173,7 @@ PY
 }
 
 run_browser_smoke() {
-    (cd "$ROOT/web" && PHOTOARCHIVE_BROWSER_SMOKE=1 "$PYTHON" -m unittest test_browser_smoke)
+    (cd "$ROOT/web" && AZIMUTH_BROWSER_SMOKE=1 "$PYTHON" -m unittest test_browser_smoke)
 }
 
 run_quick_checks

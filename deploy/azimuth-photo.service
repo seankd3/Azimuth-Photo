@@ -1,0 +1,44 @@
+[Unit]
+Description=Azimuth Photo library server
+Wants=network-online.target
+After=network-online.target local-fs.target
+RequiresMountsFor=/mnt/expansion/Photos
+
+[Service]
+Type=simple
+User=sean
+Group=sean
+WorkingDirectory=/home/sean/Projects/azimuth-photo
+Environment=PYTHONUNBUFFERED=1
+Environment=AZIMUTH_MODE=hub
+Environment=AZIMUTH_ACCESS=tailscale
+Environment=AZIMUTH_HOST=100.102.150.104
+Environment=AZIMUTH_PORT=8000
+Environment=AZIMUTH_DATA_DIR=/home/sean/.local/share/azimuth-photo
+Environment=AZIMUTH_CONFIG_DIR=/home/sean/.config/azimuth-photo
+Environment=AZIMUTH_CACHE_DIR=/home/sean/.cache/azimuth-photo
+Environment=AZIMUTH_STATE_DIR=/home/sean/.local/state/azimuth-photo
+Environment=AZIMUTH_DB_PATH=/home/sean/.local/share/azimuth-photo/catalog/azimuth.db
+Environment=AZIMUTH_MODELS_DIR=/home/sean/.local/share/azimuth-photo/models
+Environment=AZIMUTH_THUMB_CACHE_DIR=/home/sean/.cache/azimuth-photo/previews
+Environment=AZIMUTH_EMBED_CACHE_DIR=/home/sean/.cache/azimuth-photo/embeddings
+Environment=AZIMUTH_DEVELOP_CACHE_DIR=/home/sean/.cache/azimuth-photo/develop
+Environment=AZIMUTH_TRANSFER_DIR=/home/sean/.local/state/azimuth-photo/transfer
+Environment="AZIMUTH_BACKUP_DIR=/mnt/expansion/Azimuth Photo/Omarchy/backups"
+Environment=AZIMUTH_SYNC_INTAKE_DIR=/mnt/expansion/Photos/_intake
+Environment=AZIMUTH_SYNC_RAWS_DIR=/mnt/expansion/Photos/RAWS
+Environment=AZIMUTH_SSD_CACHE_BYTES=193273528320
+Environment=AZIMUTH_BULK_HDD_CONCURRENCY=1
+ExecStart=/home/sean/.local/share/azimuth-photo/venv/bin/python /home/sean/Projects/azimuth-photo/scripts/server_entry.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+KillMode=mixed
+UMask=0027
+LimitNOFILE=65536
+Nice=5
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+
+[Install]
+WantedBy=multi-user.target

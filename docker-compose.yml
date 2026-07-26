@@ -8,23 +8,23 @@
 # mode is the simple default for a single machine on your LAN / Tailscale.
 
 services:
-  photoarchive:
+  azimuth-photo:
     build: .
-    image: photoarchive:latest
-    container_name: photoarchive
+    image: azimuth-photo:latest
+    container_name: azimuth-photo
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      PHOTOARCHIVE_HOST: "0.0.0.0"
-      PHOTOARCHIVE_PORT: "8000"
-      PHOTOARCHIVE_HOME: "/data"
-      PHOTOARCHIVE_MODE: "hub"
+      AZIMUTH_HOST: "0.0.0.0"
+      AZIMUTH_PORT: "8000"
+      AZIMUTH_HOME: "/data"
+      AZIMUTH_MODE: "hub"
     volumes:
       # Your photo originals (read-write so imports / trash can work).
       - ./photos:/photos
       # Catalog database, caches, settings.
       - ./data:/data
-    # Uncomment for LAN mDNS (_photoarchive._tcp) discovery from other devices:
+    # Uncomment for LAN mDNS (_azimuth._tcp) discovery from other devices:
     # network_mode: host
     # # When using host networking, drop the ports: block above.

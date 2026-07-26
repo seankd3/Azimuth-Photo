@@ -7,7 +7,9 @@ cd "$ROOT"
 
 export PATH="/usr/bin:/usr/local/bin:${PATH}"
 
-if [[ -x "$ROOT/web/.venv/bin/ruff" ]]; then
+if [[ -n "${AZIMUTH_VENV:-}" && -x "$AZIMUTH_VENV/bin/ruff" ]]; then
+  RUFF="$AZIMUTH_VENV/bin/ruff"
+elif [[ -x "$ROOT/web/.venv/bin/ruff" ]]; then
   RUFF="$ROOT/web/.venv/bin/ruff"
 elif command -v ruff >/dev/null 2>&1; then
   RUFF="$(command -v ruff)"

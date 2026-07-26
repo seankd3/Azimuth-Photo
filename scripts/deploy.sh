@@ -1,22 +1,58 @@
-#!/bin/bash
-# One-command prod deploy: gate, backup, push, restart, resume workers.
-set -e
-cd ~/Projects/photo-archive
-git fetch -q origin develop
-git merge origin/develop --no-edit || { echo "MERGE CONFLICT — resolve manually"; exit 1; }
-cd web
-PHOTOARCHIVE_SMOKE_MODE=1 .venv/bin/python -m pytest -q > /tmp/deploy-suite.log 2>&1
-code=$?
-tail -1 /tmp/deploy-suite.log
-[ $code -ne 0 ] && { echo "SUITE RED — aborting deploy"; exit 1; }
-cd ..
-./scripts/qa.sh
-cd web
-cp photoarchive.db "photoarchive.db.pre-$(date +%m%d-%H%M).bak"
-ls -t photoarchive.db.pre-*.bak | tail -n +6 | xargs -r rm -f
-cd ..
-git push -q origin main
-sudo -n systemctl restart photoarchive
-for i in $(seq 1 30); do sleep 5; c=$(curl -s -o /dev/null -w "%{http_code}" http://100.102.150.104:8000/ || echo 000); [ "$c" = "200" ] && echo "UP after ~$((i*5))s" && break; done
-for e in cache/pregen/start geo/backfill/start sync/hash-backfill; do curl -s -X POST "http://100.102.150.104:8000/api/$e" -H "Content-Type: application/json" -d "{}" >/dev/null 2>&1; done
-echo "DEPLOYED $(git log --oneline -1) — workers resumed (captions stay manual)"
+#!/usr/bin/env bash
+# Deploy the verified GitHub main branch into the one canonical Omarchy checkout.
+set -euo pipefail
+
+ROOT="${AZIMUTH_REPO:-/home/sean/Projects/azimuth-photo}"
+VENV="${AZIMUTH_VENV:-/home/sean/.local/share/azimuth-photo/venv}"
+SERVICE="${AZIMUTH_SERVICE:-azimuth-photo.service}"
+HEALTH_URL="${AZIMUTH_HEALTH_URL:-http://100.102.150.104:8000/api/dev/status}"
+BACKUP_URL="${AZIMUTH_BACKUP_URL:-http://100.102.150.104:8000/api/system/backup/now}"
+TEST_LOG="${AZIMUTH_DEPLOY_TEST_LOG:-/tmp/azimuth-photo-deploy-tests.log}"
+
+cd "$ROOT"
+
+if [[ "$(git branch --show-current)" != "main" ]]; then
+    echo "Deploy refused: $ROOT must be on main." >&2
+    exit 1
+fi
+if [[ -n "$(git status --porcelain)" ]]; then
+    echo "Deploy refused: $ROOT has uncommitted changes." >&2
+    exit 1
+fi
+if [[ ! -x "$VENV/bin/python" ]]; then
+    echo "Deploy refused: missing managed runtime at $VENV." >&2
+    exit 1
+fi
+
+git fetch --quiet origin main
+git merge --ff-only origin/main
+
+echo "Running isolated verification..."
+(
+    cd "$ROOT/web"
+    AZIMUTH_SMOKE_MODE=1 \
+    PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-/home/sean/.cache}/azimuth-photo/test-pycache" \
+    "$VENV/bin/python" -m pytest -q
+) >"$TEST_LOG" 2>&1 || {
+    tail -n 80 "$TEST_LOG"
+    echo "Deploy refused: test suite failed." >&2
+    exit 1
+}
+tail -n 2 "$TEST_LOG"
+
+echo "Creating a verified catalog snapshot through the live service..."
+curl --fail --silent --show-error --max-time 3600 \
+    --request POST "$BACKUP_URL" >/tmp/azimuth-photo-deploy-backup.json
+
+sudo -n systemctl restart "$SERVICE"
+for attempt in $(seq 1 60); do
+    if curl --fail --silent --max-time 2 "$HEALTH_URL" >/dev/null; then
+        echo "DEPLOYED $(git log --oneline -1)"
+        exit 0
+    fi
+    sleep 2
+done
+
+sudo -n systemctl status "$SERVICE" --no-pager || true
+echo "Deploy failed: $SERVICE did not become healthy at $HEALTH_URL." >&2
+exit 1
