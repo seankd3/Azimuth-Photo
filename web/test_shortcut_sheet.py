@@ -10,6 +10,7 @@ SHEET_SOURCE = WEB_ROOT / "static/js/desktop/shortcut_sheet.js"
 KEYBOARD_SOURCE = WEB_ROOT / "static/js/desktop/keyboard.js"
 DEVELOP_SOURCE = WEB_ROOT / "static/js/desktop/develop/develop.js"
 PAINTER_SOURCE = WEB_ROOT / "static/js/desktop/keywords_panel.js"
+DESKTOP_TEMPLATE = WEB_ROOT / "templates/desktop.html"
 
 
 def load_shortcuts():
@@ -48,7 +49,12 @@ def test_shortcut_sheet_entries_are_backed_by_keyboard_bindings():
         "G": ["key === 'g'"],
         "E": ["key === 'e'"],
         "D": ["event.key.toLowerCase() === 'd'"],
-        "O / M / Y / H": ["key === 'o'", "key === 'm'", "key === 'y'", "event.key.toLowerCase() === 'h'"],
+        "C / O / M / H": [
+            "key === 'c'", "switchLens('collections')",
+            "key === 'o'", "switchLens('people')",
+            "key === 'm'", "switchLens('map')",
+            "event.key.toLowerCase() === 'h'", "switchLens('shared')",
+        ],
         "Arrows": ["event.key === 'ArrowRight'", "event.key === 'ArrowLeft'"],
         "Home / End": ["event.key === 'Home'", "event.key === 'End'"],
         "Page Up / Down": ["event.key === 'PageUp'", "event.key === 'PageDown'"],
@@ -88,3 +94,14 @@ def test_shortcut_sheet_entries_are_backed_by_keyboard_bindings():
     for shortcut in shortcuts:
         fragments = expected_fragments[shortcut["key"]]
         assert all(fragment in keyboard for fragment in fragments), shortcut
+
+    template = DESKTOP_TEMPLATE.read_text(encoding="utf-8")
+    for key, lens, label in (
+        ("C", "collections", "Collections"),
+        ("O", "people", "People"),
+        ("M", "map", "Map"),
+        ("H", "shared", "Shared"),
+    ):
+        assert f'data-view="{lens}"' in template
+        assert f'data-tip="{label} · {key}"' in template
+        assert f'aria-label="{label} lens"' in template
