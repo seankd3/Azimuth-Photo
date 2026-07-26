@@ -117,6 +117,7 @@ class DevelopDiscoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             environment = os.environ.copy()
             environment.pop("PHOTOARCHIVE_DEVELOP_CACHE_DIR", None)
+            environment["AZIMUTH_DEVELOP_CACHE_DIR"] = str(Path(tmp) / "inherited-default")
             environment["PHOTOARCHIVE_HOME"] = str(Path(tmp) / "app")
             script = (
                 "from features.develop import ai_masks, hdr, pano, rawproc; "
@@ -132,6 +133,30 @@ class DevelopDiscoveryTests(unittest.TestCase):
                 text=True,
             )
             root = Path(tmp) / "app" / "cache" / "develop"
+        self.assertEqual(
+            result.stdout.splitlines(),
+            [str(root), str(root / "hdr"), str(root / "pano"), str(root)],
+        )
+
+    def test_direct_cache_modules_preserve_explicit_develop_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            environment = os.environ.copy()
+            environment.pop("AZIMUTH_DEVELOP_CACHE_DIR", None)
+            root = Path(tmp) / "configured-develop"
+            environment["PHOTOARCHIVE_DEVELOP_CACHE_DIR"] = str(root)
+            script = (
+                "from features.develop import ai_masks, hdr, pano, rawproc; "
+                "print(ai_masks.DEVELOP_CACHE_ROOT); print(hdr.HDR_CACHE_DIR); "
+                "print(pano.PANO_CACHE_DIR); print(rawproc.BASE_CACHE_ROOT)"
+            )
+            result = subprocess.run(
+                [sys.executable, "-c", script],
+                cwd=Path(__file__).resolve().parent,
+                env=environment,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
         self.assertEqual(
             result.stdout.splitlines(),
             [str(root), str(root / "hdr"), str(root / "pano"), str(root)],

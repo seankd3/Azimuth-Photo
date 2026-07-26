@@ -26,10 +26,8 @@ from PIL import Image
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
 from core.dates import parse_taken_timestamp
-from core.runtime_paths import apply_environment_defaults, resolve_runtime_paths
+from core.runtime_paths import resolve_runtime_paths
 from data import connection as data_connection
-
-apply_environment_defaults()
 
 from features.develop import rawproc
 
