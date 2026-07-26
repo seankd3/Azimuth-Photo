@@ -358,6 +358,11 @@ areas, but responsibility does not.
   truthful, and Loupe Escape returns to the invoking photo.
 - **Current evidence:** `9e8802643`, `de5987071`, `aa7dfffb0`, and
   `569492c17`; focused Node/contracts/browser proof reported by each lane.
+  The completed client-gallery resilience lane specifically proves that public
+  galleries report media/submission failures honestly, recover without a dead
+  end, and return keyboard focus correctly. This is completed lane evidence,
+  not permission to merge the customer-trust cohort during the current
+  source-frozen Release investigation.
 - **Prerequisite:** approved main reconciliation; customer-trust cohort review;
   desktop proof merged last inside the cohort.
 - **Boundary:** named commits only; no delivery primitive consolidation or UI
@@ -952,7 +957,37 @@ areas, but responsibility does not.
   `aria-label` names, and Collections architecture all agree. Test-only commit
   `7d71b91b6` updates that expected map and pins each key to its lens destination
   plus visible/accessibility contract; two focused tests, Ruff, and quick are
-  green without a product-code change.
+  green without a product-code change. A time-boxed, source-frozen
+  `BUG-TEST-02` investigation on `c17879607` then reran the eleven residual
+  identities together in a fresh process: all 11 passed in 9.96 seconds. This
+  rules out standalone regressions and cross-contamination among those eleven.
+  The previous full-order traces directly show eight bulk-work identities
+  entering the shared memory-pressure path: People returns `pause=True`, while
+  seven thumbnail contracts return the `-3` memory-pressure sentinel. The exact
+  earlier trigger remains unresolved: the failed full run did not capture
+  cgroup current/swap or hysteresis flags at those nodes. Code inspection found
+  the memory-pressure test class resets injected readers and both hysteresis
+  flags in setup and cleanup, but that does not yet prove another predecessor
+  cannot retain an override or that live cgroup pressure did not cross the
+  9,448,928,052-byte soft watermark and remain above the
+  8,912,057,140-byte resume watermark.
+
+  A final instrumented default-order prefix reproduced the caption timing
+  failure after the first 128 collected nodes. Immediately before the target,
+  elapsed process time was 19.622 seconds; there were seven active threads, one
+  registered executor thread, zero queued executor jobs, one-minute host load
+  4.17, no memory/RSS/host-reader override, both memory hysteresis flags false,
+  and cgroup RSS/swap/current-plus-swap of 2,865,872,896 /
+  1,473,458,176 / 4,339,331,072 bytes. The target still missed its one-second
+  executor-start event and failed; teardown at 20.768 seconds had two active
+  threads and an empty executor queue. The run was stopped at the authorized
+  safe point before reaching catalog/decode, so no smaller polluting
+  predecessor was proved. Existing full-order evidence remains: catalog's
+  prefetch task did not produce `sm` within its bounded wait, and decode budget
+  acquisition did not occur within 100 ten-millisecond polls; all three pass in
+  the fresh residual-node process. These are now split into
+  `BUG-TEST-02A`/`BUG-TEST-02B`; no assertion, product threshold, or source file
+  changed during the audit.
 - **Prerequisite:** integration complete; quality-foundation lane reapproved.
 - **Boundary:** `scripts/azimuth-check`, pytest config, focused target mapping,
   and docs; retain the pre-migration command reader only during the protected
@@ -1106,6 +1141,7 @@ target means measure/profile before choosing one; it does not mean "fast enough.
 | 2026-07-25 read-only performance triage on `ea258ce68` | Synthetic rankings first page / date histogram / visible-library query | Fixed 2,000-image tmpfs catalog; 10 grouped plus 5 isolated fresh processes per node, 45 application-cache-cold samples each; OS page/scheduler state remained host-controlled. Grouped p50/p95/p99/worst: rankings 65.3/161.7/188.6/188.6 ms, histogram 35.0/101.6/102.1/102.1 ms, visible 61.8/111.9/115.9/115.9 ms. Isolated: 59.6/160.6/160.6/160.6, 32.3/85.9/85.9/85.9, and 42.5/56.6/56.6/56.6 ms. Process assertions: 15/15, 13/15, 15/15 respectively; all correctness checks retained. No profiler was run; attribution is call-path ownership only | Existing median-of-three budgets remain 200/80/125 ms; do not rebaseline until a controlled idle/load matrix distinguishes gate noise from a repeatable Core query miss | `unverified` |
 | 2026-07-25 BUG-TEST-SHIM-01 on `6ccac86bd` | Canonical browser-smoke contract and compatibility bridge | Before: exact integration/main living-shell node failed 1/1; exact develop passed 1/1. Both pre-fix command names exited 1 because CommonJS imports ran as ES modules. After: canonical and shim `--help` both exit 0 with Azimuth-only usage; three exact contracts passed, all 16 UI contracts passed, focused Ruff and quick green | Preserve the old filename only as a tested forwarding bridge until WIN-06; run the actual CDP smoke against a disposable server before release | `done awaiting integration` |
 | 2026-07-25 BUG-SHORTCUT-01 on `7d71b91b6` | Collections/People/Map/Shared keyboard contract | Pre-fix integration and exact develop failed 1/1 because the test still expected Events/Y; exact main passed its internally consistent older behavior. Current C/O/M/H sheet, handlers, tooltips, accessible lens names, and `9cb15beb5` product decision agree. After: shortcut plus Collections-lens focused proof 2 passed, Ruff and quick green; no product code changed | Preserve C/O/M/H parity; add real key-event/focus proof to the later desktop accessibility journey | `done awaiting integration` |
+| 2026-07-25 BUG-TEST-02 time box on `c17879607` | Residual order-sensitive failures | Fresh combined residual run: 11 passed in 9.96 s. Instrumented first-129-node default-order prefix reproduced caption failure at 19.622 s with cgroup RSS 2,865,872,896, swap 1,473,458,176, combined 4,339,331,072 bytes; soft/resume 9,448,928,052/8,912,057,140; hysteresis false/false; no reader overrides; 7 threads, 1 executor thread, queue 0, load1 4.17. Full-order traces separately identify eight memory-gated bulk tests, but their transition sample and minimal predecessor remain unmeasured | `BUG-TEST-02A`: capture and minimize first memory-gate transition without weakening production watermarks. `BUG-TEST-02B`: minimize scheduling prefixes and isolate harness scheduling without loosening waits. No source changed in this audit | `active` |
 
 Every future performance receipt records catalog/fixture shape, machine, commit,
 warm/cold state, p50, p95, p99, worst, profiler attribution, and correctness
@@ -1181,7 +1217,8 @@ initiatives. Items marked `unverified` must be reproduced before a fix lane.
 | BUG-RANK-05 | `parked` / P1 | Ranking | Pair rows can be treated as independent evidence despite shared human action | One-action migration/projection and grouped-training proof |
 | BUG-RANK-06 | `parked` / P1 | Ranking | 100,469 active photos lacked embeddings and ranking signal in audit | Coverage/provenance report and full-catalog projection evaluation |
 | BUG-TEST-01 | `parked` / P0 | Release | Default unittest gate selects 1,425 tests while pytest selects 1,539; 114 selected tests are omitted | Before/after collection receipt and green complete unit gate |
-| BUG-TEST-02 | `active` / P0 | Release | The post-Core complete gate confirms the same eleven tests fail only in suite order but pass together in isolation: caption owner release, first-run preview/ranking visibility, decode-budget cancellation, manual People work, and seven thumbnail bulk/priority/manual-work contracts | Reproduce with order/bisection receipt, eliminate leaked global/env/resource state without weakening product assertions, then pass isolated nodes and two complete non-Playwright runs |
+| BUG-TEST-02A | `active` / P0 | Release | Eight bulk-work identities pass together in a fresh residual-node process but fail in full order through the shared memory-pressure gate: manual People work reports `pause=True` and seven thumbnail bulk/priority/manual contracts return `-3`. The failed full run did not record cgroup current/swap, hysteresis flags, or reader override origin at those nodes; memory-pressure's own tests do reset their injected readers and flags, so a leaked override from that class is ruled out but live cgroup threshold crossing versus another predecessor remains unresolved | In one source-frozen run, sample cgroup current/swap, `_paused`/`_host_paused`, and reader origins before every gate transition; minimize the first transition to a reproducible predecessor/state. Harness isolation must inject a deterministic below-watermark reading for contract tests—not relax production watermarks—then prove each node after the contaminating sequence and in two complete gates |
+| BUG-TEST-02B | `active` / P0 | Release | Caption, first-run preview, and decode-budget timing identities pass in the fresh 11-node process. A default-order prefix through the first 128 nodes reproduced caption's one-second executor-start miss with no queued executor work, no memory override, hysteresis clear, cgroup pressure 4,339,331,072 bytes below soft, seven active threads, and host load 4.17; the time box ended before a smaller predecessor or the catalog/decode prefix was reached | Minimize the 128-node caption prefix by module/node while sampling executor creation/submission/start, event-loop lag, runnable CPU pressure, and retained threads; run the same probe for catalog/decode. Use deterministic executor/event-loop isolation in the harness if host scheduling is causal; retain product waits/budgets and prove the contaminating sequence plus two complete gates |
 | BUG-TEST-CRASH-01 | `done awaiting integration` / P0 | Release | The pre-existing test-harness race had two ownership layers: media warm itself could still use the per-test persistent thumbnail SQLite connection, and its prefetch wrapper could finish after handing a probe to an unretained `asyncio.to_thread` task. A preliminary direct drain still crashed at 35% with the child in `cache_entries._get_disk_entry`; final harness-only commit `3c6b0fae` explicitly drains media-warm tasks and then handed-off test-loop work before closing the connection, without changing production async behavior. Focused ordering 2 passed, compare stress completed 10/10 (510 tests), lifecycle coverage passed 45, Ruff and quick are green, and two complete gates finished without native aborts. Gate 1 exactly reproduced the known 18 failures; gate 2 reproduced 15, omitting only three known performance budgets; neither introduced a new identity | Preserve the ordering contract and both complete-gate receipts when this lane is reviewed for `develop`; do not weaken the bounded fail-before-close behavior |
 | BUG-ARTIFACT-01 | `parked` / P1 | Release | Source tracks 74 pytest-temp paths, 13 database-like files, 15 benchmark-run paths, and three receipt logs; ignores do not prospectively contain all classes | Preserve/disposition inventory, no deletion in containment lane, and clean proof that new generated files remain untracked |
 | BUG-VERSION-01 | `blocked` / P0 | Release | Current integration manifests report `0.1.0` while the proved Windows artifact reports `1.0.0-rc.1` | One-version matrix across source, tag, installer, engine, API, About, updater, and changelog |
@@ -1294,7 +1331,7 @@ not permission to merge it.
 | CORE-01 | `first-use-boot` / `fce783a7a` → merge `84650c100` | Defer updater bundle prep after library readiness while advertising no unready update | Integrated without conflicts; startup/fresh-home/desktop/rollback matrix 72 passed and quick green; untracked QA-5000 receipts preserved in the source lane; disposable integration timing remains |
 | MOB-01 | `mobile-field-resilience` / `462997293` | Offline/reconnect/terminal mobile write behavior | Customer-trust cohort |
 | DESK-01 | `deliver-load-resilience` / `9e8802643` | Independent Deliver destination loading/retry | Manual `panel.js` review |
-| DESK-01 | `client-gallery-resilience` / `de5987071` | Honest gallery failure/retry and focus | Isolated gallery browser proof |
+| DESK-01 | `client-gallery-resilience` / `de5987071` | Honest public-gallery media/submission failure recovery and correct focus return, with focused coverage | Completed lane output; integrate only in the serialized customer-trust cohort |
 | DESK-01 | `health-clarity` / `aa7dfffb0` | Calm System/Library Health states | Backend payload compatibility review |
 | DESK-01/DESK-02 | `desktop-journey-proof` / `569492c17` | Loupe Escape focus-return scenario | Merge after desktop product cohort |
 | WIN-01/WIN-02 | `windows-install` / `0ee6004db` | Bundled local engine and desktop shell | Proof complete; controlled Windows cohort |
@@ -1308,6 +1345,7 @@ not permission to merge it.
 | BUG-TEST-CRASH-01 | `sprint-integration` / `3c6b0fae` | Test teardown drains media-warm wrappers and nested thumbnail-prefetch handoffs before closing the per-test persistent SQLite connection | Compare 10/10 (510 tests), lifecycle 45 passed, Ruff/quick green; two full gates completed with zero native aborts and no new failure identity |
 | BUG-PREGEN-WATCHDOG-01 | `sprint-integration` / `7ad2d5f3` | Watchdog staleness follows the newest generation, progress-heartbeat, or start timestamp | Exact progressing fixture 10/10, true-stall/progress pair 2 passed, preview/pregeneration matrix 62 passed, Ruff/quick green; full-order identity closed on `ba0fffe4` with no new failure |
 | BUG-RUNTIME-02 | `sprint-integration` / `e8265d81` | HDR no longer re-runs app-level path initialization during direct feature import; selected and explicit Develop roots remain contained | Focused 2 passed; runtime/path/HDR/panorama/rebrand matrix 46 passed with 1 platform skip; Ruff/quick green; full-order identity closed on `e6296737` with no new failure |
+| BUG-TEST-02A/02B | `sprint-integration` / `c17879607` (source-frozen audit) | Split the residual order-sensitive cluster into shared memory-gate and executor/event-loop timing boundaries; recorded the fresh 11-node pass and the bounded caption-prefix state trace | Evidence only; resume from the exact acceptance probes in the defect register, with no remediation or cohort work started |
 | BUG-TEST-SHIM-01 | `sprint-integration` / `6ccac86bd` | Canonical Azimuth browser-smoke command, callers, contracts, and docs; prior filename remains a forwarding compatibility shim | Exact 3 and full UI-contract 16 passed; canonical/shim help equivalence, syntax, focused Ruff, and quick green; disposable-server CDP proof remains |
 | BUG-SHORTCUT-01 | `sprint-integration` / `7d71b91b6` | Test-only alignment with intentional Collections/C product behavior; C/O/M/H now pinned to handlers, visible tips, and accessible lens labels | Exact shortcut and Collections-lens contracts 2 passed; focused Ruff and quick green; browser-level key/focus accessibility proof remains under DESK-04 |
 | RANK research | No implementation branch | Real-catalog latency, action/intelligence boundary, local-first contract | Preserve report; one future owner |
