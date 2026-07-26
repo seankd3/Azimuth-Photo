@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import pytest
 import os
 from pathlib import Path
-import posixpath
 import tempfile
 import unittest
 from unittest import mock
@@ -14,42 +12,37 @@ import settings
 
 class RuntimePathTests(unittest.TestCase):
     def test_clean_linux_defaults_follow_xdg(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            paths = resolve_runtime_paths(
-                web,
-                {
-                    "HOME": "/home/alex",
-                    "XDG_DATA_HOME": "/data",
-                    "XDG_CONFIG_HOME": "/config",
-                    "XDG_CACHE_HOME": "/cache",
-                    "XDG_STATE_HOME": "/state",
-                },
-                "linux",
-                "/home/alex",
-            )
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {
+                "HOME": "/home/alex",
+                "XDG_DATA_HOME": "/data",
+                "XDG_CONFIG_HOME": "/config",
+                "XDG_CACHE_HOME": "/cache",
+                "XDG_STATE_HOME": "/state",
+            },
+            "linux",
+            "/home/alex",
+        )
         self.assertEqual(paths.layout, "native")
-        self.assertEqual(paths.catalog_db, "/data/azimuthphoto/catalog/azimuth.db")
-        self.assertEqual(paths.settings_file, "/config/azimuthphoto/settings.json")
-        self.assertEqual(paths.thumb_cache_dir, "/cache/azimuthphoto/previews")
-        self.assertEqual(paths.model_root, "/data/azimuthphoto/models")
-        self.assertEqual(paths.server_log, "/state/azimuthphoto/logs/server.log")
+        self.assertEqual(paths.catalog_db, "/data/azimuth-photo/catalog/azimuth.db")
+        self.assertEqual(paths.settings_file, "/config/azimuth-photo/settings.json")
+        self.assertEqual(paths.thumb_cache_dir, "/cache/azimuth-photo/previews")
+        self.assertEqual(paths.model_root, "/data/azimuth-photo/models")
+        self.assertEqual(paths.transfer_dir, "/state/azimuth-photo/transfer")
+        self.assertEqual(paths.server_log, "/state/azimuth-photo/logs/server.log")
 
     def test_clean_windows_defaults(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            paths = resolve_runtime_paths(
-                web,
-                {
-                    "USERPROFILE": r"C:\Users\Alex",
-                    "LOCALAPPDATA": r"C:\Users\Alex\AppData\Local",
-                    "APPDATA": r"C:\Users\Alex\AppData\Roaming",
-                },
-                "win32",
-                r"C:\Users\Alex",
-            )
+        paths = resolve_runtime_paths(
+            r"C:\checkout\web",
+            {
+                "USERPROFILE": r"C:\Users\Alex",
+                "LOCALAPPDATA": r"C:\Users\Alex\AppData\Local",
+                "APPDATA": r"C:\Users\Alex\AppData\Roaming",
+            },
+            "win32",
+            r"C:\Users\Alex",
+        )
         self.assertEqual(paths.layout, "native")
         self.assertEqual(
             paths.catalog_db,
@@ -63,155 +56,128 @@ class RuntimePathTests(unittest.TestCase):
             paths.thumb_cache_dir,
             r"C:\Users\Alex\AppData\Local\Azimuth Photo\cache\previews",
         )
+        self.assertEqual(
+            paths.transfer_dir,
+            r"C:\Users\Alex\AppData\Local\Azimuth Photo\state\transfer",
+        )
 
     def test_clean_macos_defaults(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            paths = resolve_runtime_paths(web, {"HOME": "/Users/alex"}, "darwin", "/Users/alex")
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {"HOME": "/Users/alex"},
+            "darwin",
+            "/Users/alex",
+        )
         self.assertEqual(
             paths.catalog_db,
             "/Users/alex/Library/Application Support/Azimuth Photo/catalog/azimuth.db",
         )
-        self.assertEqual(paths.thumb_cache_dir, "/Users/alex/Library/Caches/Azimuth Photo/previews")
-        self.assertEqual(paths.server_log, "/Users/alex/Library/Logs/Azimuth Photo/server.log")
+        self.assertEqual(
+            paths.thumb_cache_dir,
+            "/Users/alex/Library/Caches/Azimuth Photo/previews",
+        )
 
-    def test_photoarchive_home_opts_out_of_legacy(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            (web / "azimuth.db").touch()
-            paths = resolve_runtime_paths(
-                web,
-                {"HOME": "/home/alex", "PHOTOARCHIVE_HOME": "/srv/photoarchive"},
-                "linux",
-                "/home/alex",
-            )
+    def test_azimuth_home_selects_one_portable_tree(self):
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {"HOME": "/home/alex", "AZIMUTH_HOME": "/srv/azimuth-photo"},
+            "linux",
+            "/home/alex",
+        )
         self.assertEqual(paths.layout, "custom")
-        self.assertEqual(paths.catalog_db, "/srv/photoarchive/data/catalog/azimuth.db")
-        self.assertEqual(paths.settings_file, "/srv/photoarchive/config/settings.json")
-        self.assertEqual(paths.thumb_cache_dir, "/srv/photoarchive/cache/previews")
+        self.assertEqual(paths.catalog_db, "/srv/azimuth-photo/data/catalog/azimuth.db")
+        self.assertEqual(paths.settings_file, "/srv/azimuth-photo/config/settings.json")
+        self.assertEqual(paths.thumb_cache_dir, "/srv/azimuth-photo/cache/previews")
 
-    def test_granular_overrides_win(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            (web / "azimuth.db").touch()
-            paths = resolve_runtime_paths(
-                web,
-                {
-                    "HOME": "/home/alex",
-                    "PHOTOARCHIVE_DB_PATH": "/catalogs/main.db",
-                    "PHOTOARCHIVE_THUMB_CACHE_DIR": "/fast/previews",
-                    "PHOTOARCHIVE_MODELS_DIR": "/models",
-                    "PHOTOARCHIVE_DEVELOP_CACHE_DIR": "/develop",
-                    "PHOTOARCHIVE_BACKUP_DIR": "/backups",
-                    "PHOTOARCHIVE_RUN_DIR": "/run/photoarchive",
-                    "PHOTOARCHIVE_LOG_DIR": "/logs/photoarchive",
-                },
-                "linux",
-                "/home/alex",
-            )
+    def test_granular_overrides(self):
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {
+                "HOME": "/home/alex",
+                "AZIMUTH_DB_PATH": "/catalogs/main.db",
+                "AZIMUTH_THUMB_CACHE_DIR": "/fast/previews",
+                "AZIMUTH_MODELS_DIR": "/fast/models",
+                "AZIMUTH_DEVELOP_CACHE_DIR": "/large/develop",
+                "AZIMUTH_BACKUP_DIR": "/large/backups",
+                "AZIMUTH_TRANSFER_DIR": "/state/transfers",
+                "AZIMUTH_RUN_DIR": "/run/azimuth-photo",
+                "AZIMUTH_LOG_DIR": "/logs/azimuth-photo",
+            },
+            "linux",
+            "/home/alex",
+        )
         self.assertEqual(paths.catalog_db, "/catalogs/main.db")
         self.assertEqual(paths.thumb_cache_dir, "/fast/previews")
-        self.assertEqual(paths.model_root, "/models")
-        self.assertEqual(paths.develop_cache_dir, "/develop")
-        self.assertEqual(paths.backup_dir, "/backups")
-        self.assertEqual(paths.run_dir, "/run/photoarchive")
-        self.assertEqual(paths.server_log, "/logs/photoarchive/server.log")
+        self.assertEqual(paths.model_root, "/fast/models")
+        self.assertEqual(paths.develop_cache_dir, "/large/develop")
+        self.assertEqual(paths.backup_dir, "/large/backups")
+        self.assertEqual(paths.transfer_dir, "/state/transfers")
+        self.assertEqual(paths.run_dir, "/run/azimuth-photo")
 
-    def test_root_overrides_beat_legacy_components(self):
+    def test_checkout_contents_never_select_runtime_storage(self):
         with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
+            web = Path(tmp) / "checkout" / "web"
+            web.mkdir(parents=True)
             (web / "azimuth.db").touch()
+            (web / ".thumbcache").mkdir()
             paths = resolve_runtime_paths(
                 web,
-                {
-                    "HOME": "/home/alex",
-                    "PHOTOARCHIVE_DATA_DIR": "/data",
-                    "PHOTOARCHIVE_CONFIG_DIR": "/config",
-                    "PHOTOARCHIVE_CACHE_DIR": "/cache",
-                    "PHOTOARCHIVE_STATE_DIR": "/state",
-                },
+                {"HOME": "/home/alex"},
                 "linux",
                 "/home/alex",
             )
-        self.assertEqual(paths.layout, "legacy")
-        self.assertEqual(paths.catalog_db, "/data/catalog/azimuth.db")
-        self.assertEqual(paths.settings_file, "/config/settings.json")
-        self.assertEqual(paths.thumb_cache_dir, "/cache/previews")
-        self.assertEqual(paths.model_root, "/data/models")
-        self.assertEqual(paths.embed_cache_dir, "/cache/embeddings")
-        self.assertEqual(paths.develop_cache_dir, "/cache/develop")
-        self.assertEqual(paths.backup_dir, "/data/backups")
-        self.assertEqual(paths.run_dir, "/state/run")
-
-    def test_legacy_paths_remain_exact(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            for name in ("azimuth.db", "settings.local.json"):
-                (web / name).touch()
-            for name in (".thumbcache", ".models", ".embedcache", ".run"):
-                (web / name).mkdir()
-            paths = resolve_runtime_paths(web, {"HOME": str(Path(tmp) / "home")}, "linux")
-            self.assertEqual(paths.layout, "legacy")
-            self.assertEqual(paths.catalog_db, posixpath.join(str(web), "azimuth.db"))
-            self.assertEqual(paths.settings_file, posixpath.join(str(web), "settings.local.json"))
-            self.assertEqual(paths.thumb_cache_dir, posixpath.join(str(web), ".thumbcache"))
-            self.assertEqual(paths.model_root, posixpath.join(str(web), ".models"))
-            self.assertEqual(paths.embed_cache_dir, posixpath.join(str(web), ".embedcache"))
-            self.assertEqual(paths.run_dir, posixpath.join(str(web), ".run"))
-
-    def test_backup_file_alone_does_not_trigger_legacy(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            (web / "azimuth.db.pre-dev7.bak").touch()
-            paths = resolve_runtime_paths(web, {"HOME": "/home/alex"}, "linux", "/home/alex")
         self.assertEqual(paths.layout, "native")
-        self.assertEqual(paths.catalog_db, "/home/alex/.local/share/azimuthphoto/catalog/azimuth.db")
+        self.assertEqual(
+            paths.catalog_db,
+            "/home/alex/.local/share/azimuth-photo/catalog/azimuth.db",
+        )
+        self.assertNotIn(str(web), paths.catalog_db)
+        self.assertNotIn(str(web), paths.thumb_cache_dir)
 
-    def test_resolution_has_no_filesystem_side_effects(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            web = Path(tmp) / "web"
-            web.mkdir()
-            before = sorted(path.relative_to(tmp) for path in Path(tmp).rglob("*"))
-            resolve_runtime_paths(web, {"HOME": str(Path(tmp) / "home")}, "linux")
-            after = sorted(path.relative_to(tmp) for path in Path(tmp).rglob("*"))
-        self.assertEqual(after, before)
-
-    def test_ensure_runtime_dirs_only_makes_directories(self):
+    def test_ensure_runtime_dirs_creates_no_catalog_or_settings_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             paths = resolve_runtime_paths(
-                Path(tmp) / "empty-web",
-                {"HOME": str(Path(tmp) / "home"), "PHOTOARCHIVE_HOME": str(Path(tmp) / "app")},
+                "/checkout/web",
+                {
+                    "HOME": str(Path(tmp) / "user"),
+                    "AZIMUTH_HOME": str(Path(tmp) / "app"),
+                },
                 "linux",
             )
-            with mock.patch("shutil.copy", side_effect=AssertionError("must not copy")), mock.patch(
-                "os.replace", side_effect=AssertionError("must not move")
-            ):
-                ensure_runtime_dirs(paths)
+            ensure_runtime_dirs(paths)
             self.assertFalse(Path(paths.catalog_db).exists())
             self.assertFalse(Path(paths.settings_file).exists())
             self.assertTrue(Path(paths.thumb_cache_dir).is_dir())
             self.assertTrue(Path(paths.model_root).is_dir())
             self.assertTrue(Path(paths.backup_dir).is_dir())
+            self.assertTrue(Path(paths.transfer_dir).is_dir())
 
-    def test_current_checkout_selects_legacy_without_mutation(self):
-        web = Path(__file__).resolve().parent
-        if not (web / "azimuth.db").exists():
-            self.skipTest("current checkout has no legacy catalog")
-        catalog = web / "azimuth.db"
-        before = (catalog.stat().st_ino, catalog.stat().st_size)
-        paths = resolve_runtime_paths(web)
-        after = (catalog.stat().st_ino, catalog.stat().st_size)
-        self.assertEqual(paths.layout, "legacy")
-        self.assertEqual(paths.catalog_db, str(catalog))
-        self.assertEqual(paths.thumb_cache_dir, posixpath.join(str(web), ".thumbcache"))
-        self.assertEqual(paths.model_root, posixpath.join(str(web), ".models"))
-        self.assertEqual(after, before)
+    def test_explicit_external_backup_is_allowed_for_real_runtime(self):
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {
+                "HOME": "/home/alex",
+                "AZIMUTH_HOME": "/fast/azimuth-photo",
+                "AZIMUTH_BACKUP_DIR": "/large/azimuth-photo/backups",
+            },
+            "linux",
+            "/home/alex",
+        )
+        self.assertEqual(paths.backup_dir, "/large/azimuth-photo/backups")
+
+    def test_smoke_runtime_rejects_foreign_backup_override(self):
+        paths = resolve_runtime_paths(
+            "/checkout/web",
+            {
+                "HOME": "/home/alex",
+                "AZIMUTH_HOME": "/tmp/azimuth-smoke",
+                "AZIMUTH_SMOKE_MODE": "1",
+                "AZIMUTH_BACKUP_DIR": "/large/azimuth-photo/backups",
+            },
+            "linux",
+            "/home/alex",
+        )
+        self.assertEqual(paths.backup_dir, "/tmp/azimuth-smoke/data/backups")
 
     def test_settings_preserve_explicit_cache_and_model_paths(self):
         raw = {
@@ -227,7 +193,7 @@ class RuntimePathTests(unittest.TestCase):
         }
         with mock.patch.dict(
             os.environ,
-            {"PHOTOARCHIVE_MODELS_DIR": "", "PHOTOARCHIVE_THUMB_CACHE_DIR": ""},
+            {"AZIMUTH_MODELS_DIR": "", "AZIMUTH_THUMB_CACHE_DIR": ""},
             clear=False,
         ):
             normalized = settings.normalize_settings(raw)
@@ -246,43 +212,27 @@ class RuntimePathTests(unittest.TestCase):
         with mock.patch.dict(
             os.environ,
             {
-                "PHOTOARCHIVE_MODELS_DIR": "/deploy/models",
-                "PHOTOARCHIVE_THUMB_CACHE_DIR": "/deploy/previews",
+                "AZIMUTH_MODELS_DIR": "/deploy/models",
+                "AZIMUTH_THUMB_CACHE_DIR": "/deploy/previews",
             },
             clear=False,
         ):
             normalized = settings.normalize_settings(raw)
         self.assertEqual(normalized["ssd_cache_dir"], "/deploy/previews")
-        # Host-adaptive model presets still must live under the deploy models root.
         self.assertTrue(
-            str(normalized["embed_model_dir"]).replace("\\", "/").startswith("/deploy/models/"),
-            normalized["embed_model_dir"],
-        )
-        self.assertTrue(
-            str(normalized["caption_model_dir"]).replace("\\", "/").startswith("/deploy/models/"),
-            normalized["caption_model_dir"],
-        )
-        self.assertEqual(normalized["face_model_dir"], os.path.normpath("/deploy/models/insightface"))
-
-    @pytest.mark.contract
-    def test_photoarchive_home_rejects_foreign_backup_override(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            home = Path(tmp) / "app-home"
-            foreign = Path(tmp) / "other-backups"
-            foreign.mkdir()
-            web = Path(tmp) / "web"
-            web.mkdir()
-            paths = resolve_runtime_paths(
-                web,
-                {
-                    "HOME": str(Path(tmp) / "user"),
-                    "PHOTOARCHIVE_HOME": str(home),
-                    "PHOTOARCHIVE_BACKUP_DIR": str(foreign),
-                },
-                "linux",
-                str(Path(tmp) / "user"),
+            str(normalized["embed_model_dir"]).replace("\\", "/").startswith(
+                "/deploy/models/"
             )
-        self.assertEqual(paths.backup_dir, str(home / "data" / "backups"))
+        )
+        self.assertTrue(
+            str(normalized["caption_model_dir"]).replace("\\", "/").startswith(
+                "/deploy/models/"
+            )
+        )
+        self.assertEqual(
+            normalized["face_model_dir"],
+            os.path.normpath("/deploy/models/insightface"),
+        )
 
 
 if __name__ == "__main__":

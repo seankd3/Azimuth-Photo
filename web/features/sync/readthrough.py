@@ -184,7 +184,7 @@ def _decode_response(base_url: str, body: bytes, content_type: str, headers: dic
                 raise BaseReadthroughError("Hub returned an invalid Develop base payload") from exc
         raise BaseReadthroughError("Hub returned an incomplete Develop base artifact")
 
-    encoded_metadata = headers.get("x-photoarchive-base-metadata")
+    encoded_metadata = headers.get("x-azimuth-base-metadata")
     if encoded_metadata:
         return body, _json_metadata(encoded_metadata)
 

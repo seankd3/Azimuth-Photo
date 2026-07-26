@@ -54,7 +54,7 @@ class _HubHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        boundary = b"photoarchive-pabase1"
+        boundary = b"azimuth-pabase1"
         body = b"".join((
             b"--" + boundary + b"\r\n"
             b"Content-Disposition: attachment; name=\"base\"; filename=\"base.bin.gz\"\r\n"
@@ -79,13 +79,13 @@ class _HubHandler(BaseHTTPRequestHandler):
 class ReadthroughTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.old_mode = os.environ.get("PHOTOARCHIVE_MODE")
-        self.old_hub = os.environ.get("PHOTOARCHIVE_HUB_URL")
+        self.old_mode = os.environ.get("AZIMUTH_MODE")
+        self.old_hub = os.environ.get("AZIMUTH_HUB_URL")
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), _HubHandler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
-        os.environ["PHOTOARCHIVE_MODE"] = "satellite"
-        os.environ["PHOTOARCHIVE_HUB_URL"] = f"http://127.0.0.1:{self.server.server_port}"
+        os.environ["AZIMUTH_MODE"] = "satellite"
+        os.environ["AZIMUTH_HUB_URL"] = f"http://127.0.0.1:{self.server.server_port}"
         self.db_path = str(Path(self.tempdir.name) / "catalog.db")
         with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("CREATE TABLE images (id INTEGER PRIMARY KEY, content_hash TEXT)")
@@ -96,13 +96,13 @@ class ReadthroughTests(unittest.TestCase):
         self.server.server_close()
         self.thread.join(timeout=1)
         if self.old_mode is None:
-            os.environ.pop("PHOTOARCHIVE_MODE", None)
+            os.environ.pop("AZIMUTH_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_MODE"] = self.old_mode
+            os.environ["AZIMUTH_MODE"] = self.old_mode
         if self.old_hub is None:
-            os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
+            os.environ.pop("AZIMUTH_HUB_URL", None)
         else:
-            os.environ["PHOTOARCHIVE_HUB_URL"] = self.old_hub
+            os.environ["AZIMUTH_HUB_URL"] = self.old_hub
         self.tempdir.cleanup()
 
     def test_fetches_base_and_companion_metadata_from_stub_hub(self):

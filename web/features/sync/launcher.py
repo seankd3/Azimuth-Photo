@@ -35,7 +35,7 @@ def ready_timeout_seconds(environ: dict[str, str] | None = None) -> float:
     """Configurable ready wait; default 120s. Slow-but-alive boots keep waiting."""
 
     env = os.environ if environ is None else environ
-    raw = (env.get("PHOTOARCHIVE_READY_TIMEOUT") or "").strip()
+    raw = (env.get("AZIMUTH_READY_TIMEOUT") or "").strip()
     if not raw:
         return 120.0
     try:
@@ -147,7 +147,7 @@ def version_web_dir(version_dir: Path) -> Path:
 
 
 def resolve_python(install_root: Path, version_dir: Path) -> str:
-    env = os.environ.get("PHOTOARCHIVE_PYTHON", "").strip()
+    env = os.environ.get("AZIMUTH_PYTHON", "").strip()
     if env:
         return env
     # Prefer venv matching requirements in this version when present.
@@ -230,7 +230,7 @@ def spawn_server(
     merged = os.environ.copy()
     if env:
         merged.update(env)
-    merged.setdefault("PHOTOARCHIVE_MODE", "satellite")
+    merged.setdefault("AZIMUTH_MODE", "satellite")
     return subprocess.Popen(  # noqa: S603 - launcher owns the satellite process
         command,
         cwd=os.fspath(web_dir),
@@ -259,9 +259,9 @@ def run_supervised(
         web_dir = version_web_dir(version_dir)
         python = resolve_python(root, version_dir)
         env = {
-            "PHOTOARCHIVE_INSTALL_ROOT": os.fspath(root),
-            "PHOTOARCHIVE_CLIENT_SHA": sha,
-            "PHOTOARCHIVE_PORT": str(port),
+            "AZIMUTH_INSTALL_ROOT": os.fspath(root),
+            "AZIMUTH_CLIENT_SHA": sha,
+            "AZIMUTH_PORT": str(port),
         }
         process = spawn(
             python=python,
@@ -293,9 +293,9 @@ def run_supervised(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Azimuth Photo satellite launcher")
-    parser.add_argument("--install-root", default=os.environ.get("PHOTOARCHIVE_INSTALL_ROOT") or "")
-    parser.add_argument("--host", default=os.environ.get("PHOTOARCHIVE_HOST") or DEFAULT_HOST)
-    parser.add_argument("--port", type=int, default=int(os.environ.get("PHOTOARCHIVE_PORT") or DEFAULT_PORT))
+    parser.add_argument("--install-root", default=os.environ.get("AZIMUTH_INSTALL_ROOT") or "")
+    parser.add_argument("--host", default=os.environ.get("AZIMUTH_HOST") or DEFAULT_HOST)
+    parser.add_argument("--port", type=int, default=int(os.environ.get("AZIMUTH_PORT") or DEFAULT_PORT))
     args = parser.parse_args(argv)
     root = resolve_install_root(args.install_root or None)
     return run_supervised(

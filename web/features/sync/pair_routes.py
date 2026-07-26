@@ -79,8 +79,8 @@ def _configured_db_path() -> str:
 
 def _hub_public_url(request: Request) -> str:
     configured = (
-        os.environ.get("PHOTOARCHIVE_PUBLIC_URL")
-        or os.environ.get("PHOTOARCHIVE_HUB_PUBLIC_URL")
+        os.environ.get("AZIMUTH_PUBLIC_URL")
+        or os.environ.get("AZIMUTH_HUB_PUBLIC_URL")
         or ""
     ).strip().rstrip("/")
     if configured:
@@ -108,7 +108,7 @@ def _redeem_pair_request(req: UrlRequest) -> tuple[int, bytes]:
 @router.post("/api/devices/link")
 async def api_devices_link(request: Request):
     """Hub: mint a one-time pair code + QR for the Devices panel."""
-    if not mdns.is_hub_mode() and os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower() == "satellite":
+    if not mdns.is_hub_mode() and os.environ.get("AZIMUTH_MODE", "").strip().lower() == "satellite":
         # Allow link codes on any instance that owns a catalog; satellite can still
         # act as a temporary hub in tests. Prefer hub mode in production.
         pass

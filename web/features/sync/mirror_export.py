@@ -233,7 +233,7 @@ async def thumbnail_pack_stream(
         )
         + "\n"
     ).encode()
-    yield _tar_header(".photoarchive-trailer.json", len(trailer), 0)
+    yield _tar_header(".azimuth-trailer.json", len(trailer), 0)
     yield trailer
     padding = _tar_padding(len(trailer))
     if padding:

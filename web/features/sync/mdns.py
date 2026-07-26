@@ -10,7 +10,7 @@ from typing import Any
 
 log = logging.getLogger(__name__)
 
-SERVICE_TYPE = "_photoarchive._tcp.local."
+SERVICE_TYPE = "_azimuth._tcp.local."
 _ZEROCONF_AVAILABLE = False
 try:
     from zeroconf import ServiceBrowser, ServiceInfo, ServiceStateChange, Zeroconf
@@ -27,14 +27,14 @@ def zeroconf_available() -> bool:
 
 
 def mdns_disabled() -> bool:
-    return os.environ.get("PHOTOARCHIVE_NO_MDNS", "").strip() in ("1", "true", "yes", "on")
+    return os.environ.get("AZIMUTH_NO_MDNS", "").strip() in ("1", "true", "yes", "on")
 
 
 def is_hub_mode() -> bool:
-    mode = os.environ.get("PHOTOARCHIVE_MODE", "").strip().lower()
+    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
     if mode in ("satellite", "standalone"):
         return False
-    if os.environ.get("PHOTOARCHIVE_HUB_URL", "").strip():
+    if os.environ.get("AZIMUTH_HUB_URL", "").strip():
         return False
     return mode in ("", "hub")
 
@@ -50,7 +50,7 @@ def _local_ipv4() -> str:
 
 def _service_name(display_name: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in "-_ " else "-" for ch in display_name).strip() or "Azimuth Photo"
-    return f"{safe}._photoarchive._tcp.local."
+    return f"{safe}._azimuth._tcp.local."
 
 
 class HubAnnouncer:
@@ -99,7 +99,7 @@ def start_hub_announce(*, name: str, port: int, hub_id: str) -> HubAnnouncer | N
     if mdns_disabled() or not is_hub_mode():
         return None
     if not _ZEROCONF_AVAILABLE:
-        log.warning("PHOTOARCHIVE mDNS skipped: zeroconf not installed")
+        log.warning("AZIMUTH mDNS skipped: zeroconf not installed")
         return None
     stop_hub_announce()
     announcer = HubAnnouncer(name=name, port=port, hub_id=hub_id)
@@ -123,7 +123,7 @@ def stop_hub_announce() -> None:
 
 
 async def browse_hubs(*, timeout_seconds: float = 2.0) -> list[dict[str, Any]]:
-    """Browse for `_photoarchive._tcp.local` hubs for ~2 seconds."""
+    """Browse for `_azimuth._tcp.local` hubs for ~2 seconds."""
     if not _ZEROCONF_AVAILABLE:
         return []
     if mdns_disabled():
@@ -149,7 +149,7 @@ async def browse_hubs(*, timeout_seconds: float = 2.0) -> list[dict[str, Any]]:
             v.decode() if isinstance(v, bytes) else str(v)
         ) for k, v in (info.properties or {}).items()}
         hub_id = props.get("hub_id") or ""
-        display = props.get("name") or name.replace("._photoarchive._tcp.local.", "")
+        display = props.get("name") or name.replace("._azimuth._tcp.local.", "")
         url = f"http://{addresses[0]}:{info.port}"
         key = hub_id or url
         found[key] = {"name": display, "url": url, "hub_id": hub_id}

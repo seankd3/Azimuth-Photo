@@ -174,9 +174,9 @@ class SyncMirrorExportTests(unittest.TestCase):
             response = self.client.get("/api/sync/thumbs/pack?size=sm&after_id=0&limit=500")
         self.assertEqual(response.status_code, 200, response.text)
         with tarfile.open(fileobj=io.BytesIO(response.content), mode="r:") as archive:
-            self.assertEqual(archive.getnames(), [f"{first_id}.jpg", ".photoarchive-trailer.json"])
+            self.assertEqual(archive.getnames(), [f"{first_id}.jpg", ".azimuth-trailer.json"])
             self.assertEqual(archive.extractfile(f"{first_id}.jpg").read(), b"existing-thumbnail")
-            trailer = archive.extractfile(".photoarchive-trailer.json").read()
+            trailer = archive.extractfile(".azimuth-trailer.json").read()
         self.assertEqual(
             json.loads(trailer),
             {"skipped": [second_id], "after_id": second_id, "order": "asc"},
@@ -206,7 +206,7 @@ class SyncMirrorExportTests(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(first.content), mode="r:") as archive:
                 self.assertEqual(archive.getnames()[0], f"{high_id}.jpg")
                 trailer = json.loads(
-                    archive.extractfile(".photoarchive-trailer.json").read()
+                    archive.extractfile(".azimuth-trailer.json").read()
                 )
             self.assertEqual(trailer["after_id"], high_id)
             self.assertEqual(trailer["order"], "newest")
@@ -218,6 +218,6 @@ class SyncMirrorExportTests(unittest.TestCase):
             with tarfile.open(fileobj=io.BytesIO(second.content), mode="r:") as archive:
                 self.assertEqual(archive.getnames()[0], f"{low_id}.jpg")
                 trailer = json.loads(
-                    archive.extractfile(".photoarchive-trailer.json").read()
+                    archive.extractfile(".azimuth-trailer.json").read()
                 )
             self.assertEqual(trailer["after_id"], low_id)

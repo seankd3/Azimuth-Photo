@@ -21,11 +21,12 @@ from core.source_files import inspect_source_file
 from data import connection
 from features.sync import oplog, satellite
 from features.sync.executor import run_sync_work
-from features.sync.hashing import compute_content_hash
+from features.sync.hashing import compute_full_hash
 
 
 HAVE_BATCH_SIZE = 1000
 HaveFn = Callable[[list[str]], Awaitable[set[str]]]
+FullHaveFn = Callable[[dict[str, str]], Awaitable[set[str]]]
 HashFn = Callable[[str], str]
 CancelFn = Callable[[], bool]
 
@@ -64,7 +65,7 @@ _tasks: dict[str, asyncio.Task] = {}
 
 
 def deletion_log_path() -> Path:
-    return Path(resolve_runtime_paths().log_dir) / "freeup-deletions.jsonl"
+    return Path(resolve_runtime_paths().transfer_dir) / "freeup-deletions.jsonl"
 
 
 def _append_log(path: Path, payload: dict[str, Any]) -> None:
@@ -110,6 +111,46 @@ async def confirm_hub_hashes(content_hashes: list[str]) -> set[str]:
     return await run_sync_work(request)
 
 
+async def confirm_hub_full_hashes(proofs: dict[str, str]) -> set[str]:
+    hub = satellite.hub_url().rstrip("/")
+    if not hub:
+        raise RuntimeError("A connected hub is required to verify local originals")
+
+    def request() -> set[str]:
+        body = json.dumps(
+            {
+                "items": [
+                    {"content_hash": content_hash, "full_hash": full_hash}
+                    for content_hash, full_hash in proofs.items()
+                ]
+            },
+            separators=(",", ":"),
+        ).encode()
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        headers.update(satellite.hub_request_headers())
+        outgoing = urllib.request.Request(
+            f"{hub}/api/sync/have/full",
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(outgoing, timeout=300) as response:  # noqa: S310 - configured private hub.
+                status = int(response.status)
+                payload = json.loads(response.read() or b"{}")
+        except urllib.error.HTTPError as error:
+            status = int(error.code)
+            payload = {}
+        if not 200 <= status < 300:
+            raise RuntimeError(f"Hub full-file verification failed ({status})")
+        present = payload.get("present") if isinstance(payload, dict) else None
+        if not isinstance(present, list):
+            raise RuntimeError("Hub returned an invalid full-file verification")
+        return {str(value) for value in present}
+
+    return await run_sync_work(request)
+
+
 def _parse_date(value: Any) -> float | None:
     if value is None or value == "":
         return None
@@ -134,6 +175,22 @@ def _old_enough(row: dict[str, Any], file_stat: os.stat_result, older_than_days:
     if captured_at is None:
         captured_at = float(file_stat.st_mtime)
     return captured_at <= time.time() - older_than_days * 86400
+
+
+def _fingerprint_matches(
+    filepath: str,
+    *,
+    expected_size: int,
+    expected_modified_ns: int,
+) -> bool:
+    try:
+        current = os.stat(filepath)
+    except OSError:
+        return False
+    return (
+        int(current.st_size) == int(expected_size)
+        and int(current.st_mtime_ns) == int(expected_modified_ns)
+    )
 
 
 def _eligible_local_rows(
@@ -164,17 +221,23 @@ async def _candidate_rows(db_path: str, older_than_days: int) -> list[dict[str, 
     try:
         cursor = await conn.execute(
             """
-            SELECT i.id, i.filepath, i.content_hash, i.hub_image_id, i.file_size,
+            SELECT i.id, i.filepath, i.content_hash, sync.full_hash,
+                   sync.file_size AS proof_file_size,
+                   sync.file_modified_ns AS proof_modified_ns,
+                   i.hub_image_id, i.file_size,
                    i.file_modified_at, i.date_taken, s.path AS source_path
             FROM images i
             JOIN catalog_sources s ON s.id = i.source_id
-            JOIN sync_state sync ON sync.image_id = i.id AND sync.content_hash = i.content_hash
+            JOIN sync_state sync ON sync.content_hash = i.content_hash
             WHERE COALESCE(i.hub_remote, 0) = 0
               AND i.hub_image_id IS NOT NULL
               AND i.vc_of IS NULL
               AND i.status IN ('kept', 'maybe')
               AND i.missing_at IS NULL
               AND COALESCE(sync.uploaded, 0) = 1
+              AND sync.full_hash IS NOT NULL
+              AND sync.file_size IS NOT NULL
+              AND sync.file_modified_ns IS NOT NULL
               AND sync.last_local_change_at <= COALESCE(sync.last_pushed_at, 0)
               AND NOT EXISTS (
                   SELECT 1
@@ -205,7 +268,7 @@ async def _still_clean(
                 SELECT i.filepath, s.path AS source_path
                 FROM images i
                 JOIN catalog_sources s ON s.id = i.source_id
-                JOIN sync_state sync ON sync.image_id = i.id AND sync.content_hash = i.content_hash
+                JOIN sync_state sync ON sync.content_hash = i.content_hash
                 WHERE i.id = ?
                   AND i.filepath = ?
                   AND i.content_hash = ?
@@ -215,6 +278,7 @@ async def _still_clean(
                   AND i.status IN ('kept', 'maybe')
                   AND i.missing_at IS NULL
                   AND COALESCE(sync.uploaded, 0) = 1
+                  AND sync.full_hash IS NOT NULL
                   AND sync.last_local_change_at <= COALESCE(sync.last_pushed_at, 0)
                   AND NOT EXISTS (
                       SELECT 1
@@ -308,7 +372,7 @@ async def recover_incomplete_deletions(db_path: str, *, log_path: Path | None = 
             continue
         if event.get("event") == "delete_ready":
             pending[key] = event
-        elif event.get("event") in {"deleted", "recovered"}:
+        elif event.get("event") in {"delete_aborted", "deleted", "recovered"}:
             pending.pop(key, None)
 
     recovered = 0
@@ -392,10 +456,18 @@ async def run_job(
     db_path: str,
     *,
     confirm: HaveFn = confirm_hub_hashes,
-    hash_file: HashFn = compute_content_hash,
+    confirm_full: FullHaveFn | None = None,
+    hash_file: HashFn = compute_full_hash,
     log_path: Path | None = None,
 ) -> None:
     path = log_path or deletion_log_path()
+    if confirm_full is None:
+        if confirm is confirm_hub_hashes:
+            confirm_full = confirm_hub_full_hashes
+        else:
+            async def confirm_full(proofs: dict[str, str]) -> set[str]:
+                return await confirm(list(proofs))
+
     try:
         await recover_incomplete_deletions(db_path, log_path=path)
         job.phase = "confirming"
@@ -417,16 +489,19 @@ async def run_job(
                 return
             image_id = int(candidate["id"])
             content_hash = str(candidate["content_hash"])
+            full_hash = str(candidate["full_hash"])
             filepath = str(candidate["filepath"])
+            proof_file_size = int(candidate["proof_file_size"])
+            proof_modified_ns = int(candidate["proof_modified_ns"])
             if not await _still_clean(db_path, image_id, content_hash, filepath):
                 job.skipped_state += 1
                 continue
-            try:
-                actual_hash = await run_sync_work(hash_file, filepath)
-            except OSError as error:
-                job.errors.append({"path": filepath, "error": str(error)})
-                continue
-            if actual_hash != content_hash:
+            if not await run_sync_work(
+                _fingerprint_matches,
+                filepath,
+                expected_size=proof_file_size,
+                expected_modified_ns=proof_modified_ns,
+            ):
                 job.skipped_modified += 1
                 await run_sync_work(
                     _append_log,
@@ -437,7 +512,36 @@ async def run_job(
                         "image_id": image_id,
                         "path": filepath,
                         "content_hash": content_hash,
-                        "actual_hash": actual_hash,
+                        "full_hash": full_hash,
+                        "hub_confirmed": True,
+                    },
+                )
+                continue
+            try:
+                actual_hash = await run_sync_work(hash_file, filepath)
+            except OSError as error:
+                job.errors.append({"path": filepath, "error": str(error)})
+                continue
+            fingerprint_stable = await run_sync_work(
+                _fingerprint_matches,
+                filepath,
+                expected_size=proof_file_size,
+                expected_modified_ns=proof_modified_ns,
+            )
+            if actual_hash != full_hash or not fingerprint_stable:
+                job.skipped_modified += 1
+                await run_sync_work(
+                    _append_log,
+                    path,
+                    {
+                        "event": "skipped_modified",
+                        "job_id": job.id,
+                        "image_id": image_id,
+                        "path": filepath,
+                        "content_hash": content_hash,
+                        "full_hash": full_hash,
+                        "actual_full_hash": actual_hash,
+                        "fingerprint_stable": fingerprint_stable,
                         "hub_confirmed": True,
                     },
                 )
@@ -449,7 +553,7 @@ async def run_job(
             # hub immediately before unlinking so a hub-side trash/purge/loss since the
             # batch check cannot cost the only remaining copy.
             try:
-                fresh = await confirm([content_hash])
+                fresh = await confirm_full({content_hash: full_hash})
             except Exception as error:  # noqa: BLE001 - any confirm failure must NOT delete
                 job.errors.append({"path": filepath, "error": str(error)})
                 continue
@@ -463,11 +567,27 @@ async def run_job(
                 "path": filepath,
                 "source_path": str(candidate.get("source_path") or ""),
                 "content_hash": content_hash,
+                "full_hash": full_hash,
+                "file_size": proof_file_size,
+                "file_modified_ns": proof_modified_ns,
                 "hub_image_id": int(candidate["hub_image_id"]),
                 "hub_confirmed": True,
                 "bytes": int(candidate["bytes"]),
             }
             await run_sync_work(_append_log, path, ready)
+            if not await run_sync_work(
+                _fingerprint_matches,
+                filepath,
+                expected_size=proof_file_size,
+                expected_modified_ns=proof_modified_ns,
+            ):
+                job.skipped_modified += 1
+                await run_sync_work(
+                    _append_log,
+                    path,
+                    {**ready, "event": "delete_aborted", "reason": "local_file_changed"},
+                )
+                continue
             try:
                 await run_sync_work(os.unlink, filepath)
                 if not await _mark_remote(db_path, image_id, content_hash):

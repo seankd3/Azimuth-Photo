@@ -93,7 +93,7 @@ class MirrorPuller:
 
     async def refresh(self) -> dict[str, Any]:
         if not self.hub:
-            raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for catalog mirror refresh")
+            raise RuntimeError("AZIMUTH_HUB_URL is required for catalog mirror refresh")
         await ensure_mirror_schema(self.db_path)
         cursor = await self._state_int("cursor")
         query = urlencode({"cursor": cursor})

@@ -355,7 +355,7 @@ def prune_old_versions(versions_dir: Path, *, keep: set[str | None]) -> None:
 
 
 def resolve_install_root(explicit: str | Path | None = None) -> Path:
-    env = os.environ.get("PHOTOARCHIVE_INSTALL_ROOT", "").strip()
+    env = os.environ.get("AZIMUTH_INSTALL_ROOT", "").strip()
     if explicit:
         return Path(explicit)
     if env:
@@ -368,11 +368,11 @@ def resolve_install_root(explicit: str | Path | None = None) -> Path:
         idx = parts.index("versions")
         return Path(*parts[:idx]) if idx > 0 else Path(*parts[: idx + 1]).parent
     # Dev checkout: treat repo root's parent-of-web sibling install as optional; fall back to cwd.
-    return Path(os.environ.get("PHOTOARCHIVE_HOME") or Path.cwd())
+    return Path(os.environ.get("AZIMUTH_HOME") or Path.cwd())
 
 
 def resolve_local_sha(*, install_root: Path | None = None) -> str:
-    env = os.environ.get("PHOTOARCHIVE_CLIENT_SHA", "").strip()
+    env = os.environ.get("AZIMUTH_CLIENT_SHA", "").strip()
     if env:
         return env
     root = install_root or resolve_install_root()

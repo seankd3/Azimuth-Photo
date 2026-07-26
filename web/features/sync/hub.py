@@ -28,7 +28,7 @@ from features.imports import taxonomy
 from features.library import keywords
 from features.sync import family_clock
 from features.sync.develop_merge import preserve_local_rating
-from features.sync.hashing import compute_content_hash, compute_full_hash
+from features.sync.hashing import compute_content_hash, compute_full_hash, compute_hash_pair
 from features.sync.validation import validate_content_hash
 from core import hdd_governor
 
@@ -58,25 +58,20 @@ CREATE TABLE IF NOT EXISTS sync_manifest_items (
 
 
 def default_intake_root() -> Path:
-    configured = os.environ.get("PHOTOARCHIVE_SYNC_INTAKE_DIR")
+    configured = os.environ.get("AZIMUTH_SYNC_INTAKE_DIR")
     if configured:
         return Path(configured).expanduser()
-    if os.environ.get("PHOTOARCHIVE_SMOKE_MODE") == "1":
-        return Path(tempfile.gettempdir()) / "photoarchive-sync-intake"
+    if os.environ.get("AZIMUTH_SMOKE_MODE") == "1":
+        return Path(tempfile.gettempdir()) / "azimuth-sync-intake"
     resolved = runtime_paths.resolve_runtime_paths()
-    if resolved.layout == "legacy":
-        # Historic omarchy deployment keeps originals on the expansion drive.
-        return Path("/mnt/expansion/Photos/_intake")
     return Path(resolved.data_dir) / "photos" / "_intake"
 
 
 def default_raws_root(intake_root: Path | None = None) -> Path:
-    configured = os.environ.get("PHOTOARCHIVE_SYNC_RAWS_DIR")
+    configured = os.environ.get("AZIMUTH_SYNC_RAWS_DIR")
     if configured:
         return Path(configured).expanduser()
     intake = intake_root or default_intake_root()
-    if intake == Path("/mnt/expansion/Photos/_intake"):
-        return Path("/mnt/expansion/Photos/RAWS")
     return intake.parent / "RAWS"
 
 
@@ -392,13 +387,91 @@ async def have_content_hashes(db_path: str, content_hashes: Iterable[str]) -> li
             if expected_size is not None and int(file_stat.st_size) != int(expected_size):
                 continue
             try:
-                if compute_content_hash(filepath) == content_hash:
+                with hdd_governor.bulk_hdd_slot_sync():
+                    actual_hash = compute_content_hash(filepath)
+                if actual_hash == content_hash:
                     present.add(content_hash)
             except OSError:
                 continue
         return present
 
     present = await asyncio.to_thread(identity_verified)
+    return [content_hash for content_hash in hashes if content_hash in present]
+
+
+async def have_full_hashes(
+    db_path: str,
+    proofs: Iterable[dict[str, str]],
+) -> list[str]:
+    """Return identities whose active hub original matches every expected byte.
+
+    A proof is accepted only when the hub's durable upload manifest recorded the
+    same complete hash and the currently stored original still hashes to that
+    value. This is the destructive-action gate used immediately before a
+    satellite removes its local original.
+    """
+
+    expected: dict[str, str] = {}
+    for proof in proofs:
+        content_hash = validate_content_hash(proof.get("content_hash", ""))
+        full_hash = validate_content_hash(proof.get("full_hash", ""))
+        prior = expected.setdefault(content_hash, full_hash)
+        if prior != full_hash:
+            raise ValueError("Conflicting full-file proofs for one content identity")
+    if not expected:
+        return []
+
+    hashes = list(expected)
+    conn = await connection.open_async(db_path)
+    try:
+        placeholders = ",".join("?" for _ in hashes)
+        rows = await (
+            await conn.execute(
+                f"""
+                SELECT i.content_hash, i.filepath, i.file_size,
+                       s.path AS source_path, m.full_hash AS manifest_full_hash
+                FROM images i
+                JOIN catalog_sources s ON s.id = i.source_id
+                JOIN sync_manifest_items m ON m.content_hash = i.content_hash
+                WHERE i.content_hash IN ({placeholders})
+                  AND COALESCE(i.hub_remote, 0) = 0
+                  AND i.status IN ('kept', 'maybe')
+                  AND i.missing_at IS NULL
+                """,
+                hashes,
+            )
+        ).fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    def verify() -> set[str]:
+        present: set[str] = set()
+        for row in rows:
+            content_hash = str(row["content_hash"])
+            if content_hash in present:
+                continue
+            expected_full = expected[content_hash]
+            if str(row["manifest_full_hash"] or "") != expected_full:
+                continue
+            filepath = str(row["filepath"] or "")
+            state, file_stat = inspect_source_file(
+                filepath,
+                str(row["source_path"] or ""),
+            )
+            if state != "available" or file_stat is None:
+                continue
+            if row["file_size"] is not None and int(file_stat.st_size) != int(row["file_size"]):
+                continue
+            try:
+                with hdd_governor.bulk_hdd_slot_sync():
+                    actual_full = compute_full_hash(filepath)
+            except OSError:
+                continue
+            if actual_full == expected_full:
+                present.add(content_hash)
+        return present
+
+    present = await asyncio.to_thread(verify)
     return [content_hash for content_hash in hashes if content_hash in present]
 
 
@@ -702,11 +775,16 @@ async def _append_upload_chunk_locked(
     # Byte-verify BEFORE any library placement or catalog write. A full-size
     # .part with corrupt bytes (the satellite→hub timeout failure mode) must
     # never become an original.
-    actual_hash = await asyncio.to_thread(compute_content_hash, part)
+    def verify_completed_upload() -> tuple[str, str]:
+        with hdd_governor.bulk_hdd_slot_sync():
+            return compute_hash_pair(part)
+
+    actual_hash, actual_full_hash = await asyncio.to_thread(
+        verify_completed_upload
+    )
     if actual_hash != content_hash:
         _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed content hash verification")
-    actual_full_hash = await asyncio.to_thread(compute_full_hash, part)
     if actual_full_hash != item["full_hash"]:
         _discard_upload_temp(intake_root, content_hash)
         raise ArithmeticError("Completed upload failed full-file hash verification")
@@ -729,7 +807,11 @@ async def _append_upload_chunk_locked(
         async with dest_lock:
             candidate_path.parent.mkdir(parents=True, exist_ok=True)
             if candidate_path.exists():
-                existing_full = await asyncio.to_thread(compute_full_hash, candidate_path)
+                def hash_existing() -> str:
+                    with hdd_governor.bulk_hdd_slot_sync():
+                        return compute_full_hash(candidate_path)
+
+                existing_full = await asyncio.to_thread(hash_existing)
                 if existing_full == item["full_hash"]:
                     # Identical bytes already at this path — idempotent success.
                     destination, destination_root = candidate_path, candidate_root
@@ -749,10 +831,14 @@ async def _append_upload_chunk_locked(
                 continue
             except OSError:
                 try:
-                    await asyncio.to_thread(_copy_exclusive, part, candidate_path)
+                    def copy_and_verify() -> str:
+                        with hdd_governor.bulk_hdd_slot_sync():
+                            _copy_exclusive(part, candidate_path)
+                            return compute_full_hash(candidate_path)
+
+                    placed_full = await asyncio.to_thread(copy_and_verify)
                 except FileExistsError:
                     continue
-                placed_full = await asyncio.to_thread(compute_full_hash, candidate_path)
                 if placed_full != item["full_hash"]:
                     candidate_path.unlink(missing_ok=True)
                     _discard_upload_temp(intake_root, content_hash)
@@ -951,7 +1037,7 @@ async def base_artifacts(db_path: str, content_hash: str) -> tuple[rawproc.BaseP
 
 
 async def multipart_base_stream(paths: rawproc.BasePaths) -> AsyncIterator[bytes]:
-    boundary = "photoarchive-pabase1"
+    boundary = "azimuth-pabase1"
     yield (
         f"--{boundary}\r\nContent-Disposition: attachment; name=\"base\"; filename=\"base.bin.gz\"\r\n"
         "Content-Type: application/octet-stream\r\nContent-Encoding: gzip\r\n\r\n"

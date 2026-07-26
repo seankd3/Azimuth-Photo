@@ -179,7 +179,7 @@ class SyncWorker:
 
     async def sync_once(self) -> None:
         if not self.hub:
-            raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for satellite sync")
+            raise RuntimeError("AZIMUTH_HUB_URL is required for satellite sync")
         force_probe = self._force_contract_refresh
         await self.refresh_hub_contract(force=force_probe or self.updater is not None)
         await self._refresh_hub_health(force=force_probe)
@@ -203,7 +203,17 @@ class SyncWorker:
             }
             response = await self._json("POST", "/api/sync/manifest", manifest)
             missing = set(response.get("missing") or [])
-            known = {item.get("content_hash") for item in (response.get("known") or [])}
+            known_rows = [
+                item
+                for item in (response.get("known") or [])
+                if isinstance(item, dict) and item.get("content_hash")
+            ]
+            known = {str(item["content_hash"]) for item in known_rows}
+            known_ids = {
+                str(item["content_hash"]): int(item["image_id"])
+                for item in known_rows
+                if item.get("image_id") is not None
+            }
             by_hash = {item["content_hash"]: item for item in items}
             for content_hash in missing:
                 if self._paused:
@@ -216,7 +226,7 @@ class SyncWorker:
                         return
                     pushed = True
             if known:
-                await self._set_uploaded(known)
+                await self._set_uploaded(known, hub_image_ids=known_ids)
             pushed = await self._push_dirty_metadata() or pushed
         oplog_result = await self._exchange_oplog()
         pushed = bool(oplog_result["pushed"]) or pushed
@@ -310,7 +320,19 @@ class SyncWorker:
                 f"upload finalize {item['filename']} failed ({status_code}): "
                 f"{body.decode(errors='replace')[:300]}"
             )
-        await self._set_uploaded({content_hash})
+        try:
+            payload = json.loads(body or b"{}")
+        except (TypeError, ValueError):
+            payload = {}
+        hub_image_ids = (
+            {content_hash: int(payload["image_id"])}
+            if isinstance(payload, dict) and payload.get("image_id") is not None
+            else {}
+        )
+        await self._set_uploaded(
+            {content_hash},
+            hub_image_ids=hub_image_ids,
+        )
         # Live count-down: the queue must shrink as photos land, not only at
         # cycle boundaries (bytes_remaining already decrements per chunk).
         self._status["queue_depth"] = max(0, int(self._status["queue_depth"]) - 1)
@@ -525,13 +547,35 @@ class SyncWorker:
         uploading = self._status.get("current_file") is not None
         return self.updater.request_restart_if_safe(uploading=uploading)
 
-    async def _set_uploaded(self, content_hashes: set[str]) -> None:
+    async def _set_uploaded(
+        self,
+        content_hashes: set[str],
+        *,
+        hub_image_ids: dict[str, int] | None = None,
+    ) -> None:
         if not content_hashes:
             return
+        mapped_ids = hub_image_ids or {}
+        uploaded_at = time.time()
         conn = await connection.open_async(self.db_path)
         try:
             placeholders = ",".join("?" for _ in content_hashes)
-            await conn.execute(f"UPDATE sync_state SET uploaded = 1 WHERE content_hash IN ({placeholders})", tuple(content_hashes))
+            await conn.execute(
+                f"UPDATE sync_state SET uploaded = 1, uploaded_at = ? "
+                f"WHERE content_hash IN ({placeholders})",
+                (uploaded_at, *content_hashes),
+            )
+            for content_hash, image_id in mapped_ids.items():
+                if content_hash not in content_hashes:
+                    continue
+                await conn.execute(
+                    "UPDATE sync_state SET hub_image_id = ? WHERE content_hash = ?",
+                    (int(image_id), content_hash),
+                )
+                await conn.execute(
+                    "UPDATE images SET hub_image_id = ? WHERE content_hash = ?",
+                    (int(image_id), content_hash),
+                )
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=self.db_path)

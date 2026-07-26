@@ -60,6 +60,15 @@ class HaveRequest(BaseModel):
     content_hashes: list[str] = Field(max_length=1000)
 
 
+class FullProofItem(BaseModel):
+    content_hash: str = Field(min_length=32, max_length=128)
+    full_hash: str = Field(min_length=32, max_length=128)
+
+
+class FullProofRequest(BaseModel):
+    items: list[FullProofItem] = Field(max_length=1000)
+
+
 def configure(
     *,
     db_path: Callable[[], str],
@@ -105,6 +114,18 @@ async def api_sync_manifest(body: ManifestRequest):
 async def api_sync_have(body: HaveRequest):
     try:
         present = await hub.have_content_hashes(_configured_db_path(), body.content_hashes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"present": present}
+
+
+@router.post("/api/sync/have/full")
+async def api_sync_have_full(body: FullProofRequest):
+    try:
+        present = await hub.have_full_hashes(
+            _configured_db_path(),
+            [item.model_dump() for item in body.items],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"present": present}
@@ -171,7 +192,7 @@ async def api_sync_base(content_hash: str):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return StreamingResponse(
         hub.multipart_base_stream(paths),
-        media_type="multipart/mixed; boundary=photoarchive-pabase1",
+        media_type="multipart/mixed; boundary=azimuth-pabase1",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 
@@ -256,7 +277,7 @@ async def api_client_bundle():
     return FileResponse(
         path,
         media_type="application/gzip",
-        filename=f"photoarchive-{identity.sha[:12]}.tar.gz",
+        filename=f"azimuth-{identity.sha[:12]}.tar.gz",
         headers={
             "Cache-Control": "no-store",
             "X-Content-SHA256": identity.bundle_sha256,

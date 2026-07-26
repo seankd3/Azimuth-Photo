@@ -40,7 +40,7 @@ def lightroom_modules_dir(
 
     env = os.environ if environ is None else environ
     family = _family(platform_name)
-    explicit = str(env.get("PHOTOARCHIVE_LR_MODULES_DIR") or "").strip()
+    explicit = str(env.get("AZIMUTH_LR_MODULES_DIR") or "").strip()
     if explicit:
         return Path(explicit)
     if family == "windows":
@@ -63,7 +63,7 @@ def lightroom_install_detected(
     """True when LR Classic appears installed (Modules parent or Program Files)."""
 
     env = os.environ if environ is None else environ
-    forced = str(env.get("PHOTOARCHIVE_LR_FORCE_DETECT") or "").strip().lower()
+    forced = str(env.get("AZIMUTH_LR_FORCE_DETECT") or "").strip().lower()
     if forced in {"1", "true", "yes"}:
         return True
     if forced in {"0", "false", "no"}:

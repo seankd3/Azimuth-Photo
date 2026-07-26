@@ -56,24 +56,24 @@ class StandaloneSeedsHubTests(unittest.TestCase):
         self.client_context = TestClient(app)
         self.client = self.client_context.__enter__()
 
-        self.old_mode = os.environ.get("PHOTOARCHIVE_MODE")
-        self.old_hub = os.environ.get("PHOTOARCHIVE_HUB_URL")
+        self.old_mode = os.environ.get("AZIMUTH_MODE")
+        self.old_hub = os.environ.get("AZIMUTH_HUB_URL")
         # Standalone = satellite semantics, no hub yet; then we gain a hub_url.
-        os.environ["PHOTOARCHIVE_MODE"] = "standalone"
-        os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
+        os.environ["AZIMUTH_MODE"] = "standalone"
+        os.environ.pop("AZIMUTH_HUB_URL", None)
 
     def tearDown(self):
         self.client_context.__exit__(None, None, None)
         self.auth_patch.stop()
         db.DB_PATH = self.old_db_path
         if self.old_mode is None:
-            os.environ.pop("PHOTOARCHIVE_MODE", None)
+            os.environ.pop("AZIMUTH_MODE", None)
         else:
-            os.environ["PHOTOARCHIVE_MODE"] = self.old_mode
+            os.environ["AZIMUTH_MODE"] = self.old_mode
         if self.old_hub is None:
-            os.environ.pop("PHOTOARCHIVE_HUB_URL", None)
+            os.environ.pop("AZIMUTH_HUB_URL", None)
         else:
-            os.environ["PHOTOARCHIVE_HUB_URL"] = self.old_hub
+            os.environ["AZIMUTH_HUB_URL"] = self.old_hub
         self.tempdir.cleanup()
 
     def _write_image(self, name: str, color: tuple[int, int, int]) -> Path:
@@ -121,8 +121,8 @@ class StandaloneSeedsHubTests(unittest.TestCase):
 
         # Runtime upgrade standalone → satellite: gain a hub_url, then sync.
         hub_url = "http://fresh-hub"
-        os.environ["PHOTOARCHIVE_MODE"] = "satellite"
-        os.environ["PHOTOARCHIVE_HUB_URL"] = hub_url
+        os.environ["AZIMUTH_MODE"] = "satellite"
+        os.environ["AZIMUTH_HUB_URL"] = hub_url
 
         async def scenario():
             db.DB_PATH = self.standalone_db

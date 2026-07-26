@@ -25,6 +25,7 @@ class FreeUpSpaceTests(BackendTestCase):
         self.source = await self._source("satellite-originals")
         self.next_hub_id = 100
         await satellite.ensure_sync_state(db.DB_PATH)
+        await hub.ensure_sync_schema(db.DB_PATH)
 
     async def _synced_original(
         self,
@@ -38,6 +39,7 @@ class FreeUpSpaceTests(BackendTestCase):
         path = Path(self.source["path"]) / filename
         path.write_bytes(payload)
         content_hash = hashing.compute_content_hash(path)
+        full_hash = hashing.compute_full_hash(path)
         self.next_hub_id += 1
         conn = await db.get_db()
         try:
@@ -47,9 +49,26 @@ class FreeUpSpaceTests(BackendTestCase):
                 (content_hash, self.next_hub_id, len(payload), path.stat().st_mtime, image_id),
             )
             await conn.execute(
-                "INSERT INTO sync_state(content_hash, image_id, last_local_change_at, last_pushed_at, uploaded) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (content_hash, image_id, 20.0, 30.0 if clean else 10.0, int(uploaded)),
+                "INSERT INTO sync_state("
+                "content_hash, image_id, last_local_change_at, last_pushed_at, "
+                "uploaded, full_hash, file_size, file_modified_ns"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    content_hash,
+                    image_id,
+                    20.0,
+                    30.0 if clean else 10.0,
+                    int(uploaded),
+                    full_hash,
+                    int(path.stat().st_size),
+                    int(path.stat().st_mtime_ns),
+                ),
+            )
+            await conn.execute(
+                "INSERT OR REPLACE INTO sync_manifest_items("
+                "content_hash, full_hash, bytes, filename"
+                ") VALUES (?, ?, ?, ?)",
+                (content_hash, full_hash, int(path.stat().st_size), path.name),
             )
             await conn.commit()
         finally:
@@ -113,6 +132,28 @@ class FreeUpSpaceTests(BackendTestCase):
         self.assertEqual(present, [])  # corrupted hub copy -> NOT present
         _ = image_id
 
+    async def test_hub_full_proof_catches_same_size_tail_changes(self):
+        payload = b"a" * hashing.HASH_PREFIX_BYTES + b"tail-one"
+        _image_id, path, content_hash = await self._synced_original(
+            "tail.raw",
+            payload,
+        )
+        expected_full = hashing.compute_full_hash(path)
+
+        path.write_bytes(b"a" * hashing.HASH_PREFIX_BYTES + b"tail-two")
+        self.assertEqual(
+            await hub.have_content_hashes(db.DB_PATH, [content_hash]),
+            [content_hash],
+            "the fast identity deliberately does not cover this same-size tail edit",
+        )
+        self.assertEqual(
+            await hub.have_full_hashes(
+                db.DB_PATH,
+                [{"content_hash": content_hash, "full_hash": expected_full}],
+            ),
+            [],
+        )
+
     async def test_pre_unlink_reconfirm_stops_deletion_when_hub_loses_copy(self):
         image_id, path, content_hash = await self._synced_original(
             "vanishes.raw", b"present at batch time, gone by unlink"
@@ -132,6 +173,33 @@ class FreeUpSpaceTests(BackendTestCase):
         self.assertEqual(job.files_done, 0)
         self.assertTrue(path.exists())  # original preserved
         self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+
+    async def test_file_change_after_hub_reconfirm_aborts_unlink(self):
+        image_id, path, content_hash = await self._synced_original(
+            "late-edit.raw", b"original bytes already on the hub"
+        )
+
+        async def confirm_then_edit(proofs: dict[str, str]) -> set[str]:
+            path.write_bytes(b"a local edit made during final confirmation")
+            return set(proofs)
+
+        job = freeup.FreeUpJob(older_than_days=0)
+        await freeup.run_job(
+            job,
+            db.DB_PATH,
+            confirm=self._confirm_all,
+            confirm_full=confirm_then_edit,
+            log_path=self.log_path,
+        )
+
+        self.assertEqual(job.phase, "completed")
+        self.assertEqual(job.files_done, 0)
+        self.assertEqual(job.skipped_modified, 1)
+        self.assertTrue(path.exists())
+        self.assertEqual((await self._image_row(image_id))["hub_remote"], 0)
+        self.assertIn('"event":"delete_aborted"', self.log_path.read_text())
+        self.assertIn('"reason":"local_file_changed"', self.log_path.read_text())
+        _ = content_hash
 
     async def test_recovery_never_marks_remote_when_source_is_offline(self):
         # delete_ready journalled, but the file is absent because its SOURCE ROOT is
@@ -275,7 +343,7 @@ class FreeUpSpaceTests(BackendTestCase):
         def cancel_during_second_hash(path: str) -> str:
             nonlocal hash_calls
             hash_calls += 1
-            digest = hashing.compute_content_hash(path)
+            digest = hashing.compute_full_hash(path)
             if hash_calls == 2:
                 first_job.cancel_requested = True
             return digest

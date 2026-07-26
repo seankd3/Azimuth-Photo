@@ -37,7 +37,7 @@ _last_request_at = 0.0  # monotonic; 0 means "never" → idle
 
 
 def mirror_max_bytes() -> int:
-    raw = os.environ.get("PHOTOARCHIVE_MIRROR_MAX_BYTES", "").strip()
+    raw = os.environ.get("AZIMUTH_MIRROR_MAX_BYTES", "").strip()
     if raw:
         try:
             return max(0, int(raw))

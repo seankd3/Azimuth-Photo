@@ -1,9 +1,4 @@
-"""Resolve Azimuth Photo runtime storage.
-
-Path discovery prefers the Azimuth names. Existing photoArchive / photoarchive
-layouts keep working via fallback, with optional one-shot renames on boot
-(see core.rebrand_migrate).
-"""
+"""Resolve Azimuth Photo runtime storage outside the source checkout."""
 
 from __future__ import annotations
 
@@ -16,19 +11,11 @@ import sys
 from typing import Mapping
 
 from core import env_names
-from core import rebrand_migrate
 
 
-# User-facing / platform app folder (Windows LocalAppData, macOS Application Support).
 APP_DIR_NAME = "Azimuth Photo"
-APP_DIR_NAME_LEGACY = "photoArchive"
-# Linux XDG segment (no spaces).
-XDG_DIR_NAME = "azimuthphoto"
-XDG_DIR_NAME_LEGACY = "photoarchive"
+XDG_DIR_NAME = "azimuth-photo"
 CATALOG_DB_NAME = "azimuth.db"
-CATALOG_DB_NAME_LEGACY = "photoarchive.db"
-LEGACY_DEVELOP_DIR = "/mnt/expansion/PhotoArchiveCache/develop"
-LEGACY_BACKUP_DIR = "/mnt/expansion/PhotoArchiveCache/backups"
 
 
 @dataclass(frozen=True)
@@ -47,6 +34,7 @@ class RuntimePaths:
     temporary_export_dir: str
     library_export_dir: str
     backup_dir: str
+    transfer_dir: str
     run_dir: str
     log_dir: str
     server_log: str
@@ -67,30 +55,18 @@ def _joiner(family: str):
 
 def _clean_path(value: str | os.PathLike[str] | None, *, family: str) -> str:
     text = os.fspath(value or "").strip()
-    if not text:
-        return ""
-    return _joiner(family).normpath(text)
+    return _joiner(family).normpath(text) if text else ""
 
 
-def _first(environment: Mapping[str, str], key: str, fallback: str, *, family: str) -> str:
-    return _clean_path(environment.get(key) or fallback, family=family)
-
-
-def _first_env(environment: Mapping[str, str], suffix: str, fallback: str, *, family: str) -> str:
-    """Like _first but reads AZIMUTH_/PHOTOARCHIVE_ dual spellings."""
-    return _clean_path(env_names.env_get(suffix, fallback, environ=environment) or fallback, family=family)
-
-
-def _legacy_install(web_dir: str) -> bool:
-    root = Path(web_dir)
-    files = (root / CATALOG_DB_NAME, root / CATALOG_DB_NAME_LEGACY, root / "settings.local.json")
-    directories = (
-        root / ".thumbcache",
-        root / ".models",
-        root / ".embedcache",
-        root / ".run",
-    )
-    return any(path.exists() for path in (*files, *directories))
+def _env_path(
+    environment: Mapping[str, str],
+    suffix: str,
+    fallback: str,
+    *,
+    family: str,
+) -> str:
+    value = env_names.env_get(suffix, fallback, environ=environment)
+    return _clean_path(value or fallback, family=family)
 
 
 def _native_roots(
@@ -102,66 +78,54 @@ def _native_roots(
     paths = _joiner(family)
     if family == "windows":
         local = environment.get("LOCALAPPDATA") or paths.join(home, "AppData", "Local")
-        roaming_base = environment.get("APPDATA") or paths.join(local, APP_DIR_NAME, "config")
-        data = rebrand_migrate.prefer_existing_dir(
-            paths.join(local, APP_DIR_NAME),
-            paths.join(local, APP_DIR_NAME_LEGACY),
-        )
-        if environment.get("APPDATA"):
-            config = rebrand_migrate.prefer_existing_dir(
-                paths.join(roaming_base, APP_DIR_NAME),
-                paths.join(roaming_base, APP_DIR_NAME_LEGACY),
-            )
-        else:
-            config = roaming_base
-        cache = rebrand_migrate.prefer_existing_dir(
-            paths.join(local, APP_DIR_NAME, "cache"),
-            paths.join(local, APP_DIR_NAME_LEGACY, "cache"),
-        )
-        state = rebrand_migrate.prefer_existing_dir(
-            paths.join(local, APP_DIR_NAME, "state"),
-            paths.join(local, APP_DIR_NAME_LEGACY, "state"),
-        )
-        log_dir = paths.join(state, "logs")
-        return data, config, cache, state, log_dir
-    if family == "macos":
-        data = rebrand_migrate.prefer_existing_dir(
-            paths.join(home, "Library", "Application Support", APP_DIR_NAME),
-            paths.join(home, "Library", "Application Support", APP_DIR_NAME_LEGACY),
-        )
-        config = paths.join(data, "config")
-        cache = rebrand_migrate.prefer_existing_dir(
-            paths.join(home, "Library", "Caches", APP_DIR_NAME),
-            paths.join(home, "Library", "Caches", APP_DIR_NAME_LEGACY),
-        )
-        state = paths.join(data, "state")
-        log_dir = rebrand_migrate.prefer_existing_dir(
-            paths.join(home, "Library", "Logs", APP_DIR_NAME),
-            paths.join(home, "Library", "Logs", APP_DIR_NAME_LEGACY),
-        )
-        return data, config, cache, state, log_dir
+        roaming = environment.get("APPDATA") or paths.join(home, "AppData", "Roaming")
+        data = paths.join(local, APP_DIR_NAME)
+        config = paths.join(roaming, APP_DIR_NAME)
+        cache = paths.join(local, APP_DIR_NAME, "cache")
+        state = paths.join(local, APP_DIR_NAME, "state")
+        return data, config, cache, state, paths.join(state, "logs")
 
-    data = environment.get("XDG_DATA_HOME") or paths.join(home, ".local", "share")
-    config = environment.get("XDG_CONFIG_HOME") or paths.join(home, ".config")
-    cache = environment.get("XDG_CACHE_HOME") or paths.join(home, ".cache")
-    state = environment.get("XDG_STATE_HOME") or paths.join(home, ".local", "state")
-    data = rebrand_migrate.prefer_existing_dir(
-        paths.join(data, XDG_DIR_NAME),
-        paths.join(data, XDG_DIR_NAME_LEGACY),
-    )
-    config = rebrand_migrate.prefer_existing_dir(
-        paths.join(config, XDG_DIR_NAME),
-        paths.join(config, XDG_DIR_NAME_LEGACY),
-    )
-    cache = rebrand_migrate.prefer_existing_dir(
-        paths.join(cache, XDG_DIR_NAME),
-        paths.join(cache, XDG_DIR_NAME_LEGACY),
-    )
-    state = rebrand_migrate.prefer_existing_dir(
-        paths.join(state, XDG_DIR_NAME),
-        paths.join(state, XDG_DIR_NAME_LEGACY),
-    )
+    if family == "macos":
+        data = paths.join(home, "Library", "Application Support", APP_DIR_NAME)
+        config = paths.join(data, "config")
+        cache = paths.join(home, "Library", "Caches", APP_DIR_NAME)
+        state = paths.join(data, "state")
+        return data, config, cache, state, paths.join(home, "Library", "Logs", APP_DIR_NAME)
+
+    data_base = environment.get("XDG_DATA_HOME") or paths.join(home, ".local", "share")
+    config_base = environment.get("XDG_CONFIG_HOME") or paths.join(home, ".config")
+    cache_base = environment.get("XDG_CACHE_HOME") or paths.join(home, ".cache")
+    state_base = environment.get("XDG_STATE_HOME") or paths.join(home, ".local", "state")
+    data = paths.join(data_base, XDG_DIR_NAME)
+    config = paths.join(config_base, XDG_DIR_NAME)
+    cache = paths.join(cache_base, XDG_DIR_NAME)
+    state = paths.join(state_base, XDG_DIR_NAME)
     return data, config, cache, state, paths.join(state, "logs")
+
+
+def _backup_path(
+    *,
+    environment: Mapping[str, str],
+    fallback: str,
+    data_dir: str,
+    family: str,
+) -> str:
+    override = _clean_path(
+        env_names.env_get("BACKUP_DIR", environ=environment),
+        family=family,
+    )
+    if not override:
+        return fallback
+    if not env_names.env_truthy("SMOKE_MODE", environ=environment):
+        return override
+
+    # Disposable/smoke instances may never publish into another catalog's
+    # durable backup root, even when the parent process exports one.
+    try:
+        Path(override).resolve().relative_to(Path(data_dir).resolve())
+    except (OSError, ValueError):
+        return fallback
+    return override
 
 
 def resolve_runtime_paths(
@@ -170,17 +134,21 @@ def resolve_runtime_paths(
     platform_name: str | None = None,
     home: str | os.PathLike[str] | None = None,
 ) -> RuntimePaths:
-    """Return the selected runtime layout without changing the filesystem."""
+    """Return the canonical runtime layout without changing the filesystem.
 
+    ``web_dir`` remains accepted for caller compatibility, but it is never used
+    as a storage fallback. A checkout is code, not a data directory.
+    """
+
+    del web_dir
     environment = os.environ if environ is None else environ
     family = _platform_family(platform_name or sys.platform)
     paths = _joiner(family)
     resolved_home = _clean_path(
-        home or environment.get("USERPROFILE") or environment.get("HOME") or str(Path.home()),
-        family=family,
-    )
-    root = _clean_path(
-        web_dir or Path(__file__).resolve().parents[1],
+        home
+        or environment.get("USERPROFILE")
+        or environment.get("HOME")
+        or str(Path.home()),
         family=family,
     )
     native_data, native_config, native_cache, native_state, native_logs = _native_roots(
@@ -189,123 +157,98 @@ def resolve_runtime_paths(
         home=resolved_home,
     )
 
-    app_home = _clean_path(env_names.env_get("HOME", environ=environment), family=family)
-    has_app_home = bool(app_home)
-    legacy = _legacy_install(os.fspath(web_dir or Path(__file__).resolve().parents[1])) and not has_app_home
-    layout = "custom" if has_app_home else "legacy" if legacy else "native"
-
-    if has_app_home:
+    app_home = _clean_path(
+        env_names.env_get("HOME", environ=environment),
+        family=family,
+    )
+    if app_home:
+        layout = "custom"
         default_data = paths.join(app_home, "data")
         default_config = paths.join(app_home, "config")
         default_cache = paths.join(app_home, "cache")
         default_state = paths.join(app_home, "state")
         default_logs = paths.join(default_state, "logs")
-    elif legacy:
-        default_data = default_config = default_cache = default_state = root
-        default_logs = paths.join(root, ".run")
     else:
-        default_data, default_config = native_data, native_config
-        default_cache, default_state, default_logs = native_cache, native_state, native_logs
+        layout = "native"
+        default_data = native_data
+        default_config = native_config
+        default_cache = native_cache
+        default_state = native_state
+        default_logs = native_logs
 
-    data_dir = _first_env(environment, "DATA_DIR", default_data, family=family)
-    config_dir = _first_env(environment, "CONFIG_DIR", default_config, family=family)
-    cache_dir = _first_env(environment, "CACHE_DIR", default_cache, family=family)
-    state_dir = _first_env(environment, "STATE_DIR", default_state, family=family)
+    data_dir = _env_path(environment, "DATA_DIR", default_data, family=family)
+    config_dir = _env_path(environment, "CONFIG_DIR", default_config, family=family)
+    cache_dir = _env_path(environment, "CACHE_DIR", default_cache, family=family)
+    state_dir = _env_path(environment, "STATE_DIR", default_state, family=family)
 
-    legacy_data = legacy and not env_names.env_get("DATA_DIR", environ=environment)
-    legacy_config = legacy and not env_names.env_get("CONFIG_DIR", environ=environment)
-    legacy_cache = legacy and not env_names.env_get("CACHE_DIR", environ=environment)
-    legacy_state = legacy and not env_names.env_get("STATE_DIR", environ=environment)
-
-    if legacy_data:
-        catalog_default = paths.join(root, CATALOG_DB_NAME)
-        models_default = paths.join(root, ".models")
-    else:
-        catalog_default = paths.join(data_dir, "catalog", CATALOG_DB_NAME)
-        models_default = paths.join(data_dir, "models")
-    if legacy_config:
-        settings_default = paths.join(root, "settings.local.json")
-    else:
-        settings_default = paths.join(config_dir, "settings.json")
-    if legacy_cache:
-        thumbs_default = paths.join(root, ".thumbcache")
-        embeds_default = paths.join(root, ".embedcache")
-    else:
-        thumbs_default = paths.join(cache_dir, "previews")
-        embeds_default = paths.join(cache_dir, "embeddings")
-    if legacy_state:
-        run_default = paths.join(root, ".run")
-    else:
-        run_default = paths.join(state_dir, "run")
-
-    develop_default = paths.join(cache_dir, "develop")
-    backup_default = paths.join(data_dir, "backups")
-    if legacy_cache and Path(LEGACY_DEVELOP_DIR).is_dir():
-        develop_default = LEGACY_DEVELOP_DIR
-    # Scratch/smoke/custom homes must never inherit the shared Expansion backup
-    # folder — that is what produced the 311-byte premigrate stubs in prod.
-    isolated_home = has_app_home or (
-        env_names.env_truthy("SMOKE_MODE", environ=environment)
-    )
-    if legacy_data and not isolated_home and Path(LEGACY_BACKUP_DIR).is_dir():
-        backup_default = LEGACY_BACKUP_DIR
-    elif legacy_data and not isolated_home:
-        old_fallback = Path(resolved_home) / ".cache" / "photoarchive" / "backups"
-        if old_fallback.is_dir():
-            backup_default = str(old_fallback)
-
-    catalog_db = _first_env(environment, "DB_PATH", catalog_default, family=family)
-    # Prefer an existing legacy catalog file until migrate_catalog_db runs.
-    catalog_new = catalog_db
-    if Path(catalog_db).name.lower() == CATALOG_DB_NAME:
-        catalog_old = str(Path(catalog_db).with_name(CATALOG_DB_NAME_LEGACY))
-        if not Path(catalog_db).exists() and Path(catalog_old).exists():
-            catalog_db = catalog_old
-        else:
-            catalog_db = catalog_new
-    settings_file = _first_env(environment, "SETTINGS_PATH", settings_default, family=family)
-    thumb_cache_dir = _first_env(environment, "THUMB_CACHE_DIR", thumbs_default, family=family)
-    model_root = _first_env(environment, "MODELS_DIR", models_default, family=family)
-    embed_cache_dir = _first_env(environment, "EMBED_CACHE_DIR", embeds_default, family=family)
-    develop_cache_dir = _first(
+    catalog_db = _env_path(
         environment,
-        "PHOTOARCHIVE_DEVELOP_CACHE_DIR",
-        develop_default,
+        "DB_PATH",
+        paths.join(data_dir, "catalog", CATALOG_DB_NAME),
         family=family,
     )
-    temporary_export_dir = _first(
+    settings_file = _env_path(
         environment,
-        "PHOTOARCHIVE_EXPORT_DIR",
+        "SETTINGS_PATH",
+        paths.join(config_dir, "settings.json"),
+        family=family,
+    )
+    thumb_cache_dir = _env_path(
+        environment,
+        "THUMB_CACHE_DIR",
+        paths.join(cache_dir, "previews"),
+        family=family,
+    )
+    model_root = _env_path(
+        environment,
+        "MODELS_DIR",
+        paths.join(data_dir, "models"),
+        family=family,
+    )
+    embed_cache_dir = _env_path(
+        environment,
+        "EMBED_CACHE_DIR",
+        paths.join(cache_dir, "embeddings"),
+        family=family,
+    )
+    develop_cache_dir = _env_path(
+        environment,
+        "DEVELOP_CACHE_DIR",
+        paths.join(cache_dir, "develop"),
+        family=family,
+    )
+    temporary_export_dir = _env_path(
+        environment,
+        "EXPORT_DIR",
         paths.join(develop_cache_dir, "exports"),
         family=family,
     )
-    # Legacy Omarchy keeps library exports beside the develop cache; clean installs
-    # use the user Pictures folder so Windows multi-drive setups stay portable.
-    if legacy_cache:
-        library_default = paths.join(develop_cache_dir, "library-exports")
-    else:
-        library_default = paths.join(resolved_home, "Pictures", "Azimuth Exports")
-    library_export_dir = _first(
+    library_export_dir = _env_path(
         environment,
-        "PHOTOARCHIVE_LIBRARY_EXPORT_DIR",
-        library_default,
+        "LIBRARY_EXPORT_DIR",
+        paths.join(resolved_home, "Pictures", "Azimuth Exports"),
         family=family,
     )
-    backup_override = _clean_path(env_names.env_get("BACKUP_DIR", environ=environment), family=family)
-    if backup_override and isolated_home:
-        # Only honor an explicit backup override when it stays inside the same home.
-        anchor = app_home or data_dir
-        try:
-            Path(backup_override).resolve().relative_to(Path(anchor).resolve())
-            backup_dir = backup_override
-        except (ValueError, OSError):
-            backup_dir = backup_default
-    elif backup_override:
-        backup_dir = backup_override
-    else:
-        backup_dir = backup_default
-    run_dir = _first_env(environment, "RUN_DIR", run_default, family=family)
-    log_dir = _first_env(environment, "LOG_DIR", default_logs, family=family)
+    backup_default = paths.join(data_dir, "backups")
+    backup_dir = _backup_path(
+        environment=environment,
+        fallback=backup_default,
+        data_dir=data_dir,
+        family=family,
+    )
+    transfer_dir = _env_path(
+        environment,
+        "TRANSFER_DIR",
+        paths.join(state_dir, "transfer"),
+        family=family,
+    )
+    run_dir = _env_path(
+        environment,
+        "RUN_DIR",
+        paths.join(state_dir, "run"),
+        family=family,
+    )
+    log_dir = _env_path(environment, "LOG_DIR", default_logs, family=family)
 
     return RuntimePaths(
         layout=layout,
@@ -322,6 +265,7 @@ def resolve_runtime_paths(
         temporary_export_dir=temporary_export_dir,
         library_export_dir=library_export_dir,
         backup_dir=backup_dir,
+        transfer_dir=transfer_dir,
         run_dir=run_dir,
         log_dir=log_dir,
         server_log=paths.join(log_dir, "server.log"),
@@ -329,7 +273,7 @@ def resolve_runtime_paths(
 
 
 def ensure_runtime_dirs(paths: RuntimePaths) -> None:
-    """Create runtime directories only; existing data is never relocated."""
+    """Create runtime directories only; original media is never relocated."""
 
     directories = {
         paths.data_dir,
@@ -344,6 +288,7 @@ def ensure_runtime_dirs(paths: RuntimePaths) -> None:
         paths.develop_cache_dir,
         paths.temporary_export_dir,
         paths.backup_dir,
+        paths.transfer_dir,
         paths.run_dir,
         paths.log_dir,
     }
@@ -352,23 +297,9 @@ def ensure_runtime_dirs(paths: RuntimePaths) -> None:
 
 
 def apply_environment_defaults(paths: RuntimePaths | None = None) -> RuntimePaths:
-    """Expose early-import paths and run one-shot rebrand renames when safe."""
+    """Expose early-import paths and create the selected runtime directories."""
 
     selected = paths or resolve_runtime_paths()
-    # Migrate catalog filename photoarchive.db → azimuth.db (+ wal/shm).
-    migrated_catalog = rebrand_migrate.migrate_catalog_db(selected.catalog_db)
-    if migrated_catalog != selected.catalog_db:
-        selected = RuntimePaths(**{**selected.__dict__, "catalog_db": migrated_catalog})
-
-    # Platform app-dir rename (LocalAppData / XDG) when only legacy exists.
-    family = _platform_family(sys.platform)
-    home = _clean_path(
-        os.environ.get("USERPROFILE") or os.environ.get("HOME") or str(Path.home()),
-        family=family,
-    )
-    rebrand_migrate.migrate_pictures_dirs(home)
-
-    env_names.setdefault_both("DEVELOP_CACHE_DIR", selected.develop_cache_dir)
-    # Clean installs need parents on disk before SQLite opens the catalog.
+    env_names.setdefault("DEVELOP_CACHE_DIR", selected.develop_cache_dir)
     ensure_runtime_dirs(selected)
     return selected

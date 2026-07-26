@@ -249,7 +249,7 @@ class ThumbPrefetcher:
 
     async def prefetch_once(self, *, size: str = "sm", limit: int = 500) -> dict[str, Any]:
         if not self.hub:
-            raise RuntimeError("PHOTOARCHIVE_HUB_URL is required for thumbnail prefetch")
+            raise RuntimeError("AZIMUTH_HUB_URL is required for thumbnail prefetch")
         if size not in {"sm", "md"}:
             raise ValueError("thumbnail prefetch supports sm or md")
         await self._ensure_state()

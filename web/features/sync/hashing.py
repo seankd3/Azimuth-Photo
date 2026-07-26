@@ -42,3 +42,30 @@ def compute_full_hash(path: str | os.PathLike[str]) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def compute_hash_pair(path: str | os.PathLike[str]) -> tuple[str, str]:
+    """Return the fast identity and complete proof in one sequential read."""
+
+    candidate = Path(path)
+    before = candidate.stat()
+    content_digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
+    full_digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
+    prefix_remaining = HASH_PREFIX_BYTES
+    with candidate.open("rb") as handle:
+        while chunk := handle.read(1024 * 1024):
+            full_digest.update(chunk)
+            if prefix_remaining:
+                prefix = chunk[:prefix_remaining]
+                content_digest.update(prefix)
+                prefix_remaining -= len(prefix)
+    after = candidate.stat()
+    if (
+        int(before.st_size) != int(after.st_size)
+        or int(before.st_mtime_ns) != int(after.st_mtime_ns)
+    ):
+        raise OSError(f"File changed while hashing: {candidate}")
+    content_digest.update(
+        int(before.st_size).to_bytes(8, byteorder="little", signed=False)
+    )
+    return content_digest.hexdigest(), full_digest.hexdigest()

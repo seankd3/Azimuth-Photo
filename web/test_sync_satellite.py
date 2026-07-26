@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from unittest import mock
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -11,7 +12,7 @@ from fastapi.testclient import TestClient
 from test_support import BackendTestCase
 from features.library import keywords
 from features.sync.sync_worker import SyncWorker
-from features.sync import satellite_routes
+from features.sync import satellite, satellite_routes
 import app as app_module
 
 
@@ -19,6 +20,7 @@ class SatelliteSyncTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.hub_files: dict[str, bytearray] = {}
+        self.hub_image_ids: dict[str, int] = {}
         self.hub_metadata: list[dict] = []
         self.hub = TestClient(self._hub_app())
 
@@ -37,7 +39,12 @@ class SatelliteSyncTests(BackendTestCase):
             for item in items:
                 content_hash = item["content_hash"]
                 if content_hash in self.hub_files and self.hub_files[content_hash]:
-                    known.append({"content_hash": content_hash, "image_id": len(known) + 1})
+                    known.append(
+                        {
+                            "content_hash": content_hash,
+                            "image_id": self.hub_image_ids[content_hash],
+                        }
+                    )
                 else:
                     missing.append(content_hash)
             return {"missing": missing, "known": known}
@@ -52,10 +59,11 @@ class SatelliteSyncTests(BackendTestCase):
             total = int(request.headers["X-Total-Bytes"])
             data = await request.body()
             target = self.hub_files.setdefault(content_hash, bytearray())
+            self.hub_image_ids.setdefault(content_hash, len(self.hub_image_ids) + 1)
             assert len(target) == offset
             target.extend(data)
             assert len(target) <= total
-            return {"image_id": len(self.hub_files)}
+            return {"image_id": self.hub_image_ids[content_hash]}
 
         @app.post("/api/sync/metadata")
         async def metadata(request: Request):
@@ -101,12 +109,112 @@ class SatelliteSyncTests(BackendTestCase):
         self.assertEqual(first["develop_settings"], {"Exposure2012": 0.7})
         self.assertEqual(first["keywords"], ["Field"])
         self.assertEqual(worker.status()["queue_depth"], 0)
+        conn = await __import__("db").get_db()
+        try:
+            receipts = [
+                dict(row)
+                for row in await (
+                    await conn.execute(
+                        "SELECT uploaded, full_hash, uploaded_at, hub_image_id "
+                        "FROM sync_state ORDER BY image_id"
+                    )
+                ).fetchall()
+            ]
+        finally:
+            await conn.close()
+        self.assertEqual(len(receipts), 3)
+        self.assertTrue(all(row["uploaded"] == 1 for row in receipts))
+        self.assertTrue(all(len(row["full_hash"] or "") == 32 for row in receipts))
+        self.assertTrue(all(row["uploaded_at"] is not None for row in receipts))
+        self.assertTrue(all(row["hub_image_id"] is not None for row in receipts))
         uploads = dict(self.hub_files)
         metadata_count = len(self.hub_metadata)
 
         await worker.sync_once()
         self.assertEqual(self.hub_files, uploads)
         self.assertEqual(len(self.hub_metadata), metadata_count)
+
+    async def test_unchanged_original_reuses_persisted_hash_receipt(self):
+        source = await self._source("field")
+        image_id = await self._image(source["id"], "cached.raw")
+        path = os.path.join(source["path"], "cached.raw")
+        with open(path, "wb") as file:
+            file.write(b"hash me once, then trust the stat fingerprint")
+
+        with mock.patch.object(
+            satellite,
+            "compute_hash_pair",
+            wraps=satellite.compute_hash_pair,
+        ) as hash_pair:
+            first = await satellite.record_local_images(__import__("db").DB_PATH)
+            second = await satellite.record_local_images(__import__("db").DB_PATH)
+
+        self.assertEqual(len(first), 1)
+        self.assertEqual(len(second), 1)
+        self.assertEqual(hash_pair.call_count, 1)
+        self.assertEqual(first[0]["content_hash"], second[0]["content_hash"])
+
+        conn = await __import__("db").get_db()
+        try:
+            receipt = await (
+                await conn.execute(
+                    "SELECT full_hash, file_size, file_modified_ns "
+                    "FROM sync_state WHERE image_id = ?",
+                    (image_id,),
+                )
+            ).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(len(receipt["full_hash"]), 32)
+        self.assertEqual(receipt["file_size"], os.path.getsize(path))
+        self.assertGreater(receipt["file_modified_ns"], 0)
+
+    async def test_legacy_upload_receipt_is_reconfirmed_with_a_full_hash(self):
+        source = await self._source("field")
+        image_id = await self._image(source["id"], "legacy.raw")
+        path = os.path.join(source["path"], "legacy.raw")
+        with open(path, "wb") as file:
+            file.write(b"legacy upload that predates complete-file proofs")
+
+        content_hash = satellite.content_hash_for_file(path)
+        stat = os.stat(path)
+        await satellite.ensure_sync_state(__import__("db").DB_PATH)
+        conn = await __import__("db").get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = ? WHERE id = ?",
+                (content_hash, image_id),
+            )
+            await conn.execute(
+                """
+                INSERT INTO sync_state(
+                    content_hash, image_id, last_local_change_at, uploaded,
+                    file_size, file_modified_ns
+                ) VALUES (?, ?, ?, 1, ?, ?)
+                """,
+                (content_hash, image_id, stat.st_mtime, stat.st_size, stat.st_mtime_ns),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        items = await satellite.record_local_images(__import__("db").DB_PATH)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["uploaded"], 0)
+        self.assertEqual(len(items[0]["full_hash"]), 32)
+        conn = await __import__("db").get_db()
+        try:
+            receipt = await (
+                await conn.execute(
+                    "SELECT uploaded, full_hash FROM sync_state WHERE image_id = ?",
+                    (image_id,),
+                )
+            ).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(receipt["uploaded"], 0)
+        self.assertEqual(len(receipt["full_hash"]), 32)
 
     async def test_failed_cycle_reports_recovering_and_keeps_owed_count(self):
         # 2026-07-16 Holland incident: a mid-sync timeout must never read as
