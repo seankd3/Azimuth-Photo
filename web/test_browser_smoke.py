@@ -21,7 +21,7 @@ class BrowserSmokeTests(unittest.TestCase):
             self.skipTest("google-chrome-stable is required for browser smoke")
 
         base_url = os.environ.get("PHOTOARCHIVE_SMOKE_URL", "http://127.0.0.1:8000")
-        script = Path(__file__).resolve().parents[1] / "scripts" / "photoarchive-browser-smoke"
+        script = Path(__file__).resolve().parents[1] / "scripts" / "azimuth-browser-smoke"
         # When targeting a local dev server, start it with PHOTOARCHIVE_SMOKE_MODE=1
         # so the browser gate skips archive DB startup and heavyweight model workers.
         result = subprocess.run(

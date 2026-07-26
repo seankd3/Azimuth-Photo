@@ -157,7 +157,7 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
   `.venv/bin/python -m unittest`; focused areas are listed by
   `./scripts/photoarchive-check --list-areas`.
 - Browser smoke: run a server, then
-  `./scripts/photoarchive-browser-smoke --base-url http://127.0.0.1:8000`;
+  `./scripts/azimuth-browser-smoke --base-url http://127.0.0.1:8000`;
   `PHOTOARCHIVE_SMOKE_MODE=1` skips DB initialization and heavyweight workers.
 - Durable desktop E2E gate: `./scripts/qa.sh` builds or reuses an isolated
   4,000-photo fixture and click-drives the named `/d` scenarios. See

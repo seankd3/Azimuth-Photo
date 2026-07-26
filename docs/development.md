@@ -164,7 +164,7 @@ cd web
 Run browser smoke checks against a running server:
 
 ```bash
-./scripts/photoarchive-browser-smoke --base-url http://127.0.0.1:8000
+./scripts/azimuth-browser-smoke --base-url http://127.0.0.1:8000
 ```
 
 For docs-only edits, also run:

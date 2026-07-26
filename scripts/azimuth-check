@@ -165,7 +165,7 @@ except Exception:
 sys.exit(0 if ok else 1)
 PY
     then
-        "$ROOT/scripts/photoarchive-browser-smoke" --base-url "$base_url"
+        "$ROOT/scripts/azimuth-browser-smoke" --base-url "$base_url"
     else
         echo "Skipping frontend browser smoke: no server available at $base_url."
     fi

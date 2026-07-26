@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+
 import pytest
 from test_support import *  # noqa: F401,F403
 
@@ -123,15 +126,41 @@ class UiContractsTests(BackendTestCase):
 
     async def test_browser_smoke_targets_living_shells(self):
         base_dir = os.path.dirname(os.path.dirname(__file__))
-        with open(os.path.join(base_dir, "scripts", "photoarchive-browser-smoke"), encoding="utf-8") as fh:
+        with open(os.path.join(base_dir, "scripts", "azimuth-browser-smoke"), encoding="utf-8") as fh:
             browser_smoke = fh.read()
 
+        self.assertIn("Usage: azimuth-browser-smoke", browser_smoke)
+        self.assertNotIn("Usage: photoarchive-browser-smoke", browser_smoke)
         self.assertIn('const PAGE_PATHS = ["/", "/d", "/m"]', browser_smoke)
         self.assertIn('"#topbar"', browser_smoke)
         self.assertIn('"#grid-flow"', browser_smoke)
         self.assertIn('"#m-timeline"', browser_smoke)
         for route in ("settings", "catalog", "people", "library", "rankings", "compare"):
             self.assertNotIn(f'"/{route}"', browser_smoke)
+
+    async def test_deprecated_browser_smoke_shim_delegates_to_azimuth(self):
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        with open(os.path.join(base_dir, "scripts", "photoarchive-browser-smoke"), encoding="utf-8") as fh:
+            compatibility_shim = fh.read()
+
+        self.assertIn("# Deprecated shim", compatibility_shim)
+        self.assertIn('exec "$ROOT/azimuth-browser-smoke" "$@"', compatibility_shim)
+
+    async def test_azimuth_browser_smoke_help_is_executable(self):
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is required for the browser-smoke contract")
+        base_dir = os.path.dirname(os.path.dirname(__file__))
+        result = subprocess.run(
+            [node, os.path.join(base_dir, "scripts", "azimuth-browser-smoke"), "--help"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=10,
+        )
+
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("Usage: azimuth-browser-smoke [--base-url URL]", result.stderr.strip())
 
     async def test_cull_brief_uses_large_previews_and_scoped_reversible_review(self):
         base_dir = os.path.dirname(__file__)
