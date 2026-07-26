@@ -719,7 +719,7 @@ class PublishRouteTests(BackendTestCase):
 
     async def test_unexpected_publish_failure_is_logged_without_leaking_internal_path(self):
         publish_routes._start_job(77, "publishing", slug="private", title="Private")
-        secret = "/home/sean/private/source.jpg"
+        secret = "/home/photographer/private/source.jpg"
 
         with unittest.mock.patch.object(publish_routes.log, "error") as error_log:
             publish_routes._fail_job(

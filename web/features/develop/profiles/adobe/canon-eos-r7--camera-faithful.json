@@ -69184,7 +69184,7 @@
   "profile_name": "Camera Faithful",
   "schema_version": 1,
   "source_count": 6776,
-  "source_file": "/mnt/expansion/Photos/RAWS/2024/2024-02-22/20240222-062926.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

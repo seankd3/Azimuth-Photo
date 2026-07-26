@@ -28,8 +28,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 VENV_PYTHON = WEB / ".venv" / "bin" / "python"
 DEFAULT_DNG_ROOT = Path(
-    "/mnt/expansion/.Trash-1000/files/Duplicate Copies Already Present Elsewhere/"
-    "Milky Way loose numbered folders"
+    os.environ.get("AZIMUTH_BENCH_RAW_ROOT", str(Path.home() / "Pictures"))
 )
 
 

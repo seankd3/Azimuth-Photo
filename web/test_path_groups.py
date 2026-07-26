@@ -77,11 +77,11 @@ class DevelopExportPathTests(unittest.TestCase):
             paths = resolve_runtime_paths(
                 web,
                 {
-                    "HOME": "/home/sean",
+                    "HOME": "/home/photographer",
                     "AZIMUTH_DEVELOP_CACHE_DIR": "/mnt/expansion/Azimuth Photo/Omarchy/cache/develop",
                 },
                 "linux",
-                "/home/sean",
+                "/home/photographer",
             )
         self.assertEqual(
             paths.temporary_export_dir,
@@ -89,7 +89,7 @@ class DevelopExportPathTests(unittest.TestCase):
         )
         self.assertEqual(
             paths.library_export_dir,
-            "/home/sean/Pictures/Azimuth Exports",
+            "/home/photographer/Pictures/Azimuth Exports",
         )
 
     def test_export_dirs_honor_env_overrides(self):
@@ -99,12 +99,12 @@ class DevelopExportPathTests(unittest.TestCase):
             paths = resolve_runtime_paths(
                 web,
                 {
-                    "HOME": "/home/sean",
+                    "HOME": "/home/photographer",
                     "AZIMUTH_EXPORT_DIR": "/tmp/azimuth-exports",
                     "AZIMUTH_LIBRARY_EXPORT_DIR": "/tmp/azimuth-library",
                 },
                 "linux",
-                "/home/sean",
+                "/home/photographer",
             )
         self.assertEqual(paths.temporary_export_dir, "/tmp/azimuth-exports")
         self.assertEqual(paths.library_export_dir, "/tmp/azimuth-library")

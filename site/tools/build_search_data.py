@@ -5,7 +5,7 @@ keeps only hits inside the Selected Landscapes collection (rank order
 preserved), and records which engines actually answered. Re-run any time —
 e.g. after the semantic model finishes loading — to refresh the rankings.
 """
-import json, subprocess, urllib.parse, pathlib
+import json, os, urllib.parse, urllib.request, pathlib
 
 # "sunset over water" exercises the AI engines (captions + embeddings);
 # the others are honest metadata hits (folder / filename trigram FTS).
@@ -16,7 +16,7 @@ QUERIES = [
     "beacon",
     "skd-west",
 ]
-API = "http://100.102.150.104:8000/api/search"
+API = os.environ.get("AZIMUTH_SEARCH_API", "http://127.0.0.1:8000/api/search")
 
 root = pathlib.Path(__file__).resolve().parent.parent
 collection = {r["id"] for r in json.load(open(root / "assets/collection_raw.json"))}
@@ -24,8 +24,8 @@ collection = {r["id"] for r in json.load(open(root / "assets/collection_raw.json
 out = []
 for q in QUERIES:
     url = f"{API}?q={urllib.parse.quote(q)}&limit=500"
-    raw = subprocess.run(["ssh", "omarchy", f'curl -s "{url}"'], capture_output=True, text=True).stdout
-    d = json.loads(raw)
+    with urllib.request.urlopen(url, timeout=30) as response:
+        d = json.load(response)
     ids = [im["id"] for im in d.get("images", []) if im["id"] in collection][:12]
     out.append({
         "q": q,

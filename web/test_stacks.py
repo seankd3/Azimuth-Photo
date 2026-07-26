@@ -572,7 +572,7 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(collapsed["total_kept"], 1)
 
     async def test_rebuild_failure_is_logged_and_status_hides_internal_path(self):
-        secret = "/home/sean/private/catalog.db"
+        secret = "/home/photographer/private/catalog.db"
         with unittest.mock.patch.object(
             builders,
             "rebuild_stacks",

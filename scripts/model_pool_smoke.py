@@ -48,6 +48,7 @@ def _nvidia_used_mib() -> int | None:
 
 def main() -> int:
     from core import model_pool
+    from core.runtime_paths import resolve_runtime_paths
     from core.model_pool import (
         DEFAULT_VRAM_BUDGET_BYTES,
         ModelPool,
@@ -67,9 +68,12 @@ def main() -> int:
     )
     pool.clear_eviction_log()
 
-    caption_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/Qwen--Qwen2.5-VL-3B-Instruct")
-    embed_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/Qwen--Qwen3-VL-Embedding-2B")
-    face_dir = Path("/home/sean/Projects/azimuth-photo/web/.models/insightface")
+    models_root = Path(
+        os.environ.get("AZIMUTH_MODELS_DIR", resolve_runtime_paths().model_root)
+    )
+    caption_dir = models_root / "Qwen--Qwen2.5-VL-3B-Instruct"
+    embed_dir = models_root / "Qwen--Qwen3-VL-Embedding-2B"
+    face_dir = models_root / "insightface"
     for path, label in (
         (caption_dir, "caption"),
         (embed_dir, "embeddings"),

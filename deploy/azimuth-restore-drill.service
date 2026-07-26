@@ -4,9 +4,11 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-User=sean
-WorkingDirectory=/home/sean/Projects/azimuth-photo
-ExecStart=/home/sean/Projects/azimuth-photo/scripts/restore_drill.py --notify --scratch-parent /var/tmp
+User=azimuth
+Group=azimuth
+WorkingDirectory=/opt/azimuth-photo
+EnvironmentFile=-/etc/azimuth-photo/azimuth-photo.env
+ExecStart=/opt/azimuth-photo/.venv/bin/python /opt/azimuth-photo/scripts/restore_drill.py --notify --scratch-parent /var/tmp
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7

@@ -69184,7 +69184,7 @@
   "profile_name": "Camera Standard",
   "schema_version": 1,
   "source_count": 12,
-  "source_file": "/mnt/expansion/Photos/RAWS/2023/2023-10-14/20231014-111715-2-Enhanced-SR.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

@@ -5,14 +5,15 @@ Output: dist/azimuth-server/
 
 Uses a SEPARATE build venv — never the shared web/.venv symlink. Default build
 venv: ~/.cache/azimuth-pkg-venv (needs symlink support; override with
-AZIMUTH_BUILD_VENV). Heavy PyInstaller workpath defaults to
-/mnt/expansion/tmp/pkg-pyinstaller.
+AZIMUTH_BUILD_VENV). PyInstaller scratch defaults to the platform temporary
+directory and can be overridden with AZIMUTH_BUILD_WORK.
 
   python3.12 scripts/build_server.py           # bootstrap venv + build
   python3.12 scripts/build_server.py --build-only   # reuse existing venv
 
 Base deps only (no torch). Ships static/, templates/, develop film stocks and
-camera profiles, plus zeroconf/tifffile/imagecodecs.
+camera profiles, plus zeroconf/tifffile/imagecodecs. Build scratch defaults to
+the operating system's temporary directory.
 """
 
 from __future__ import annotations
@@ -22,13 +23,16 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
 DIST = ROOT / "dist"
-SPEC_WORK = Path(os.environ.get("AZIMUTH_BUILD_WORK", "/mnt/expansion/tmp/pkg-pyinstaller"))
+SPEC_WORK = Path(
+    os.environ.get("AZIMUTH_BUILD_WORK", str(Path(tempfile.gettempdir()) / "azimuth-pkg-pyinstaller"))
+)
 DEFAULT_VENV = Path(
     os.environ.get(
         "AZIMUTH_BUILD_VENV",

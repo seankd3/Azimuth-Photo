@@ -296,7 +296,9 @@ fun TimelineScreen(
             } else {
                 UnifiedGrid(
                     entries = entries,
-                    api = api ?: ArchiveApi(SettingsStore.DEFAULT_SERVER_URL),
+                    api = requireNotNull(api) {
+                        "The archive server must be configured before opening the timeline"
+                    },
                     selectedIds = selectedIds,
                     onTapEntry = { entry ->
                         if (entry is TimelineEntry.Device && selectedIds.isNotEmpty()) {

@@ -56,8 +56,8 @@ python3.12 scripts/build_server.py
 ```
 
 The builder uses a separate venv (default `~/.cache/azimuth-pkg-venv`) and
-never touches `web/.venv`. Heavy build scratch can go on
-`/mnt/expansion/tmp/pkg-pyinstaller` via `AZIMUTH_BUILD_WORK`.
+never touches `web/.venv`. Build scratch uses the platform temporary directory;
+override it via `AZIMUTH_BUILD_WORK`.
 
 Opens on `http://127.0.0.1:8000`. Useful env vars:
 
@@ -77,9 +77,9 @@ The Windows build of this folder is what the desktop app can ship as its sidecar
 | What | Docker | Bare binary (Linux, no overrides) |
 |---|---|---|
 | Originals | Your `/photos` mount | Wherever you add as a source folder |
-| Catalog DB | `/data/data/catalog/` | `~/.local/share/azimuth/` |
-| Settings | `/data/config/` | `~/.config/azimuth/` |
-| Previews / caches | `/data/cache/` | `~/.cache/azimuth/` |
+| Catalog DB | `/data/data/catalog/` | `~/.local/share/azimuth-photo/` |
+| Settings | `/data/config/` | `~/.config/azimuth-photo/` |
+| Previews / caches | `/data/cache/` | `~/.cache/azimuth-photo/` |
 
 Existing developer checkouts that already have `web/azimuth.db` keep using that in-repo layout. New installs never move your photos.
 
@@ -93,3 +93,4 @@ Existing developer checkouts that already have `web/azimuth.db` keep using that 
 4. Optional later: AI features need extra packages or the AI image docs; the base install stays light on purpose.
 
 More detail: [getting-started.md](getting-started.md), [DISTRIBUTION_SPEC.md](DISTRIBUTION_SPEC.md).
+For a direct Linux service, see [deploy/README.md](../deploy/README.md).

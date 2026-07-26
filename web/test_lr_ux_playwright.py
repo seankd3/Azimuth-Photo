@@ -5,6 +5,8 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -19,12 +21,12 @@ pytestmark = pytest.mark.skipif(
 
 WEB_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = WEB_ROOT.parent
-SCRATCH = Path("/mnt/expansion/tmp/lrux-playwright")
+SCRATCH = Path(tempfile.gettempdir()) / "azimuth-lrux-playwright"
 DB_PATH = SCRATCH / "catalog.db"
 CACHE_ROOT = SCRATCH / "thumbs"
 MODULES = SCRATCH / "Modules"
-SCREENSHOT_CONNECT = Path("/mnt/expansion/tmp/lrux-connect-button.png")
-SCREENSHOT_CHIP = Path("/mnt/expansion/tmp/lrux-ranking-chip.png")
+SCREENSHOT_CONNECT = SCRATCH / "connect-button.png"
+SCREENSHOT_CHIP = SCRATCH / "ranking-chip.png"
 PORT = 8157
 BASE_URL = f"http://127.0.0.1:{PORT}"
 
@@ -90,7 +92,7 @@ async def main():
 asyncio.run(main())
 """ % (str(DB_PATH), str(CACHE_ROOT), HASH_RAW, HASH_EDIT)
     subprocess.check_call(
-        ["/home/sean/Projects/azimuth-photo/web/.venv/bin/python", "-c", script],
+        [sys.executable, "-c", script],
         cwd=str(WEB_ROOT),
         env=env,
     )
@@ -122,7 +124,7 @@ def test_lr_ux_connect_and_ranking_chip_screenshots():
         "AZIMUTH_LR_FORCE_DETECT": "1",
         "PYTHONPATH": str(WEB_ROOT),
     })
-    py = "/home/sean/Projects/azimuth-photo/web/.venv/bin/python"
+    py = sys.executable
     server = subprocess.Popen(
         [py, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(PORT)],
         cwd=str(WEB_ROOT),

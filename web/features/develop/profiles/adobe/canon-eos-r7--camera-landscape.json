@@ -69184,7 +69184,7 @@
   "profile_name": "Camera Landscape",
   "schema_version": 1,
   "source_count": 361,
-  "source_file": "/mnt/expansion/Photos/RAWS/2023/2023-11-18/20231118-070256-3-Enhanced-NR.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

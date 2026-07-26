@@ -29,7 +29,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
-DEFAULT_CR3_ROOT = Path("/mnt/expansion/Photos/RAWS")
+DEFAULT_CR3_ROOT = Path(
+    os.environ.get("AZIMUTH_BENCH_RAW_ROOT", str(Path.home() / "Pictures"))
+)
 VENV_PYTHON = WEB / ".venv" / "bin" / "python"
 HISTORY = ROOT / "bench-runs" / "hdd-value-history.jsonl"
 

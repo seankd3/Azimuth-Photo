@@ -1,8 +1,12 @@
 [CmdletBinding()]
 param(
-    [string]$DataRoot = "C:\Azimuth Photo",
+    [string]$DataRoot = $env:AZIMUTH_HOME,
+    [ValidateSet("standalone", "satellite", "hub")]
+    [string]$Mode = $(if ($env:AZIMUTH_MODE) { $env:AZIMUTH_MODE } else { "standalone" }),
+    [string]$PreviewRoot = $env:AZIMUTH_THUMB_CACHE_DIR,
     [int]$Port = 8010,
     [int]$StartupTimeoutSeconds = 180,
+    [switch]$RequireExistingCatalog,
     [switch]$NoOpen
 )
 
@@ -31,9 +35,23 @@ trap {
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $RepoRoot "web\.venv\Scripts\python.exe"
 $ServerEntry = Join-Path $RepoRoot "scripts\server_entry.py"
-$Catalog = Join-Path $DataRoot "data\catalog\azimuth.db"
-$PreviewRoot = Join-Path $DataRoot "thumbs"
-$StateRoot = Join-Path $DataRoot "state"
+$NativeRoot = Join-Path $env:LOCALAPPDATA "Azimuth Photo"
+if ($DataRoot) {
+    $DataRoot = [IO.Path]::GetFullPath($DataRoot)
+    $Catalog = Join-Path $DataRoot "data\catalog\azimuth.db"
+    $StateRoot = Join-Path $DataRoot "state"
+    if (-not $PreviewRoot) {
+        $PreviewRoot = Join-Path $DataRoot "cache\previews"
+    }
+}
+else {
+    $Catalog = Join-Path $NativeRoot "catalog\azimuth.db"
+    $StateRoot = Join-Path $NativeRoot "state"
+    if (-not $PreviewRoot) {
+        $PreviewRoot = Join-Path $NativeRoot "cache\previews"
+    }
+}
+$PreviewRoot = [IO.Path]::GetFullPath($PreviewRoot)
 $LogRoot = Join-Path $StateRoot "logs"
 $RunRoot = Join-Path $StateRoot "run"
 $StatusUrl = "http://127.0.0.1:$Port/api/dev/status"
@@ -48,16 +66,21 @@ if (-not (Test-Path -LiteralPath $Python -PathType Leaf)) {
 if (-not (Test-Path -LiteralPath $ServerEntry -PathType Leaf)) {
     throw "Azimuth Photo's server entrypoint is missing at $ServerEntry."
 }
-if (-not (Test-Path -LiteralPath $Catalog -PathType Leaf)) {
-    throw "The Azimuth Photo catalog is missing at $Catalog. The launcher stopped before creating a new library."
+if ($RequireExistingCatalog -and -not (Test-Path -LiteralPath $Catalog -PathType Leaf)) {
+    throw "The required Azimuth Photo catalog is missing at $Catalog. The launcher stopped before creating a new library."
 }
 
 New-Item -ItemType Directory -Force -Path $PreviewRoot, $LogRoot, $RunRoot | Out-Null
 
-# The shortcut always selects the real satellite library. A test-only smoke
-# variable inherited from a developer shell must never disable catalog setup.
-$env:AZIMUTH_HOME = $DataRoot
-$env:AZIMUTH_MODE = "satellite"
+# An explicit data root supports portable or multi-machine installations.
+# Without one, the application uses the current user's platform-native paths.
+if ($DataRoot) {
+    $env:AZIMUTH_HOME = $DataRoot
+}
+else {
+    Remove-Item Env:AZIMUTH_HOME -ErrorAction SilentlyContinue
+}
+$env:AZIMUTH_MODE = $Mode
 $env:AZIMUTH_HOST = "127.0.0.1"
 $env:AZIMUTH_PORT = [string]$Port
 $env:AZIMUTH_THUMB_CACHE_DIR = $PreviewRoot
@@ -126,7 +149,7 @@ if ($null -eq $Status) {
     throw "Azimuth Photo did not become ready within $StartupTimeoutSeconds seconds. See $LogRoot."
 }
 
-Write-Host "Azimuth Photo is ready (PID $($Status.pid)) with catalog $Catalog"
+Write-Host "Azimuth Photo is ready (PID $($Status.pid)) in $Mode mode with catalog $Catalog"
 
 if (-not $NoOpen) {
     $AppBrowser = @(

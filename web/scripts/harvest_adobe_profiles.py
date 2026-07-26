@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 import struct
 import sys
@@ -28,7 +29,9 @@ from features.develop.adobe_profiles import (  # noqa: E402
 )
 
 
-DEFAULT_DB = Path("/home/sean/Projects/azimuth-photo/web/azimuth.db")
+DEFAULT_DB = Path(
+    os.environ.get("AZIMUTH_PROFILE_CATALOG", str(Path.home() / ".local/share/azimuth-photo/catalog/azimuth.db"))
+)
 DEFAULT_OUTPUT = WEB_ROOT / "features" / "develop" / "profiles" / "adobe"
 RAW_EXTENSIONS = (".dng", ".cr2", ".cr3")
 MAX_PROFILE_BYTES = 2 * 1024 * 1024

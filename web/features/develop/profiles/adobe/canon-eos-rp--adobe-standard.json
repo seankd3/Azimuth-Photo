@@ -30099,5 +30099,5 @@
   "profile_name": "Adobe Standard",
   "schema_version": 1,
   "source_count": 15435,
-  "source_file": "/mnt/expansion/Photos/RAWS/2021/2021-06-21/20210621-IMG_0002.dng"
+  "source_file": "reference://embedded-camera-profile"
 }

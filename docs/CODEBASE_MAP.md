@@ -11,7 +11,8 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - Repo launcher: `scripts/azimuth-server` runs
   `web/.venv/bin/uvicorn app:app --host HOST --port PORT`; default is `127.0.0.1:8000`,
   `AZIMUTH_ACCESS=tailscale` binds the Tailscale IPv4.
-- Target service: `/etc/systemd/system/azimuth-photo.service` runs as `sean`
+- Service template: `deploy/azimuth-photo.service` runs as the dedicated
+  `azimuth` account; installations may override user and paths locally
   from `web/`, waits for Tailscale, binds its IPv4 on `:8000`, and restarts on
   failure; Tailscale Serve supplies the phone-facing HTTPS `:8443` URL. Check
   `TOPOLOGY.md` before assuming the live service has completed this cutover.
@@ -179,6 +180,6 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
   (the configured `cache_root`) consistently; mixing roots causes cache misses,
   stale counts, or incorrect visible-image filtering.
 - Do not use plain `:8000` for phone/PWA verification: use the Tailscale HTTPS
-  `https://omarchy.tail0eeded.ts.net:8443/m` endpoint.
+  `https://photos.example.com/m` endpoint.
 - The canonical checkouts stay on `main`; do not create persistent lanes or
   worktrees. Test artifacts and runtime data belong outside the checkout.

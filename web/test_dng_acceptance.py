@@ -10,6 +10,7 @@ from __future__ import annotations
 import io
 import os
 import sqlite3
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -26,8 +27,15 @@ from features.develop import adobe_profiles, dng_pipeline, importer, lossydng, p
 
 pytestmark = pytest.mark.slow
 
-PROD_DB = Path(os.environ.get("AZIMUTH_ACCEPTANCE_DB", "/home/sean/Projects/azimuth-photo/web/azimuth.db"))
-EVIDENCE_DIR = Path(os.environ.get("AZIMUTH_DNG_EVIDENCE_DIR", "/mnt/expansion/tmp-lanes/color/evidence"))
+if "AZIMUTH_ACCEPTANCE_DB" not in os.environ:
+    pytest.skip("AZIMUTH_ACCEPTANCE_DB must point to a copied acceptance catalog", allow_module_level=True)
+PROD_DB = Path(os.environ["AZIMUTH_ACCEPTANCE_DB"])
+EVIDENCE_DIR = Path(
+    os.environ.get(
+        "AZIMUTH_DNG_EVIDENCE_DIR",
+        str(Path(tempfile.gettempdir()) / "azimuth-dng-acceptance"),
+    )
+)
 SAMPLE_SIZE = 40
 PREVIEW_EDGE = 512
 MEAN_L_LIMIT = 0.035

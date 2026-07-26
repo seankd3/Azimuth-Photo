@@ -1,13 +1,13 @@
 # FIELD_SPEC — satellite mode + hub sync (v1, frozen 2026-07-11)
 
 Goal: Azimuth Photo works fully offline/remote on a laptop ("satellite") against the always-on
-"hub" (omarchy). Import/cull/edit happen locally at native speed; originals and metadata sync in
+"hub" server. Import/cull/edit happen locally at native speed; originals and metadata sync in
 the background; the full hub library stays browsable remotely through a read-through cache.
 
 ## Roles
-- **hub**: the existing prod instance (omarchy :8000). Authoritative catalog. Default mode.
+- **hub**: the always-on server. Authoritative catalog. Default server mode.
 - **satellite**: same codebase on a laptop. `AZIMUTH_MODE=satellite`,
-  `AZIMUTH_HUB_URL=http://100.102.150.104:8000`. Own SQLite catalog, own caches,
+  `AZIMUTH_HUB_URL=https://photos.example.com`. Own SQLite catalog, own caches,
   own originals dir for field imports. AI models optional (smoke-degraded is fine).
 
 ## Identity
@@ -26,10 +26,10 @@ the background; the full hub library stays browsable remotely through a read-thr
    "missing" = hub wants the original uploaded. "known" = already present (any path).
 2. `POST /api/sync/upload/{content_hash}`  chunked/resumable:
    headers `X-Offset`, `X-Total-Bytes`; body = raw chunk (≤32MB). Hub appends to
-   `/mnt/expansion/Photos/_intake/<content_hash>.part`; each chunk is fsynced before an
+   `<library>/_intake/<content_hash>.part`; each chunk is fsynced before an
    offset journal advances. Resume truncates any uncommitted tail. When complete, the hub
    verifies both `content_hash` and the satellite-supplied full-file `full_hash`,
-   moves to `/mnt/expansion/Photos/RAWS/<YYYY>/<YYYY-MM-DD>/<original filename>`
+   moves to `<library>/RAWS/<YYYY>/<YYYY-MM-DD>/<original filename>`
    (date from EXIF DateTimeOriginal; collision → suffix), registers through the EXISTING
    importer machinery (idempotent), returns `{image_id}`. Finalize keeps `.part` intact until
    registration succeeds, so a failed or interrupted registration is retry-safe.

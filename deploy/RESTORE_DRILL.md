@@ -29,6 +29,6 @@ State and log:
 | `/var/tmp/azimuth-restore-drill.log` | bounded run log (last 5000 lines) |
 | `http://127.0.0.1:8091/azimuth-alerts` | ntfy topic |
 
-The service points at the canonical `/home/sean/Projects/azimuth-photo`
+The service template points at the conventional `/opt/azimuth-photo`
 checkout. Enable it only after that checkout and its runtime configuration
 have passed the production health check.

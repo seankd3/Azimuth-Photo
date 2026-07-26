@@ -23,10 +23,7 @@ QUALITY = 92
 
 
 def find_r5_dngs(n: int = 12) -> list[Path]:
-    roots = [
-        Path("/mnt/expansion/Photos/RAWS/2022/2022-05-09"),
-        Path("/mnt/expansion/Photos/RAWS/2022/2022-05-08"),
-    ]
+    roots = [Path(os.environ.get("AZIMUTH_BENCH_RAW_ROOT", Path.home() / "Pictures"))]
     found: list[Path] = []
     for root in roots:
         if not root.is_dir():

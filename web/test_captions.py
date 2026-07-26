@@ -488,7 +488,7 @@ class CaptionTests(BackendTestCase):
             caption_worker._oom_circuit.reset()
 
     async def test_caption_control_failure_returns_actionable_error_without_internal_detail(self):
-        secret = "/home/sean/private/model.bin"
+        secret = "/home/photographer/private/model.bin"
         with unittest.mock.patch.object(
             caption_worker,
             "pause_caption_worker",

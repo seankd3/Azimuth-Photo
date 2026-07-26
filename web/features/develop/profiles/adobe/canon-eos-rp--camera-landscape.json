@@ -69185,7 +69185,7 @@
   "profile_name": "Camera Landscape",
   "schema_version": 1,
   "source_count": 162,
-  "source_file": "/mnt/expansion/Photos/RAWS/2022/2022-04-29/20220429-IMG_0944-Pano.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

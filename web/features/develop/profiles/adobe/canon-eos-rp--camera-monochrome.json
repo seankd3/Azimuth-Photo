@@ -69185,7 +69185,7 @@
   "profile_name": "Camera Monochrome",
   "schema_version": 1,
   "source_count": 49,
-  "source_file": "/mnt/expansion/Photos/RAWS/2022/2022-04-11/20220411-IMG_3043-2.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

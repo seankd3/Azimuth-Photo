@@ -24,9 +24,10 @@ def postprocess(path: str):
 
 
 def main() -> None:
+    root = Path(os.environ.get("AZIMUTH_BENCH_RAW_ROOT", Path.home() / "Pictures"))
     paths = [
         str(p)
-        for p in sorted(Path("/mnt/expansion/Photos/RAWS/2022/2022-05-09").glob("*R5*.DNG"))[:12]
+        for p in sorted(root.rglob("*.DNG"))[:12]
     ]
     for path in paths:
         with open(path, "rb") as handle:

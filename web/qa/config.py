@@ -71,6 +71,6 @@ def fixture_environment() -> dict[str, str]:
         # The seeding subprocess may have a different TMPDIR. Keep all fixture
         # paths on this invocation's chosen QA scratch root.
         "AZIMUTH_QA_SCRATCH": str(SCRATCH_ROOT),
-        "TMPDIR": os.environ.get("TMPDIR", "/mnt/expansion/tmp"),
+        "TMPDIR": os.environ.get("TMPDIR", tempfile.gettempdir()),
         "PYTHONPATH": str(WEB_ROOT),
     }

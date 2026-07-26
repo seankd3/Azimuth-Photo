@@ -1,51 +1,44 @@
-# Azimuth Photo — Field Satellite (Windows laptop)
+# Azimuth Photo — Windows satellite
 
-Runs the full app locally in **satellite mode**: your entire hub library is
-mirrored here, imports/culls/edits happen at local speed, and everything syncs
-back to the hub automatically. Big picture: [docs/TOPOLOGY.md](docs/TOPOLOGY.md).
+A Windows computer can run the full app locally in satellite mode: its catalog
+and previews stay fast on the laptop while changes and verified originals sync
+to a hub.
 
-## Start
+## First run
 
-From the repo (PowerShell):
+Create the development environment described in
+[docs/development.md](docs/development.md), then launch a fresh standalone
+library:
 
 ```powershell
 .\scripts\start_azimuth_windows.ps1
 ```
 
-The launcher selects the real `C:\Azimuth Photo` catalog, reuses the running
-server when possible, waits until it is healthy, and opens the desktop surface
-in an app window at http://127.0.0.1:8010/d.
-
-Do **not** set `AZIMUTH_SMOKE_MODE` — it's a test-only flag that disables
-DB init and all background workers (thumbnails never generate, sync never runs).
-
-## Stop
+The default runtime lives under the current user's local application-data
+directory. To use an existing portable runtime safely:
 
 ```powershell
-Get-NetTCPConnection -LocalPort 8010 -State Listen |
-  ForEach-Object { Stop-Process -Id $_.OwningProcess -Force }
+.\scripts\start_azimuth_windows.ps1 `
+  -DataRoot "D:\Azimuth Photo" `
+  -Mode satellite `
+  -PreviewRoot "D:\Azimuth Photo\cache\previews" `
+  -RequireExistingCatalog
 ```
 
-## Where things are
+The launcher refuses to create a replacement catalog when
+`-RequireExistingCatalog` is set, reuses a healthy process from the same
+checkout, and opens http://127.0.0.1:8010/d. A desktop shortcut may pass the
+same explicit options.
 
-- Repo: `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo`
-  (`main`, GitHub origin)
-- Venv: `web\.venv` (Python 3.12; base runtime + development tools; optional
-  AI packs are installed separately)
-- Runtime data: `C:\Azimuth Photo\` (catalog, previews, Develop cache,
-  models, logs, and transfer receipts)
-- Originals waiting for verified hub offload: the configured XPS source
-  folders, including `C:\Pictures`
+Do not set `AZIMUTH_SMOKE_MODE`; it disables normal initialization and
+background workers for isolated tests.
 
-## Update
+## Storage behavior
 
-```bash
-git pull --ff-only
-```
+Keep the catalog, previews, Develop cache, models, logs, and transfer receipts
+on fast local storage. Original source folders are user-selected. After a hub
+has accepted an upload and verified its complete hash, **Free up space** can
+remove the matching local original while retaining the catalog and previews.
 
-## Windows gotchas
-
-- Let the catalog scan finish before starting **Free up space**. Only files
-  represented by a verified sync identity can be removed locally.
-- Sync/AI workers self-skip if their deps are absent; embeddings can hold
-  write locks — writes retry, but if the app feels locked up, it's usually that.
+Let the catalog scan finish before using **Free up space**. Only files with a
+verified sync identity are eligible.

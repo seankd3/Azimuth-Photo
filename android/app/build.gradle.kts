@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val releaseKeystore = System.getenv("AZIMUTH_KEYSTORE")
+val releasePassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD")
+
 android {
     namespace = "app.azimuthphoto.mobile"
     compileSdk = 35
@@ -18,11 +21,13 @@ android {
     }
 
     signingConfigs {
-        create("release") {
-            storeFile = file(System.getenv("AZIMUTH_KEYSTORE") ?: "${System.getProperty("user.home")}/.azimuth/release.keystore")
-            storePassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"
-            keyAlias = "azimuth"
-            keyPassword = System.getenv("AZIMUTH_KEYSTORE_PASSWORD") ?: "azimuth-local"
+        if (!releaseKeystore.isNullOrBlank() && !releasePassword.isNullOrBlank()) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = releasePassword
+                keyAlias = "azimuth"
+                keyPassword = releasePassword
+            }
         }
     }
 
@@ -31,7 +36,7 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }

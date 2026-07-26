@@ -4,7 +4,12 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APK="$ROOT/outputs/azimuth-android-debug.apk"
 ARTIFACT_DIR="${AZIMUTH_ANDROID_RELEASE_ARTIFACTS:-$ROOT/outputs/android-release}"
-DOWNLOAD_URL="${AZIMUTH_ANDROID_DOWNLOAD_URL:-https://omarchy.tail0eeded.ts.net/azimuth-apk/azimuth.apk}"
+DOWNLOAD_URL="${AZIMUTH_ANDROID_DOWNLOAD_URL:-}"
+
+if [[ -z "$DOWNLOAD_URL" ]]; then
+    echo "Set AZIMUTH_ANDROID_DOWNLOAD_URL to the published APK URL." >&2
+    exit 2
+fi
 
 mkdir -p "$ARTIFACT_DIR"
 

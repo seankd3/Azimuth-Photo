@@ -1,9 +1,9 @@
 # Azimuth Photo Develop Module — Architecture Spec (v1, frozen)
 
-Branch: `main`, checkout `/home/sean/Projects/azimuth-photo`. Goal: a Lightroom-Classic-class
+Branch: `main`, checkout `/home/photographer/Projects/azimuth-photo`. Goal: a Lightroom-Classic-class
 non-destructive RAW develop module inside Azimuth Photo. This spec is the single source of
 truth; the WebGL renderer and the Python export renderer MUST implement the same math.
-Reference for raw-handling ideas: `/home/sean/Projects/darktable-ref` (read, never copy GPL code verbatim —
+Reference for raw-handling ideas: `/home/photographer/Projects/darktable-ref` (read, never copy GPL code verbatim —
 learn the approach, write original code).
 
 ## 0. Assets & constraints
@@ -210,7 +210,7 @@ matches canvas within tolerance; suite green; screenshots captured. Honest notes
 - rawpy 0.27 decode of a 38MB DNG: **1.2s warm**, but cold file read off /mnt/expansion is **17–45s**
   (HDD at ~2MB/s under caption/embedding worker contention). Decode cost is I/O, not CPU.
 - Therefore: base cache (**.bin.gz + .jpg + .json**) lives on the root SSD at
-  `/home/sean/.cache/azimuth-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
+  `/home/photographer/.cache/azimuth-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
   check on each write). Exports stay in the configured runtime export directory.
 - UI: first-open of an uncached raw takes ~20–60s — show an honest staged progress state
   ("Reading RAW from disk…" → "Developing preview…"), never a dead spinner. Filmstrip warm-ahead

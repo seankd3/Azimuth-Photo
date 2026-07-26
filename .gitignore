@@ -26,6 +26,7 @@ android/app/build/
 .codex
 .gstack/
 .claude/
+AGENTS.local.md
 
 # Local audits and build outputs
 cleanup/

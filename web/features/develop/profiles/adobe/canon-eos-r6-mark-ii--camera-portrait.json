@@ -69184,7 +69184,7 @@
   "profile_name": "Camera Portrait",
   "schema_version": 1,
   "source_count": 15,
-  "source_file": "/mnt/expansion/Photos/RAWS/2024/2024-10-13/Johnny/20241013-062833-Enhanced-NR.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Deploy the verified GitHub main branch into the one canonical Omarchy checkout.
+# Deploy the verified GitHub main branch into a configured Linux checkout.
 set -euo pipefail
 
-ROOT="${AZIMUTH_REPO:-/home/sean/Projects/azimuth-photo}"
-VENV="${AZIMUTH_VENV:-/home/sean/.local/share/azimuth-photo/venv}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${AZIMUTH_REPO:-$(dirname "$SCRIPT_DIR")}"
+VENV="${AZIMUTH_VENV:-$ROOT/.venv}"
 SERVICE="${AZIMUTH_SERVICE:-azimuth-photo.service}"
-HEALTH_URL="${AZIMUTH_HEALTH_URL:-http://100.102.150.104:8000/api/dev/status}"
-BACKUP_URL="${AZIMUTH_BACKUP_URL:-http://100.102.150.104:8000/api/system/backup/now}"
+HEALTH_URL="${AZIMUTH_HEALTH_URL:-http://127.0.0.1:8000/api/dev/status}"
+BACKUP_URL="${AZIMUTH_BACKUP_URL:-http://127.0.0.1:8000/api/system/backup/now}"
 TEST_LOG="${AZIMUTH_DEPLOY_TEST_LOG:-/tmp/azimuth-photo-deploy-tests.log}"
 
 cd "$ROOT"
@@ -31,7 +32,7 @@ echo "Running isolated verification..."
 (
     cd "$ROOT/web"
     AZIMUTH_SMOKE_MODE=1 \
-    PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-/home/sean/.cache}/azimuth-photo/test-pycache" \
+    PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-${TMPDIR:-/tmp}}/azimuth-photo/test-pycache" \
     "$VENV/bin/python" -m pytest -q
 ) >"$TEST_LOG" 2>&1 || {
     tail -n 80 "$TEST_LOG"

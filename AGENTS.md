@@ -1,42 +1,35 @@
 # Azimuth Photo agent guide
 
 This is the authoritative operating contract for agents working in this
-repository. Keep it short, current, and consistent with the linked docs. Do not
-create another competing instruction file.
+repository. Keep public instructions portable. If `AGENTS.local.md` exists,
+read it after this file for deployment-specific paths and live-service truth;
+that ignored overlay must never become a product dependency.
 
 ## Start here
 
 Before editing or launching anything:
 
 1. Run `git status --short --branch` and `git worktree list`.
-2. Confirm this is one of the canonical checkouts listed in
-   [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md).
-3. Read [`docs/development.md`](docs/development.md) and the specification for
-   the product surface being changed.
-4. Check the relevant live status before changing runtime behavior. The XPS
-   satellite uses `http://127.0.0.1:8010`; the Omarchy hub uses port `8000`.
+2. Read [`docs/TOPOLOGY.md`](docs/TOPOLOGY.md),
+   [`docs/development.md`](docs/development.md), and the specification for the
+   product surface being changed.
+3. Read `AGENTS.local.md` when present.
+4. Check the relevant live status before changing runtime behavior.
 5. State the intended scope and keep unrelated user or agent changes untouched.
 
-If the checkout, branch, runtime, or deployment truth differs from the
-documentation, stop and reconcile the discrepancy before coding.
+If checkout, branch, runtime, or deployment truth differs from the local
+overlay, stop and reconcile the discrepancy before coding.
 
-## Canonical truth
+## Source and runtime boundaries
 
-- Repository: `Sean-Kenneth-Doherty/azimuth-photo`
-- Branch: `main`
-- XPS checkout:
-  `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo`
-- Omarchy checkout: `/home/sean/Projects/azimuth-photo`
-- XPS runtime: `C:\Azimuth Photo`
+- GitHub `main` is the product source of truth.
 - Runtime data never belongs inside a source checkout.
-
-Retired checkouts, worktrees, installations, consolidation staging, and archive
-bundles are preservation material—not development sources. Never revive or copy
-code from them unless the task explicitly calls for historical recovery.
-
-The current production cutover boundary is documented in
-[`docs/TOPOLOGY.md`](docs/TOPOLOGY.md). Do not infer deployment state from a
-clean checkout.
+- Do not add personal usernames, home directories, private addresses, mount
+  points, catalog paths, or secrets to tracked defaults or documentation.
+- Product defaults must support a fresh standalone install. Hub and satellite
+  deployments are selected through environment variables or launcher options.
+- Retired checkouts and worktrees are preservation material, not development
+  sources. Do not revive them unless the task explicitly calls for recovery.
 
 ## How to work
 
@@ -45,32 +38,28 @@ clean checkout.
   the user explicitly requests them.
 - Never change a production checkout's branch or restart a long-running service
   as a side effect of development.
-- Stage explicit paths. Never use `git add -A` in a shared or previously dirty
-  tree.
-- Preserve unrelated changes. If the requested file overlaps unknown work,
-  inspect the diff and work around it or ask before overwriting.
-- Keep code modular and product-owned. Prefer a small focused module over a
-  shared abstraction with one caller.
+- Stage explicit paths. Never use `git add -A` in a shared or dirty tree.
+- Preserve unrelated changes.
+- Keep code modular and product-owned. Prefer a focused module over a shared
+  abstraction with one caller.
 - Build real behavior, not mockups or simulations.
-- Keep implementation complexity, model choice, and confidence plumbing out of
-  the product UI.
+- Keep implementation complexity and model plumbing out of the product UI.
 
 ## Code ownership
 
 Use [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) for the detailed route map.
-The short version:
 
 - `web/features/<surface>/` owns backend behavior and routes.
 - `web/data/repositories/` owns SQL and persistent queries.
-- `web/core/` owns application wiring and genuinely cross-cutting runtime code.
+- `web/core/` owns application wiring and cross-cutting runtime code.
 - `web/static/js/desktop/` owns focused desktop ES modules.
-- `web/static/js/mobile/` owns the PWA; desktop and mobile share backend writes.
+- `web/static/js/mobile/` owns the PWA.
 - `web/thumbnails/` owns preview generation and cache maintenance.
 - `desktop/` is the Windows shell; `android/` is the native Android client.
 - `scripts/` contains repeatable developer/operator entry points only.
 
-Keep routes thin, SQL in repositories, and UI state close to the surface that
-owns it. Preserve public routes and response shapes unless the task explicitly
+Keep routes thin, SQL in repositories, and UI state close to its owning
+surface. Preserve public routes and response shapes unless the task explicitly
 changes the contract.
 
 ## Data and safety
@@ -84,10 +73,10 @@ changes the contract.
 - Catalogs, previews, models, embeddings, Develop caches, logs, backups, and
   transfer receipts are runtime/generated data. Never commit or silently
   discard them.
-- The 20 TB expansion drive is a slow durable tier. Serialize bulk reads and
-  keep interactive catalogs and caches on SSD.
-- Never run tests against the real catalog unless the task explicitly requires
-  a read-only live check. Use isolated test homes and fixtures for writes.
+- Slow archive drives must not host latency-sensitive catalogs or active
+  caches. Serialize bulk reads and prefer SSD/RAM previews.
+- Never run tests against a real catalog unless the task explicitly requires a
+  read-only live check. Use isolated test homes and fixtures for writes.
 - `AZIMUTH_SMOKE_MODE=1` is test-only. Never use it for a real hub or satellite.
 
 ## Verification
@@ -104,48 +93,34 @@ risk:
 
 - Docs-only: `git diff --check`, link/path review, and instruction-conflict
   search.
-- Focused backend/frontend change: quick checks plus the owning test module or
-  named area.
-- Browser behavior: verify the actual changed workflow against an isolated
-  server; a healthy API alone is not UI proof.
+- Focused change: quick checks plus the owning test module or named area.
+- Browser behavior: verify the actual workflow against an isolated server.
 - Sync, deletion, imports, recovery, or catalog changes: add focused safety
-  tests and verify the final persisted state.
-- Deployment: verify the listener, process working directory, health endpoint,
-  catalog path, cache path, and rollback route.
+  tests and verify final persisted state.
+- Deployment: verify listener, working directory, health endpoint, catalog,
+  cache, and rollback route.
 
-Report exact commands and results. Never call the suite green when failures or
-errors remain, and never claim a UI reproduction or retest that was not
-actually performed.
+Report exact commands and results. Never claim a UI reproduction or passing
+suite that did not occur.
 
 ## Documentation hygiene
 
 Each durable fact has one owner:
 
-- `AGENTS.md` — agent operating rules and safety boundaries.
-- `docs/TOPOLOGY.md` — machines, canonical paths, runtime storage, and cutover
-  truth.
+- `AGENTS.md` — public agent rules and safety boundaries.
+- `AGENTS.local.md` — ignored installation-specific deployment truth.
+- `docs/TOPOLOGY.md` — portable runtime roles and storage architecture.
 - `docs/development.md` — setup, edit map, and verification commands.
 - `docs/CODEBASE_MAP.md` — module and route ownership.
 - `docs/README.md` — documentation index.
 - Feature specifications — expensive-to-rediscover product behavior.
 
 Update the owning document instead of adding a new summary. Do not commit
-one-off audits, task plans, handoff reports, generated receipts, scratch notes,
-or dated status files. Put temporary evidence outside the repository; preserve
-only durable conclusions in the appropriate existing doc.
-
-`CLAUDE.md` is a compatibility pointer to this file. It must not duplicate
-project rules.
+one-off audits, plans, handoff reports, generated receipts, scratch notes, or
+dated status files. `CLAUDE.md` is only a compatibility pointer to this file.
 
 ## Handoff
 
-Finish with:
-
-- the user-visible outcome;
-- files changed;
-- exact verification commands and results;
-- whether live services or user data changed;
-- any remaining failure, deployment boundary, or deliberately deferred work.
-
-Leave the checkout clean unless the user explicitly asked for an uncommitted
-handoff.
+Finish with the user-visible outcome, files changed, exact verification
+commands/results, whether live services or user data changed, and any remaining
+deployment boundary. Leave the checkout clean unless asked otherwise.

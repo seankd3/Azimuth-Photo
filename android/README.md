@@ -1,6 +1,6 @@
 # Azimuth Photo — Android
 
-A native Google-Photos replacement for the self-hosted Azimuth Azimuth Photo. It is
+A native Google-Photos replacement for a self-hosted Azimuth Photo library. It is
 your phone's photo app: it shows your camera roll, quietly backs every shot up to your
 own server over Tailscale, lets you browse your entire archive (years of DSLR RAWs,
 exported edits, everything) from anywhere, and can free space by aging backed-up media
@@ -32,7 +32,7 @@ off the device. No cloud account, no subscription, no one else's servers.
 Requires **JDK 17** (Gradle/AGP won't run on the JDK 8 that's often first on PATH):
 
 ```powershell
-$env:JAVA_HOME = "C:\Users\smast\AppData\Local\Programs\Microsoft\jdk-17.0.10.7-hotspot"
+$env:JAVA_HOME = "C:\path\to\jdk-17"
 .\gradlew.bat testDebugUnitTest assembleDebug   # unit tests + debug APK
 .\gradlew.bat assembleRelease                    # minified, shrunk, signed release APK
 ```
@@ -42,22 +42,22 @@ Release APK (~11 MB): `app/build/outputs/apk/release/app-release.apk`.
 
 ### Release signing
 
-The release build is signed with a local keystore at `C:\Users\smast\.azimuth\release.keystore`
-(alias `azimuth`). The password defaults to `azimuth-local` and can be overridden with the
-`AZIMUTH_KEYSTORE_PASSWORD` environment variable. The keystore lives outside the repo and is
-never committed. To recreate it:
+Release signing is opt-in. Set `AZIMUTH_KEYSTORE` and
+`AZIMUTH_KEYSTORE_PASSWORD`; otherwise Gradle produces an unsigned release APK.
+The keystore lives outside the repository and is never committed:
 
 ```powershell
-keytool -genkeypair -v -keystore C:\Users\smast\.azimuth\release.keystore `
+keytool -genkeypair -v -keystore C:\secure\azimuth-release.keystore `
   -alias azimuth -keyalg RSA -keysize 2048 -validity 10000 `
-  -storepass azimuth-local -keypass azimuth-local `
-  -dname "CN=Azimuth Photo, OU=Personal, O=Sean Doherty, C=US"
+  -dname "CN=Azimuth Photo"
+$env:AZIMUTH_KEYSTORE = "C:\secure\azimuth-release.keystore"
+$env:AZIMUTH_KEYSTORE_PASSWORD = Read-Host -MaskInput "Keystore password"
 ```
 
 ## Hub endpoints used
 
-Default server `http://100.102.150.104:8000` (Tailscale). Read paths need no auth; sync
-paths accept an optional `X-Device-Token`.
+The app asks for the user's hub URL during onboarding. Read paths need no auth
+by default; sync paths accept an optional `X-Device-Token`.
 
 - `GET /api/rankings?sort=date_taken&limit=&offset=&q=&deep=true&folder=` — library / search.
 - `GET /api/thumb/{sm|md|lg}/{id}` — thumbnails.

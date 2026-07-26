@@ -165,14 +165,14 @@ K = <span class="tok-num">32</span> <span class="tok-kw">if</span> abs(winner_el
 
     <div class="prose rv">
       <p class="lead">April 21st is the most important day in the whole history. Read the commit list in order and you can watch a tool become a product:</p>
-      <p><em>CLIP active learning → a unified bottom bar → an AI panel with effective-Elo pairing → a Library page with a justified grid and AI search → Qwen3-VL-Embedding-8B for state-of-the-art search → </em><strong>rename PhotoRanker → photoArchive</strong><em> → lightbox, find-similar, duplicate detection, EXIF, k-means auto-collections → Qwen3-VL-2B-int4 "to fit the GPU alongside other apps."</em></p>
+      <p><em>CLIP active learning → a unified bottom bar → an AI panel with effective-Elo pairing → a Library page with a justified grid and AI search → Qwen3-VL-Embedding-8B for state-of-the-art search → </em><strong>evolve PhotoRanker into Azimuth Photo</strong><em> → lightbox, find-similar, duplicate detection, EXIF, k-means auto-collections → Qwen3-VL-2B-int4 "to fit the GPU alongside other apps."</em></p>
       <p>The core realization: a photo library shouldn't make you type tags. It should <strong>understand the pictures</strong>. Embeddings turn every image into a vector; suddenly you can search "golden hour over water" in plain language, find everything visually similar to a frame you love, and cluster a shoot automatically — all without a single keyword.</p>
     </div>
 
     <figure class="plate wide rv">
-      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">photoArchive · Library (the day it was born)</span><span class="hash">c0d7f5441 · 2026-04-21</span></div>
-      <div class="img"><img src="assets/screens/03-library-apr21.jpg" alt="photoArchive Library: edge-to-edge justified grid with an AI search bar and Top Rated / AI Ranked sorting" loading="lazy"></div>
-      <figcaption>The newborn <b>photoArchive</b>, booted from the April 21 commit. An edge-to-edge justified grid, a search bar that reads <b>"e.g. sunset, portrait, building,"</b> and sorting by <b>Top Rated / AI Ranked / Most Compared</b>. Heritage-flight jets, Starbase, coastlines, aurora — Sean's real archive, now searchable by meaning.</figcaption>
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="t">Azimuth Photo · Library (the day it was born)</span><span class="hash">c0d7f5441 · 2026-04-21</span></div>
+      <div class="img"><img src="assets/screens/03-library-apr21.jpg" alt="Azimuth Photo Library: edge-to-edge justified grid with an AI search bar and Top Rated / AI Ranked sorting" loading="lazy"></div>
+      <figcaption>The newborn <b>Azimuth Photo</b>, booted from the April 21 commit. An edge-to-edge justified grid, a search bar that reads <b>"e.g. sunset, portrait, building,"</b> and sorting by <b>Top Rated / AI Ranked / Most Compared</b>. Heritage-flight jets, Starbase, coastlines, aurora — a real archive, now searchable by meaning.</figcaption>
     </figure>
 
     <div class="callout rv">
@@ -190,7 +190,7 @@ K = <span class="tok-num">32</span> <span class="tok-kw">if</span> abs(winner_el
     </div>
 
     <div class="prose rv">
-      <p>With intelligence in place, photoArchive got obsessed with speed — the way only a tool you use every single day can. Over four days the commit log reads like a benchmark changelog, and each win came from the same move: stop asking the slow disk, and answer from memory.</p>
+      <p>With intelligence in place, Azimuth Photo got obsessed with speed — the way only a tool you use every single day can. Over four days the commit log reads like a benchmark changelog, and each win came from the same move: stop asking the slow disk, and answer from memory.</p>
     </div>
 
     <!-- BENCHMARK RACE -->
@@ -276,7 +276,7 @@ _disk_path_index: dict[tuple[str, int], str] = {}
     </div>
 
     <div class="prose rv">
-      <p>By summer the product vision crystallizes into a single sentence and a hard split. On the phone, photoArchive should feel like Google Photos — effortless, scrollable, one-handed. On the desktop, it should feel like Lightroom Classic — dense, keyboard-driven, serious. In June a native Kotlin/Compose Android client is born; in early July the desktop <code>/d</code> and mobile <code>/m</code> surfaces get a unified redesign with real writes, stacks, safe trash, share links, and smart collections.</p>
+      <p>By summer the product vision crystallizes into a single sentence and a hard split. On the phone, Azimuth Photo should feel like Google Photos — effortless, scrollable, one-handed. On the desktop, it should feel like Lightroom Classic — dense, keyboard-driven, serious. In June a native Kotlin/Compose Android client is born; in early July the desktop <code>/d</code> and mobile <code>/m</code> surfaces get a unified redesign with real writes, stacks, safe trash, share links, and smart collections.</p>
     </div>
 
     <figure class="plate wide rv">
@@ -309,7 +309,7 @@ _disk_path_index: dict[tuple[str, int], str] = {}
     <div class="head rv">
       <div class="eyebrow">Chapter 06 <span class="sep">/</span> July 9–11, 2026 <span class="sep">/</span> <span class="muted">dev1 → dev7 · 611 tests green</span></div>
       <h2>The darkroom</h2>
-      <p class="dek">photoArchive stops being a <em>manager</em> and becomes an <em>editor</em> — aiming, explicitly, to beat Lightroom, darktable, and Affinity pillar by pillar.</p>
+      <p class="dek">Azimuth Photo stops being a <em>manager</em> and becomes an <em>editor</em> — aiming, explicitly, to beat Lightroom, darktable, and Affinity pillar by pillar.</p>
     </div>
 
     <div class="prose rv">
@@ -458,10 +458,10 @@ amount = hal[<span class="tok-str">"amount"</span>] * halation_scale
     <div class="head rv">
       <div class="eyebrow">Chapter 08 <span class="sep">/</span> July 12–13, 2026 <span class="sep">/</span> <span class="muted">c5fc4579a · the rebrand</span></div>
       <h2>Becoming Azimuth</h2>
-      <p class="dek">photoArchive gets a real name, a real installer, and a real front door — the turn from "my tool" to "a thing other people can run."</p>
+      <p class="dek">Azimuth Photo gets a permanent identity, a real installer, and a real front door — the turn from "my tool" to "a thing other people can run."</p>
     </div>
     <div class="prose rv">
-      <p><strong>photoArchive → Azimuth Photo.</strong> A brand layer across the wordmark, the PWA manifest, the Android launcher, the Tauri desktop shell; bundle IDs move to <code>app.azimuthphoto.*</code>. Crucially, the internal identifiers, paths, and database names are left untouched and sequenced behind in-flight work — a rename done like an engineer, not a marketer. A Docker image, a compose file, an Unraid template, and an <code>INSTALL.md</code> for NAS boxes turn it into something installable. A full Google-Photos-replacement Android client — timeline, auto-backup, free-up-space — ships the same week.</p>
+      <p><strong>Azimuth Photo becomes the permanent product name.</strong> A brand layer across the wordmark, the PWA manifest, the Android launcher, and the Tauri desktop shell; bundle IDs move to <code>app.azimuthphoto.*</code>. Internal identifiers, paths, and database names follow in a deliberate compatibility-safe migration. A Docker image, a compose file, an Unraid template, and an <code>INSTALL.md</code> for NAS boxes turn it into something installable. A full Google-Photos-replacement Android client — timeline, auto-backup, free-up-space — ships the same week.</p>
     </div>
 
     <div class="callout rv" style="border-left-color:var(--amber); background:color-mix(in srgb, var(--amber) 6%, var(--panel))">

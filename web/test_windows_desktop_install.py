@@ -73,8 +73,8 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
         server = (TAURI / "src" / "server.rs").read_text(encoding="utf-8")
         combined = engine + server
 
-        self.assertNotIn(r"C:\Users\smast", combined)
-        self.assertNotIn("100.102.150.104", combined)
+        self.assertNotRegex(combined, r"[A-Za-z]:\\Users\\")
+        self.assertNotRegex(combined, r"http://100\.\d+\.\d+\.\d+")
         self.assertNotIn("AZIMUTH_HUB_URL", combined)
         self.assertNotIn("python.exe", combined.lower())
         self.assertIn('.env("AZIMUTH_MODE", "standalone")', engine)
@@ -91,14 +91,17 @@ class WindowsDesktopPackageContracts(unittest.TestCase):
         self.assertIn("azimuth-server.exe", script)
         self.assertIn("*-setup.exe", script)
 
-    def test_windows_satellite_launcher_selects_real_catalog_safely(self):
+    def test_windows_launcher_is_portable_and_can_pin_an_existing_catalog(self):
         script = (ROOT / "scripts" / "start_azimuth_windows.ps1").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn(r'[string]$DataRoot = "C:\Azimuth Photo"', script)
+        self.assertIn('[string]$DataRoot = $env:AZIMUTH_HOME', script)
+        self.assertIn('"standalone"', script)
+        self.assertIn("$RequireExistingCatalog", script)
+        self.assertNotIn(r"C:\Azimuth Photo", script)
         self.assertIn(r'data\catalog\azimuth.db', script)
-        self.assertIn('$env:AZIMUTH_MODE = "satellite"', script)
+        self.assertIn("$env:AZIMUTH_MODE = $Mode", script)
         self.assertIn("$env:AZIMUTH_THUMB_CACHE_DIR = $PreviewRoot", script)
         self.assertIn("Remove-Item Env:AZIMUTH_SMOKE_MODE", script)
         self.assertIn("/api/dev/status", script)

@@ -137,7 +137,7 @@ def default_library_root(*, intake_root: Path | None = None, raws_root: Path | N
         if intake.name == "_intake":
             return intake.parent
         return intake.parent
-    return Path("/mnt/expansion/Photos")
+    return (Path.home() / "Pictures").resolve()
 
 
 def normalize_folder_hint(value: str | None) -> str | None:

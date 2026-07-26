@@ -77,7 +77,7 @@ replacement; desktop = Lightroom Classic replacement).
   network-only for other APIs, offline fallback to cached `/m`).
 - Service workers require a secure context. On the tailnet the app is served
   over HTTPS via `tailscale serve --https=8443` →
-  `https://omarchy.tail0eeded.ts.net:8443/m`. Plain `:8000` works but without
+  `https://photos.example.com/m`. Plain `:8000` works but without
   the service worker/install flow. Port 443 is a PUBLIC Funnel serving an
   unrelated APK page — never reconfigure it.
 - Timeline endpoints: `/api/date-histogram` (whole-scope month counts driving

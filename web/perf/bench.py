@@ -8,7 +8,7 @@ and representative thumbnail-pregeneration probes.
 Example (from ``web/``)::
 
     .venv/bin/python perf/bench.py \
-      --db /mnt/expansion/tmp/perf.db \
+      --db /tmp/azimuth-perf/perf.db \
       --port 8081 --output /tmp/dev8/perf-baseline.json
 """
 
@@ -38,9 +38,10 @@ from typing import Any, Iterator
 
 WEB_DIR = Path(__file__).resolve().parents[1]
 PYTHON = WEB_DIR / ".venv" / "bin" / "python"
-DEFAULT_DB = Path("/mnt/expansion/tmp/perf.db")
-DEFAULT_DEVELOP_CACHE = Path("/mnt/expansion/tmp/azimuth-perf-develop")
-DEFAULT_THUMB_CACHE = Path("/mnt/expansion/tmp/azimuth-perf-thumbs")
+DEFAULT_ROOT = Path(tempfile.gettempdir()) / "azimuth-perf"
+DEFAULT_DB = DEFAULT_ROOT / "perf.db"
+DEFAULT_DEVELOP_CACHE = DEFAULT_ROOT / "develop"
+DEFAULT_THUMB_CACHE = DEFAULT_ROOT / "thumbs"
 BASE_HEADER = struct.Struct("<8sII")
 
 

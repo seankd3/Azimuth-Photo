@@ -32,7 +32,7 @@ data class AppSettings(
 )
 
 object SettingsStore {
-    const val DEFAULT_SERVER_URL = "http://100.102.150.104:8000"
+    const val DEFAULT_SERVER_URL = ""
 
     private val SERVER_URL = stringPreferencesKey("server_url")
     private val DEVICE_TOKEN = stringPreferencesKey("device_token")

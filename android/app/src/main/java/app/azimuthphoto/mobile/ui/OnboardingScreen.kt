@@ -135,6 +135,7 @@ fun OnboardingScreen(
                             testResult = null
                         },
                         label = { Text("Server URL") },
+                        placeholder = { Text("https://photos.example.com") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )

@@ -30099,5 +30099,5 @@
   "profile_name": "Adobe Standard",
   "schema_version": 1,
   "source_count": 1,
-  "source_file": "/mnt/expansion/Photos/RAWS/2024/2024-06-23/PXL_20240623_185806581.RAW-02.ORIGINAL.dng"
+  "source_file": "reference://embedded-camera-profile"
 }

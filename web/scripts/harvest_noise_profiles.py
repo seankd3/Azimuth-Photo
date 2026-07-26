@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 
 DARKTABLE_REPOSITORY = "https://github.com/darktable-org/darktable"
 DARKTABLE_COMMIT = "9afc58a34dfd79b6e6a41f0c6277a7189b46ac62"
 LICENSE = "GPL-3.0-or-later"
-DEFAULT_SOURCE = Path("/home/sean/Projects/darktable/data/noiseprofiles.json")
+DEFAULT_SOURCE = Path(
+    os.environ.get("DARKTABLE_NOISE_PROFILES", str(Path.home() / "src/darktable/data/noiseprofiles.json"))
+)
 DEFAULT_OUTPUT = Path(__file__).resolve().parents[1] / "features" / "develop" / "noise_profiles.json"
 
 # (maker, model) pairs to ship.  Aliases map EXIF / catalog spellings onto these.

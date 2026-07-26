@@ -69185,7 +69185,7 @@
   "profile_name": "Camera Neutral",
   "schema_version": 1,
   "source_count": 470,
-  "source_file": "/mnt/expansion/Photos/RAWS/2021/2021-12-31/20211231-IMG_2123.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

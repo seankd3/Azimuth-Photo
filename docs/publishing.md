@@ -99,7 +99,7 @@ Point nginx at `/srv/www` and serve `/g/<slug>/` directly. The site must route `
 Set:
 
 ```text
-publish_dir=/home/sean/azimuth-publish/g
+publish_dir=/home/photographer/azimuth-publish/g
 publish_hook=rsync -az --delete ./ user@example.com:/var/www/photos/g/
 publish_site_base_url=https://photos.example.com
 ```
@@ -111,7 +111,7 @@ Azimuth Photo writes locally, then the hook mirrors the gallery folder to the se
 One real install looks like this (paths and project name are Sean’s portfolio — treat as a pattern, not a requirement):
 
 ```text
-publish_dir=/home/sean/Projects/sean-kenneth-doherty/app/public/g
+publish_dir=/home/photographer/Projects/sean-kenneth-doherty/app/public/g
 publish_hook=scripts/deploy-galleries.sh
 publish_site_base_url=https://www.seankennethdoherty.com
 ```

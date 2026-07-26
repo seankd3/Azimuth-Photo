@@ -1,153 +1,94 @@
 # Azimuth Photo topology
 
-This is the canonical map for code, runtime data, generated data, and original
-photos. There is one product, one repository, one active branch, and one clean
-checkout on each development machine.
+Azimuth Photo is one product and one repository with three runtime roles. A
+single machine can run standalone, or several devices can form a private photo
+cloud without changing the source code.
 
-## Code
-
-The GitHub repository is `Sean-Kenneth-Doherty/azimuth-photo`. Both machines use
-its `main` branch directly:
-
-| Machine | Canonical checkout |
-| --- | --- |
-| Omarchy | `/home/sean/Projects/azimuth-photo` |
-| XPS | `C:\Users\smast\OneDrive\Desktop\Projects\photography\azimuth-photo` |
-
-The repository contains every maintained product surface:
+## Product layout
 
 ```text
 azimuth-photo/
-├── web/              FastAPI hub/satellite, desktop web UI, and mobile PWA
+├── web/              FastAPI engine, desktop web UI, and mobile PWA
 ├── desktop/          Windows Tauri shell
-├── android/          Android client
-├── clients/          External integrations, including Lightroom
-├── site/             Public website and Field Log output
-├── tools/field-log/  Field Log source and capture tooling
+├── android/          Native Android client
+├── clients/          External integrations
+├── site/             Public website
+├── tools/field-log/  Product-history source and capture tooling
 ├── scripts/          Build, check, run, and deployment commands
-├── deploy/           Service and restore-drill units
-└── docs/             Current product and operating documentation
+├── deploy/           Configurable Linux service templates
+└── docs/             Product and operating documentation
 ```
 
-Do not create integration branches, lane branches, or development worktrees.
-Owned changes are committed directly to `main`. The Field Log may create
-temporary detached checkouts under its ignored scratch directory while
-reproducing historical versions; those are disposable test fixtures, not
-development copies.
+Runtime databases, caches, models, logs, backups, and photos stay outside this
+tree. GitHub `main` is the source of truth; deployment-specific facts belong in
+the ignored `AGENTS.local.md` overlay.
 
-### Current cutover status
+## Runtime roles
 
-Canonical development is complete on both machines. The XPS shortcut and real
-satellite library already run from the canonical checkout and runtime paths.
-
-Omarchy port `8000` still runs the preserved pre-consolidation production
-checkout. The clean canonical Omarchy checkout is ready, but the live service
-must not be repointed or the preserved checkout retired until a deliberate
-service cutover verifies the catalog, caches, intake paths, and rollback path.
-This production boundary is the only active code exception.
-
-## Machine roles
-
-| Machine | Role |
+| Role | Purpose |
 | --- | --- |
-| Omarchy | Always-on hub, authoritative catalog, background indexing, and durable-original intake |
-| XPS | Interactive desktop client, local catalog mirror, SSD caches, imports, and recent-original working set |
-| Pixel | Android client and phone-photo source |
+| Standalone | Complete local library with no server dependency |
+| Hub | Always-on authoritative catalog, indexing, sync intake, and durable originals |
+| Satellite | Interactive catalog mirror, fast local caches, imports, and a recent-original working set |
+| Client | Android or browser UI connected to a configured hub |
 
-The same `web/` application runs as a hub on Omarchy and as a satellite on the
-XPS. Catalog changes converge through the sync log; original files upload by
-content identity and are byte-verified before the XPS can offer to remove its
-local copy.
+`AZIMUTH_MODE` selects `standalone`, `hub`, or `satellite`. Android asks for the
+hub URL during onboarding rather than shipping a maintainer-specific address.
 
 ## Storage tiers
 
-Code and runtime data are deliberately separate. A source checkout must never
-be used as a database, cache, model, log, or backup directory.
+Keep these concerns separate:
 
-### Omarchy
+| Tier | Typical contents | Placement |
+| --- | --- | --- |
+| Source | Git checkout and virtual environment | Developer-selected project directory |
+| Fast state | Catalog, indexes, models, settings, logs | Platform-native application data on SSD |
+| Fast cache | Previews, embeddings, active Develop results | SSD with explicit byte budgets |
+| Durable originals | RAWs, images, videos, intake | User-selected library root, often NAS/HDD |
+| Recovery | Verified catalog backups and transfer receipts | Separate durable location |
 
-Fast SSD storage uses the platform-native Azimuth Photo roots:
+Without overrides, Azimuth uses platform-native application data directories.
+`AZIMUTH_HOME` provides a portable all-in-one runtime root. Fine-grained
+variables such as `AZIMUTH_DATA_DIR`, `AZIMUTH_CACHE_DIR`,
+`AZIMUTH_THUMB_CACHE_DIR`, and `AZIMUTH_BACKUP_DIR` support tiered servers.
 
-| Data | Location |
-| --- | --- |
-| Catalog and models | `/home/sean/.local/share/azimuth-photo/` |
-| Settings | `/home/sean/.config/azimuth-photo/` |
-| Preview, embedding, and active Develop caches | `/home/sean/.cache/azimuth-photo/` |
-| Logs and process state | `/home/sean/.local/state/azimuth-photo/` |
-| Python environment | `/home/sean/.local/share/azimuth-photo/venv/` |
+For a slow archive disk:
 
-The 20 TB Expansion drive is the durable, slow tier:
+- keep catalog, indexes, models, previews, and active Develop cache on SSD;
+- serialize bulk reads with `AZIMUTH_BULK_HDD_CONCURRENCY=1`;
+- serve interactive browsing from SSD/RAM previews;
+- cache recently viewed full-resolution files;
+- never reorganize originals during a code deployment.
 
-| Data | Location |
-| --- | --- |
-| Originals | `/mnt/expansion/Photos/` |
-| Incoming upload staging | `/mnt/expansion/Photos/_intake/` |
-| Durable catalog backups | `/mnt/expansion/Azimuth Photo/Omarchy/backups/` |
-| Preserved generated-cache history | `/mnt/expansion/Azimuth Photo/Omarchy/cache-archive/` |
-| Consolidation and historical archives | `/mnt/expansion/Azimuth Photo/Archive/` |
+## Hub and satellite safety
 
-The hub service explicitly sets the intake, original, and backup paths. The
-Expansion drive is not used for the live catalog, models, indexes, thumbnails,
-or other latency-sensitive metadata.
+Catalog changes converge through the sync log. Original files upload by content
+identity and are byte-verified before a satellite may offer to remove its local
+copy. **Free up space** must confirm the same complete bytes immediately before
+local deletion.
 
-### XPS
+Library migrations are separate, resumable operations with collision-proof
+destinations and durable per-file receipts. A code update never implies a bulk
+photo transfer.
 
-The Windows satellite uses `C:\Azimuth Photo\` as its portable runtime home:
+## Configuration
 
-```text
-C:\Azimuth Photo\
-├── data\catalog\azimuth.db
-├── data\models\
-├── config\settings.json
-├── thumbs\
-├── cache\embeddings\
-├── cache\develop\
-├── state\logs\
-└── state\transfer\
+The Windows PowerShell launcher defaults to a fresh standalone library in the
+current user's local application-data directory. Existing or portable
+libraries can be pinned explicitly:
+
+```powershell
+.\scripts\start_azimuth_windows.ps1 `
+  -DataRoot "D:\Azimuth Photo" `
+  -Mode satellite `
+  -RequireExistingCatalog
 ```
 
-The laptop keeps a complete catalog mirror, browsable previews, selected
-full-resolution cache entries, and recent originals. Older originals can be
-removed only through **Free up space**, after the hub has accepted the upload,
-verified the complete file hash, registered the original, and confirmed the
-same bytes immediately before local deletion.
-
-Code, tests, and service configuration must be complete and verified before any
-existing library migration begins. Migration then runs as resumable,
-collision-proof batches with a durable receipt per file; no bulk transfer is
-part of a normal code deploy.
-
-## Slow-drive rules
-
-- Bulk HDD work is serialized. It must never create a random-seek storm.
-- Interactive browsing reads SSD/RAM previews whenever possible.
-- The preview cache owns explicit byte budgets and evicts by recency.
-- Recent full-resolution cache entries make recently viewed RAWs available
-  without waking the archive drive.
-- Models, embeddings, the catalog, and live indexes stay on SSD.
-- Originals on the Expansion drive are never reorganized or deleted by a
-  development cleanup.
-- Generated data may be moved into the named cache archive, but is not silently
-  discarded during consolidation.
-
-## Runtime modes
-
-The hub listens on Omarchy port `8000`. The XPS satellite listens on loopback
-port `8010`. Never use `AZIMUTH_SMOKE_MODE=1` for either real instance; it is
-test-only and disables normal initialization and background work.
-
-Key deployment variables:
-
-```text
-AZIMUTH_MODE
-AZIMUTH_HOME
-AZIMUTH_HUB_URL
-AZIMUTH_SYNC_INTAKE_DIR
-AZIMUTH_SYNC_RAWS_DIR
-AZIMUTH_BACKUP_DIR
-AZIMUTH_SSD_CACHE_BYTES
-```
+Linux deployments start from `deploy/azimuth-photo.service` and
+`deploy/azimuth-photo.env.example`. Copy the environment example outside the
+repository and adapt addresses, users, photo roots, and cache budgets to the
+installation.
 
 See [getting-started.md](getting-started.md) for local setup,
-[development.md](development.md) for checks, and [recovery.md](recovery.md)
-for catalog restore procedures.
+[development.md](development.md) for checks, and [recovery.md](recovery.md) for
+catalog restoration.

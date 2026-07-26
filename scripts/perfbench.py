@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Azimuth performance benchmark — reproducible hot-path timings for the bottleneck loop.
 
-Runs against the live app (default http://100.102.150.104:8000) and its
+Runs against the live app (default http://127.0.0.1:8000) and its
 configured preview cache. Emits a one-line summary and appends a JSONL row
 outside the checkout. With ``--md``, it also updates a Markdown report beside
 that history file. Pass ``--label "what changed"`` to tag the run.
@@ -26,7 +26,7 @@ import sys
 import time
 import urllib.request
 
-HUB = os.environ.get("PERFBENCH_HUB", "http://100.102.150.104:8000")
+HUB = os.environ.get("PERFBENCH_HUB", "http://127.0.0.1:8000")
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "web"))
 from core.runtime_paths import resolve_runtime_paths  # noqa: E402

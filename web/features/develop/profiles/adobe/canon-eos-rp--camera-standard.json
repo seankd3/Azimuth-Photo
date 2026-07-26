@@ -69185,7 +69185,7 @@
   "profile_name": "Camera Standard",
   "schema_version": 1,
   "source_count": 17,
-  "source_file": "/mnt/expansion/Photos/RAWS/2021/2021-12-29/20211229-IMG_2020.dng",
+  "source_file": "reference://embedded-camera-profile",
   "tone_curve": [
     [
       0.0,

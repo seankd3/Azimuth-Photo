@@ -15,7 +15,7 @@ App listens on the Tailscale IPv4 at `:8000` (systemd
 Front it with HTTPS:
 
 ```bash
-# Discover this machine's MagicDNS name (example: omarchy.tail0eeded.ts.net)
+# Discover this machine's MagicDNS name (example: photos.example-tailnet.ts.net)
 tailscale status --json | python -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))'
 
 # Tailnet-only HTTPS on :8443 → local Azimuth Photo :8000
@@ -29,14 +29,14 @@ Verify:
 ```bash
 tailscale serve status
 # Expect something like:
-# https://omarchy.<tailnet>.ts.net:8443 (tailnet only)
+# https://photos.<tailnet>.ts.net:8443 (tailnet only)
 # |-- / proxy http://100.x.x.x:8000
 ```
 
 Open on the phone (Tailscale connected):
 
 ```text
-https://omarchy.<tailnet>.ts.net:8443/m
+https://photos.<tailnet>.ts.net:8443/m
 ```
 
 To tear down only this serve mapping (leave Funnel alone):
@@ -76,8 +76,8 @@ All mobile fetches use **root-absolute** paths (`/api/...`, `/static/...`,
 `/m`). They follow the page origin, so the same build works on:
 
 - `http://127.0.0.1:8132/m` (probe / local)
-- `http://omarchy.<tailnet>.ts.net:8000/m` (plain HTTP on the tailnet)
-- `https://omarchy.<tailnet>.ts.net:8443/m` (Serve HTTPS)
+- `http://photos.<tailnet>.ts.net:8000/m` (plain HTTP on the tailnet)
+- `https://photos.<tailnet>.ts.net:8443/m` (Serve HTTPS)
 
 Guards:
 

@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-exec /home/sean/Projects/mobile-app-toolkit/bin/mobile-app azimuth-photo "$@"
+TOOLKIT="${AZIMUTH_MOBILE_TOOLKIT:-${MOBILE_APP_TOOLKIT:-}}"
+if [[ -z "$TOOLKIT" || ! -x "$TOOLKIT/bin/mobile-app" ]]; then
+    echo "Set AZIMUTH_MOBILE_TOOLKIT to a mobile-app-toolkit checkout." >&2
+    exit 2
+fi
+exec "$TOOLKIT/bin/mobile-app" azimuth-photo "$@"
