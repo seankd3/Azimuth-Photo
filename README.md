@@ -148,6 +148,7 @@ Choose the install path that fits your library in [Install Azimuth Photo](docs/I
 
 ## Docs
 
+- [Agent guide](AGENTS.md)
 - [Documentation index](docs/README.md)
 - [Code, machine, and storage topology](docs/TOPOLOGY.md)
 - [Features in depth](docs/features.md)

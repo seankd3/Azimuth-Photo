@@ -16,6 +16,8 @@ in Git history and the Field Log rather than in the active documentation set.
 
 ## Build and operate
 
+- [Agent guide](../AGENTS.md) — authoritative workflow, safety boundaries, and
+  documentation ownership for coding agents.
 - [Topology](TOPOLOGY.md) — canonical checkouts, machine roles, runtime data,
   caches, and originals.
 - [Install](INSTALL.md) — supported installation paths.

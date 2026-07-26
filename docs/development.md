@@ -190,8 +190,9 @@ complete.
 - Keep experiments out of main. Prototype folders, one-off audits, generated
   proofs, and agent scratch work should stay untracked or move outside the
   repo.
-- Do not commit public process files such as `AGENTS.md`, `CLAUDE.md`,
-  `TODO.md`, `GOAL.md`, or agent run logs.
+- Keep `AGENTS.md` as the single tracked agent contract and `CLAUDE.md` as its
+  compatibility pointer. Do not add competing instruction files, task plans,
+  dated status reports, or agent run logs.
 - Before committing, check the public surface with `git ls-files` and the
   pending surface with `git ls-files --others --exclude-standard`.
 

@@ -40,10 +40,6 @@ bench/
 # Server packaging scratch (never the shared web/.venv)
 .pkg-venv/
 
-# internal agent docs
-AGENTS.md
-CLAUDE.md
-
 # DB backups and desktop build output
 web/*.bak
 desktop/src-tauri/target/

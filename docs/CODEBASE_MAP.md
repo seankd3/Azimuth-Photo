@@ -11,13 +11,14 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - Repo launcher: `scripts/azimuth-server` runs
   `web/.venv/bin/uvicorn app:app --host HOST --port PORT`; default is `127.0.0.1:8000`,
   `AZIMUTH_ACCESS=tailscale` binds the Tailscale IPv4.
-- Service: `/etc/systemd/system/azimuth-photo.service` runs as `sean` from `web/`,
-  waits for Tailscale, binds its IPv4 on `:8000`, restarts on failure; Tailscale
-  Serve supplies the phone-facing HTTPS `:8443` URL.
+- Target service: `/etc/systemd/system/azimuth-photo.service` runs as `sean`
+  from `web/`, waits for Tailscale, binds its IPv4 on `:8000`, and restarts on
+  failure; Tailscale Serve supplies the phone-facing HTTPS `:8443` URL. Check
+  `TOPOLOGY.md` before assuming the live service has completed this cutover.
 - Runtime paths: `web/core/runtime_paths.py` selects platform-native data,
-  config, cache, and state roots for clean installs. Existing in-repo catalog,
-  settings, preview, model, embedding, and run paths remain exact legacy local
-  state; startup never migrates them.
+  config, cache, and state roots or an explicit `AZIMUTH_HOME`. A source
+  checkout is never a runtime-storage fallback, and startup never silently
+  migrates existing data.
 - Startup warms templates/query caches, then schedules thumbnail prefetch, cleanup, orientation/metadata scans, embedding, People, and caption loops; shutdown stops prefetch and cancels tracked tasks (`core/background.py`).
 - Embeddings start paused until Background Work resumes them; People is paused
   by default; captions auto-resume only when `caption_scan_enabled` is true;
