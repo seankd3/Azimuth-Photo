@@ -35,6 +35,17 @@ temporary detached checkouts under its ignored scratch directory while
 reproducing historical versions; those are disposable test fixtures, not
 development copies.
 
+### Current cutover status
+
+Canonical development is complete on both machines. The XPS shortcut and real
+satellite library already run from the canonical checkout and runtime paths.
+
+Omarchy port `8000` still runs the preserved pre-consolidation production
+checkout. The clean canonical Omarchy checkout is ready, but the live service
+must not be repointed or the preserved checkout retired until a deliberate
+service cutover verifies the catalog, caches, intake paths, and rollback path.
+This production boundary is the only active code exception.
+
 ## Machine roles
 
 | Machine | Role |
@@ -88,7 +99,7 @@ C:\Azimuth Photo\
 ├── data\catalog\azimuth.db
 ├── data\models\
 ├── config\settings.json
-├── cache\previews\
+├── thumbs\
 ├── cache\embeddings\
 ├── cache\develop\
 ├── state\logs\
