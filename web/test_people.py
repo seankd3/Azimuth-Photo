@@ -6,9 +6,10 @@ from unittest import mock
 import httpx
 
 from features.people import routes as people_routes
+from testing_support import BulkMemoryIsolatedTestCase
 
 
-class PeopleTests(BackendTestCase):
+class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
     async def test_people_status_never_cancels_slow_catalog_counts(self):
         started = asyncio.Event()
         release = asyncio.Event()

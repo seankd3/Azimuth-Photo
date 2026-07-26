@@ -28,6 +28,7 @@ from thumbnails import pregen as thumbnail_pregen  # noqa: E402
 from thumbnails import pregen_worker as thumbnail_pregen_worker  # noqa: E402
 from thumbnails import runtime as thumbnail_runtime  # noqa: E402
 from thumbnails import status as thumbnail_status  # noqa: E402
+from testing_support import BulkMemoryIsolatedTestCase  # noqa: E402
 
 
 class RawPreviewOrientationTests(unittest.TestCase):
@@ -1228,8 +1229,9 @@ class ThumbnailStatusPayloadTests(unittest.TestCase):
         self.assertEqual(result["source_read_failures"], 2)
 
 
-class ThumbnailBulkWarmupTests(unittest.TestCase):
+class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
     def setUp(self):
+        super().setUp()
         self.tempdir = tempfile.TemporaryDirectory()
         self.old_cache_dir = thumbnails.SSD_CACHE_DIR
         self.old_allocations = dict(thumbnails._disk_allocations)

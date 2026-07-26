@@ -9,7 +9,10 @@ import unittest
 from dataclasses import dataclass
 from unittest import mock
 
+import face_worker
+import thumbnails
 from core import memory_pressure
+from testing_support import install_bulk_memory_isolation
 from thumbnails import pregen as thumbnail_pregen
 from thumbnails import pregen_worker
 from thumbnails.decode_budget import DecodeByteBudget, estimate_decode_bytes
@@ -167,8 +170,6 @@ class MemoryPressureTests(unittest.TestCase):
         self.assertEqual(paused.thumbnail_batch_size, 0)
 
     def test_pregen_background_decision_inherits_shared_gate(self):
-        import thumbnails
-
         soft = memory_pressure.SOFT_WATERMARK_BYTES
         with (
             mock.patch.object(
@@ -188,6 +189,42 @@ class MemoryPressureTests(unittest.TestCase):
         self.assertIsInstance(decision, thumbnail_pregen.BackgroundDecision)
         self.assertTrue(decision.pause)
         self.assertEqual(decision.reason, "memory pressure")
+
+    def test_bulk_contract_isolation_does_not_change_production_gate(self):
+        above_hard = memory_pressure.HARD_WATERMARK_BYTES + 1
+
+        def install_above_watermark_reader():
+            memory_pressure.reset_for_tests()
+            memory_pressure.set_memory_reader(
+                lambda: memory_pressure.MemoryReading(
+                    rss_bytes=above_hard,
+                    swap_bytes=0,
+                    pressure_bytes=above_hard,
+                    source="synthetic-host-pressure",
+                )
+            )
+
+        install_above_watermark_reader()
+        with (
+            mock.patch.object(memory_pressure, "release_discardable_buffers", return_value={}),
+            mock.patch.object(memory_pressure, "request_model_unload", return_value=[]),
+        ):
+            production_decision = face_worker._people_background_decision({})
+        self.assertTrue(production_decision.pause)
+        self.assertEqual(production_decision.reason, "memory pressure")
+
+        install_bulk_memory_isolation(self)
+        self.assertFalse(face_worker._people_background_decision({}).pause)
+        self.assertFalse(thumbnails._pregen_background_decision().pause)
+
+        install_above_watermark_reader()
+        with (
+            mock.patch.object(memory_pressure, "release_discardable_buffers", return_value={}),
+            mock.patch.object(memory_pressure, "request_model_unload", return_value=[]),
+        ):
+            production_decision = thumbnails._pregen_background_decision()
+        self.assertTrue(production_decision.pause)
+        self.assertEqual(production_decision.reason, "memory pressure")
 
     def test_hard_unload_then_lazy_reload_path_clears_model(self):
         import embedding_worker
