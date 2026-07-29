@@ -8,6 +8,7 @@ import { emit } from './state.js';
 import { showToast } from './toast.js';
 
 const STORAGE_KEY = 'azimuth-mobile-write-queue-v1';
+const LEGACY_STORAGE_KEY = 'pa-m-write-queue-v1';
 const BASE_RETRY_MS = 500;
 const MAX_RETRY_MS = 30000;
 const WRITE_SYNC_TAG = 'azimuth-write-queue';
@@ -19,7 +20,25 @@ let syncListenerBound = false;
 let nextItemId = 1;
 const pendingOutcomes = new Map();
 
+// One-time rebrand migration: writes queued under the pre-rename key were
+// already confirmed in the UI — adopt them ahead of newer entries so they
+// still reach the server, and retire the old key only after they are safe.
+function adoptLegacyQueue() {
+    try {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || '[]');
+        if (Array.isArray(legacy) && legacy.length) {
+            const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            const merged = legacy.concat(Array.isArray(current) ? current : []);
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+        }
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+        // Unreadable or unwritable storage: keep the legacy key for next boot.
+    }
+}
+
 function loadQueue() {
+    adoptLegacyQueue();
     try {
         const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
         const items = Array.isArray(saved) ? saved.filter((item) => item?.url && item?.body) : [];

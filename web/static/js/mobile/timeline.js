@@ -856,8 +856,11 @@ export async function reload() {
     initialLoading = false;
 }
 
+// Returns the live images array after a successful load (concat/trim REBIND the
+// module variable, so callers holding the old reference — the viewer — must adopt
+// the return value), or null when nothing was loaded.
 export async function loadMore() {
-    if (initialLoading || loadingNext || endReached || zoomIdx === 2) return;
+    if (initialLoading || loadingNext || endReached || zoomIdx === 2) return null;
     loadingNext = true;
     const gen = generation;
     let page = null;
@@ -866,17 +869,17 @@ export async function loadMore() {
     } catch {
         loadingNext = false;
         showToast('Couldn’t load more photos');
-        return;
+        return null;
     }
     loadingNext = false;
-    if (gen !== generation || !page || !Array.isArray(page.images)) return;
+    if (gen !== generation || !page || !Array.isArray(page.images)) return null;
     updateThumbnailPoll(pendingCount(page));
     pendingPreviewTotal = hiddenPendingThumbnailCount(page);
     if (!page.images.length) {
         endReached = true;
         renderEndMarker();
         renderScopeBar();
-        return;
+        return images;
     }
     images = images.concat(page.images);
     rememberImages(page.images);
@@ -887,6 +890,7 @@ export async function loadMore() {
     }
     renderEndMarker();
     renderScopeBar();
+    return images;
 }
 
 async function loadPrev() {

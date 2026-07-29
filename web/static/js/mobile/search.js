@@ -16,6 +16,8 @@ let built = false;
 let people = null;
 let filterOptions = null;
 let tagOptions = null;
+let loadError = false;
+let loadingDetails = false;
 
 const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -158,6 +160,13 @@ function render() {
         + '<button type="button" data-hint="tag:wedding">tag:wedding</button>'
         + '</div>';
 
+    if (loadError) {
+        html += '<div class="m-feature-empty">'
+            + '<b>Search details couldn’t load</b>'
+            + '<span>Your search box still works. Reconnect to restore People, tags, and filters.</span>'
+            + '<button class="sheet-btn" id="ms-retry-load" type="button">Try again</button></div>';
+    }
+
     html += '<div class="ms-sec"><h3>People</h3><div id="ms-people">';
     if (!ppl) {
         for (let i = 0; i < 6; i++) html += '<div class="m-person"><div class="m-face skel"></div></div>';
@@ -226,6 +235,7 @@ function render() {
 
     const input = root.querySelector('#ms-input');
     const clear = root.querySelector('#ms-clear');
+    root.querySelector('#ms-retry-load')?.addEventListener('click', loadSearchDetails);
     input.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -351,15 +361,40 @@ export function initSearch() {
     root = document.getElementById('m-search');
 }
 
+// One failed fetch must not strand the skeletons for the life of the page:
+// resolve every section to an honest state and offer an explicit retry.
+async function loadSearchDetails() {
+    if (loadingDetails) return;
+    loadingDetails = true;
+    loadError = false;
+    people = null;
+    filterOptions = null;
+    tagOptions = null;
+    render();
+    try {
+        const [peopleData, filtersData, tagsData] = await Promise.all([
+            getPeople(24),
+            getFilterOptions(),
+            getTags(24),
+        ]);
+        people = { people: flattenPeople(peopleData) };
+        filterOptions = filtersData;
+        tagOptions = tagsData || { tags: [] };
+    } catch {
+        people = { people: [] };
+        filterOptions = {};
+        tagOptions = { tags: [] };
+        loadError = true;
+    } finally {
+        loadingDetails = false;
+        render();
+    }
+}
+
 export function showSearch() {
     if (!built) {
         built = true;
-        render();
-        Promise.all([
-            getPeople(24).then((data) => { people = { people: flattenPeople(data) }; }),
-            getFilterOptions().then((data) => { filterOptions = data; }),
-            getTags(24).then((data) => { tagOptions = data || { tags: [] }; }),
-        ]).then(render);
+        void loadSearchDetails();
     } else {
         render();
     }

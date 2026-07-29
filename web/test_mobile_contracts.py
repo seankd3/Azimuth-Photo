@@ -28,6 +28,40 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("emit('rating-write'", api)
         self.assertNotIn("'#mv-pick'", self.read("static", "js", "mobile", "bootstrap.js"))
 
+    def test_offline_pins_and_queued_writes_survive_upgrades(self):
+        queue = self.read("static", "js", "mobile", "write_queue.js")
+        offline = self.read("static", "js", "mobile", "offline.js")
+        service_worker = self.read("static", "sw.js")
+
+        # Pre-rebrand localStorage keys are adopted once, then retired —
+        # writes the UI already confirmed must still reach the server.
+        self.assertIn("'pa-m-write-queue-v1'", queue)
+        self.assertIn("localStorage.removeItem(LEGACY_STORAGE_KEY)", queue)
+        self.assertIn("'pa-m-offline-photos-v1'", offline)
+        self.assertIn("localStorage.removeItem(LEGACY_STORAGE_KEY)", offline)
+
+        # Pinned photos live in a version-independent cache the SW never
+        # rotates away or trims, and the local index is reconciled against
+        # what the cache actually holds instead of trusted blindly.
+        self.assertIn("'azimuth-mobile-pinned-thumbs'", offline)
+        self.assertIn("'azimuth-mobile-pinned-thumbs'", service_worker)
+        self.assertIn("name !== PIN_CACHE && !name.startsWith(CACHE_VERSION)", service_worker)
+        self.assertIn("const cache = pinned ? pinCache : await caches.open(THUMB_CACHE);", service_worker)
+        self.assertIn("if (!pinned) trimThumbCache();", service_worker)
+        self.assertIn("async function reconcileIndex()", offline)
+        self.assertIn("void reconcileIndex();", offline)
+
+    def test_mobile_shell_preloads_match_import_urls_and_banner_is_honest(self):
+        template = self.read("templates", "mobile.html")
+
+        # Relative imports do not inherit ?v — a versioned preload never
+        # matches the module loader's request and double-fetches the graph.
+        self.assertIn('<link rel="modulepreload" href="/static/js/{{ mod }}">', template)
+        self.assertNotIn('modulepreload" href="/static/js/{{ mod }}?v=', template)
+        # Flag writes queue and sync offline; the banner must not deny it.
+        self.assertIn("Offline — favorites and rejects will sync", template)
+        self.assertNotIn("changes need a connection", template)
+
     def test_service_worker_is_secure_only_and_versioned(self):
         template = self.read("templates", "mobile.html")
         service_worker = self.read("static", "sw.js")
@@ -70,7 +104,7 @@ class MobileOfflineContractsTests(unittest.TestCase):
 
         self.assertIn("function flattenPeople(data)", search)
         self.assertIn("sections.named_people", search)
-        self.assertIn("people = { people: flattenPeople(data) }", search)
+        self.assertIn("people = { people: flattenPeople(peopleData) }", search)
 
     @pytest.mark.contract
     def test_background_workers_default_new_productive_states_to_running_on_mobile(self):

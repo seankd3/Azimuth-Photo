@@ -7,7 +7,7 @@
 
 import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
 import { applyFlags } from './flags.js';
-import { byId, emit, nav as appNav, on, rememberImages, setScope } from './state.js';
+import { byId, emit, isOffline, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
@@ -102,7 +102,12 @@ function loadLg() {
         window.clearTimeout(timeout);
         if (offline && token === loadToken) setViewerOffline(true);
     };
-    const timeout = window.setTimeout(() => finish({ offline: true }), LARGE_IMAGE_TIMEOUT_MS);
+    const timeout = window.setTimeout(() => {
+        // Slow is not offline: a large preview on a weak link routinely takes >8s
+        // while still succeeding. Only claim offline when the network really is
+        // down; otherwise leave the verdict to onload/onerror.
+        if (isOffline()) finish({ offline: true });
+    }, LARGE_IMAGE_TIMEOUT_MS);
     lg.onload = () => {
         if (token === loadToken) {
             img.src = lg.src;
@@ -158,6 +163,20 @@ function upgradeToMedium(image, token) {
     medium.src = thumbUrl('md', image.id);
 }
 
+function extendListFromSource() {
+    // Timeline loadMore REBINDS its images array (concat/trim), so the reference
+    // captured at openViewer time goes stale. Adopt the returned array and
+    // re-anchor on the current photo's id — trimWindowFromStart shifts indices
+    // even when the photo itself survives the trim.
+    void Promise.resolve(needMore()).then((fresh) => {
+        if (!openState || !Array.isArray(fresh) || fresh === list) return;
+        const at = fresh.findIndex((image) => Number(image.id) === Number(current()?.id || 0));
+        if (at < 0) return;
+        list = fresh;
+        index = at;
+    }).catch(() => {});
+}
+
 function showCurrent({ stageReady = false } = {}) {
     const image = current();
     if (!image) return;
@@ -183,7 +202,7 @@ function showCurrent({ stageReady = false } = {}) {
     syncOfflineButton();
     preload(1);
     preload(-1);
-    if (needMore && index >= list.length - 5) needMore();
+    if (needMore && index >= list.length - 5) extendListFromSource();
 }
 
 function syncFlagButtons() {

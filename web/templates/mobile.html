@@ -13,10 +13,13 @@
     <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
     <link rel="apple-touch-icon" href="/static/icons/icon.svg">
     <link rel="stylesheet" href="/static/mobile.css?v={{ static_version }}">
-    {% for mod in module_preloads | default([]) %}<link rel="modulepreload" href="/static/js/{{ mod }}?v={{ static_version }}">
+    {# Unversioned on purpose: relative imports do not inherit ?v, so these must
+       match the URLs the module loader actually requests or the whole eager
+       graph is fetched twice (once preloaded, once for real). #}
+    {% for mod in module_preloads | default([]) %}<link rel="modulepreload" href="/static/js/{{ mod }}">
     {% endfor %}</head>
 <body data-tab="photos">
-    <div id="m-offline" hidden>Offline — changes need a connection</div>
+    <div id="m-offline" hidden>Offline — favorites and rejects will sync</div>
 
     <main id="m-tabs">
         <section id="tab-photos" class="m-tab active">

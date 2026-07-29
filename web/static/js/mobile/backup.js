@@ -154,10 +154,17 @@ function render() {
 }
 
 async function refresh(token) {
-    const [nextStatus, estimate] = await Promise.all([
-        getSyncStatus(),
-        navigator.storage?.estimate ? navigator.storage.estimate().catch(() => null) : null,
-    ]);
+    let nextStatus = null;
+    let estimate = null;
+    try {
+        [nextStatus, estimate] = await Promise.all([
+            getSyncStatus(),
+            navigator.storage?.estimate ? navigator.storage.estimate().catch(() => null) : null,
+        ]);
+    } catch {
+        // getSyncStatus throws on network failure/non-2xx; a null status must
+        // reach render() so the unavailable/retry card replaces the skeleton.
+    }
     if (token !== generation || !host) return;
     status = nextStatus;
     storage = estimate;

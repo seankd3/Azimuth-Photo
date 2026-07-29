@@ -4,6 +4,8 @@
  * - Precache the /m app shell (page, css, js modules, manifest, icon).
  * - Stale-while-revalidate for thumbnail GETs (/api/thumb/*), size-bounded
  *   Cache API. Only 200 image/* responses stored (never 204, never JSON).
+ * - User-pinned offline photos (azimuth-mobile-pinned-thumbs) are served
+ *   first and survive shell version rotation and trimming.
  * - Network-only for every other /api request: rankings, counts, writes.
  * - Navigations fall back to the cached /m shell when offline.
  * - Background Sync tag `azimuth-write-queue` wakes open clients so
@@ -27,6 +29,9 @@ const CACHE_VERSION = (() => {
 })();
 const SHELL_CACHE = `${CACHE_VERSION}-shell`;
 const THUMB_CACHE = `${CACHE_VERSION}-thumbs`;
+// User-pinned offline photos (mobile/offline.js): version-independent so
+// deploys never delete explicit saves, and exempt from thumb-cache trimming.
+const PIN_CACHE = 'azimuth-mobile-pinned-thumbs';
 const THUMB_CACHE_MAX_ENTRIES = 4000;
 const WRITE_SYNC_TAG = 'azimuth-write-queue';
 
@@ -77,7 +82,7 @@ self.addEventListener('activate', (event) => {
         const names = await caches.keys();
         await Promise.all(
             names
-                .filter((name) => !name.startsWith(CACHE_VERSION))
+                .filter((name) => name !== PIN_CACHE && !name.startsWith(CACHE_VERSION))
                 .map((name) => caches.delete(name))
         );
         await self.clients.claim();
@@ -101,14 +106,17 @@ async function trimThumbCache() {
 }
 
 /** Serve stored JPEG instantly, refresh in background — thumb URLs are
- * unversioned, so pure cache-first would pin stale pixels after an edit. */
+ * unversioned, so pure cache-first would pin stale pixels after an edit.
+ * Pinned photos win over the rotating thumb cache and refresh in place. */
 async function thumbStaleWhileRevalidate(request) {
-    const cache = await caches.open(THUMB_CACHE);
-    const cached = await cache.match(request);
+    const pinCache = await caches.open(PIN_CACHE);
+    const pinned = await pinCache.match(request);
+    const cache = pinned ? pinCache : await caches.open(THUMB_CACHE);
+    const cached = pinned || await cache.match(request);
     const refresh = fetch(request).then(async (response) => {
         if (isCacheableThumbResponse(response)) {
             await cache.put(request, response.clone());
-            trimThumbCache();
+            if (!pinned) trimThumbCache();
         }
         return response;
     }).catch(() => null);

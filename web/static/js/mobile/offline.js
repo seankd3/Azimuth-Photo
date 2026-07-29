@@ -1,6 +1,7 @@
-// Explicit phone availability for viewer previews. The service worker already
-// owns thumbnail delivery; this module pins all viewer sizes in its active
-// thumbnail cache and keeps a tiny local index for clear, instant status.
+// Explicit phone availability for viewer previews. The service worker owns
+// thumbnail delivery; this module pins all viewer sizes into the dedicated
+// pinned cache (served first by sw.js, exempt from version rotation and
+// trimming) and keeps a tiny local index for clear, instant status.
 
 import { thumbUrl } from './api.js';
 import { emit } from './state.js';
@@ -9,9 +10,30 @@ import { queueLength } from './write_queue.js';
 import { showToast } from './toast.js';
 
 const STORAGE_KEY = 'azimuth-mobile-offline-photos-v1';
+const LEGACY_STORAGE_KEY = 'pa-m-offline-photos-v1';
+// Pins live in their own version-independent cache: sw.js serves it first,
+// never trims it, and keeps it across shell version rotations, so a deploy
+// can never delete photos the user explicitly saved to this phone.
+const PIN_CACHE = 'azimuth-mobile-pinned-thumbs';
 const SIZES = ['sm', 'md', 'lg'];
 
+// One-time rebrand migration: adopt the pre-rename index, then retire the old
+// key. reconcileIndex() below drops any adopted entries whose bytes are gone.
+function adoptLegacyIndex() {
+    try {
+        const legacy = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || 'null');
+        if (legacy && typeof legacy === 'object' && !Array.isArray(legacy)) {
+            const current = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+            localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...legacy, ...current }));
+        }
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+    } catch {
+        // Unreadable or unwritable storage: keep the legacy key for next boot.
+    }
+}
+
 function loadIndex() {
+    adoptLegacyIndex();
     try {
         const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
         return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
@@ -31,23 +53,56 @@ function saveIndex() {
     emit('offline-availability', offlineSummary());
 }
 
-function cacheVersion() {
-    return document.documentElement.dataset.staticVersion || 'dev';
-}
-
-async function thumbCache() {
+async function pinnedCache() {
     if (!('caches' in window)) return null;
-    const expected = `azimuth-mobile-${cacheVersion()}-thumbs`;
-    const names = await caches.keys();
-    const active = names.find((name) => name === expected)
-        || names.find((name) => name.startsWith(`azimuth-mobile-${cacheVersion()}`) && name.endsWith('-thumbs'))
-        || expected;
-    return caches.open(active);
+    return caches.open(PIN_CACHE);
 }
 
 function urlsFor(imageId) {
     return SIZES.map((size) => thumbUrl(size, imageId));
 }
+
+// The index is a claim; the pin cache is the truth. On boot, re-adopt pinned
+// previews still sitting in older thumb caches (pre-pin-cache pins lived in
+// the version-rotated SWR cache) and drop entries whose bytes are actually
+// gone, so "Available offline" never claims photos this phone no longer has.
+async function reconcileIndex() {
+    if (!('caches' in window)) return;
+    try {
+        const cache = await caches.open(PIN_CACHE);
+        const donorNames = (await caches.keys())
+            .filter((name) => name !== PIN_CACHE && name.endsWith('-thumbs'));
+        const donors = await Promise.all(donorNames.map((name) => caches.open(name)));
+        let changed = false;
+        for (const id of Object.keys(index)) {
+            let present = true;
+            for (const url of urlsFor(id)) {
+                if (await cache.match(url)) continue;
+                let adopted = null;
+                for (const donor of donors) {
+                    adopted = await donor.match(url);
+                    if (adopted) break;
+                }
+                if (adopted) {
+                    await cache.put(url, adopted);
+                    continue;
+                }
+                present = false;
+                break;
+            }
+            if (!present) {
+                delete index[id];
+                changed = true;
+            }
+        }
+        if (changed) saveIndex();
+    } catch {
+        // Cache API failed mid-check — keep the current claim rather than
+        // dropping pins we could not actually verify.
+    }
+}
+
+void reconcileIndex();
 
 export function isAvailableOffline(imageId) {
     return Boolean(index[String(Number(imageId))]);
@@ -75,7 +130,7 @@ async function removeCached(imageId) {
 }
 
 async function cacheImage(imageId) {
-    const cache = await thumbCache();
+    const cache = await pinnedCache();
     if (!cache) throw new Error('offline cache unavailable');
     let bytes = 0;
     const inserted = [];
