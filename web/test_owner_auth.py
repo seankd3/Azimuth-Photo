@@ -10,6 +10,7 @@ import sys
 import time
 
 import pytest
+from fastapi.routing import iter_route_contexts
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(__file__))
@@ -83,7 +84,9 @@ def test_route_sweep_public_allowlist_or_reject(clean_auth):
     _set_owner_key()
     client = _client()
     swept = 0
-    for route in app_module.app.routes:
+    # iter_route_contexts flattens FastAPI's lazy _IncludedRouter wrappers
+    # (>= 0.140); app.routes alone no longer exposes the real surface.
+    for route in iter_route_contexts(app_module.app.routes):
         path = getattr(route, "path", None)
         methods = getattr(route, "methods", None)
         if not path or not methods:

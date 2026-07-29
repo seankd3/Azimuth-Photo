@@ -30,6 +30,7 @@ import thumbnails  # noqa: E402
 from core import app_factory, bulk_scheduler  # noqa: E402
 from core import background as background_runtime  # noqa: E402
 from core import cache_events  # noqa: E402
+from core import memory_pressure  # noqa: E402
 from core import query_constraints  # noqa: E402
 from core import work_coordination  # noqa: E402
 from core.static_assets import StaticAssetContext  # noqa: E402
@@ -243,6 +244,10 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 await _asyncio.sleep(0.4)
 
     def _reset_shared_runtime_state(self):
+        # Any TestClient(app) startup arms memory_pressure's 120s startup-calm,
+        # which pauses all bulk work (pregen, captions, decode batches) for
+        # every later test in the process; clear it on both setup and teardown.
+        memory_pressure.reset_for_tests()
         thumbnails._clear_memory_cache()
         # Each test gets a fresh DB; a disk-path index built against an earlier
         # test's DB would hide this test's cache rows from fast_disk_has.

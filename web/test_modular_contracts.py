@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import unittest
 
 
-from fastapi.routing import APIRoute
+from fastapi.routing import APIRoute, iter_route_contexts
 
 import app as app_module
 from core import app_factory
@@ -251,6 +251,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/backup/cloud/start"),
     ("POST", "/api/backup/cloud/stop"),
     ("POST", "/api/sync/have"),
+    ("POST", "/api/sync/have/full"),
     ("POST", "/api/sync/upload/{content_hash}"),
     ("GET", "/api/sync/upload/{content_hash}/status"),
     ("POST", "/api/sync/metadata"),
@@ -330,8 +331,10 @@ class ModularContractTests(unittest.TestCase):
 
     def test_public_route_registry_is_preserved(self):
         route_contract = set()
-        for route in app_module.app.routes:
-            if not isinstance(route, APIRoute):
+        # FastAPI >= 0.140 defers include_router: app.routes holds lazy
+        # _IncludedRouter wrappers, so flatten via iter_route_contexts.
+        for route in iter_route_contexts(app_module.app.routes):
+            if not isinstance(route.original_route, APIRoute):
                 continue
             for method in route.methods or ():
                 if method != "HEAD":

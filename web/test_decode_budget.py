@@ -76,8 +76,14 @@ class DecodeBudgetTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_mid_batch_releases_budget_fully(self):
         """Cancelled batch finally must return budget to empty (no leak)."""
+        from core import memory_pressure
         from thumbnails.decode_budget import bulk_decode_budget
         from thumbnails import pregen_worker
+
+        # An earlier TestClient(app) startup arms a 120s startup-calm that makes
+        # run_pregen_bulk_batch skip decodes entirely; clear it so the batch runs.
+        memory_pressure.reset_for_tests()
+        self.addCleanup(memory_pressure.reset_for_tests)
 
         # Isolate process-wide budget for this test.
         old_used = bulk_decode_budget._used

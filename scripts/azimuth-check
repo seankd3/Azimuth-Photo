@@ -138,6 +138,24 @@ run_quick_checks() {
     while IFS= read -r js_file; do
         "$NODE_BIN" --check "$ROOT/$js_file"
     done < <(cd "$ROOT" && rg --files web/static -g '*.js')
+
+    run_node_checks
+}
+
+run_node_checks() {
+    local node_tests=()
+    local test_file
+    for test_file in "$ROOT"/web/test_*.mjs; do
+        [[ -e "$test_file" ]] && node_tests+=("$test_file")
+    done
+    if ((${#node_tests[@]})); then
+        # Quiet on success: node --test TAP output only surfaces on failure.
+        local output
+        if ! output="$(cd "$ROOT/web" && "$NODE_BIN" --test "${node_tests[@]}" 2>&1)"; then
+            printf '%s\n' "$output" >&2
+            return 1
+        fi
+    fi
 }
 
 run_unit_checks() {
