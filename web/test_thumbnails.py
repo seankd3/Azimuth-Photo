@@ -20,6 +20,7 @@ from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
 from thumbnails import config_metadata as thumbnail_config_metadata  # noqa: E402
+from thumbnails import disk_store as thumbnail_disk_store  # noqa: E402
 from thumbnails import full_cache as thumbnail_full_cache  # noqa: E402
 from thumbnails import generation as thumbnail_generation  # noqa: E402
 from thumbnails import jobs as thumbnail_jobs  # noqa: E402
@@ -825,6 +826,49 @@ class ThumbnailMaintenanceFacadeTests(unittest.TestCase):
 
         self.assertEqual(facade_result, direct_result)
         self.assertTrue(os.path.exists(thumbnails._cache_marker_path()))
+
+    def test_prerename_marker_stays_clearable_and_converges_to_new_marker(self):
+        # Carried-over cache root from before the rebrand: tier dirs plus the
+        # old .photoarchive-cache marker, and a stray non-cache file that would
+        # defeat the layout heuristic — marker ownership must win.
+        root = self._legacy_cache_root()
+        for tier in thumbnails.ALL_TIERS:
+            os.makedirs(os.path.join(root, tier), exist_ok=True)
+        legacy_marker = os.path.join(root, thumbnail_disk_store.LEGACY_CACHE_MARKER)
+        with open(legacy_marker, "w", encoding="utf-8") as f:
+            f.write("photoArchive thumbnail cache\n")
+        with open(os.path.join(root, "desktop.ini"), "w", encoding="utf-8") as f:
+            f.write("stray")
+
+        result = thumbnail_maintenance.cache_dir_safe_to_clear(
+            root,
+            thumbnails.ALL_TIERS,
+            thumbnails.CACHE_MARKER,
+        )
+
+        self.assertEqual(result, (True, ""))
+        new_marker = thumbnail_maintenance.cache_marker_path(root, thumbnails.CACHE_MARKER)
+        self.assertTrue(os.path.exists(new_marker))
+        self.assertTrue(os.path.exists(legacy_marker))
+
+    def test_ensure_dirs_upgrades_prerename_marker(self):
+        root = self._legacy_cache_root()
+        legacy_marker = os.path.join(root, thumbnail_disk_store.LEGACY_CACHE_MARKER)
+        with open(legacy_marker, "w", encoding="utf-8") as f:
+            f.write("photoArchive thumbnail cache\n")
+
+        thumbnail_maintenance.ensure_disk_cache_dirs(
+            root,
+            thumbnails.THUMB_TIERS,
+            thumbnails.FULL_TIER,
+            thumbnails.CACHE_MARKER,
+        )
+
+        self.assertTrue(
+            os.path.exists(
+                thumbnail_maintenance.cache_marker_path(root, thumbnails.CACHE_MARKER)
+            )
+        )
 
     def test_cache_temp_cleanup_helper_owns_invalidation(self):
         root = self._legacy_cache_root()

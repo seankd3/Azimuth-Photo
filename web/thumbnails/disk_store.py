@@ -2,6 +2,11 @@
 
 import os
 
+# Pre-rename installs (Docker volumes, AZIMUTH_HOME, configured cache dirs)
+# carry this marker; it stays accepted so their caches remain clearable, and
+# the current marker is written beside it on first touch.
+LEGACY_CACHE_MARKER = ".photoarchive-cache"
+
 
 def cache_marker_path(cache_root: str, cache_marker: str) -> str:
     return os.path.join(cache_root, cache_marker)
@@ -18,7 +23,7 @@ def cache_dir_is_legacy_cache_layout(
 ) -> bool:
     if not cache_root or not os.path.isdir(cache_root):
         return True
-    allowed = set(tiers) | {cache_marker}
+    allowed = set(tiers) | {cache_marker, LEGACY_CACHE_MARKER}
     try:
         entries = os.listdir(cache_root)
     except OSError:
@@ -27,7 +32,7 @@ def cache_dir_is_legacy_cache_layout(
         if entry not in allowed:
             return False
         path = os.path.join(cache_root, entry)
-        if entry == cache_marker:
+        if entry in (cache_marker, LEGACY_CACHE_MARKER):
             if not os.path.isfile(path):
                 return False
         elif not os.path.isdir(path):
@@ -55,6 +60,8 @@ def cache_dir_safe_to_clear(
         return False, f"Cache path is not a directory: {cache_root}", False
     if cache_dir_has_marker(cache_root, cache_marker):
         return True, "", False
+    if cache_dir_has_marker(cache_root, LEGACY_CACHE_MARKER):
+        return True, "", True
     if cache_dir_is_legacy_cache_layout(cache_root, tiers, cache_marker):
         return True, "", True
     return (
@@ -75,6 +82,7 @@ def ensure_cache_dirs(
     should_mark = (
         not os.path.exists(cache_root)
         or cache_dir_has_marker(cache_root, cache_marker)
+        or cache_dir_has_marker(cache_root, LEGACY_CACHE_MARKER)
         or cache_dir_is_legacy_cache_layout(cache_root, thumb_tiers + (full_tier,), cache_marker)
     )
     os.makedirs(cache_root, exist_ok=True)
