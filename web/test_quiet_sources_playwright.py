@@ -24,6 +24,13 @@ pytestmark = [
     pytest.mark.playwright,
 ]
 
+# Guard at import time — before any fixture boots uvicorn — so a missing
+# playwright is one visible module skip, not a boot-then-fail mid-test.
+pytest.importorskip(
+    "playwright.sync_api",
+    reason="playwright is not installed; browser proofs are opt-in",
+)
+
 WEB_ROOT = Path(__file__).resolve().parent
 
 

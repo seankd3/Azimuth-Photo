@@ -23,7 +23,12 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r web/requirements.txt
       - run: python -m pip install pytest
-      - run: cd web && AZIMUTH_SMOKE_MODE=1 python -m pytest -q
+      # rclone lets the real local-remote sync acceptance run instead of
+      # silently skipping the only test that proves backup bytes round-trip.
+      - run: sudo apt-get update && sudo apt-get install -y rclone
+      # -rs: skips are part of the result — silent non-execution is how the
+      # browser and capability suites went unexercised unnoticed.
+      - run: cd web && AZIMUTH_SMOKE_MODE=1 python -m pytest -q -rs
 
   javascript:
     name: JavaScript syntax

@@ -130,21 +130,13 @@ class UiContractsTests(BackendTestCase):
             browser_smoke = fh.read()
 
         self.assertIn("Usage: azimuth-browser-smoke", browser_smoke)
-        self.assertNotIn("Usage: azimuth-browser-smoke", browser_smoke)
+        self.assertNotIn("Usage: photoarchive-browser-smoke", browser_smoke)
         self.assertIn('const PAGE_PATHS = ["/", "/d", "/m"]', browser_smoke)
         self.assertIn('"#topbar"', browser_smoke)
         self.assertIn('"#grid-flow"', browser_smoke)
         self.assertIn('"#m-timeline"', browser_smoke)
         for route in ("settings", "catalog", "people", "library", "rankings", "compare"):
             self.assertNotIn(f'"/{route}"', browser_smoke)
-
-    async def test_deprecated_browser_smoke_shim_delegates_to_azimuth(self):
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        with open(os.path.join(base_dir, "scripts", "azimuth-browser-smoke"), encoding="utf-8") as fh:
-            compatibility_shim = fh.read()
-
-        self.assertIn("# Deprecated shim", compatibility_shim)
-        self.assertIn('exec "$ROOT/azimuth-browser-smoke" "$@"', compatibility_shim)
 
     async def test_azimuth_browser_smoke_help_is_executable(self):
         node = shutil.which("node")
@@ -266,6 +258,32 @@ class UiContractsTests(BackendTestCase):
         self.assertIn("isDone: (publish) => !publishJobSettling(publish)", panel)
         self.assertIn("const busy = publishJobSettling(data)", panel)
         self.assertIn("retrying automatically", panel)
+
+    async def test_deliver_destinations_fail_and_retry_independently(self):
+        base_dir = os.path.dirname(__file__)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is required for Deliver loading behavior")
+
+        result = subprocess.run(
+            [node, os.path.join(base_dir, "test_deliver_loading.mjs")],
+            cwd=base_dir,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("destinations settle independently", result.stdout)
+
+        with open(os.path.join(base_dir, "static", "js", "desktop", "panel.js"), encoding="utf-8") as fh:
+            panel = fh.read()
+        self.assertIn("createDeliverLoads", panel)
+        self.assertIn("Your other delivery options are still available.", panel)
+        self.assertIn("data-deliver-load-retry", panel)
+        self.assertIn("Client picks unavailable.", panel)
+        self.assertIn("deliverSession?.loads?.dispose();", panel)
 
     async def test_template_context_versions_static_assets(self):
         context = app_module.app.state.azimuth_shell.template_context(HeaderRequest())

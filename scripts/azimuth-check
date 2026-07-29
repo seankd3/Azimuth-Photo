@@ -4,6 +4,9 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${AZIMUTH_VENV:-$ROOT/web/.venv}"
 PYTHON="$VENV/bin/python"
+if [[ ! -x "$PYTHON" && -x "$VENV/Scripts/python.exe" ]]; then
+    PYTHON="$VENV/Scripts/python.exe" # Windows venv layout
+fi
 NODE_BIN="${NODE:-node}"
 MODE="unit"
 AREA=""
@@ -138,16 +141,25 @@ run_quick_checks() {
 }
 
 run_unit_checks() {
+    # pytest, never unittest: the suite's function-style tests are invisible to
+    # unittest discovery, so a unittest "OK" can skip the security/data-safety
+    # proofs entirely. -rsfE keeps skips AND failures in the short summary
+    # (a bare -r spec would drop pytest's default failure lines).
     local targets
     targets="$(unit_targets_for_area "$AREA")"
     if [[ -n "$targets" ]]; then
-        # shellcheck disable=SC2086
-        (cd "$ROOT/web" && "$PYTHON" -m unittest $targets)
+        local target_files=()
+        local target
+        for target in $targets; do
+            target_files+=("$target.py")
+        done
+        (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE "${target_files[@]}")
         if [[ "$AREA" == "background-work" || "$AREA" == "frontend" ]]; then
             run_background_work_smoke_if_available
         fi
     else
-        (cd "$ROOT/web" && "$PYTHON" -m unittest)
+        # Restate "not bench": a CLI -m replaces the pytest.ini addopts filter.
+        (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "not slow and not bench")
     fi
 }
 
@@ -173,7 +185,7 @@ PY
 }
 
 run_browser_smoke() {
-    (cd "$ROOT/web" && AZIMUTH_BROWSER_SMOKE=1 "$PYTHON" -m unittest test_browser_smoke)
+    (cd "$ROOT/web" && AZIMUTH_BROWSER_SMOKE=1 "$PYTHON" -m pytest -q -rsfE test_browser_smoke.py)
 }
 
 run_quick_checks

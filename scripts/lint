@@ -7,10 +7,21 @@ cd "$ROOT"
 
 export PATH="/usr/bin:/usr/local/bin:${PATH}"
 
+# Windows (Git Bash) checkouts skip linters that have no supported install
+# there — loudly. Linux keeps the fail-fast install contract.
+WINDOWS=0
+case "$(uname -s)" in
+  MINGW* | MSYS* | CYGWIN*) WINDOWS=1 ;;
+esac
+
 if [[ -n "${AZIMUTH_VENV:-}" && -x "$AZIMUTH_VENV/bin/ruff" ]]; then
   RUFF="$AZIMUTH_VENV/bin/ruff"
+elif [[ -n "${AZIMUTH_VENV:-}" && -x "$AZIMUTH_VENV/Scripts/ruff.exe" ]]; then
+  RUFF="$AZIMUTH_VENV/Scripts/ruff.exe"
 elif [[ -x "$ROOT/web/.venv/bin/ruff" ]]; then
   RUFF="$ROOT/web/.venv/bin/ruff"
+elif [[ -x "$ROOT/web/.venv/Scripts/ruff.exe" ]]; then
+  RUFF="$ROOT/web/.venv/Scripts/ruff.exe"
 elif command -v ruff >/dev/null 2>&1; then
   RUFF="$(command -v ruff)"
 else
@@ -22,23 +33,36 @@ if [[ -x "$ROOT/node_modules/.bin/eslint" ]]; then
   ESLINT="$ROOT/node_modules/.bin/eslint"
 elif command -v eslint >/dev/null 2>&1; then
   ESLINT="$(command -v eslint)"
+elif [[ "$WINDOWS" == 1 ]]; then
+  ESLINT=""
+  echo "lint: eslint not found — SKIPPING on Windows (npm install at repo root for full lint)" >&2
 else
   echo "lint: eslint not found (run npm install at repo root)" >&2
   exit 2
 fi
 
+LUACHECK=1
 if ! command -v luacheck >/dev/null 2>&1; then
-  echo "lint: luacheck not found (pacman -S luacheck)" >&2
-  exit 2
+  if [[ "$WINDOWS" == 1 ]]; then
+    LUACHECK=0
+    echo "lint: luacheck not found — SKIPPING on Windows" >&2
+  else
+    echo "lint: luacheck not found (pacman -S luacheck)" >&2
+    exit 2
+  fi
 fi
 
 echo "==> ruff"
 (cd "$ROOT/web" && "$RUFF" check .)
 
-echo "==> eslint"
-"$ESLINT" web/static/js web/static/sw.js
+if [[ -n "$ESLINT" ]]; then
+  echo "==> eslint"
+  "$ESLINT" web/static/js web/static/sw.js
+fi
 
-echo "==> luacheck"
-luacheck clients/lightroom
+if [[ "$LUACHECK" == 1 ]]; then
+  echo "==> luacheck"
+  luacheck clients/lightroom
+fi
 
 echo "lint: ok"

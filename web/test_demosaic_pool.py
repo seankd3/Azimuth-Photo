@@ -54,13 +54,17 @@ class DemosaicPoolConfigTests(unittest.TestCase):
 
 
 class DemosaicPoolParityTests(unittest.TestCase):
-    """Real-file parity when R5 DNGs are mounted (skipped otherwise)."""
+    """Real-file parity, opt-in via AZIMUTH_RUN_RAW_CORPUS=1 (skipped otherwise)."""
 
     @classmethod
     def setUpClass(cls):
         root = Path("/mnt/expansion/Photos/RAWS/2022/2022-05-09")
         cls.sample = root / "20220509-R5__7241.DNG"
-        cls.available = cls.sample.is_file()
+        # Reads the real mounted archive — never by default (AGENTS.md: no
+        # tests against a real catalog without an explicit opt-in).
+        cls.available = (
+            os.environ.get("AZIMUTH_RUN_RAW_CORPUS") == "1" and cls.sample.is_file()
+        )
 
     def tearDown(self):
         demosaic_pool.reset_for_tests()
@@ -69,7 +73,7 @@ class DemosaicPoolParityTests(unittest.TestCase):
 
     def test_process_pool_jpeg_matches_inprocess(self):
         if not self.available:
-            self.skipTest("R5 DNG corpus not mounted")
+            self.skipTest("opt-in R5 DNG corpus probe: set AZIMUTH_RUN_RAW_CORPUS=1 with the corpus mounted")
         from raw_thumb_ops import demosaic_tier_jpegs
 
         sizes = {"md": 1920, "lg": 3840}

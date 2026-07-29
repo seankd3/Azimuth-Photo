@@ -21,6 +21,8 @@ mkdir -p "$TMPDIR" "$AZIMUTH_QA_SCRATCH"
 
 if [[ -x "$WEB/.venv/bin/python" ]]; then
   PYTHON="$WEB/.venv/bin/python"
+elif [[ -x "$WEB/.venv/Scripts/python.exe" ]]; then
+  PYTHON="$WEB/.venv/Scripts/python.exe" # Windows venv layout
 elif [[ -x "$ROOT/../azimuth-photo/web/.venv/bin/python" ]]; then
   PYTHON="$ROOT/../azimuth-photo/web/.venv/bin/python"
 else

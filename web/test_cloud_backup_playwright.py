@@ -13,9 +13,20 @@ from pathlib import Path
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
-    os.name == "nt",
-    reason="uses POSIX process groups for its isolated Playwright server",
+pytestmark = [
+    pytest.mark.skipif(
+        os.name == "nt",
+        reason="uses POSIX process groups for its isolated Playwright server",
+    ),
+    pytest.mark.slow,
+    pytest.mark.playwright,
+]
+
+# Guard at import time — before the test boots uvicorn — so a missing
+# playwright is one visible module skip, not a boot-then-fail mid-test.
+pytest.importorskip(
+    "playwright.sync_api",
+    reason="playwright is not installed; browser proofs are opt-in",
 )
 
 WEB_ROOT = Path(__file__).resolve().parent

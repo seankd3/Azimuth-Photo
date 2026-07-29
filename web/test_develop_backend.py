@@ -1,6 +1,7 @@
 import asyncio
 import gzip
 import io
+import itertools
 import json
 import os
 import sys
@@ -796,18 +797,22 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertTrue(np.allclose(untouched, rgb))
 
 
-@pytest.mark.skipif(not RAW_ROOT.exists(), reason="expansion RAW library is not mounted")
+@pytest.mark.skipif(
+    os.environ.get("AZIMUTH_RUN_RAW_CORPUS") != "1" or not RAW_ROOT.exists(),
+    reason="opt-in live-corpus probe: set AZIMUTH_RUN_RAW_CORPUS=1 with the RAW library mounted",
+)
 def test_real_dng_decode_has_linear_uint16_base():
     # Some Lightroom-created DNGs contain only a reduced preview that LibRaw
-    # correctly rejects. Probe until the mounted library yields one full RAW.
+    # correctly rejects. Probe a bounded slice of the mounted library for one
+    # full RAW — never walk the whole archive drive.
     rgb = meta = None
-    for dng in RAW_ROOT.rglob("*.dng"):
+    for dng in itertools.islice(RAW_ROOT.rglob("*.dng"), 32):
         try:
             rgb, meta = rawproc.decode_base(dng)
             break
         except rawproc.RawDecodeError:
             continue
-    assert rgb is not None and meta is not None, "mounted RAW library contains no LibRaw-decodable DNG"
+    assert rgb is not None and meta is not None, "first 32 corpus DNGs held no LibRaw-decodable RAW"
     assert rgb.dtype == np.uint16
     assert rgb.ndim == 3 and rgb.shape[2] == 3
     assert max(rgb.shape[:2]) <= rawproc.MAX_BASE_EDGE

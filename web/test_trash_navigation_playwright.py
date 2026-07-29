@@ -26,6 +26,13 @@ pytestmark = [
     pytest.mark.serial,
 ]
 
+# Guard at import time — before any fixture boots uvicorn — so a missing
+# playwright is one visible module skip, not a 30s boot-then-skip.
+pytest.importorskip(
+    "playwright.sync_api",
+    reason="playwright is not installed; browser proofs are opt-in",
+)
+
 
 WEB_ROOT = Path(__file__).resolve().parent
 ACTIVE_IMAGES = 139_000
