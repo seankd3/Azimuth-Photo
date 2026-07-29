@@ -470,6 +470,84 @@ class ReclassifyGatedTests(BackendTestCase):
         for path, moved_path in zip(stranded[:2], moved_paths):
             self.assertEqual(by_name[path.name], str(moved_path))
 
+    async def test_catalog_only_reclassify_requires_relocated_file(self):
+        """move_files=False must never re-point a row at a nonexistent path."""
+        library = Path(self.tempdir.name) / "Photos"
+        bad = library / "RAWS" / "Personal Photos" / "2026" / "2026-07-10"
+        bad.mkdir(parents=True)
+        stranded = bad / "PXL_catalog.jpg"
+        stranded.write_bytes(b"mis-nested-phone")
+        source = await db.add_or_restore_source(str(library / "RAWS"))
+        await db.insert_images_batch(
+            [(stranded.name, str(stranded), ".jpg", stranded.stat().st_size, stranded.stat().st_mtime)],
+            source_id=source["id"],
+        )
+
+        result = await taxonomy.reclassify_misplaced_personal_photos(
+            db.DB_PATH, library, confirm=True, dry_run=False, move_files=False,
+        )
+        self.assertEqual(result["updated"], 0)
+        self.assertEqual(len(result["errors"]), 1)
+        self.assertIn("destination missing", result["errors"][0]["message"])
+        conn = await connection.open_async(db.DB_PATH)
+        try:
+            row = await (
+                await conn.execute("SELECT filepath FROM images WHERE filename = ?", (stranded.name,))
+            ).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=db.DB_PATH)
+        self.assertEqual(row["filepath"], str(stranded))
+
+        good = library / "Personal Photos" / "2026" / "2026-07-10" / stranded.name
+        good.parent.mkdir(parents=True)
+        good.write_bytes(stranded.read_bytes())
+        result = await taxonomy.reclassify_misplaced_personal_photos(
+            db.DB_PATH, library, confirm=True, dry_run=False, move_files=False,
+        )
+        self.assertEqual(result["updated"], 1)
+
+
+class MoveOriginalTests(unittest.TestCase):
+    """Cross-filesystem relocation must verify the copy before the original dies."""
+
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.root = Path(self.tempdir.name)
+        self.src = self.root / "src" / "PXL_move.jpg"
+        self.dest = self.root / "dest" / "PXL_move.jpg"
+        self.src.parent.mkdir(parents=True)
+        self.dest.parent.mkdir(parents=True)
+        self.payload = b"phone-bytes" * 4096
+        self.src.write_bytes(self.payload)
+
+    @staticmethod
+    def _exdev_rename(*_args, **_kwargs):
+        raise OSError(errno.EXDEV, "cross-device link")
+
+    def test_same_device_move_renames(self):
+        taxonomy._move_original(self.src, self.dest)
+        self.assertEqual(self.dest.read_bytes(), self.payload)
+        self.assertFalse(self.src.exists())
+
+    def test_cross_device_copy_is_verified_then_source_unlinked(self):
+        with patch.object(taxonomy.os, "rename", side_effect=self._exdev_rename):
+            taxonomy._move_original(self.src, self.dest)
+        self.assertEqual(self.dest.read_bytes(), self.payload)
+        self.assertFalse(self.src.exists())
+
+    def test_cross_device_corrupted_copy_keeps_source(self):
+        def corrupting_copy(_incoming, outgoing, length=None):
+            outgoing.write(b"corrupted")
+
+        with patch.object(taxonomy.os, "rename", side_effect=self._exdev_rename), \
+             patch.object(taxonomy.shutil, "copyfileobj", side_effect=corrupting_copy):
+            with self.assertRaisesRegex(OSError, "verification failed"):
+                taxonomy._move_original(self.src, self.dest)
+        self.assertEqual(self.src.read_bytes(), self.payload, "source must survive a bad copy")
+        self.assertFalse(self.dest.exists())
+        self.assertFalse(self.dest.with_name(f".{self.dest.name}.moving").exists())
+
 
 class MoveJournalRecoveryTests(BackendTestCase):
     async def _pending_move(self, *, old_exists: bool, new_exists: bool):

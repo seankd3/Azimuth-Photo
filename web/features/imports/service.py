@@ -85,27 +85,35 @@ def destination_plan(
     }
 
 
-def unique_destination(path: str) -> tuple[str, bool]:
-    if not os.path.exists(path):
-        return path, False
+def destination_candidates(path: str):
+    yield path
     stem, ext = os.path.splitext(path)
     for index in range(2, 10000):
-        candidate = f"{stem}-{index}{ext}"
-        if not os.path.exists(candidate):
-            return candidate, True
-    raise RuntimeError("Could not create a unique filename")
+        yield f"{stem}-{index}{ext}"
 
 
 async def copy_upload(upload, destination_path: str) -> int:
     os.makedirs(os.path.dirname(destination_path), exist_ok=True)
     bytes_written = 0
-    with open(destination_path, "wb") as handle:
-        while True:
-            chunk = await upload.read(CHUNK_SIZE)
-            if not chunk:
-                break
-            handle.write(chunk)
-            bytes_written += len(chunk)
+    # "xb" claims the destination atomically: a concurrent upload of the same
+    # name gets FileExistsError instead of truncating the earlier import's file.
+    handle = open(destination_path, "xb")
+    try:
+        with handle:
+            while True:
+                chunk = await upload.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                handle.write(chunk)
+                bytes_written += len(chunk)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except Exception:
+        try:
+            os.unlink(destination_path)
+        except OSError:
+            pass
+        raise
     return bytes_written
 
 
@@ -131,10 +139,20 @@ async def copy_import_files(
         cleaned_relative = clean_relative_path(relative_path, original_name)
         if not preserve_structure:
             cleaned_relative = os.path.basename(cleaned_relative)
-        target_path, collided = unique_destination(os.path.join(destination_path, cleaned_relative))
+        target_path = None
+        collided = False
+        for candidate in destination_candidates(os.path.join(destination_path, cleaned_relative)):
+            try:
+                await copy_upload(upload, candidate)
+            except FileExistsError:
+                collided = True
+                continue
+            target_path = candidate
+            break
+        if target_path is None:
+            raise RuntimeError("Could not create a unique filename")
         if collided:
             collision_count += 1
-        await copy_upload(upload, target_path)
         stat = os.stat(target_path)
         copied.append({
             "filename": os.path.basename(target_path),

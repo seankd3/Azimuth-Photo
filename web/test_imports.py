@@ -1,6 +1,58 @@
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from features.imports import service as import_service
+
+
+class _FakeUpload:
+    def __init__(self, name: str, payload: bytes):
+        self.filename = name
+        self._chunks = [payload]
+
+    async def read(self, _size: int) -> bytes:
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+class ImportCopySafetyTests(BackendTestCase):
+    async def test_copy_claims_destination_with_exclusive_create(self):
+        """A same-named destination must survive untruncated; the upload lands at -2."""
+        destination = os.path.join(self.tempdir.name, "shoot")
+        os.makedirs(destination)
+        existing = os.path.join(destination, "alpha.jpg")
+        with open(existing, "wb") as fh:
+            fh.write(b"first-import-original")
+
+        result = await import_service.copy_import_files(
+            uploads=[_FakeUpload("alpha.jpg", b"second-upload")],
+            relative_paths=["alpha.jpg"],
+            destination_path=destination,
+            preserve_structure=False,
+        )
+
+        with open(existing, "rb") as fh:
+            self.assertEqual(fh.read(), b"first-import-original")
+        self.assertEqual(result["collision_count"], 1)
+        copied = result["copied"][0]
+        self.assertEqual(copied["filename"], "alpha-2.jpg")
+        with open(copied["filepath"], "rb") as fh:
+            self.assertEqual(fh.read(), b"second-upload")
+
+    async def test_failed_upload_copy_leaves_no_partial_file(self):
+        class _ExplodingUpload:
+            filename = "boom.jpg"
+
+            async def read(self, _size: int) -> bytes:
+                raise RuntimeError("stream died")
+
+        destination = os.path.join(self.tempdir.name, "shoot-fail")
+        with self.assertRaisesRegex(RuntimeError, "stream died"):
+            await import_service.copy_import_files(
+                uploads=[_ExplodingUpload()],
+                relative_paths=["boom.jpg"],
+                destination_path=destination,
+                preserve_structure=False,
+            )
+        self.assertEqual(os.listdir(destination), [])
 
 
 class ImportTests(BackendTestCase):

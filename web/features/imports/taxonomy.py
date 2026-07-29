@@ -19,6 +19,7 @@ see `reclassify_misplaced_personal_photos` for an explicit repair action.
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
@@ -489,6 +490,14 @@ async def reclassify_misplaced_personal_photos(
                 except OSError as exc:
                     errors.append({"id": int(row["id"]), "message": str(exc)})
                     continue
+            # move_files=False promises the files were already relocated; never
+            # re-point a catalog row at a path that does not exist.
+            if not move_files and not new_path.exists():
+                errors.append({
+                    "id": int(row["id"]),
+                    "message": f"destination missing: {new_path}",
+                })
+                continue
             try:
                 await conn.execute(
                     "UPDATE images SET filepath = ?, source_id = ? WHERE id = ?",
@@ -518,7 +527,33 @@ async def reclassify_misplaced_personal_photos(
 async def _to_thread_move(src: Path, dest: Path) -> None:
     import asyncio
 
-    def _move() -> None:
-        shutil.move(str(src), str(dest))
+    await asyncio.to_thread(_move_original, src, dest)
 
-    await asyncio.to_thread(_move)
+
+def _move_original(src: Path, dest: Path) -> None:
+    """Same-device moves rename atomically. Cross-device, shutil.move would be
+    copy2 + unlink with no byte check — a silently corrupted copy destroys the
+    only original — so copy + fsync + full-hash verify before unlinking."""
+    try:
+        os.rename(src, dest)
+        return
+    except OSError as exc:
+        if exc.errno != errno.EXDEV:
+            raise
+
+    from features.sync.hashing import compute_full_hash
+
+    partial = dest.with_name(f".{dest.name}.moving")
+    try:
+        with src.open("rb") as incoming, partial.open("wb") as outgoing:
+            shutil.copyfileobj(incoming, outgoing, length=1024 * 1024)
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        if compute_full_hash(partial) != compute_full_hash(src):
+            raise OSError(f"cross-device copy verification failed: {src} -> {dest}")
+        shutil.copystat(src, partial)
+        os.replace(partial, dest)
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
+    src.unlink()
