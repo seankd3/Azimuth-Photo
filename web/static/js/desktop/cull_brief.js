@@ -1,5 +1,5 @@
 import { getRankings, postJson, thumbUrl, writeFlags } from './api.js';
-import { folderValues, scope, scopeParams } from './state.js';
+import { folderValues, on, scope, scopeParams } from './state.js';
 import { showToast } from './toast.js';
 
 const AUTOCULL_BATCH_SIZE = 500;
@@ -321,7 +321,8 @@ export function initCullBrief() {
         else if (key === 'z') { event.preventDefault(); event.stopImmediatePropagation(); undoAccept(); }
         else if (event.key === 'Escape') { event.preventDefault(); event.stopImmediatePropagation(); closeReview(); }
     });
-    document.addEventListener('azimuth:import-complete', refreshCullBriefWithErrorState);
+    // Staged imports and watched folders announce completion on the state bus.
+    on('import:changed', refreshCullBriefWithErrorState);
     setTimeout(refreshCullBriefWithErrorState, 3000);
 }
 

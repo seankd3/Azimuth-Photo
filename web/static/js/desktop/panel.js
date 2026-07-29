@@ -16,6 +16,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { confirmAction } from './trash.js';
 import { exportScope, openExportMenu, savedOriginalsExportSize } from './export_menu.js';
 import { pollJob } from './jobs.js';
+import { createDeliverLoads } from './deliver_loading.js';
 import { initFoldersPanel } from './folders.js';
 import {
     rememberSources, applyExcludeSources,
@@ -41,6 +42,7 @@ let deliverOverlayReturn = null;
 let deliverPoll = null;
 let deliverSession = null;
 let chromeRefreshTimer = 0;
+let libraryCountsRetryTimer = 0;
 let editingSmartCollection = null;
 let savedViews = [];
 
@@ -262,6 +264,8 @@ function deliverOverlayIsCurrent(token) {
 function closeDeliverOverlay() {
     deliverPoll?.cancel();
     deliverPoll = null;
+    deliverSession?.loads?.dispose();
+    deliverSession?.picksLoad?.dispose();
     if (!deliverOverlay || deliverOverlay.hidden) return;
     deliverOverlayToken += 1;
     releaseFocus(deliverOverlay);
@@ -327,10 +331,6 @@ function tabCreatedAt(item) {
     return Number(item?.created_at || item?.createdAt || item?.created || 0);
 }
 
-function mostRecentDelivery(deliveries = []) {
-    return [...deliveries].sort((left, right) => tabCreatedAt(right) - tabCreatedAt(left))[0] || null;
-}
-
 function resolveDeliverTab({ explicitTab, share, publish, gallery }) {
     if (DELIVER_TABS.some(([id]) => id === explicitTab)) return explicitTab;
     const active = [
@@ -346,8 +346,66 @@ function resolveDeliverTab({ explicitTab, share, publish, gallery }) {
     return DELIVER_TABS.some(([id]) => id === savedTab) ? savedTab : 'private';
 }
 
-export async function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = null) {
+function initialDeliverTab(activeTab) {
+    if (DELIVER_TABS.some(([id]) => id === activeTab)) return activeTab;
+    const savedTab = localStorage.getItem(DELIVER_TAB_STORAGE_KEY);
+    return DELIVER_TABS.some(([id]) => id === savedTab) ? savedTab : 'private';
+}
+
+function assignDeliverLoad(session, tab, value) {
+    if (tab === 'private') session.share = value?.share || null;
+    if (tab === 'website') {
+        session.publish = value;
+        if (!session.restoredDraft && !session.userInteracted && value?.publish?.title) session.draft.title = value.publish.title;
+        if (!session.restoredDraft && !session.userInteracted && value?.publish?.slug) session.draft.slug = value.publish.slug;
+    }
+    if (tab === 'gallery') {
+        session.galleryEditor = value?.editor || null;
+        session.galleryData = value?.data || { gallery: null, images: [] };
+    }
+}
+
+function resolveLoadedDeliverTab(session) {
+    if (session.userInteracted || session.initialTabResolved) return;
+    session.initialTabResolved = true;
+    const resolved = resolveDeliverTab({
+        explicitTab: session.explicitTab,
+        share: session.share,
+        publish: session.publish,
+        gallery: session.galleryData?.gallery,
+    });
+    if (resolved === session.activeTab) return;
+    session.activeTab = resolved;
+    deliverOverlay.dataset.activeTab = resolved;
+    renderDeliver(session);
+}
+
+function handleDeliverLoadChange(session, token, tab, state) {
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    if (state.status === 'ready') assignDeliverLoad(session, tab, state.value);
+    if (session.activeTab === tab) {
+        const retry = deliverOverlay.querySelector('[data-deliver-load-retry]');
+        if (state.status === 'loading' && retry === document.activeElement) {
+            retry.textContent = 'Trying again…';
+            retry.setAttribute('aria-disabled', 'true');
+        } else {
+            renderDeliver(session, token);
+        }
+    }
+    if (session.loads.settled()) resolveLoadedDeliverTab(session);
+}
+
+function createPrivatePicksLoad(session, token) {
+    session.picksLoad?.dispose();
+    session.picksLoad = createDeliverLoads({
+        picks: () => getCollectionShareFavorites(session.collectionId),
+    }, () => patchPrivatePicks(session, token));
+}
+
+export function openDeliverOverlay(collectionId, name = 'Collection', opener = null, activeTab = null) {
     ensureDeliverOverlay();
+    deliverSession?.loads?.dispose();
+    deliverSession?.picksLoad?.dispose();
     const token = ++deliverOverlayToken;
     deliverOverlayReturn = opener || document.activeElement;
     deliverOverlay.dataset.collectionId = String(collectionId);
@@ -356,34 +414,30 @@ export async function openDeliverOverlay(collectionId, name = 'Collection', open
     deliverSession = {
         collectionId,
         name,
-        activeTab: 'private',
+        activeTab: initialDeliverTab(activeTab),
+        explicitTab: activeTab,
+        initialTabResolved: false,
+        userInteracted: false,
         share: null,
         publish: null,
+        galleryData: null,
+        galleryEditor: null,
+        picksLoad: null,
         draft: restoredDraft.draft,
         restoredDraft: restoredDraft.restored,
     };
-    renderDeliverShell(name, deliverSession.activeTab);
-    bindDeliverTabs((tab) => switchDeliverTab(deliverSession, tab));
-    trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
-    const [shareData, publishData, galleryData] = await Promise.all([
-        getCollectionShare(collectionId),
-        getCollectionPublish(collectionId),
-        import('./gallery_editor.js').then(({ listGalleryDeliveries }) => listGalleryDeliveries(collectionId)).catch(() => null),
-    ]);
-    if (!deliverOverlayIsCurrent(token)) return token;
-    deliverSession.share = shareData?.share || null;
-    deliverSession.publish = publishData;
-    const resolvedTab = resolveDeliverTab({
-        explicitTab: activeTab,
-        share: deliverSession.share,
-        publish: deliverSession.publish,
-        gallery: mostRecentDelivery(galleryData?.galleries),
-    });
-    deliverSession.activeTab = resolvedTab;
-    deliverOverlay.dataset.activeTab = resolvedTab;
-    if (!deliverSession.restoredDraft && deliverSession.publish?.publish?.title) deliverSession.draft.title = deliverSession.publish.publish.title;
-    if (!deliverSession.restoredDraft && deliverSession.publish?.publish?.slug) deliverSession.draft.slug = deliverSession.publish.publish.slug;
-    renderDeliver(deliverSession, token);
+    const session = deliverSession;
+    session.loads = createDeliverLoads({
+        private: () => getCollectionShare(collectionId),
+        gallery: async () => {
+            const editor = await import('./gallery_editor.js');
+            const data = await editor.loadGalleryDelivery(collectionId, getCollection);
+            return { editor, data };
+        },
+        website: () => getCollectionPublish(collectionId),
+    }, (tab, state) => handleDeliverLoadChange(session, token, tab, state));
+    renderDeliverLoadState(session, token, session.loads.state(session.activeTab));
+    void session.loads.loadAll();
     return token;
 }
 
@@ -430,6 +484,48 @@ function sharePicksRow(pickData) {
         + `<button data-deliver-view-picks type="button" ${ids.length ? '' : 'disabled'}>View picks</button>`
         + `<button data-deliver-apply-picks type="button" ${ids.length ? '' : 'disabled'}>Apply as picks</button>`
         + '</div></div>';
+}
+
+function privatePicksContents(session) {
+    const state = session.picksLoad?.state('picks') || { status: 'loading', value: null };
+    if (state.status === 'error') {
+        return '<div class="share-picks"><span>Client picks unavailable.</span>'
+            + '<button data-deliver-picks-retry type="button">Try again</button></div>';
+    }
+    if (state.status !== 'ready') {
+        return '<div class="share-picks"><span>Loading client picks…</span></div>';
+    }
+    const picks = state.value;
+    const finished = picks?.client_finished_at || session.share?.client_finished_at;
+    return deliverStatusRows([['Client selection', finished ? `Finished ${formatShareDate(finished)}` : 'In progress']])
+        + sharePicksRow(picks);
+}
+
+function bindPrivatePicks(session) {
+    const picks = session.picksLoad?.state('picks').value;
+    const pickIds = clientPickIds(picks);
+    deliverOverlay.querySelector('[data-deliver-view-picks]')?.addEventListener('click', () => selectClientPicks(pickIds));
+    deliverOverlay.querySelector('[data-deliver-apply-picks]')?.addEventListener('click', () => applyClientPicks(session.collectionId, pickIds));
+    deliverOverlay.querySelector('[data-deliver-picks-retry]')?.addEventListener('click', (event) => {
+        if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
+        void session.picksLoad.load('picks');
+    });
+}
+
+function patchPrivatePicks(session, token) {
+    if (!deliverOverlayIsCurrent(token) || deliverSession !== session || session.activeTab !== 'private' || !session.share) return;
+    const host = deliverOverlay.querySelector('[data-deliver-picks]');
+    if (!host) return;
+    const retry = host.querySelector('[data-deliver-picks-retry]');
+    if (session.picksLoad.state('picks').status === 'loading' && retry === document.activeElement) {
+        retry.textContent = 'Trying again…';
+        retry.setAttribute('aria-disabled', 'true');
+        return;
+    }
+    const restoreFocus = host.contains(document.activeElement);
+    host.innerHTML = privatePicksContents(session);
+    bindPrivatePicks(session);
+    if (restoreFocus) host.querySelector('button:not([disabled])')?.focus({ preventScroll: true });
 }
 
 async function rememberCollectionImages(collectionId) {
@@ -622,25 +718,27 @@ function saveDeliverDraft(session) {
 }
 
 function bindDeliverCommon(session, url = '') {
-    deliverOverlay.querySelector('[data-deliver-title]')?.addEventListener('input', () => saveDeliverDraft(session));
-    deliverOverlay.querySelector('[data-deliver-password]')?.addEventListener('input', () => saveDeliverDraft(session));
-    deliverOverlay.querySelector('[data-deliver-expiry]')?.addEventListener('change', () => saveDeliverDraft(session));
+    const saveInteractedDraft = () => {
+        session.userInteracted = true;
+        saveDeliverDraft(session);
+    };
+    deliverOverlay.querySelector('[data-deliver-title]')?.addEventListener('input', saveInteractedDraft);
+    deliverOverlay.querySelector('[data-deliver-password]')?.addEventListener('input', saveInteractedDraft);
+    deliverOverlay.querySelector('[data-deliver-expiry]')?.addEventListener('change', saveInteractedDraft);
     deliverOverlay.querySelector('[data-deliver-copy]')?.addEventListener('click', () => copyDeliverUrl(url));
     deliverOverlay.querySelector('[data-deliver-open]')?.addEventListener('click', () => window.open(url, '_blank', 'noopener,noreferrer'));
 }
 
-async function renderPrivateDeliver(session, token) {
+function renderPrivateDeliver(session, token) {
     const share = session.share;
-    const picks = share ? await getCollectionShareFavorites(session.collectionId) : null;
-    if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    if (share && !session.picksLoad) createPrivatePicksLoad(session, token);
     const body = deliverTitleRow(session, session.draft.title)
         + (share
             ? (share.expired ? '<div class="share-expired">Expired - rotate to renew</div>' : '')
                 + deliverLinkRow(share.url || '')
                 + `<div class="share-meta"><div><span>Created</span><b>${esc(formatShareDate(share.created_at))}</b></div><div><span>Expires</span><b>${esc(formatShareDate(share.expires_at))}</b></div></div>`
                 + `<div class="share-stats">${esc(shareStatsLine(share))}</div>`
-                + deliverStatusRows([['Client selection', picks?.client_finished_at || share.client_finished_at ? `Finished ${formatShareDate(picks?.client_finished_at || share.client_finished_at)}` : 'In progress']])
-                + sharePicksRow(picks)
+                + `<div data-deliver-picks aria-live="polite">${privatePicksContents(session)}</div>`
                 + deliverPasswordRow({ protected: share.protected, value: session.draft.password, action: share.protected ? 'Change' : 'Set', clear: share.protected })
                 + '<div class="share-actions"><button data-deliver-rotate type="button">Rotate link</button><button data-deliver-revoke type="button">Revoke</button></div>'
             : '<p class="share-empty">Create a private gallery link for this collection.</p>'
@@ -650,14 +748,14 @@ async function renderPrivateDeliver(session, token) {
     renderDeliverShell(session.name, 'private', body);
     bindDeliverTabs((tab) => switchDeliverTab(session, tab));
     bindDeliverCommon(session, share?.url || '');
-    const pickIds = clientPickIds(picks);
-    deliverOverlay.querySelector('[data-deliver-view-picks]')?.addEventListener('click', () => selectClientPicks(pickIds));
-    deliverOverlay.querySelector('[data-deliver-apply-picks]')?.addEventListener('click', () => applyClientPicks(session.collectionId, pickIds));
+    bindPrivatePicks(session);
+    if (share && session.picksLoad.state('picks').status === 'idle') void session.picksLoad.load('picks');
     deliverOverlay.querySelector('[data-deliver-create]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
         saveDeliverDraft(session);
         const result = await createCollectionShare(session.collectionId, { expiresInDays: session.draft.expiry ? Number(session.draft.expiry) : null, ...(session.draft.password ? { password: session.draft.password } : {}) });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
+            createPrivatePicksLoad(session, token);
             clearDeliverDraft(session);
             showDeliveryToast('Private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
@@ -689,6 +787,7 @@ async function renderPrivateDeliver(session, token) {
         const result = await createCollectionShare(session.collectionId, { rotate: true });
         if (deliverOverlayIsCurrent(token) && result?.ok) {
             session.share = result.share;
+            createPrivatePicksLoad(session, token);
             showDeliveryToast('New private link created for', session);
             emitSharedSurfacesChanged(session.collectionId);
             renderDeliver(session, token);
@@ -774,89 +873,98 @@ function renderWebsiteDeliver(session, token) {
     trapFocus(deliverOverlay, deliverOverlay.querySelector('input, button'));
 }
 
-async function renderGalleryDeliver(session, token) {
-    renderDeliverShell(session.name, 'gallery', '<div class="muted">Client gallery settings are loading…</div>');
+function renderGalleryDeliver(session, token) {
+    const galleryEditor = session.galleryEditor;
+    const galleryData = session.galleryData;
+    const gallery = galleryData.gallery;
+    const body = deliverTitleRow(session, session.draft.title || gallery?.title || session.name)
+        + galleryEditor.galleryDeliveryFields(gallery, galleryData.images)
+        + deliverPasswordRow({ protected: Boolean(gallery?.protected), value: session.draft.password, action: gallery ? (gallery.protected ? 'Change' : 'Set') : '', clear: Boolean(gallery?.protected) })
+        + deliverLinkRow(gallery?.url || '')
+        + (gallery ? deliverStatusRows([
+            ['Views', shareStatsLine(gallery)],
+            ['Photos', `${fmt(gallery.image_count)} frozen in this gallery`],
+        ]) : '')
+        + '<div class="publish-actions">'
+        + (gallery ? '<button data-deliver-gallery-revoke type="button" class="btn-danger">Revoke</button>' : '')
+        + `<button data-deliver-gallery-save type="button">${gallery ? 'Update client gallery' : 'Create client gallery'}</button></div>`;
+    renderDeliverShell(session.name, 'gallery', body);
     bindDeliverTabs((tab) => switchDeliverTab(session, tab));
-    trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
-    try {
-        const galleryEditor = await import('./gallery_editor.js');
-        const galleryData = await galleryEditor.loadGalleryDelivery(session.collectionId, getCollection);
-        if (!deliverOverlayIsCurrent(token) || deliverSession !== session || session.activeTab !== 'gallery') return;
-        session.galleryEditor = galleryEditor;
-        session.galleryData = galleryData;
-        const gallery = galleryData.gallery;
-        const body = deliverTitleRow(session, session.draft.title || gallery?.title || session.name)
-            + galleryEditor.galleryDeliveryFields(gallery, galleryData.images)
-            + deliverPasswordRow({ protected: Boolean(gallery?.protected), value: session.draft.password, action: gallery ? (gallery.protected ? 'Change' : 'Set') : '', clear: Boolean(gallery?.protected) })
-            + deliverLinkRow(gallery?.url || '')
-            + (gallery ? deliverStatusRows([
-                ['Views', shareStatsLine(gallery)],
-                ['Photos', `${fmt(gallery.image_count)} frozen in this gallery`],
-            ]) : '')
-            + '<div class="publish-actions">'
-            + (gallery ? '<button data-deliver-gallery-revoke type="button" class="btn-danger">Revoke</button>' : '')
-            + `<button data-deliver-gallery-save type="button">${gallery ? 'Update client gallery' : 'Create client gallery'}</button></div>`;
-        renderDeliverShell(session.name, 'gallery', body);
-        bindDeliverTabs((tab) => switchDeliverTab(session, tab));
-        bindDeliverCommon(session, gallery?.url || '');
-        deliverOverlay.querySelector('[data-deliver-gallery-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
-            saveDeliverDraft(session);
-            try {
-                const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
-                    title: session.draft.title || session.name,
-                    password: session.draft.password,
-                }));
-                if (!deliverOverlayIsCurrent(token)) return;
-                session.galleryData.gallery = result.gallery;
-                session.draft.password = '';
-                clearDeliverDraft(session);
-                showDeliveryToast(gallery ? 'Client gallery updated for' : 'Client gallery created for', session);
-                emitSharedSurfacesChanged(session.collectionId);
-                renderGalleryDeliver(session, token);
-            } catch (error) {
-                showDeliveryToast("Couldn't save client gallery for", session, { error });
-            }
-        }));
-        deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', () => deliverOverlay.querySelector('[data-deliver-gallery-save]')?.click());
-        deliverOverlay.querySelector('[data-deliver-password-clear]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
-            try {
-                const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
-                    title: session.draft.title || session.name,
-                    clearPassword: true,
-                }));
-                if (!deliverOverlayIsCurrent(token)) return;
-                session.galleryData.gallery = result.gallery;
-                showDeliveryToast('Password removed for', session);
-                renderGalleryDeliver(session, token);
-            } catch (error) {
-                showDeliveryToast("Couldn't remove password for", session, { error });
-            }
-        }));
-        bindDeliverConfirmButton('[data-deliver-gallery-revoke]', 'Confirm revoke', async () => {
-            try {
-                await galleryEditor.revokeGalleryDelivery(session.collectionId, gallery.id);
-                if (!deliverOverlayIsCurrent(token)) return;
-                session.galleryData.gallery = null;
-                clearDeliverDraft(session);
-                showDeliveryToast('Client gallery revoked for', session);
-                emitSharedSurfacesChanged(session.collectionId);
-                renderGalleryDeliver(session, token);
-            } catch (error) {
-                showDeliveryToast("Couldn't revoke client gallery for", session, { error });
-            }
-        });
-        trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
-    } catch (error) {
-        if (!deliverOverlayIsCurrent(token) || deliverSession !== session || session.activeTab !== 'gallery') return;
-        renderDeliverShell(session.name, 'gallery', `<div class="publish-error"><b>Couldn’t load client gallery settings.</b><p>${esc(error.message || 'Try again when ready.')}</p><button data-deliver-gallery-retry type="button">Try again</button></div>`);
-        bindDeliverTabs((tab) => switchDeliverTab(session, tab));
-        deliverOverlay.querySelector('[data-deliver-gallery-retry]')?.addEventListener('click', () => renderGalleryDeliver(session, token));
-        trapFocus(deliverOverlay, deliverOverlay.querySelector('button'));
-    }
+    bindDeliverCommon(session, gallery?.url || '');
+    deliverOverlay.querySelector('[data-deliver-gallery-save]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+        saveDeliverDraft(session);
+        try {
+            const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
+                title: session.draft.title || session.name,
+                password: session.draft.password,
+            }));
+            if (!deliverOverlayIsCurrent(token)) return;
+            session.galleryData.gallery = result.gallery;
+            session.draft.password = '';
+            clearDeliverDraft(session);
+            showDeliveryToast(gallery ? 'Client gallery updated for' : 'Client gallery created for', session);
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        } catch (error) {
+            showDeliveryToast("Couldn't save client gallery for", session, { error });
+        }
+    }));
+    deliverOverlay.querySelector('[data-deliver-password-save]')?.addEventListener('click', () => deliverOverlay.querySelector('[data-deliver-gallery-save]')?.click());
+    deliverOverlay.querySelector('[data-deliver-password-clear]')?.addEventListener('click', (event) => withBusyButton(event.currentTarget, async () => {
+        try {
+            const result = await galleryEditor.saveGalleryDelivery(session.collectionId, gallery, galleryEditor.galleryDeliveryPayload(deliverOverlay, {
+                title: session.draft.title || session.name,
+                clearPassword: true,
+            }));
+            if (!deliverOverlayIsCurrent(token)) return;
+            session.galleryData.gallery = result.gallery;
+            showDeliveryToast('Password removed for', session);
+            renderDeliver(session, token);
+        } catch (error) {
+            showDeliveryToast("Couldn't remove password for", session, { error });
+        }
+    }));
+    bindDeliverConfirmButton('[data-deliver-gallery-revoke]', 'Confirm revoke', async () => {
+        try {
+            await galleryEditor.revokeGalleryDelivery(session.collectionId, gallery.id);
+            if (!deliverOverlayIsCurrent(token)) return;
+            session.galleryData.gallery = null;
+            clearDeliverDraft(session);
+            showDeliveryToast('Client gallery revoked for', session);
+            emitSharedSurfacesChanged(session.collectionId);
+            renderDeliver(session, token);
+        } catch (error) {
+            showDeliveryToast("Couldn't revoke client gallery for", session, { error });
+        }
+    });
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('input, select, button'));
 }
 
-async function renderDeliver(session, token = deliverOverlayToken) {
+const DELIVER_LOAD_LABELS = {
+    private: 'private link',
+    gallery: 'client gallery',
+    website: 'website delivery',
+};
+
+function renderDeliverLoadState(session, token, state) {
+    const label = DELIVER_LOAD_LABELS[session.activeTab];
+    const body = state.status === 'error'
+        ? `<div class="publish-error"><b>Couldn’t load ${label} settings.</b><p>Your other delivery options are still available.</p><button data-deliver-load-retry type="button">Try again</button></div>`
+        : `<div class="muted">Loading ${label} settings…</div>`;
+    renderDeliverShell(session.name, session.activeTab, body);
+    bindDeliverTabs((tab) => switchDeliverTab(session, tab));
+    deliverOverlay.querySelector('[data-deliver-load-retry]')?.addEventListener('click', () => {
+        const retry = deliverOverlay.querySelector('[data-deliver-load-retry]');
+        if (retry?.getAttribute('aria-disabled') === 'true') return;
+        void session.loads.load(session.activeTab);
+    });
+    trapFocus(deliverOverlay, deliverOverlay.querySelector('[data-deliver-load-retry]') || deliverOverlay.querySelector('button'));
+}
+
+function renderDeliver(session, token = deliverOverlayToken) {
     if (!deliverOverlayIsCurrent(token) || deliverSession !== session) return;
+    const state = session.loads.state(session.activeTab);
+    if (state.status !== 'ready') return renderDeliverLoadState(session, token, state);
     if (session.activeTab === 'private') return renderPrivateDeliver(session, token);
     if (session.activeTab === 'website') return renderWebsiteDeliver(session, token);
     return renderGalleryDeliver(session, token);
@@ -865,6 +973,7 @@ async function renderDeliver(session, token = deliverOverlayToken) {
 function switchDeliverTab(session, tab) {
     if (!DELIVER_TABS.some(([id]) => id === tab)) return;
     saveDeliverDraft(session);
+    session.userInteracted = true;
     session.activeTab = tab;
     deliverOverlay.dataset.activeTab = tab;
     localStorage.setItem(DELIVER_TAB_STORAGE_KEY, tab);
@@ -1069,10 +1178,16 @@ function renderLibrary() {
 async function loadLibraryCounts() {
     const params = new URLSearchParams();
     applyExcludeSources(params);
-    const [data, trash] = await Promise.all([getCounts(params), getTrash({ limit: 1, offset: 0 })]);
-    libraryCounts = data || {};
-    trashTotal = trash && trash.total != null ? Number(trash.total) || 0 : null;
-    renderLibrary();
+    window.clearTimeout(libraryCountsRetryTimer);
+    try {
+        const [data, trash] = await Promise.all([getCounts(params), getTrash({ limit: 1, offset: 0 })]);
+        libraryCounts = data || {};
+        trashTotal = trash && trash.total != null ? Number(trash.total) || 0 : null;
+        renderLibrary();
+    } catch {
+        // Keep any loaded counts; retry while the nav still shows placeholder ellipses.
+        if (libraryCounts == null) libraryCountsRetryTimer = window.setTimeout(loadLibraryCounts, 15000);
+    }
 }
 
 async function loadCollections() {

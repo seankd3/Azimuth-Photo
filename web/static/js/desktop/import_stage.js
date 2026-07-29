@@ -17,6 +17,8 @@ const CATEGORY_TREES = { raw: 'RAWS', personal: 'Personal Photos', film: 'Film S
 const CATEGORY_SHORT = { raw: 'RAW', personal: 'personal', film: 'film', export: 'exports', video: 'video' };
 const SCAN_POLL_MS = 1000;
 const JOB_POLL_MS = 1000;
+const JOB_POLL_MAX_MS = 15_000;
+const JOB_POLL_WARN_MISSES = 3;
 const RENDER_CHUNK = 400;
 
 let root = null;
@@ -427,11 +429,31 @@ async function commit() {
     watchJob(result.job_id, clearingCard, result.batch_id);
 }
 
+// fetchJson throws on non-OK; a failed poll must read as a retryable miss
+// here, not as an unhandled rejection that kills the watcher (the
+// fetchScanPage precedent). A 404 is decisive — jobs live in server RAM, so
+// a missing id means the registry is gone and status can never come back.
+async function fetchJob(jobId) {
+    try {
+        return { job: await getImportJob(jobId), transient: false };
+    } catch (error) {
+        return { job: null, transient: error?.status !== 404 };
+    }
+}
+
 async function watchJob(jobId, clearingCard, batchId) {
     let lastEta = null;
+    let misses = 0;
     for (;;) {
-        await new Promise((resolve) => setTimeout(resolve, JOB_POLL_MS));
-        const job = await getImportJob(jobId);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(JOB_POLL_MS * 2 ** misses, JOB_POLL_MAX_MS)));
+        const { job, transient } = await fetchJob(jobId);
+        if (!job && transient) {
+            // The import keeps running server-side: back off and keep watching
+            // so completion/failure/safe-to-eject always eventually render.
+            misses += 1;
+            if (misses === JOB_POLL_WARN_MISSES) showToast('Can’t reach the library — still watching this import');
+            continue;
+        }
         if (!job) {
             showToast('Import status lost — this import may still be running');
             if (String(scope.import_batch || '') === String(batchId || '')) {
@@ -439,6 +461,7 @@ async function watchJob(jobId, clearingCard, batchId) {
             }
             return;
         }
+        misses = 0;
         if (clearingCard && job.card_free_eta_seconds != null && job.card_free_eta_seconds !== lastEta
             && job.phase === 'copying' && job.files_done > 0 && job.files_done % 250 === 0) {
             lastEta = job.card_free_eta_seconds;

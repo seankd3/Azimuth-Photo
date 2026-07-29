@@ -12,6 +12,7 @@ let foldersLoading = false;
 let tagsLoading = false;
 let foldersLoadError = false;
 let tagsLoadError = false;
+let coreLoadError = false;
 let loadSeq = 0;
 let lastOptionsLoadedAt = 0;
 let expandedYear = '';
@@ -156,6 +157,7 @@ function renderFlag() {
 function renderPeople() {
     return searchableOptionBlock('People', 'people', options.people, 'people', (person) => person.id, personLabel, {
         placeholder: 'Search people', empty: 'No people found.', loading, glyph: 'users',
+        error: coreLoadError ? "Couldn't load people." : '', retry: 'people',
     });
 }
 
@@ -213,7 +215,10 @@ function renderDate() {
     const undated = Number(options.undated || 0) > 0
         ? `<button class="filter-row ${scope.date_taken === 'undated' ? 'active' : ''}" data-key="date_taken" data-value="undated" title="Undated"><span title="Undated">Undated</span><span class="num">${fmt(options.undated)}</span></button>`
         : '';
-    return selectBlock('Date', yearRows + undated || emptyOption('No dates found.', 'calendar'), 'data-filter-section="date"');
+    const fallback = loading
+        ? loadingOption('Loading dates…')
+        : coreLoadError ? retryOption("Couldn't load dates.", 'date') : emptyOption('No dates found.', 'calendar');
+    return selectBlock('Date', yearRows + undated || fallback, 'data-filter-section="date"');
 }
 
 function monthLabel(value) {
@@ -341,12 +346,16 @@ function render() {
             renderFolders(),
             renderDate(),
             selectBlock('File type', optionRows(options.fileTypes, 'file_type', (item) => item.ext || item.value, (item) => String(item.ext || item.value).replace('.', '').toUpperCase())
-                || (loading ? loadingOption('Loading file types…') : emptyOption('No file types found.', 'file-type')), 'data-filter-section="filetype"'),
+                || (loading
+                    ? loadingOption('Loading file types…')
+                    : coreLoadError ? retryOption("Couldn't load file types.", 'filetype') : emptyOption('No file types found.', 'file-type')), 'data-filter-section="filetype"'),
             searchableOptionBlock('Camera', 'camera', options.cameras, 'camera', (item) => item.camera || item.value, (item) => item.camera || item.value, {
                 placeholder: 'Search cameras', empty: 'No cameras found.', loading, glyph: 'camera',
+                error: coreLoadError ? "Couldn't load cameras." : '', retry: 'camera',
             }),
             searchableOptionBlock('Lens', 'lens', options.lenses, 'lens', (item) => item.lens || item.value, (item) => item.lens || item.value, {
                 placeholder: 'Search lenses', empty: 'No lenses found.', loading, glyph: 'aperture',
+                error: coreLoadError ? "Couldn't load lenses." : '', retry: 'lens',
             }),
             searchableOptionBlock('Tags', 'tags', options.tags, 'tag', (item) => item.tag || item.value, (item) => item.tag || item.value, {
                 placeholder: 'Search tags', empty: 'No caption tags yet.', loading: tagsLoading,
@@ -431,6 +440,7 @@ async function loadOptions({ force = false } = {}) {
     tagsLoading = true;
     foldersLoadError = false;
     tagsLoadError = false;
+    coreLoadError = false;
     render();
     const core = getFilterOptions(scopeParams()).then((filterData) => {
         if (seq !== loadSeq) return;
@@ -449,6 +459,7 @@ async function loadOptions({ force = false } = {}) {
         render();
     }).catch(() => {
         if (seq !== loadSeq) return;
+        coreLoadError = true;
         loading = false;
         render();
     });
@@ -485,6 +496,7 @@ function invalidateOptions() {
     tagsLoading = false;
     foldersLoadError = false;
     tagsLoadError = false;
+    coreLoadError = false;
     lastOptionsLoadedAt = 0;
     resetMonthCacheIfScopeChanged();
     if (filtersOpen()) loadOptions({ force: true });

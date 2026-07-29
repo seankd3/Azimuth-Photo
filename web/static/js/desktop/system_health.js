@@ -5,8 +5,16 @@ import { escapeHtml as esc } from './dom.js';
 const POLL_MS = 30000;
 let payload = null;
 let lastLoaded = 0;
+let lastRefreshFailed = false;
 let loading = false;
 let pollTimer = null;
+
+function ageLabel(ts) {
+    const minutes = Math.floor((Date.now() - ts) / 60000);
+    if (minutes < 1) return 'moments ago';
+    if (minutes < 60) return `${minutes}m ago`;
+    return `${Math.floor(minutes / 60)}h ago`;
+}
 
 function badge(status) {
     const tone = status === 'bad' || status === 'warn' || status === 'ok' ? status : 'ok';
@@ -40,9 +48,16 @@ export function renderSystemHealth() {
     }
     const checks = payload.checks || [];
     const overall = payload.overall || 'ok';
+    // A stale snapshot must never wear the "Live read" promise or an all-clear badge.
+    const stale = lastRefreshFailed;
+    const staleAlert = '<div class="health-alert warn" role="status"><b>Couldn’t refresh health</b>'
+        + `<span>Showing the last read from ${esc(ageLabel(lastLoaded))}. Retries automatically.</span>`
+        + '<button class="mini-btn" type="button" data-system-health-retry>Retry now</button></div>';
     return '<section class="dr-sec system-health" id="system-health-panel">'
-        + '<div class="health-title"><h3>System Health</h3>' + badge(overall) + '</div>'
-        + '<p class="health-promise">Live read of catalog, backups, vault, disk, memory, and workers — the same story a host watchdog would surface, inside the app.</p>'
+        + '<div class="health-title"><h3>System Health</h3>' + badge(stale && overall === 'ok' ? 'warn' : overall) + '</div>'
+        + (stale
+            ? staleAlert
+            : '<p class="health-promise">Live read of catalog, backups, vault, disk, memory, and workers — the same story a host watchdog would surface, inside the app.</p>')
         + overallBanner(overall)
         + checks.map(checkRow).join('')
         + '</section>';
@@ -57,6 +72,7 @@ export async function refreshSystemHealth({ force = false } = {}) {
             payload = next;
             lastLoaded = Date.now();
         }
+        lastRefreshFailed = !next;
     } finally {
         loading = false;
     }

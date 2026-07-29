@@ -703,5 +703,7 @@ export async function commitImportScan(body) {
 }
 
 export async function getImportJob(jobId) {
-    return fetchJson(`/api/import/jobs/${jobId}`, { defaultValue: null });
+    // Polled in a loop by the import watcher, which owns outage messaging —
+    // the generic failure toast would otherwise fire on every missed poll.
+    return sharedFetchJson(`/api/import/jobs/${jobId}`, { timeoutMs: 10_000, defaultValue: null });
 }

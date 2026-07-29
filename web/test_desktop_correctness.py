@@ -389,6 +389,44 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("Couldn't load tags.", filters)
         self.assertIn("data-filter-retry", filters)
         self.assertIn("loadOptions({ force: true })", filters)
+        # The core filter-options leg must show the same truthful error, never
+        # confident "No people/cameras/dates found." copy for a failed fetch.
+        self.assertIn("let coreLoadError = false;", filters)
+        self.assertIn("Couldn't load people.", filters)
+        self.assertIn("Couldn't load cameras.", filters)
+        self.assertIn("Couldn't load lenses.", filters)
+        self.assertIn("Couldn't load dates.", filters)
+        self.assertIn("Couldn't load file types.", filters)
+
+    def test_stack_status_polls_survive_thrown_fetches_and_unlock_review(self):
+        duplicates = read("duplicates.js")
+
+        poll_start = duplicates.index("async function pollIdenticalVerification()")
+        poll = duplicates[poll_start:duplicates.index("\n}\n", poll_start)]
+        self.assertIn("status = await getIdenticalVerificationStatus();", poll)
+        self.assertIn("} catch", poll)
+        self.assertIn("identicalPollMisses", poll)
+        self.assertIn("scheduleIdenticalPoll(2500);", poll)
+
+        rescan_start = duplicates.index("async function rescanStacks()")
+        rescan = duplicates[rescan_start:duplicates.index("\n}\n", rescan_start)]
+        self.assertIn("status = await getStackRebuildStatus();", rescan)
+        self.assertIn("} catch", rescan)
+        # A dead poll must never leave review actions locked behind the rescan banner.
+        self.assertIn("stackRescanning = false;\n            button.disabled = false;", rescan)
+
+        # A list refresh resumes polling for a verification still running server-side.
+        self.assertIn("if (identicalStatus?.state === 'running') scheduleIdenticalPoll();", duplicates)
+
+    def test_system_health_never_labels_a_stale_snapshot_a_live_read(self):
+        system_health = read("system_health.js")
+
+        self.assertIn("lastRefreshFailed = !next;", system_health)
+        self.assertIn("Couldn’t refresh health", system_health)
+        self.assertIn("Showing the last read from", system_health)
+        # The "Live read" promise line must be replaced, not shown alongside stale data.
+        promise_start = system_health.index("const stale = lastRefreshFailed;")
+        self.assertIn("stale\n            ? staleAlert", system_health[promise_start:])
 
     def test_collection_scope_pages_compose_filters_through_rankings(self):
         scope_data = read("scope_data.js")
@@ -673,6 +711,22 @@ class DesktopCorrectnessTests(unittest.TestCase):
         )
         self.assertIn("Import status lost — this import may still be running", import_stage)
         self.assertIn("setScope({ import_batch: '', importBatchLabel: '' });", import_stage)
+
+    def test_import_watcher_survives_thrown_polls_and_feeds_cull_brief(self):
+        import_stage = read("import_stage.js")
+        cull_brief = read("cull_brief.js")
+
+        # A thrown status fetch is a retryable miss, never an unhandled
+        # rejection that kills the watcher — only a 404 (job registry gone)
+        # ends it, so completion/failure/safe-to-eject always eventually render.
+        self.assertIn("transient: error?.status !== 404", import_stage)
+        self.assertIn("const { job, transient } = await fetchJob(jobId);", import_stage)
+        self.assertIn("Math.min(JOB_POLL_MS * 2 ** misses, JOB_POLL_MAX_MS)", import_stage)
+        self.assertIn("Can’t reach the library — still watching this import", import_stage)
+        # The cull brief rides the live completion signal; the legacy
+        # 'azimuth:import-complete' event is only dispatched by dead code.
+        self.assertIn("on('import:changed', refreshCullBriefWithErrorState);", cull_brief)
+        self.assertNotIn("azimuth:import-complete", cull_brief)
 
     def test_publish_poll_cannot_clobber_active_input(self):
         # The ux7 Deliver rewrite re-renders the website tab on each poll tick.

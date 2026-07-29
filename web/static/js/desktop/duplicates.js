@@ -49,6 +49,9 @@ let stackObserver = null;
 let loading = false;
 let stackRescanning = false;
 let identicalPollTimer = null;
+let identicalPollMisses = 0;
+
+const POLL_MAX_MISSES = 5;
 
 const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
@@ -763,6 +766,8 @@ async function loadStackPage({ reset = false } = {}) {
             identicalSummary = data.summary || null;
             identicalStatus = data.verification_status || null;
             stackCounts.identical = Number(data.total) || incoming.length;
+            // Resume polling after a remount/kind switch while a verification is still running.
+            if (identicalStatus?.state === 'running') scheduleIdenticalPoll();
         }
         stackTotal = Number(data.total) || incoming.length;
         for (const stack of incoming) rememberImages(stackMembers(stack));
@@ -900,19 +905,35 @@ async function keepCoverForStack(stackId) {
     });
 }
 
-function scheduleIdenticalPoll() {
+function scheduleIdenticalPoll(delayMs = 1200) {
     if (identicalPollTimer) clearTimeout(identicalPollTimer);
-    identicalPollTimer = setTimeout(pollIdenticalVerification, 1200);
+    identicalPollTimer = setTimeout(pollIdenticalVerification, delayMs);
 }
 
 async function pollIdenticalVerification() {
     identicalPollTimer = null;
     if (!open || mode !== 'stacks' || stackKind !== 'identical') return;
-    const status = await getIdenticalVerificationStatus();
+    let status = null;
+    try {
+        status = await getIdenticalVerificationStatus();
+    } catch {
+        // A thrown poll must not kill the chain: verification keeps running server-side.
+    }
     if (!status) {
+        identicalPollMisses += 1;
+        if (identicalPollMisses < POLL_MAX_MISSES) {
+            scheduleIdenticalPoll(2500);
+            return;
+        }
+        identicalPollMisses = 0;
+        identicalStatus = null;
+        syncStackTools();
+        const hero = root.querySelector('.identical-hero');
+        if (hero) hero.outerHTML = identicalHeroHtml();
         showToast('Couldn’t read verification progress');
         return;
     }
+    identicalPollMisses = 0;
     identicalStatus = status;
     syncStackTools();
     if (status.state === 'running') {
@@ -939,6 +960,7 @@ async function startIdenticalVerification() {
         return;
     }
     identicalStatus = result.data?.verification_status || { state: 'running' };
+    identicalPollMisses = 0;
     syncStackTools();
     scheduleIdenticalPoll();
 }
@@ -994,8 +1016,23 @@ async function rescanStacks() {
         showToast('Couldn’t start rescan');
         return;
     }
-    const poll = async () => {
-        const status = await getStackRebuildStatus();
+    const poll = async (misses = 0) => {
+        let status = null;
+        try {
+            status = await getStackRebuildStatus();
+        } catch {
+            // A thrown poll must not leave review actions locked forever: retry, then unlock.
+            if (misses + 1 < POLL_MAX_MISSES) {
+                setTimeout(() => poll(misses + 1), 2500);
+                return;
+            }
+            stackRescanning = false;
+            button.disabled = false;
+            button.textContent = 'Rescan stacks';
+            renderStacks();
+            showToast('Couldn’t read rescan progress');
+            return;
+        }
         const state = String(status?.state || status?.status || '').toLowerCase();
         if (state && !['done', 'idle', 'complete', 'completed'].includes(state)) {
             setTimeout(poll, 1200);
