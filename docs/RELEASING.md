@@ -30,14 +30,17 @@ server with `scripts/build_server.py`, attaches
 `azimuth-photo-server-v0.1.0.tar.gz`, and asks GitHub Releases to generate
 notes from commits since the previous release tag.
 
-Docker users update with:
+The shipped `docker-compose.yml` builds the image locally (`build: .` with the
+local tag `azimuth-photo:latest`), so `docker compose pull` does not fetch
+releases. Compose users update with:
 
 ```bash
-docker compose pull
-docker compose up -d
+git pull
+docker compose up -d --build
 ```
 
-Or, for a direct image pull, replace the tag then recreate the container:
+Or, to run the published registry image directly, pull the release tag then
+recreate the container:
 
 ```bash
 docker pull ghcr.io/<owner>/azimuth-photo:v0.1.0

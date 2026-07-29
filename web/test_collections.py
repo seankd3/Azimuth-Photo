@@ -837,6 +837,18 @@ class SuggestionGroupingTests(unittest.TestCase):
         self.assertEqual(lauren["title"], "Lauren Elphin")
         self.assertEqual(wedding["title"], "Kathryn & Joeseph Wedding")
 
+    def test_shoot_hint_skips_mount_segments_but_keeps_person_folders(self):
+        from features.collections.suggestions import shoot_hint_from_path
+
+        mount_only = shoot_hint_from_path(
+            "/run/media/anyone/BigDisk/Photos/2024/2024-04-24/IMG_1234.jpg"
+        )
+        person_folder = shoot_hint_from_path("/photos/Sean/DSC_1234.jpg")
+
+        self.assertIsNone(mount_only)
+        self.assertEqual(person_folder["title"], "Sean")
+        self.assertEqual(person_folder["source"], "folder")
+
     def test_build_shoot_candidates_titles_date_pattern(self):
         from features.collections.suggestions import _build_shoot_candidates
 

@@ -1,7 +1,7 @@
 import os
 from PIL import Image
 from playwright.sync_api import sync_playwright
-OUT=r"C:/Users/smast/OneDrive/Desktop/Projects/azimuth-devlog/captures/DEVLOG"
+OUT=os.environ.get("AZIMUTH_CAPTURE_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "DEVLOG")
 BASE="http://127.0.0.1:8791/index.html"
 with sync_playwright() as p:
     b=p.chromium.launch()

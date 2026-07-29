@@ -58,8 +58,6 @@ _GENERIC_FOLDERS = {
     "",
     "run",
     "media",
-    "sean",
-    "expansion",
     "photos",
     "photo",
     "personal photos",
@@ -260,9 +258,15 @@ def _filename_hint(filename: str) -> dict | None:
     return _filename_hint_from_prefix(prefix.strip(" -_. ,"), date_ts)
 
 
+# Mount roots name machines and volumes (usernames, drive labels), not shoots;
+# strip them structurally for any user instead of enumerating one person's names.
+_MOUNT_ROOT_RE = re.compile(r"^/(?:run/media/[^/]+/[^/]+|media/[^/]+|mnt/[^/]+)(?=/|$)")
+
+
 @lru_cache(maxsize=8192)
 def _parent_folder_hint(parent: str) -> dict | None:
-    folder_hints = [_folder_hint(part) for part in PurePosixPath(parent).parts]
+    trimmed = _MOUNT_ROOT_RE.sub("", parent)
+    folder_hints = [_folder_hint(part) for part in PurePosixPath(trimmed).parts]
     return next((hint for hint in reversed(folder_hints) if hint), None)
 
 

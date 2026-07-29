@@ -76,7 +76,9 @@ find_pids() {
 }
 
 is_healthy() {
-    curl -fsS --max-time 1 "$URL/api/dev/status" >/dev/null 2>&1
+    # /api/health, not /api/dev/status: the probe hits the bind address, which
+    # in tailscale mode is the tailnet IP and therefore not loopback-exempt.
+    curl -fsS --max-time 1 "$URL/api/health" >/dev/null 2>&1
 }
 
 print_status() {
@@ -99,10 +101,10 @@ print_status() {
     fi
 
     if command -v curl >/dev/null 2>&1; then
-        if curl -fsS --max-time 1 "$URL/api/dev/status"; then
+        if curl -fsS --max-time 1 "$URL/api/health"; then
             printf '\n'
         else
-            printf 'health: not responding to /api/dev/status\n'
+            printf 'health: not responding to /api/health\n'
         fi
     fi
 }

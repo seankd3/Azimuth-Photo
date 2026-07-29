@@ -75,11 +75,12 @@ replacement; desktop = Lightroom Classic replacement).
 - PWA assets: `web/static/manifest.webmanifest`, `web/static/icons/icon.svg`,
   `web/static/sw.js` (shell precache, stale-while-revalidate thumbnails,
   network-only for other APIs, offline fallback to cached `/m`).
-- Service workers require a secure context. On the tailnet the app is served
-  over HTTPS via `tailscale serve --https=8443` →
-  `https://photos.example.com/m`. Plain `:8000` works but without
-  the service worker/install flow. Port 443 is a PUBLIC Funnel serving an
-  unrelated APK page — never reconfigure it.
+- Service workers require a secure context. Serve the app over HTTPS to use
+  `/m` as an installable PWA — for example `tailscale serve --https=8443` →
+  `https://<machine>.<tailnet>.ts.net:8443/m`, or any TLS reverse proxy.
+  Plain `:8000` works but without the service worker/install flow.
+  Machine-specific serving rules (ports already claimed on a given host)
+  belong in the untracked `AGENTS.local.md` overlay, not here.
 - Timeline endpoints: `/api/date-histogram` (whole-scope month counts driving
   the scrubber and month view) and `/api/counts` (total/picked/rejected per
   scope); `file_type` accepts `raw`/`jpg`/`tif` group aliases.
@@ -154,11 +155,12 @@ Agent verification ladder:
 | Narrow handoff | `./scripts/azimuth-check --quick` plus the relevant area |
 | Broad handoff or changed browser behavior | `./scripts/azimuth-check --unit` or `./scripts/azimuth-check --full` |
 
-Run unit tests directly from `web/` when you need a narrower loop:
+Run unit tests directly from `web/` when you need a narrower loop (always
+pytest — unittest discovery silently skips the suite's function-style tests):
 
 ```bash
 cd web
-.venv/bin/python -m unittest
+.venv/bin/python -m pytest -q test_the_module.py
 ```
 
 Run browser smoke checks against a running server:

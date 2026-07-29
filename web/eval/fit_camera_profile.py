@@ -41,12 +41,14 @@ from features.develop.lossydng import decode_lossy_dng
 from features.develop.rawproc import estimate_as_shot_white_balance
 
 
-EXPORT_DIRS = (
-    "/mnt/expansion/Photos/Exported Edits/2024/All Selected",
-    "/mnt/expansion/Photos/Exported Edits/2025",
+# Machine-specific roots come from the environment; there are no personal defaults.
+EXPORT_DIRS = tuple(
+    part
+    for part in os.environ.get("AZIMUTH_EVAL_EXPORT_DIRS", "").split(os.pathsep)
+    if part.strip()
 )
-RAWS = "/mnt/expansion/Photos/RAWS"
-EXIFTOOL = "/usr/bin/vendor_perl/exiftool"
+RAWS = os.environ.get("AZIMUTH_EVAL_RAWS_DIR", "")
+EXIFTOOL = os.environ.get("AZIMUTH_EXIFTOOL", "exiftool")
 DEFAULT_MAX_PAIRS = 48
 DEFAULT_FIT_PX = 384
 TONE_NODES = np.linspace(0.0, 1.0, C.CAMERA_PROFILE_TONE_NODES)
@@ -355,6 +357,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if not EXPORT_DIRS or not RAWS:
+        raise SystemExit(
+            "Set AZIMUTH_EVAL_EXPORT_DIRS (os.pathsep-separated Lightroom export "
+            "folders) and AZIMUTH_EVAL_RAWS_DIR (RAW root with "
+            "YYYY/YYYY-MM-DD/YYYYMMDD-HHMMSS.dng layout)."
+        )
     C.BASE_PROFILE_POINTS = tuple((float(value), float(value)) for value in (0, 32, 64, 128, 192, 255))
     C.BASE_PROFILE_SAT = 1.0
     pairs = gather_pairs()

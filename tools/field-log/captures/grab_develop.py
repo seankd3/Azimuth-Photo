@@ -3,7 +3,7 @@
 import sys, os
 from playwright.sync_api import sync_playwright
 BASE = "http://127.0.0.1:8890"
-OUT = r"C:/Users/smast/OneDrive/Desktop/Projects/azimuth-devlog/captures/DEV"
+OUT = os.environ.get("AZIMUTH_CAPTURE_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "DEV")
 os.makedirs(OUT, exist_ok=True)
 
 def shot(page, name):

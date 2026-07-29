@@ -2,17 +2,17 @@
  * WIZARDHUB Playwright proof for the first-run server-connect card on :8141.
  *
  * Usage:
- *   TMPDIR=/mnt/expansion/tmp NODE_PATH=.../node_modules \
- *     node scripts/wizardhub-playwright-proof.cjs http://127.0.0.1:8141
+ *   NODE_PATH=.../node_modules node scripts/wizardhub-playwright-proof.cjs http://127.0.0.1:8141
  *
- * Screenshots land in /mnt/expansion/tmp/dist2/wizardhub-*.png.
+ * Screenshots land in $AZIMUTH_PROOF_OUT (default: <os tmpdir>/azimuth-wizardhub-proof).
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const BASE = (process.argv[2] || process.env.AZIMUTH_PROBE_URL || 'http://127.0.0.1:8141').replace(/\/$/, '');
-const OUT = '/mnt/expansion/tmp/dist2';
+const OUT = process.env.AZIMUTH_PROOF_OUT || path.join(os.tmpdir(), 'azimuth-wizardhub-proof');
 fs.mkdirSync(OUT, { recursive: true });
 
 function shot(name) {

@@ -11,11 +11,16 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - Repo launcher: `scripts/azimuth-server` runs
   `web/.venv/bin/uvicorn app:app --host HOST --port PORT`; default is `127.0.0.1:8000`,
   `AZIMUTH_ACCESS=tailscale` binds the Tailscale IPv4.
-- Service template: `deploy/azimuth-photo.service` runs as the dedicated
-  `azimuth` account; installations may override user and paths locally
-  from `web/`, waits for Tailscale, binds its IPv4 on `:8000`, and restarts on
-  failure; Tailscale Serve supplies the phone-facing HTTPS `:8443` URL. Check
-  `TOPOLOGY.md` before assuming the live service has completed this cutover.
+- Service template: `deploy/azimuth-photo.service` runs
+  `scripts/server_entry.py` as the dedicated `azimuth` account from
+  `/opt/azimuth-photo`, binds loopback `127.0.0.1:8000` by default
+  (`AZIMUTH_ACCESS=local`), and restarts on failure. Installations override
+  user, paths, and exposure via `/etc/azimuth-photo/azimuth-photo.env`;
+  tailnet exposure (`AZIMUTH_ACCESS=tailscale` plus an explicit
+  `AZIMUTH_HOST`) is an env-file opt-in — only the bash launcher
+  auto-resolves the Tailscale IPv4, and Tailscale Serve supplies any
+  phone-facing HTTPS `:8443` URL. Check `TOPOLOGY.md` before assuming the
+  live service matches this template.
 - Runtime paths: `web/core/runtime_paths.py` selects platform-native data,
   config, cache, and state roots or an explicit `AZIMUTH_HOME`. A source
   checkout is never a runtime-storage fallback, and startup never silently
@@ -31,6 +36,8 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 
 - `access/` — authentication/access helpers and protected-route behavior.
 - `ai/` — embedding status, model controls, and AI worker endpoints.
+- `auth/` — owner-key auth: unlock page, session cookies, key set/rotate.
+- `backup/` — in-app Cloud Backup (rclone vault sync for original trees).
 - `cache/` — thumbnail cache status and pregeneration controls.
 - `captions/` — caption scan status, pause/resume, and caption edits.
 - `catalog/` — source folders, catalog scans, and catalog status.
@@ -46,7 +53,7 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - `library/` — ranked library, filters, dates, and visible-image queries; plus
   `keywords.py` (keyword/IPTC store + painter), `geodata.py` (GPS backfill,
   trail interpolation, Timeline import), `timeline_import.py`,
-  `saved_views.py`, `watched_folders.py` (in flight), `taste.py`.
+  `saved_views.py`, `watched_folders.py`, `taste.py`.
 - `media/` — thumbnail/full-image/media response endpoints and warming.
 - `pages/` — desktop, mobile, and share-gallery page routes.
 - `people/` — face scan, labels, merges, and People status.
@@ -59,8 +66,9 @@ ownership, and the verification ladder, read [`development.md`](development.md).
 - `share/` — private share-token/gallery routes and share mutations.
 - `shared/` — Shared triage/aggregation across published and private work.
 - `stacks/` — burst/variant/cross-source/manual stack operations.
-- `sync/` — (in flight) satellite/hub field sync: hashing, read-through media,
-  sync worker. Contract: `docs/FIELD_SPEC.md`.
+- `sync/` — satellite/hub field sync: device auth/pairing, mDNS discovery,
+  hashing, read-through media, mirror/oplog, LR bridge, sync worker.
+  Contract: `docs/FIELD_SPEC.md`.
 - `system/` — catalog time machine: DB snapshots/backups + restore.
 - `trash/` — source-local trash, restore, and permanent empty-trash actions.
 
@@ -85,7 +93,14 @@ Desktop modules (`web/static/js/desktop/`):
 - `scope_data.js` / `filters.js` — scope/filter data and controls.
 - `date_scrubber.js` — date histogram scrubber.
 - `panel.js` / `panel_sections.js` / `panel_right.js` — side-panel surfaces.
+- `collections.js` — Collections lens mount/render.
 - `drawer.js` / `folders.js` — settings drawer and catalog folder tree.
+- `library_manage.js` / `source_picker.js` / `quiet_sources.js` /
+  `source_reveal_menu.js` — Manage-library popover, add-source picker,
+  per-client quiet sources, and source reveal menus.
+- `system_lens.js` / `system_health.js` / `library_health.js` /
+  `cloud_backup.js` — System canvas, System Health panel, catalog
+  backup/integrity controls, and the Cloud Backup panel.
 - `contextbar.js` / `context_menu.js` — selection/context actions.
 - `selection.js` — selection mode and selected IDs.
 - `keyboard.js` / `focusTrap.js` — keyboard commands and modal focus.
@@ -101,9 +116,17 @@ Desktop modules (`web/static/js/desktop/`):
 - `suggestions.js` — collection suggestions.
 - `shared.js` — Shared triage UI.
 - `duplicates.js` / `similar.js` / `stack_cull.js` — duplicate/similarity/stack tools.
-- `trash.js` — Trash UI.
-- `importer.js` / `export_menu.js` — import and export controls.
-- `watched_folders.js` / `sync_chip.js` / `shortcut_sheet.js` — (in flight) watched folders, field-sync status, shortcut overlay.
+- `trash.js` / `trash_outcome.js` — Trash UI and mutation-outcome helpers.
+- `import_stage.js` / `export_menu.js` — staged Import canvas (the live import
+  surface) and export controls; `importer.js` is the unwired legacy modal.
+- `watched_folders.js` / `sync_chip.js` / `shortcut_sheet.js` — watched folders, field-sync status, shortcut overlay.
+- `layers.js` — ordered foreground-layer registry (keyboard/Esc consume it).
+- `jobs.js` — token-gated foreground job polling.
+- `elo_stars_display.js` / `lr_ranking_chip.js` — star/Elo projection display
+  and LR ranking chip.
+- `loading_state.js` / `empty_state.js` / `dom.js` / `file_manager.js` /
+  `quick_guide.js` — skeleton/empty-state builders, DOM/date helpers,
+  reveal-in-file-manager labels, quick guide overlay.
 - `motion.js` / `toast.js` — motion preferences and notifications.
 - `develop/` — Develop editor: `develop.js` shell, `gl.js` WebGL twin,
   `panels.js` + per-panel modules (film/lens/calibration/transform/history/
@@ -156,7 +179,8 @@ overrides density tokens on `html[data-density]`. Note: `--surface-popover` /
 - Preferred quick check: `./scripts/azimuth-check --quick` (diff check,
   compile with `web/.venv/bin/python`, and `node --check` for all JS).
 - Unit suite: `./scripts/azimuth-check --unit` or from `web/`,
-  `.venv/bin/python -m unittest`; focused areas are listed by
+  `.venv/bin/python -m pytest -q` (never unittest — it cannot collect the
+  function-style tests); focused areas are listed by
   `./scripts/azimuth-check --list-areas`.
 - Browser smoke: run a server, then
   `./scripts/azimuth-browser-smoke --base-url http://127.0.0.1:8000`;

@@ -1,6 +1,6 @@
 import os
 from playwright.sync_api import sync_playwright
-OUT=r"C:/Users/smast/OneDrive/Desktop/Projects/azimuth-devlog/captures/DEVLOG"
+OUT=os.environ.get("AZIMUTH_CAPTURE_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "DEVLOG")
 with sync_playwright() as p:
     b=p.chromium.launch()
     ctx=b.new_context(viewport={"width":940,"height":1100}, device_scale_factor=1.4)

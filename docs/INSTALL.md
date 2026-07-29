@@ -83,7 +83,7 @@ The Windows build of this folder is what the desktop app can ship as its sidecar
 | Settings | `/data/config/` | `~/.config/azimuth-photo/` |
 | Previews / caches | `/data/cache/` | `~/.cache/azimuth-photo/` |
 
-Existing developer checkouts that already have `web/azimuth.db` keep using that in-repo layout. New installs never move your photos.
+A source checkout is never used as runtime storage: older developer installs that kept `web/azimuth.db` inside the repo must set `AZIMUTH_DB_PATH` (or `AZIMUTH_HOME`) to that data — or move it into the paths above — to keep their catalog. Azimuth Photo never moves your photos.
 
 ---
 

@@ -42,13 +42,15 @@ jobs:
       - name: Build the Linux onedir server
         run: python scripts/build_server.py
       - name: Package the server artifact
-        run: tar -C dist -czf "azimuth-photo-server-${GITHUB_REF_NAME}.tar.gz" azimuth-server
+        # -C only rebases the input operand; the -f path is relative to the workspace.
+        run: tar -C dist -czf "dist/azimuth-photo-server-${GITHUB_REF_NAME}.tar.gz" azimuth-server
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           # GitHub compares this tag to the previous release tag and writes the commit notes.
           generate_release_notes: true
           files: dist/azimuth-photo-server-*.tar.gz
+          fail_on_unmatched_files: true
 
   # STUB: Enable once desktop signing is ready. This Windows job will build the
   # Tauri NSIS installer, sign its updater bundle, and upload the installer plus

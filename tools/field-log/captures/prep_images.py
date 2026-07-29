@@ -2,7 +2,7 @@
 """Resize period captures into web-ready plates for the devlog."""
 import os
 from PIL import Image
-SB = r"C:/Users/smast/OneDrive/Desktop/Projects/azimuth-devlog"
+SB = os.environ.get("AZIMUTH_DEVLOG_ROOT") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(SB, "build", "assets", "screens")
 os.makedirs(OUT, exist_ok=True)
 

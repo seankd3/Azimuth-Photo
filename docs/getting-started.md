@@ -49,9 +49,13 @@ A clean install keeps the catalog and generated data outside the source tree:
 - macOS uses `~/Library/Application Support/Azimuth Photo` and
   `~/Library/Caches/Azimuth Photo`.
 
-Existing installations continue using their current `web/azimuth.db`,
-`.thumbcache`, `.models`, `.embedcache`, settings, logs, Develop cache, and
-backup folders. Startup never moves, copies, or rebuilds them.
+Startup never moves, copies, or rebuilds existing data, and a source checkout
+is never used as runtime storage. If you upgraded from an older version that
+kept data inside the repo (`web/azimuth.db`, `web/.thumbcache`, `web/.models`,
+`web/.embedcache`), the app starts a fresh catalog at the native location
+above; your old data stays untouched on disk. To keep using it, point the app
+at it explicitly — set `AZIMUTH_DB_PATH` (plus the matching cache/model
+overrides below) to the old files, or move them into the native directories.
 
 Set `AZIMUTH_HOME` to keep a new installation under one chosen root, or
 use a granular override such as `AZIMUTH_DB_PATH`,

@@ -10,11 +10,13 @@ implementation of this architecture.
   Google Photos — instant timeline, effortless search, people, one-thumb
   viewer, long-press selection. Where Google Photos has cloud lock-in, we have
   Tailscale + local truth. Where it has Memories, we have Refine and Best-of.
-- **Desktop: Lightroom Classic replacement** for everything except developing —
-  culling, organizing, ranking, and notably stronger publishing tools
-  (collections to share links to website galleries).
-- Editing/develop is explicitly out of scope for now; if it ever lands, it is
-  one more overlay verb on Photo, not a new module.
+- **Desktop: Lightroom Classic replacement** — culling, organizing, ranking,
+  developing, and notably stronger publishing tools (collections to share
+  links to website galleries).
+- Editing ships as the **Develop** module (`docs/DEVELOP_SPEC.md`): a verb on
+  Photo entered with `D` that takes over the canvas full-bleed (like Loupe, a
+  canvas-scale surface rather than a scrimmed overlay). Esc parks it and
+  returns exactly where the user was; it owns no navigation and adds no page.
 
 ## The grammar
 

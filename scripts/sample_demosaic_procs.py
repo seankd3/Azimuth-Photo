@@ -48,10 +48,17 @@ def _child_rss_mb(parent_pid: int) -> list[tuple[int, float]]:
 def main() -> int:
     from thumbnails import demosaic_pool
 
+    raw_dir = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("AZIMUTH_SAMPLE_RAW_DIR", "")
+    if not raw_dir:
+        print("usage: sample_demosaic_procs.py <folder-with-DNG-files>", file=sys.stderr)
+        return 2
+    paths = sorted(p for p in Path(raw_dir).iterdir() if p.suffix.lower() == ".dng")[:12]
+    if not paths:
+        print(f"no DNG files in {raw_dir}", file=sys.stderr)
+        return 2
     demosaic_pool.reset_for_tests()
     demosaic_pool.ensure_pool()
     parent = os.getpid()
-    paths = sorted(Path("/mnt/expansion/Photos/RAWS/2022/2022-05-09").glob("*R5*.DNG"))[:12]
 
     def one(path: Path) -> None:
         demosaic_pool.run_demosaic_tier_jpegs(
