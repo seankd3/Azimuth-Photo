@@ -127,6 +127,16 @@ class SyncClientTest {
     }
 
     @Test
+    fun verifiedPresentUsesByteProofEndpointAndParsesPresentSet() {
+        server.enqueue(jsonResponse("""{"present":["hash-a"]}"""))
+
+        val present = client.verifiedPresent(listOf("hash-a", "hash-b"))
+
+        assertEquals(setOf("hash-a"), present)
+        assertEquals("/api/sync/have", server.takeRequest().path)
+    }
+
+    @Test
     fun completedBytesWithoutImageIdThrows() {
         val payload = ByteArray(100)
         server.enqueue(jsonResponse("""{"offset":0}"""))

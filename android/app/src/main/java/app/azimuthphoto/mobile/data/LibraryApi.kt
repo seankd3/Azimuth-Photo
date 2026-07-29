@@ -97,9 +97,10 @@ data class FilterOptions(
 
 /**
  * The desktop-parity library surface: people/faces, collections/albums, places,
- * captions/tags, and visual-similar. Read paths need no auth; write paths accept
- * an optional X-Device-Token. Response shapes for write endpoints are verified
- * against the live hub by each feature's builder.
+ * captions/tags, and visual-similar. Every request carries the paired device
+ * token when one is stored — a secured hub (owner auth) 401s read paths too.
+ * Response shapes for write endpoints are verified against the live hub by
+ * each feature's builder.
  */
 class LibraryApi(private val baseUrl: String, private val deviceToken: String? = null) {
 
@@ -112,6 +113,7 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
     private val jsonType = "application/json".toMediaType()
 
     private fun builder(path: String) = Request.Builder().url("$baseUrl$path")
+        .header("X-PA-Api-Rev", HUB_API_REV.toString())
         .apply { deviceToken?.let { header("X-Device-Token", it) } }
 
     private fun get(path: String): String =
@@ -195,16 +197,26 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
             }.isSuccess
         }
 
-    /** Returns the public URL when publishing succeeds (null when the hub has no publish dir set). */
+    /**
+     * Start publishing and wait for the public gallery URL. The hub accepts the
+     * job with 202 {job, slug, title} and exports in the background, so poll the
+     * publish status until the URL lands. Returns null when publishing isn't
+     * configured (409, no publish dir) or the job doesn't finish in time.
+     */
     suspend fun publish(collectionId: Long): String? = withContext(Dispatchers.IO) {
         runCatching {
-            val obj = json.parseToJsonElement(
-                postJson("/api/user-collections/$collectionId/publish", "{}"),
-            ).jsonObject
-            (obj["url"]?.toString()?.trim('"')?.takeIf { it != "null" })
-                ?: obj["publish"]?.jsonObject?.let {
-                    (it["url"] ?: it["publish_slug"])?.toString()?.trim('"')?.takeIf { s -> s != "null" }
-                }
+            postJson("/api/user-collections/$collectionId/publish", "{}")
+            repeat(30) {
+                kotlinx.coroutines.delay(1_000)
+                val obj = json.parseToJsonElement(
+                    get("/api/user-collections/$collectionId/publish"),
+                ).jsonObject
+                val url = obj["url"]?.toString()?.trim('"')
+                    ?.takeIf { it.isNotBlank() && it != "null" }
+                if (url != null) return@runCatching url
+                if (obj["in_progress"]?.toString() != "true") return@runCatching null
+            }
+            null
         }.getOrNull()
     }
 
@@ -265,7 +277,9 @@ class LibraryApi(private val baseUrl: String, private val deviceToken: String? =
 
     // ---- Places ----
     suspend fun markers(limit: Int = 5000): List<MapMarker> = withContext(Dispatchers.IO) {
-        json.decodeFromString<MarkersResponse>(get("/api/map/markers?limit=$limit")).markers
+        // The hub doesn't implement ?limit yet (sent for forward compat), so the
+        // cap is enforced here — Places never renders more markers than it asked for.
+        json.decodeFromString<MarkersResponse>(get("/api/map/markers?limit=$limit")).markers.take(limit)
     }
 
     // ---- Tags / captions / similar ----

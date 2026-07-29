@@ -1,5 +1,6 @@
 package app.azimuthphoto.mobile.backup
 
+import app.azimuthphoto.mobile.data.HUB_API_REV
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -30,6 +31,12 @@ data class KnownItem(val content_hash: String, val image_id: Long)
 
 @Serializable
 data class ManifestResponse(val missing: List<String>, val known: List<KnownItem>)
+
+@Serializable
+private data class HaveRequest(val content_hashes: List<String>)
+
+@Serializable
+private data class HaveResponse(val present: List<String> = emptyList())
 
 @Serializable
 private data class SyncOpResponse(
@@ -64,6 +71,23 @@ class SyncClient(
         ).execute().use { resp ->
             if (!resp.isSuccessful) throw hubException("manifest", resp)
             return json.decodeFromString(resp.body!!.string())
+        }
+    }
+
+    /**
+     * Byte-verification gate for destructive cleanup: the hub re-derives each
+     * content hash from the live bytes it holds right now, so a truncated or
+     * bit-rotted hub copy never green-lights deleting the phone's only copy.
+     * (Manifest "known" is only an existence + stat-size check — never enough.)
+     */
+    fun verifiedPresent(contentHashes: List<String>): Set<String> {
+        if (contentHashes.isEmpty()) return emptySet()
+        val body = json.encodeToString(HaveRequest(contentHashes)).toRequestBody(jsonType)
+        http.newCall(
+            requestBuilder("$baseUrl/api/sync/have").post(body).build()
+        ).execute().use { resp ->
+            if (!resp.isSuccessful) throw hubException("have", resp)
+            return json.decodeFromString<HaveResponse>(resp.body!!.string()).present.toSet()
         }
     }
 
@@ -136,6 +160,7 @@ class SyncClient(
 
     private fun requestBuilder(url: String): Request.Builder = Request.Builder()
         .url(url)
+        .header("X-PA-Api-Rev", HUB_API_REV.toString())
         .apply { deviceToken?.let { header("X-Device-Token", it) } }
 
     private fun parseSyncResponse(body: String): SyncOpResponse = try {

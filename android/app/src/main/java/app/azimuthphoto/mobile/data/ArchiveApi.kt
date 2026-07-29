@@ -16,8 +16,12 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import app.azimuthphoto.mobile.backup.HubHttpException
 
 private val JSON_TYPE = "application/json".toMediaType()
+
+/** Hub wire-contract revision this app was built against (web/core/version.py API_REV). */
+const val HUB_API_REV = 2
 
 @Serializable
 data class ArchiveImage(
@@ -50,14 +54,20 @@ data class RankingsPage(
     val images: List<ArchiveImage> = emptyList(),
     val visible_images: Long = 0,
     val total_images: Long = 0,
+    /** True when the hub answered 200-but-busy (sqlite lock) — not a real empty page. */
+    val status_stale: Boolean = false,
 )
 
-class ArchiveApi(private val baseUrl: String) {
+class ArchiveApi(private val baseUrl: String, val deviceToken: String? = null) {
     private val http = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
     private val json = Json { ignoreUnknownKeys = true }
+
+    private fun request(url: String): Request.Builder = Request.Builder().url(url)
+        .header("X-PA-Api-Rev", HUB_API_REV.toString())
+        .apply { deviceToken?.let { header("X-Device-Token", it) } }
 
     suspend fun page(
         offset: Int,
@@ -77,7 +87,7 @@ class ArchiveApi(private val baseUrl: String) {
                 append("&folder=").append(java.net.URLEncoder.encode("/$folder", "UTF-8"))
             }
         }
-        http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+        http.newCall(request(url).build()).execute().use { response ->
             if (!response.isSuccessful) {
                 throw IOException("rankings failed: HTTP ${response.code}")
             }
@@ -86,7 +96,7 @@ class ArchiveApi(private val baseUrl: String) {
     }
 
     suspend fun shelves(): List<Shelf> = withContext(Dispatchers.IO) {
-        val all = http.newCall(Request.Builder().url("$baseUrl/api/folders").build())
+        val all = http.newCall(request("$baseUrl/api/folders").build())
             .execute().use { response ->
                 if (!response.isSuccessful) {
                     throw IOException("folders failed: HTTP ${response.code}")
@@ -107,10 +117,29 @@ class ArchiveApi(private val baseUrl: String) {
             .readTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .callTimeout(timeoutSeconds, TimeUnit.SECONDS)
             .build()
-        client.newCall(Request.Builder().url("$baseUrl/api/stats").build()).execute().use { response ->
-            if (!response.isSuccessful) throw IOException("stats failed: HTTP ${response.code}")
+        client.newCall(request("$baseUrl/api/stats").build()).execute().use { response ->
+            // Carries the HTTP code so callers can tell "secured, needs pairing"
+            // (401) apart from a genuinely unreachable address.
+            if (!response.isSuccessful) throw HubHttpException(response.code, "stats")
             val root = json.parseToJsonElement(response.body?.string().orEmpty())
             ArchiveStats(photoCount = findPhotoCount(root))
+        }
+    }
+
+    /**
+     * Redeem a one-time pairing code (hub Settings → Devices) into this device's
+     * token. Public on the hub by design; returns the raw device_token to store.
+     */
+    suspend fun pair(code: String, deviceName: String): String = withContext(Dispatchers.IO) {
+        val body = json.encodeToString(
+            PairBody(code.trim().uppercase(), deviceName.ifBlank { "Android" }),
+        ).toRequestBody(JSON_TYPE)
+        http.newCall(request("$baseUrl/api/pair").post(body).build()).execute().use { response ->
+            if (!response.isSuccessful) throw HubHttpException(response.code, "pair")
+            val root = json.parseToJsonElement(response.body?.string().orEmpty())
+            ((root as? JsonObject)?.get("device_token") as? JsonPrimitive)?.content
+                ?.takeIf { it.isNotBlank() }
+                ?: throw IOException("hub did not return a device token")
         }
     }
 
@@ -126,21 +155,21 @@ class ArchiveApi(private val baseUrl: String) {
     /** Move hub images to the archive's restorable trash. */
     suspend fun trash(ids: List<Long>): Boolean = withContext(Dispatchers.IO) {
         val body = json.encodeToString(ImageIdsBody(ids)).toRequestBody(JSON_TYPE)
-        http.newCall(Request.Builder().url("$baseUrl/api/images/trash").post(body).build())
+        http.newCall(request("$baseUrl/api/images/trash").post(body).build())
             .execute().use { it.isSuccessful }
     }
 
     /** Mark one hub photo as a favorite, or clear its favorite flag. */
     suspend fun setFlag(imageId: Long, flag: String): Boolean = withContext(Dispatchers.IO) {
         val body = json.encodeToString(ImageFlagBody(flag)).toRequestBody(JSON_TYPE)
-        http.newCall(Request.Builder().url("$baseUrl/api/image/$imageId/flag").post(body).build())
+        http.newCall(request("$baseUrl/api/image/$imageId/flag").post(body).build())
             .execute().use { it.isSuccessful }
     }
 
     /** EXIF fields for the info sheet; shapes vary, so everything renders defensively. */
     suspend fun exif(imageId: Long): Map<String, String> = withContext(Dispatchers.IO) {
         runCatching {
-            http.newCall(Request.Builder().url("$baseUrl/api/image/$imageId/exif").build())
+            http.newCall(request("$baseUrl/api/image/$imageId/exif").build())
                 .execute().use { response ->
                     if (!response.isSuccessful) return@use emptyMap()
                     val root = json.parseToJsonElement(response.body?.string().orEmpty())
@@ -168,7 +197,7 @@ class ArchiveApi(private val baseUrl: String) {
             // mistaken for a complete one on the next attempt.
             val tmp = File(dir, "${target.name}.part")
             try {
-                http.newCall(Request.Builder().url(fullUrl(image.id)).build()).execute().use { response ->
+                http.newCall(request(fullUrl(image.id)).build()).execute().use { response ->
                     if (!response.isSuccessful) throw IOException("full download failed: HTTP ${response.code}")
                     tmp.outputStream().use { out -> response.body!!.byteStream().copyTo(out) }
                 }
@@ -196,6 +225,9 @@ private data class ImageIdsBody(val ids: List<Long>)
 
 @Serializable
 private data class ImageFlagBody(val flag: String)
+
+@Serializable
+private data class PairBody(val code: String, val device_name: String, val platform: String = "android")
 
 data class ArchiveStats(val photoCount: Long?)
 

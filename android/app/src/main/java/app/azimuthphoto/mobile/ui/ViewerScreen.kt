@@ -86,7 +86,10 @@ import androidx.core.content.FileProvider
 import androidx.exifinterface.media.ExifInterface
 import androidx.media3.common.Player
 import androidx.media3.common.MediaItem as ExoMediaItem
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
 import app.azimuthphoto.mobile.ViewerActivity
 import app.azimuthphoto.mobile.backup.BackupDb
@@ -260,11 +263,13 @@ fun ViewerScreen(
                 }
                 media is ViewerMedia.Remote && media.isVideo -> {
                     LaunchedEffect(page) { if (isActive) currentZoom = 1f }
-                    // Streams straight off the hub; ExoPlayer speaks http natively.
+                    // Streams straight off the hub; ExoPlayer speaks http natively,
+                    // but a secured hub needs the paired device token on the stream.
                     VideoPage(
                         source = Uri.parse(api?.fullUrl(media.image.id).orEmpty()),
                         key = media.key,
                         isActive = isActive,
+                        headers = api?.deviceToken?.let { mapOf("X-Device-Token" to it) } ?: emptyMap(),
                     )
                 }
                 else -> ZoomableImage(
@@ -518,8 +523,10 @@ private fun RemoteInfo(image: ArchiveImage, api: ArchiveApi?) {
     var exif by remember(image.id) { mutableStateOf<Map<String, String>>(emptyMap()) }
     var caption by remember(image.id) { mutableStateOf<app.azimuthphoto.mobile.data.Caption?>(null) }
     // One client per server, not one per caption load.
-    val library = remember(settings?.serverUrl) {
-        settings?.serverUrl?.let { app.azimuthphoto.mobile.data.LibraryApi(it) }
+    val library = remember(settings?.serverUrl, settings?.deviceToken) {
+        settings?.serverUrl?.let {
+            app.azimuthphoto.mobile.data.LibraryApi(it, settings?.deviceToken?.takeIf { t -> t.isNotBlank() })
+        }
     }
     LaunchedEffect(image.id) { exif = api?.exif(image.id) ?: emptyMap() }
     LaunchedEffect(image.id, library) { library?.let { caption = it.caption(image.id) } }
@@ -659,13 +666,31 @@ private fun ZoomableImage(
 }
 
 @Composable
-private fun VideoPage(source: Uri, key: String, isActive: Boolean) {
+private fun VideoPage(
+    source: Uri,
+    key: String,
+    isActive: Boolean,
+    headers: Map<String, String> = emptyMap(),
+) {
     val context = LocalContext.current
     val hostView = LocalView.current
     var muted by remember(key) { mutableStateOf(false) }
     var isPlaying by remember(key) { mutableStateOf(false) }
     val player = remember(key) {
-        ExoPlayer.Builder(context).build().apply {
+        val builder = ExoPlayer.Builder(context)
+        if (headers.isNotEmpty()) {
+            // DefaultDataSource still handles local content:// URIs; only the
+            // http path picks up the extra headers.
+            builder.setMediaSourceFactory(
+                DefaultMediaSourceFactory(
+                    DefaultDataSource.Factory(
+                        context,
+                        DefaultHttpDataSource.Factory().setDefaultRequestProperties(headers),
+                    )
+                )
+            )
+        }
+        builder.build().apply {
             setMediaItem(ExoMediaItem.fromUri(source))
             prepare()
         }

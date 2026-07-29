@@ -37,6 +37,7 @@ import app.azimuthphoto.mobile.backup.BackupDb
 import app.azimuthphoto.mobile.backup.BackupScheduler
 import app.azimuthphoto.mobile.backup.BackupWorker
 import app.azimuthphoto.mobile.backup.FreeUpSpace
+import app.azimuthphoto.mobile.backup.HubHttpException
 import app.azimuthphoto.mobile.data.SettingsStore
 import app.azimuthphoto.mobile.data.ArchiveApi
 import kotlinx.coroutines.launch
@@ -60,11 +61,16 @@ fun SettingsScreen(onOpenTrash: () -> Unit) {
     var serverUrl by remember(s.serverUrl) { mutableStateOf(s.serverUrl) }
     var deviceToken by remember(s.deviceToken) { mutableStateOf(s.deviceToken) }
     var reachability by remember(s.serverUrl) { mutableStateOf<String?>(null) }
-    LaunchedEffect(s.serverUrl) {
+    LaunchedEffect(s.serverUrl, s.deviceToken) {
         reachability = runCatching {
-            val count = ArchiveApi(s.serverUrl).stats(timeoutSeconds = 3).photoCount
+            val count = ArchiveApi(s.serverUrl, s.deviceToken.takeIf { it.isNotBlank() })
+                .stats(timeoutSeconds = 3).photoCount
             if (count != null) "Connected — ${"%,d".format(count)} photos" else "Connected"
-        }.getOrElse { "Unreachable" }
+        }.getOrElse { error ->
+            // 401 = reachable but secured; "Unreachable" would be a false report.
+            if ((error as? HubHttpException)?.code == 401) "Secured — pair this device or paste its token"
+            else "Unreachable"
+        }
     }
 
     Column(

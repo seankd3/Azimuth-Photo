@@ -27,10 +27,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.azimuthphoto.mobile.R
+import app.azimuthphoto.mobile.backup.HubHttpException
 import app.azimuthphoto.mobile.data.ArchiveApi
 import app.azimuthphoto.mobile.data.SettingsStore
 import kotlinx.coroutines.launch
@@ -43,10 +45,16 @@ fun OnboardingScreen(
 ) {
     val pagerState = rememberPagerState { 3 }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var serverUrl by remember { mutableStateOf(SettingsStore.DEFAULT_SERVER_URL) }
     var backupEnabled by remember { mutableStateOf(true) }
     var testResult by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+    var needsPairing by remember { mutableStateOf(false) }
+    var pairedToken by remember { mutableStateOf<String?>(null) }
+    var pairCode by remember { mutableStateOf("") }
+    var pairing by remember { mutableStateOf(false) }
+    var pairError by remember { mutableStateOf<String?>(null) }
 
     // Granting from the system dialog advances the flow without a second tap.
     LaunchedEffect(hasMediaPermission) {
@@ -55,19 +63,30 @@ fun OnboardingScreen(
 
     // The app can answer "does this address work?" itself — probe on entering the
     // connect step and after edits settle, instead of making the user tap a button.
-    LaunchedEffect(pagerState.currentPage, serverUrl) {
+    // A 401 means the hub is reachable but secured: offer pairing, never "can't reach".
+    LaunchedEffect(pagerState.currentPage, serverUrl, pairedToken) {
         if (pagerState.currentPage != 2 || serverUrl.isBlank()) {
             testResult = null
             testing = false
+            needsPairing = false
             return@LaunchedEffect
         }
         testing = true
         testResult = null
         kotlinx.coroutines.delay(500)
         testResult = runCatching {
-            val count = ArchiveApi(serverUrl.trim().trimEnd('/')).stats().photoCount
+            val count = ArchiveApi(serverUrl.trim().trimEnd('/'), pairedToken).stats().photoCount
+            needsPairing = false
             if (count == null) "✓ Connected" else "✓ ${"%,d".format(count)} photos"
-        }.getOrElse { "× Can't reach this address" }
+        }.getOrElse { error ->
+            if ((error as? HubHttpException)?.code == 401) {
+                needsPairing = true
+                "Secured — pair this device to connect"
+            } else {
+                needsPairing = false
+                "× Can't reach this address"
+            }
+        }
         testing = false
     }
 
@@ -150,6 +169,43 @@ fun OnboardingScreen(
                         color = if (testResult?.startsWith("✓") == true) Positive else TextSecondary,
                         style = MaterialTheme.typography.bodySmall,
                     )
+                    if (needsPairing && !testing) {
+                        Spacer(Modifier.height(10.dp))
+                        OutlinedTextField(
+                            value = pairCode,
+                            onValueChange = { pairCode = it.uppercase(); pairError = null },
+                            label = { Text("Pair code") },
+                            placeholder = { Text("From the hub: Settings → Devices") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        pairError?.let {
+                            Spacer(Modifier.height(6.dp))
+                            Text(it, color = TextSecondary, style = MaterialTheme.typography.bodySmall)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            enabled = pairCode.isNotBlank() && !pairing,
+                            onClick = {
+                                scope.launch {
+                                    pairing = true
+                                    pairError = null
+                                    runCatching {
+                                        ArchiveApi(serverUrl.trim().trimEnd('/'))
+                                            .pair(pairCode.trim(), android.os.Build.MODEL)
+                                    }.onSuccess { token ->
+                                        SettingsStore.setDeviceToken(context, token)
+                                        pairCode = ""
+                                        pairedToken = token // re-arms the probe with the credential
+                                    }.onFailure {
+                                        pairError =
+                                            "Pairing failed — codes are single-use and expire in 10 minutes"
+                                    }
+                                    pairing = false
+                                }
+                            },
+                        ) { Text(if (pairing) "Pairing…" else "Pair") }
+                    }
                     Spacer(Modifier.height(14.dp))
                     androidx.compose.foundation.layout.Row(
                         Modifier.fillMaxWidth(),

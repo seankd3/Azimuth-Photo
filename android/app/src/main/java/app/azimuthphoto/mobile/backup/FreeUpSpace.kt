@@ -26,7 +26,7 @@ object FreeUpSpace {
     /** What a "Free up now" would reclaim, so the user can see before they commit. */
     data class Preview(val count: Int, val bytes: Long)
 
-    /** Hub-confirmed, aged-out local copies eligible for removal, with their sizes. */
+    /** Hub-verified, aged-out local copies eligible for removal, with their sizes. */
     private suspend fun eligible(activity: Activity): List<Pair<Uri, Long>> =
         withContext(Dispatchers.IO) {
             val settings = SettingsStore.current(activity)
@@ -41,16 +41,13 @@ object FreeUpSpace {
             val hashed = aged.mapNotNull { item -> hashFor(activity, item.id)?.let { item to it } }
             if (hashed.isEmpty()) return@withContext emptyList()
 
+            // Deletion gate: /api/sync/have re-hashes the hub's live bytes
+            // (TOPOLOGY: confirm the same complete bytes immediately before local
+            // deletion). The manifest's "known" is stat-size only — never enough
+            // to remove the phone's only copy.
             val confirmed = try {
                 SyncClient(settings.serverUrl, settings.deviceToken.takeIf { it.isNotBlank() })
-                    .manifest(hashed.map { (item, hash) ->
-                        ManifestItem(
-                            content_hash = hash,
-                            bytes = item.sizeBytes,
-                            filename = item.displayName.ifEmpty { "IMG_${item.id}" },
-                        )
-                    })
-                    .known.map { it.content_hash }.toSet()
+                    .verifiedPresent(hashed.map { it.second })
             } catch (e: Exception) {
                 return@withContext emptyList()
             }

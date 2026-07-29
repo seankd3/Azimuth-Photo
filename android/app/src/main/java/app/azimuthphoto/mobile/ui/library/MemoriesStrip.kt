@@ -47,14 +47,18 @@ import java.time.LocalDate
  * Renders nothing when there are no memories, so it never leaves an empty header behind.
  */
 @Composable
-fun MemoriesStrip(serverUrl: String, onOpenPhotos: (List<ArchiveImage>, Int) -> Unit) {
+fun MemoriesStrip(
+    serverUrl: String,
+    deviceToken: String? = null,
+    onOpenPhotos: (List<ArchiveImage>, Int) -> Unit,
+) {
     var memories by remember { mutableStateOf<LoadState<List<Memory>>>(LoadState.Loading) }
     var reloads by remember { mutableStateOf(0) }
 
-    LaunchedEffect(serverUrl, reloads) {
+    LaunchedEffect(serverUrl, deviceToken, reloads) {
         memories = LoadState.Loading
         val today = LocalDate.now()
-        memories = loadState { Memories.onThisDay(serverUrl, today) }
+        memories = loadState { Memories.onThisDay(serverUrl, today, deviceToken = deviceToken) }
     }
 
     if (memories is LoadState.Loading) {

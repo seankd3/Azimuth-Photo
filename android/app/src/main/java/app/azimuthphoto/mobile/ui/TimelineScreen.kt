@@ -116,7 +116,9 @@ fun TimelineScreen(
     var refreshing by remember { mutableStateOf(false) }
     val settings by SettingsStore.flow(context).collectAsState(initial = null)
     val progress by BackupWorker.progress.collectAsState()
-    val api = remember(settings?.serverUrl) { settings?.serverUrl?.let { ArchiveApi(it) } }
+    val api = remember(settings?.serverUrl, settings?.deviceToken) {
+        settings?.serverUrl?.let { ArchiveApi(it, settings?.deviceToken?.takeIf { t -> t.isNotBlank() }) }
+    }
 
     var device by remember { mutableStateOf<List<MediaItem>?>(null) }
     var rawTwins by remember { mutableStateOf<Map<String, MediaItem>>(emptyMap()) }
@@ -128,6 +130,8 @@ fun TimelineScreen(
     var hubOffset by remember { mutableStateOf(0) }
     var hubExhausted by remember { mutableStateOf(false) }
     var hubOffline by remember { mutableStateOf(false) }
+    var hubStale by remember { mutableStateOf(false) }
+    var hubRetry by remember { mutableStateOf(0) }
     var wantMore by remember { mutableStateOf(false) }
     var loadTick by remember { mutableStateOf(0) }
     var mediaStoreChanges by remember { mutableStateOf(0) }
@@ -191,12 +195,31 @@ fun TimelineScreen(
     val usesHub = api != null && activeScope !is Scope.NotBackedUp
 
     // (Re)load the hub source whenever the scope, server, or a manual retry changes.
-    LaunchedEffect(folderKey, usesHub, api, loadTick) {
+    LaunchedEffect(folderKey, usesHub, api, loadTick, hubRetry) {
         hub = emptyList(); hubOffset = 0; hubExhausted = false; hubOffline = false; wantMore = false
         if (usesHub && api != null) {
             runCatching { api.page(offset = 0, limit = HUB_PAGE, folders = folderPaths) }
-                .onSuccess { hub = it.images; hubOffset = it.images.size; hubExhausted = it.images.isEmpty() }
-                .onFailure { hubOffline = true }
+                .onSuccess {
+                    if (it.status_stale) {
+                        // The hub answered 200-but-busy (sqlite lock): its empty page is
+                        // not proof of an empty library — show "busy" and retry, never
+                        // the empty-library placeholder.
+                        hubStale = true
+                    } else {
+                        hubStale = false
+                        hub = it.images; hubOffset = it.images.size; hubExhausted = it.images.isEmpty()
+                    }
+                }
+                .onFailure { hubOffline = true; hubStale = false }
+        } else {
+            hubStale = false
+        }
+    }
+    // A busy hub self-heals: retry quietly until a real answer lands.
+    LaunchedEffect(hubStale, hubRetry, loadTick) {
+        if (hubStale) {
+            delay(2_500)
+            hubRetry++
         }
     }
 
@@ -287,7 +310,7 @@ fun TimelineScreen(
                     )
                     Spacer(Modifier.height(16.dp))
                     Text(
-                        emptyMessage(activeScope, hubOffline),
+                        emptyMessage(activeScope, hubOffline, hubStale),
                         color = TextSecondary,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
@@ -322,6 +345,9 @@ fun TimelineScreen(
                 if (usesHub && api != null && hubOffset > 0 && !hubExhausted && !hubOffline) {
                     val next = runCatching { api.page(offset = hubOffset, limit = HUB_PAGE, folders = folderPaths) }.getOrNull()
                     if (next == null) hubOffline = true
+                    // A busy-hub page is not the end of the timeline: leave the source
+                    // unexhausted so the next scroll retries it.
+                    else if (next.status_stale) Unit
                     else if (next.images.isEmpty()) hubExhausted = true
                     else {
                         hub = (hub + next.images).distinctBy { it.id }
@@ -357,6 +383,7 @@ fun TimelineScreen(
                     selected = scope,
                     onSelect = { scope = it },
                     offline = hubOffline && activeScope is Scope.All,
+                    stale = hubStale && activeScope is Scope.All,
                     onRetry = { loadTick++ },
                 )
             }
@@ -381,6 +408,7 @@ private fun ScopeChips(
     selected: Int,
     onSelect: (Int) -> Unit,
     offline: Boolean,
+    stale: Boolean,
     onRetry: () -> Unit,
 ) {
     Row(
@@ -407,6 +435,13 @@ private fun ScopeChips(
                 Text("Archive offline", color = TextSecondary, style = MaterialTheme.typography.labelMedium)
                 TextButton(onClick = onRetry) { Text("Retry") }
             }
+        } else if (stale) {
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "Archive busy — retrying…",
+                color = TextSecondary,
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }
@@ -424,9 +459,10 @@ private fun ScopeChip(label: String, selected: Boolean, onClick: () -> Unit) {
     )
 }
 
-private fun emptyMessage(scope: Scope, offline: Boolean): String = when {
+private fun emptyMessage(scope: Scope, offline: Boolean, stale: Boolean): String = when {
     scope is Scope.NotBackedUp -> "Everything on this device is backed up."
     offline -> "Archive offline — no photos on this device yet."
+    stale -> "Archive is busy — retrying…"
     scope is Scope.Shelf -> "Nothing in ${scope.shelf.name} yet."
     else -> "No photos yet — take one and it'll land here (and in your archive)."
 }

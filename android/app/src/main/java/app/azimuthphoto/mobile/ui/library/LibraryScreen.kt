@@ -85,7 +85,7 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
     val serverUrl = settings?.serverUrl ?: return
     val token = settings?.deviceToken?.takeIf { it.isNotBlank() }
     val api = remember(serverUrl, token) { LibraryApi(serverUrl, token) }
-    val archiveApi = remember(serverUrl) { ArchiveApi(serverUrl) }
+    val archiveApi = remember(serverUrl, token) { ArchiveApi(serverUrl, token) }
 
     val backStack = remember { mutableStateListOf<Route>(Route.Home) }
     fun push(route: Route) { backStack.add(route) }
@@ -109,6 +109,7 @@ fun LibraryScreen(onImmersive: (Boolean) -> Unit = {}) {
             Route.Home -> LibraryHome(
                 api = api,
                 serverUrl = serverUrl,
+                deviceToken = token,
                 onOpenSearch = { push(Route.Search) },
                 onOpenPeople = { push(Route.People) },
                 onOpenPerson = { push(Route.Person(it)) },
@@ -164,6 +165,7 @@ private var homeCache: HomeCache? = null
 private fun LibraryHome(
     api: LibraryApi,
     serverUrl: String,
+    deviceToken: String? = null,
     onOpenSearch: () -> Unit,
     onOpenPeople: () -> Unit,
     onOpenPerson: (Person) -> Unit,
@@ -202,7 +204,7 @@ private fun LibraryHome(
             Text("Search your photos", color = TextSecondary, style = MaterialTheme.typography.bodyLarge)
         }
 
-        MemoriesStrip(serverUrl = serverUrl, onOpenPhotos = onOpenPhotos)
+        MemoriesStrip(serverUrl = serverUrl, deviceToken = deviceToken, onOpenPhotos = onOpenPhotos)
 
         if (people.isNotEmpty()) {
             SectionHeader("People", actionLabel = "See all", onAction = onOpenPeople)

@@ -34,6 +34,7 @@ object Memories {
         serverUrl: String,
         today: LocalDate,
         maxYears: Int = 12,
+        deviceToken: String? = null,
     ): List<Memory> = coroutineScope {
         val mm = "%02d".format(today.monthValue)
         val dd = "%02d".format(today.dayOfMonth)
@@ -46,16 +47,26 @@ object Memories {
                     // Skip dates that don't exist in the target year (e.g. Feb 29).
                     val valid = runCatching { LocalDate.of(year, today.monthValue, today.dayOfMonth) }.isSuccess
                     val images = if (!valid) emptyList()
-                    else runCatching { fetch(serverUrl, year, mm, dd) }.getOrDefault(emptyList())
+                    else runCatching { fetch(serverUrl, year, mm, dd, deviceToken) }.getOrDefault(emptyList())
                     if (images.isEmpty()) null else Memory(yearsAgo = yearsAgo, year = year, images = images)
                 }
             }.awaitAll().filterNotNull()
         }.orEmpty()
     }
 
-    private fun fetch(serverUrl: String, year: Int, mm: String, dd: String): List<ArchiveImage> {
+    private fun fetch(
+        serverUrl: String,
+        year: Int,
+        mm: String,
+        dd: String,
+        deviceToken: String?,
+    ): List<ArchiveImage> {
         val url = "$serverUrl/api/rankings?sort=elo&date_taken=$year-$mm-$dd&limit=12"
-        http.newCall(Request.Builder().url(url).build()).execute().use { response ->
+        val request = Request.Builder().url(url)
+            .header("X-PA-Api-Rev", HUB_API_REV.toString())
+            .apply { deviceToken?.let { header("X-Device-Token", it) } }
+            .build()
+        http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw IOException("memories failed: HTTP ${response.code}")
             val body = response.body?.string() ?: return emptyList()
             return json.decodeFromString<RankingsPage>(body).images

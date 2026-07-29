@@ -96,7 +96,9 @@ fun SearchScreen(
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         return
     }
-    val api = remember(currentSettings.serverUrl) { ArchiveApi(currentSettings.serverUrl) }
+    val api = remember(currentSettings.serverUrl, currentSettings.deviceToken) {
+        ArchiveApi(currentSettings.serverUrl, currentSettings.deviceToken.takeIf { it.isNotBlank() })
+    }
     val libApi = remember(currentSettings.serverUrl, currentSettings.deviceToken) {
         LibraryApi(currentSettings.serverUrl, currentSettings.deviceToken.takeIf { it.isNotBlank() })
     }
@@ -167,10 +169,16 @@ fun SearchScreen(
         firstPageLoading = true
         runCatching { libApi.search(filters, 0, PAGE_SIZE) }
             .onSuccess { page ->
-                archiveImages = page.images
-                // total_images = real match count; visible_images only counts
-                // thumb-ready photos and undercounts while the hub processes.
-                visibleTotal = page.total_images
+                if (page.status_stale) {
+                    // 200-but-busy (sqlite lock): the empty page and 0 total are not
+                    // real results — surface the retry affordance, never "0 photos".
+                    archiveError = true
+                } else {
+                    archiveImages = page.images
+                    // total_images = real match count; visible_images only counts
+                    // thumb-ready photos and undercounts while the hub processes.
+                    visibleTotal = page.total_images
+                }
             }
             .onFailure { archiveError = true }
         firstPageLoading = false
@@ -192,7 +200,7 @@ fun SearchScreen(
         scope.launch {
             runCatching { libApi.search(launched, archiveImages.size, PAGE_SIZE) }
                 .onSuccess { page ->
-                    if (filters == launched) {
+                    if (filters == launched && !page.status_stale) {
                         archiveImages = (archiveImages + page.images).distinctBy { it.id }
                         visibleTotal = page.total_images
                         // The hub only serves thumb-ready images; an empty page
