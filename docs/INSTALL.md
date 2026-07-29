@@ -28,7 +28,9 @@ Open `http://<that-machine>:8000`.
 
 ### Unraid
 
-Import `deploy/unraid-template.xml` (or add the image manually):
+There is no published registry image yet — build `azimuth-photo:latest` on the
+server first (`docker compose build` in this repo, or `docker load` a saved
+image). Then import `deploy/unraid-template.xml` (or add the image manually):
 
 | Path / port | Maps to |
 |---|---|

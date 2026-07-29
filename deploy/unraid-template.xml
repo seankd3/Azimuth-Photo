@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <Container version="2">
   <Name>Azimuth Photo</Name>
-  <Repository>azimuth:latest</Repository>
+  <Repository>azimuth-photo:latest</Repository>
   <Registry/>
   <Network>bridge</Network>
   <MyIP/>
@@ -15,7 +15,7 @@
     For phone discovery on the LAN, switch to host networking (see docs/INSTALL.md).
   </Overview>
   <Category>MediaApp:Photos</Category>
-  <WebUI>http://[IP]:[PORT:8000]/WebUI>
+  <WebUI>http://[IP]:[PORT:8000]/</WebUI>
   <TemplateURL/>
   <Icon>https://raw.githubusercontent.com/Sean-Kenneth-Doherty/azimuth-photo/main/web/static/icons/icon.svg</Icon>
   <ExtraParams/>
