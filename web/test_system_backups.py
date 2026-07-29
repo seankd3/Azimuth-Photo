@@ -354,14 +354,53 @@ class BackupUnitTests(unittest.TestCase):
         staging = other_db.with_name("azimuth.restored.db")
         self.assertFalse(staging.exists())
 
-    def test_retention_never_prunes_newest_snapshot(self):
-        """An aged-out newest snapshot survives; older siblings still prune."""
+    def test_retention_ranks_present_snapshots_not_calendar_windows(self):
+        """History survives long gaps; slots rank the days/weeks actually present.
 
-        for stamp in ("20260101-040000", "20260102-040000"):
+        Twelve daily snapshots spanning ISO weeks 27 (Jul 1-5) and 28
+        (Jul 6-12), pruned long after the fact: the 7 newest days present
+        (Jul 6-12) plus the newest snapshot of week 27 (Jul 5) survive.
+        """
+
+        for day in range(1, 13):
+            (self.root / f"azimuth-202607{day:02d}-040000.db.gz").write_bytes(b"old")
+        pruned = backups.apply_retention(self.root, now=date(2026, 12, 1))
+        self.assertEqual(
+            sorted(pruned),
+            [f"azimuth-202607{day:02d}-040000.db.gz" for day in range(1, 5)],
+        )
+        for day in range(5, 13):
+            self.assertTrue((self.root / f"azimuth-202607{day:02d}-040000.db.gz").is_file())
+
+    def test_failed_snapshot_never_deletes_a_sibling_instances_publish(self):
+        """Failure cleanup removes only what this run published.
+
+        Names have one-second resolution; a sibling that started in the same
+        second may already own final_path with a verified snapshot.
+        """
+
+        first = backups.create_snapshot(
+            str(self.db_path), when=datetime(2026, 7, 28, 3, 0, 0)
+        )
+        self.assertTrue(first["ok"])
+        when = datetime(2026, 7, 28, 4, 0, 0)
+        sibling = self.root / "azimuth-20260728-040000.db.gz"
+        sibling.write_bytes(b"sibling-verified-snapshot")
+        with mock.patch.object(
+            backups, "_sqlite_backup_to_path", side_effect=OSError("disk full")
+        ):
+            with self.assertRaises(OSError):
+                backups.create_snapshot(str(self.db_path), when=when)
+        self.assertTrue(sibling.is_file())
+        self.assertEqual(sibling.read_bytes(), b"sibling-verified-snapshot")
+
+    def test_retention_keeps_all_history_after_a_long_gap(self):
+        """The first snapshot after months away must not wipe the pre-gap history."""
+
+        for stamp in ("20260101-040000", "20260102-040000", "20260728-040000"):
             (self.root / f"azimuth-{stamp}.db.gz").write_bytes(b"old")
         pruned = backups.apply_retention(self.root, now=date(2026, 7, 28))
-        self.assertEqual(pruned, ["azimuth-20260101-040000.db.gz"])
-        self.assertTrue((self.root / "azimuth-20260102-040000.db.gz").is_file())
+        self.assertEqual(pruned, [])
 
     def test_legacy_named_snapshots_stay_visible_and_retained(self):
         """Pre-rename photoarchive-* snapshots list, sort, and count as history."""

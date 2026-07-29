@@ -551,6 +551,7 @@ def create_snapshot(
     # tmp file — the in-process _backup_lock cannot see the other process.
     tmp_db = root / f".{name}.{os.getpid()}.tmp.db"
     tmp_gz = root / f".{name}.{os.getpid()}.tmp.gz"
+    published = False
 
     with _backup_lock:
         try:
@@ -580,6 +581,7 @@ def create_snapshot(
             _verify_gzip_matches_db(tmp_gz, tmp_db)
 
             os.replace(tmp_gz, final_path)
+            published = True
             _fsync_file(final_path)
             _fsync_directory(root)
             write_backup_owner_marker(root, db_path)
@@ -616,7 +618,10 @@ def create_snapshot(
                 last_error_at=failed_at,
                 last_name=name,
             )
-            if final_path.exists():
+            # Only remove what this run published. Snapshot names have
+            # one-second resolution, so a sibling instance that started in the
+            # same second may already own final_path with a verified copy.
+            if published and final_path.exists():
                 try:
                     final_path.unlink()
                 except OSError:
@@ -695,7 +700,15 @@ def list_backups(db_path: str | None = None) -> list[dict[str, Any]]:
 
 
 def apply_retention(root: Path | None = None, *, now: date | None = None) -> list[str]:
-    """Keep 7 daily + 4 weekly snapshots; delete the rest. Returns pruned names."""
+    """Keep 7 daily + 4 weekly snapshots; delete the rest. Returns pruned names.
+
+    Days and weeks are ranked by the snapshots actually present, not anchored
+    to the calendar: after a long gap (seasonal use, a laptop in a drawer) the
+    pre-gap history still fills the daily/weekly slots instead of being wiped
+    by the first snapshot on return — the moment deep history matters most.
+    ``now`` is accepted for call-site compatibility; ranking makes it moot.
+    """
+    del now
     root = root or backup_root()
     backups: list[tuple[datetime, Path]] = []
     for path in _snapshot_paths(root):
@@ -706,13 +719,7 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
     if not backups:
         return []
 
-    today = now or date.today()
     keep: set[Path] = set()
-
-    # The newest snapshot is never pruned. Retention trims history; it must
-    # not leave the catalog with zero backups when every snapshot has aged
-    # out of the daily/weekly windows (long-offline machine, backdated stamp).
-    keep.add(backups[0][1])
 
     # Always retain the most recent pre-migration snapshots. They are the
     # rollback safety net for a schema upgrade and must survive routine pruning.
@@ -724,32 +731,28 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
     for _when, path in premigrate[:PREMIGRATE_KEEP]:
         keep.add(path)
 
-    # Newest backup per calendar day for the last 7 days.
+    # Newest backup per calendar day for the 7 most recent days present.
     daily_seen: set[date] = set()
     for when, path in backups:
         day = when.date()
-        if day < today - timedelta(days=DAILY_KEEP - 1):
-            continue
         if day in daily_seen:
             continue
+        if len(daily_seen) >= DAILY_KEEP:
+            break
         daily_seen.add(day)
         keep.add(path)
 
-    # Newest backup per ISO week for the last 4 weeks.
+    # Newest backup per ISO week for the 4 most recent weeks present.
     weekly_seen: set[tuple[int, int]] = set()
     for when, path in backups:
         iso = when.isocalendar()
         week_key = (iso.year, iso.week)
         if week_key in weekly_seen:
             continue
-        # Only count weeks that fall within the weekly retention window.
-        week_start = date.fromisocalendar(iso.year, iso.week, 1)
-        if week_start < today - timedelta(weeks=WEEKLY_KEEP):
-            continue
-        weekly_seen.add(week_key)
-        keep.add(path)
         if len(weekly_seen) >= WEEKLY_KEEP:
             break
+        weekly_seen.add(week_key)
+        keep.add(path)
 
     pruned: list[str] = []
     for when, path in backups:
