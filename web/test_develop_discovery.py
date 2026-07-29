@@ -114,10 +114,12 @@ class DevelopDiscoveryTests(unittest.TestCase):
         self.assertEqual(report["xmp_found"], 1)
 
     def test_direct_cache_modules_respect_selected_develop_root(self):
+        # TOPOLOGY.md: AZIMUTH_HOME is the all-in-one root; a fine-grained
+        # AZIMUTH_* dir var refines it for tiered servers and therefore wins
+        # when set. Without one, every direct cache module stays inside HOME.
         with tempfile.TemporaryDirectory() as tmp:
             environment = os.environ.copy()
             environment.pop("AZIMUTH_DEVELOP_CACHE_DIR", None)
-            environment["AZIMUTH_DEVELOP_CACHE_DIR"] = str(Path(tmp) / "inherited-default")
             environment["AZIMUTH_HOME"] = str(Path(tmp) / "app")
             script = (
                 "from features.develop import ai_masks, hdr, pano, rawproc; "

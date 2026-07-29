@@ -71,6 +71,10 @@ class DevelopLensTests(unittest.TestCase):
         np.testing.assert_allclose(tiled, full, atol=2e-6)
 
     def test_modern_rf_lens_resolves_from_exif_names(self):
+        try:
+            import lensfunpy  # noqa: F401
+        except ImportError:
+            self.skipTest("lensfunpy not installed (requirements-ai-develop.txt)")
         correction = lens.resolve_lens_correction(
             {
                 "camera_make": "Canon",

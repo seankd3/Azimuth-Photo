@@ -83,6 +83,14 @@ class HubContractTests(unittest.TestCase):
                 "features.sync.satellite_routes.oplog.pending_entry_count",
                 new_callable=AsyncMock,
                 return_value=3,
+            ), patch(
+                # The LR bridge reads real catalog tables; this contract test's
+                # :memory: db has none and only the version fields matter here.
+                # satellite_routes imports the module inside the handler, so
+                # patch at the module's own definition.
+                "features.sync.lr_status.bridge_status_payload",
+                new_callable=AsyncMock,
+                return_value={},
             ):
                 return await satellite_routes.sync_status()
 
