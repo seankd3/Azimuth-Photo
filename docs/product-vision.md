@@ -31,6 +31,37 @@ The execution order lives in [Product Roadmap](product-roadmap.md).
 - Trust that originals are safe, private material is not accidentally exposed,
   and public/share states are obvious.
 
+## Non-Negotiables
+
+These are covenants, not backlog ideas. A change that violates one is a defect
+regardless of what it improves.
+
+- **One coherent app.** A user sees Azimuth Photo — never Python, servers,
+  ports, URLs, databases, or deployment concepts.
+- **One name.** Everything customer-visible — installers, windows, packages,
+  documentation — is Azimuth Photo, with no prior branding.
+- **Windows-first installation.** A normal Windows user can download, install,
+  choose local, external, mapped-drive, or NAS folders, and reach their library
+  without a terminal.
+- **Local-first and offline-capable.** Once a device has its catalog, previews,
+  and embeddings, browsing, search, culling, ranking, organizing, and learning
+  keep working with no server and no network.
+- **The server is optional.** Another machine may add storage, backup, bulk
+  compute, sync, sharing, or publishing — it never becomes a prerequisite for
+  day-to-day work.
+- **Nothing leaves the device by default.** Originals, previews, embeddings,
+  faces, captions, ranking history, and catalog facts stay local unless the
+  user enables a specific capability with a specific destination.
+- **Taste is durable user data.** Direct choices, undos, curation, and edits
+  are preserved locally and portably. Elo scores, models, indexes, and caches
+  are rebuildable projections.
+- **Interactions feel instant.** No click spinner in culling or ranking; a warm
+  device advances immediately while expensive learning happens quietly in the
+  background.
+- **Originals and the catalog are sacred.** No cleanup, migration, free-space,
+  scan, restore, or sync path may risk the only verified copy of an original or
+  the only durable record of the user's work.
+
 ## Product Principles
 
 ### The Archive Is The Source Of Truth

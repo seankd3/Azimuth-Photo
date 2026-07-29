@@ -63,6 +63,27 @@ Each check asserts the median of three calls. Route and query caches are cleared
 before each sample so the budget continues to cover the real data path; the
 synthetic database itself is reused to keep setup representative and fast.
 
+## Proposed daily-workflow SLOs (not ratified)
+
+Targets for the workflows photographers repeat all day. **Covenant** rows are
+already product doctrine; **proposed** rows need ratification against measured
+cold/warm, local/NAS baselines before any implementation is held to them. A
+blank target means measure first — it does not mean "fast enough". Never widen
+a budget to mask slowness, and never let a faster number hide an incomplete
+result: zero omitted or misordered photos is part of every row.
+
+| Daily workflow | Target | Status |
+| --- | --- | --- |
+| Cull/Refine/ranking action → visible acknowledgement | < 50 ms perceived, no spinner | covenant |
+| Prepared local workflow (server absent, network denied) | zero network dependency | covenant |
+| Durable ranking-action append | p95 ≤ 50 ms, p99 < 100 ms | proposed |
+| Dual click → both photos replaced | p95 ≤ 50 ms, p99 < 100 ms | proposed |
+| Export start → acknowledgement | ≤ 50 ms | proposed |
+| Launch → first usable library | measure cold/warm, local/NAS first | proposed |
+| Grid first content and sustained scroll | measure first; no omitted photos | proposed |
+| Loupe open and next/previous | measure cached/uncached, RAW/raster first | proposed |
+| Develop adjustment → preview update | measure first; input never dropped | proposed |
+
 ## Re-baselining
 
 Run the focused module on omarchy when the hardware or intentional query shape

@@ -95,6 +95,82 @@ Goal: help Sean find and shape better albums faster.
 
 User outcome: the app helps curate without taking control away from Sean.
 
+## Next Slices
+
+### Instant, Trustworthy Ranking
+
+Goal: make every ranking click durable, instant, and exactly undoable.
+
+- Record each choice as one durable action that is acknowledged immediately and
+  survives restart, with expensive learning deferred to the background.
+- Treat a mosaic pick as one action over its full candidate set, not dozens of
+  independent comparisons.
+- Make Random mean random: draw from the complete eligible scope with filters
+  and exclusions applied, not from a top-ranked window.
+- Keep direct choices and inferred scores visibly separate, and extend learning
+  across the whole catalog — including photos with no direct signal yet —
+  with honest uncertainty.
+
+User outcome: ranking feels instant and honest, a wrong click never costs real
+work, and taste signals reach the entire archive instead of a refined minority.
+
+### Dual As An Atomic Rhythm
+
+Goal: make the two-photo Dual comparison a decisive rhythm.
+
+- After every successful choice, replace both photos with two genuinely new
+  candidates — no stale survivor.
+- Mouse and keyboard behave identically; rapid input never double-fires or
+  skips a round.
+- Failure and undo restore the exact previous pair and focus.
+
+User outcome: Dual becomes a fast, decisive flow instead of one new photo at a
+time.
+
+### A Professional Format And Export Covenant
+
+Goal: photographers know exactly which files Azimuth Photo handles faithfully.
+
+- Declare the supported RAW, raster, and video formats, and fail honestly on
+  the rest.
+- Round-trip orientation, timestamps, ratings, keywords, EXIF/XMP metadata, and
+  color profiles predictably.
+- Make exports match the chosen recipe exactly: dimensions, color space,
+  quality, metadata, and filenames.
+- Never modify an original file.
+
+User outcome: pros can trust the archive with real client work because format,
+color, and metadata behavior is documented and proven.
+
+### The Installed Windows Day
+
+Goal: a photographer's entire working day runs on one installed Windows
+machine with no server anywhere.
+
+- Prove the full session on a clean install: browse, search, cull, refine,
+  organize, edit, export, close, and restart — offline, against local,
+  external, and NAS folders.
+- Direct choices and edits survive restart, source disconnects and reconnects,
+  and app upgrades.
+- Every failure state offers a clear retry, locate, or keep-offline action
+  instead of a dead end.
+
+User outcome: Azimuth Photo is a real Windows app, not a hosted service that
+has to be kept alive.
+
+### One-Action Catalog Restore
+
+Goal: recovering from a corrupt catalog needs no terminal.
+
+- Keep restore preparation as safe as it is today: validate a snapshot and
+  stage it beside the live catalog without overwriting anything.
+- Add the missing apply step: one explicit action stops the engine, preserves
+  the failed catalog, promotes the staged one, restarts, verifies health, and
+  offers rollback.
+
+User outcome: a scary catalog failure becomes a calm, guided recovery instead
+of a manual file-move procedure.
+
 ## Later Goals
 
 - Platform-ready derivatives for Instagram, X, and future destinations.
