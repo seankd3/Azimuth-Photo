@@ -158,6 +158,20 @@ def test_share_unlock_failure_tracker_is_bounded():
     share_routes._unlock_failures.clear()
 
 
+def test_capacity_pressure_never_evicts_a_live_share_lockout():
+    share_routes._unlock_failures.clear()
+    for _ in range(share_routes.UNLOCK_FAILURE_LIMIT):
+        share_routes._record_unlock_failure("under-attack", now=1.0)
+    assert share_routes._unlock_retry_after("under-attack", now=2.0) is not None
+
+    for index in range(share_routes.MAX_TRACKED_UNLOCK_TOKENS + 50):
+        share_routes._record_unlock_failure(f"flood-{index}", now=2.0)
+
+    assert share_routes._unlock_retry_after("under-attack", now=3.0) is not None
+    assert len(share_routes._unlock_failures) <= share_routes.MAX_TRACKED_UNLOCK_TOKENS
+    share_routes._unlock_failures.clear()
+
+
 def test_bulk_request_models_reject_unbounded_lists():
     oversized_cases = (
         lambda: CreateStackBody(image_ids=list(range(10_001))),

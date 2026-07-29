@@ -123,7 +123,8 @@ async def api_create_gallery(collection_id: int, body: GalleryBody, request: Req
     gallery = await galleries.create_gallery(
         _configured_db_path(), collection_id=collection_id,
         title=(body.title or snapshot["name"] or "Client gallery"), image_ids=snapshot["image_ids"],
-        options=_options(body), password_hash=auth.hash_password(body.password) if body.password else None,
+        options=_options(body),
+        password_hash=await asyncio.to_thread(auth.hash_password, body.password) if body.password else None,
     )
     return {"ok": True, "gallery": _owner_payload(request, gallery)}
 
@@ -137,7 +138,7 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     if body.clear_password:
         password_hash = None
     elif body.password is not None:
-        password_hash = auth.hash_password(body.password) if body.password else None
+        password_hash = await asyncio.to_thread(auth.hash_password, body.password) if body.password else None
     updated = await galleries.update_gallery(
         _configured_db_path(), gallery_id, title=body.title,
         options=_options(body), password_hash=password_hash,
@@ -300,7 +301,11 @@ async def public_gallery_unlock(token: str, request: Request):
     if _unlock_retry_after(token) is not None:
         return _public_response(_locked_response(request, token, gallery, throttle_seconds=_unlock_retry_after(token), status_code=429))
     password = await auth.read_form_password(request)
-    if password is None or len(password) > MAX_UNLOCK_PASSWORD_LENGTH or not auth.verify_password(password, gallery.get("password_hash")):
+    if (
+        password is None
+        or len(password) > MAX_UNLOCK_PASSWORD_LENGTH
+        or not await asyncio.to_thread(auth.verify_password, password, gallery.get("password_hash"))
+    ):
         count, started = _unlock_failures.get(token, (0, time.time()))
         _unlock_failures[token] = (count + 1, started)
         await asyncio.sleep(0.2)

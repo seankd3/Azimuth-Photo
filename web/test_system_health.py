@@ -394,10 +394,14 @@ class HealthAuthTests(unittest.TestCase):
             response = client.get("/api/health/details")
             self.assertEqual(response.status_code, 401)
             self.assertIn("Owner authentication required", response.json().get("error", ""))
-            summary = client.get("/api/health")
-            self.assertEqual(summary.status_code, 401)
             self.assertNotIn("/api/health/details", owner_auth.PUBLIC_PATHS)
-            self.assertNotIn("/api/health", owner_auth.PUBLIC_PATHS)
+            # The summary is deliberately public: launchers and monitors probe
+            # the bind address (tailnet IP in tailscale mode, never loopback),
+            # and it carries no catalog specifics — only check ids and ok/warn.
+            summary = client.get("/api/health")
+            self.assertEqual(summary.status_code, 200)
+            self.assertEqual(set(summary.json()), {"status", "checked_at", "checks"})
+            self.assertIn("/api/health", owner_auth.PUBLIC_PATHS)
         finally:
             settings.SETTINGS_PATH = old_settings
             settings._settings = None

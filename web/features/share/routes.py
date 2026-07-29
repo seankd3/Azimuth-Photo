@@ -301,12 +301,12 @@ def _favorite_ids(favorites: list[dict]) -> list[int]:
     return [int(row["image_id"]) for row in favorites]
 
 
-def _password_hash_for_payload(payload: ShareBody) -> str | None:
+async def _password_hash_for_payload(payload: ShareBody) -> str | None:
     if payload.clear_password:
         return None
     if payload.password is None:
         return None
-    return auth.hash_password(payload.password)
+    return await asyncio.to_thread(auth.hash_password, payload.password)
 
 
 def _has_password_change(payload: ShareBody) -> bool:
@@ -347,8 +347,19 @@ def _record_unlock_failure(token: str, now: float | None = None) -> None:
     for key in expired:
         _unlock_failures.pop(key, None)
     if token not in _unlock_failures and len(_unlock_failures) >= MAX_TRACKED_UNLOCK_TOKENS:
-        oldest = min(_unlock_failures, key=lambda key: float(_unlock_failures[key].get("first_at") or 0))
-        _unlock_failures.pop(oldest, None)
+        # Capacity pressure must never clear a live lockout: that is how an
+        # attempt flood would buy itself fresh guesses against a real token.
+        evictable = [
+            key
+            for key, value in _unlock_failures.items()
+            if int(value.get("count") or 0) < UNLOCK_FAILURE_LIMIT
+        ]
+        if not evictable:
+            return
+        _unlock_failures.pop(
+            min(evictable, key=lambda key: float(_unlock_failures[key].get("first_at") or 0)),
+            None,
+        )
     failure = _unlock_failures.get(token)
     if not failure or now >= float(failure.get("first_at") or now) + UNLOCK_FAILURE_WINDOW_SECONDS:
         _unlock_failures[token] = {"count": 1, "first_at": now}
@@ -399,13 +410,13 @@ async def api_create_share(collection_id: int, payload: ShareBody, request: Requ
     if _is_password_only_update(payload):
         active = await _get_share(collection_id)
         if active is not None:
-            share = await _set_share_password(collection_id, _password_hash_for_payload(payload))
+            share = await _set_share_password(collection_id, await _password_hash_for_payload(payload))
             return {"ok": True, "share": _share_payload(request, share)}
 
     expires_at = None
     if payload.expires_in_days is not None:
         expires_at = time.time() + (payload.expires_in_days * 86400)
-    password_hash = _password_hash_for_payload(payload) if _has_password_change(payload) else None
+    password_hash = await _password_hash_for_payload(payload) if _has_password_change(payload) else None
     if payload.rotate and not _has_password_change(payload):
         active = await _get_share(collection_id)
         password_hash = active.get("password_hash") if active else None
@@ -579,8 +590,14 @@ async def public_share_unlock(token: str, request: Request):
                 status_code=413,
             )
         return _public_response(JSONResponse({"error": "Password is too long"}, status_code=413))
-    if collection is None or not auth.verify_password(password, collection.get("password_hash")):
-        _record_unlock_failure(token)
+    unlocked = collection is not None and await asyncio.to_thread(
+        auth.verify_password, password, collection.get("password_hash")
+    )
+    if not unlocked:
+        # Only real tokens are tracked: made-up ones must not be able to flood
+        # the failure table and evict a token that is genuinely under attack.
+        if collection is not None:
+            _record_unlock_failure(token)
         await asyncio.sleep(0.4)
         return _public_response(RedirectResponse(f"/s/{token}?e=1", status_code=303))
 

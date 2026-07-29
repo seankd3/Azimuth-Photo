@@ -149,16 +149,24 @@ async def track_idle_activity(
     excluded_paths: set[str] | None = None,
     activity_classifier=None,
 ):
-    """Note browsing only for genuine media traffic.
+    """Note browsing only for genuine media traffic that authenticated.
 
     The central classifier in ``core.user_activity`` is the source of truth.
     ``excluded_paths`` is an optional extra deny-list (tests / specialized shells).
+    This middleware is installed outside owner auth, so it reads the response:
+    401s and unlock redirects are unauthenticated traffic (scanners, logged-out
+    tabs) and must never clamp background work to the activity-burst budget.
     """
     path = request.url.path
     classify = activity_classifier or marks_user_activity
-    if classify(path) and (excluded_paths is None or path not in excluded_paths):
+    response = await call_next(request)
+    status = int(getattr(response, "status_code", 200) or 200)
+    authenticated = status < 400 and not (
+        status == 303 and str(response.headers.get("location", "")).startswith("/unlock")
+    )
+    if authenticated and classify(path) and (excluded_paths is None or path not in excluded_paths):
         thumbnails.note_user_activity()
-    return await call_next(request)
+    return response
 
 
 def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):

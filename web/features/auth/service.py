@@ -13,7 +13,7 @@ import time
 from ipaddress import ip_address
 
 import settings
-from core.browser_origin import _first_header_value, _is_trusted_proxy, _parse_forwarded
+from core.browser_origin import _is_trusted_proxy, _last_header_value, _parse_forwarded
 from features.share import auth as share_auth
 
 COOKIE_NAME = "pa_o"
@@ -124,21 +124,27 @@ def scope_headers(scope) -> dict[str, str]:
 
 def client_ip(scope, headers: dict[str, str]) -> str:
     """Real client IP: forwarded headers count only when the peer is a trusted
-    proxy (loopback or the server itself), mirroring core.browser_origin."""
+    proxy (loopback or the server itself), mirroring core.browser_origin. The
+    rightmost chain entry is the one the proxy appended — nginx, Caddy, Traefik
+    and friends all append, so the leftmost entry is attacker-controlled."""
     client = scope.get("client") or ()
     peer = str(client[0]) if client and client[0] else ""
     if _is_trusted_proxy(scope):
-        forwarded_for = _first_header_value(headers.get("x-forwarded-for", ""))
+        forwarded_for = _last_header_value(headers.get("x-forwarded-for", ""))
         if forwarded_for:
             return forwarded_for
-        forwarded = _parse_forwarded(headers.get("forwarded", "")).get("for", "")
+        forwarded = _parse_forwarded(_last_header_value(headers.get("forwarded", ""))).get("for", "")
         if forwarded:
             return forwarded
     return peer
 
 
 def is_loopback_client(scope, headers: dict[str, str]) -> bool:
-    """Only true loopback is exempt — never LAN or tailnet addresses."""
+    """Only true loopback is exempt — never LAN or tailnet addresses. A request
+    carrying forwarded headers came through a proxy from somewhere else, so it
+    is never loopback-exempt however the chain describes itself."""
+    if headers.get("x-forwarded-for", "").strip() or headers.get("forwarded", "").strip():
+        return False
     try:
         return ip_address(client_ip(scope, headers)).is_loopback
     except ValueError:

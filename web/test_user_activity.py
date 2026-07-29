@@ -76,6 +76,36 @@ class UserActivityClassificationTests(unittest.TestCase):
         asyncio.run(run())
         self.assertEqual(noted, [True])
 
+    def test_unauthenticated_traffic_never_marks_activity(self):
+        noted = []
+
+        class Thumb:
+            def note_user_activity(self):
+                noted.append(True)
+
+        class Reply:
+            def __init__(self, status_code, location=""):
+                self.status_code = status_code
+                self.headers = {"location": location}
+
+        async def run():
+            for status, location in ((401, ""), (303, "/unlock?next=/d"), (200, "")):
+                async def call_next(_request, status=status, location=location):
+                    return Reply(status, location)
+
+                request = mock.Mock()
+                request.url.path = "/api/rankings"
+                await background_runtime.track_idle_activity(
+                    request,
+                    call_next,
+                    thumbnails=Thumb(),
+                )
+
+        import asyncio
+
+        asyncio.run(run())
+        self.assertEqual(noted, [True])  # only the 200 counted
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -844,6 +844,35 @@ class ShareTests(BackendTestCase):
         self.assertEqual(recovered.status_code, 303)
         self.assertNotIn(share["token"], share_routes._unlock_failures)
 
+    async def test_unknown_share_tokens_are_never_tracked_as_failures(self):
+        async def no_sleep(_seconds):
+            return None
+
+        old_sleep = share_routes.asyncio.sleep
+        share_routes.asyncio.sleep = no_sleep
+        try:
+            def probe():
+                client = TestClient(app_module.app)
+                try:
+                    return [
+                        client.post(
+                            f"/s/made-up-{index}/unlock",
+                            data={"password": "nope"},
+                            follow_redirects=False,
+                        )
+                        for index in range(3)
+                    ]
+                finally:
+                    client.close()
+
+            responses = await asyncio.to_thread(probe)
+        finally:
+            share_routes.asyncio.sleep = old_sleep
+
+        self.assertEqual([response.status_code for response in responses], [303] * 3)
+        # Untracked, so a flood of invented tokens can never evict a real lockout.
+        self.assertEqual(share_routes._unlock_failures, {})
+
     async def test_public_thumb_rejects_non_member_image(self):
         collection, _first, _second, third = await self._collection_with_images()
         share = await db.create_or_rotate_share(collection["id"])

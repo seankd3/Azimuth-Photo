@@ -1,3 +1,4 @@
+import os
 from ipaddress import ip_address
 from urllib.parse import urlsplit
 
@@ -6,16 +7,33 @@ from fastapi.responses import JSONResponse
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 BLOCKED_CROSS_SITE_RESPONSE = {"error": "Cross-site browser request blocked"}
+BLOCKED_HOST_RESPONSE = {
+    "error": "Unrecognized Host header. Set AZIMUTH_ALLOWED_HOSTS to the name this library is served under."
+}
+ALLOWED_HOSTS_ENV = "AZIMUTH_ALLOWED_HOSTS"
+BIND_HOST_ENV = "AZIMUTH_HOST"
+# Name families a rebinding attacker cannot mint: loopback, mDNS, tailnet.
+ALLOWED_HOST_SUFFIXES = (".localhost", ".local", ".ts.net")
 
 
 class BrowserOriginGuardMiddleware:
-    """Reject cross-site browser writes while leaving non-browser clients alone."""
+    """Reject cross-site browser writes and rebound Hosts, leaving non-browser
+    clients alone. The Host check runs first for every method, so the origin set
+    below can keep deriving from a Host header that is already vetted."""
 
     def __init__(self, app):
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if scope.get("type") != "http" or scope.get("method") not in UNSAFE_METHODS:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        if not _host_is_allowed(_host_header(scope)):
+            await _reject(scope, receive, send, BLOCKED_HOST_RESPONSE, status_code=400)
+            return
+
+        if scope.get("method") not in UNSAFE_METHODS:
             await self.app(scope, receive, send)
             return
 
@@ -35,9 +53,54 @@ class BrowserOriginGuardMiddleware:
         await self.app(scope, receive, send)
 
 
-async def _reject(scope, receive, send) -> None:
-    response = JSONResponse(BLOCKED_CROSS_SITE_RESPONSE, status_code=403)
+async def _reject(scope, receive, send, payload=BLOCKED_CROSS_SITE_RESPONSE, status_code: int = 403) -> None:
+    response = JSONResponse(payload, status_code=status_code)
     await response(scope, receive, send)
+
+
+def _host_header(scope) -> str:
+    # Scanned directly: this runs on every request, including thumbnail floods.
+    for key, value in scope.get("headers") or []:
+        if key == b"host":
+            return value.decode("latin-1")
+    return ""
+
+
+def _configured_allowed_hosts() -> frozenset[str]:
+    hosts = {
+        part.strip().lower()
+        for part in os.environ.get(ALLOWED_HOSTS_ENV, "").split(",")
+        if part.strip()
+    }
+    bind = os.environ.get(BIND_HOST_ENV, "").strip().lower()
+    if bind:
+        hosts.add(bind)
+    return frozenset(hosts)
+
+
+def _host_is_allowed(raw_host: str) -> bool:
+    """DNS-rebinding defense: a rebinding page can only aim a browser at us
+    through a public domain the attacker owns. Accept IP literals (a browser
+    never rebinds those), single-label LAN/MagicDNS names, the loopback/mDNS/
+    tailnet suffixes, and whatever the operator configured; reject other names
+    so a hostile Host can never approve itself as our own origin."""
+    host = raw_host.strip()
+    if not host:
+        return True  # no Host header: not a browser
+    try:
+        hostname = (urlsplit(f"//{host}").hostname or "").lower()
+    except ValueError:
+        return False
+    if not hostname:
+        return False
+    if hostname in _configured_allowed_hosts():
+        return True
+    try:
+        ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    return "." not in hostname or hostname.endswith(ALLOWED_HOST_SUFFIXES)
 
 
 def _headers(scope) -> dict[str, str]:
@@ -107,6 +170,12 @@ def _parse_forwarded(value: str) -> dict[str, str]:
 
 def _first_header_value(value: str) -> str:
     return value.split(",", 1)[0].strip()
+
+
+def _last_header_value(value: str) -> str:
+    """The rightmost chain entry — the one our own trusted proxy appended.
+    Everything to its left is client-supplied and therefore spoofable."""
+    return value.rsplit(",", 1)[-1].strip()
 
 
 def _add_origin(origins: set[str], scheme: str, host: str) -> None:

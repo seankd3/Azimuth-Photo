@@ -13,6 +13,8 @@ PUBLIC_PATHS = frozenset(
         "/api/auth/unlock",  # unlock form target
         "/api/auth/status",  # configured/unlocked state; drives the Unsecured banner
         "/api/version",      # public release metadata for clients and satellites
+        "/api/health",       # liveness summary (check ids + ok/warn/bad) for launchers
+                             # and monitors; /api/health/details stays owner-only
         "/api/pair",         # pairing-code redeem: single-use, expiring, rate-limited
         "/sw.js",            # mobile service worker (static JS served from the site root)
     }

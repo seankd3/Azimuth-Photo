@@ -34,6 +34,7 @@ DOCUMENTED_PUBLIC_PATHS = {
     "/api/auth/unlock",
     "/api/auth/status",
     "/api/version",
+    "/api/health",
     "/api/pair",
     "/sw.js",
 }
@@ -161,6 +162,14 @@ def test_loopback_client_is_exempt_but_forwarded_remote_is_not(clean_auth):
     # ...and a non-loopback peer cannot fake exemption with forwarded headers.
     spoofed = _client().get(PROTECTED_API, headers={"X-Forwarded-For": "127.0.0.1"})
     assert spoofed.status_code == 401
+    # The proxy topology itself: appending proxies (nginx/Caddy/Traefik) hit us
+    # from loopback with the attacker's claim on the LEFT of the chain.
+    chained = _client(LOOPBACK).get(
+        PROTECTED_API, headers={"X-Forwarded-For": "127.0.0.1, 100.64.0.5"}
+    )
+    assert chained.status_code == 401
+    forwarded = _client(LOOPBACK).get(PROTECTED_API, headers={"Forwarded": "for=127.0.0.1"})
+    assert forwarded.status_code == 401
 
 
 # --- unlock flow, rotation, legacy installs ----------------------------------
