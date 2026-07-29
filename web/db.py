@@ -920,7 +920,12 @@ async def store_face_scan_result(
         status=status,
         error=error,
     )
-    _invalidate_people_dependent_caches()
+    # Backlog scans store one result every few hundred ms; only a scan that
+    # actually touched person memberships may clear the facet/count caches,
+    # or the People worker keeps every warm path cold for hours.
+    affected_people = result.pop("_affected_people", [])
+    if affected_people:
+        _invalidate_people_dependent_caches()
     return result
 
 
@@ -1367,6 +1372,15 @@ async def get_map_markers(orientation: str = "", compared: str = "", min_stars: 
 
 
 async def get_filter_options(**scope):
+    # Request wiring always passes the full kwargs spray, so drop default
+    # values first: an all-default scope is the plain Library request and must
+    # ride the warmed SWR cache. An empty-but-present id_filter is a real
+    # scope (a search that matched nothing), never the cached payload.
+    scope = {
+        key: value
+        for key, value in scope.items()
+        if value or (key == "id_filter" and value is not None)
+    }
     if scope:
         scope["caption_model_key"] = scope.get("caption_model_key") or active_caption_model_key()
         catalog_counts = await get_catalog_image_counts()

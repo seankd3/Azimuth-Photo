@@ -492,6 +492,78 @@ class LibraryTests(BackendTestCase):
         finally:
             filter_options_repository.filter_options = original_filter_options
 
+    async def test_filter_options_all_default_scope_serves_cached_payload(self):
+        source = await self._source()
+        named = await self._image(source["id"], "named-camera.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Canon", "R5", named),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db.clear_filter_options_cache()
+
+        primed = await db.get_filter_options()
+        original_filter_options = filter_options_repository.filter_options
+        uncached_calls = []
+
+        async def recording_filter_options(*args, **kwargs):
+            uncached_calls.append(kwargs)
+            return await original_filter_options(*args, **kwargs)
+
+        filter_options_repository.filter_options = recording_filter_options
+        try:
+            # The request path always passes the full kwargs spray; all-default
+            # values must ride the warmed cache instead of a fresh facet scan.
+            default_scope = await db.get_filter_options(
+                orientation="", compared="", min_stars=0, folder="", flag="",
+                date_taken="", file_type="", camera="", lens="", tag="",
+                caption_model_key="", id_filter=None, collection_id=0,
+                text_query="", exclude_collapsed_stack_members=False,
+                exclude_sources=(),
+            )
+            self.assertEqual(uncached_calls, [])
+            self.assertEqual(default_scope, primed)
+
+            scoped = await db.get_filter_options(camera="Canon R5")
+            self.assertEqual(len(uncached_calls), 1)
+            self.assertEqual(scoped["cameras"], [{"camera": "Canon R5", "count": 1}])
+
+            # A present-but-empty id filter is a no-results search scope, not
+            # the default Library scope: it must never serve the cached payload.
+            empty_search = await db.get_filter_options(id_filter=set())
+            self.assertEqual(empty_search, filter_options_repository.empty_filter_options())
+        finally:
+            filter_options_repository.filter_options = original_filter_options
+
+    async def test_filter_options_exclude_blank_camera_rows(self):
+        source = await self._source()
+        blank = await self._image(source["id"], "blank-camera.jpg")
+        named = await self._image(source["id"], "named-camera.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET camera_make = '', camera_model = '' WHERE id = ?",
+                (blank,),
+            )
+            await conn.execute(
+                "UPDATE images SET camera_make = ?, camera_model = ? WHERE id = ?",
+                ("Canon", "R5", named),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        db.invalidate_stats_cache()
+        db.clear_filter_options_cache()
+
+        options = await db.get_filter_options()
+
+        self.assertEqual(options["cameras"], [{"camera": "Canon R5", "count": 1}])
+
     async def test_rankings_repository_matches_facade_visible_cache_paths(self):
         source = await self._source()
         alpha = await self._image(source["id"], "alpha.jpg", elo=1300)

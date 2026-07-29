@@ -1,6 +1,7 @@
 from test_support import *  # noqa: F401,F403
 import asyncio
 import contextlib
+import time
 from unittest import mock
 
 import httpx
@@ -338,6 +339,50 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         )
         review = await db.get_people_review(limit=4)
         self.assertEqual(review["counts"]["scan"]["scanned"], 1)
+
+    async def test_face_scan_only_invalidates_facet_caches_on_membership_change(self):
+        source = await self._source()
+        image_id = await self._image(source["id"], "facet-cache.jpg")
+        cache_path = os.path.join(self.tempdir.name, "facet-cache-preview.jpg")
+
+        await db.get_filter_options()
+        primed_expires = db._filter_options_cache["expires"]
+        self.assertGreater(primed_expires, time.time())
+
+        scan = await db.store_face_scan_result(
+            image_id=image_id,
+            model_id="buffalo_l",
+            cache_path=cache_path,
+            faces=[{
+                "bbox": {"x": 10, "y": 12, "w": 34, "h": 42},
+                "confidence": 0.95,
+                "quality": 0.91,
+                "embedding": np.array([1.0, 0.0], dtype=np.float32),
+            }],
+        )
+
+        self.assertNotIn("_affected_people", scan)
+        # No person memberships changed: a backlog scan must not cool the
+        # warmed facet/count caches.
+        self.assertEqual(db._filter_options_cache["expires"], primed_expires)
+
+        await db.assign_face(scan["face_ids"][0])
+        # Clear rather than reuse the stale-while-refresh path so the reprime
+        # sets a fresh expiry synchronously.
+        db.clear_filter_options_cache()
+        await db.get_filter_options()
+        self.assertGreater(db._filter_options_cache["expires"], time.time())
+
+        await db.store_face_scan_result(
+            image_id=image_id,
+            model_id="buffalo_l",
+            cache_path=cache_path,
+            faces=[],
+        )
+
+        # The rescan dropped an assigned face, so memberships changed and the
+        # people facet cache must invalidate.
+        self.assertEqual(db._filter_options_cache["expires"], 0)
 
     def test_people_scan_decision_is_manual_bulk_work(self):
         decision = face_worker._people_background_decision({})

@@ -36,37 +36,36 @@ def _filter_row_groups(db_path: str, base_where: str, params=(), staged_ids=None
     image columns once keeps the answer exact while leaving the disk free for
     browsing and preview work.
     """
-    facet_sql = (
-        "WITH filtered AS MATERIALIZED ("
+    # A CTE cannot be shared across statements, so stage the filtered set in a
+    # temp table once and let both the facet and people queries read it.
+    stage_sql = (
+        "CREATE TEMP TABLE temp_filter_facet_rows AS "
         "SELECT i.id, i.date_taken, i.file_ext, i.camera_make, i.camera_model, i.lens "
         "FROM images i JOIN catalog_sources s ON s.id = i.source_id "
         f"WHERE {base_where}"
-        ") "
+    )
+    facet_sql = (
         "SELECT kind, value, count FROM ("
         "SELECT 'year' AS kind, SUBSTR(date_taken, 1, 4) AS value, COUNT(*) AS count "
-        "FROM filtered WHERE date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 GROUP BY value "
+        "FROM temp_filter_facet_rows WHERE date_taken IS NOT NULL AND LENGTH(date_taken) >= 4 GROUP BY value "
         "UNION ALL "
-        "SELECT 'undated', '', COUNT(*) FROM filtered "
+        "SELECT 'undated', '', COUNT(*) FROM temp_filter_facet_rows "
         "WHERE date_taken IS NULL OR LENGTH(date_taken) < 4 "
         "UNION ALL "
-        "SELECT 'file_type', file_ext, COUNT(*) FROM filtered "
+        "SELECT 'file_type', file_ext, COUNT(*) FROM temp_filter_facet_rows "
         "WHERE file_ext IS NOT NULL AND file_ext != '' GROUP BY file_ext "
         "UNION ALL "
-        "SELECT 'camera', TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')), COUNT(*) "
-        "FROM filtered WHERE camera_make IS NOT NULL OR camera_model IS NOT NULL "
-        "GROUP BY 2 HAVING 2 != '' "
+        "SELECT 'camera', TRIM(COALESCE(camera_make, '') || ' ' || COALESCE(camera_model, '')) AS value, COUNT(*) "
+        "FROM temp_filter_facet_rows WHERE camera_make IS NOT NULL OR camera_model IS NOT NULL "
+        "GROUP BY value HAVING value != '' "
         "UNION ALL "
-        "SELECT 'lens', lens, COUNT(*) FROM filtered WHERE lens IS NOT NULL AND lens != '' GROUP BY lens"
+        "SELECT 'lens', lens, COUNT(*) FROM temp_filter_facet_rows WHERE lens IS NOT NULL AND lens != '' GROUP BY lens"
         ")"
     )
     people_sql = (
-        "WITH filtered AS MATERIALIZED ("
-        "SELECT i.id FROM images i JOIN catalog_sources s ON s.id = i.source_id "
-        f"WHERE {base_where}"
-        ") "
         "SELECT p.id, p.name, p.status, COUNT(DISTINCT pim.image_id) AS count "
         "FROM people p JOIN person_image_membership pim ON pim.person_id = p.id "
-        "JOIN filtered ON filtered.id = pim.image_id "
+        "JOIN temp_filter_facet_rows filtered ON filtered.id = pim.image_id "
         "WHERE p.status != 'ignored' AND p.merged_into_person_id IS NULL "
         "GROUP BY p.id HAVING count > 0 "
         "ORDER BY count DESC, LOWER(COALESCE(NULLIF(p.name, ''), 'Person ' || p.id)) ASC, p.id ASC LIMIT 200"
@@ -75,7 +74,9 @@ def _filter_row_groups(db_path: str, base_where: str, params=(), staged_ids=None
     try:
         if staged_ids is not None:
             stage_temp_ids_sync(conn, "temp_filter_scope_ids", staged_ids)
-        return conn.execute(facet_sql, params).fetchall(), conn.execute(people_sql, params).fetchall()
+        conn.execute(stage_sql, params)
+        conn.execute("CREATE INDEX temp_filter_facet_rows_id ON temp_filter_facet_rows(id)")
+        return conn.execute(facet_sql).fetchall(), conn.execute(people_sql).fetchall()
     finally:
         connection.close_sync(conn, db_path=db_path)
 

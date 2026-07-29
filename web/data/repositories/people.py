@@ -367,7 +367,11 @@ async def store_face_scan_result(
         await conn.commit()
     finally:
         await connection.close_async(conn, db_path=db_path)
-    return {"face_ids": inserted_face_ids, "face_count": len(inserted_face_ids)}
+    return {
+        "face_ids": inserted_face_ids,
+        "face_count": len(inserted_face_ids),
+        "_affected_people": sorted(affected_people),
+    }
 
 
 async def cluster_unassigned_faces(
