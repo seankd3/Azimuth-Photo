@@ -136,6 +136,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/import/scan"),
     ("GET", "/api/import/scan/{scan_id}"),
     ("GET", "/api/import/scan/{scan_id}/thumb/{key}"),
+    ("POST", "/api/import/film"),
     ("POST", "/api/import/commit"),
     ("GET", "/api/import/jobs/{job_id}"),
     ("POST", "/api/import/jobs/{job_id}/cancel"),

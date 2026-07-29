@@ -5,7 +5,7 @@
 // until commit; the stage only clears on commit or picking a new source.
 import {
     commitImportScan, getImportJob, getImportScan, getImportSources,
-    browseImportPath, startImportScan,
+    browseImportPath, startImportScan, uploadFilmScans,
 } from './api.js';
 import { emit, on, scope, setScope } from './state.js';
 import { switchLens } from './lenses.js';
@@ -152,6 +152,46 @@ function selectSource(row) {
     startScan();
 }
 
+// Film scans arrive as lab ZIPs or loose TIFFs picked in the OS dialog: upload,
+// extract server-side, then stage the extraction exactly like any other source.
+// Destination is Film Scans/<archive name>/ — scan dates are not shoot dates.
+async function startFilmImport(files) {
+    openImport();
+    resetStage();
+    const token = generation;
+    source = { id: 'film:uploading', kind: 'film', label: 'film scans', path: '' };
+    mode = 'copy';
+    scanStatus = 'scanning';
+    loadSources(); // repopulate the rail; the card fast-path yields to the film source
+    syncAll();
+    const form = new FormData();
+    for (const file of files) form.append('files', file);
+    let staged = null;
+    try {
+        staged = await uploadFilmScans(form);
+    } catch (error) {
+        if (token !== generation) return;
+        scanStatus = 'error';
+        syncAll();
+        showToast(error?.message || 'Couldn’t read those scans');
+        return;
+    }
+    if (token !== generation) return;
+    if (!staged?.scan_id) {
+        scanStatus = 'error';
+        syncAll();
+        showToast('Couldn’t stage those scans');
+        return;
+    }
+    source = { id: `film:${staged.path}`, kind: 'film', label: staged.label, path: staged.path };
+    scanId = staged.scan_id;
+    syncAll();
+    if (staged.skipped?.length) {
+        showToast(`${fmt(staged.skipped.length)} file${staged.skipped.length === 1 ? '' : 's'} skipped — ${staged.skipped[0].reason}`);
+    }
+    pollScan(token);
+}
+
 // ---------------------------------------------------------------- scan
 
 async function startScan() {
@@ -279,6 +319,26 @@ function syncDestination() {
         els.destination.innerHTML = `<div class="imps-dest-add">Photos stay where they are — <b>${esc(source?.label || 'this folder')}</b> is registered as a source and watched from now on.</div>`;
         return;
     }
+    if (source?.kind === 'film') {
+        // The truth for film: one folder per archive/batch, never date-guessed.
+        const staged = checkedEntries();
+        if (!staged.length) {
+            els.destination.innerHTML = '<div class="imps-dest-add">Nothing staged yet.</div>';
+            return;
+        }
+        const folders = new Map();
+        for (const entry of staged) {
+            const parts = String(entry.rel_path || '').split('/');
+            const folder = parts.length > 1 ? parts[0] : (source.label || 'Film scans');
+            folders.set(folder, (folders.get(folder) || 0) + 1);
+        }
+        const lines = ['<div class="imps-dest-tree">Film Scans</div>'];
+        for (const [folder, count] of [...folders.entries()].sort()) {
+            lines.push(`<div class="imps-dest-date"><span>${esc(folder)}</span><span class="imps-dest-count">${fmt(count)}</span></div>`);
+        }
+        els.destination.innerHTML = lines.join('');
+        return;
+    }
     const staged = checkedEntries();
     const trees = new Map(); // tree -> Map(year -> Map(date -> count))
     for (const entry of staged) {
@@ -312,13 +372,17 @@ function syncDestination() {
 
 function syncModeSeg() {
     const isCard = source?.kind === 'card';
+    const isFilm = source?.kind === 'film';
     els.modeCopy.classList.toggle('active', mode === 'copy');
     els.modeCopy.setAttribute('aria-pressed', String(mode === 'copy'));
     els.modeAdd.classList.toggle('active', mode === 'add');
     els.modeAdd.setAttribute('aria-pressed', String(mode === 'add'));
-    els.modeAdd.disabled = isCard; // cards are forced Copy: never trust removable media as storage
-    els.modeAdd.dataset.tip = isCard ? 'Cards must be copied before import' : 'Register in place without copying';
+    els.modeAdd.disabled = isCard || isFilm; // cards + film staging are forced Copy
+    els.modeAdd.dataset.tip = isCard ? 'Cards must be copied before import'
+        : (isFilm ? 'Film scans are copied into the library' : 'Register in place without copying');
     els.clearCardRow.hidden = !isCard;
+    // Film destination is the archive folder — a category override would lie.
+    if (els.category) els.category.disabled = isFilm;
 }
 
 function syncFilterSeg() {
@@ -649,6 +713,15 @@ export function initImportStage() {
 
     els.peek?.addEventListener('click', openImport);
     document.getElementById('import-view')?.addEventListener('click', openImport);
+    const filmInput = document.getElementById('import-film-file');
+    const pickFilmFiles = () => filmInput?.click();
+    document.getElementById('import-film')?.addEventListener('click', pickFilmFiles);
+    filmInput?.addEventListener('change', () => {
+        const files = [...(filmInput.files || [])];
+        filmInput.value = ''; // picking the same archive again must re-fire change
+        if (files.length) startFilmImport(files);
+    });
     on('import:open', openImport);
+    on('import:film', pickFilmFiles);
     emit('import:ready');
 }

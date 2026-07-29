@@ -1,12 +1,15 @@
 import asyncio
+import io
 import os
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+from starlette.datastructures import UploadFile
 
 from test_support import *  # noqa: F401,F403
-from features.imports import card, staging
+from features.imports import card, film, staging
 
 
 class StagedImportTests(BackendTestCase):
@@ -373,6 +376,111 @@ class StagedImportTests(BackendTestCase):
                 os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
             else:
                 os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
+
+    def _tiff_bytes(self, color=(20, 20, 20)) -> bytes:
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGB", (24, 16), color).save(buffer, "TIFF")
+        return buffer.getvalue()
+
+    async def test_film_zip_lands_under_film_scans_archive_folder(self):
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
+        try:
+            archive = io.BytesIO()
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("scans/frame01.tif", self._tiff_bytes((10, 10, 10)))
+                bundle.writestr("scans/deep/frame02.tif", self._tiff_bytes((20, 20, 20)))
+                bundle.writestr("__MACOSX/._frame01.tif", b"resource fork junk")
+                bundle.writestr("../evil.tif", self._tiff_bytes((30, 30, 30)))
+                bundle.writestr("scans/notes.txt", b"lab notes")
+            with patch.object(film, "staging_root", return_value=root / "filmstage"):
+                staged = await film.stage_uploads(
+                    [UploadFile(io.BytesIO(archive.getvalue()), filename="roll12.zip")]
+                )
+                self.assertEqual(staged["label"], "roll12")
+                self.assertEqual(staged["staged_files"], 3)
+                # The traversal member was flattened inside the batch dir, not written outside it.
+                extracted = sorted(path.name for path in Path(staged["path"]).rglob("*") if path.is_file())
+                self.assertEqual(extracted, ["evil.tif", "frame01.tif", "frame02.tif"])
+
+                scan = await staging.start_film_scan(staged["path"], label=staged["label"])
+                await asyncio.wait_for(staging._tasks[scan.id], timeout=10)
+                self.assertEqual(scan.status, "done")
+                self.assertEqual({entry["category"] for entry in scan.entries}, {"film"})
+
+                with self.assertRaises(ValueError):
+                    await staging.start_commit(scan, keys="all_checked_default", mode="add", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+                job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+                await self._wait(job)
+                self.assertEqual(job.phase, "complete")
+                self.assertEqual(job.errors, [])
+
+                landed = sorted(path for path in originals.rglob("*") if path.is_file())
+                # One archive = one folder named from the archive filename — never a date tree.
+                self.assertEqual(
+                    sorted(path.name for path in landed),
+                    ["evil.tif", "frame01.tif", "frame02.tif"],
+                )
+                for path in landed:
+                    self.assertEqual(path.parent, originals / "Film Scans" / "roll12")
+                batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+                self.assertEqual(batch["name"], "roll12")
+                # A clean full commit reclaims the transient extraction dir.
+                self.assertFalse(Path(staged["path"]).exists())
+                self.assertIsNone(staging.scan_for_id(scan.id))
+        finally:
+            if old_root is None:
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
+            else:
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
+
+    async def test_film_loose_tiffs_batch_together_and_collide_safely(self):
+        root = Path(self.tempdir.name)
+        originals = root / "library"
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(originals)
+        try:
+            with patch.object(film, "staging_root", return_value=root / "filmstage"):
+                staged = await film.stage_uploads([
+                    UploadFile(io.BytesIO(self._tiff_bytes((11, 11, 11))), filename="frame.tif"),
+                    UploadFile(io.BytesIO(self._tiff_bytes((22, 22, 22))), filename="frame.tif"),
+                ])
+                self.assertEqual(staged["staged_files"], 2)
+                self.assertEqual(staged["skipped"], [])
+                scan = await staging.start_film_scan(staged["path"], label=staged["label"])
+                await asyncio.wait_for(staging._tasks[scan.id], timeout=10)
+                job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
+                await self._wait(job)
+                self.assertEqual(job.phase, "complete")
+                landed = sorted(path.name for path in (originals / "Film Scans" / staged["label"]).glob("*"))
+                self.assertEqual(landed, ["frame-2.tif", "frame.tif"])
+        finally:
+            if old_root is None:
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
+            else:
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
+
+    async def test_film_route_refuses_rar_and_empty_uploads_honestly(self):
+        root = Path(self.tempdir.name)
+        with patch.object(film, "staging_root", return_value=root / "filmstage"):
+            with TestClient(app_module.app) as client:
+                response = client.post(
+                    "/api/import/film",
+                    files=[("files", ("negatives.rar", b"Rar!\x1a\x07\x00", "application/vnd.rar"))],
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("ZIP", response.json()["error"])
+                response = client.post(
+                    "/api/import/film",
+                    files=[("files", ("notes.txt", b"not a scan", "text/plain"))],
+                )
+                self.assertEqual(response.status_code, 400)
+            # Refused uploads leave no staging spill behind.
+            self.assertEqual([path for path in (root / "filmstage").rglob("*")], [])
 
     async def test_routes_reject_paths_and_previews_without_scan_keys(self):
         root = Path(self.tempdir.name)

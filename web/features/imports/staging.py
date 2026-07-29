@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import shutil
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -39,6 +40,8 @@ class Scan:
     path: str
     include_subfolders: bool
     card_source: bool
+    film_source: bool = False
+    label: str = ""
     status: str = "scanning"
     error: str = ""
     entries: list[dict] = field(default_factory=list)
@@ -168,6 +171,18 @@ async def start_scan(path: str, include_subfolders: bool) -> Scan:
     return scan
 
 
+async def start_film_scan(path: str, *, label: str) -> Scan:
+    """Stage a server-created film extraction dir (already under our cache root,
+    so the allowed-roots fence does not apply)."""
+    scan = Scan(
+        id=uuid.uuid4().hex, path=str(Path(path).resolve()), include_subfolders=True,
+        card_source=False, film_source=True, label=label,
+    )
+    _scans[scan.id] = scan
+    _tasks[scan.id] = asyncio.create_task(_scan_worker(scan))
+    return scan
+
+
 def scan_page(scan: Scan, offset: int) -> dict:
     start = max(0, int(offset))
     entries = [
@@ -223,15 +238,18 @@ def _enumerate_scan(scan: Scan) -> None:
             modified = safe_datetime_fromtimestamp(stat.st_mtime)
             taken_at = metadata.get("date_taken") or (modified.strftime("%Y-%m-%d %H:%M:%S") if modified else "")
             kind = "video" if path.suffix.lower() in card.VIDEO_EXTENSIONS else "image"
-            source_kind = remembered_kind if (remembered_kind and kind != "video") else taxonomy.classify_source_kind(
-                filename=path.name,
-                path=str(path),
-                rel_path=str(path.relative_to(root)).replace(os.sep, "/"),
-                card_source=bool(scan.card_source),
-                kind=kind,
-                camera_make=str(metadata.get("camera_make") or ""),
-                software=str(metadata.get("software") or ""),
-            )
+            if scan.film_source and kind != "video":
+                source_kind = "film_scan"  # the user said these are film scans; provenance guessing would lie
+            else:
+                source_kind = remembered_kind if (remembered_kind and kind != "video") else taxonomy.classify_source_kind(
+                    filename=path.name,
+                    path=str(path),
+                    rel_path=str(path.relative_to(root)).replace(os.sep, "/"),
+                    card_source=bool(scan.card_source),
+                    kind=kind,
+                    camera_make=str(metadata.get("camera_make") or ""),
+                    software=str(metadata.get("software") or ""),
+                )
             scan.entries.append({
                 "key": uuid.uuid4().hex,
                 "name": path.name,
@@ -328,9 +346,11 @@ async def start_commit(
         raise ValueError("Import mode must be copy or add")
     if scan.card_source and mode != "copy":
         raise ValueError("Removable cards must be copied before import")
+    if scan.film_source and mode != "copy":
+        raise ValueError("Film scans are always copied into the library")
     if category is not None and category not in taxonomy.IMPORT_CATEGORIES:
         raise ValueError("Unknown import category")
-    if category:
+    if category and not scan.film_source:
         # The correction is remembered: this source classifies itself from now on.
         current = settings.get_settings()
         memory = dict(current.get("import_category_memory") or {})
@@ -344,7 +364,7 @@ async def start_commit(
     else:
         raise ValueError("keys must be a list or all_checked_default")
     batch_id = await import_repository.create_import_batch(db.DB_PATH, {
-        "name": Path(scan.path).name or "Import",
+        "name": scan.label or Path(scan.path).name or "Import",
         "destination_mode": mode,
         "destination_root": str(originals_root()),
         "destination_path": str(originals_root()),
@@ -396,10 +416,27 @@ async def _commit_worker(job: ImportJob) -> None:
         if job.image_rows:
             await quality_routes.scan_image_ids([int(row["image_id"]) for row in job.image_rows])
         catalog_routes.invalidate_folders_cache()
+        await _reclaim_film_staging(job)
     except Exception as exc:
         job.errors.append({"message": str(exc)})
         job.phase = "failed"
         await import_repository.fail_import_batch(db.DB_PATH, job.batch_id, str(exc))
+
+
+async def _reclaim_film_staging(job: ImportJob) -> None:
+    """The film extraction dir is transient upload spill. Reclaim it only once
+    every staged file was covered by a clean commit; anything less keeps the
+    dir for the 24h stale sweep (never risk the only server-side copy)."""
+    scan = job.scan
+    if not (scan.film_source and job.phase == "complete" and not job.errors):
+        return
+    if len(job.entries) != len(scan.entries):
+        return
+    from features.imports import film
+
+    if film.is_staging_path(scan.path):
+        await asyncio.to_thread(shutil.rmtree, scan.path, True)
+    _scans.pop(scan.id, None)
 
 
 async def _import_entry(job: ImportJob, entry: dict) -> None:
@@ -431,6 +468,8 @@ def _source_kind_for_entry(job: ImportJob, entry: dict) -> taxonomy.SourceKind:
 
 
 def _destination_directory(job: ImportJob, entry: dict) -> Path:
+    if job.scan.film_source:
+        return _film_destination_directory(job, entry)
     taken = str(entry.get("taken_at") or "")[:10]
     try:
         parsed = datetime.strptime(taken, "%Y-%m-%d")
@@ -448,6 +487,17 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
         day=parsed.strftime("%Y-%m-%d"),
         source_kind=_source_kind_for_entry(job, entry),
     )
+
+
+def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
+    """Scan dates are not shoot dates: one archive/batch lands in one folder
+    named from the archive filename, never a date-guessed RAWS-style tree."""
+    library_root = originals_root()
+    if library_root.name == taxonomy.DEST_RAWS:
+        library_root = library_root.parent
+    parts = str(entry.get("rel_path") or "").split("/")
+    folder = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
+    return library_root / taxonomy.DEST_FILM / folder
 
 
 def _catalog_source_root_for_destination(destination: str | Path) -> str:

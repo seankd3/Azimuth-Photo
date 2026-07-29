@@ -694,6 +694,12 @@ export async function startImportScan(path, includeSubfolders) {
     return postJson('/api/import/scan', { path, include_subfolders: includeSubfolders });
 }
 
+export async function uploadFilmScans(formData) {
+    // Multipart — the browser sets the boundary; requestJson surfaces the
+    // server's honest error copy (e.g. RAR archives not supported).
+    return requestJson('/api/import/film', { method: 'POST', body: formData, timeoutMs: 300_000 });
+}
+
 export async function getImportScan(scanId, offset = 0) {
     return fetchJson(`/api/import/scan/${scanId}?offset=${offset}`, { defaultValue: null });
 }

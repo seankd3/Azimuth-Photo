@@ -10,6 +10,7 @@ import settings
 from core import cache_events
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
+from features.imports import film
 from features.imports import service as import_service
 from features.imports import staging
 from features.imports import taxonomy
@@ -91,6 +92,24 @@ async def api_import_scan_thumb(scan_id: str, key: str):
     except (OSError, ValueError) as exc:
         return JSONResponse({"error": str(exc) or "Preview could not be decoded"}, status_code=422)
     return Response(data, media_type="image/jpeg")
+
+
+@router.post("/api/import/film")
+async def api_import_film(files: list[UploadFile] = File(...)):
+    """Film-scan intake: ZIP archives (extracted server-side) or loose TIFF/image
+    scans, staged for the import canvas. Destination is Film Scans/<archive name>/."""
+    try:
+        staged = await film.stage_uploads(files)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    scan = await staging.start_film_scan(staged["path"], label=staged["label"])
+    return {
+        "scan_id": scan.id,
+        "label": staged["label"],
+        "path": staged["path"],
+        "staged_files": staged["staged_files"],
+        "skipped": staged["skipped"],
+    }
 
 
 @router.post("/api/import/commit")
