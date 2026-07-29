@@ -36,7 +36,9 @@ def _diag(message: str, **fields) -> None:
     if not _PREGEN_DIAG:
         return
     details = " ".join(f"{key}={value!r}" for key, value in fields.items())
-    log.info("pregendiag %s %s", message, details)
+    # WARNING so the opt-in trace survives production log filtering (INFO from
+    # this module is swallowed by the default logging config).
+    log.warning("pregendiag %s %s", message, details)
 
 # Capture the real sleep at import time. Tests often replace `asyncio.sleep`
 # (via `thumbnails.asyncio.sleep = …`); the stall watchdog must not share that
@@ -133,13 +135,17 @@ async def run_pregen_bulk_batch(
     if should_pause_for_priority():
         generate_batch = min(generate_batch, max(1, int(activity_burst_items)))
     tier_budgets = bulk_tier_budgets()
+    _diag("bulk batch entry", generate_batch=generate_batch, tier_budgets=tier_budgets)
     if all(tier_budgets.get(size, 0) <= 0 for size in thumb_tiers):
+        _diag("bulk batch abort: all tier budgets empty")
         return 0
 
     if not await _flush_off_request_pool(flush_write_queue, prefetch_executor) and cache_metadata_backoff_active():
+        _diag("bulk batch abort: flush failed under metadata backoff")
         return 0
     tier_room = bulk_tier_room(tier_budgets)
     if all(room <= 0 for room in tier_room.values()) and cache_metadata_backoff_active():
+        _diag("bulk batch abort: no tier room under metadata backoff", tier_room=tier_room)
         return 0
     full_budget = int(disk_allocations.get(full_tier, 0) or 0)
     full_room = {"bytes": full_tier_room(full_budget)} if full_budget > 0 else {"bytes": 0}
@@ -408,7 +414,20 @@ async def run_pregen_bulk_batch(
             memory_pressure.gate_bulk_work()
             pressure_abort = True
             return False
-        weight = await bulk_decode_budget.acquire(_item_decode_estimate(item))
+        estimate = _item_decode_estimate(item)
+        _diag("pump acquire", item=item["id"], estimate=estimate, used=bulk_decode_budget.used_bytes, in_flight=len(in_flight))
+        if in_flight:
+            # Never block on budget while holding in-flight work: releases
+            # happen in the completion loop this coroutine still has to
+            # reach, so a blocking wait here deadlocks until the watchdog.
+            weight = bulk_decode_budget.try_acquire(estimate)
+            if weight is None:
+                _diag("pump budget full", item=item["id"], in_flight=len(in_flight))
+                pending.appendleft(item)
+                return False
+        else:
+            weight = await bulk_decode_budget.acquire(estimate)
+        _diag("pump acquired", item=item["id"], weight=weight)
         epoch = bulk_decode_budget.epoch
         if memory_pressure.evaluate_memory_pressure().pause_bulk:
             # Pressure rose while waiting on the decode budget.
@@ -462,11 +481,13 @@ async def run_pregen_bulk_batch(
                     break
 
             if in_flight:
+                _diag("pump waiting", in_flight=len(in_flight), submitted=submitted, finished=finished)
                 done, _still = await asyncio.wait(
                     set(in_flight),
                     timeout=PREGEN_WAVE_TIMEOUT_SECONDS,
                     return_when=asyncio.FIRST_COMPLETED,
                 )
+                _diag("pump wave done", done=len(done), in_flight=len(in_flight))
                 if not done:
                     log.error(
                         "pregen pump timeout after %.0fs with %s tasks still in flight",

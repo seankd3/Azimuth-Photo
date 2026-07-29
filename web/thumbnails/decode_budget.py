@@ -117,6 +117,20 @@ class DecodeByteBudget:
         self._epoch += 1
         return leaked
 
+    def try_acquire(self, estimate: int) -> int | None:
+        """Charge without waiting; None when the frame does not fit right now.
+
+        For callers already holding in-flight work: blocking here would
+        deadlock, because releases happen in the completion loop those
+        callers still have to reach.
+        """
+        weight = max(MIN_DECODE_ESTIMATE_BYTES, int(estimate or 0))
+        weight = min(weight, self.max_bytes)
+        if self._used > 0 and self._used + weight > self.max_bytes:
+            return None
+        self._used += weight
+        return weight
+
     async def acquire(self, estimate: int) -> int:
         weight = max(MIN_DECODE_ESTIMATE_BYTES, int(estimate or 0))
         # Never block forever on a single frame larger than the budget.

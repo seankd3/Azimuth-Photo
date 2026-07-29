@@ -74,6 +74,24 @@ class DecodeBudgetTests(unittest.IsolatedAsyncioTestCase):
         await budget.release(second)
         self.assertEqual(budget.used_bytes, 0)
 
+    async def test_try_acquire_never_blocks_a_holder(self):
+        """A caller holding in-flight work refills without waiting.
+
+        The bulk pump deadlocked here: it blocked in acquire while its own
+        completion loop — the only place releases happen — was unreachable.
+        """
+        budget = DecodeByteBudget(max_bytes=768 * 1024 * 1024)
+        first = budget.try_acquire(500 * 1024 * 1024)
+        self.assertIsNotNone(first)
+        # Does not fit alongside the first: refuse instantly, never wait.
+        self.assertIsNone(budget.try_acquire(500 * 1024 * 1024))
+        self.assertTrue(budget.release_nowait(first, epoch=budget.epoch))
+        # Empty ledger admits even an oversized frame, capped to the budget.
+        capped = budget.try_acquire(2 * 1024 * 1024 * 1024)
+        self.assertEqual(capped, budget.max_bytes)
+        self.assertTrue(budget.release_nowait(capped, epoch=budget.epoch))
+        self.assertEqual(budget.used_bytes, 0)
+
     async def test_cancel_mid_batch_releases_budget_fully(self):
         """Cancelled batch finally must return budget to empty (no leak)."""
         from core import memory_pressure
