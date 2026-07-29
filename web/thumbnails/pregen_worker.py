@@ -502,7 +502,9 @@ async def run_pregen_bulk_batch(
                     epoch, weight = in_flight.pop(task)
                     finished += 1
                     try:
-                        completed += record_pregen_result(await task)
+                        outcome = await task
+                        _diag("pump item result", result=outcome)
+                        completed += record_pregen_result(outcome)
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
