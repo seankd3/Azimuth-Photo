@@ -354,6 +354,58 @@ class BackupUnitTests(unittest.TestCase):
         staging = other_db.with_name("azimuth.restored.db")
         self.assertFalse(staging.exists())
 
+    def test_retention_never_prunes_newest_snapshot(self):
+        """An aged-out newest snapshot survives; older siblings still prune."""
+
+        for stamp in ("20260101-040000", "20260102-040000"):
+            (self.root / f"azimuth-{stamp}.db.gz").write_bytes(b"old")
+        pruned = backups.apply_retention(self.root, now=date(2026, 7, 28))
+        self.assertEqual(pruned, ["azimuth-20260101-040000.db.gz"])
+        self.assertTrue((self.root / "azimuth-20260102-040000.db.gz").is_file())
+
+    def test_legacy_named_snapshots_stay_visible_and_retained(self):
+        """Pre-rename photoarchive-* snapshots list, sort, and count as history."""
+
+        created = backups.create_snapshot(str(self.db_path))
+        self.assertTrue(created["ok"])
+        (self.root / "photoarchive-20260720-040000.db.gz").write_bytes(b"legacy")
+        with mock.patch.object(backups, "backup_root", return_value=self.root):
+            names = [item["name"] for item in backups.list_backups()]
+        self.assertEqual(names[0], created["name"])
+        self.assertIn("photoarchive-20260720-040000.db.gz", names)
+        pruned = backups.apply_retention(self.root, now=date(2026, 7, 28))
+        self.assertNotIn("photoarchive-20260720-040000.db.gz", pruned)
+
+    def test_legacy_owner_marker_is_honored_and_upgraded(self):
+        """A legacy marker naming the pre-rename catalog path still owns the dir."""
+
+        legacy = self.root / backups.LEGACY_OWNER_MARKER_NAME
+        legacy.write_text(
+            json.dumps({"catalog_path": str(self.db_path.with_name("photoarchive.db"))}),
+            encoding="utf-8",
+        )
+        created = backups.create_snapshot(str(self.db_path))
+        self.assertTrue(created["ok"])
+        upgraded = self.root / backups.OWNER_MARKER_NAME
+        self.assertTrue(upgraded.is_file())
+        self.assertEqual(
+            json.loads(upgraded.read_text(encoding="utf-8"))["catalog_path"],
+            str(self.db_path.resolve()),
+        )
+        self.assertTrue(legacy.is_file())
+
+    def test_foreign_legacy_owner_marker_still_refuses(self):
+        """A legacy marker for a different catalog refuses publish and restore."""
+
+        legacy = self.root / backups.LEGACY_OWNER_MARKER_NAME
+        legacy.write_text(
+            json.dumps({"catalog_path": "/somewhere/else/photoarchive.db"}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(backups.BackupMisconfigurationError):
+            backups.create_snapshot(str(self.db_path))
+        self.assertFalse((self.root / backups.OWNER_MARKER_NAME).exists())
+
 
 class BackupIsolationTests(unittest.TestCase):
     @pytest.mark.contract

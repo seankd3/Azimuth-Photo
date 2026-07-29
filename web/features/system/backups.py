@@ -28,8 +28,15 @@ from data import connection as data_connection
 
 log = logging.getLogger(__name__)
 
-BACKUP_NAME_RE = re.compile(r"^azimuth-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$")
+# New snapshots always publish under the azimuth- prefix; the photoarchive-
+# prefix stays recognized so libraries that predate the rename keep their
+# snapshot history visible to listing, restore, and retention.
+BACKUP_NAME_RE = re.compile(
+    r"^(?:azimuth|photoarchive)-(\d{8})-(\d{6})(?:-([a-z0-9]+))?\.db\.gz$"
+)
 OWNER_MARKER_NAME = ".azimuth-backup-owner"
+LEGACY_OWNER_MARKER_NAME = ".photoarchive-backup-owner"
+LEGACY_CATALOG_BASENAME = "photoarchive.db"
 DAILY_KEEP = 7
 WEEKLY_KEEP = 4
 # Pre-migration snapshots are the rollback safety net for a schema upgrade; they
@@ -314,8 +321,22 @@ def _owner_marker_path(root: Path) -> Path:
     return Path(root) / OWNER_MARKER_NAME
 
 
+def _legacy_owner_marker_path(root: Path) -> Path:
+    return Path(root) / LEGACY_OWNER_MARKER_NAME
+
+
 def _catalog_identity(db_path: str) -> str:
     return str(Path(db_path).resolve())
+
+
+def _catalog_legacy_alias(db_path: str) -> str:
+    """The pre-rename path this catalog had when the marker was written.
+
+    The rebrand migration renames ``photoarchive.db`` to ``azimuth.db`` in
+    place, so a legacy marker naming the old basename in the same directory
+    describes this same catalog.
+    """
+    return str(Path(db_path).resolve().with_name(LEGACY_CATALOG_BASENAME))
 
 
 def assert_backup_owner(root: Path, db_path: str) -> None:
@@ -339,8 +360,7 @@ def assert_backup_owner_for_restore(root: Path, db_path: str) -> None:
     """
 
     root = Path(root)
-    marker = _owner_marker_path(root)
-    if not marker.is_file():
+    if not _owner_marker_path(root).is_file() and not _legacy_owner_marker_path(root).is_file():
         return
     warning = backup_owner_warning(root, db_path)
     if warning:
@@ -352,6 +372,8 @@ def backup_owner_warning(root: Path, db_path: str) -> str | None:
 
     root = Path(root)
     marker = _owner_marker_path(root)
+    if not marker.is_file() and _legacy_owner_marker_path(root).is_file():
+        marker = _legacy_owner_marker_path(root)
     catalog = _catalog_identity(db_path)
     if marker.is_file():
         try:
@@ -359,7 +381,7 @@ def backup_owner_warning(root: Path, db_path: str) -> str | None:
         except (OSError, json.JSONDecodeError) as exc:
             return f"Refusing backup: owner marker '{marker}' is unreadable ({exc})"
         owned = str(payload.get("catalog_path") or "").strip()
-        if owned != catalog:
+        if owned not in (catalog, _catalog_legacy_alias(db_path)):
             return (
                 "Refusing backup: backup destination "
                 f"'{root}' belongs to catalog '{owned or '<unknown>'}', "
@@ -379,10 +401,15 @@ def backup_owner_warning(root: Path, db_path: str) -> str | None:
 
 
 def _snapshot_paths(root: Path) -> list[Path]:
-    """Return catalog snapshots across frozen and public names."""
+    """Return catalog snapshots across both name prefixes, newest first.
+
+    Ordered by the parsed timestamp — lexical filename order would rank any
+    legacy photoarchive-* snapshot above every azimuth-* one.
+    """
     try:
         return sorted(
             (path for path in Path(root).glob("*.db.gz") if BACKUP_NAME_RE.match(path.name)),
+            key=lambda path: (_parse_backup_name(path.name) or datetime.min, path.name),
             reverse=True,
         )
     except OSError:
@@ -390,13 +417,21 @@ def _snapshot_paths(root: Path) -> list[Path]:
 
 
 def write_backup_owner_marker(root: Path, db_path: str) -> None:
-    """Persist catalog ownership after the first successful snapshot."""
+    """Persist catalog ownership after the first successful snapshot.
+
+    A directory honored through its legacy marker gets the current marker
+    written beside it, so the upgrade happens on the first successful
+    snapshot; the legacy file stays behind as history.
+    """
 
     root = Path(root)
     marker = _owner_marker_path(root)
     if marker.exists():
         assert_backup_owner(root, db_path)
         return
+    if _legacy_owner_marker_path(root).exists():
+        # Refuses here when the legacy marker names a different catalog.
+        assert_backup_owner(root, db_path)
     payload = {
         "catalog_path": _catalog_identity(db_path),
         "created_at": datetime.now(timezone.utc).isoformat(),
@@ -673,6 +708,11 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
 
     today = now or date.today()
     keep: set[Path] = set()
+
+    # The newest snapshot is never pruned. Retention trims history; it must
+    # not leave the catalog with zero backups when every snapshot has aged
+    # out of the daily/weekly windows (long-offline machine, backdated stamp).
+    keep.add(backups[0][1])
 
     # Always retain the most recent pre-migration snapshots. They are the
     # rollback safety net for a schema upgrade and must survive routine pruning.
