@@ -352,9 +352,6 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                     "trash_path": None,
                     "size": 0,
                     "token": None,
-                    "previous_status": row.get("status") or "kept",
-                    "previous_trashed_at": row.get("trashed_at"),
-                    "previous_trash_path": row.get("trash_path"),
                 })
                 continue
             source_root = row.get("source_root") or ""
@@ -375,9 +372,6 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 "trash_path": dest,
                 "size": moved_bytes,
                 "token": expected_token,
-                "previous_status": row.get("status") or "kept",
-                "previous_trashed_at": row.get("trashed_at"),
-                "previous_trash_path": row.get("trash_path"),
             })
 
         if failed_prepare_ids:
@@ -388,22 +382,11 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
             ]
 
         if plans:
-            await conn.execute("BEGIN")
-            await conn.executemany(
-                "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ?, trash_pending_hub = 0 WHERE id = ?",
-                [(now, plan["trash_path"], plan["id"]) for plan in plans],
-            )
-            source_ids = sorted({
-                int(rows[plan["id"]]["source_id"])
-                for plan in plans
-                if rows[plan["id"]].get("source_id") is not None
-            })
-            for source_id in source_ids:
-                await catalog_repository.update_source_counts_on_conn(conn, source_id)
-            await conn.commit()
-
+            # Files move before any catalog write so a committed 'trashed' row
+            # only ever describes a move that actually happened; a crash here
+            # leaves every row untouched and never strands a phantom trash_path.
             successful: list[dict] = []
-            failed: list[dict] = []
+            failed_ids: set[int] = set()
             for plan in plans:
                 moved_bytes, reason = await __to_thread_move_to_trash(
                     plan["filepath"],
@@ -412,27 +395,33 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 )
                 if reason:
                     errors.append(_error(plan["id"], reason))
-                    failed.append(plan)
+                    failed_ids.add(int(plan["id"]))
                     continue
                 plan["moved_bytes"] = moved_bytes
                 successful.append(plan)
-            if failed:
-                failed_family_ids = _failed_family_ids(plans, (plan["id"] for plan in failed))
-                failed = [
-                    plan for plan in plans
-                    if int(plan["family_id"]) in failed_family_ids
-                ]
+            if failed_ids:
+                failed_family_ids = _failed_family_ids(plans, failed_ids)
                 successful = [
                     plan for plan in successful
                     if int(plan["family_id"]) not in failed_family_ids
                 ]
-                await _revert_failed_trash_moves(conn, failed, rows)
             if successful:
                 trashed.extend(int(plan["id"]) for plan in successful)
                 freed_estimate_bytes += sum(
                     int(plan.get("moved_bytes") or 0) for plan in successful
                 )
                 await conn.execute("BEGIN")
+                await conn.executemany(
+                    "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ?, trash_pending_hub = 0 WHERE id = ?",
+                    [(now, plan["trash_path"], plan["id"]) for plan in successful],
+                )
+                source_ids = sorted({
+                    int(rows[plan["id"]]["source_id"])
+                    for plan in successful
+                    if rows[plan["id"]].get("source_id") is not None
+                })
+                for source_id in source_ids:
+                    await catalog_repository.update_source_counts_on_conn(conn, source_id)
                 successful_ids = [plan["id"] for plan in successful]
                 await _repair_stacks_after_trash(conn, successful_ids)
                 await _repair_collection_covers(conn, successful_ids)
@@ -467,30 +456,6 @@ async def __to_thread_move_to_trash(
     import asyncio
 
     return await asyncio.to_thread(_move_to_trash, filepath, dest, expected_token)
-
-
-async def _revert_failed_trash_moves(conn, failed: list[dict], rows: dict[int, dict]) -> None:
-    await conn.execute("BEGIN")
-    await conn.executemany(
-        "UPDATE images SET status = ?, trashed_at = ?, trash_path = ? WHERE id = ?",
-        [
-            (
-                plan["previous_status"],
-                plan["previous_trashed_at"],
-                plan["previous_trash_path"],
-                plan["id"],
-            )
-            for plan in failed
-        ],
-    )
-    source_ids = sorted({
-        int(rows[plan["id"]]["source_id"])
-        for plan in failed
-        if rows[plan["id"]].get("source_id") is not None
-    })
-    for source_id in source_ids:
-        await catalog_repository.update_source_counts_on_conn(conn, source_id)
-    await conn.commit()
 
 
 async def restore_images(db_path: str, image_ids: list[int]) -> dict:
@@ -787,13 +752,14 @@ async def _purge_trash_rows(
         deletable_ids.append(image_id)
         rows_by_id[image_id] = row
 
-    deleted_ids: list[int] = []
-    if deletable_ids:
-        deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, deletable_ids)
-        errors.extend(delete_errors)
+    # Files go first: a catalog row may only disappear once its trash file is
+    # confirmed gone. A failed unlink leaves the row in Trash for the next
+    # Empty Trash to retry; a removed file whose row delete defers purges
+    # cleanly next pass because a missing trash file counts as removed.
     freed_bytes = 0
     paths_to_prune: list[str] = []
-    for image_id in deleted_ids:
+    removed_ids: list[int] = []
+    for image_id in deletable_ids:
         row = rows_by_id[image_id]
         trash_path = row.get("trash_path")
         freed, reason = await __to_thread_remove_trash_file(
@@ -804,8 +770,13 @@ async def _purge_trash_rows(
             errors.append(_error(image_id, reason))
             continue
         freed_bytes += freed
+        removed_ids.append(image_id)
         if trash_path:
             paths_to_prune.append(trash_path)
+    deleted_ids: list[int] = []
+    if removed_ids:
+        deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, removed_ids)
+        errors.extend(delete_errors)
     await __to_thread_prune_empty_trash_dirs(paths_to_prune)
     if deleted_ids:
         invalidate_pending_hub_trash_refs(db_path)

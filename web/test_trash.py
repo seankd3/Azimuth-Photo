@@ -62,12 +62,15 @@ class TrashTests(BackendTestCase):
         self.assertEqual(result["deleted_count"], 0)
         self.assertIn("deferred", result["errors"][0]["reason"])
         self.assertLess(elapsed, 2.0)
-        self.assertTrue(os.path.exists(trash_path))
+        # The file is confirmed removed before the row delete was attempted;
+        # the surviving row purges cleanly on the next pass.
+        self.assertFalse(os.path.exists(trash_path))
+        self.assertEqual(result["freed_bytes"], 6)
         self.assertTrue(await self._image_exists(image_id))
 
-    async def test_purge_lock_failure_keeps_files_and_rows(self):
+    async def test_purge_lock_failure_keeps_rows_for_retry(self):
         source, _root = await self._source_root()
-        image_id, filepath = await self._file_image(source, "retryable.jpg", data=b"retryable")
+        image_id, _filepath = await self._file_image(source, "retryable.jpg", data=b"retryable")
         await trash_service.trash_images(db.DB_PATH, [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
         deferred = {"id": image_id, "reason": "catalog row deletion deferred: locked"}
@@ -82,15 +85,16 @@ class TrashTests(BackendTestCase):
 
         row = await self._image_row(image_id)
         self.assertEqual(result["deleted_count"], 0)
-        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["freed_bytes"], 9)
         self.assertEqual(result["errors"], [deferred])
-        self.assertTrue(os.path.exists(trash_path))
+        self.assertFalse(os.path.exists(trash_path))
         self.assertEqual(row["status"], "trashed")
         self.assertEqual(row["trash_path"], trash_path)
 
-        restored = await trash_service.restore_images(db.DB_PATH, [image_id])
-        self.assertEqual(restored["restored"], [image_id])
-        self.assertEqual(open(filepath, "rb").read(), b"retryable")
+        retried = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        self.assertEqual(retried["deleted_count"], 1)
+        self.assertEqual(retried["errors"], [])
+        self.assertFalse(await self._image_exists(image_id))
 
     async def _mirrored_trash(self, *, name="mirrored.jpg", hub_image_id=92):
         conn = await db.get_db()
@@ -182,13 +186,13 @@ class TrashTests(BackendTestCase):
         self.assertTrue(row["trash_path"].endswith(os.path.join(".trash", "shoot", "one.jpg")))
         self.assertEqual(open(row["trash_path"], "rb").read(), b"one")
 
-    async def test_trash_move_failure_reverts_committed_row(self):
+    async def test_trash_move_failure_leaves_row_untouched(self):
         source, _root = await self._source_root()
         image_id, filepath = await self._file_image(source, "move-fails.jpg", data=b"keep me")
         original_move = trash_service._move_to_trash
         observed_states = []
 
-        def fail_after_db_commit(_filepath, _dest, _token):
+        def fail_before_db_write(_filepath, _dest, _token):
             conn = sqlite3.connect(db.DB_PATH)
             try:
                 observed_states.append(
@@ -198,7 +202,7 @@ class TrashTests(BackendTestCase):
                 conn.close()
             return 0, "injected move failure"
 
-        trash_service._move_to_trash = fail_after_db_commit
+        trash_service._move_to_trash = fail_before_db_write
         try:
             result = await trash_service.trash_images(db.DB_PATH, [image_id])
         finally:
@@ -207,8 +211,9 @@ class TrashTests(BackendTestCase):
 
         self.assertEqual(result["trashed"], [])
         self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected move failure"}])
-        self.assertEqual(observed_states[0][0], "trashed")
-        self.assertIsNotNone(observed_states[0][1])
+        # The catalog never recorded a move that had not happened yet.
+        self.assertEqual(observed_states[0][0], "kept")
+        self.assertIsNone(observed_states[0][1])
         self.assertTrue(os.path.exists(filepath))
         self.assertEqual(row["status"], "kept")
         self.assertIsNone(row["trashed_at"])
@@ -314,7 +319,7 @@ class TrashTests(BackendTestCase):
         self.assertFalse(await self._image_exists(first_id))
         self.assertFalse(await self._image_exists(second_id))
 
-    async def test_empty_trash_keeps_bytes_when_catalog_delete_fails(self):
+    async def test_empty_trash_keeps_row_when_catalog_delete_fails(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "delete-fails.jpg", data=b"irreplaceable")
         await trash_service.trash_images(db.DB_PATH, [image_id])
@@ -322,7 +327,8 @@ class TrashTests(BackendTestCase):
 
         async def fail_catalog_delete(_db_path, image_ids):
             self.assertEqual(image_ids, [image_id])
-            self.assertTrue(os.path.exists(trash_path))
+            # The row delete is only attempted once the file is confirmed gone.
+            self.assertFalse(os.path.exists(trash_path))
             return [], [{"id": image_id, "reason": "injected catalog failure"}]
 
         with patch.object(
@@ -333,12 +339,11 @@ class TrashTests(BackendTestCase):
             result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
 
         self.assertEqual(result["deleted_count"], 0)
-        self.assertEqual(result["freed_bytes"], 0)
+        self.assertEqual(result["freed_bytes"], 13)
         self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected catalog failure"}])
-        self.assertTrue(os.path.exists(trash_path))
         self.assertTrue(await self._image_exists(image_id))
 
-    async def test_empty_trash_surfaces_unlink_failure_after_catalog_delete(self):
+    async def test_empty_trash_unlink_failure_keeps_row_for_retry(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "unlink-fails.jpg", data=b"leftover")
         await trash_service.trash_images(db.DB_PATH, [image_id])
@@ -352,10 +357,18 @@ class TrashTests(BackendTestCase):
         ):
             result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
 
-        self.assertEqual(result["deleted_count"], 1)
+        # A file that could not be removed keeps its catalog row so the next
+        # Empty Trash can retry it — never a stranded orphan on disk.
+        self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["freed_bytes"], 0)
         self.assertEqual(result["errors"], [{"id": image_id, "reason": "injected unlink failure"}])
         self.assertTrue(os.path.exists(trash_path))
+        self.assertTrue(await self._image_exists(image_id))
+
+        retried = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        self.assertEqual(retried["deleted_count"], 1)
+        self.assertEqual(retried["errors"], [])
+        self.assertFalse(os.path.exists(trash_path))
         self.assertFalse(await self._image_exists(image_id))
 
     async def test_empty_trash_happy_path_prunes_removed_file_tree(self):
@@ -807,11 +820,11 @@ class VirtualCopyTrashTests(BackendTestCase):
         self.assertFalse(os.path.exists(filepath))
 
     @pytest.mark.contract
-    async def test_master_trash_failure_reverts_entire_virtual_copy_family(self):
+    async def test_master_trash_failure_keeps_entire_virtual_copy_family(self):
         master_id, copy_id, filepath = await self._master_with_copy()
         observed_statuses = []
 
-        def fail_master_after_family_commit(_filepath, dest, _token):
+        def fail_master_before_family_commit(_filepath, dest, _token):
             if dest is None:
                 return 0, ""
             conn = sqlite3.connect(db.DB_PATH)
@@ -824,10 +837,11 @@ class VirtualCopyTrashTests(BackendTestCase):
                 conn.close()
             return 0, "injected trash failure"
 
-        with patch.object(trash_service, "_move_to_trash", fail_master_after_family_commit):
+        with patch.object(trash_service, "_move_to_trash", fail_master_before_family_commit):
             result = await trash_service.trash_images(db.DB_PATH, [master_id])
 
-        self.assertEqual(observed_statuses, [{master_id: "trashed", copy_id: "trashed"}])
+        # Nothing is committed until the master's file move succeeds.
+        self.assertEqual(observed_statuses, [{master_id: "kept", copy_id: "kept"}])
         self.assertEqual(result["trashed"], [])
         self.assertEqual(result["errors"], [{"id": master_id, "reason": "injected trash failure"}])
         master = await self._image_row(master_id)

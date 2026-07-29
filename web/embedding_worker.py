@@ -657,6 +657,7 @@ def resume_embedding_worker(*, persist: bool = True) -> dict:
     _embedding_manual_pause_message = ""
     _embedding_pause_reason = ""
     _embedding_oom_circuit.reset()
+    work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
     _set_worker_status("idle", "Search will run from Background Work.", ready=_model is not None)
     return get_worker_status()

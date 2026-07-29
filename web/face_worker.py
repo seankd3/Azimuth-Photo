@@ -178,6 +178,7 @@ def resume_face_worker(*, persist: bool = True) -> None:
             settings.save_settings({**config, "people_scan_enabled": True})
     _face_manual_pause = False
     _face_manual_pause_message = ""
+    work_coordination.claim_manual_owner("people")
     request_scan_now()
     _set_status(state="idle", message="People will scan cached previews.")
 
