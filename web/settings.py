@@ -71,8 +71,9 @@ DEFAULT_SETTINGS = {
     "taste_blend_min_signal": 25,
     "refine_semantic_pairing": True,
     "show_loupe_cache_status": True,
+    "embedding_scan_enabled": True,
     "people_scan_enabled": True,
-    "caption_scan_enabled": False,
+    "caption_scan_enabled": True,
     "caption_model_preset": DEFAULT_CAPTION_MODEL_PRESET_KEY,
     "caption_model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
     "caption_model_revision": "main",
@@ -589,6 +590,10 @@ def normalize_settings(raw: dict | None) -> dict:
     if normalized["thumb_size_md"] > normalized["thumb_size_lg"]:
         normalized["thumb_size_lg"] = normalized["thumb_size_md"]
 
+    normalized["embedding_scan_enabled"] = _normalize_bool(
+        raw.get("embedding_scan_enabled", normalized["embedding_scan_enabled"]),
+        DEFAULT_SETTINGS["embedding_scan_enabled"],
+    )
     normalized["people_scan_enabled"] = _normalize_bool(
         raw.get("people_scan_enabled", normalized["people_scan_enabled"]),
         DEFAULT_SETTINGS["people_scan_enabled"],

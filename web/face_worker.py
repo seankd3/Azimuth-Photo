@@ -75,7 +75,14 @@ _status: dict[str, Any] = {
 _face_app = None
 _face_app_key: tuple[str, str, int] | None = None
 _scan_now = False
-_face_manual_pause = True
+def _initial_manual_pause() -> bool:
+    try:
+        return not bool(settings.get_settings().get("people_scan_enabled", True))
+    except Exception:
+        return True
+
+
+_face_manual_pause = _initial_manual_pause()
 _face_manual_pause_message = "People is stopped until you start it from Background Work."
 AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
@@ -152,18 +159,25 @@ def _enter_paused(message: str) -> None:
     _set_status(state="paused", ready=False, message=message, last_error="")
 
 
-def pause_face_worker() -> None:
+def pause_face_worker(*, persist: bool = True) -> None:
     global _face_manual_pause, _face_manual_pause_message
+    if persist:
+        config = settings.get_settings()
+        if bool(config.get("people_scan_enabled", True)):
+            settings.save_settings({**config, "people_scan_enabled": False})
     _face_manual_pause = True
     _face_manual_pause_message = "People is stopped."
     _enter_paused(_face_manual_pause_message)
 
 
-def resume_face_worker() -> None:
+def resume_face_worker(*, persist: bool = True) -> None:
     global _face_manual_pause, _face_manual_pause_message
+    if persist:
+        config = settings.get_settings()
+        if not bool(config.get("people_scan_enabled", True)):
+            settings.save_settings({**config, "people_scan_enabled": True})
     _face_manual_pause = False
     _face_manual_pause_message = ""
-    work_coordination.claim_manual_owner("people")
     request_scan_now()
     _set_status(state="idle", message="People will scan cached previews.")
 

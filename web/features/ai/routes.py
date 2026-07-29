@@ -261,6 +261,7 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
         "worker_message": worker_status["message"],
         "worker_ready": worker_status["ready"],
         "embedding_manual_pause": bool(worker_status.get("manual_pause")),
+        "automatic": bool(settings.get_settings().get("embedding_scan_enabled", True)),
         "worker_error": worker_status["last_error"],
         "last_batch_size": worker_status.get("last_batch_size", 0),
         "last_batch_seconds": worker_status.get("last_batch_seconds", 0.0),

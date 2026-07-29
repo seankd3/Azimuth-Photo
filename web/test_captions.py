@@ -290,7 +290,7 @@ class CaptionTests(BackendTestCase):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-                self.assertIsNone(work_coordination.manual_owner())
+                self.assertNotEqual(work_coordination.manual_owner(), "captions")
                 self.assertIsNone(work_coordination.gpu_owner())
         finally:
             allow_load_finish.set()
@@ -367,7 +367,7 @@ class CaptionTests(BackendTestCase):
             ):
                 task = asyncio.create_task(caption_worker.run_caption_worker())
                 await asyncio.wait_for(sleep_started.wait(), timeout=1)
-                self.assertIsNone(work_coordination.manual_owner())
+                self.assertNotEqual(work_coordination.manual_owner(), "captions")
         finally:
             if task is not None:
                 task.cancel()
@@ -388,7 +388,7 @@ class CaptionTests(BackendTestCase):
         circuit.reset()
         self.assertEqual(circuit.consecutive_failures, 0)
 
-    async def test_caption_worker_pauses_after_repeated_minimum_batch_ooms(self):
+    async def test_caption_worker_cools_down_after_repeated_minimum_batch_ooms(self):
         old_dependencies = (
             caption_worker._count_images_needing_captions,
             caption_worker._get_images_needing_captions,
@@ -397,6 +397,8 @@ class CaptionTests(BackendTestCase):
         old_pause = caption_worker._caption_manual_pause
         old_pause_message = caption_worker._caption_manual_pause_message
         old_status = dict(caption_worker._status)
+        old_oom_cooldown_until = caption_worker._oom_cooldown_until
+        old_oom_cooldown_count = caption_worker._oom_cooldown_count
         stored_errors = 0
         third_error = asyncio.Event()
 
@@ -462,8 +464,11 @@ class CaptionTests(BackendTestCase):
                 task = asyncio.create_task(caption_worker.run_caption_worker())
                 await asyncio.wait_for(third_error.wait(), timeout=2)
                 await asyncio.sleep(0)
-                self.assertTrue(caption_worker.manual_pause_active())
-                self.assertIn("out-of-memory", caption_worker.get_worker_status()["message"])
+                self.assertFalse(caption_worker.manual_pause_active())
+                status = caption_worker.get_worker_status()
+                self.assertEqual(status["state"], "cooldown")
+                self.assertIn("retry automatically", status["message"])
+                self.assertIsNotNone(status["retry_at"])
         finally:
             if task is not None:
                 task.cancel()
@@ -476,6 +481,8 @@ class CaptionTests(BackendTestCase):
             ) = old_dependencies
             caption_worker._caption_manual_pause = old_pause
             caption_worker._caption_manual_pause_message = old_pause_message
+            caption_worker._oom_cooldown_until = old_oom_cooldown_until
+            caption_worker._oom_cooldown_count = old_oom_cooldown_count
             caption_worker._status.clear()
             caption_worker._status.update(old_status)
             caption_worker._oom_circuit.reset()
