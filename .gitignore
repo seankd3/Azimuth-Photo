@@ -53,3 +53,12 @@ node_modules/
 
 # local pregen diagnosis artifacts
 .diag/
+
+# runtime artifacts on the serving tree
+web/photoarchive.db.clean-shutdown
+web/cloud_backup_status.json
+web/bulk_desired.json
+web/backups/
+bench-runs/
+RELEASE_AUDIT_*.md
+web/**/*.bak-*
