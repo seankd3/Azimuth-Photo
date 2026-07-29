@@ -65,8 +65,21 @@ def bulk_hdd_slot_sync():
 
 @asynccontextmanager
 async def bulk_hdd_slot():
-    """Async wrapper around the same thread gate (single spindle flight)."""
-    await asyncio.to_thread(_acquire)
+    """Async wrapper around the same thread gate (single spindle flight).
+
+    Cancellation-safe: the acquiring thread cannot be cancelled, so a task
+    cancelled while waiting (the stall watchdog does exactly this) must hand
+    the eventually-acquired slot straight back — otherwise one cancelled
+    waiter starves every later batch permanently.
+    """
+    future = asyncio.get_running_loop().run_in_executor(None, _acquire)
+    try:
+        await asyncio.shield(future)
+    except BaseException:
+        future.add_done_callback(
+            lambda f: _release() if not f.cancelled() and f.exception() is None else None
+        )
+        raise
     try:
         yield
     finally:

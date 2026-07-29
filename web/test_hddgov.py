@@ -68,6 +68,44 @@ class HddGovernorTests(unittest.TestCase):
         self.assertLessEqual(max(peaks), 2)
         self.assertGreaterEqual(max(peaks), 2)
 
+    def test_cancelled_waiter_never_leaks_the_slot(self):
+        """The stall watchdog cancels batches mid-acquire; the slot must come
+        back. One leaked slot starves every later batch permanently — this was
+        the production pregen stall loop."""
+        import asyncio
+
+        async def scenario():
+            stop = asyncio.Event()
+
+            async def hold():
+                async with hdd_governor.bulk_hdd_slot():
+                    await stop.wait()
+
+            async def blocked_waiter():
+                async with hdd_governor.bulk_hdd_slot():
+                    pass
+
+            blocker = asyncio.create_task(hold())
+            await asyncio.sleep(0.05)
+            victim = asyncio.create_task(blocked_waiter())
+            await asyncio.sleep(0.1)
+            victim.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await victim
+            stop.set()
+            await blocker
+            # The orphaned acquire thread hands the slot back on completion.
+            for _ in range(50):
+                if hdd_governor.bulk_hdd_holds() == 0:
+                    break
+                await asyncio.sleep(0.02)
+            self.assertEqual(hdd_governor.bulk_hdd_holds(), 0)
+            # And the gate still works for the next batch.
+            async with hdd_governor.bulk_hdd_slot():
+                pass
+
+        asyncio.run(scenario())
+
 
 class HarvestReadOnceTests(unittest.TestCase):
     def setUp(self):
