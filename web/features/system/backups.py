@@ -731,9 +731,14 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
     for _when, path in premigrate[:PREMIGRATE_KEEP]:
         keep.add(path)
 
+    # Premigrate snapshots live under their own cap; routine daily/weekly
+    # slots rank only routine snapshots.
+    premigrate_all = {path for _when, path in premigrate}
+    routine = [(when, path) for when, path in backups if path not in premigrate_all]
+
     # Newest backup per calendar day for the 7 most recent days present.
     daily_seen: set[date] = set()
-    for when, path in backups:
+    for when, path in routine:
         day = when.date()
         if day in daily_seen:
             continue
@@ -744,7 +749,7 @@ def apply_retention(root: Path | None = None, *, now: date | None = None) -> lis
 
     # Newest backup per ISO week for the 4 most recent weeks present.
     weekly_seen: set[tuple[int, int]] = set()
-    for when, path in backups:
+    for when, path in routine:
         iso = when.isocalendar()
         week_key = (iso.year, iso.week)
         if week_key in weekly_seen:

@@ -73,16 +73,22 @@ class MigrationBackupTests(unittest.TestCase):
             backups.backup_before_migration(self.db + ".nope", 20, 27)
 
     def test_retention_protects_premigrate_snapshots(self):
-        old = datetime.now() - timedelta(days=120)  # far outside daily/weekly windows
+        # An ancient premigrate snapshot survives even when routine snapshots
+        # overflow every daily slot; the overflowed routine one prunes.
+        old = datetime.now() - timedelta(days=120)
         premig = self._fake(old, backups.PREMIGRATE_LABEL)
         plain = self._fake(old - timedelta(minutes=1))
-        recent = self._fake(datetime.now())
+        # 28 consecutive days fill all 7 daily and 4 weekly slots.
+        recents = [
+            self._fake(datetime.now() - timedelta(days=i)) for i in range(28)
+        ]
 
         pruned = backups.apply_retention(self.root)
 
         self.assertIn(plain, pruned)
         self.assertNotIn(premig, pruned)
-        self.assertNotIn(recent, pruned)
+        for name in recents[: backups.DAILY_KEEP]:
+            self.assertNotIn(name, pruned)
         self.assertTrue((self.root / premig).exists())
         self.assertFalse((self.root / plain).exists())
 
