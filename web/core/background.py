@@ -235,6 +235,10 @@ async def run_shutdown(
     await _fire_and_forget.cancel_all()
     await thumbnails.cancel_background_tasks()
 
+    from data import connection as data_connection
+
+    await data_connection.close_shared_readers()
+
     from features.media import warm as media_warm
     await media_warm.cancel_background_tasks()
 

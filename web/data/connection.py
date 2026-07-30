@@ -86,6 +86,45 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
     return conn
 
 
+# Serving one tile should not cost a connection. Opening one spawns a thread
+# and runs seven PRAGMAs (including a 256MB mmap), which on a laptop mid-boot
+# measured 1.3-2.9s per thumbnail — far more than the row lookup it wrapped.
+# Hot read paths share one reader per catalog; aiosqlite serializes work on its
+# own thread, and WAL readers see every commit, so sharing is safe here.
+_shared_readers: dict[str, aiosqlite.Connection] = {}
+_shared_reader_lock = asyncio.Lock()
+
+
+async def shared_reader(db_path: str) -> aiosqlite.Connection:
+    """Long-lived read connection for per-request lookups. Never close it."""
+    existing = _shared_readers.get(db_path)
+    if existing is not None:
+        return existing
+    async with _shared_reader_lock:
+        existing = _shared_readers.get(db_path)
+        if existing is not None:
+            return existing
+        conn = await open_async(db_path)
+        _shared_readers[db_path] = conn
+        return conn
+
+
+async def drop_shared_reader(db_path: str) -> None:
+    """Forget a reader whose connection went bad; the next call reopens."""
+    conn = _shared_readers.pop(db_path, None)
+    if conn is None:
+        return
+    try:
+        await conn.close()
+    except Exception:
+        pass
+
+
+async def close_shared_readers() -> None:
+    for db_path in list(_shared_readers):
+        await drop_shared_reader(db_path)
+
+
 def open_sync(
     db_path: str,
     *,
