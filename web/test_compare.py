@@ -1096,7 +1096,10 @@ class CompareTests(BackendTestCase):
         result = await compare_routes.mosaic_next(n=3, strategy="diverse")
         ids = [img["id"] for img in result["images"]]
 
-        self.assertEqual(ids, [first, second])
+        # Membership, not order: the reservoir is a moving random window, and
+        # what this contract owns is which images are eligible and how the
+        # pending-thumbnail totals are reported.
+        self.assertEqual(set(ids), {first, second})
         self.assertNotIn(hidden, ids)
         self.assertEqual(result["visible_images"], 2)
         self.assertEqual(result["total_images"], 3)

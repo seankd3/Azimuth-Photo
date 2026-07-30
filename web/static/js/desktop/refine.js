@@ -70,8 +70,34 @@ function stageClassName() {
     return mode === 'duel' ? 'duel' : `mosaic grid-${gridSize}`;
 }
 
+// sm previews are 400px on the long edge, so they only look right while the
+// tile needs fewer physical pixels than that.
+const SM_TIER_EDGE_PX = 400;
+
 function thumbTier() {
-    return 'md';
+    // Ask for the tier the tile can actually show. Small waves and HiDPI
+    // screens need md; a dense wave on a 1x screen does not, and asking for sm
+    // there keeps every sm-only image usable on a satellite whose md coverage
+    // lags the hub. A missing md falls back to sm rather than dropping the
+    // candidate (see smFallbackTier), so the pool stays wide either way.
+    if (need() <= 4) return 'md';
+    const stage = document.getElementById('refine-stage');
+    const cols = GRID_SIZES[gridSize].columns;
+    const cssTile = stage ? stage.clientWidth / Math.max(1, cols) : 0;
+    const physicalTile = cssTile * (window.devicePixelRatio || 1);
+    return physicalTile > SM_TIER_EDGE_PX ? 'md' : 'sm';
+}
+
+function smFallbackTier(image) {
+    // An md-less image is still a real candidate: retry once at sm before the
+    // heal path replaces it, or a satellite mid-backfill would keep discarding
+    // photos it can display perfectly well.
+    if (!image || image.dataset.tierFallback === 'done') return false;
+    const src = image.src || '';
+    if (!src.includes('/api/thumb/md/')) return false;
+    image.dataset.tierFallback = 'done';
+    image.src = src.replace('/api/thumb/md/', '/api/thumb/sm/');
+    return true;
 }
 
 function imageUrl(img) {
@@ -142,19 +168,34 @@ async function refreshPropagation() {
 let healsThisRender = 0;
 const HEAL_BUDGET = 24;
 
+function setImageHandlers(img) {
+    const markLoaded = () => {
+        // A tier that has no file resolves as a load with no pixels (204).
+        if (img.naturalWidth === 0 && smFallbackTier(img)) {
+            setImageHandlers(img);
+            return;
+        }
+        img.classList.add('loaded');
+    };
+    const heal = () => {
+        if (smFallbackTier(img)) {
+            setImageHandlers(img);
+            return;
+        }
+        const card = img.closest('.ref-card');
+        const index = card ? Number(card.dataset.index) : NaN;
+        if (Number.isInteger(index)) healFailedCell(index);
+    };
+    img.addEventListener('load', markLoaded, { once: true });
+    img.addEventListener('error', heal, { once: true });
+    if (img.complete && img.naturalWidth > 0) markLoaded();
+    else if (img.complete && img.src) heal();
+}
+
 function setImagesLoadedHandlers() {
     healsThisRender = 0;
     for (const img of document.querySelectorAll('#refine-stage .ref-card img')) {
-        const markLoaded = () => img.classList.add('loaded');
-        const heal = () => {
-            const card = img.closest('.ref-card');
-            const index = card ? Number(card.dataset.index) : NaN;
-            if (Number.isInteger(index)) healFailedCell(index);
-        };
-        img.addEventListener('load', markLoaded, { once: true });
-        img.addEventListener('error', heal, { once: true });
-        if (img.complete && img.naturalWidth > 0) markLoaded();
-        else if (img.complete && img.src) heal();
+        setImageHandlers(img);
     }
 }
 
@@ -482,24 +523,41 @@ function swapCell(index, img) {
     layoutEqualArea();
     const image = card.querySelector('img');
     const finish = () => {
+        // A tier with no file resolves as a load with no pixels; retry at sm
+        // before treating the candidate as unusable. Handlers are one-shot, so
+        // the retry rebinds them.
+        if (image && image.naturalWidth === 0 && smFallbackTier(image)) {
+            bind();
+            return;
+        }
         card.classList.remove('replacing');
         if (image) image.classList.add('loaded');
     };
     const fail = () => {
         // Never present a failed load as loaded — heal with the next
         // screened replacement instead of leaving a blank card.
+        if (image && smFallbackTier(image)) {
+            bind();
+            return;
+        }
         card.classList.remove('replacing');
         if (image) image.classList.remove('loaded');
         healFailedCell(index);
     };
-    if (image) {
-        image.classList.remove('loaded');
-        image.alt = img.filename || '';
+    const bind = () => {
+        if (!image) return;
         image.addEventListener('load', finish, { once: true });
         image.addEventListener('error', fail, { once: true });
-        image.src = imageUrl(img);
         if (image.complete && image.naturalWidth > 0) finish();
-        else if (image.complete) fail();
+        else if (image.complete && image.src) fail();
+    };
+    if (image) {
+        image.classList.remove('loaded');
+        // A new photo gets its own one-shot tier fallback.
+        delete image.dataset.tierFallback;
+        image.alt = img.filename || '';
+        image.src = imageUrl(img);
+        bind();
     } else {
         finish();
     }

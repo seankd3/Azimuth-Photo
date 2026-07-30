@@ -180,6 +180,38 @@ async def _rotated_least_compared_sample(
     return rows
 
 
+async def _cached_ids_sample(
+    conn,
+    cache_root: str,
+    size: str,
+    limit: int,
+    max_id: int,
+) -> list[list[int]]:
+    """Random-pivot window of ids that already have a preview in this tier.
+
+    Returns one or two id batches (the second is the wrap-around arm) taken
+    straight off the cache_entries index, so every id handed back is eligible
+    for the tier before the visibility filters run.
+    """
+    pivot = random.randint(1, max(1, max_id))
+    # Oversample lightly: a few cached ids are hidden, trashed, or missing.
+    want = max(limit, int(limit * 1.3))
+    sql = (
+        "SELECT image_id FROM cache_entries "
+        "WHERE cache_root = ? AND size = ? AND image_id >= ? "
+        "ORDER BY image_id LIMIT ?"
+    )
+    cursor = await conn.execute(sql, (cache_root, size, pivot, want))
+    ahead = [int(row["image_id"]) for row in await cursor.fetchall()]
+    batches = [ahead] if ahead else []
+    if len(ahead) < want:
+        cursor = await conn.execute(sql, (cache_root, size, 1, want - len(ahead)))
+        behind = [int(row["image_id"]) for row in await cursor.fetchall()]
+        if behind:
+            batches.append(behind)
+    return batches
+
+
 async def _random_visible_sample(
     conn,
     projection: str,
@@ -203,6 +235,18 @@ async def _random_visible_sample(
         f"{_PAIRING_VISIBLE_WHERE}AND i.id IN ({{placeholders}})"
     )
     found: dict[int, object] = {}
+    # Draw from the cache table, which *is* the eligibility set for this tier.
+    # Guessing ids out of the whole id space needs one round per miss, and a
+    # satellite whose md coverage sits near a quarter of the catalog paid
+    # seconds for it (measured 2.6s). One indexed range scan at a random pivot
+    # is dense by construction, wherever coverage stands.
+    for cached in await _cached_ids_sample(conn, cache_root, size, limit, max_id):
+        for chunk in _chunked(cached, _PAIRING_ID_CHUNK):
+            sql = sql_template.format(placeholders=",".join("?" for _ in chunk))
+            for row in await _pairing_rows(conn, sql, [cache_root, size, *chunk]):
+                found[int(row["id"])] = row
+        if len(found) >= limit:
+            return list(found.values())[:limit]
     drawn = 0
     oversample = PAIRING_SAMPLE_OVERSAMPLE
     for _round in range(PAIRING_SAMPLE_ROUNDS):

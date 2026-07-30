@@ -1362,12 +1362,22 @@ async def _refine_sample(
     return sample, "strategy"
 
 
-def _mosaic_pool_tier() -> str:
-    """Refine tiles render the md tier, so candidate pools must be gated on md
-    servability — an sm-visible image with no md file paints a blank cell.
-    Rollback override: AZIMUTH_REFINE_VISIBLE_TIER=sm."""
-    tier = os.environ.get("AZIMUTH_REFINE_VISIBLE_TIER", "md").strip().lower()
-    return tier if tier in ("sm", "md") else "md"
+def _mosaic_pool_tier(n: int = 0) -> str:
+    """Gate the pool on the tier the client will actually paint.
+
+    A candidate whose tile would paint blank must not be offered, but gating
+    everything on md excluded every sm-only image for no visual gain: a wave of
+    six or more tiles renders each photo a few hundred pixels tall, where the
+    400px sm preview is already more than the tile can show. Small waves (2x2,
+    duel) do render large, so they keep the md gate. The client picks its tier
+    from the same wave size in refine.js thumbTier().
+
+    Rollback override: AZIMUTH_REFINE_VISIBLE_TIER=md pins the old behaviour.
+    """
+    override = os.environ.get("AZIMUTH_REFINE_VISIBLE_TIER", "").strip().lower()
+    if override in ("sm", "md"):
+        return override
+    return "sm" if n > 4 else "md"
 
 
 def _schedule_disk_index_warm(thumbnails) -> None:
@@ -1448,7 +1458,7 @@ async def mosaic_next_impl(
     collection_id: int = 0, import_batch: int = 0, exclude_sources=(),
 ):
     """Get active images for mosaic ranking with configurable sampling strategy."""
-    pool_tier = _mosaic_pool_tier()
+    pool_tier = _mosaic_pool_tier(n)
     candidate_source = "mosaic_window"
     cache_hit = False
     counts_stale = False

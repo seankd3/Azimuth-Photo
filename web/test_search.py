@@ -511,6 +511,9 @@ class SearchTests(BackendTestCase):
         visible_b = await self._image(source["id"], "landscape-b.jpg")
         miss = await self._image(source["id"], "portrait-miss.jpg")
         for image_id in (visible_a, visible_b, miss):
+            # Both tiers: a wave this size is gated on sm, a duel on md, and
+            # this test is about search filtering rather than tier choice.
+            await self._cache_entry(image_id, "sm")
             await self._cache_entry(image_id, "md")
 
         self._stub_text_search(
