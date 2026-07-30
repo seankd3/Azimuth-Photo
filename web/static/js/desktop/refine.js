@@ -47,6 +47,8 @@ let history = [];
 let generation = 0;
 let actionSeq = 0;
 let filling = false;
+let lastFetchStale = false;
+let staleRetryTimer = 0;
 let selectedIndex = -1;
 let picks = 0;
 let startedAt = 0;
@@ -182,8 +184,18 @@ function renderSet() {
     const stage = document.getElementById('refine-stage');
     stage.className = stageClassName();
     if (currentSet.length < need()) {
-        stage.innerHTML = '<div class="load-error"><h4>Not enough photos to refine</h4><p>Add a source if your library is empty, or try widening this view.</p></div>';
         selectedIndex = -1;
+        if (lastFetchStale) {
+            stage.innerHTML = '<div class="load-error"><h4>The archive is busy</h4>'
+                + '<p>Your last picks are still being saved. This will pick up on its own.</p>'
+                + '<button class="btn" id="refine-retry" type="button">Try now</button></div>';
+            stage.querySelector('#refine-retry')?.addEventListener('click', resetSet);
+            // Self-healing: a lock clears in well under a second.
+            clearTimeout(staleRetryTimer);
+            staleRetryTimer = setTimeout(() => { if (open) resetSet(); }, 1200);
+            return;
+        }
+        stage.innerHTML = '<div class="load-error"><h4>Not enough photos to refine</h4><p>Add a source if your library is empty, or try widening this view.</p></div>';
         return;
     }
     if (selectedIndex >= currentSet.length) selectedIndex = currentSet.length - 1;
@@ -303,6 +315,10 @@ async function fetchImages(count, excludeIds = []) {
         gridElo(),
     );
     if (count === 2) renderSemanticPairing(data && data.pairing === 'semantic');
+    // The archive answers 200 with an empty list while the catalog is briefly
+    // locked — typically by the write from the pick that just happened. That
+    // is "ask again", not "your library is too small".
+    lastFetchStale = Boolean(data && (data.status_stale || data.candidate_source === 'sqlite_busy'));
     return ((data && data.images) || []).map(normalizeImage).filter(Boolean);
 }
 
@@ -390,7 +406,11 @@ async function fillReplacements() {
     } catch {
         if (token === generation) showToast('Couldn’t load Refine replacements');
     } finally {
-        if (token === generation) filling = false;
+        // Always release the guard. Gating this on the token meant closing
+        // Refine, or changing scope/strategy/grid, while a fetch was in
+        // flight left it latched for the life of the page: the pool then
+        // drained and every later pick silently failed to advance.
+        filling = false;
     }
     return true;
 }
@@ -426,6 +446,10 @@ function waitForReplacement() {
 }
 
 function replacementIndices(pickedIndex) {
+    // Duel is an atomic two-photo rhythm: a decided pair is spent, so both
+    // photos go. Keeping the loser for up to STALE_ROUNDS made every round
+    // a rematch against the same survivor.
+    if (mode === 'duel') return currentSet.map((_img, index) => index);
     let oldestIndex = -1;
     let oldestAge = -1;
     for (let i = 0; i < age.length; i++) {
@@ -686,6 +710,7 @@ export function unmountRefine() {
     open = false;
     generation += 1;
     selectedIndex = -1;
+    clearTimeout(staleRetryTimer);
     document.getElementById('view-refine').classList.remove('active');
     document.getElementById('refine-head')?.classList.remove('controls-open');
     document.getElementById('refine-controls-toggle')?.setAttribute('aria-expanded', 'false');
