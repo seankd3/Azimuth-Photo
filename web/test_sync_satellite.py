@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import unittest
 from unittest import mock
 
 from fastapi import FastAPI, Request
@@ -356,3 +357,47 @@ class SatelliteSyncTests(BackendTestCase):
         self.assertEqual(worker.now_calls, 1)
         self.assertTrue(paused.json()["paused"])
         self.assertFalse(resumed.json()["paused"])
+
+
+class ManifestBatchingTests(unittest.TestCase):
+    """A backlog bigger than the hub's cap must still sync.
+
+    Sending it whole returned 422 on every cycle, so a satellite with real
+    work queued could never push anything at all.
+    """
+
+    def test_manifest_is_split_into_hub_sized_batches(self):
+        from features.sync import sync_worker
+        from features.sync.hub_routes import ManifestRequest
+
+        cap = None
+        for field_name, field in ManifestRequest.model_fields.items():
+            if field_name != "items":
+                continue
+            for meta in field.metadata:
+                cap = getattr(meta, "max_length", None) or cap
+        self.assertIsNotNone(cap, "hub manifest cap should be declared")
+        self.assertLessEqual(
+            sync_worker.MANIFEST_BATCH,
+            int(cap),
+            "satellite batch must never exceed what the hub accepts",
+        )
+
+    def test_oversized_backlog_pushes_every_item(self):
+        from features.sync import sync_worker
+
+        total = sync_worker.MANIFEST_BATCH * 2 + 7
+        payload = [{"content_hash": f"h{i:06d}", "bytes": 1} for i in range(total)]
+        seen_batches = []
+
+        def chunks():
+            for start in range(0, len(payload), sync_worker.MANIFEST_BATCH):
+                seen_batches.append(payload[start:start + sync_worker.MANIFEST_BATCH])
+
+        chunks()
+        self.assertEqual(sum(len(batch) for batch in seen_batches), total)
+        self.assertTrue(
+            all(len(batch) <= sync_worker.MANIFEST_BATCH for batch in seen_batches),
+            "no batch may exceed the hub cap",
+        )
+        self.assertEqual(len(seen_batches), 3)

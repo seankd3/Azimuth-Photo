@@ -23,6 +23,9 @@ from features.trash import service as trash_service
 
 
 log = logging.getLogger(__name__)
+
+# Must stay at or under the hub's ManifestRequest cap (hub_routes.py).
+MANIFEST_BATCH = 2000
 CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 _BASE_IDLE_SECONDS = 15.0
@@ -195,19 +198,27 @@ class SyncWorker:
             self._status["state"] = "syncing"
         pushed = False
         if items and not self._paused:
-            manifest = {
-                "items": [
-                    {key: item[key] for key in ("content_hash", "full_hash", "bytes", "filename", "date_taken") if item.get(key) is not None}
-                    for item in items
-                ]
-            }
-            response = await self._json("POST", "/api/sync/manifest", manifest)
-            missing = set(response.get("missing") or [])
-            known_rows = [
-                item
-                for item in (response.get("known") or [])
-                if isinstance(item, dict) and item.get("content_hash")
+            # The hub bounds one manifest at MANIFEST_BATCH items. A backlog
+            # larger than that used to be sent whole and rejected 422 on every
+            # cycle, so a satellite with real work queued could never sync at
+            # all — it must walk the backlog in batches instead.
+            payload_items = [
+                {key: item[key] for key in ("content_hash", "full_hash", "bytes", "filename", "date_taken") if item.get(key) is not None}
+                for item in items
             ]
+            missing: set[str] = set()
+            known_rows: list[dict] = []
+            for start in range(0, len(payload_items), MANIFEST_BATCH):
+                if self._paused:
+                    return
+                batch = payload_items[start:start + MANIFEST_BATCH]
+                response = await self._json("POST", "/api/sync/manifest", {"items": batch})
+                missing.update(response.get("missing") or [])
+                known_rows.extend(
+                    item
+                    for item in (response.get("known") or [])
+                    if isinstance(item, dict) and item.get("content_hash")
+                )
             known = {str(item["content_hash"]) for item in known_rows}
             known_ids = {
                 str(item["content_hash"]): int(item["image_id"])
