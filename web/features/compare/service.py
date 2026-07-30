@@ -23,10 +23,15 @@ _visible_matchups_cache: dict[str, dict] = {}
 _visible_pairing_candidates_cache: dict[str, dict] = {}
 _visible_pairing_candidates_refreshing: set[str] = set()
 _visible_pairing_candidates_generation = 0
+_disk_index_warming = False
 _interaction_response_cache: dict[tuple, dict] = {}
 _visible_pairing_candidates_cache_ttl_seconds = 15.0
 _patched_pairing_candidates_ttl_seconds = 15.0
 _interaction_response_cache_ttl_seconds = 600.0
+# Picks and propagation patch reservoirs instead of clearing them, so the
+# reservoir cache needs its own ceiling.
+_VISIBLE_PAIRING_CANDIDATES_CACHE_MAX = 48
+_COMPETE_PIVOT_BUCKET_ELO = 25.0
 _SWISS_PAIR_WINDOW = 512
 _FILTERED_SWISS_PAIR_WINDOW = 256
 _FILTERED_MOSAIC_WINDOW = 192
@@ -36,6 +41,9 @@ _MOSAIC_EXPLORE_WINDOW = 768
 # any remainder statistically.
 _SCOPED_MOSAIC_WINDOW_MAX = 5000
 _MOSAIC_DIVERSE_WINDOW = 1536
+# Random and compete draw a bounded window too: the user sees twelve tiles, and
+# a full-universe reservoir measured 1107ms against 20ms for a bounded draw.
+_MOSAIC_SAMPLE_WINDOW = 960
 _DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
 _invalidate_rankings_cache: Callable[[], None] | None = None
@@ -281,6 +289,58 @@ def add_past_matchups(pairs: list[tuple[int, int]]) -> None:
         cached["data"].update(normalized_pairs)
 
 
+def _pairing_candidates_entry(rows: list, **extra) -> dict:
+    return {
+        "data": rows,
+        # id -> row position, so patching a twelve-image pick stays O(12)
+        # instead of walking every reservoir row and rebuilding a six-figure
+        # id set on the acknowledged pick path.
+        "index_by_id": {int(row["id"]): position for position, row in enumerate(rows)},
+        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
+        **extra,
+    }
+
+
+def _store_pairing_candidates(cache_key: str, rows: list, **extra) -> None:
+    _visible_pairing_candidates_cache[cache_key] = _pairing_candidates_entry(rows, **extra)
+    overflow = len(_visible_pairing_candidates_cache) - _VISIBLE_PAIRING_CANDIDATES_CACHE_MAX
+    if overflow <= 0:
+        return
+    stale_first = sorted(
+        _visible_pairing_candidates_cache.items(),
+        key=lambda item: item[1].get("expires") or 0.0,
+    )
+    for stale_key, _entry in stale_first[:overflow]:
+        if stale_key == cache_key or stale_key in _visible_pairing_candidates_refreshing:
+            continue
+        _visible_pairing_candidates_cache.pop(stale_key, None)
+
+
+def _patch_cached_reservoir_rows(update_map: dict, patch_row) -> None:
+    """Apply row patches in place at the mapped positions.
+
+    Every cached reservoir keeps an id -> position map, so a pick or a
+    propagation batch touches only its own rows. Readers hold the same list and
+    only read from it, so replacing elements in place is safe and keeps the
+    patch off the O(reservoir) path.
+    """
+    now = time.monotonic()
+    for cached in list(_visible_pairing_candidates_cache.values()):
+        rows = cached.get("data")
+        positions = cached.get("index_by_id")
+        if rows is None or positions is None:
+            continue
+        patched = False
+        for image_id in update_map:
+            position = positions.get(image_id)
+            if position is None:
+                continue
+            rows[position] = patch_row(rows[position], image_id)
+            patched = True
+        if patched:
+            cached["expires"] = now + _patched_pairing_candidates_ttl_seconds
+
+
 def patch_pairing_cache(updates: list[tuple[int, float, int]]) -> None:
     _invalidate_rankings()
     invalidate_interaction_response_cache()
@@ -293,48 +353,60 @@ def patch_pairing_cache(updates: list[tuple[int, float, int]]) -> None:
         _pairing_cache["valid"] = False
         return
 
-    def _patched_rows(rows):
+    def _patched_row(row, image_id: int):
+        new_elo, comparison_delta = update_map[image_id]
+        row_dict = dict(row)
+        row_dict["elo"] = new_elo
+        row_dict["comparisons"] = int(row_dict.get("comparisons") or 0) + comparison_delta
+        return row_dict
+
+    if _pairing_cache["valid"] and _pairing_cache["data"] is not None:
         patched = []
         changed = False
-        for row in rows:
+        for row in _pairing_cache["data"]:
             try:
                 image_id = int(row["id"])
             except (KeyError, TypeError, ValueError):
                 patched.append(row)
                 continue
-            update = update_map.get(image_id)
-            if update is None:
+            if image_id in update_map:
+                patched.append(_patched_row(row, image_id))
+                changed = True
+            else:
                 patched.append(row)
-                continue
-            new_elo, comparison_delta = update
-            row_dict = dict(row)
-            row_dict["elo"] = new_elo
-            row_dict["comparisons"] = int(row_dict.get("comparisons") or 0) + comparison_delta
-            patched.append(row_dict)
-            changed = True
-        return patched, changed
-
-    if _pairing_cache["valid"] and _pairing_cache["data"] is not None:
-        patched, changed = _patched_rows(_pairing_cache["data"])
         if changed:
             _pairing_cache["data"] = patched
         else:
             _pairing_cache["valid"] = False
 
-    now = time.monotonic()
-    for _cache_key, cached in list(_visible_pairing_candidates_cache.items()):
-        rows = cached.get("data")
-        if rows is None:
-            continue
-        cached_ids = cached.get("id_set")
-        if cached_ids is not None and cached_ids.isdisjoint(update_map):
-            continue
-        patched, changed = _patched_rows(rows)
-        if not changed:
-            continue
-        cached["data"] = patched
-        cached["id_set"] = {int(row["id"]) for row in patched}
-        cached["expires"] = now + _patched_pairing_candidates_ttl_seconds
+    _patch_cached_reservoir_rows(update_map, _patched_row)
+
+
+def patch_propagated_pairing_cache(deltas: list[tuple[int, float]]) -> None:
+    """Propagation touched these ids — patch them instead of clearing the cache.
+
+    A pick schedules propagation, so a blanket clear on drain threw away the
+    reservoir the same pick had just patched and made the next click fully cold.
+    Deltas are applied relatively, exactly as propagation writes them, so a pick
+    that landed in between is not undone in the cache.
+    """
+    update_map: dict[int, float] = {}
+    for image_id, delta in deltas:
+        image_id = int(image_id)
+        update_map[image_id] = update_map.get(image_id, 0.0) + float(delta)
+    if not update_map:
+        return
+    _invalidate_rankings()
+    invalidate_interaction_response_cache()
+
+    def _patched_row(row, image_id: int):
+        row_dict = dict(row)
+        row_dict["elo"] = float(row_dict.get("elo") or 1200.0) + update_map[image_id]
+        row_dict["propagated_updates"] = int(row_dict.get("propagated_updates") or 0) + 1
+        return row_dict
+
+    _pairing_cache["valid"] = False
+    _patch_cached_reservoir_rows(update_map, _patched_row)
 
 
 async def filter_visible_candidates(candidates: list[dict], size: str) -> list[dict]:
@@ -360,14 +432,22 @@ async def default_visible_pairing_candidates(
     limit: int | None = None,
     order: str = "elo",
     include_card_metadata: bool | None = None,
+    elo_pivot: float | None = None,
 ) -> list[dict]:
     cache_root = _configured_cache_root()
     normalized_limit = int(limit or 0)
     if include_card_metadata is None:
         include_card_metadata = size != "md"
+    # Bucket the compete pivot so a drifting grid average reuses one reservoir
+    # instead of minting a cache entry per request.
+    pivot_bucket = (
+        int(round(float(elo_pivot) / _COMPETE_PIVOT_BUCKET_ELO))
+        if elo_pivot
+        else 0
+    )
     cache_key = (
         f"{_configured_db_signature()}:{cache_root}:{size}:"
-        f"{normalized_limit}:{order}:{int(include_card_metadata)}"
+        f"{normalized_limit}:{order}:{int(include_card_metadata)}:{pivot_bucket}"
     )
     now = time.monotonic()
     cached = _visible_pairing_candidates_cache.get(cache_key)
@@ -387,14 +467,11 @@ async def default_visible_pairing_candidates(
                         include_card_metadata=include_card_metadata,
                         limit=normalized_limit or None,
                         order=order,
+                        elo_pivot=elo_pivot,
                     )
                     if refresh_generation != _visible_pairing_candidates_generation:
                         return
-                    _visible_pairing_candidates_cache[cache_key] = {
-                        "data": refreshed,
-                        "id_set": {int(row["id"]) for row in refreshed},
-                        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
-                    }
+                    _store_pairing_candidates(cache_key, refreshed)
                 except Exception:
                     pass
                 finally:
@@ -408,12 +485,9 @@ async def default_visible_pairing_candidates(
             include_card_metadata=include_card_metadata,
             limit=normalized_limit or None,
             order=order,
+            elo_pivot=elo_pivot,
         )
-        _visible_pairing_candidates_cache[cache_key] = {
-            "data": rows,
-            "id_set": {int(row["id"]) for row in rows},
-            "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
-        }
+        _store_pairing_candidates(cache_key, rows)
     if copy_rows:
         return [dict(row) for row in rows]
     return rows
@@ -476,13 +550,12 @@ async def filtered_visible_ranked_candidates(
                     )
                     if refresh_generation != _visible_pairing_candidates_generation:
                         return
-                    _visible_pairing_candidates_cache[cache_key] = {
-                        "data": refreshed_rows,
-                        "id_set": {int(row["id"]) for row in refreshed_rows},
-                        "filtered_total": int(refreshed_total),
-                        "visible_count": int(refreshed_visible),
-                        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
-                    }
+                    _store_pairing_candidates(
+                        cache_key,
+                        refreshed_rows,
+                        filtered_total=int(refreshed_total),
+                        visible_count=int(refreshed_visible),
+                    )
                 except Exception:
                     pass
                 finally:
@@ -510,13 +583,12 @@ async def filtered_visible_ranked_candidates(
         lens=lens,
         tag=tag,
             exclude_sources=exclude_sources,)
-    _visible_pairing_candidates_cache[cache_key] = {
-        "data": result_rows,
-        "id_set": {int(row["id"]) for row in result_rows},
-        "filtered_total": int(filtered_total),
-        "visible_count": int(visible_count),
-        "expires": time.monotonic() + _visible_pairing_candidates_cache_ttl_seconds,
-    }
+    _store_pairing_candidates(
+        cache_key,
+        result_rows,
+        filtered_total=int(filtered_total),
+        visible_count=int(visible_count),
+    )
     return result_rows, int(filtered_total), int(visible_count)
 
 
@@ -1156,15 +1228,24 @@ def _compete_semantic_tiebreak(
         image_id: abs(_effective_elo(candidate) - target_elo)
         for image_id, candidate in selected_by_id.items()
     }
+    # One batched pass per selected image, instead of a cosine call inside the
+    # sort key for every candidate/selection pair.
+    candidate_ids = [_candidate_id(candidate) for candidate in candidates]
+    affinity: dict[int, float] = {}
+    for sample_id in selected_ids:
+        if not context.has(sample_id):
+            continue
+        for candidate_id, cosine in zip(
+            candidate_ids, context.cosine_many(sample_id, candidate_ids)
+        ):
+            if cosine is None:
+                continue
+            affinity[candidate_id] = affinity.get(candidate_id, 0.0) + max(0.0, cosine)
     ordered_pool = sorted(
         candidates,
         key=lambda img: (
             abs(_effective_elo(img) - target_elo),
-            -sum(
-                max(0.0, context.cosine(_candidate_id(img), sample_id) or 0.0)
-                for sample_id in selected_ids
-                if context.has(_candidate_id(img)) and context.has(sample_id)
-            ),
+            -affinity.get(_candidate_id(img), 0.0),
             _candidate_id(img),
         ),
     )
@@ -1233,7 +1314,12 @@ async def _semantic_duel_sample(
         return [], "strategy"
     seed = seed_sample[0]
     strategy_scores = _strategy_scores(score_pool, score_weights)
-    partner = semantic_pairing.best_partner(seed, candidates, strategy_scores, context)
+    # The partner search reads one embedding row per candidate, so look at a
+    # pre-shuffled window rather than the whole scope.
+    partner_pool = candidates
+    if len(partner_pool) > semantic_pairing.SEMANTIC_PARTNER_WINDOW:
+        partner_pool = random.sample(partner_pool, semantic_pairing.SEMANTIC_PARTNER_WINDOW)
+    partner = semantic_pairing.best_partner(seed, partner_pool, strategy_scores, context)
     if partner is None:
         remaining = [img for img in candidates if int(img["id"]) != int(seed["id"])]
         remaining_weights = [strategy_scores.get(int(img["id"]), 1.0) for img in remaining]
@@ -1284,10 +1370,40 @@ def _mosaic_pool_tier() -> str:
     return tier if tier in ("sm", "md") else "md"
 
 
+def _schedule_disk_index_warm(thumbnails) -> None:
+    """Build the cache path index in the background, once per gap."""
+    global _disk_index_warming
+    if _disk_index_warming:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _warm_disk_index():
+        global _disk_index_warming
+        try:
+            await thumbnails.warm_disk_path_index()
+        except Exception:
+            pass
+        finally:
+            _disk_index_warming = False
+
+    _disk_index_warming = True
+    loop.create_task(_warm_disk_index())
+
+
 def _tier_file_exists(tier: str, image_id: int) -> bool:
     try:
         import thumbnails
 
+        if not thumbnails.disk_index_ready():
+            # Building the index reads every cache_entries row for this cache
+            # root — 771ms measured on a 240k-row catalog. Warm it off the loop
+            # and fail open until it lands, the same as any other
+            # infrastructure gap.
+            _schedule_disk_index_warm(thumbnails)
+            return True
         return bool(thumbnails.fast_disk_has(tier, image_id))
     except Exception:
         # Fail open only on infrastructure errors — never for a known-missing file.
@@ -1394,17 +1510,31 @@ async def mosaic_next_impl(
             candidates = await default_visible_pairing_candidates(
                 pool_tier,
                 limit=max(_MOSAIC_EXPLORE_WINDOW, n * 80),
-                order="least_compared",
+                order="least_compared_shuffled",
             )
         elif strategy == "diverse":
-            candidate_source = "default_diverse_universe"
+            # diverse_sample already narrows to a random search pool before the
+            # embedding spread, so a bounded random reservoir is equivalent to
+            # the whole visible universe and an order of magnitude cheaper.
             candidates = await default_visible_pairing_candidates(
                 pool_tier,
-                order="cache",
+                limit=max(_MOSAIC_DIVERSE_WINDOW, n * 40),
+                order="random",
                 include_card_metadata=False,
             )
+        elif strategy == "compete" and grid_elo > 0:
+            candidates = await default_visible_pairing_candidates(
+                pool_tier,
+                limit=max(_MOSAIC_SAMPLE_WINDOW, n * 80),
+                order="near_elo",
+                elo_pivot=grid_elo,
+            )
         else:
-            candidates = await default_visible_pairing_candidates(pool_tier)
+            candidates = await default_visible_pairing_candidates(
+                pool_tier,
+                limit=max(_MOSAIC_SAMPLE_WINDOW, n * 80),
+                order="random",
+            )
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
         counts = await counts_task
@@ -1416,8 +1546,15 @@ async def mosaic_next_impl(
         stats = None
         candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
             pool_tier,
-            limit=max(_FILTERED_MOSAIC_WINDOW, n * 40),
-            sort="least_compared_shuffled" if strategy == "explore" else "elo",
+            limit=(
+                max(_MOSAIC_DIVERSE_WINDOW, n * 40)
+                if strategy == "diverse"
+                else max(_FILTERED_MOSAIC_WINDOW, n * 40)
+            ),
+            # Diverse and Explore need a window that spans the filtered set
+            # rather than its highest-rated head; the shuffled tie-break covers
+            # the remainder statistically.
+            sort="least_compared_shuffled" if strategy in ("explore", "diverse") else "elo",
             orientation=orientation,
             compared=compared,
             min_stars=min_stars,
@@ -1429,22 +1566,6 @@ async def mosaic_next_impl(
             lens=lens,
             tag=tag,
             exclude_sources=exclude_sources,)
-        if strategy == "diverse" and visible_count > len(candidates):
-            candidate_source = "filtered_diverse_universe"
-            candidates, filtered_total, visible_count = await filtered_visible_ranked_candidates(
-                pool_tier,
-                limit=visible_count,
-                orientation=orientation,
-                compared=compared,
-                min_stars=min_stars,
-                folder=folder,
-                flag=flag,
-                date_taken=date_taken,
-                file_type=file_type,
-                camera=camera,
-                lens=lens,
-                tag=tag,
-            exclude_sources=exclude_sources,)
         if exclude_ids:
             candidates = [row for row in candidates if int(row["id"]) not in exclude_ids]
             filtered_total = max(0, int(filtered_total) - len(exclude_ids))
@@ -1453,7 +1574,10 @@ async def mosaic_next_impl(
         candidate_source = "search_reservoir" if search.get("active") else "scoped_reservoir"
         stats = None
         scoped_id_filter = search.get("id_filter")
-        scoped_window = max(_FILTERED_MOSAIC_WINDOW, n * 40)
+        scoped_window = max(
+            _MOSAIC_DIVERSE_WINDOW if strategy == "diverse" else _FILTERED_MOSAIC_WINDOW,
+            n * 40,
+        )
         if scoped_id_filter:
             # The user asked to refine THIS set — the pool must span all of it,
             # not a fixed head of the ranking order.
@@ -1462,7 +1586,7 @@ async def mosaic_next_impl(
             pool_tier,
             limit=scoped_window,
             search=search,
-            sort="least_compared_shuffled" if strategy == "explore" else "elo",
+            sort="least_compared_shuffled" if strategy in ("explore", "diverse") else "elo",
             exclude_ids=exclude_ids,
             force_exact_counts=strategy == "diverse",
             orientation=orientation,
@@ -1475,25 +1599,6 @@ async def mosaic_next_impl(
             camera=camera,
             lens=lens,
             tag=tag,
-            exclude_sources=exclude_sources,)
-        if strategy == "diverse" and visible_count > len(candidates):
-            candidate_source = "search_diverse_universe" if search.get("active") else "scoped_diverse_universe"
-            candidates, filtered_total, visible_count = await search_visible_ranked_candidates(
-                pool_tier,
-                limit=visible_count,
-                search=search,
-                exclude_ids=exclude_ids,
-                force_exact_counts=True,
-                orientation=orientation,
-                compared=compared,
-                min_stars=min_stars,
-                folder=folder,
-                flag=flag,
-                date_taken=date_taken,
-                file_type=file_type,
-                camera=camera,
-                lens=lens,
-                tag=tag,
             exclude_sources=exclude_sources,)
     else:
         candidate_source = "full_candidate_scan"

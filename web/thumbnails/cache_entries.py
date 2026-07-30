@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sqlite3
 import threading
@@ -405,6 +406,20 @@ def _build_disk_path_index() -> bool:
     _disk_index_built = True
     _clear_cache_metadata_lock_backoff()
     return True
+
+
+def disk_index_ready() -> bool:
+    """True when the in-memory cache path index is usable without a rebuild."""
+    return _disk_index_built
+
+
+async def warm_disk_path_index() -> bool:
+    """Build the disk path index off the event loop.
+
+    The synchronous build reads every cache_entries row for this cache root, so
+    request handlers must never trigger it inline.
+    """
+    return await asyncio.to_thread(_build_disk_path_index)
 
 
 def _index_disk_entry(size: str, image_id: int, path: str, source_signature: str):

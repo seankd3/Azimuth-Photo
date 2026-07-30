@@ -443,6 +443,16 @@ async def run_startup(
 
     track_background_task(_warm_collection_suggestions())
 
+    async def _warm_disk_path_index():
+        # Otherwise the first request that gates a tile on cache truth pays the
+        # whole-table index build inline (771ms on a 240k-row cache).
+        try:
+            await thumbnails.warm_disk_path_index()
+        except Exception:
+            log.debug("cache path index warmup skipped", exc_info=True)
+
+    track_background_task(_warm_disk_path_index())
+
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
     track_background_task(_sweep_phantom_cache_entries())

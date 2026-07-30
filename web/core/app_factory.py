@@ -309,10 +309,25 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     def invalidate_interaction_response_cache() -> None:
         cache_events.invalidate_interaction_response_cache()
 
+    def apply_propagated_pairing_updates(*, elo_deltas=None) -> None:
+        """Patch the ids propagation touched; clear only when they are unknown.
+
+        A pick schedules its own propagation, so clearing every reservoir on
+        drain threw away the rows that same pick had just patched and made the
+        next click fully cold.
+        """
+        if elo_deltas is None:
+            invalidate_pairing_cache()
+            return
+        compare_service.patch_propagated_pairing_cache(elo_deltas)
+
     def schedule_pairing_propagation(coro) -> None:
         from core import propagation_queue
 
-        propagation_queue.schedule(coro, invalidate_callback=invalidate_pairing_cache)
+        propagation_queue.schedule(
+            coro,
+            invalidate_callback=apply_propagated_pairing_updates,
+        )
 
     async def resolve_text_search(q: str, *, deep: bool = False) -> dict:
         return await query_constraints.resolve_configured_text_search(

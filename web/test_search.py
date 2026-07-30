@@ -138,7 +138,7 @@ class SearchTests(BackendTestCase):
         self.assertNotIn("i.filename LIKE", where)
         self.assertEqual(params[-2:], ["jpg", ".jpg"])
 
-    async def test_mosaic_diverse_expands_filtered_and_search_results_to_visible_universe(self):
+    async def test_mosaic_diverse_samples_one_bounded_window_of_filtered_and_search_results(self):
         def candidate(image_id: int) -> dict:
             return {
                 "id": image_id,
@@ -166,13 +166,16 @@ class SearchTests(BackendTestCase):
         old_diverse = compare_service.diverse_sample
         old_resolve = compare_service._resolve_library_constraints
         try:
-            async def fake_filtered(size: str, *, limit: int, **_kwargs):
-                filtered_limits.append((size, limit))
+            async def fake_filtered(size: str, *, limit: int, sort: str = "elo", **_kwargs):
+                filtered_limits.append((size, limit, sort))
                 returned = min(int(limit), 500)
                 return [candidate(idx) for idx in range(1, returned + 1)], 600, 500
 
-            async def fake_search(size: str, *, limit: int, search: dict, force_exact_counts=False, **_kwargs):
-                search_calls.append((size, limit, bool(force_exact_counts), search.get("text_query")))
+            async def fake_search(
+                size: str, *, limit: int, search: dict, sort: str = "elo",
+                force_exact_counts=False, **_kwargs,
+            ):
+                search_calls.append((size, limit, sort, bool(force_exact_counts), search.get("text_query")))
                 returned = min(int(limit), 300)
                 return [candidate(idx) for idx in range(1, returned + 1)], 350, 300
 
@@ -211,12 +214,17 @@ class SearchTests(BackendTestCase):
             compare_service.diverse_sample = old_diverse
             compare_service._resolve_library_constraints = old_resolve
 
-        self.assertEqual(filtered_limits[0], ("md", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40)))
-        self.assertEqual(filtered_limits[1], ("md", 500))
-        self.assertEqual(filtered["candidate_source"], "filtered_diverse_universe")
-        self.assertEqual(search_calls[0], ("md", max(compare_service._FILTERED_MOSAIC_WINDOW, 4 * 40), True, "sunset"))
-        self.assertEqual(search_calls[1], ("md", 300, True, "sunset"))
-        self.assertEqual(searched["candidate_source"], "search_diverse_universe")
+        # One bounded, shuffled window per surface — no second full-universe fetch.
+        diverse_window = max(compare_service._MOSAIC_DIVERSE_WINDOW, 4 * 40)
+        self.assertEqual(filtered_limits, [("md", diverse_window, "least_compared_shuffled")])
+        self.assertEqual(filtered["candidate_source"], "filtered_reservoir")
+        self.assertEqual(
+            search_calls,
+            [("md", diverse_window, "least_compared_shuffled", True, "sunset")],
+        )
+        self.assertEqual(searched["candidate_source"], "search_reservoir")
+        self.assertEqual(len(filtered["images"]), 4)
+        self.assertEqual(len(searched["images"]), 4)
 
     async def test_search_visibility_is_mode_aware(self):
         source = await self._source()

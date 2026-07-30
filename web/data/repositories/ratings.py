@@ -1,12 +1,21 @@
 """Rating write queries for compare, mosaic, and undo workflows."""
 
 import asyncio
+import random
 import time as _time
 
 from data import connection
 from data.repositories.common import chunked as _chunked
 
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
+# Sampler-only orders: the caller wants a bounded window that moves between
+# calls, not a stable page of a ranking. Never use them for grid pagination.
+PAIRING_SAMPLE_ORDERS = ("least_compared_shuffled", "random", "near_elo")
+PAIRING_SAMPLE_ROUNDS = 3
+PAIRING_SAMPLE_OVERSAMPLE = 2.0
+PAIRING_SAMPLE_MAX_OVERSAMPLE = 20.0
+PAIRING_SAMPLE_MAX_DRAW = 20000
+_PAIRING_ID_CHUNK = 900
 _visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
 _past_matchups_cache = {"data": None, "signature": None}
 
@@ -94,6 +103,177 @@ async def get_active_images_for_pairing(db_path: str, *, get_catalog_image_count
     )
 
 
+_PAIRING_COLUMNS = (
+    "i.id, i.filename, i.filepath, i.elo, i.comparisons, "
+    "i.propagated_updates, i.status, i.flag, i.orientation, "
+    "i.aspect_ratio, i.date_taken, i.date_source, i.camera_make, i.camera_model, "
+    "i.lens, i.file_ext"
+)
+_PAIRING_CARD_COLUMNS = (
+    "i.file_size, i.file_modified_at, i.width, i.height, "
+    "i.latitude, i.longitude, i.created_at"
+)
+_PAIRING_VISIBLE_WHERE = (
+    "WHERE i.status IN ('kept', 'maybe') "
+    "AND s.included = 1 AND i.missing_at IS NULL "
+    "AND EXISTS ("
+    "  SELECT 1 FROM cache_entries c "
+    "  WHERE c.cache_root = ? AND c.size = ? AND c.image_id = i.id"
+    ") "
+)
+
+
+def _pairing_projection(include_card_metadata: bool) -> str:
+    if include_card_metadata:
+        return f"SELECT {_PAIRING_COLUMNS}, {_PAIRING_CARD_COLUMNS} "
+    return f"SELECT {_PAIRING_COLUMNS} "
+
+
+def _pairing_sample_source(index: str) -> str:
+    return (
+        f"FROM images i INDEXED BY {index} "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        f"{_PAIRING_VISIBLE_WHERE}"
+    )
+
+
+async def _pairing_rows(conn, sql: str, params: list) -> list:
+    cursor = await conn.execute(sql, params)
+    return list(await cursor.fetchall())
+
+
+async def _max_image_id(conn) -> int:
+    cursor = await conn.execute("SELECT MAX(id) AS max_id FROM images")
+    row = await cursor.fetchone()
+    if row is None:
+        return 0
+    return int(row["max_id"] or 0)
+
+
+async def _rotated_least_compared_sample(
+    conn,
+    projection: str,
+    cache_root: str,
+    size: str,
+    limit: int,
+) -> list:
+    """Explore reservoir: rotate the least-compared window by a random rowid.
+
+    Tens of thousands of images tie at comparisons=0 and elo=1200.0, so a plain
+    `comparisons ASC, elo DESC LIMIT n` returns the same ids on every call and
+    Explore samples the same sliver of the archive forever. Rotating the window
+    keeps the least-compared bias and the covering index; a RANDOM() tie-break
+    instead measured 254ms against 11ms because it sorts the whole tie block.
+    """
+    pivot = random.randint(1, max(1, await _max_image_id(conn)))
+    sql = (
+        f"{projection}{_pairing_sample_source('idx_images_visible_comparisons_elo')}"
+        "AND i.id {operator} ? ORDER BY i.comparisons ASC, i.elo DESC LIMIT ?"
+    )
+    rows = await _pairing_rows(
+        conn, sql.format(operator=">="), [cache_root, size, pivot, limit]
+    )
+    if len(rows) < limit:
+        rows += await _pairing_rows(
+            conn, sql.format(operator="<"), [cache_root, size, pivot, limit - len(rows)]
+        )
+    return rows
+
+
+async def _random_visible_sample(
+    conn,
+    projection: str,
+    cache_root: str,
+    size: str,
+    limit: int,
+) -> list:
+    """Random reservoir: draw random rowids instead of the whole universe.
+
+    The random strategy weights every candidate equally, so a bounded random
+    draw is equivalent to materializing every visible row and far cheaper
+    (20ms against 1107ms for a 103k-image catalog). Oversample because some
+    drawn ids are absent, hidden, or not cached in this tier yet.
+    """
+    max_id = await _max_image_id(conn)
+    if max_id <= 0:
+        return []
+    sql_template = (
+        f"{projection}FROM images i "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        f"{_PAIRING_VISIBLE_WHERE}AND i.id IN ({{placeholders}})"
+    )
+    found: dict[int, object] = {}
+    drawn = 0
+    oversample = PAIRING_SAMPLE_OVERSAMPLE
+    for _round in range(PAIRING_SAMPLE_ROUNDS):
+        need = limit - len(found)
+        if need <= 0 or drawn >= PAIRING_SAMPLE_MAX_DRAW:
+            break
+        draw_size = min(
+            max_id,
+            max(need, int(need * oversample)),
+            PAIRING_SAMPLE_MAX_DRAW - drawn,
+        )
+        drawn += draw_size
+        for chunk in _chunked(random.sample(range(1, max_id + 1), draw_size), _PAIRING_ID_CHUNK):
+            sql = sql_template.format(placeholders=",".join("?" for _ in chunk))
+            for row in await _pairing_rows(conn, sql, [cache_root, size, *chunk]):
+                found[int(row["id"])] = row
+            if len(found) >= limit:
+                break
+        if not found:
+            break
+        # Widen the next draw for a tier that only covers part of the catalog.
+        oversample = min(PAIRING_SAMPLE_MAX_OVERSAMPLE, max(oversample, 1.5 * drawn / len(found)))
+    if len(found) < limit:
+        # Too sparse to fill by drawing ids: top up from a dense rotated window
+        # so the grid still fills, and still from a window that moves.
+        for row in await _rotated_least_compared_sample(
+            conn, projection, cache_root, size, limit
+        ):
+            found.setdefault(int(row["id"]), row)
+            if len(found) >= limit:
+                break
+    return list(found.values())[:limit]
+
+
+async def _near_elo_visible_sample(
+    conn,
+    projection: str,
+    cache_root: str,
+    size: str,
+    limit: int,
+    elo_pivot: float | None,
+) -> list:
+    """Compete reservoir: two index range scans around the grid's rating.
+
+    Compete wants opponents rated like the grid, which the full-universe scan
+    paid 1107ms to find. Range scans either side of the pivot cost 17-34ms, and
+    the random rowid rotation stops the images tied at 1200.0 from returning
+    the same window on every call.
+    """
+    if elo_pivot is None:
+        return await _random_visible_sample(conn, projection, cache_root, size, limit)
+    pivot_id = random.randint(1, max(1, await _max_image_id(conn)))
+    below = _pairing_sample_source("idx_images_active_elo")
+    above = _pairing_sample_source("idx_images_active_elo_asc")
+    arms = (
+        (f"{projection}{below}AND i.elo <= ? AND i.id >= ? ORDER BY i.elo DESC LIMIT ?", max(1, limit // 2)),
+        (f"{projection}{above}AND i.elo > ? AND i.id >= ? ORDER BY i.elo ASC LIMIT ?", limit),
+        (f"{projection}{below}AND i.elo <= ? AND i.id < ? ORDER BY i.elo DESC LIMIT ?", limit),
+        (f"{projection}{above}AND i.elo > ? AND i.id < ? ORDER BY i.elo ASC LIMIT ?", limit),
+    )
+    rows: list = []
+    for sql, arm_limit in arms:
+        remaining = min(arm_limit, limit - len(rows))
+        if remaining <= 0:
+            break
+        rows += await _pairing_rows(
+            conn, sql, [cache_root, size, float(elo_pivot), pivot_id, remaining]
+        )
+    return rows
+
+
 async def visible_images_for_pairing(
     db_path: str,
     size: str,
@@ -102,15 +282,33 @@ async def visible_images_for_pairing(
     include_card_metadata: bool = True,
     limit: int | None = None,
     order: str = "elo",
+    elo_pivot: float | None = None,
 ):
     if not size or not cache_root:
         return []
-    metadata_columns = (
-        "i.file_size, i.file_modified_at, i.width, i.height, "
-        "i.latitude, i.longitude, i.created_at "
-        if include_card_metadata
-        else ""
-    )
+    bounded_limit = int(limit) if limit and int(limit) > 0 else 0
+    if order in PAIRING_SAMPLE_ORDERS:
+        if bounded_limit <= 0:
+            # A sampler order without a window has no meaning; fall back to the
+            # deterministic order with the same bias.
+            order = "least_compared" if order == "least_compared_shuffled" else "elo"
+        else:
+            projection = _pairing_projection(include_card_metadata)
+            conn = await connection.open_async(db_path)
+            try:
+                if order == "least_compared_shuffled":
+                    return await _rotated_least_compared_sample(
+                        conn, projection, cache_root, size, bounded_limit
+                    )
+                if order == "random":
+                    return await _random_visible_sample(
+                        conn, projection, cache_root, size, bounded_limit
+                    )
+                return await _near_elo_visible_sample(
+                    conn, projection, cache_root, size, bounded_limit, elo_pivot
+                )
+            finally:
+                await connection.close_async(conn, db_path=db_path)
     limit_sql = " LIMIT ?" if limit and limit > 0 else ""
     params = [cache_root, size]
     if limit_sql:
@@ -153,10 +351,7 @@ async def visible_images_for_pairing(
     conn = await connection.open_async(db_path)
     try:
         cursor = await conn.execute(
-            "SELECT i.id, i.filename, i.filepath, i.elo, i.comparisons, "
-            "i.propagated_updates, i.status, i.flag, i.orientation, "
-            "i.aspect_ratio, i.date_taken, i.date_source, i.camera_make, i.camera_model, "
-            f"i.lens, i.file_ext{', ' if metadata_columns else ' '}{metadata_columns}"
+            f"{_pairing_projection(include_card_metadata)}"
             f"{from_sql}"
             f"{where_sql}"
             f"{order_sql}{limit_sql}",
@@ -175,6 +370,7 @@ async def get_visible_images_for_pairing(
     include_card_metadata: bool = True,
     limit: int | None = None,
     order: str = "elo",
+    elo_pivot: float | None = None,
 ):
     """Return visible active pairing rows for one thumbnail tier, sorted by Elo."""
     return await visible_images_for_pairing(
@@ -184,6 +380,7 @@ async def get_visible_images_for_pairing(
         include_card_metadata=include_card_metadata,
         limit=limit,
         order=order,
+        elo_pivot=elo_pivot,
     )
 
 

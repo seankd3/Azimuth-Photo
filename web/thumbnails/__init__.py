@@ -548,6 +548,14 @@ def fast_disk_has(size: str, image_id: int, source_signature: str | None = None)
     return thumbnail_cache_entries.fast_disk_has(size, image_id, source_signature)
 
 
+def disk_index_ready() -> bool:
+    return thumbnail_cache_entries.disk_index_ready()
+
+
+async def warm_disk_path_index() -> bool:
+    return await thumbnail_cache_entries.warm_disk_path_index()
+
+
 def fast_disk_path_entry(
     size: str,
     image_id: int,

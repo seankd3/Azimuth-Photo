@@ -190,9 +190,17 @@ async def _apply_propagation_deltas(
     deltas: dict[int, float],
     *,
     action_id: str | None,
-) -> int:
+) -> list[tuple[int, float]]:
+    """Apply the deltas and return the (image_id, delta) rows written.
+
+    Callers report those ids so caches can patch the touched rows instead of
+    dropping every reservoir the originating pick just patched. The delta, not
+    the resulting Elo, is what the writes below apply, so a patch built from it
+    survives a pick that landed between the read and the write.
+    """
     updates = []
     history_rows = []
+    applied: list[tuple[int, float]] = []
     for neighbor_id, delta in deltas.items():
         neighbor = neighbors.get(neighbor_id)
         if not neighbor or neighbor["comparisons"] >= MAX_DIRECT_COMPARISONS:
@@ -201,6 +209,7 @@ async def _apply_propagation_deltas(
         before_count = int(neighbor.get("propagated_updates") or 0)
         after_elo = before_elo + float(delta)
         updates.append((float(delta), neighbor_id))
+        applied.append((int(neighbor_id), float(delta)))
         if action_id:
             history_rows.append((
                 action_id,
@@ -212,7 +221,7 @@ async def _apply_propagation_deltas(
             ))
 
     if not updates:
-        return 0
+        return []
 
     await conn.execute("BEGIN IMMEDIATE")
     if action_id:
@@ -222,7 +231,7 @@ async def _apply_propagation_deltas(
         )
         if await cursor.fetchone() is None:
             await conn.rollback()
-            return 0
+            return []
         await conn.executemany(
             "INSERT INTO propagation_updates "
             "(action_id, image_id, elo_before, propagated_updates_before, elo_after, delta) "
@@ -237,7 +246,7 @@ async def _apply_propagation_deltas(
         "propagated_updates = COALESCE(propagated_updates, 0) + 1 WHERE id = ?",
         updates,
     )
-    return len(updates)
+    return applied
 
 
 async def predict_propagation(grid_ids: list[int]) -> dict[int, int]:
@@ -314,18 +323,23 @@ async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, ac
     """
     _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, loser_id))
     if image_ids is None:
-        return  # no embeddings available yet
+        return []  # no embeddings available yet
 
-    # Find similar images for winner and loser (CPU-bound matvec; off-loop)
-    winner_neighbors = await asyncio.to_thread(
-        _find_similar, winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+    # Find similar images for winner and loser (one batched matmul; off-loop)
+    neighbors_by_id = await asyncio.to_thread(
+        _find_similar_batch,
+        [winner_id, loser_id],
+        image_ids,
+        matrix,
+        id_to_idx,
+        SIMILARITY_THRESHOLD,
+        MAX_NEIGHBORS,
     )
-    loser_neighbors = await asyncio.to_thread(
-        _find_similar, loser_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
-    )
+    winner_neighbors = neighbors_by_id.get(winner_id) or []
+    loser_neighbors = neighbors_by_id.get(loser_id) or []
 
     if not winner_neighbors and not loser_neighbors:
-        return
+        return []
 
     # Collect all neighbor IDs to fetch their current state
     all_neighbor_ids = list({nid for nid, _ in winner_neighbors + loser_neighbors})
@@ -352,20 +366,21 @@ async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, ac
             deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
 
         global last_propagation_count
-        updated = await _apply_propagation_deltas(
+        applied = await _apply_propagation_deltas(
             conn,
             neighbors,
             deltas,
             action_id=action_id,
         )
-        if updated:
+        if applied:
             await conn.commit()
             _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
-            last_propagation_count = updated
-            log.debug(f"Propagated Elo to {updated} neighbors "
+            last_propagation_count = len(applied)
+            log.debug(f"Propagated Elo to {len(applied)} neighbors "
                      f"(winner={winner_id}, loser={loser_id})")
         else:
             last_propagation_count = 0
+        return applied
     finally:
         await conn.close()
 
@@ -390,20 +405,23 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
     """
     _, image_ids, matrix, id_to_idx = await _get_compare_matrix((winner_id, *loser_ids))
     if image_ids is None:
-        return
+        return []
 
     involved = {winner_id} | set(loser_ids)
 
-    # Find neighbors for winner AND all losers (CPU-bound matvecs; off-loop)
-    winner_neighbors = await asyncio.to_thread(
-        _find_similar, winner_id, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
+    # Find neighbors for winner AND all losers in one batched matmul, instead of
+    # one sequential matvec per grid image (CPU-bound numpy; off-loop).
+    neighbors_by_id = await asyncio.to_thread(
+        _find_similar_batch,
+        [winner_id, *loser_ids],
+        image_ids,
+        matrix,
+        id_to_idx,
+        SIMILARITY_THRESHOLD,
+        MAX_NEIGHBORS,
     )
-    loser_neighbor_lists = []
-    for lid in loser_ids:
-        loser_neighbors = await asyncio.to_thread(
-            _find_similar, lid, image_ids, matrix, id_to_idx, SIMILARITY_THRESHOLD, MAX_NEIGHBORS
-        )
-        loser_neighbor_lists.append(loser_neighbors)
+    winner_neighbors = neighbors_by_id.get(winner_id) or []
+    loser_neighbor_lists = [neighbors_by_id.get(lid) or [] for lid in loser_ids]
 
     all_neighbor_ids = set()
     for nid, _ in winner_neighbors:
@@ -413,7 +431,7 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
             all_neighbor_ids.add(nid)
 
     if not all_neighbor_ids:
-        return
+        return []
 
     neighbors = await _configured(_get_active_images_by_ids, "get_active_images_by_ids")(list(all_neighbor_ids))
 
@@ -441,20 +459,21 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
                 deltas[neighbor_id] = deltas.get(neighbor_id, 0.0) - penalty
 
         global last_propagation_count
-        updated = await _apply_propagation_deltas(
+        applied = await _apply_propagation_deltas(
             conn,
             neighbors,
             deltas,
             action_id=action_id,
         )
-        if updated:
+        if applied:
             await conn.commit()
             _configured(_invalidate_rating_stats_cache, "invalidate_rating_stats_cache")()
-            last_propagation_count = updated
-            log.debug(f"Propagated mosaic to {updated} neighbors "
+            last_propagation_count = len(applied)
+            log.debug(f"Propagated mosaic to {len(applied)} neighbors "
                      f"(winner={winner_id}, {len(loser_ids)} losers)")
         else:
             last_propagation_count = 0
+        return applied
     finally:
         await conn.close()
 

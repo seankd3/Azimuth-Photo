@@ -100,12 +100,15 @@ class CompareTests(BackendTestCase):
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
         elo_propagation.embed_cache.get_index = fake_get_index
 
-        await elo_propagation.propagate_comparison(winner, loser, k=20.0)
+        applied = await elo_propagation.propagate_comparison(winner, loser, k=20.0)
 
         row = await self._image_row(neighbor)
         self.assertEqual(row["comparisons"], 0)
         self.assertEqual(row["propagated_updates"], 1)
         self.assertGreater(row["elo"], 1200.0)
+        # Propagation reports the deltas it wrote so caches can patch those ids.
+        self.assertEqual([image_id for image_id, _delta in applied], [neighbor])
+        self.assertAlmostEqual(applied[0][1], row["elo"] - 1200.0, places=4)
 
     async def test_compare_propagation_uses_active_embedding_surface(self):
         source = await self._source()
@@ -286,7 +289,7 @@ class CompareTests(BackendTestCase):
         finally:
             await conn.close()
 
-        self.assertEqual(updated, 0)
+        self.assertEqual(updated, [])
         neighbor_row = await self._image_row(neighbor)
         self.assertEqual(neighbor_row["elo"], 1200.0)
         self.assertEqual(neighbor_row["propagated_updates"], 0)
@@ -439,21 +442,19 @@ class CompareTests(BackendTestCase):
             ],
         })
         expires = time.monotonic() + 1.0
-        compare_service._visible_pairing_candidates_cache["test:md:2:elo"] = {
-            "data": [
+        compare_service._store_pairing_candidates(
+            "test:md:2:elo",
+            [
                 {"id": 1, "elo": 1200.0, "comparisons": 0},
                 {"id": 2, "elo": 1300.0, "comparisons": 2},
             ],
-            "id_set": {1, 2},
-            "expires": expires,
-        }
-        compare_service._visible_pairing_candidates_cache["test:sm:2:cache"] = {
-            "data": [
-                {"id": 3, "elo": 1100.0, "comparisons": 0},
-            ],
-            "id_set": {3},
-            "expires": expires,
-        }
+        )
+        compare_service._store_pairing_candidates(
+            "test:sm:2:cache",
+            [{"id": 3, "elo": 1100.0, "comparisons": 0}],
+        )
+        for cache_key in ("test:md:2:elo", "test:sm:2:cache"):
+            compare_service._visible_pairing_candidates_cache[cache_key]["expires"] = expires
 
         compare_service.patch_pairing_cache([(1, 1400.0, 1)])
 
@@ -462,12 +463,172 @@ class CompareTests(BackendTestCase):
         cached = compare_service._visible_pairing_candidates_cache["test:md:2:elo"]
         self.assertEqual([row["id"] for row in cached["data"]], [1, 2])
         self.assertEqual(cached["data"][0]["comparisons"], 1)
-        self.assertEqual(cached["id_set"], {1, 2})
+        self.assertEqual(cached["data"][0]["elo"], 1400.0)
+        self.assertEqual(cached["index_by_id"], {1: 0, 2: 1})
         self.assertGreater(cached["expires"], expires)
         self.assertEqual(
             compare_service._visible_pairing_candidates_cache["test:sm:2:cache"]["expires"],
             expires,
         )
+
+    async def test_pick_patch_touches_only_its_own_reservoir_rows(self):
+        """A twelve-image pick must not walk a six-figure reservoir."""
+        rows = [{"id": image_id, "elo": 1200.0, "comparisons": 0} for image_id in range(1, 20001)]
+        compare_service._store_pairing_candidates("test:md:20000:elo", rows)
+        cached = compare_service._visible_pairing_candidates_cache["test:md:20000:elo"]
+
+        class CountingRows(list):
+            reads = 0
+
+            def __getitem__(self, index):
+                CountingRows.reads += 1
+                return super().__getitem__(index)
+
+        cached["data"] = CountingRows(rows)
+        compare_service.patch_pairing_cache(
+            [(image_id, 1300.0, 1) for image_id in range(1, 13)]
+        )
+
+        self.assertEqual(CountingRows.reads, 12)
+        self.assertEqual(cached["data"][0]["elo"], 1300.0)
+        self.assertEqual(cached["data"][12]["elo"], 1200.0)
+
+    async def test_propagation_patches_reservoirs_instead_of_clearing(self):
+        compare_service._store_pairing_candidates(
+            "test:md:2:propagate",
+            [
+                {"id": 7, "elo": 1200.0, "comparisons": 0, "propagated_updates": 0},
+                {"id": 8, "elo": 1250.0, "comparisons": 1, "propagated_updates": 2},
+            ],
+        )
+
+        compare_service.patch_propagated_pairing_cache([(7, 6.5)])
+
+        cached = compare_service._visible_pairing_candidates_cache["test:md:2:propagate"]
+        self.assertEqual(cached["data"][0]["elo"], 1206.5)
+        self.assertEqual(cached["data"][0]["propagated_updates"], 1)
+        self.assertEqual(cached["data"][1]["elo"], 1250.0)
+        self.assertEqual(cached["data"][1]["propagated_updates"], 2)
+
+    async def test_propagation_queue_reports_written_ids_to_the_callback(self):
+        from core import propagation_queue
+
+        seen = []
+
+        async def wrote_rows():
+            return [(5, 4.5)]
+
+        propagation_queue.schedule(
+            wrote_rows(),
+            invalidate_callback=lambda **kwargs: seen.append(kwargs),
+        )
+        for _ in range(200):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        self.assertEqual(seen, [{"elo_deltas": [(5, 4.5)]}])
+
+        seen.clear()
+
+        async def reported_nothing():
+            return None
+
+        propagation_queue.schedule(
+            reported_nothing(),
+            invalidate_callback=lambda **kwargs: seen.append(kwargs),
+        )
+        for _ in range(200):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+        # Unknown ids must still fall back to a full invalidation.
+        self.assertEqual(seen, [{"elo_deltas": None}])
+
+    async def test_reservoir_cache_stays_bounded(self):
+        compare_service._visible_pairing_candidates_cache.clear()
+        for index in range(compare_service._VISIBLE_PAIRING_CANDIDATES_CACHE_MAX + 10):
+            compare_service._store_pairing_candidates(
+                f"bounded:{index}", [{"id": index, "elo": 1200.0, "comparisons": 0}]
+            )
+
+        self.assertLessEqual(
+            len(compare_service._visible_pairing_candidates_cache),
+            compare_service._VISIBLE_PAIRING_CANDIDATES_CACHE_MAX,
+        )
+        self.assertIn(
+            f"bounded:{compare_service._VISIBLE_PAIRING_CANDIDATES_CACHE_MAX + 9}",
+            compare_service._visible_pairing_candidates_cache,
+        )
+
+    async def test_admit_gate_fails_open_until_the_cache_index_is_warm(self):
+        from unittest import mock
+
+        compare_service._disk_index_warming = False
+        warmed = asyncio.Event()
+
+        async def fake_warm():
+            warmed.set()
+            return True
+
+        try:
+            with mock.patch.object(thumbnails, "disk_index_ready", lambda: False), \
+                    mock.patch.object(thumbnails, "warm_disk_path_index", fake_warm), \
+                    mock.patch.object(thumbnails, "fast_disk_has", lambda *_a, **_k: False):
+                self.assertTrue(compare_service._tier_file_exists("md", 1))
+                await asyncio.wait_for(warmed.wait(), timeout=2)
+
+            compare_service._disk_index_warming = False
+            with mock.patch.object(thumbnails, "disk_index_ready", lambda: True), \
+                    mock.patch.object(thumbnails, "fast_disk_has", lambda *_a, **_k: False):
+                self.assertFalse(compare_service._tier_file_exists("md", 1))
+        finally:
+            compare_service._disk_index_warming = False
+
+    async def test_semantic_cosine_many_matches_single_pair_cosine(self):
+        matrix = np.array(
+            [[1.0, 0.0], [0.6, 0.8], [0.0, 1.0], [3.0, 4.0]],
+            dtype=np.float32,
+        )
+        context = semantic_pairing.SemanticContext(
+            matrix=matrix,
+            index_by_id={10: 0, 11: 1, 12: 2, 13: 3},
+        )
+        image_ids = [11, 12, 13, 99]
+
+        vectorized = context.cosine_many(10, image_ids)
+
+        for value, expected in zip(vectorized, (context.cosine(10, i) for i in image_ids)):
+            if expected is None:
+                self.assertIsNone(value)
+            else:
+                self.assertAlmostEqual(value, expected, places=6)
+
+    async def test_semantic_duel_bounds_the_partner_search_window(self):
+        from unittest import mock
+
+        candidates = [
+            {"id": image_id, "elo": 1200.0, "comparisons": 0}
+            for image_id in range(1, semantic_pairing.SEMANTIC_PARTNER_WINDOW * 2 + 1)
+        ]
+        pool_sizes = []
+
+        def fake_best_partner(seed, pool, _scores, _context, **_kwargs):
+            pool_sizes.append(len(pool))
+            return next(img for img in pool if img["id"] != seed["id"])
+
+        with mock.patch.object(semantic_pairing, "best_partner", fake_best_partner), \
+                mock.patch("random.random", return_value=0.99):
+            sample, mode = await compare_service._semantic_duel_sample(
+                candidates,
+                2,
+                strategy="random",
+                grid_elo=0,
+                context=object(),
+            )
+
+        self.assertEqual(mode, "semantic")
+        self.assertEqual(len(sample), 2)
+        self.assertEqual(pool_sizes, [semantic_pairing.SEMANTIC_PARTNER_WINDOW])
 
     async def test_orientation_visible_pairing_pool_counts(self):
         self.assertGreaterEqual(db.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS, 30.0)
@@ -584,6 +745,135 @@ class CompareTests(BackendTestCase):
         plan = " ".join(row[3] for row in plan_rows)
         self.assertIn("idx_images_visible_comparisons_elo", plan)
         self.assertNotIn("TEMP B-TREE", plan)
+
+    async def _tied_visible_pool(self, count: int, *, tier: str = "sm"):
+        source = await self._source()
+        image_ids = []
+        for index in range(count):
+            image_id = await self._image(
+                source["id"], f"tied-{index:03d}.jpg", elo=1200.0, comparisons=0
+            )
+            await self._cache_entry(image_id, tier)
+            image_ids.append(image_id)
+        return source, image_ids
+
+    async def _pairing_window(self, order: str, limit: int, **kwargs):
+        rows = await db.get_visible_images_for_pairing(
+            "sm",
+            thumbnails.SSD_CACHE_DIR,
+            include_card_metadata=False,
+            limit=limit,
+            order=order,
+            **kwargs,
+        )
+        return [row["id"] for row in rows]
+
+    async def test_explore_reservoir_window_rotates_instead_of_repeating(self):
+        """Regression: the unfiltered Explore window was identical on every call.
+
+        Every image here ties at comparisons=0 and elo=1200.0, the same tie the
+        real archive has across tens of thousands of images, so a deterministic
+        tie-break hands Explore one fixed sliver of the library forever.
+        """
+        from unittest import mock
+
+        _source, image_ids = await self._tied_visible_pool(60)
+        rated = await self._image(_source["id"], "rated.jpg", elo=1900.0, comparisons=7)
+        await self._cache_entry(rated, "sm")
+
+        fixed_first = await self._pairing_window("least_compared", 10)
+        fixed_second = await self._pairing_window("least_compared", 10)
+        self.assertEqual(fixed_first, fixed_second)
+        self.assertEqual(fixed_first, image_ids[:10])
+
+        pivot = {"value": image_ids[0]}
+
+        def fake_randint(_low, _high):
+            return pivot["value"]
+
+        with mock.patch.object(ratings.random, "randint", fake_randint):
+            head = await self._pairing_window("least_compared_shuffled", 10)
+            pivot["value"] = image_ids[50]
+            tail = await self._pairing_window("least_compared_shuffled", 10)
+            pivot["value"] = max(image_ids + [rated]) + 1
+            wrapped = await self._pairing_window("least_compared_shuffled", 10)
+
+        self.assertEqual(head, image_ids[:10])
+        self.assertEqual(tail, image_ids[50:60])
+        self.assertNotEqual(head, tail)
+        # A pivot past the end wraps, so the whole pool stays reachable.
+        self.assertEqual(wrapped, image_ids[:10])
+        # Least-compared bias survives the rotation.
+        self.assertNotIn(rated, head + tail + wrapped)
+
+        moved = {tuple(await self._pairing_window("least_compared_shuffled", 10)) for _ in range(12)}
+        self.assertGreater(len(moved), 1)
+
+    async def test_random_reservoir_is_bounded_and_draws_across_the_pool(self):
+        _source, image_ids = await self._tied_visible_pool(60)
+        hidden = await self._image(_source["id"], "hidden.jpg")
+
+        windows = []
+        for _ in range(8):
+            window = await self._pairing_window("random", 10)
+            self.assertEqual(len(window), 10)
+            self.assertEqual(len(set(window)), 10)
+            self.assertNotIn(hidden, window)
+            self.assertTrue(set(window) <= set(image_ids))
+            windows.append(tuple(sorted(window)))
+
+        self.assertGreater(len(set(windows)), 1)
+        # A draw wider than the pool must still stop at the pool, not loop.
+        self.assertEqual(len(await self._pairing_window("random", 500)), 60)
+
+    async def test_random_reservoir_fills_a_sparse_tier(self):
+        """A tier covering a sliver of the id space must still fill the grid."""
+        source, _image_ids = await self._tied_visible_pool(20)
+        conn = await db.get_db()
+        try:
+            # One far-away id makes the drawn-id hit rate hopeless (20 visible
+            # images across a 200k id space), like a fresh cache on a big catalog.
+            await conn.execute(
+                "INSERT INTO images (id, source_id, filename, filepath, elo, comparisons, status) "
+                "VALUES (?, ?, 'far.jpg', '/photos/far-uncached.jpg', 1200.0, 0, 'kept')",
+                (200000, source["id"]),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        window = await self._pairing_window("random", 12)
+        self.assertEqual(len(window), 12)
+        self.assertEqual(len(set(window)), 12)
+
+    async def test_compete_reservoir_samples_around_the_grid_rating(self):
+        source = await self._source()
+        by_elo = {}
+        for elo in (900.0, 1000.0, 1200.0, 1400.0, 1500.0, 1600.0):
+            for index in range(6):
+                image_id = await self._image(
+                    source["id"], f"elo-{int(elo)}-{index}.jpg", elo=elo, comparisons=1
+                )
+                await self._cache_entry(image_id, "sm")
+                by_elo[image_id] = elo
+
+        window = await self._pairing_window("near_elo", 8, elo_pivot=1500.0)
+
+        self.assertEqual(len(window), 8)
+        self.assertTrue(all(1400.0 <= by_elo[image_id] <= 1600.0 for image_id in window))
+        self.assertGreater(
+            len({tuple(sorted(await self._pairing_window("near_elo", 8, elo_pivot=1200.0))) for _ in range(8)}),
+            1,
+        )
+
+    async def test_sampler_orders_without_a_window_fall_back_to_a_stable_order(self):
+        _source, image_ids = await self._tied_visible_pool(4)
+
+        self.assertEqual(
+            set(await self._pairing_window("least_compared_shuffled", 0)),
+            set(image_ids),
+        )
+        self.assertEqual(set(await self._pairing_window("random", 0)), set(image_ids))
 
     async def test_pairing_row_repositories_match_facades(self):
         source = await self._source()
@@ -1094,7 +1384,8 @@ class CompareTests(BackendTestCase):
             compare_service._interaction_response_cache.clear()
 
         self.assertEqual(calls[0][0], compare_service._mosaic_pool_tier())
-        self.assertEqual(calls[0][1].get("order"), "least_compared")
+        self.assertEqual(calls[0][1].get("order"), "least_compared_shuffled")
+        self.assertGreater(calls[0][1].get("limit"), 0)
         self.assertEqual(result["candidate_source"], "default_explore_least_compared")
         self.assertEqual({image["id"] for image in result["images"]}, {1, 2})
 
@@ -1461,11 +1752,12 @@ class CompareTests(BackendTestCase):
 
         self.assertEqual(len(calls), 2)
         self.assertEqual(calls[0][0], compare_service._mosaic_pool_tier())
-        self.assertIsNone(calls[0][1].get("limit"))
-        self.assertEqual(calls[0][1].get("order"), "cache")
+        # Bounded random reservoir: the user sees a grid, not the archive.
+        self.assertEqual(calls[0][1].get("limit"), compare_service._MOSAIC_DIVERSE_WINDOW)
+        self.assertEqual(calls[0][1].get("order"), "random")
         self.assertFalse(calls[0][1].get("include_card_metadata"))
-        self.assertEqual(first["candidate_source"], "default_diverse_universe")
-        self.assertEqual(second["candidate_source"], "default_diverse_universe")
+        self.assertEqual(first["candidate_source"], "default_diverse_reservoir")
+        self.assertEqual(second["candidate_source"], "default_diverse_reservoir")
         self.assertFalse(first["cache_hit"])
         self.assertFalse(second["cache_hit"])
 

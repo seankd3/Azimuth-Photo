@@ -713,6 +713,7 @@ async def get_visible_images_for_pairing(
     include_card_metadata: bool = True,
     limit: int | None = None,
     order: str = "elo",
+    elo_pivot: float | None = None,
 ):
     return await rating_repository.get_visible_images_for_pairing(
         DB_PATH,
@@ -721,6 +722,7 @@ async def get_visible_images_for_pairing(
         include_card_metadata=include_card_metadata,
         limit=limit,
         order=order,
+        elo_pivot=elo_pivot,
     )
 
 
