@@ -126,6 +126,37 @@ def _pending_thumb_response() -> Response:
     )
 
 
+# Local-first: what is already on this device is always worth painting.
+_SMALLER_TIERS = {"full": ("lg", "md", "sm"), "lg": ("md", "sm"), "md": ("sm",)}
+
+
+def _local_stand_in_response(size: str, image_id: int) -> Response | None:
+    """Serve the best smaller tier this device already holds, or None.
+
+    A tile with no bytes yet is not the same as a tile with nothing to show.
+    Waiting for the exact tier — decoded here or fetched from the hub — leaves
+    the app blank while a perfectly good preview sits in the local cache, so
+    the smaller one paints now and the requested tier upgrades the tile when
+    the background fill lands. Never cached: it is deliberately provisional.
+    """
+    for smaller in _SMALLER_TIERS.get(size, ()):
+        entry = thumbnails._memory_get_entry_fast(smaller, image_id)
+        if entry is not None:
+            return Response(
+                content=entry[1],
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store", "X-Azimuth-Tier": smaller},
+            )
+        path_entry = thumbnails.fast_disk_path_entry(smaller, image_id)
+        if path_entry is not None:
+            return FileResponse(
+                path_entry[1],
+                media_type="image/jpeg",
+                headers={"Cache-Control": "no-store", "X-Azimuth-Tier": smaller},
+            )
+    return None
+
+
 def _schedule_local_thumb_fill(filepath: str, size: str, image_id: int) -> None:
     """Keep a cold decode running after the request path returns 204."""
 
@@ -288,6 +319,10 @@ async def _remote_media_response(image, tier: str) -> Response:
     if not hub:
         return _remote_media_pending_response(tier)
     _schedule_remote_media_prefetch(image, tier)
+    # Paint whatever this device already holds while the hub copy is on its way.
+    stand_in = _local_stand_in_response(tier, int(image["id"]))
+    if stand_in is not None:
+        return stand_in
     return _remote_media_pending_response(tier)
 
 
@@ -368,6 +403,9 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
             return Response(status_code=304, headers=headers)
         return Response(content=data, media_type="image/jpeg", headers=headers)
     if cache_only:
+        stand_in = _local_stand_in_response(size, image_id)
+        if stand_in is not None:
+            return stand_in
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
 
     # Cache miss: now it's worth inspecting the original (HDD) and decoding.
@@ -410,11 +448,15 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
         )
 
     if source_state == "cache_only":
-        return _pending_thumb_response()
+        stand_in = _local_stand_in_response(size, image_id)
+        return stand_in if stand_in is not None else _pending_thumb_response()
 
     data = await _await_thumbnail_bounded(image["filepath"], size, image_id)
     if data is None:
-        return _pending_thumb_response()
+        # The decode is still running or the spindle is busy; show the smaller
+        # local preview now rather than a hole in the grid.
+        stand_in = _local_stand_in_response(size, image_id)
+        return stand_in if stand_in is not None else _pending_thumb_response()
     if not data:
         changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
         if changed:

@@ -82,5 +82,51 @@ class ManualSyncRouteTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(elapsed, 1.0)
 
 
+class LocalStandInTests(unittest.TestCase):
+    """The local cache paints first: a tier this device lacks must never show
+    a hole when a smaller preview is already here."""
+
+    def test_missing_tier_serves_the_smaller_local_preview(self):
+        from features.media import routes as media_routes
+
+        with mock.patch.object(
+            media_routes.thumbnails, "_memory_get_entry_fast", return_value=None
+        ), mock.patch.object(
+            media_routes.thumbnails,
+            "fast_disk_path_entry",
+            side_effect=lambda size, image_id, *a, **k: ("sig", "/cache/sm.jpg") if size == "sm" else None,
+        ):
+            response = media_routes._local_stand_in_response("md", 42)
+        self.assertIsNotNone(response)
+        self.assertEqual(response.headers["X-Azimuth-Tier"], "sm")
+        # Provisional bytes must not be cached over the real tier.
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_memory_hit_wins_before_touching_disk(self):
+        from features.media import routes as media_routes
+
+        with mock.patch.object(
+            media_routes.thumbnails,
+            "_memory_get_entry_fast",
+            side_effect=lambda size, image_id: ("sig", b"jpegbytes") if size == "sm" else None,
+        ), mock.patch.object(
+            media_routes.thumbnails, "fast_disk_path_entry", return_value=None
+        ) as disk:
+            response = media_routes._local_stand_in_response("md", 42)
+        self.assertIsNotNone(response)
+        self.assertEqual(response.body, b"jpegbytes")
+        disk.assert_not_called()
+
+    def test_smallest_tier_has_nothing_to_fall_back_to(self):
+        from features.media import routes as media_routes
+
+        with mock.patch.object(
+            media_routes.thumbnails, "_memory_get_entry_fast", return_value=None
+        ), mock.patch.object(
+            media_routes.thumbnails, "fast_disk_path_entry", return_value=None
+        ):
+            self.assertIsNone(media_routes._local_stand_in_response("sm", 42))
+
+
 if __name__ == "__main__":
     unittest.main()

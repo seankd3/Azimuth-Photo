@@ -86,27 +86,52 @@ $env:AZIMUTH_PORT = [string]$Port
 $env:AZIMUTH_THUMB_CACHE_DIR = $PreviewRoot
 Remove-Item Env:AZIMUTH_SMOKE_MODE -ErrorAction SilentlyContinue
 
-function Get-AzimuthStatus {
+# Ports are plumbing. The person opening Azimuth Photo should never be told
+# about one, and never be refused because something else answered on a number
+# they did not choose: if this port is busy, move to the next free one.
+function Get-AzimuthStatusOn {
+    param([int]$Candidate)
     try {
-        $Response = Invoke-RestMethod -Uri $StatusUrl -TimeoutSec 2
+        $Response = Invoke-RestMethod -Uri "http://127.0.0.1:$Candidate/api/dev/status" -TimeoutSec 2
     }
     catch {
         return $null
     }
     if (-not $Response.pid -or -not $Response.git_commit) {
-        throw "Port $Port is already in use by another application."
+        return "foreign"  # Someone else's server holds this port.
     }
     if (-not [string]::Equals(
         [string]$Response.cwd,
         $RepoRoot,
         [StringComparison]::OrdinalIgnoreCase
     )) {
-        throw "Another Azimuth Photo checkout is already using port $Port. Stop it before opening the canonical app."
+        return "other-checkout"  # Azimuth, but not this install.
     }
     return $Response
 }
 
-$Status = Get-AzimuthStatus
+function Resolve-AzimuthPort {
+    # Reuse our own already-running library; otherwise take the first port
+    # nothing has claimed. Twelve tries is far more than a desktop ever needs.
+    for ($Offset = 0; $Offset -lt 12; $Offset++) {
+        $Candidate = $Port + $Offset
+        $Found = Get-AzimuthStatusOn -Candidate $Candidate
+        if ($null -eq $Found) {
+            return @{ Port = $Candidate; Status = $null }
+        }
+        if ($Found -isnot [string]) {
+            return @{ Port = $Candidate; Status = $Found }
+        }
+    }
+    throw "Azimuth Photo could not find a free port to open on."
+}
+
+$Resolved = Resolve-AzimuthPort
+$Port = $Resolved.Port
+$StatusUrl = "http://127.0.0.1:$Port/api/dev/status"
+$DesktopUrl = "http://127.0.0.1:$Port/d"
+$env:AZIMUTH_PORT = [string]$Port
+$Status = $Resolved.Status
 $StartedProcess = $null
 if ($null -eq $Status) {
     $StdoutLog = Join-Path $LogRoot "desktop-server.stdout.log"
@@ -129,8 +154,9 @@ if ($null -eq $Status) {
     $Deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
     while ((Get-Date) -lt $Deadline) {
         Start-Sleep -Milliseconds 500
-        $Status = Get-AzimuthStatus
-        if ($null -ne $Status) {
+        $Probe = Get-AzimuthStatusOn -Candidate $Port
+        if ($null -ne $Probe -and $Probe -isnot [string]) {
+            $Status = $Probe
             break
         }
         if ($StartedProcess.HasExited) {
