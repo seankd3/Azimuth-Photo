@@ -447,6 +447,15 @@ class ModularContractTests(unittest.TestCase):
             versioned.headers.get("cache-control"),
             "public, max-age=31536000, immutable",
         )
+        # Modules are imported by relative specifier and never carry ?v=, so a
+        # stale copy would run against a fresh shell. Revalidate every load.
+        module = client.get("/static/js/desktop/refine.js")
+        self.assertEqual(module.headers.get("cache-control"), "public, no-cache")
+        versioned_module = client.get("/static/js/desktop/refine.js?v=9001")
+        self.assertEqual(
+            versioned_module.headers.get("cache-control"),
+            "public, max-age=31536000, immutable",
+        )
 
 
 if __name__ == "__main__":

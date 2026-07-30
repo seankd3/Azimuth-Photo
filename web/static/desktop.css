@@ -871,6 +871,9 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #refine-stage.mosaic.grid-3x2 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); }
 #refine-stage.mosaic.grid-3x3 { grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
 #refine-stage.mosaic.grid-4x3 { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: repeat(3, minmax(0, 1fr)); }
+/* Mosaic cards are sized to equal area at their own aspect (refine.js
+   layoutEqualArea), so they sit centered in their grid cell. */
+#refine-stage.mosaic .ref-card { place-self: center; }
 .ref-card { position: relative; overflow: hidden; border-radius: var(--r-media); background: var(--card); outline: 1px solid transparent; outline-offset: -1px; transition: outline-color var(--dur-fast) var(--ease), opacity var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease); }
 .ref-card:hover { outline-color: rgba(255,255,255,.48); }
 .ref-card.selected { outline-color: var(--accent); }

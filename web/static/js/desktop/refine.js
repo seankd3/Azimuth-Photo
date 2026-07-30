@@ -193,6 +193,55 @@ function renderSet() {
             + `<img src="${esc(imageUrl(img))}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}"></button>`;
     }).join('');
     setImagesLoadedHandlers();
+    layoutEqualArea();
+    // The lens is still settling into its final box on the frame it mounts, so
+    // size once more after layout rather than keeping the pre-mount scale.
+    requestAnimationFrame(layoutEqualArea);
+}
+
+// Every candidate must present the same pixel area at its own true aspect.
+// Uniform cells with letterboxing showed portraits at roughly half a
+// landscape's area, so the wider photo won attention before taste entered —
+// a bias baked into durable ranking data. Extreme aspects are clamped so one
+// panorama cannot shrink the whole wave.
+const SIZING_ASPECT_MIN = 0.4;
+const SIZING_ASPECT_MAX = 2.6;
+
+function sizingAspect(img) {
+    const raw = Number(img && img.aspect_ratio);
+    if (!Number.isFinite(raw) || raw <= 0) return 1;
+    return Math.min(SIZING_ASPECT_MAX, Math.max(SIZING_ASPECT_MIN, raw));
+}
+
+function layoutEqualArea() {
+    const stage = document.getElementById('refine-stage');
+    if (!stage || mode === 'duel') return;
+    const cards = [...stage.querySelectorAll('.ref-card[data-index]')];
+    if (!cards.length) return;
+    // Derive the cell from the stage box and the grid shape. Measuring a card
+    // would be circular: centered cards hug their own content, so an unloaded
+    // wave reports a zero-size box and never gets sized.
+    const { columns: cols, rows } = GRID_SIZES[gridSize];
+    const style = getComputedStyle(stage);
+    const gap = parseFloat(style.gap) || 0;
+    const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
+    const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+    const cell = {
+        width: (stage.clientWidth - padX - gap * (cols - 1)) / cols,
+        height: (stage.clientHeight - padY - gap * (rows - 1)) / rows,
+    };
+    if (cell.width < 1 || cell.height < 1) return;
+    const aspects = cards.map((card) => sizingAspect(currentSet[Number(card.dataset.index)]));
+    // Largest area that still fits every photo inside a cell.
+    const area = Math.min(
+        ...aspects.map((ar) => Math.min(cell.height * cell.height * ar, (cell.width * cell.width) / ar))
+    );
+    if (!Number.isFinite(area) || area <= 0) return;
+    cards.forEach((card, index) => {
+        const ar = aspects[index];
+        card.style.width = `${Math.round(Math.sqrt(area * ar))}px`;
+        card.style.height = `${Math.round(Math.sqrt(area / ar))}px`;
+    });
 }
 
 function renderLoadError() {
@@ -404,6 +453,9 @@ function swapCell(index, img) {
     card.classList.add('replacing');
     card.dataset.id = String(img.id);
     card.setAttribute('aria-label', `Pick ${img.filename || img.id}`);
+    // The replacement's aspect is known from its row, so the wave re-balances
+    // before the new bytes arrive — no reflow once the image paints.
+    layoutEqualArea();
     const image = card.querySelector('img');
     const finish = () => {
         card.classList.remove('replacing');
@@ -725,6 +777,14 @@ export function pickByKey(key) {
 }
 
 export function initRefine() {
+    // Panel drags and window resizes change the cell box, so the equal-area
+    // sizing has to be recomputed or the wave keeps a stale scale.
+    const stage = document.getElementById('refine-stage');
+    if (stage && typeof ResizeObserver === 'function') {
+        // Not gated on `open`: the stage reaches its real size as the lens
+        // mounts, so the first render measures a box that is still growing.
+        new ResizeObserver(() => layoutEqualArea()).observe(stage);
+    }
     const refineHead = document.getElementById('refine-head');
     const controlsToggle = document.getElementById('refine-controls-toggle');
     const controls = document.getElementById('refine-controls');

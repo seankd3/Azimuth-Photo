@@ -174,6 +174,13 @@ class StaticCacheHeadersMiddleware:
         query = scope.get("query_string") or b""
         if b"v=" in query:
             return f"public, max-age={self.versioned_max_age}, immutable"
+        # ES modules are imported by bare relative specifier, so they never
+        # carry the ?v= stamp the entry script gets. Letting them go stale
+        # runs a fresh shell against old modules for up to an hour after an
+        # update; they are small, so revalidate and let ETag answer 304.
+        path = scope.get("path") or ""
+        if path.endswith(".js") or path.endswith(".mjs"):
+            return "public, no-cache"
         return f"public, max-age={self.max_age}, stale-while-revalidate=3600"
 
     async def __call__(self, scope, receive, send):
