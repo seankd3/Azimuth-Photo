@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import sqlite3
+import time
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
@@ -40,6 +41,7 @@ _REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 0.0
 _ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS = float(
     os.environ.get("AZIMUTH_ON_DEMAND_FOREGROUND_TIMEOUT", "1.5")
 )
+_SLOW_THUMB_LOG_MS = float(os.environ.get("AZIMUTH_SLOW_THUMB_MS", "1000"))
 _remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 _local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
@@ -332,6 +334,39 @@ async def serve_thumbnail(request: Request, size: str, image_id: int, cached: bo
 
 
 async def thumbnail_response(request: Request, size: str, image_id: int, cached: bool = False):
+    """Serve one preview. A tile is the unit of feeling fast, so any request
+    that takes longer than a blink is logged with the stage that cost the
+    time — the app must never be slow without saying where."""
+    started = time.monotonic()
+    marks: list[tuple[str, float]] = []
+
+    def mark(stage: str) -> None:
+        marks.append((stage, round((time.monotonic() - started) * 1000)))
+
+    try:
+        return await _thumbnail_response_inner(
+            request, size, image_id, cached=cached, mark=mark
+        )
+    finally:
+        elapsed_ms = (time.monotonic() - started) * 1000
+        if elapsed_ms >= _SLOW_THUMB_LOG_MS:
+            log.warning(
+                "slow thumb size=%s image_id=%s total=%.0fms stages=%s",
+                size,
+                image_id,
+                elapsed_ms,
+                marks,
+            )
+
+
+async def _thumbnail_response_inner(
+    request: Request,
+    size: str,
+    image_id: int,
+    *,
+    cached: bool = False,
+    mark=lambda _stage: None,
+):
     if size not in thumbnails.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
@@ -342,6 +377,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     mirror_version: str | None = None
     if not cached:
         image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+        mark("catalog_row")
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
         # Catalog hints only — never lstat the original before an SSD cache hit.
@@ -368,6 +404,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
     if entry is None:
         if required_signature is not None:
             path_hit = preview_mirror.get_local(image_id, size, required_signature, touch=True)
+            mark("mirror_get_local")
             if path_hit is not None:
                 signature, path = path_hit
                 headers = _cache_headers(signature)
@@ -388,6 +425,7 @@ async def thumbnail_response(request: Request, size: str, image_id: int, cached:
             image_id,
             required_signature,
         )
+        mark("disk_read")
         if entry is not None:
             signature, data = entry
             thumbnails._memory_put(size, image_id, signature, data)

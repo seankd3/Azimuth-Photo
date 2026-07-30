@@ -139,11 +139,26 @@ def get_local(
         delete_entry(int(image_id), size)
         return None
     if touch:
-        try:
-            thumbnails.touch_cached_signature(size, int(image_id), preview_version)
-        except Exception:
-            pass
+        # LRU bookkeeping, never a reason to make someone wait for a photo:
+        # this takes the cache metadata lock, which background writers hold, and
+        # tiles were measured waiting 33s to record a timestamp nobody reads
+        # back. Hand it to a thread and return the pixels now.
+        threading.Thread(
+            target=_touch_quietly,
+            args=(size, int(image_id), preview_version),
+            name="mirror-touch",
+            daemon=True,
+        ).start()
     return signature, path
+
+
+def _touch_quietly(size: str, image_id: int, preview_version: str) -> None:
+    try:
+        import thumbnails
+
+        thumbnails.touch_cached_signature(size, image_id, preview_version)
+    except Exception:
+        pass
 
 
 def read_local(
@@ -230,7 +245,43 @@ def put(image_id: int, size: str, preview_version: str, data: bytes, *, hot: boo
     return bool(ok)
 
 
+# How much of the mirror is on disk is a number to show, never a number to
+# wait for: computing it flushes the write queue and sums every cache row under
+# the metadata lock, which on a 121k-row satellite froze the whole app each time
+# the shell polled sync status. Requests read this cache; a refresh runs behind.
+_MIRROR_BYTES_TTL_SECONDS = 30.0
+_mirror_bytes_cache: dict[str, float | int | bool] = {"value": 0, "at": 0.0, "refreshing": False}
+_mirror_bytes_lock = threading.Lock()
+
+
+def mirror_bytes_used_cached() -> int:
+    """Last known mirror size, refreshed off the request path."""
+    now = time.monotonic()
+    with _mirror_bytes_lock:
+        value = int(_mirror_bytes_cache["value"] or 0)
+        fresh = (now - float(_mirror_bytes_cache["at"] or 0.0)) < _MIRROR_BYTES_TTL_SECONDS
+        already = bool(_mirror_bytes_cache["refreshing"])
+        if fresh or already:
+            return value
+        _mirror_bytes_cache["refreshing"] = True
+
+    def _refresh() -> None:
+        try:
+            measured = mirror_bytes_used()
+        except Exception:
+            measured = None
+        with _mirror_bytes_lock:
+            if measured is not None:
+                _mirror_bytes_cache["value"] = measured
+                _mirror_bytes_cache["at"] = time.monotonic()
+            _mirror_bytes_cache["refreshing"] = False
+
+    threading.Thread(target=_refresh, name="mirror-bytes-refresh", daemon=True).start()
+    return value
+
+
 def mirror_bytes_used() -> int:
+    """Exact mirror size. Blocking — background callers only."""
     cache_root = _cache_root()
     if not cache_root:
         return 0
@@ -486,7 +537,7 @@ class PreviewMirrorFiller:
             "seconds_since_request": (
                 None if last_request_at() <= 0 else round(seconds_since_request(), 2)
             ),
-            "mirror_bytes": mirror_bytes_used(),
+            "mirror_bytes": mirror_bytes_used_cached(),
             "mirror_max_bytes": mirror_max_bytes(),
         }
 

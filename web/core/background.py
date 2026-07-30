@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from core import capabilities
 from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
@@ -66,6 +67,45 @@ def track_background_task(coro) -> asyncio.Task:
 
 def smoke_mode_enabled() -> bool:
     return os.environ.get("AZIMUTH_SMOKE_MODE") == "1"
+
+
+# A launch is the moment someone is most impatient, and it is exactly when the
+# app used to start every warmer at once: a 150k-image satellite spent minutes
+# serving thumbnails in 5-50s because its own boot work held the disk and the
+# worker threads. Warmers now wait for a gap in real traffic instead.
+STARTUP_WARM_IDLE_SECONDS = float(os.environ.get("AZIMUTH_WARM_IDLE_SECONDS", "1.5"))
+STARTUP_WARM_MAX_WAIT_SECONDS = float(os.environ.get("AZIMUTH_WARM_MAX_WAIT", "180"))
+# Idle alone is not enough at launch: nobody has browsed yet, so the app looks
+# idle at the exact moment someone is opening it. Hold for this long first, so
+# the shell, its counts and its first screen of tiles get the machine.
+STARTUP_WARM_GRACE_SECONDS = float(os.environ.get("AZIMUTH_WARM_GRACE", "20"))
+_process_started_at = time.monotonic()
+
+
+async def wait_for_user_gap(
+    idle_seconds: float = STARTUP_WARM_IDLE_SECONDS,
+    max_wait: float = STARTUP_WARM_MAX_WAIT_SECONDS,
+) -> None:
+    """Hold until the person using the app pauses, or the ceiling is reached.
+
+    The ceiling matters: a library left open all day still deserves its caches
+    warmed, so patience is bounded rather than infinite.
+    """
+    deadline = time.monotonic() + max(0.0, max_wait)
+    while time.monotonic() < deadline:
+        uptime = time.monotonic() - _process_started_at
+        if uptime < STARTUP_WARM_GRACE_SECONDS:
+            await asyncio.sleep(min(1.0, STARTUP_WARM_GRACE_SECONDS - uptime))
+            continue
+        try:
+            import thumbnails
+
+            idle = thumbnails.get_idle_seconds()
+        except Exception:
+            return
+        if idle >= idle_seconds:
+            return
+        await asyncio.sleep(min(0.5, max(0.1, idle_seconds - idle)))
 
 
 async def _gather_logged(worker_name: str, *awaitables) -> None:
@@ -396,7 +436,9 @@ async def run_startup(
     track_background_task(_warm_light_startup_caches())
 
     async def _warm_priority_interaction_caches():
-        await asyncio.sleep(0.5)
+        # These are the heaviest queries in the app. Firing them the instant the
+        # port opens is what made a fresh launch feel frozen.
+        await wait_for_user_gap()
         await _gather_logged(
             "priority_interaction_cache_warmup",
             get_stats(),
@@ -433,7 +475,7 @@ async def run_startup(
     async def _warm_collection_suggestions():
         # Populate the suggestions cache off the request path so the first user
         # after a boot gets it instantly instead of paying the multi-second build.
-        await asyncio.sleep(2.0)
+        await wait_for_user_gap()
         try:
             import db as _db
             from features.collections import suggestions as _suggestions
@@ -445,7 +487,9 @@ async def run_startup(
 
     async def _warm_disk_path_index():
         # Otherwise the first request that gates a tile on cache truth pays the
-        # whole-table index build inline (771ms on a 240k-row cache).
+        # whole-table index build inline (771ms on a 240k-row cache). It reads
+        # the whole cache table, so it waits for a gap like the other warmers.
+        await wait_for_user_gap()
         try:
             await thumbnails.warm_disk_path_index()
         except Exception:

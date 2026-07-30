@@ -440,8 +440,9 @@ def _clear_disk_index(tiers: tuple[str, ...] | None = None):
 
 def fast_disk_has(size: str, image_id: int, source_signature: str | None = None) -> bool:
     if not _disk_index_built:
-        if not _build_disk_path_index():
-            return False
+        # Same rule as fast_disk_path_entry: answer this one tile rather than
+        # building the whole index while someone is waiting.
+        return _one_row_disk_path_entry(size, image_id, source_signature) is not None
     entry = disk_store.lookup_index_entry(
         _disk_path_index,
         _disk_index_lock,
@@ -458,14 +459,56 @@ def fast_disk_has(size: str, image_id: int, source_signature: str | None = None)
     return False
 
 
+def _one_row_disk_path_entry(
+    size: str,
+    image_id: int,
+    source_signature: str | None,
+) -> tuple[str, str] | None:
+    """Look one preview up directly, without the whole-table index.
+
+    Used while the index is still being built. The covering index on
+    (cache_root, size, image_id) makes this sub-millisecond, and it runs on its
+    own short-lived connection so it never queues behind the build's lock.
+    """
+    providers = _p()
+    cache_root = providers.cache_root()
+    if not cache_root:
+        return None
+    try:
+        conn = sqlite3.connect(providers.db_path(), timeout=0.25)
+        try:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT path, source_signature FROM cache_entries "
+                "WHERE cache_root = ? AND size = ? AND image_id = ?",
+                (cache_root, size, int(image_id)),
+            ).fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return None
+    if row is None:
+        return None
+    cached_signature = str(row["source_signature"] or "")
+    if source_signature is not None and cached_signature != source_signature:
+        return None
+    path = str(row["path"] or "")
+    if not path or not os.path.exists(path):
+        return None
+    return cached_signature, path
+
+
 def fast_disk_path_entry(
     size: str,
     image_id: int,
     source_signature: str | None = None,
 ) -> tuple[str, str] | None:
     if not _disk_index_built:
-        if not _build_disk_path_index():
-            return None
+        # Never build the whole-table index on a request: on a 121k-row cache
+        # that took tens of seconds under the metadata lock, and every tile
+        # queued behind it while the app looked frozen. Answer this one tile
+        # from the table and let the background warm build the index.
+        return _one_row_disk_path_entry(size, image_id, source_signature)
     entry = disk_store.lookup_index_entry(
         _disk_path_index,
         _disk_index_lock,
@@ -490,8 +533,20 @@ def fast_disk_read_entry(
     populate_memory: bool = False,
 ) -> tuple[str, bytes] | None:
     if not _disk_index_built:
-        if not _build_disk_path_index():
+        direct = _one_row_disk_path_entry(size, image_id, source_signature)
+        if direct is None:
             return None
+        cached_signature, path = direct
+        try:
+            with open(path, "rb") as handle:
+                data = handle.read()
+        except OSError:
+            return None
+        if not data:
+            return None
+        if populate_memory and size in _p().thumb_tiers():
+            _p().memory_put(size, image_id, cached_signature, data)
+        return cached_signature, data
     entry = disk_store.lookup_index_entry(
         _disk_path_index,
         _disk_index_lock,
