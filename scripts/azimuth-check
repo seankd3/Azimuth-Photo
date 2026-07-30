@@ -177,7 +177,18 @@ run_unit_checks() {
         fi
     else
         # Restate "not bench": a CLI -m replaces the pytest.ini addopts filter.
-        (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "not slow and not bench")
+        # Parallel first, then the serial-marked tests alone — that marker
+        # exists because those cannot share an xdist wave. Measured on an
+        # 8-core box: 45s of suite time becomes 19s, so a full gate stops
+        # being something you schedule your work around.
+        local jobs="${AZIMUTH_CHECK_JOBS:-auto}"
+        if [[ "$jobs" != "1" ]] && "$PYTHON" -c "import xdist" >/dev/null 2>&1; then
+            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -n "$jobs" \
+                -m "not slow and not bench and not serial")
+            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "serial and not bench")
+        else
+            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "not slow and not bench")
+        fi
     fi
 }
 
