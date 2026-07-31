@@ -880,21 +880,6 @@ async def append_flags(db_path: str, image_ids: Sequence[int], flag: str) -> lis
     ]
 
 
-async def append_rating(db_path: str, image_id: int, rating: int | float | None) -> dict[str, Any] | None:
-    await ensure_schema(db_path)
-    conn = await connection.open_async(db_path)
-    try:
-        hashes = await _image_hashes(conn, [image_id])
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-    content_hash = hashes.get(int(image_id))
-    if content_hash is None:
-        return None
-    return await append_entry(
-        db_path, content_hash=content_hash, family="rating", payload={"value": rating}
-    )
-
-
 async def append_develop(db_path: str, image_id: int) -> dict[str, Any] | None:
     await ensure_schema(db_path)
     conn = await connection.open_async(db_path)
