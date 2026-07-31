@@ -22,6 +22,7 @@ RUN_DIR = Path(
     )
 )
 BASELINE = ROOT / "web" / "perf" / "baseline.json"
+REPO_HISTORY = ROOT / "web" / "perf" / "history.jsonl"
 SCRATCH = Path(
     os.environ.get(
         "AZIMUTH_BENCH_SCRATCH",
@@ -55,6 +56,11 @@ def _args() -> argparse.Namespace:
         help="replace web/perf/baseline.json with this fixture run",
     )
     parser.add_argument("--iterations", type=int, default=standing.DEFAULT_ITERATIONS)
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="append a compact metrics row to web/perf/history.jsonl to commit with the change",
+    )
     parser.add_argument(
         "--trend",
         action="store_true",
@@ -161,6 +167,9 @@ def main() -> int:
     print(f"\nWrote {output}")
     if args.write_baseline:
         print(f"Wrote {BASELINE.relative_to(ROOT)}")
+    if args.record:
+        report.append_history(REPO_HISTORY, report.compact_record(result))
+        print(f"Appended {REPO_HISTORY.relative_to(ROOT)}")
 
     failures = report.regressions(metrics, baseline)
     if args.check and baseline is None:

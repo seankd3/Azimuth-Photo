@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 
@@ -34,11 +35,31 @@ def deltas(metrics: dict[str, float], reference: dict | None) -> dict[str, float
 
 
 def regressions(metrics: dict[str, float], baseline: dict | None) -> list[tuple[str, float]]:
+    # AZIMUTH_BENCH_REGRESSION_LIMIT widens the gate where the baseline was
+    # measured on different hardware (CI runners vs the dev box). Never widen
+    # it to mask a same-machine slowdown.
+    limit = float(os.environ.get("AZIMUTH_BENCH_REGRESSION_LIMIT", REGRESSION_LIMIT))
     return [
         (name, change)
         for name, change in deltas(metrics, baseline).items()
-        if change is not None and change > REGRESSION_LIMIT
+        if change is not None and change > limit
     ]
+
+
+def compact_record(result: dict) -> dict:
+    """One committed history row: run identity plus metrics, nothing else."""
+    return {
+        "measured_at": result.get("measured_at"),
+        "git_sha": result.get("git_sha"),
+        "profile": (result.get("details") or {}).get("profile"),
+        "metrics": result.get("metrics") or {},
+    }
+
+
+def append_history(path: Path, record: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, separators=(",", ":"), sort_keys=True) + "\n")
 
 
 def previous_run(run_dir: Path, *, current: Path) -> dict | None:

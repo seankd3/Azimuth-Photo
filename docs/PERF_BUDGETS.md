@@ -38,9 +38,13 @@ active. Findings go in the report; this tool does not fix performance.
 | --- | ---: | --- |
 | grid (`/api/rankings` date sort) p95 | **< 150 ms** | LAN, warm |
 | sm thumb p95 | **< 80 ms** | LAN, warm |
+| md thumb p95 | **< 150 ms** | LAN, warm |
+| search (`/api/search` text) p95 | **< 300 ms** | LAN, warm |
+| rankings (`/api/rankings` elo sort) p95 | **< 150 ms** | LAN, warm |
 
-Mark as initial until product ratifies. `--check` exits non-zero when either
-misses. Fixture acceptance runs use the QA `ProbeServer` + catalog (same boot
+Every measured class carries a budget — a metric without one is a number nobody
+is held to. Mark as initial until product ratifies. `--check` exits non-zero
+when any class misses. Fixture acceptance runs use the QA `ProbeServer` + catalog (same boot
 path as `scripts/bench.py` / desktop QA).
 
 The test builds one temporary, synthetic 2,000-image catalog per module and shares
@@ -83,6 +87,44 @@ result: zero omitted or misordered photos is part of every row.
 | Grid first content and sustained scroll | measure first; no omitted photos | proposed |
 | Loupe open and next/previous | measure cached/uncached, RAW/raster first | proposed |
 | Develop adjustment → preview update | measure first; input never dropped | proposed |
+
+## CI perf gate
+
+`.github/workflows/ci.yml` runs `scripts/bench.py --check` on every push and
+pull request: the standing benchmark boots the isolated QA fixture catalog
+(5,003 synthetic images) and compares each metric against the committed
+`web/perf/baseline.json`.
+
+- The baseline was measured on the dev box, not a GitHub runner, so the CI job
+  sets `AZIMUTH_BENCH_REGRESSION_LIMIT=2.0`: a metric fails only above 3x
+  baseline. That is cross-hardware headroom, not a quality target — it still
+  stops order-of-magnitude blowups from merging.
+- Tighten the limit from observed runner numbers once CI history accumulates.
+  Never widen it to make a slow change pass; fix the change or re-baseline
+  deliberately (below) with the reason in the commit message.
+- Locally the gate is stricter: `scripts/bench.py --check` fails at +25%, and
+  the opt-in pytest wrapper is `pytest -m bench test_standing_bench.py`.
+- Baseline refresh: `scripts/bench.py --write-baseline` on the standing dev box
+  (5 fixture runs, per-metric upper quartile), committed with the reason. Only
+  after an accepted, explained change in performance shape.
+
+## Committed bench history
+
+`web/perf/history.jsonl` is the in-repo record of how fast the app is over
+time — one compact JSON line per recorded run (`measured_at`, `git_sha`,
+`profile`, `metrics`). The full per-run reports still land outside the checkout
+in `AZIMUTH_BENCH_RUNS`.
+
+Update flow for any perf-relevant change:
+
+```bash
+scripts/bench.py --check --record   # gate + append one history row
+git add web/perf/history.jsonl      # commit the row with the change
+```
+
+Append-only: never rewrite or prune rows — the trend is the point. Record from
+the standing dev box (fixture profile) so rows stay comparable; `--trend` reads
+the external run directory for the same series with more context.
 
 ## Re-baselining
 
