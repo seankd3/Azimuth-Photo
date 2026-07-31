@@ -180,6 +180,57 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
                 case,
             )
 
+    def test_camera_evidence_beats_a_phone_folder_name(self):
+        # A folder name alone is not provenance when the file itself carries
+        # camera evidence: camera-only RAW + camera EXIF make or card source.
+        camera_raw_in_phone_folders = [
+            dict(
+                filename="IMG_1234.CR3",
+                path="/takeout/Google Photos/2024/IMG_1234.CR3",
+                camera_make="Canon",
+                card_source=True,
+            ),
+            dict(
+                filename="DSC_001.NEF",
+                path="D:/backup/Camera Roll/DSC_001.NEF",
+                camera_make="NIKON CORPORATION",
+            ),
+        ]
+        for case in camera_raw_in_phone_folders:
+            kind = taxonomy.classify_source_kind(**case)
+            self.assertEqual(kind, "camera_card", case)
+            self.assertEqual(
+                taxonomy.route_destination(filename=case["filename"], source_kind=kind),
+                taxonomy.DEST_DIGITAL,
+                case,
+            )
+        # Same rule without EXIF: the card flag is the camera evidence.
+        self.assertEqual(
+            taxonomy.infer_source_kind(
+                filename="IMG_1234.CR3",
+                path="/takeout/Google Photos/2024/IMG_1234.CR3",
+                card_source=True,
+            ),
+            "camera_card",
+        )
+        # Unbacked, the folder provenance stands: a lone camera-only RAW in a
+        # Camera Roll dump with no EXIF and no card flag stays phone.
+        self.assertEqual(
+            taxonomy.classify_source_kind(
+                filename="mystery.cr3", path="/dump/Camera Roll/mystery.cr3"
+            ),
+            "phone",
+        )
+        # Preserved: a phone-make DNG in the same folders is still a phone file.
+        self.assertEqual(
+            taxonomy.classify_source_kind(
+                filename="PXL_20260731.dng",
+                path="/takeout/Google Photos/2026/PXL_20260731.dng",
+                camera_make="Google",
+            ),
+            "phone",
+        )
+
     def test_camera_evidence_still_beats_weak_phone_hints(self):
         # An unambiguous camera RAW in a generic Camera folder is a camera file.
         self.assertEqual(

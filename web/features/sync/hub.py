@@ -142,6 +142,11 @@ def compute_placed_relpath(
 
     Computed once on first manifest sighting and reused for every retry so a
     mid-transfer timeout cannot place the same bytes under a second path.
+
+    Placement is decided at declare time from filename + folder hint only —
+    the bytes (and their EXIF) have not arrived yet. That is the contract
+    with sync clients: a client that wants phone routing must say so via the
+    folder hint; EXIF-based provenance cannot rescue a missing hint here.
     """
 
     year, day = _date_parts(date_taken) or (str(date.today().year), date.today().isoformat())

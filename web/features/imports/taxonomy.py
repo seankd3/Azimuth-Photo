@@ -226,6 +226,12 @@ def infer_source_kind(
         return "film_scan"
     ext = extension_of(filename)
     if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        # A folder name alone is not provenance against camera evidence: a
+        # camera-only RAW off a card is a camera file even inside a takeout
+        # or Camera Roll dump. Without EXIF here, the card flag is the only
+        # camera evidence available.
+        if ext in UNAMBIGUOUS_RAW_EXTENSIONS and card_source:
+            return "camera_card"
         return "phone"
     # An unambiguous camera-RAW file is a camera file no matter what folder it
     # sits in — this beats the weak "/camera/" markers and the card flag.
@@ -285,8 +291,9 @@ def classify_source_kind(
     software: str = "",
 ) -> SourceKind:
     """infer_source_kind plus EXIF provenance, with explicit precedence:
-    strong path markers > unambiguous RAW extension > EXIF software/make >
-    weak path markers / HEIC > card flag > TIFF > unknown."""
+    strong path markers (unless the file itself carries camera evidence) >
+    unambiguous RAW extension > EXIF software/make > weak path markers /
+    HEIC > card flag > TIFF > unknown."""
     if kind == "video":
         return "video"
     haystack = " ".join(
@@ -296,18 +303,28 @@ def classify_source_kind(
         return "export"
     if any(marker in haystack for marker in _FILM_PATH_MARKERS):
         return "film_scan"
-    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
-        return "phone"
     ext = extension_of(filename)
+    make = (camera_make or "").lower()
+    phone_make = bool(make) and any(marker in make for marker in PHONE_MAKES)
+    scanner = bool(make) and any(marker in make for marker in SCANNER_MAKES)
+    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        # A folder name alone is not provenance when the file itself carries
+        # camera evidence: a camera-only RAW backed by camera EXIF or a card
+        # source is a camera file even inside a takeout or Camera Roll dump.
+        # A phone-make DNG (Pixel, iPhone, Galaxy) stays phone.
+        if ext in UNAMBIGUOUS_RAW_EXTENSIONS and (
+            card_source or (make and not phone_make and not scanner)
+        ):
+            return "camera_card"
+        return "phone"
     if ext in UNAMBIGUOUS_RAW_EXTENSIONS:
         return "camera_card"
-    make = (camera_make or "").lower()
     stamped = (software or "").lower()
     if stamped and any(marker in stamped for marker in EXPORT_SOFTWARE):
         return "export"
-    if make and any(marker in make for marker in SCANNER_MAKES):
+    if scanner:
         return "film_scan"
-    if make and any(marker in make for marker in PHONE_MAKES):
+    if phone_make:
         return "phone"
     if any(marker in haystack for marker in _WEAK_PHONE_PATH_MARKERS):
         return "phone"
