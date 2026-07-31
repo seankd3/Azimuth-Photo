@@ -66,6 +66,14 @@ changes the contract.
 
 - Original photos are user data. Do not move, rename, deduplicate, or delete
   them during code cleanup.
+- The `Astrophotography/` archive root is out of scope and off limits. It is not
+  a library root or a taxonomy destination. No scan, index, import, migration,
+  cleanup, dedup, or free-up path may read, move, rename, or delete anything
+  under it.
+- The archive roots are `Edits/`, `Raws/`, and `Snapshots/`, spelled exactly so.
+  The archive filesystem is case-sensitive, so `RAWS` and `Raws` are different
+  directories; never normalise or guess root casing, and never create a root
+  that does not already exist.
 - Destructive photo operations require collision-proof destinations,
   full-byte verification, and a recoverable Trash/Undo path.
 - Exact duplicate cleanup keeps the oldest filesystem-modified file; the
