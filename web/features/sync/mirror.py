@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import functools
 import gzip
+import inspect
 import json
 import time
 import urllib.error
@@ -55,6 +56,17 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
     return await run_sync_work(request)
 
 
+def _accepts_timeout(request) -> bool:
+    try:
+        parameters = inspect.signature(request).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == "timeout" or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
+
+
 async def ensure_mirror_schema(db_path: str) -> None:
     """Keep old satellite catalogs usable until the additive schema migration lands."""
 
@@ -81,10 +93,13 @@ class MirrorPuller:
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
-        # The catalog export is the whole library since the cursor — tens of
-        # MB that a busy hub takes minutes to produce over the tailnet. The
-        # interactive 20s default would abandon every full refresh.
-        self._bulk_request = request or functools.partial(_urllib_request, timeout=600)
+        # An export page still takes minutes on a busy hub over the tailnet;
+        # the interactive 20s default abandons it. Only widen the timeout when
+        # the transport actually accepts one — injected test fakes may not.
+        if _accepts_timeout(self._request):
+            self._bulk_request = functools.partial(self._request, timeout=600)
+        else:
+            self._bulk_request = self._request
         self._status: dict[str, Any] = {
             "cursor": 0,
             "rows_applied": 0,

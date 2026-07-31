@@ -476,11 +476,16 @@ class SyncWorker:
             raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
         return json.loads(response or b"{}")
 
-    async def _hub_request(self, method: str, url: str, *, body: bytes | None = None, headers: dict | None = None):
-        """Attach the revision header to every request made by this satellite."""
+    async def _hub_request(self, method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, **kwargs):
+        """Attach the revision header to every request made by this satellite.
+
+        Extra keyword arguments (a bulk fetch's long timeout) pass through to
+        the transport; swallowing them here silently reinstated the 20s
+        interactive timeout on the catalog export and broke every refresh.
+        """
 
         outbound_headers = {**dict(headers or {}), **contract.request_headers()}
-        return await self._request(method, url, body=body, headers=outbound_headers)
+        return await self._request(method, url, body=body, headers=outbound_headers, **kwargs)
 
     async def refresh_hub_contract(self, *, force: bool = False) -> None:
         """Refresh once at startup, then use the ten-minute shared cache."""
