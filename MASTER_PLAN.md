@@ -33,6 +33,8 @@ global `CLAUDE.md`.
 ### 1.1 What the product is
 
 - `unverified` "I want to build this into a product not just for myself but for any photographer out there" — 07-06
+- `open` "The photographer like you" — 07-31 · **the second user.** Shoots RAW, runs Lightroom Classic, owns a NAS, wants out of Adobe. Generalize only where that person differs from Sean — different camera, different drive layout, different OS. Not the self-hoster escaping Google Photos; that is Immich's audience and chasing it pulls Azimuth onto their ground.
+- `open` "Import-to-share pipeline" — 07-31 · **the core loop.** No single stage wins a tie: Library, Refine and Develop all serve the chain from card to shared image, and *the seams between stages* are the product. When two surfaces disagree, the one that keeps the chain moving wins. This is the hardest tiebreaker to hold agents to, so any work that improves one stage by worsening a handoff is a regression.
 - `live` "lets always just work off prod, this is a private app" — 07-09 · **reaffirmed 07-31** when asked whether going public ends prod-first development: it does not. Azimuth is a public product that in practice has one user, and prod-first iteration stays.
 - `live` "lets keep it all open source and free." — 07-06 · AGPL-3.0 free/open-source license with no product paywall in settings or routes; greps for stripe/paypal/require_license found only false-positive stripEnd identifiers.
 - `partial` "all of the custom solutions im building for me, ideally id like to be built in such an elegantly generalized way that they can benefit anyone who wants to use this software." — 07-19 · `web/core/runtime_paths.py:72`, `web/settings.py:36`, `web/settings.py:90` — Portable XDG/AppData paths and empty publish defaults show generalization; camera Adobe profile pack is still a small set (Canon-heavy plus a few others) so not every custom solution is generalized for anyone.
@@ -46,7 +48,8 @@ global `CLAUDE.md`.
 
 ### 1.2 Speed
 
-- `runtime` "the data should all be there somewhere we really want to focus on extreame preformace too, LRCs fatal flaw is how slow it is, our biggest pitch is lightnight fast speed that feels like magic, this is 2026 and you are AGI, we shouldnt be afraid to use low level code if we need to to accelerate and hyper optomize the program." — 07-10 · `web/core/host_profile.py:1`, `web/thumbnails/demosaic_pool.py:1`, `desktop/src-tauri/src/engine.rs:49` — "Lightning-fast / feels like magic" is a quality bar; settle with standing-bench p50/p95 vs Lightroom on the same 5k catalog — code has adaptive budgets and a demosaic process pool, but only a Tauri…
+- `open` "Speed is the bar" — 07-31 · **the release gate, above feature parity.** A missing feature is acceptable; a slow one is not. Nothing ships that misses its latency budget, even if scope must be cut to make it. Directly bounds "100% Lightroom parity" (1.1): parity never justifies shipping something slow.
+- `runtime` "the data should all be there somewhere we really want to focus on extreame preformace too
 - `runtime` "I want every part of this app hyper optimized like VLC levels, it should be wayyyyy faster than anything else, most software is horribly inefficent." — 07-16 · `web/test_perf_budgets.py:30`, `web/perf/baseline.json`, `scripts/bench.py:50` — "VLC levels / way faster than anything else" is comparative and subjective; settle with a same-machine browse/open latency bakeoff against peer apps using the standing fixture metrics.
 - `runtime` "no bloat, no slop, just extreamly good engineering to make this app the fastest photo app ever made." — 07-16 · `web/perf/standing.py:1`, `scripts/perfbench.py:1`, `web/test_perf_budgets.py:30` — "Fastest photo app ever / no bloat" cannot be proven from source; settle with end-to-end wall-clock and RSS on a large catalog versus named competitors, not internal budgets alone.
 - `runtime` "I want this running as fast and as snappy on any system as its physically possible." — 07-16 · `web/core/host_profile.py:37`, `web/settings.py:345`, `web/thumbnails/demosaic_pool.py:35` — "As fast as physically possible on any system" is an unbounded ceiling; settle by measuring interactive p50/p95 and resource use on 8GB, 16GB, and 64GB hosts after host_profile tuning.
@@ -231,3 +234,12 @@ to Sean on 07-31:
   development survives.
 - **C4 storage** — resolved into new architecture: two modes, local-only and
   desktop+server, with canonical as a role rather than a fixed drive.
+
+### 1.10 Non-goals
+
+What Azimuth deliberately refuses. A non-goal is worth as much to an agent as a
+goal — it is permission to stop.
+
+- `open` "No cloud, no accounts, no telemetry" — 07-31 · nothing may require an external service or account to work. Constrains dependencies, not features.
+- `open` "No general media manager" — 07-31 · photos and the photographer's workflow only. Not video editing, not documents, not a Drive replacement. Stay narrow exactly where Immich went broad.
+- `unrecorded` — Sean selected a fourth non-goal in his own words on 07-31 that did not reach this file. **Ask him and record it verbatim before the overnight run.**
