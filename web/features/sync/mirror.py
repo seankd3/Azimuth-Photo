@@ -97,11 +97,32 @@ class MirrorPuller:
         return dict(self._status)
 
     async def refresh(self) -> dict[str, Any]:
+        """Pull export pages until the mirror has caught up to the hub."""
+        result = await self._refresh_page()
+        total_applied = int(result.get("rows_applied") or 0)
+        total_skipped = int(result.get("skipped_unhashed") or 0)
+        for _round in range(400):
+            cursor_before = int(result.get("cursor") or 0)
+            if int(result.get("rows_applied") or 0) <= 0:
+                break
+            result = await self._refresh_page()
+            total_applied += int(result.get("rows_applied") or 0)
+            total_skipped += int(result.get("skipped_unhashed") or 0)
+            if int(result.get("cursor") or 0) <= cursor_before:
+                break
+        self._status.update(rows_applied=total_applied, skipped_unhashed=total_skipped)
+        return self.status()
+
+    async def _refresh_page(self) -> dict[str, Any]:
         if not self.hub:
             raise RuntimeError("AZIMUTH_HUB_URL is required for catalog mirror refresh")
         await ensure_mirror_schema(self.db_path)
         cursor = await self._state_int("cursor")
-        query = urlencode({"cursor": cursor})
+        # Paged: a whole-catalog export over a slow tailnet cannot finish
+        # inside any sane timeout; five-thousand-row pages can, and the
+        # cursor makes every page resumable. Old hubs ignore the limit and
+        # stream everything — the long timeout covers that case.
+        query = urlencode({"cursor": cursor, "limit": 5000})
         status, _headers, body = await self._bulk_request("GET", f"{self.hub}/api/sync/catalog/export?{query}")
         if not 200 <= status < 300:
             raise RuntimeError(f"mirror export failed ({status}): {body.decode(errors='replace')[:300]}")

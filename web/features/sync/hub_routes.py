@@ -215,13 +215,14 @@ async def api_sync_original(image_id: int):
 
 
 @router.get("/api/sync/catalog/export")
-async def api_sync_catalog_export(cursor: int = 0):
+async def api_sync_catalog_export(cursor: int = 0, limit: int = 0):
     try:
         parsed_cursor = mirror_export.parse_cursor(cursor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    limit = max(0, min(int(limit or 0), 20000))
     return StreamingResponse(
-        mirror_export.gzip_catalog_export_stream(_configured_db_path(), parsed_cursor),
+        mirror_export.gzip_catalog_export_stream(_configured_db_path(), parsed_cursor, limit),
         media_type="application/x-ndjson",
         headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"},
     )

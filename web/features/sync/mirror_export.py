@@ -104,8 +104,14 @@ async def _catalog_snapshot(conn) -> int:
     return int(row["cursor"])
 
 
-async def gzip_catalog_export_stream(db_path: str, cursor: int) -> AsyncIterator[bytes]:
-    """Yield gzip-compressed NDJSON and a final cursor line."""
+async def gzip_catalog_export_stream(db_path: str, cursor: int, limit: int = 0) -> AsyncIterator[bytes]:
+    """Yield gzip-compressed NDJSON and a final cursor line.
+
+    With a limit, the page ends at a clean row_version boundary (a version's
+    rows are never split across pages), and the cursor line names the boundary
+    so the next page resumes exactly there. A whole-catalog export over a slow
+    link cannot finish inside any sane timeout; pages can.
+    """
 
     compressor = zlib.compressobj(wbits=31)
     conn = await connection.open_async(db_path)
@@ -124,13 +130,22 @@ async def gzip_catalog_export_stream(db_path: str, cursor: int) -> AsyncIterator
             "ORDER BY i.row_version ASC, i.id ASC",
             (cursor, snapshot),
         )
+        emitted = 0
+        last_version = cursor
+        page_cursor = snapshot
         async for row in rows:
+            row_version = int(row["row_version"] or 0)
+            if limit and emitted >= limit and row_version != last_version:
+                page_cursor = last_version
+                break
             payload = await build_row_payload(conn, row)
             encoded = (json.dumps(payload, separators=(",", ":"), sort_keys=True) + "\n").encode()
             chunk = compressor.compress(encoded)
             if chunk:
                 yield chunk
-        final = compressor.compress((json.dumps({"cursor": snapshot}, separators=(",", ":")) + "\n").encode())
+            emitted += 1
+            last_version = row_version
+        final = compressor.compress((json.dumps({"cursor": page_cursor}, separators=(",", ":")) + "\n").encode())
         if final:
             yield final
         yield compressor.flush()
