@@ -80,7 +80,10 @@ global `CLAUDE.md`.
 - **`open`** "id like to retire and remove c/pictures once we have propperly moved everything to its new home" — 07-19 · `C:\Pictures` still holds `2025\`, `Lightroom\`, and loose files. Restated 07-31: *"you never fixed the folders what are pictures?"*
 - `unverified` "lets keep the catlog and the images on the same drive, that seems cleaner to my mind." — 07-19
 - `unverified` "just make sure ALLL of the photos are organized into their propper places and nothing is lost please." — 07-19
-- `unverified` "i want it to be super elegant and automatically maintained and sorted." — 07-31
+- `unverified` "i want it to be super elegant and automatically maintained and sorted. Edits, (film, digital and edited phone shots) Raws, (Digital Raws and Film Scan Raws), and Phone (facebook photos, google photos, etc combined into one date sorted) all nice and elegant and organized automatically" — 07-31
+- `unverified` "everyphoto should have metadata or an exisiting folder that tells you what is is." — 07-31
+- `unverified` "photo is already in a folder. the only ones with issues are the personal folders" — 07-31
+- `unverified` "when files are imported they should be imported and sorted by the structure I said." — 07-31
 - `unverified` "i dont want to do all this through you, I want the app to support this so users can easily and seemlessly migrate from LRC to this." — 07-12
 
 ### 1.5 Editing and colour
@@ -142,7 +145,8 @@ already true or has never been checked — checking is itself the first job.
 
 | # | Item | From | Status |
 |---|---|---|---|
-| 1 | Retire and remove `C:\Pictures` after proving every file has a home | 1.4 | `open`, restated twice |
+| 1 | Retire and remove `C:\Pictures` after proving every file has a home | 1.4 | `open`, restated twice; 07-31 audit: 9,911/10,689 hash-proven in hub, 778 need homes first |
+| 1b | Edits / Raws / Phone auto-sorted taxonomy — view over the canonical archive + imports physically filed into it | 1.4 | `open`, directive 07-31 |
 | 2 | Diverse refine mode returns visually similar images; fix the sampling so it spans clusters | 1.6 | `open` |
 | 3 | Aspect-ratio matching in Dual (orientation pairing is not the same thing) | 1.6 | `partial` |
 | 4 | One-click invisible import: confirm what of `INVISIBLE_IMPORT.md` actually shipped | 1.4 | `partial` |
