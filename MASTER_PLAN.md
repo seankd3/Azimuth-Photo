@@ -181,7 +181,7 @@ goal — it is permission to stop.
 
 - `open` "import need default move setting" — 07-31 · the import canvas offers Copy/Add only; Move must exist and be the default for card and staging imports. A photographer pulling from a card wants the card drained, not duplicated.
 - `open` "the folders I see on the side appear pretty arbitary" — 07-31 · the import source rail is a filesystem dump: user dirs, duplicate names ("Pictures" twice), raw drive letters, OneDrive, a UNC path. It should present *sources that mean something* — cards, remembered import locations, recents — not a drive tree. Coordinate with the sidebar rework the review session shipped (c419b128) so the two rails share one philosophy.
-- `open` (observed 07-31, screenshot) · **film-scan TIFs were auto-filed "Personal" → Snapshots** — 74 lab TIFs from a Pictures subfolder classified as phone shots. Violates both the taxonomy (scans are Raws) and "Ask me when ambiguous": a TIFF with no phone provenance must hold for the review queue, never default to Personal. Also visible: "That source couldn't be read" error bar with no actionable detail.
+- `withdrawn 07-31` the "film TIFs misclassified as Personal" observation — Sean had set the file-source dropdown himself; the classifier was not at fault. Kept: the "That source couldn't be read" error bar shows no actionable detail and needs a real message.
 
 ### 1.14 Culling outcome, video, first run, search
 
