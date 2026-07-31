@@ -22,11 +22,15 @@ shared across the grid, lenses, overlays, panels, exports, and background work.
 - **People** shows **Named people**, **Unnamed**, and **Review merges**.
 - **Map** shows photos with GPS metadata.
 - Filters compose across text, person, folder, date, file type, camera, lens,
-  tag, orientation, flag, minimum rating, and ranked/unranked states.
+  tag, orientation, flag, minimum stars, and ranked/unranked states.
+- Stars are computed from Elo standing (top 2/10/30 percent of ranked photos)
+  and stored per photo. There is no manual star gesture on any client: the
+  1–5 keys filter, and ranking in Refine is the only way to change a star.
 - Folder scope can include multiple folders at once; the API receives repeated
   `folder` query parameters.
-- The sort menu exposes **Rating**, **Date**, **Camera**, **Filename**, and
-  **Size**. The adjacent sort-direction button toggles ascending/descending.
+- The sort menu exposes **Rating**, **Stars**, **Date**, **Camera**,
+  **Filename**, and **Size**. The adjacent sort-direction button toggles
+  ascending/descending.
 - **Best of** narrows the current non-collection scope to the top slice by
   rating.
 
