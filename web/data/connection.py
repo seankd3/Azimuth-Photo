@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import contextvars
+import functools
 import os
 import sqlite3
 import tempfile
@@ -67,9 +68,24 @@ async def run_with_busy_retry(
             await asyncio.sleep(backoff_seconds)
 
 
-async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite.Connection:
-    """Open an async SQLite connection with the row shape expected by callers."""
+# Each aiosqlite connection is a Python thread plus seven PRAGMAs (including a
+# 256MB mmap). "Open per query, close after" meant boot warmers churned through
+# hundreds of such threads in seconds (py-spy 07-30: worker threads #77-#365
+# alive at once), and the GIL contention queued interactive requests for whole
+# seconds. Durable connections go back on a per-catalog idle shelf instead of
+# being torn down; callers keep the exact open/close API they always had.
+_POOL_MAX_IDLE = 8
+_idle_connections: dict[str, list[aiosqlite.Connection]] = {}
 
+
+async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite.Connection:
+    """Open (or reuse) an async SQLite connection with the expected row shape."""
+
+    pool_key = db_path if timeout is None and _sqlite_timeout_seconds.get() is None and not is_ephemeral_db_path(db_path) else None
+    if pool_key is not None:
+        idle = _idle_connections.get(pool_key)
+        if idle:
+            return idle.pop()
     effective_timeout = _effective_timeout(timeout)
     conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
     conn.row_factory = aiosqlite.Row
@@ -83,46 +99,65 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
         await conn.execute("PRAGMA mmap_size=268435456")
     except Exception:
         pass
+    conn._azimuth_pool_key = pool_key
     return conn
 
 
-# Serving one tile should not cost a connection. Opening one spawns a thread
-# and runs seven PRAGMAs (including a 256MB mmap), which on a laptop mid-boot
-# measured 1.3-2.9s per thumbnail — far more than the row lookup it wrapped.
-# Hot read paths share one reader per catalog; aiosqlite serializes work on its
-# own thread, and WAL readers see every commit, so sharing is safe here.
-_shared_readers: dict[str, aiosqlite.Connection] = {}
-_shared_reader_lock = asyncio.Lock()
+async def close_shared_readers() -> None:
+    for db_path in list(_inline_readers):
+        drop_inline_reader(db_path)
+    for db_path, idle in list(_idle_connections.items()):
+        _idle_connections.pop(db_path, None)
+        for conn in idle:
+            try:
+                await conn.close()
+            except Exception:
+                pass
 
 
-async def shared_reader(db_path: str) -> aiosqlite.Connection:
-    """Long-lived read connection for per-request lookups. Never close it."""
-    existing = _shared_readers.get(db_path)
-    if existing is not None:
-        return existing
-    async with _shared_reader_lock:
-        existing = _shared_readers.get(db_path)
-        if existing is not None:
-            return existing
-        conn = await open_async(db_path)
-        _shared_readers[db_path] = conn
+# A tile's catalog row is a primary-key fetch measured in tenths of a
+# millisecond, but riding aiosqlite means two hops through one worker thread —
+# and during boot that queue backs up to 0.6-1.5s per tile (measured 07-30).
+# For sub-millisecond reads the loop itself is the fastest executor there is.
+_inline_readers: dict[str, sqlite3.Connection] = {}
+
+
+def inline_reader(db_path: str) -> sqlite3.Connection:
+    """Long-lived read-only connection for sub-millisecond lookups on the loop.
+
+    Read-only mode can never hold a write lock, and WAL readers see every
+    commit, so sharing one autocommit connection across requests is safe.
+    Callers run queries directly on the event loop — only primary-key-shaped
+    reads belong here.
+    """
+
+    conn = _inline_readers.get(db_path)
+    if conn is not None:
         return conn
+    conn = sqlite3.connect(
+        f"file:{db_path}?mode=ro",
+        uri=True,
+        timeout=_effective_timeout(None),
+        check_same_thread=False,
+    )
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA mmap_size=268435456")
+    except Exception:
+        pass
+    _inline_readers[db_path] = conn
+    return conn
 
 
-async def drop_shared_reader(db_path: str) -> None:
+def drop_inline_reader(db_path: str) -> None:
     """Forget a reader whose connection went bad; the next call reopens."""
-    conn = _shared_readers.pop(db_path, None)
+    conn = _inline_readers.pop(db_path, None)
     if conn is None:
         return
     try:
-        await conn.close()
+        conn.close()
     except Exception:
         pass
-
-
-async def close_shared_readers() -> None:
-    for db_path in list(_shared_readers):
-        await drop_shared_reader(db_path)
 
 
 def open_sync(
@@ -160,8 +195,13 @@ async def enable_wal(conn, *, db_path: str | None = None) -> None:
         await cursor.close()
 
 
+@functools.lru_cache(maxsize=4096)
 def is_ephemeral_db_path(db_path: str) -> bool:
-    """Return True for temp DBs that should not leave WAL sidecars behind."""
+    """Return True for temp DBs that should not leave WAL sidecars behind.
+
+    Cached: realpath is a filesystem call, and this used to run on the event
+    loop for every connection close (py-spy caught it mid-boot 07-30).
+    """
 
     try:
         path = os.path.realpath(db_path)
@@ -201,5 +241,17 @@ def close_sync(conn: sqlite3.Connection, *, db_path: str | None = None) -> None:
 
 
 async def close_async(conn, *, db_path: str | None = None) -> None:
+    pool_key = getattr(conn, "_azimuth_pool_key", None)
+    if pool_key is not None:
+        try:
+            if conn.in_transaction:
+                await conn.rollback()
+            idle = _idle_connections.setdefault(pool_key, [])
+            if len(idle) < _POOL_MAX_IDLE:
+                idle.append(conn)
+                return
+        except Exception:
+            # A connection that cannot be returned clean is not worth keeping.
+            pass
     await _checkpoint_temp_wal_async(conn, db_path)
     await conn.close()

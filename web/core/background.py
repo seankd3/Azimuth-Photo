@@ -333,6 +333,25 @@ async def run_startup(
     await init_db()
     thumbnails.configure(settings.load_settings())
 
+    async def _warm_tile_row_reader():
+        # The first tile after launch pays the reader's first-touch page
+        # faults (~400ms measured) unless someone else pays them first.
+        from data import connection as data_connection
+
+        if data_connection.is_ephemeral_db_path(db.DB_PATH):
+            # Temp catalogs never hold an inline reader (Windows deletability).
+            return
+        try:
+            await asyncio.to_thread(
+                lambda: data_connection.inline_reader(db.DB_PATH)
+                .execute("SELECT id FROM images ORDER BY id LIMIT 1")
+                .fetchone()
+            )
+        except Exception:
+            log.debug("tile row reader warm skipped", exc_info=True)
+
+    track_background_task(_warm_tile_row_reader())
+
     # Bulk HDD sequencing: one spindle consumer at a time (previews before vault).
     try:
         from core import bulk_scheduler as _bulk_scheduler

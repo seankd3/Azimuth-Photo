@@ -18,27 +18,31 @@ async def get_image_by_id(db_path: str, image_id: int):
 async def get_media_image_by_id(db_path: str, image_id: int):
     """Load media-serving state together with its source availability context.
 
-    Every tile the grid paints comes through here, so it rides the shared
-    reader rather than paying for a fresh connection each time.
+    Every tile the grid paints comes through here, so the primary-key fetch
+    runs inline on the loop — a thread hop costs more than the query does,
+    and under boot load a shared worker thread queues into whole seconds.
     """
     sql = (
         "SELECT i.*, s.path AS source_path, s.online AS source_online "
         "FROM images i LEFT JOIN catalog_sources s ON s.id = i.source_id "
         "WHERE i.id = ?"
     )
+    if not connection.is_ephemeral_db_path(db_path):
+        # Durable catalogs are WAL: reads never block, so the loop is the
+        # fastest executor. Temp catalogs run without WAL (no sidecars), where
+        # a busy writer blocks readers — those stay on the async path below,
+        # which also keeps them deletable on Windows.
+        try:
+            return connection.inline_reader(db_path).execute(sql, (int(image_id),)).fetchone()
+        except Exception:
+            # A broken reader must never cost the caller its photo.
+            connection.drop_inline_reader(db_path)
+    conn = await connection.open_async(db_path)
     try:
-        conn = await connection.shared_reader(db_path)
         cursor = await conn.execute(sql, (int(image_id),))
         return await cursor.fetchone()
-    except Exception:
-        # A broken shared reader must never cost the caller its photo.
-        await connection.drop_shared_reader(db_path)
-        conn = await connection.open_async(db_path)
-        try:
-            cursor = await conn.execute(sql, (int(image_id),))
-            return await cursor.fetchone()
-        finally:
-            await connection.close_async(conn, db_path=db_path)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
 
 
 async def get_images_by_ids(db_path: str, image_ids: list[int]) -> dict[int, dict]:
