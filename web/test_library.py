@@ -2674,6 +2674,99 @@ class LibraryTests(BackendTestCase):
         self.assertTrue(all(row["missing_at"] is None for row in rows))
         self.assertIn("scan found no files", scanner.scan_state["warning"].lower())
 
+    async def _scanned_source_with_files(self, name, filepaths):
+        source = await self._source(name)
+        absolute_paths = []
+        for relative in filepaths:
+            filepath = os.path.join(source["path"], *relative.split("/"))
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, "wb") as handle:
+                handle.write(b"photo")
+            absolute_paths.append(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+        return source, absolute_paths
+
+    async def _source_missing_counts(self, source_id):
+        conn = await db.get_db()
+        try:
+            counts = await (await conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "SUM(CASE WHEN missing_at IS NOT NULL THEN 1 ELSE 0 END) AS missing "
+                "FROM images WHERE source_id = ?",
+                (source_id,),
+            )).fetchone()
+            source = await (await conn.execute(
+                "SELECT online FROM catalog_sources WHERE id = ?",
+                (source_id,),
+            )).fetchone()
+        finally:
+            await conn.close()
+        return int(counts["total"]), int(counts["missing"] or 0), int(source["online"])
+
+    async def test_scan_halts_when_most_of_a_source_vanishes(self):
+        source, _paths = await self._scanned_source_with_files(
+            "scan-breaker-yanked",
+            [f"keep-{i}.jpg" for i in range(4)] + [f"shoot/gone-{i}.jpg" for i in range(16)],
+        )
+
+        # A yanked or sleeping volume: most of the tree stops being visible at once.
+        shutil.rmtree(os.path.join(source["path"], "shoot"))
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        total, missing, online = await self._source_missing_counts(source["id"])
+        self.assertEqual((total, missing), (20, 0))
+        self.assertEqual(online, 0)
+        self.assertIn("storage looks unavailable", scanner.scan_state["error"].lower())
+        self.assertTrue(scanner.scan_state["recoverable"])
+
+    async def test_scan_marks_genuinely_deleted_handful_normally(self):
+        source, paths = await self._scanned_source_with_files(
+            "scan-breaker-handful",
+            [f"img-{i}.jpg" for i in range(20)],
+        )
+
+        for filepath in paths[:2]:
+            os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        total, missing, online = await self._source_missing_counts(source["id"])
+        self.assertEqual((total, missing), (20, 2))
+        self.assertEqual(online, 1)
+        self.assertEqual(scanner.scan_state["error"], "")
+
+    async def test_scan_marks_deletions_under_the_fraction_threshold(self):
+        source, paths = await self._scanned_source_with_files(
+            "scan-breaker-fraction",
+            [f"img-{i}.jpg" for i in range(240)],
+        )
+
+        # Above the row floor but within the per-pass fraction: a real cleanup.
+        for filepath in paths[:11]:
+            os.remove(filepath)
+        await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        total, missing, online = await self._source_missing_counts(source["id"])
+        self.assertEqual((total, missing), (240, 11))
+        self.assertEqual(online, 1)
+        self.assertEqual(scanner.scan_state["error"], "")
+
+    async def test_scan_override_env_allows_deliberate_bulk_removal(self):
+        source, _paths = await self._scanned_source_with_files(
+            "scan-breaker-override",
+            [f"keep-{i}.jpg" for i in range(4)] + [f"shoot/gone-{i}.jpg" for i in range(16)],
+        )
+
+        shutil.rmtree(os.path.join(source["path"], "shoot"))
+        with unittest.mock.patch.dict(
+            os.environ, {catalog_repository.MISSING_MARK_OVERRIDE_ENV: "1"}
+        ):
+            await scanner.scan_folder(source["path"], source_id=source["id"])
+
+        total, missing, online = await self._source_missing_counts(source["id"])
+        self.assertEqual((total, missing), (20, 16))
+        self.assertEqual(online, 1)
+        self.assertEqual(scanner.scan_state["error"], "")
+
     async def test_interrupted_scan_preserves_catalog_and_offers_retry(self):
         source = await self._source("scan-interrupted")
         filepath = os.path.join(source["path"], "preserve.jpg")
