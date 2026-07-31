@@ -159,3 +159,38 @@ def best_partner(
         return None
     ranked.sort(reverse=True)
     return ranked[0][3]
+
+
+def most_different_partner(
+    seed: dict,
+    candidates: list[dict],
+    strategy_scores: dict[int, float],
+    context: SemanticContext,
+) -> dict | None:
+    """Lowest-cosine partner for the seed.
+
+    The diverse duel wants the pair to disagree as much as the pool allows —
+    the opposite of best_partner — so Elo propagation can bridge distant
+    clusters instead of re-ranking lookalikes.
+    """
+    seed_id = int(seed["id"])
+    eligible = []
+    for candidate in candidates:
+        candidate_id = int(candidate["id"])
+        if candidate_id == seed_id:
+            continue
+        if strategy_scores.get(candidate_id, 1.0) <= 0:
+            continue
+        eligible.append((candidate_id, candidate))
+    if not eligible:
+        return None
+    cosines = context.cosine_many(seed_id, [candidate_id for candidate_id, _ in eligible])
+    ranked = []
+    for (candidate_id, candidate), cosine in zip(eligible, cosines):
+        if cosine is None:
+            continue
+        ranked.append((cosine, candidate_id, candidate))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[:2])
+    return ranked[0][2]
