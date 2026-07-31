@@ -66,6 +66,8 @@ class ImportJob:
     errors: list[dict] = field(default_factory=list)
     cancel_requested: bool = False
     image_rows: list[dict] = field(default_factory=list)
+    move_degraded: bool = False  # Move from inside the library behaves as Copy
+    library_roots: list[str] = field(default_factory=list)  # deletion-guard fence, cached at commit
 
     def status(self) -> dict:
         total_bytes = sum(int(entry["size"]) for entry in self.entries)
@@ -83,6 +85,7 @@ class ImportJob:
             "skipped_duplicates": self.skipped_duplicates,
             "errors": list(self.errors),
             "batch_id": self.batch_id,
+            "move_degraded": self.move_degraded,
         }
 
 
@@ -100,6 +103,24 @@ async def allowed_roots() -> list[str]:
     roots = [str(originals_root())]
     roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
     roots.extend(row["path"] for row in catalog_routes.quick_browse_roots())
+    return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
+
+
+ASTRO_ROOT_NAME = "astrophotography"
+
+
+def _under_astro(path: str | Path) -> bool:
+    """MASTER_PLAN §1.10: Astrophotography/ is out of scope for every import
+    path — never read from it, never delete under it. Case-blind on purpose:
+    over-fencing only skips a file, under-fencing loses one."""
+    return any(str(part).lower() == ASTRO_ROOT_NAME for part in Path(path).parts)
+
+
+async def library_roots() -> list[str]:
+    """Roots that hold catalog data. Moving *from* one of these would relocate
+    library files, not drain a card, so Move degrades to Copy under them."""
+    roots = [str(originals_root())]
+    roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
     return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
 
 
@@ -123,8 +144,10 @@ def scan_cards() -> list[dict]:
 async def sources() -> list[dict]:
     cards = await asyncio.to_thread(scan_cards)
     roots = await allowed_roots()
+    library = await library_roots()
     root_rows = [{
         "id": f"root:{path}", "kind": "root", "label": Path(path).name or path, "path": path,
+        "library": _under_roots(path, library),
     } for path in roots if Path(path).is_dir()]
     return cards + root_rows
 
@@ -233,6 +256,8 @@ def _enumerate_scan(scan: Scan) -> None:
                 scanner.is_junk_directory(part) for part in relative.parts[:-1]
             ):
                 continue
+            if _under_astro(path):
+                continue  # Astrophotography/ never stages — MASTER_PLAN §1.10
             stat = path.stat()
             metadata = geodata.extract_file_metadata(str(path)) if path.suffix.lower() not in card.VIDEO_EXTENSIONS else {}
             modified = safe_datetime_fromtimestamp(stat.st_mtime)
@@ -341,12 +366,19 @@ async def start_commit(
 ) -> ImportJob:
     if scan.status != "done":
         raise ValueError("Scan is not ready to import")
-    if mode not in {"copy", "add"}:
-        raise ValueError("Import mode must be copy or add")
-    if scan.card_source and mode != "copy":
-        raise ValueError("Removable cards must be copied before import")
+    if mode not in {"copy", "add", "move"}:
+        raise ValueError("Import mode must be copy, add, or move")
+    if scan.card_source and mode == "add":
+        raise ValueError("Removable cards must be copied or moved before import")
     if scan.film_source and mode != "copy":
         raise ValueError("Film scans are always copied into the library")
+    # Moving from inside the library would relocate catalog data, not drain a
+    # card: silently behave as Copy and say so, never delete library originals.
+    # This scan-root check is the UX signal; the per-entry guard in
+    # _refuse_source_delete is the safety (an ancestor scan or a junction can
+    # reach library files from a scan root that is not itself inside one).
+    fence = await library_roots()
+    move_degraded = mode == "move" and _under_roots(scan.path, fence)
     if category is not None and category not in taxonomy.IMPORT_CATEGORIES:
         raise ValueError("Unknown import category")
     if category and not scan.film_source:
@@ -372,9 +404,10 @@ async def start_commit(
     })
     job = ImportJob(
         id=uuid.uuid4().hex, scan=scan, entries=selected, mode=mode,
-        clear_card=bool(clear_card and scan.card_source),
+        clear_card=bool((clear_card or mode == "move") and scan.card_source),
         category=category, keywords=[str(path) for path in keyword_paths if str(path).strip()],
-        collection_id=collection_id, batch_id=batch_id,
+        collection_id=collection_id, batch_id=batch_id, move_degraded=move_degraded,
+        library_roots=fence,
     )
     _jobs[job.id] = job
     _tasks[job.id] = asyncio.create_task(_commit_worker(job))
@@ -382,7 +415,7 @@ async def start_commit(
 
 
 async def _commit_worker(job: ImportJob) -> None:
-    job.phase = "copying" if job.mode == "copy" else "registering"
+    job.phase = "registering" if job.mode == "add" else "copying"
     job.started_at = time.monotonic()
     try:
         for entry in job.entries:
@@ -440,6 +473,9 @@ async def _reclaim_film_staging(job: ImportJob) -> None:
 
 async def _import_entry(job: ImportJob, entry: dict) -> None:
     try:
+        # Resolved, not lexical: a junction must not smuggle astro files in.
+        if _under_astro(await asyncio.to_thread(os.path.realpath, entry["path"])):
+            raise ValueError("Astrophotography/ is out of scope for import")
         if job.mode == "add":
             await _register_existing(job, entry)
         else:
@@ -519,7 +555,10 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
         card.copy_verified, str(source), str(_destination_directory(job, entry))
     )
     duplicate_destination = result.get("duplicate_destination")
-    if duplicate_destination or await _known_exact_duplicate(result["content_hash"], result["full_hash"]):
+    known_duplicate = None if duplicate_destination else await _known_exact_duplicate(
+        result["content_hash"], result["full_hash"]
+    )
+    if duplicate_destination or known_duplicate:
         if result.get("destination"):
             await asyncio.to_thread(Path(result["destination"]).unlink)
         if duplicate_destination:
@@ -533,7 +572,9 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
                 source_root=_catalog_source_root_for_destination(duplicate_destination),
             )
         job.skipped_duplicates += 1
-        await _clear_card_after_verified_duplicate(job, entry)
+        await _clear_source_after_verified_duplicate(
+            job, entry, duplicate_destination or known_duplicate
+        )
         return
     destination = result["destination"]
     image_id = await _register_file(
@@ -543,26 +584,83 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
         source_root=_catalog_source_root_for_destination(destination),
     )
     job.image_rows.append({"image_id": image_id, "filepath": destination, "original_name": entry["name"]})
-    if job.clear_card:
-        await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
-        job.cleared_bytes += int(entry["size"])
+    if _removes_source(job):
+        await _remove_verified_source(job, entry, destination, int(result["bytes"]))
 
 
-async def _known_exact_duplicate(content_hash: str, full_hash: str) -> bool:
+async def _known_exact_duplicate(content_hash: str, full_hash: str) -> str | None:
+    """Return the catalog's verified copy so deletion can guard against it."""
     candidates = await import_repository.image_paths_by_content_hash(db.DB_PATH, content_hash)
     for candidate in candidates:
         try:
             if await asyncio.to_thread(card.compute_full_hash, candidate) == full_hash:
-                return True
+                return candidate
         except OSError:
             continue
-    return False
+    return None
 
 
-async def _clear_card_after_verified_duplicate(job: ImportJob, entry: dict) -> None:
-    if job.clear_card:
-        await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
-        job.cleared_bytes += int(entry["size"])
+def _removes_source(job: ImportJob) -> bool:
+    return job.clear_card or (job.mode == "move" and not job.move_degraded)
+
+
+def _refuse_source_delete(source: str, landed: str | None, library: list[str]) -> str | None:
+    """The per-entry deletion guard — the safety behind Move. Returns the
+    reason the source must be kept, or None when deletion is safe. Judged on
+    the resolved path (junctions, symlinks, subst): the guard is about where
+    the bytes really live, not what the scan called them. The scan-root
+    degrade check cannot cover an ancestor scan that walks *into* the library,
+    or a link that points there."""
+    try:
+        resolved = os.path.realpath(source)
+        if not os.path.exists(resolved):
+            return "source could not be resolved"
+    except OSError:
+        return "source could not be resolved"
+    if _under_astro(resolved):
+        return "inside Astrophotography/"
+    if _under_roots(resolved, library):
+        return "inside a library root"
+    if landed:
+        try:
+            if os.path.samefile(resolved, landed):
+                return "source and library copy are the same file"
+        except OSError:
+            return "library copy could not be compared with the source"
+    return None
+
+
+async def _guarded_source_delete(job: ImportJob, entry: dict, landed: str | None) -> None:
+    reason = await asyncio.to_thread(
+        _refuse_source_delete, entry["path"], landed, job.library_roots
+    )
+    if reason:
+        # Move reached library bytes: behave as Copy for this file — keep the
+        # source and surface the degrade. A kept original is never an error.
+        job.move_degraded = True
+        return
+    await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
+    job.cleared_bytes += int(entry["size"])
+
+
+async def _remove_verified_source(job: ImportJob, entry: dict, destination: str, verified_bytes: int) -> None:
+    """The deletion gate: the source only goes once the *final* landed file —
+    hash-verified by copy_verified, registered in the catalog — still holds
+    every byte on disk. Any doubt keeps the source and reports the file."""
+    landed = await asyncio.to_thread(os.path.getsize, destination)
+    if landed != verified_bytes:
+        raise RuntimeError(
+            f"Landed copy is {landed} bytes, expected {verified_bytes} — source kept"
+        )
+    await _guarded_source_delete(job, entry, destination)
+
+
+async def _clear_source_after_verified_duplicate(job: ImportJob, entry: dict, duplicate: str | None) -> None:
+    # The catalog provably owns a full-hash-identical copy; draining the
+    # source is safe — unless the "source" IS that copy (ancestor scan,
+    # junction), which the guard refuses.
+    if _removes_source(job):
+        await _guarded_source_delete(job, entry, duplicate)
 
 
 async def _register_existing(job: ImportJob, entry: dict) -> None:

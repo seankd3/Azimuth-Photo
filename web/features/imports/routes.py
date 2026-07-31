@@ -29,7 +29,7 @@ class ScanRequest(BaseModel):
 class CommitRequest(BaseModel):
     scan_id: str
     keys: list[str] | Literal["all_checked_default"]
-    mode: Literal["copy", "add"]
+    mode: Literal["copy", "add", "move"]
     skip_suspects: bool = True
     clear_card: bool = False
     category: Literal["raw", "personal", "film", "export"] | None = None
