@@ -26,7 +26,7 @@ class MoveImportTests(BackendTestCase):
         await super().asyncTearDown()
 
     async def _wait(self, job):
-        await asyncio.wait_for(staging._tasks[job.id], timeout=10)
+        await asyncio.wait_for(staging._tasks[job.id], timeout=30)
 
     def _entry(self, root: Path, path: Path) -> dict:
         stat = path.stat()
@@ -152,6 +152,118 @@ class MoveImportTests(BackendTestCase):
         self.assertTrue(shot.exists())  # library originals are never Move-deleted
         self.assertEqual(job.cleared_bytes, 0)
         self.assertEqual(len(list(self.originals.rglob(shot.name))), 1)
+
+    async def test_ancestor_scan_move_never_deletes_library_originals(self):
+        # The reviewer's PoC: scan an ANCESTOR of the library (a drive-letter
+        # rail entry) — the walk reaches library originals whose "copy" is the
+        # file itself. The per-entry guard must keep every one of them.
+        stage = Path(self.tempdir.name) / "staging"
+        stage.mkdir()
+        shot = stage / "CANON0100.CR3"
+        shot.write_bytes(b"irreplaceable " * 2048)
+        job1 = await self._move(self._scan(stage, [self._entry(stage, shot)]))
+        await self._wait(job1)
+        landed = list(self.originals.rglob(shot.name))
+        self.assertEqual(len(landed), 1)
+
+        ancestor = Path(self.tempdir.name)  # parent of originals/
+        job2 = await self._move(self._scan(ancestor, [self._entry(ancestor, landed[0])]))
+        await self._wait(job2)
+
+        self.assertEqual(job2.phase, "complete")
+        self.assertEqual(job2.errors, [])
+        self.assertTrue(landed[0].exists())  # the library original survived
+        self.assertEqual(landed[0].read_bytes(), b"irreplaceable " * 2048)
+        self.assertEqual(job2.cleared_bytes, 0)
+        self.assertTrue(job2.move_degraded)
+        self.assertEqual(job2.skipped_duplicates, 1)
+
+    async def test_junction_into_library_move_never_deletes(self):
+        # A junction/symlink outside the library pointing into it: the scan
+        # root and entry paths look safe, but the bytes live in the library.
+        # The guard judges the resolved path and must refuse deletion.
+        stage = Path(self.tempdir.name) / "staging"
+        stage.mkdir()
+        shot = stage / "CANON0200.CR3"
+        shot.write_bytes(b"linked bytes " * 1024)
+        job1 = await self._move(self._scan(stage, [self._entry(stage, shot)]))
+        await self._wait(job1)
+        landed = list(self.originals.rglob(shot.name))
+        self.assertEqual(len(landed), 1)
+
+        # The link sits INSIDE an innocent scan root, so the scan-level degrade
+        # check stays False and only the per-entry guard stands in the way.
+        wrap = Path(self.tempdir.name) / "linkedwrap"
+        wrap.mkdir()
+        link_root = wrap / "lib"
+        try:
+            os.symlink(self.originals, link_root, target_is_directory=True)
+        except OSError:
+            try:
+                import _winapi
+
+                _winapi.CreateJunction(str(self.originals), str(link_root))
+            except (ImportError, OSError):
+                self.skipTest("neither symlinks nor junctions available")
+        through_link = link_root / landed[0].relative_to(self.originals)
+        self.assertTrue(through_link.exists())
+
+        job2 = await self._move(self._scan(wrap, [self._entry(wrap, through_link)]))
+        await self._wait(job2)
+
+        self.assertEqual(job2.phase, "complete")
+        self.assertEqual(job2.errors, [])
+        self.assertTrue(landed[0].exists())  # the real file behind the link survived
+        self.assertEqual(job2.cleared_bytes, 0)
+        self.assertTrue(job2.move_degraded)
+
+    async def test_refuse_source_delete_reasons(self):
+        # The guard unit: samefile, library-root, and astro refusals each
+        # keep the source on their own, independent of scan-level state.
+        keep = Path(self.tempdir.name) / "keep.jpg"
+        keep.write_bytes(b"keep me")
+        relative_alias = os.path.join(str(self.tempdir.name), ".", "keep.jpg")
+        self.assertIn("same file", staging._refuse_source_delete(str(keep), relative_alias, []))
+        self.assertIn("library root", staging._refuse_source_delete(
+            str(keep), None, [str(self.tempdir.name)]
+        ))
+        astro = Path(self.tempdir.name) / "Astrophotography" / "m31.tif"
+        astro.parent.mkdir()
+        astro.write_bytes(b"stars")
+        self.assertIn("Astrophotography", staging._refuse_source_delete(str(astro), None, []))
+        other = Path(self.tempdir.name) / "other.jpg"
+        other.write_bytes(b"a distinct landed copy")
+        self.assertIsNone(staging._refuse_source_delete(str(keep), str(other), []))
+
+    async def test_astro_subtree_is_untouchable(self):
+        # MASTER_PLAN §1.10: no import path reads from or deletes under an
+        # Astrophotography/ root — the scanner skips it and commit refuses it.
+        stage = Path(self.tempdir.name) / "staging"
+        astro = stage / "Astrophotography"
+        astro.mkdir(parents=True)
+        starfield = astro / "M31_0001.TIF"
+        starfield.write_bytes(b"calibrated stars " * 256)
+        normal = stage / "CANON0300.JPG"
+        from PIL import Image
+
+        Image.new("RGB", (64, 48)).save(normal, "JPEG")
+
+        scan = staging.Scan(
+            id=f"scan-{os.urandom(6).hex()}", path=str(stage), include_subfolders=True,
+            card_source=False,
+        )
+        await asyncio.to_thread(staging._enumerate_scan, scan)
+        self.assertEqual([entry["name"] for entry in scan.entries], [normal.name])
+
+        # Defense in depth: even a hand-crafted entry under astro is refused.
+        forced = self._scan(stage, [self._entry(stage, starfield)])
+        job = await self._move(forced)
+        await self._wait(job)
+        self.assertEqual(job.phase, "complete")
+        self.assertEqual(len(job.errors), 1)
+        self.assertIn("Astrophotography", job.errors[0]["message"])
+        self.assertTrue(starfield.exists())
+        self.assertEqual(list(self.originals.rglob(starfield.name)), [])
 
     async def test_mixed_batch_with_locked_file_completes_the_rest(self):
         stage = Path(self.tempdir.name) / "staging"

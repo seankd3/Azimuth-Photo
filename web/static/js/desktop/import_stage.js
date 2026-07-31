@@ -38,7 +38,7 @@ let checked = new Set();        // entry keys staged for import
 let insertedEntryKeys = new Set();
 let filter = 'new';             // new | all
 let anchorIndex = null;         // shift-range anchor into the visible list
-let mode = 'move';
+let mode = 'copy';
 let skipSuspects = true;
 let clearCard = false;
 let thumbPx = Number(localStorage.getItem('importThumbPx')) || 148;
@@ -79,15 +79,18 @@ function effectiveCategory(entry) {
     return categoryOverride || entry.category || 'raw';
 }
 
-// Cards and staged folders default to Move — a photographer pulling from a
-// card wants the card drained, not duplicated — and the last choice is
-// remembered per source kind (the importThumbPx precedent).
+// Cards default to Move — a photographer pulling from a card wants the card
+// drained, not duplicated. Rail folders (Home, Pictures, drive letters) are
+// not provably staging areas, so they default to Copy until the rail can
+// tell true staging folders apart. Last choice is remembered per source
+// kind (the importThumbPx precedent).
 const MODES = ['move', 'copy', 'add'];
 
 function rememberedMode(kind) {
     if (kind === 'film') return 'copy';
     const saved = localStorage.getItem(`importMode.${kind}`);
-    return MODES.includes(saved) ? saved : 'move';
+    if (MODES.includes(saved)) return saved;
+    return kind === 'card' ? 'move' : 'copy';
 }
 
 function setMode(next) {
