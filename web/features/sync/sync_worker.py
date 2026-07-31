@@ -33,13 +33,13 @@ _MAX_BACKOFF_SECONDS = 300.0
 _HEALTH_PROBE_SECONDS = 30.0
 
 
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict, bytes]:
+async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, timeout: float = 30) -> tuple[int, dict, bytes]:
     def request() -> tuple[int, dict, bytes]:
         request_headers = dict(headers or {})
         request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=timeout) as response:
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
