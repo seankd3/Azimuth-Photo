@@ -22,16 +22,20 @@ from features.sync import hub_routes
 
 
 class TaxonomyRoutingTableTests(unittest.TestCase):
-    def test_raw_camera_extensions_route_to_raws(self):
+    def test_raw_camera_extensions_route_to_the_digital_shelf(self):
         for name in ("shot.CR3", "a.cr2", "b.ARW", "c.nef", "d.raf", "e.dng", "f.orf", "g.rw2"):
             self.assertEqual(
                 taxonomy.route_destination(filename=name, source_kind="camera_card"),
-                taxonomy.DEST_RAWS,
+                taxonomy.DEST_DIGITAL,
                 name,
             )
+        # The Digital shelf lives inside the Raws root.
+        self.assertEqual(Path(taxonomy.DEST_DIGITAL).parts[0], taxonomy.DEST_RAWS)
 
-    def test_phone_source_routes_stills_and_phone_dng_to_snapshots(self):
-        for name in ("PXL_1.jpg", "IMG_2.HEIC", "shot.heif", "PXL_3.dng"):
+    def test_phone_source_routes_stills_and_phone_raws_to_snapshots(self):
+        # Provenance decides the root: a RAW with phone provenance stays in
+        # Snapshots, whatever its extension.
+        for name in ("PXL_1.jpg", "IMG_2.HEIC", "shot.heif", "PXL_3.dng", "shot.cr3"):
             self.assertEqual(
                 taxonomy.route_destination(filename=name, source_kind="phone"),
                 taxonomy.DEST_SNAPSHOTS,
@@ -77,20 +81,22 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
             taxonomy.DEST_SNAPSHOTS,
         )
 
-    def test_camera_jpeg_without_phone_source_stays_raws(self):
+    def test_camera_jpeg_without_phone_source_stays_on_the_digital_shelf(self):
         # Camera-card JPEG companions and legacy sync seeds must not flip to Snapshots.
         self.assertEqual(
             taxonomy.route_destination(filename="IMG_0001.JPG", source_kind="camera_card"),
-            taxonomy.DEST_RAWS,
+            taxonomy.DEST_DIGITAL,
         )
         self.assertEqual(
             taxonomy.route_destination(filename="seed.jpg"),
-            taxonomy.DEST_RAWS,
+            taxonomy.DEST_DIGITAL,
         )
 
     def test_legacy_root_hints_map_to_canonical_destinations(self):
         for legacy, canonical in (
-            ("RAWS", taxonomy.DEST_RAWS),
+            # A bare Raws hint (either spelling) lands on the Digital shelf.
+            ("RAWS", taxonomy.DEST_DIGITAL),
+            ("Raws", taxonomy.DEST_DIGITAL),
             ("Exported Edits", taxonomy.DEST_EDITS),
             ("Film Scans", taxonomy.DEST_FILM),
             ("Personal Photos", taxonomy.DEST_SNAPSHOTS),
@@ -100,11 +106,32 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
                 canonical,
                 legacy,
             )
-        # Custom hints still pass through untouched.
+        # Custom hints are phone-sync device folders; they file inside
+        # Snapshots instead of minting a stray sibling root.
         self.assertEqual(
             taxonomy.route_destination(filename="x.jpg", folder_hint="Screenshots"),
-            "Screenshots",
+            f"{taxonomy.DEST_SNAPSHOTS}/Screenshots",
         )
+
+    def test_no_routing_leaves_the_enforced_roots(self):
+        allowed = {
+            taxonomy.DEST_EDITS,
+            taxonomy.DEST_RAWS,
+            taxonomy.DEST_SNAPSHOTS,
+            taxonomy.DEST_VIDEO,
+        }
+        kinds = (None, "phone", "camera_card", "export", "film_scan", "video", "unknown")
+        hints = (None, "Screenshots", "Instagram", "RAWS", "Personal Photos", "Film Scans")
+        names = ("a.cr3", "b.dng", "c.jpg", "d.heic", "e.tif", "f.mp4", "g.xyz")
+        for hint in hints:
+            for kind in kinds:
+                for name in names:
+                    dest = taxonomy.route_destination(
+                        filename=name, source_kind=kind, folder_hint=hint
+                    )
+                    self.assertIn(
+                        Path(dest).parts[0], allowed, f"{name} {kind} {hint} -> {dest}"
+                    )
 
     def test_infer_phone_from_path_markers(self):
         self.assertEqual(
@@ -132,6 +159,45 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
         self.assertEqual(
             taxonomy.route_destination(filename="PXL_20260715.jpg", source_kind=kind),
             taxonomy.DEST_SNAPSHOTS,
+        )
+
+    def test_phone_provenance_dng_classifies_phone_and_lands_in_snapshots(self):
+        # Phone EXIF make, phone path marker, or both: the RAW extension never
+        # overrides strong phone provenance.
+        cases = [
+            dict(filename="PXL_20260731_101010.dng", camera_make="Google"),
+            dict(filename="IMG_4501.dng", camera_make="Apple"),
+            dict(filename="20260731_101010.dng", camera_make="samsung"),
+            dict(filename="shot.dng", path="/mnt/phone/Camera Roll/shot.dng"),
+            dict(filename="shot.dng", path="D:/DCIM/Camera/shot.dng"),
+        ]
+        for case in cases:
+            kind = taxonomy.classify_source_kind(**case)
+            self.assertEqual(kind, "phone", case)
+            self.assertEqual(
+                taxonomy.route_destination(filename=case["filename"], source_kind=kind),
+                taxonomy.DEST_SNAPSHOTS,
+                case,
+            )
+
+    def test_camera_evidence_still_beats_weak_phone_hints(self):
+        # An unambiguous camera RAW in a generic Camera folder is a camera file.
+        self.assertEqual(
+            taxonomy.classify_source_kind(
+                filename="IMG_0001.CR3", path="/card/DCIM/Camera/IMG_0001.CR3"
+            ),
+            "camera_card",
+        )
+        # A DNG with camera EXIF (not a phone make) off a card stays camera.
+        self.assertEqual(
+            taxonomy.classify_source_kind(
+                filename="DSC0001.dng", card_source=True, camera_make="RICOH IMAGING COMPANY, LTD."
+            ),
+            "camera_card",
+        )
+        self.assertEqual(
+            taxonomy.route_destination(filename="DSC0001.dng", source_kind="camera_card"),
+            taxonomy.DEST_DIGITAL,
         )
 
 
@@ -204,16 +270,20 @@ class StagedImportTaxonomyTests(BackendTestCase):
 
             raw = camera / "IMG_0001.CR3"
             phone_jpg = phone / "PXL_20260712_120000.jpg"
+            phone_dng = phone / "PXL_20260712_120001.dng"
             film_tif = film / "scan-001.tif"
             export_jpg = exports / "edit-final.jpg"
             raw.write_bytes(b"canon-raw-bytes")
             phone_jpg.write_bytes(b"phone-jpeg-bytes")
+            phone_dng.write_bytes(b"phone-dng-bytes")
             film_tif.write_bytes(b"tiff-scan-bytes")
             export_jpg.write_bytes(b"export-jpeg-bytes")
 
             cases = [
-                (camera, raw, library / "Raws" / "2026" / "2026-07-12" / raw.name),
+                (camera, raw, library / "Raws" / "Digital" / "2026" / "2026-07-12" / raw.name),
                 (phone, phone_jpg, library / "Snapshots" / "2026" / "2026-07-12" / phone_jpg.name),
+                # A phone-provenance RAW stays in Snapshots — extension decides nothing.
+                (phone, phone_dng, library / "Snapshots" / "2026" / "2026-07-12" / phone_dng.name),
                 (film, film_tif, library / "Raws" / "Film Scans" / "2026" / "2026-07-12" / film_tif.name),
                 (exports, export_jpg, library / "Edits" / "2026" / "2026-07-12" / export_jpg.name),
             ]

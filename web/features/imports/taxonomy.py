@@ -6,8 +6,13 @@ Three top-level roots under the library root (siblings, never nested):
 |------------|-------------------------------------------------------------------|
 | Edits      | Our own edited exports, ready for sharing                         |
 | Raws       | Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …) and film  |
-|            | scans (a scan is a negative; batches land in `Raws/Film Scans/`)  |
+|            | scans (a scan is a negative). Exactly two shelves inside:         |
+|            | `Raws/Digital/` (date folders) and `Raws/Film Scans/` (batches)   |
 | Snapshots  | Phone stills, takeout dumps, memes — browsed, never developed     |
+
+The three roots (plus `Video`) are enforced: routing can never mint a new
+top-level sibling, and provenance decides the root — a RAW shot on a phone
+is still a snapshot; the extension alone never picks the root.
 
 The archive filesystem is case-sensitive and the spellings above are exact
 (`RAWS` and `Raws` are different directories — never normalise or guess case).
@@ -47,6 +52,9 @@ DEST_SNAPSHOTS = "Snapshots"
 DEST_VIDEO = "Video"
 # Film scans are Raws; batches keep their own subtree under the Raws root.
 DEST_FILM = f"{DEST_RAWS}/Film Scans"
+# Digital-camera files are also Raws. The Raws root holds exactly two shelves —
+# Digital and Film Scans — so nothing new files bare under Raws itself.
+DEST_DIGITAL = f"{DEST_RAWS}/Digital"
 
 DESTINATIONS: tuple[str, ...] = (
     DEST_EDITS,
@@ -256,7 +264,7 @@ CATEGORY_BY_KIND = {
     "film_scan": "film", "export": "export", "video": "video",
 }
 DEST_BY_CATEGORY = {
-    "raw": DEST_RAWS, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
+    "raw": DEST_DIGITAL, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
     "export": DEST_EDITS, "video": DEST_VIDEO,
 }
 KIND_BY_CATEGORY = {
@@ -320,25 +328,37 @@ def route_destination(
 ) -> str:
     """Return the library-relative destination folder for an incoming file.
 
+    Every destination lives inside the enforced roots — Edits, Raws (on its
+    Digital or Film Scans shelf), Snapshots — plus Video. Routing can never
+    mint a new top-level sibling.
+
     Mapping table (first match wins):
 
-    1. Explicit folder hint naming a retired root → its canonical destination
-       (older clients still say "Personal Photos"; never re-create a dead root)
-    2. Explicit custom folder hint → that name (caller places under library root)
+    1. Folder hint naming a root, current or retired → its canonical
+       destination (older clients still say "Personal Photos"; never
+       re-create a dead root); a bare Raws hint lands on the Digital shelf
+    2. Any other folder hint → that folder inside Snapshots (device folders
+       like "Screenshots" from phone sync; never a stray sibling root)
     3. source_kind=video → Video
     4. source_kind=export → Edits
     5. source_kind=film_scan → Raws/Film Scans
-    6. source_kind=phone → Snapshots (phone DNG/RAW included)
-    7. RAW camera extensions → Raws
+    6. source_kind=phone → Snapshots. Provenance decides the root: a
+       phone-provenance DNG/RAW stays in Snapshots. Classification only
+       says "phone" on strong provenance (strong path marker, phone EXIF
+       make, explicit phone source), so the extension never overrides it
+    7. RAW camera extensions → Raws/Digital
     8. Film-scan extensions (TIFF) → Raws/Film Scans
-    9. Phone still extensions when source is phone/unknown-but-HEIC already handled
-       → Snapshots only for .heic/.heif; JPEG without phone source stays Raws
-       for camera-card companions and legacy sync seeds
-    10. Default → Raws
+    9. .heic/.heif → Snapshots
+    10. Default (camera-card JPEG companions, legacy sync seeds) → Raws/Digital
     """
     hint = normalize_folder_hint(folder_hint) if folder_hint else None
     if hint:
-        return normalize_destination(hint)
+        dest = normalize_destination(hint)
+        if dest == DEST_RAWS:
+            return DEST_DIGITAL
+        if Path(dest).parts[0] in {DEST_EDITS, DEST_RAWS, DEST_SNAPSHOTS, DEST_VIDEO}:
+            return dest
+        return f"{DEST_SNAPSHOTS}/{hint}"
 
     kind = (source_kind or "unknown").strip().lower() or "unknown"
     ext = extension_of(filename)
@@ -349,16 +369,15 @@ def route_destination(
     if kind == "film_scan":
         return DEST_FILM
     if kind == "phone":
-        # A camera RAW is never a phone still, regardless of inferred kind.
-        return DEST_RAWS if ext in UNAMBIGUOUS_RAW_EXTENSIONS else DEST_SNAPSHOTS
+        return DEST_SNAPSHOTS
 
     if ext in RAW_CAMERA_EXTENSIONS:
-        return DEST_RAWS
+        return DEST_DIGITAL
     if ext in FILM_SCAN_EXTENSIONS:
         return DEST_FILM
     if ext in {".heic", ".heif"}:
         return DEST_SNAPSHOTS
-    return DEST_RAWS
+    return DEST_DIGITAL
 
 
 # Canonical root → its retired name, for write-time tolerance while the
