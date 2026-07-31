@@ -206,6 +206,7 @@ PUBLIC_ROUTE_CONTRACT = {
     ("POST", "/api/develop/{image_id}/reset"),
     ("PUT", "/api/develop/{image_id}"),
     ("GET", "/api/develop/lrcat/status"),
+    ("GET", "/api/develop/lrcat/catalogs"),
     ("POST", "/api/develop/lrcat/scan"),
     ("POST", "/api/develop/{image_id}/ai-mask"),
     ("GET", "/api/develop/ai-mask/{cache_key}.png"),

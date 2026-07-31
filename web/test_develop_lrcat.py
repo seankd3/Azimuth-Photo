@@ -2,7 +2,9 @@ import pytest
 import json
 import os
 import sqlite3
+import time
 from contextlib import closing
+from unittest import mock
 import tempfile
 import unittest
 
@@ -159,6 +161,63 @@ class LightroomCatalogImportTests(unittest.TestCase):
         with closing(sqlite3.connect(dry_db)) as conn, conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM develop_settings').fetchone()[0], 0)
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM collections').fetchone()[0], 0)
+
+    def _wait_for_scan(self, client, timeout=15.0):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            status = client.get('/api/develop/lrcat/status').json()
+            if not status['running']:
+                return status
+            time.sleep(0.05)
+        raise AssertionError('Lightroom catalog scan did not finish in time')
+
+    def _client(self):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+
+        from features.develop import import_routes
+
+        app = FastAPI()
+        app.include_router(import_routes.router)
+        import_routes.configure(db_path=lambda: self.db_path)
+        return TestClient(app)
+
+    def test_catalogs_route_lists_discovered_catalogs(self):
+        with self._client() as client, mock.patch.dict(os.environ, {'AZIMUTH_LIGHTROOM_CATALOG_DIRS': self.tempdir.name}):
+            payload = client.get('/api/develop/lrcat/catalogs').json()
+        self.assertEqual(payload['catalogs'], [self.catalog_path])
+
+    def test_scan_route_dry_run_reports_counts_without_writing(self):
+        with self._client() as client:
+            started = client.post('/api/develop/lrcat/scan', json={'catalog_path': self.catalog_path, 'dry_run': True})
+            self.assertEqual(started.status_code, 200)
+            self.assertTrue(started.json()['status']['dry_run'])
+            status = self._wait_for_scan(client)
+        self.assertEqual(status['catalogs'], 1)
+        self.assertEqual(status['matched'], 3)
+        result = status['results'][0]
+        self.assertTrue(result['dry_run'])
+        self.assertEqual(result['picks_updated'], 1)
+        self.assertEqual(result['ratings_updated'], 3)
+        self.assertEqual(result['develop_settings_updated'], 3)
+        self.assertEqual(result['collections_created'], 1)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM collections').fetchone()[0], 0)
+            self.assertEqual(conn.execute('SELECT COUNT(*) FROM develop_settings').fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM images WHERE flag != 'unflagged'").fetchone()[0], 1)
+
+    def test_scan_route_runs_import_after_preview(self):
+        with self._client() as client:
+            client.post('/api/develop/lrcat/scan', json={'catalog_path': self.catalog_path, 'dry_run': True})
+            self._wait_for_scan(client)
+            started = client.post('/api/develop/lrcat/scan', json={'catalog_path': self.catalog_path})
+            self.assertEqual(started.status_code, 200)
+            self.assertFalse(started.json()['status']['dry_run'])
+            status = self._wait_for_scan(client)
+        self.assertEqual(status['results'][0]['collections_created'], 1)
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            self.assertEqual(conn.execute("SELECT name FROM collections").fetchone()[0], 'LR 2023/Favorites')
+            self.assertEqual(conn.execute("SELECT flag FROM images WHERE id = 1").fetchone()[0], 'picked')
 
     def _make_library_copy(self, destination):
         with closing(sqlite3.connect(destination)) as conn, conn:

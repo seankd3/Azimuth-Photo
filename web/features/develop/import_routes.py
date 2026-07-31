@@ -68,11 +68,16 @@ async def api_develop_import_status():
     return importer.import_status()
 
 
-async def _scan_lrcat_in_background(paths: list[str], db_path: str) -> None:
+async def _scan_lrcat_in_background(paths: list[str], db_path: str, dry_run: bool) -> None:
     try:
-        await asyncio.to_thread(lrcat_import.scan_catalogs, paths, db_path, claimed=True)
+        await asyncio.to_thread(lrcat_import.scan_catalogs, paths, db_path, dry_run=dry_run, claimed=True)
     except Exception:
         _LOG.exception("Lightroom catalog import worker failed")
+
+
+@router.get("/api/develop/lrcat/catalogs")
+async def api_lrcat_catalogs():
+    return {"catalogs": await asyncio.to_thread(lrcat_import.catalog_paths)}
 
 
 @router.post("/api/develop/lrcat/scan")
@@ -82,14 +87,15 @@ async def api_scan_lrcat(request: Request):
         return error
     requested_path = str(payload.get("catalog_path") or "").strip()
     scan_all = payload.get("all") is True
+    dry_run = payload.get("dry_run") is True
     if not requested_path and not scan_all:
         return JSONResponse({"error": "Provide catalog_path or all: true"}, status_code=400)
     paths = [requested_path] if requested_path else lrcat_import.catalog_paths()
     if not paths:
         return JSONResponse({"error": "No Lightroom catalogs found"}, status_code=404)
-    if not lrcat_import.begin_scan():
+    if not lrcat_import.begin_scan(dry_run=dry_run):
         return JSONResponse({"error": "Lightroom catalog import is already running", "status": lrcat_import.import_status()}, status_code=409)
-    track_background_task(_scan_lrcat_in_background(paths, _configured_db_path()))
+    track_background_task(_scan_lrcat_in_background(paths, _configured_db_path(), dry_run))
     return {"started": True, "catalogs": paths, "status": lrcat_import.import_status()}
 
 

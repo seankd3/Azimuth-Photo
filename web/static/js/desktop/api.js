@@ -343,6 +343,18 @@ export async function disconnectLightroom() {
     return requestWithStatus('/api/lr/connect', { method: 'DELETE' });
 }
 
+export async function getLrcatCatalogs() {
+    return fetchJson('/api/develop/lrcat/catalogs', { defaultValue: null });
+}
+
+export async function getLrcatStatus() {
+    return fetchJson('/api/develop/lrcat/status', { defaultValue: null });
+}
+
+export async function startLrcatScan(catalogPath, { dryRun = false } = {}) {
+    return postJsonWithStatus('/api/develop/lrcat/scan', { catalog_path: catalogPath, dry_run: dryRun });
+}
+
 export async function getFreeable(olderThanDays = 30) {
     const days = Math.max(0, Number(olderThanDays) || 0);
     return fetchJson(`/api/sync/freeable?older_than_days=${encodeURIComponent(days)}`, { defaultValue: null });
