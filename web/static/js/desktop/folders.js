@@ -95,8 +95,46 @@ function libraryRoots(list) {
             });
         }
     }
-    return out.sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' })
+    const sorted = out.sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' })
         || a.path.localeCompare(b.path));
+    return mergeSameNamedRoots(sorted);
+}
+
+/**
+ * One name, one entry. A local staging source and the library folder its
+ * photos flow into ("Film Scans" on the laptop, "Film Scans" in the archive)
+ * are the same place to the person using the app, so they present as one
+ * root: counts combined, both trees inside, both scopes selected on click.
+ * The library folder anchors the merged entry; the staging copy rides along.
+ */
+function mergeSameNamedRoots(list) {
+    const byName = new Map();
+    const merged = [];
+    for (const root of list) {
+        const key = root.display_name.trim().toLowerCase();
+        const anchor = byName.get(key);
+        if (!anchor) {
+            root.scope_paths = [root.path];
+            byName.set(key, root);
+            merged.push(root);
+            continue;
+        }
+        // The library namespace entry (id 0) anchors; a local source folds in.
+        const [keep, fold] = anchor.id === 0 || root.id !== 0 ? [anchor, root] : [root, anchor];
+        if (keep !== anchor) {
+            merged[merged.indexOf(anchor)] = keep;
+            keep.scope_paths = [keep.path, ...(anchor.scope_paths || []).filter((p) => p !== anchor.path), anchor.path].filter(
+                (p, i, arr) => arr.indexOf(p) === i,
+            );
+            byName.set(key, keep);
+        }
+        keep.scope_paths = [...new Set([...(keep.scope_paths || [keep.path]), fold.path])];
+        keep.total_count = Number(keep.total_count || 0) + Number(fold.total_count || 0);
+        keep.folders = [...(keep.folders || []), ...(fold.folders || [])];
+        keep.online = keep.online || fold.online;
+        if (!keep.id && fold.id) keep.merged_source_id = fold.id;
+    }
+    return merged;
 }
 
 function nodeMatches(node, query) {
@@ -107,7 +145,10 @@ function nodeMatches(node, query) {
 
 function applyFolderScope(path, options = {}) {
     if (!path) return;
-    navigateToScope({ folder: [path] }, options);
+    // A merged root is one place with several underlying paths.
+    const root = roots.find((item) => item.path === path);
+    const paths = root?.scope_paths?.length ? root.scope_paths : [path];
+    navigateToScope({ folder: paths }, options);
     if (!options.keepOpen) closeDrawer();
 }
 
