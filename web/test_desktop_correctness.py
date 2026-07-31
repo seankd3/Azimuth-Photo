@@ -486,7 +486,11 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("applyExcludeSources(params, undefined, folderValues(), { reveal });", state)
         self.assertIn("forGridResults", state)
         self.assertIn("export function applyExcludeSources", quiet)
-        self.assertIn("data-quiet-toggle", folders)
+        # The quiet toggle lives in the folder context menu (no hover-gated
+        # inline control), but must still compose through quiet_sources.
+        self.assertIn('data-act="quiet"', folders)
+        self.assertIn("applyQuietToggle", folders)
+        self.assertIn("toggleSourceQuiet", folders)
         self.assertIn("pa_d_quiet_sources", quiet)
         self.assertIn("await getMapMarkers(scopeParams())", map_module)
         self.assertIn("scopeParams({ limit: MONTH_SAMPLE_LIMIT", timeline)
