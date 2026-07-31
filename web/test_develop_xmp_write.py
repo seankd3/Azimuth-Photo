@@ -210,6 +210,21 @@ class XmpWriteTests(unittest.TestCase):
         self.assertFalse(Path(f"{raw}.xmp-backup").exists())
         self.assertEqual(xmp_write.parse_xmp_text(raw.with_suffix(".xmp").read_bytes()), settings)
 
+    def test_vendor_raw_write_back_targets_the_sidecar(self):
+        settings = {"Exposure2012": 0.5}
+        arw = self._image(11, ".arw", settings=settings)
+        nef = self._image(12, ".nef", settings=settings)
+
+        arw_result = xmp_write.write_image_xmp(self.db_path, 11)
+        nef_result = xmp_write.write_image_xmp(self.db_path, 12, mode="embedded")
+
+        self.assertEqual(arw_result["status"], "written")
+        self.assertEqual(xmp_write.parse_xmp_text(arw.with_suffix(".xmp").read_bytes()), settings)
+        # Embedded requests must never splice a non-DNG vendor raw.
+        self.assertEqual(nef_result["status"], "fallback_sidecar")
+        self.assertEqual(nef.read_bytes(), b"raw fixture")
+        self.assertEqual(xmp_write.parse_xmp_text(nef.with_suffix(".xmp").read_bytes()), settings)
+
     def test_batch_deduplicates_and_reports_each_outcome(self):
         self._image(5, ".cr2", settings={"Exposure2012": -1})
         self._image(6, ".cr3", origin="lrcat", settings={"Exposure2012": 1})

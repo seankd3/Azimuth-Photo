@@ -27,7 +27,9 @@ XMP_NAMESPACE = "adobe:ns:meta/"
 RDF_NAMESPACE = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 CRS_NAMESPACE = "http://ns.adobe.com/camera-raw-settings/1.0/"
 _XPACKET_ID = "W5M0MpCehiHzreSzNTczkc9d"
-_RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
+# Camera raws that receive develop write-back. Embedded writes remain DNG-only
+# splices (write_embedded_dng); every other vendor gets the safe sidecar.
+_RAW_EXTENSIONS = frozenset({".arw", ".cr2", ".cr3", ".dng", ".nef", ".orf", ".raf", ".rw2"})
 _XML_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
 _NUMBER = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 _XMP_START = b"<x:xmpmeta"
