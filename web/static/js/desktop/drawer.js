@@ -1,12 +1,12 @@
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
-    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrConnect, getMetadataStatus, getPairStatus,
+    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
     getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
     installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
     resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan, startFreeUpSpace, cancelFreeUpJob, getStorageOverview, revealFolder,
+    stopMetadataScan, startFreeUpSpace, startLrcatScan, cancelFreeUpJob, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -49,6 +49,12 @@ let metadataStatus = null;
 let remoteAccess = null;
 let pairStatus = null;
 let lrConnectStatus = null;
+let lrcatCatalogs = null;
+let lrcatPath = '';
+let lrcatRun = null;
+let lrcatPreview = null;
+let lrcatReport = null;
+let lrcatTimer = null;
 
 let syncStatus = null;
 let freeableStatus = null;
@@ -773,7 +779,78 @@ function renderConnectLightroom() {
     return '<section class="dr-sec" id="connect-lightroom-panel"><h3>Lightroom</h3>'
         + stateLine
         + '<p class="setting-hint">Next launch of Lightroom Classic picks up the bridge automatically.</p>'
-        + `<div class="setting-actions">${action}</div></section>`;
+        + `<div class="setting-actions">${action}</div>`
+        + renderLrcatMigrate()
+        + '</section>';
+}
+
+function lrcatBaseName(path) {
+    return String(path || '').split(/[\\/]/).pop();
+}
+
+function lrcatTotals(status) {
+    // One honest sum across catalogs — results carry the importer's real counts.
+    const totals = { images: 0, matched: 0, picks: 0, ratings: 0, edits: 0, collections: 0, errors: 0 };
+    for (const result of (status && status.results) || []) {
+        totals.images += Number(result.catalog_images || 0);
+        totals.matched += Number(result.matched || 0);
+        totals.picks += Number(result.picks_updated || 0);
+        totals.ratings += Number(result.ratings_updated || 0);
+        totals.edits += Number(result.develop_settings_updated || 0);
+        totals.collections += Number(result.collections_created || 0) + Number(result.collections_updated || 0);
+        totals.errors += Number(result.errors || 0);
+    }
+    return totals;
+}
+
+function lrcatCountsLine(totals) {
+    // "flags" not "picks": the importer's pick count carries rejects too.
+    const noun = (count, word) => `${fmt(count)} ${word}${count === 1 ? '' : 's'}`;
+    return `${fmt(totals.matched)} of ${noun(totals.images, 'photo')} — ${noun(totals.picks, 'flag')}, `
+        + `${noun(totals.ratings, 'rating')}, ${noun(totals.edits, 'edit')}, ${noun(totals.collections, 'collection')}`
+        + (totals.errors ? ` · ${noun(totals.errors, 'error')}` : '');
+}
+
+function lrcatProgressLine() {
+    if (!lrcatRun || !lrcatRun.running) return '';
+    const verb = lrcatRun.dry_run ? 'Reading' : 'Importing';
+    const current = lrcatBaseName(lrcatRun.current);
+    return current ? `${verb} ${current}…` : `${verb}…`;
+}
+
+function renderLrcatMigrate() {
+    const running = Boolean(lrcatRun && lrcatRun.running);
+    const catalogs = lrcatCatalogs || [];
+    const found = lrcatCatalogs == null
+        ? ''
+        : `<div class="discovered-hubs">${catalogs.length
+            ? catalogs.map((path) => (
+                `<button class="discovered-hub" type="button" data-lrcat-path="${esc(path)}">`
+                + `<b>${esc(lrcatBaseName(path))}</b><span>${esc(path)}</span></button>`
+            )).join('')
+            : '<div class="setting-hint">No catalogs found in the usual Lightroom folders.</div>'}</div>`;
+    let report = '';
+    if (running) {
+        report = `<div class="setting-status" data-lrcat-progress>${esc(lrcatProgressLine())}</div>`;
+    } else if (lrcatReport) {
+        report = `<div class="setting-status" data-lrcat-report>Imported ${esc(lrcatCountsLine(lrcatTotals(lrcatReport)))}</div>`;
+    } else if (lrcatPreview) {
+        report = `<div class="setting-status" data-lrcat-preview>Will import ${esc(lrcatCountsLine(lrcatTotals(lrcatPreview)))}</div>`;
+    }
+    return '<div class="drawer-action-row">'
+        + '<span>Bring picks, ratings, edits and collections over from a catalog.</span>'
+        + `<button class="mini-btn" id="lrcat-find-btn" type="button"${running ? ' disabled' : ''}>Find catalogs</button>`
+        + '</div>'
+        + found
+        + '<label class="setting-row" for="lrcat-path"><span><b>Catalog file</b></span>'
+        + `<input class="drawer-input" id="lrcat-path" type="text" spellcheck="false" autocomplete="off" placeholder="Path to a .lrcat file" value="${esc(lrcatPath)}"${running ? ' disabled' : ''}>`
+        + '</label>'
+        + report
+        + '<div class="setting-actions">'
+        + `<button class="btn" id="lrcat-preview-btn" type="button"${running || !lrcatPath ? ' disabled' : ''}>Preview import</button>`
+        + (lrcatPreview && !running && !lrcatReport ? '<button class="btn primary" id="lrcat-import-btn" type="button">Import</button>' : '')
+        + '</div>'
+        + '<p class="setting-hint">The catalog is only read — Lightroom never sees a change. Existing flags and newer edits here are kept.</p>';
 }
 
 function remoteQrMarkup(text) {
@@ -1530,6 +1607,54 @@ function pollFreeUpJob(jobId) {
     tick();
 }
 
+function stopLrcatPolling() {
+    clearTimeout(lrcatTimer);
+    lrcatTimer = null;
+}
+
+function pollLrcatScan(dryRun) {
+    stopLrcatPolling();
+    const tick = async () => {
+        const status = await getLrcatStatus().catch(() => null);
+        if (status) lrcatRun = status;
+        if (!status || status.running) {
+            const body = systemSurfaceRender
+                ? document.getElementById('system-lens-content')
+                : document.getElementById('drawer-body');
+            if (body) patchNodeText(body, '[data-lrcat-progress]', lrcatProgressLine());
+            lrcatTimer = window.setTimeout(tick, 800);
+            return;
+        }
+        stopLrcatPolling();
+        lrcatRun = null;
+        const totals = lrcatTotals(status);
+        if (dryRun) {
+            lrcatPreview = status;
+            showToast(totals.errors ? 'Preview finished with errors' : `Ready to import ${fmt(totals.matched)} photos`);
+        } else {
+            lrcatReport = status;
+            showToast(totals.errors ? 'Lightroom import finished with errors' : 'Lightroom import finished');
+        }
+        renderCurrentSystemSurface();
+        if (!dryRun) refreshDrawer();
+    };
+    tick();
+}
+
+async function startLrcatRun(dryRun) {
+    if (!lrcatPath) return;
+    lrcatReport = null;
+    if (!dryRun) lrcatPreview = null;
+    const result = await startLrcatScan(lrcatPath, { dryRun });
+    if (!result.ok) {
+        showToast((result.data && (result.data.error || result.data.detail)) || 'Couldn’t start the Lightroom import');
+        return;
+    }
+    lrcatRun = (result.data && result.data.status) || { running: true, dry_run: dryRun };
+    renderCurrentSystemSurface();
+    pollLrcatScan(dryRun);
+}
+
 async function handleFreeUpAction() {
     if (freeupActive()) {
         const status = await cancelFreeUpJob(freeupJob.job_id);
@@ -1793,6 +1918,34 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             showToast('Couldn’t disconnect Lightroom');
         }
     }));
+    body.querySelector('#lrcat-find-btn')?.addEventListener('click', (event) => withBusyAction('lrcat-find', event.currentTarget, async () => {
+        const payload = await getLrcatCatalogs().catch(() => null);
+        lrcatCatalogs = (payload && payload.catalogs) || [];
+        if (lrcatCatalogs.length === 1 && !lrcatPath) lrcatPath = lrcatCatalogs[0];
+        renderCurrentSystemSurface();
+        const count = lrcatCatalogs.length;
+        showToast(count ? `Found ${count} catalog${count === 1 ? '' : 's'}` : 'No catalogs found');
+    }));
+    for (const btn of body.querySelectorAll('[data-lrcat-path]')) {
+        btn.addEventListener('click', () => {
+            lrcatPath = btn.dataset.lrcatPath || '';
+            lrcatPreview = null;
+            lrcatReport = null;
+            renderCurrentSystemSurface();
+        });
+    }
+    body.querySelector('#lrcat-path')?.addEventListener('input', (event) => {
+        lrcatPath = event.currentTarget.value.trim();
+        // A different catalog invalidates the last preview; hold the re-render
+        // so the input keeps focus, and let the buttons follow directly.
+        lrcatPreview = null;
+        lrcatReport = null;
+        const preview = body.querySelector('#lrcat-preview-btn');
+        if (preview) preview.disabled = !lrcatPath;
+        body.querySelector('#lrcat-import-btn')?.remove();
+    });
+    body.querySelector('#lrcat-preview-btn')?.addEventListener('click', (event) => withBusyAction('lrcat-preview', event.currentTarget, () => startLrcatRun(true)));
+    body.querySelector('#lrcat-import-btn')?.addEventListener('click', (event) => withBusyAction('lrcat-import', event.currentTarget, () => startLrcatRun(false)));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
     body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
@@ -1936,6 +2089,7 @@ function stopDrawerPolling() {
     stopCloudBackupPolling();
     stopSystemHealthPolling();
     if (!freeupActive()) stopFreeUpPolling();
+    if (!(lrcatRun && lrcatRun.running)) stopLrcatPolling();
 }
 
 function resolvePublishReturnTarget() {
