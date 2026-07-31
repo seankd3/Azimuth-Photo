@@ -66,6 +66,7 @@ class ImportJob:
     errors: list[dict] = field(default_factory=list)
     cancel_requested: bool = False
     image_rows: list[dict] = field(default_factory=list)
+    move_degraded: bool = False  # Move from inside the library behaves as Copy
 
     def status(self) -> dict:
         total_bytes = sum(int(entry["size"]) for entry in self.entries)
@@ -83,6 +84,7 @@ class ImportJob:
             "skipped_duplicates": self.skipped_duplicates,
             "errors": list(self.errors),
             "batch_id": self.batch_id,
+            "move_degraded": self.move_degraded,
         }
 
 
@@ -100,6 +102,14 @@ async def allowed_roots() -> list[str]:
     roots = [str(originals_root())]
     roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
     roots.extend(row["path"] for row in catalog_routes.quick_browse_roots())
+    return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
+
+
+async def library_roots() -> list[str]:
+    """Roots that hold catalog data. Moving *from* one of these would relocate
+    library files, not drain a card, so Move degrades to Copy under them."""
+    roots = [str(originals_root())]
+    roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
     return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
 
 
@@ -123,8 +133,10 @@ def scan_cards() -> list[dict]:
 async def sources() -> list[dict]:
     cards = await asyncio.to_thread(scan_cards)
     roots = await allowed_roots()
+    library = await library_roots()
     root_rows = [{
         "id": f"root:{path}", "kind": "root", "label": Path(path).name or path, "path": path,
+        "library": _under_roots(path, library),
     } for path in roots if Path(path).is_dir()]
     return cards + root_rows
 
@@ -341,12 +353,15 @@ async def start_commit(
 ) -> ImportJob:
     if scan.status != "done":
         raise ValueError("Scan is not ready to import")
-    if mode not in {"copy", "add"}:
-        raise ValueError("Import mode must be copy or add")
-    if scan.card_source and mode != "copy":
-        raise ValueError("Removable cards must be copied before import")
+    if mode not in {"copy", "add", "move"}:
+        raise ValueError("Import mode must be copy, add, or move")
+    if scan.card_source and mode == "add":
+        raise ValueError("Removable cards must be copied or moved before import")
     if scan.film_source and mode != "copy":
         raise ValueError("Film scans are always copied into the library")
+    # Moving from inside the library would relocate catalog data, not drain a
+    # card: silently behave as Copy and say so, never delete library originals.
+    move_degraded = mode == "move" and _under_roots(scan.path, await library_roots())
     if category is not None and category not in taxonomy.IMPORT_CATEGORIES:
         raise ValueError("Unknown import category")
     if category and not scan.film_source:
@@ -372,9 +387,9 @@ async def start_commit(
     })
     job = ImportJob(
         id=uuid.uuid4().hex, scan=scan, entries=selected, mode=mode,
-        clear_card=bool(clear_card and scan.card_source),
+        clear_card=bool((clear_card or mode == "move") and scan.card_source),
         category=category, keywords=[str(path) for path in keyword_paths if str(path).strip()],
-        collection_id=collection_id, batch_id=batch_id,
+        collection_id=collection_id, batch_id=batch_id, move_degraded=move_degraded,
     )
     _jobs[job.id] = job
     _tasks[job.id] = asyncio.create_task(_commit_worker(job))
@@ -382,7 +397,7 @@ async def start_commit(
 
 
 async def _commit_worker(job: ImportJob) -> None:
-    job.phase = "copying" if job.mode == "copy" else "registering"
+    job.phase = "registering" if job.mode == "add" else "copying"
     job.started_at = time.monotonic()
     try:
         for entry in job.entries:
@@ -533,7 +548,7 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
                 source_root=_catalog_source_root_for_destination(duplicate_destination),
             )
         job.skipped_duplicates += 1
-        await _clear_card_after_verified_duplicate(job, entry)
+        await _clear_source_after_verified_duplicate(job, entry)
         return
     destination = result["destination"]
     image_id = await _register_file(
@@ -543,9 +558,8 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
         source_root=_catalog_source_root_for_destination(destination),
     )
     job.image_rows.append({"image_id": image_id, "filepath": destination, "original_name": entry["name"]})
-    if job.clear_card:
-        await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
-        job.cleared_bytes += int(entry["size"])
+    if _removes_source(job):
+        await _remove_verified_source(job, entry, destination, int(result["bytes"]))
 
 
 async def _known_exact_duplicate(content_hash: str, full_hash: str) -> bool:
@@ -559,8 +573,27 @@ async def _known_exact_duplicate(content_hash: str, full_hash: str) -> bool:
     return False
 
 
-async def _clear_card_after_verified_duplicate(job: ImportJob, entry: dict) -> None:
-    if job.clear_card:
+def _removes_source(job: ImportJob) -> bool:
+    return job.clear_card or (job.mode == "move" and not job.move_degraded)
+
+
+async def _remove_verified_source(job: ImportJob, entry: dict, destination: str, verified_bytes: int) -> None:
+    """The deletion gate: the source only goes once the *final* landed file —
+    hash-verified by copy_verified, registered in the catalog — still holds
+    every byte on disk. Any doubt keeps the source and reports the file."""
+    landed = await asyncio.to_thread(os.path.getsize, destination)
+    if landed != verified_bytes:
+        raise RuntimeError(
+            f"Landed copy is {landed} bytes, expected {verified_bytes} — source kept"
+        )
+    await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
+    job.cleared_bytes += int(entry["size"])
+
+
+async def _clear_source_after_verified_duplicate(job: ImportJob, entry: dict) -> None:
+    # The catalog provably owns a full-hash-identical copy; draining the
+    # source is safe for both clear-card and Move.
+    if _removes_source(job):
         await asyncio.to_thread(card.remove_verified_card_file, entry["path"])
         job.cleared_bytes += int(entry["size"])
 
