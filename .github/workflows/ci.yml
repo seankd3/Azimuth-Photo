@@ -30,6 +30,30 @@ jobs:
       # browser and capability suites went unexercised unnoticed.
       - run: cd web && AZIMUTH_SMOKE_MODE=1 python -m pytest -q -rs
 
+  perf:
+    name: Perf gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: web/requirements.txt
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install -r web/requirements.txt
+      # httpx drives the standing-bench HTTP probes (web/perf/standing.py).
+      - run: python -m pip install httpx
+      # Standing benchmark on the isolated QA fixture catalog, gated against
+      # the committed web/perf/baseline.json. The baseline was measured on the
+      # dev box, so the limit carries cross-hardware headroom: fail only when
+      # a metric exceeds 3x baseline (limit 2.0 = +200%). Tighten it from real
+      # runner numbers, never widen it to mask a slowdown — see
+      # docs/PERF_BUDGETS.md "CI perf gate".
+      - run: python scripts/bench.py --check
+        env:
+          AZIMUTH_BENCH_REGRESSION_LIMIT: "2.0"
+
   javascript:
     name: JavaScript syntax
     runs-on: ubuntu-latest
