@@ -227,24 +227,19 @@ class MirrorPuller:
             "SELECT id, hub_remote FROM images WHERE content_hash = ? OR hub_image_id = ? ORDER BY hub_remote ASC, id ASC LIMIT 1",
             (content_hash, hub_image_id),
         )).fetchone()
-        if existing is not None:
-            # The same photo can be two rows: a local import matched by hash
-            # and an older mirror row already holding this hub identity.
-            # Stamping the identity onto the local row while the mirror row
-            # keeps it violates the unique index and used to kill the whole
-            # refresh. The local row wins; the redundant mirror row folds in,
-            # its earned ranking carried over rather than lost.
-            other = await (await conn.execute(
-                "SELECT id, elo, comparisons FROM images WHERE hub_image_id = ? AND id != ?",
-                (hub_image_id, int(existing["id"])),
-            )).fetchone()
-            if other is not None:
-                await conn.execute(
-                    "UPDATE images SET elo = ?, comparisons = ? "
-                    "WHERE id = ? AND COALESCE(comparisons, 0) = 0 AND COALESCE(?, 0) > 0",
-                    (other["elo"], other["comparisons"], int(existing["id"]), other["comparisons"]),
-                )
-                await conn.execute("DELETE FROM images WHERE id = ?", (int(other["id"]),))
+        # The same photo can be two rows: a local import matched by hash and a
+        # mirror row already holding this hub identity. Stamping the identity
+        # onto the local row while another row keeps it violates the unique
+        # index and used to kill the whole refresh — and half the catalog
+        # references an image row, so deleting either is not an option. The
+        # row that already holds the identity keeps it; the local duplicate
+        # stays untouched and leaves with its retired source.
+        holder = await (await conn.execute(
+            "SELECT id, hub_remote FROM images WHERE hub_image_id = ?",
+            (hub_image_id,),
+        )).fetchone()
+        if holder is not None:
+            existing = holder
         values = self._image_values(remote, available_columns)
         if existing is None:
             values.update(source_id=source_id, hub_image_id=hub_image_id, hub_remote=1, filepath=str(remote.get("filepath") or ""))
