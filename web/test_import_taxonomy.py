@@ -1,4 +1,4 @@
-"""Library taxonomy routing — four destinations + phone-under-RAWs regression."""
+"""Library taxonomy routing — three roots + phone-under-Raws regression."""
 
 from __future__ import annotations
 
@@ -30,15 +30,17 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
                 name,
             )
 
-    def test_phone_source_routes_stills_and_phone_dng_to_personal(self):
+    def test_phone_source_routes_stills_and_phone_dng_to_snapshots(self):
         for name in ("PXL_1.jpg", "IMG_2.HEIC", "shot.heif", "PXL_3.dng"):
             self.assertEqual(
                 taxonomy.route_destination(filename=name, source_kind="phone"),
-                taxonomy.DEST_PERSONAL,
+                taxonomy.DEST_SNAPSHOTS,
                 name,
             )
 
-    def test_phone_folder_hint_is_sibling_not_nested(self):
+    def test_legacy_phone_folder_hint_maps_to_snapshots_sibling(self):
+        # Older Android clients still hint "Personal Photos"; the retired root
+        # must never be re-created and the destination stays a sibling.
         dest = taxonomy.destination_directory(
             "/library",
             filename="PXL_1.jpg",
@@ -48,14 +50,15 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
         )
         self.assertEqual(
             dest,
-            Path("/library/Personal Photos/2026/2026-07-10"),
+            Path("/library/Snapshots/2026/2026-07-10"),
         )
-        self.assertNotIn("RAWS", dest.parts)
+        self.assertNotIn("Raws", dest.parts)
+        self.assertNotIn("Personal Photos", dest.parts)
 
     def test_export_and_film_scan_sources(self):
         self.assertEqual(
             taxonomy.route_destination(filename="edit.jpg", source_kind="export"),
-            taxonomy.DEST_EXPORTS,
+            taxonomy.DEST_EDITS,
         )
         self.assertEqual(
             taxonomy.route_destination(filename="scan.tif", source_kind="film_scan"),
@@ -65,15 +68,17 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
             taxonomy.route_destination(filename="scan.TIFF", source_kind="unknown"),
             taxonomy.DEST_FILM,
         )
+        # Film scans are Raws: the film destination lives under the Raws root.
+        self.assertEqual(Path(taxonomy.DEST_FILM).parts[0], taxonomy.DEST_RAWS)
 
-    def test_heic_without_source_still_personal(self):
+    def test_heic_without_source_still_snapshots(self):
         self.assertEqual(
             taxonomy.route_destination(filename="roll.HEIC"),
-            taxonomy.DEST_PERSONAL,
+            taxonomy.DEST_SNAPSHOTS,
         )
 
     def test_camera_jpeg_without_phone_source_stays_raws(self):
-        # Camera-card JPEG companions and legacy sync seeds must not flip to Personal.
+        # Camera-card JPEG companions and legacy sync seeds must not flip to Snapshots.
         self.assertEqual(
             taxonomy.route_destination(filename="IMG_0001.JPG", source_kind="camera_card"),
             taxonomy.DEST_RAWS,
@@ -81,6 +86,24 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
         self.assertEqual(
             taxonomy.route_destination(filename="seed.jpg"),
             taxonomy.DEST_RAWS,
+        )
+
+    def test_legacy_root_hints_map_to_canonical_destinations(self):
+        for legacy, canonical in (
+            ("RAWS", taxonomy.DEST_RAWS),
+            ("Exported Edits", taxonomy.DEST_EDITS),
+            ("Film Scans", taxonomy.DEST_FILM),
+            ("Personal Photos", taxonomy.DEST_SNAPSHOTS),
+        ):
+            self.assertEqual(
+                taxonomy.route_destination(filename="x.jpg", folder_hint=legacy),
+                canonical,
+                legacy,
+            )
+        # Custom hints still pass through untouched.
+        self.assertEqual(
+            taxonomy.route_destination(filename="x.jpg", folder_hint="Screenshots"),
+            "Screenshots",
         )
 
     def test_infer_phone_from_path_markers(self):
@@ -99,7 +122,7 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
             "film_scan",
         )
 
-    def test_windows_phone_camera_path_routes_to_personal_photos(self):
+    def test_windows_phone_camera_path_routes_to_snapshots(self):
         kind = taxonomy.infer_source_kind(
             filename="PXL_20260715.jpg",
             path=r"D:\DCIM\Camera\PXL_20260715.jpg",
@@ -108,7 +131,7 @@ class TaxonomyRoutingTableTests(unittest.TestCase):
         self.assertEqual(kind, "phone")
         self.assertEqual(
             taxonomy.route_destination(filename="PXL_20260715.jpg", source_kind=kind),
-            taxonomy.DEST_PERSONAL,
+            taxonomy.DEST_SNAPSHOTS,
         )
 
 
@@ -165,7 +188,7 @@ class StagedImportTaxonomyTests(BackendTestCase):
             "suspect_reason": "",
         }
 
-    async def test_four_destination_routings_on_copy(self):
+    async def test_three_root_routings_on_copy(self):
         root = Path(self.tempdir.name)
         library = root / "Photos"
         old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
@@ -189,10 +212,10 @@ class StagedImportTaxonomyTests(BackendTestCase):
             export_jpg.write_bytes(b"export-jpeg-bytes")
 
             cases = [
-                (camera, raw, library / "RAWS" / "2026" / "2026-07-12" / raw.name),
-                (phone, phone_jpg, library / "Personal Photos" / "2026" / "2026-07-12" / phone_jpg.name),
-                (film, film_tif, library / "Film Scans" / "2026" / "2026-07-12" / film_tif.name),
-                (exports, export_jpg, library / "Exported Edits" / "2026" / "2026-07-12" / export_jpg.name),
+                (camera, raw, library / "Raws" / "2026" / "2026-07-12" / raw.name),
+                (phone, phone_jpg, library / "Snapshots" / "2026" / "2026-07-12" / phone_jpg.name),
+                (film, film_tif, library / "Raws" / "Film Scans" / "2026" / "2026-07-12" / film_tif.name),
+                (exports, export_jpg, library / "Edits" / "2026" / "2026-07-12" / export_jpg.name),
             ]
             for source_root, path, expected in cases:
                 scan = await self._card_scan(
@@ -213,11 +236,11 @@ class StagedImportTaxonomyTests(BackendTestCase):
                 self.assertEqual(job.phase, "complete", job.errors)
                 self.assertTrue(expected.is_file(), expected)
                 self.assertEqual(expected.read_bytes(), path.read_bytes())
-                # Regression: phone must never land under RAWS.
-                if "Personal Photos" in str(expected):
+                # Regression: phone must never nest under the Raws root.
+                if "Snapshots" in str(expected):
                     self.assertFalse(
-                        (library / "RAWS" / "Personal Photos").exists()
-                        or any("RAWS" in Path(row["filepath"]).parts and "Personal Photos" in Path(row["filepath"]).parts
+                        (library / "Raws" / "Snapshots").exists()
+                        or any("Raws" in Path(row["filepath"]).parts and "Snapshots" in Path(row["filepath"]).parts
                                for row in job.image_rows)
                     )
         finally:
@@ -242,10 +265,38 @@ class StagedImportTaxonomyTests(BackendTestCase):
                 clear_card=False, keyword_paths=[], collection_id=None,
             )
             await self._wait(job)
+            landed = library / "Snapshots" / "2026" / "2026-07-12" / shot.name
+            self.assertTrue(landed.is_file(), landed)
+            self.assertFalse((library / "Raws" / "2026" / "2026-07-12" / shot.name).exists())
+            self.assertFalse((library / "Raws" / "Snapshots").exists())
+        finally:
+            if old_root is None:
+                os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
+            else:
+                os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
+
+    async def test_copy_into_unrenamed_library_keeps_writing_legacy_roots(self):
+        """Write-time tolerance: a pre-rename archive must not grow a second root."""
+        root = Path(self.tempdir.name)
+        library = root / "Photos"
+        (library / "Personal Photos").mkdir(parents=True)
+        old_root = os.environ.get("AZIMUTH_ORIGINALS_DIR")
+        os.environ["AZIMUTH_ORIGINALS_DIR"] = str(library)
+        try:
+            phone_dump = root / "Camera Roll"
+            phone_dump.mkdir(parents=True)
+            shot = phone_dump / "PXL_legacy.jpg"
+            shot.write_bytes(b"cellphone-jpeg-legacy")
+            scan = await self._card_scan(phone_dump, [self._entry(phone_dump, shot)], card_source=False)
+            job = await staging.start_commit(
+                scan, keys="all_checked_default", mode="copy", skip_suspects=True,
+                clear_card=False, keyword_paths=[], collection_id=None,
+            )
+            await self._wait(job)
+            self.assertEqual(job.phase, "complete", job.errors)
             landed = library / "Personal Photos" / "2026" / "2026-07-12" / shot.name
             self.assertTrue(landed.is_file(), landed)
-            self.assertFalse((library / "RAWS" / "2026" / "2026-07-12" / shot.name).exists())
-            self.assertFalse((library / "RAWS" / "Personal Photos").exists())
+            self.assertFalse((library / "Snapshots").exists(), "must not create a second root")
         finally:
             if old_root is None:
                 os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
@@ -314,11 +365,14 @@ class HubPhoneUnderRawsRegressionTests(unittest.TestCase):
             content=payload,
         )
         self.assertEqual(upload.status_code, 200, upload.text)
-        good = self.root / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
-        nested_bug = self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
+        # The legacy "Personal Photos" hint routes to Snapshots and must not
+        # re-create the retired root or nest under the raws tree.
+        good = self.root / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg"
+        nested_bug = self.raws / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg"
         self.assertTrue(good.is_file(), good)
         self.assertEqual(good.read_bytes(), payload)
-        self.assertFalse(nested_bug.exists(), "phone shots must not nest under RAWS")
+        self.assertFalse(nested_bug.exists(), "phone shots must not nest under the raws tree")
+        self.assertFalse((self.root / "Personal Photos").exists(), "retired root must not be re-created")
 
 
 class ReclassifyGatedTests(BackendTestCase):
@@ -353,7 +407,7 @@ class ReclassifyGatedTests(BackendTestCase):
         )
         self.assertEqual(result["action"], "reclassify")
         self.assertEqual(result["updated"], 1)
-        good = library / "Personal Photos" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
+        good = library / "Snapshots" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
         self.assertTrue(good.is_file())
         self.assertFalse(stranded.exists())
 
@@ -393,7 +447,7 @@ class ReclassifyGatedTests(BackendTestCase):
         self.assertEqual(response.json()["updated"], 1)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json()["updated"], 0)
-        moved = library / "Personal Photos" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
+        moved = library / "Snapshots" / "2026" / "2026-07-10" / "PXL_stranded.jpg"
         self.assertTrue(moved.is_file())
         self.assertFalse(stranded.exists())
         self.assertTrue(untouched.is_file())
@@ -432,7 +486,7 @@ class ReclassifyGatedTests(BackendTestCase):
                 )
 
         moved_paths = [
-            library / "Personal Photos" / "2026" / "2026-07-10" / path.name
+            library / "Snapshots" / "2026" / "2026-07-10" / path.name
             for path in stranded[:2]
         ]
         self.assertTrue(all(path.exists() for path in moved_paths))
@@ -498,7 +552,7 @@ class ReclassifyGatedTests(BackendTestCase):
             await connection.close_async(conn, db_path=db.DB_PATH)
         self.assertEqual(row["filepath"], str(stranded))
 
-        good = library / "Personal Photos" / "2026" / "2026-07-10" / stranded.name
+        good = library / "Snapshots" / "2026" / "2026-07-10" / stranded.name
         good.parent.mkdir(parents=True)
         good.write_bytes(stranded.read_bytes())
         result = await taxonomy.reclassify_misplaced_personal_photos(
@@ -702,7 +756,7 @@ class MoveJournalRecoveryTests(BackendTestCase):
                 db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
             )
 
-        good = [library / "Personal Photos" / "2026" / "2026-07-10" / path.name for path in stranded]
+        good = [library / "Snapshots" / "2026" / "2026-07-10" / path.name for path in stranded]
         first_row = await self._image_row(image_ids[0])
         self.assertEqual(first_row["filepath"], str(good[0]))
         self.assertTrue(good[0].is_file())

@@ -4,8 +4,8 @@ Film scans arrive as lab ZIPs (or loose TIFF/JPEG frames), not camera cards.
 Uploads spill into a per-upload staging directory under the cache root, ZIPs
 are extracted server-side, and the result is staged like any other source:
 the import canvas previews it and the verified copy pipeline lands it under
-``Film Scans/<archive name>/`` (scan dates are not shoot dates, so film never
-routes into date-guessed folders).
+``Raws/Film Scans/<archive name>/`` (scan dates are not shoot dates, so film
+never routes into date-guessed folders).
 
 RAR is not supported in v1 — no rar library ships in requirements, and the
 picker copy says "ZIP or TIFF files" honestly.

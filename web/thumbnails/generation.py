@@ -102,7 +102,7 @@ def partition_raw_thumbnail_tiers(
 
 # Still-frame thumbnail pipeline only. Videos live in the catalog for
 # playback/backup, but Pillow cannot decode them — skip quietly so bulk
-# pregen does not thrash retries on every .mp4/.mov in Personal Photos.
+# pregen does not thrash retries on every .mp4/.mov in Snapshots.
 VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
 
 

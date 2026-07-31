@@ -1,20 +1,25 @@
 """Library taxonomy — where imports land on disk.
 
-Four top-level destinations under the library root (siblings, never nested):
+Three top-level roots under the library root (siblings, never nested):
 
-| Destination        | When                                                         |
-|--------------------|--------------------------------------------------------------|
-| Personal Photos    | Phone / cellphone stills (JPEG/HEIC/HEIF) or phone upload    |
-| RAWS               | Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …)      |
-| Exported Edits     | Our own edited exports                                       |
-| Film Scans         | Scanner / lab film-scan inputs (typically TIFF)              |
+| Root       | When                                                              |
+|------------|-------------------------------------------------------------------|
+| Edits      | Our own edited exports, ready for sharing                         |
+| Raws       | Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …) and film  |
+|            | scans (a scan is a negative; batches land in `Raws/Film Scans/`)  |
+| Snapshots  | Phone stills, takeout dumps, memes — browsed, never developed     |
 
-Disk names match the live Photos README (`RAWS` spelling preserved).
-Display may say "RAWs"; on-disk folder stays `RAWS`.
+The archive filesystem is case-sensitive and the spellings above are exact
+(`RAWS` and `Raws` are different directories — never normalise or guess case).
+The owner renames the roots on disk himself; while that is underway the
+retired four-destination names (`Personal Photos`, `RAWS`, `Exported Edits`,
+`Film Scans`) are still read and routed correctly, but nothing writes new
+files into them.
 
 Routing is keyed on file type + source kind / folder hint — not scattered
 if/else at each call site. Existing files are never moved automatically;
-see `reclassify_misplaced_personal_photos` for an explicit repair action.
+see `reclassify_misplaced_personal_photos` for an explicit repair action and
+`features.imports.relocation` for catalog-follows-rename repair.
 """
 
 from __future__ import annotations
@@ -36,21 +41,65 @@ SourceKind = Literal[
     "unknown",
 ]
 
-DEST_PERSONAL = "Personal Photos"
-DEST_RAWS = "RAWS"
-DEST_EXPORTS = "Exported Edits"
-DEST_FILM = "Film Scans"
+DEST_EDITS = "Edits"
+DEST_RAWS = "Raws"
+DEST_SNAPSHOTS = "Snapshots"
 DEST_VIDEO = "Video"
+# Film scans are Raws; batches keep their own subtree under the Raws root.
+DEST_FILM = f"{DEST_RAWS}/Film Scans"
 
-# Canonical on-disk destinations (order is the product taxonomy).
 DESTINATIONS: tuple[str, ...] = (
-    DEST_PERSONAL,
+    DEST_EDITS,
     DEST_RAWS,
-    DEST_EXPORTS,
-    DEST_FILM,
+    DEST_SNAPSHOTS,
 )
 
-DESTINATION_SET = frozenset(DESTINATIONS) | {DEST_VIDEO}
+# Retired four-destination root names → where their content lives now. Read
+# tolerance for the manual on-disk rename: hints and persisted paths naming
+# these still route correctly, but no new file is written under them and no
+# code path re-creates them.
+LEGACY_DESTINATIONS: dict[str, str] = {
+    "Personal Photos": DEST_SNAPSHOTS,
+    "RAWS": DEST_RAWS,
+    "Exported Edits": DEST_EDITS,
+    "Film Scans": DEST_FILM,
+}
+
+# A configured raws tree may still carry the pre-rename spelling on disk.
+RAWS_ROOT_NAMES = frozenset({DEST_RAWS, "RAWS"})
+
+DESTINATION_SET = (
+    frozenset(DESTINATIONS) | {DEST_VIDEO} | frozenset(LEGACY_DESTINATIONS)
+)
+
+
+def normalize_destination(name: str) -> str:
+    """Map a retired root name to its canonical destination; pass others through."""
+    return LEGACY_DESTINATIONS.get(name, name)
+
+
+def existing_root(library_root: Path | str, canonical: str, legacy: str) -> Path:
+    """Prefer the canonical root; fall back to a still-unrenamed legacy tree.
+
+    Chooses between directories that already exist — it never creates either.
+    On a case-folding filesystem the canonical name can report present while
+    the directory on disk is the legacy spelling (`Raws` vs `RAWS`); the real
+    name wins so catalog paths match the disk.
+    """
+    library = Path(library_root)
+    canonical_dir = library / canonical
+    if canonical_dir.is_dir():
+        try:
+            real = canonical_dir.resolve().name
+        except OSError:
+            real = canonical
+        if real == legacy:
+            return library / legacy
+        return canonical_dir
+    if (library / legacy).is_dir():
+        return library / legacy
+    return canonical_dir
+
 
 RAW_CAMERA_EXTENSIONS = frozenset({
     ".arw",
@@ -74,10 +123,6 @@ FILM_SCAN_EXTENSIONS = frozenset({
     ".tif",
     ".tiff",
 })
-
-# Folder hints the Android backup / clients may send (exact match, case-sensitive
-# for the known set; unknown hints still become top-level siblings).
-KNOWN_FOLDER_HINTS = frozenset(DESTINATIONS)
 
 # Strong signals uniquely identify a phone/personal source; they win over file
 # extension. Weak signals are generic folder names ("Camera", "DCIM/Camera") that
@@ -120,9 +165,9 @@ def extension_of(filename: str) -> str:
 
 
 def library_root_from_raws(raws_root: Path | str) -> Path:
-    """Parent of the RAWS tree — the Photos library root."""
+    """Parent of the Raws tree — the Photos library root."""
     root = Path(raws_root).expanduser().resolve()
-    if root.name == DEST_RAWS:
+    if root.name in RAWS_ROOT_NAMES:
         return root.parent
     return root
 
@@ -211,8 +256,8 @@ CATEGORY_BY_KIND = {
     "film_scan": "film", "export": "export", "video": "video",
 }
 DEST_BY_CATEGORY = {
-    "raw": DEST_RAWS, "personal": DEST_PERSONAL, "film": DEST_FILM,
-    "export": DEST_EXPORTS, "video": DEST_VIDEO,
+    "raw": DEST_RAWS, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
+    "export": DEST_EDITS, "video": DEST_VIDEO,
 }
 KIND_BY_CATEGORY = {
     "raw": "camera_card", "personal": "phone", "film": "film_scan",
@@ -273,47 +318,71 @@ def route_destination(
     source_kind: SourceKind | str | None = None,
     folder_hint: str | None = None,
 ) -> str:
-    """Return the top-level destination folder name for an incoming file.
+    """Return the library-relative destination folder for an incoming file.
 
     Mapping table (first match wins):
 
-    1. Explicit folder hint that names a known destination → that destination
+    1. Explicit folder hint naming a retired root → its canonical destination
+       (older clients still say "Personal Photos"; never re-create a dead root)
     2. Explicit custom folder hint → that name (caller places under library root)
     3. source_kind=video → Video
-    4. source_kind=export → Exported Edits
-    5. source_kind=film_scan → Film Scans
-    6. source_kind=phone → Personal Photos
-       (phone DNG/RAW stays with Personal Photos per Photos README)
-    7. RAW camera extensions → RAWS
-    8. Film-scan extensions (TIFF) → Film Scans
+    4. source_kind=export → Edits
+    5. source_kind=film_scan → Raws/Film Scans
+    6. source_kind=phone → Snapshots (phone DNG/RAW included)
+    7. RAW camera extensions → Raws
+    8. Film-scan extensions (TIFF) → Raws/Film Scans
     9. Phone still extensions when source is phone/unknown-but-HEIC already handled
-       → Personal Photos only for .heic/.heif; JPEG without phone source stays RAWS
+       → Snapshots only for .heic/.heif; JPEG without phone source stays Raws
        for camera-card companions and legacy sync seeds
-    10. Default → RAWS
+    10. Default → Raws
     """
     hint = normalize_folder_hint(folder_hint) if folder_hint else None
     if hint:
-        return hint
+        return normalize_destination(hint)
 
     kind = (source_kind or "unknown").strip().lower() or "unknown"
     ext = extension_of(filename)
     if kind == "video":
         return DEST_VIDEO
     if kind == "export":
-        return DEST_EXPORTS
+        return DEST_EDITS
     if kind == "film_scan":
         return DEST_FILM
     if kind == "phone":
         # A camera RAW is never a phone still, regardless of inferred kind.
-        return DEST_RAWS if ext in UNAMBIGUOUS_RAW_EXTENSIONS else DEST_PERSONAL
+        return DEST_RAWS if ext in UNAMBIGUOUS_RAW_EXTENSIONS else DEST_SNAPSHOTS
 
     if ext in RAW_CAMERA_EXTENSIONS:
         return DEST_RAWS
     if ext in FILM_SCAN_EXTENSIONS:
         return DEST_FILM
     if ext in {".heic", ".heif"}:
-        return DEST_PERSONAL
+        return DEST_SNAPSHOTS
     return DEST_RAWS
+
+
+# Canonical root → its retired name, for write-time tolerance while the
+# archive is renamed by hand.
+_LEGACY_BY_ROOT = {
+    DEST_RAWS: "RAWS",
+    DEST_EDITS: "Exported Edits",
+    DEST_SNAPSHOTS: "Personal Photos",
+}
+
+
+def resolve_destination_dir(library_root: Path | str, destination: str) -> Path:
+    """Absolute directory for a routed destination.
+
+    Tolerates a library whose roots are not renamed yet: when the canonical
+    root is absent but its legacy-named tree exists, keep writing into the
+    legacy tree instead of creating a second root beside it. Fresh libraries
+    get the canonical name.
+    """
+    parts = Path(destination).parts
+    legacy = _LEGACY_BY_ROOT.get(parts[0])
+    if legacy is None:
+        return Path(library_root).joinpath(*parts)
+    return existing_root(library_root, parts[0], legacy).joinpath(*parts[1:])
 
 
 def destination_directory(
@@ -331,7 +400,7 @@ def destination_directory(
         source_kind=source_kind,
         folder_hint=folder_hint,
     )
-    return Path(library_root) / dest / year / day
+    return resolve_destination_dir(library_root, dest) / year / day
 
 
 def destination_source_root(library_root: Path | str, destination: str) -> Path:
@@ -340,8 +409,13 @@ def destination_source_root(library_root: Path | str, destination: str) -> Path:
 
 
 def misplaced_personal_under_raws_prefix(library_root: Path | str) -> str:
-    """Path prefix for the dogfood mis-nest: RAWS/Personal Photos/…"""
-    return str(Path(library_root) / DEST_RAWS / DEST_PERSONAL)
+    """Path prefix for the dogfood mis-nest: <raws root>/Personal Photos/…
+
+    The mis-nest was produced by the retired four-destination router, so the
+    nested folder keeps its legacy spelling regardless of the raws root name.
+    """
+    raws = existing_root(library_root, DEST_RAWS, "RAWS")
+    return str(raws / "Personal Photos")
 
 
 async def preview_misplaced_personal_photos(
@@ -422,7 +496,7 @@ async def reclassify_misplaced_personal_photos(
 
     library = Path(library_root)
     bad_prefix = Path(preview["prefix"])
-    good_root = library / DEST_PERSONAL
+    good_root = existing_root(library, DEST_SNAPSHOTS, "Personal Photos")
     source = await catalog_repository.add_or_restore_source(db_path, str(good_root))
     source_id = int(source["id"])
 

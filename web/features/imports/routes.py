@@ -156,28 +156,28 @@ async def api_import_taxonomy():
     return {
         "destinations": [
             {
-                "id": "personal_photos",
-                "folder": taxonomy.DEST_PERSONAL,
-                "label": "Personal Photos",
-                "rule": "Phone / cellphone stills (JPEG/HEIC/HEIF) and the phone upload queue",
+                "id": "edits",
+                "folder": taxonomy.DEST_EDITS,
+                "label": "Edits",
+                "rule": "Edited exports from Develop (incl. film-scan edits)",
             },
             {
                 "id": "raws",
                 "folder": taxonomy.DEST_RAWS,
-                "label": "RAWs",
+                "label": "Raws",
                 "rule": "Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …)",
-            },
-            {
-                "id": "exported_edits",
-                "folder": taxonomy.DEST_EXPORTS,
-                "label": "Exported Edits",
-                "rule": "Edited exports from Develop (incl. film-scan edits)",
             },
             {
                 "id": "film_scans",
                 "folder": taxonomy.DEST_FILM,
                 "label": "Film Scans",
-                "rule": "Scanner / lab film-scan inputs (typically TIFF)",
+                "rule": "Scanner / lab film-scan inputs (typically TIFF), filed under Raws",
+            },
+            {
+                "id": "snapshots",
+                "folder": taxonomy.DEST_SNAPSHOTS,
+                "label": "Snapshots",
+                "rule": "Phone / cellphone stills (JPEG/HEIC/HEIF), takeout dumps, and the phone upload queue",
             },
         ],
         "misplaced_personal_under_raws": (

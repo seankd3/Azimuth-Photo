@@ -72,7 +72,8 @@ def default_raws_root(intake_root: Path | None = None) -> Path:
     if configured:
         return Path(configured).expanduser()
     intake = intake_root or default_intake_root()
-    return intake.parent / "RAWS"
+    # Tolerate a not-yet-renamed archive; never create either root here.
+    return taxonomy.existing_root(intake.parent, taxonomy.DEST_RAWS, "RAWS")
 
 
 def default_library_root(intake_root: Path | None = None, raws_root: Path | None = None) -> Path:
@@ -145,7 +146,12 @@ def compute_placed_relpath(
 
     year, day = _date_parts(date_taken) or (str(date.today().year), date.today().isoformat())
     folder_hint = str(folder).strip() if folder else None
-    source_kind = "phone" if folder_hint == taxonomy.DEST_PERSONAL else None
+    # Older Android clients still hint the retired "Personal Photos" name.
+    source_kind = (
+        "phone"
+        if folder_hint and taxonomy.normalize_destination(folder_hint) == taxonomy.DEST_SNAPSHOTS
+        else None
+    )
     destination_name = taxonomy.route_destination(
         filename=filename,
         source_kind=source_kind,
@@ -658,15 +664,20 @@ def _resolve_library_destination(
 ) -> tuple[Path, Path]:
     """Return (absolute destination file, catalog source root) for a locked relpath.
 
-    ``RAWS/...`` always resolves through the configured raws_root (which may not
-    literally be named ``RAWS`` in tests/standalone layouts). Other tops stay
-    siblings under the library root.
+    ``Raws/...`` always resolves through the configured raws_root (which may not
+    literally be named ``Raws`` in tests/standalone layouts). Other tops stay
+    siblings under the library root. Retired root names in relpaths persisted
+    before the three-root rename resolve to their canonical destination instead
+    of re-creating a dead root.
     """
 
     library_root = taxonomy.library_root_from_raws(raws_root).resolve()
     relative = Path(str(placed_relpath).replace("\\", "/"))
     if relative.is_absolute() or ".." in relative.parts or not relative.parts:
         raise ValueError("placed_relpath must be a safe library-relative path")
+    canonical_top = taxonomy.normalize_destination(relative.parts[0])
+    if canonical_top != relative.parts[0]:
+        relative = Path(canonical_top).joinpath(*relative.parts[1:])
     top = relative.parts[0]
     rest = Path(*relative.parts[1:]) if len(relative.parts) > 1 else Path()
     if top == taxonomy.DEST_RAWS:
@@ -675,14 +686,14 @@ def _resolve_library_destination(
         try:
             destination.relative_to(source_root)
         except ValueError as exc:
-            raise ValueError("placed_relpath escapes the RAWS root") from exc
+            raise ValueError("placed_relpath escapes the Raws root") from exc
     else:
-        destination = (library_root / relative).resolve()
+        destination = taxonomy.resolve_destination_dir(library_root, str(relative)).resolve()
         try:
-            destination.relative_to(library_root)
+            actual_top = destination.relative_to(library_root).parts[0]
         except ValueError as exc:
             raise ValueError("placed_relpath escapes the library root") from exc
-        source_root = taxonomy.destination_source_root(library_root, top)
+        source_root = taxonomy.destination_source_root(library_root, actual_top)
     return destination, source_root
 
 

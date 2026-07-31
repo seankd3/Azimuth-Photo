@@ -13,7 +13,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
-const CATEGORY_TREES = { raw: 'RAWS', personal: 'Personal Photos', film: 'Film Scans', export: 'Exported Edits', video: 'Video' };
+const CATEGORY_TREES = { raw: 'Raws', personal: 'Snapshots', film: 'Raws/Film Scans', export: 'Edits', video: 'Video' };
 const CATEGORY_SHORT = { raw: 'RAW', personal: 'personal', film: 'film', export: 'exports', video: 'video' };
 const SCAN_POLL_MS = 1000;
 const JOB_POLL_MS = 1000;
@@ -154,7 +154,7 @@ function selectSource(row) {
 
 // Film scans arrive as lab ZIPs or loose TIFFs picked in the OS dialog: upload,
 // extract server-side, then stage the extraction exactly like any other source.
-// Destination is Film Scans/<archive name>/ — scan dates are not shoot dates.
+// Destination is Raws/Film Scans/<archive name>/ — scan dates are not shoot dates.
 async function startFilmImport(files) {
     openImport();
     resetStage();
@@ -332,7 +332,7 @@ function syncDestination() {
             const folder = parts.length > 1 ? parts[0] : (source.label || 'Film scans');
             folders.set(folder, (folders.get(folder) || 0) + 1);
         }
-        const lines = ['<div class="imps-dest-tree">Film Scans</div>'];
+        const lines = ['<div class="imps-dest-tree">Raws/Film Scans</div>'];
         for (const [folder, count] of [...folders.entries()].sort()) {
             lines.push(`<div class="imps-dest-date"><span>${esc(folder)}</span><span class="imps-dest-count">${fmt(count)}</span></div>`);
         }
@@ -342,7 +342,7 @@ function syncDestination() {
     const staged = checkedEntries();
     const trees = new Map(); // tree -> Map(year -> Map(date -> count))
     for (const entry of staged) {
-        const tree = CATEGORY_TREES[effectiveCategory(entry)] || 'RAWS';
+        const tree = CATEGORY_TREES[effectiveCategory(entry)] || 'Raws';
         const date = String(entry.taken_at || '').slice(0, 10) || 'Unknown date';
         const year = date.slice(0, 4);
         const years = trees.get(tree) || new Map();
@@ -429,7 +429,7 @@ function syncCommit() {
     if (els.category && !committing) {
         const dominant = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
         els.category.options[0].text = dominant && !categoryOverride
-            ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'RAWS'}` : 'Auto';
+            ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'Raws'}` : 'Auto';
     }
     els.commit.disabled = !staged.length || committing || validating
         || scanStatus === 'scanning' || scanStatus === 'error'; // server rejects non-done scans
