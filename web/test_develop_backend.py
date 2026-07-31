@@ -617,6 +617,20 @@ class DevelopBackendTests(unittest.TestCase):
         self.assertEqual((width, height), (3, 2))
         np.testing.assert_array_equal(parsed, rgb)
 
+    def test_unfitted_vendor_raw_is_refused_honestly(self):
+        source = asyncio.run(db.add_or_restore_source(os.path.join(self.tempdir.name, "raws")))
+        arw_id = self._image(source["id"], Path(self.tempdir.name) / "raws" / "vendor.arw")
+
+        response = self.client.get(f"/api/develop/{arw_id}/base.jpg")
+
+        # Cataloged vendor raws get an honest not-fitted-yet refusal, never the
+        # generic unsupported-format message and never a broken render.
+        self.assertEqual(response.status_code, 400)
+        message = response.json()["error"]
+        self.assertIn("ARW", message)
+        self.assertIn("cataloged", message)
+        self.assertFalse(rawproc.is_develop_path("vendor.arw"))
+
     def test_display_extensions_follow_pillow_heic_support(self):
         formats = {
             "jpg": "JPEG",
