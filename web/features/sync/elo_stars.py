@@ -1,7 +1,12 @@
-"""Elo → LR star projection (read-time, short-cached).
+"""Elo → star projection (read-time, short-cached, persisted to images.stars).
 
 Thresholds default to top 2% / next 8% / next 20% (cumulative 2/10/30).
 Only photos with ≥N comparisons project; predicted-only Elo does not.
+
+The star is Elo's readable face, not a second signal: ``images.stars`` is a
+stored copy of this projection, refreshed when rankings move, so grids can
+filter and sort on it without recomputing percentiles per query. There is no
+manual star write anywhere — Refine is the only way to change a star.
 
 Outbound also emits clear-to-zero when a previously projected photo drops
 below threshold — the server tracks last-emitted projections so demotions
@@ -10,11 +15,15 @@ reach Lightroom even though the live projection map omits zeros.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import threading
 import time
 from typing import Any
 
 from data import connection
+
+log = logging.getLogger(__name__)
 
 DEFAULT_MIN_COMPARISONS = 3
 # Cumulative percentile ceilings for 5★ / 4★ / 3★.
@@ -209,6 +218,109 @@ async def _load_projection(db_path: str) -> tuple[dict[str, int], dict[int, int]
         _cache["by_hash"] = by_hash
         _cache["by_id"] = by_id
     return dict(by_hash), dict(by_id)
+
+
+async def _ensure_stars_column(conn) -> None:
+    """Additive migration: legacy catalogs predate the stored ``stars`` column."""
+
+    cursor = await conn.execute("PRAGMA table_info(images)")
+    columns = {row["name"] for row in await cursor.fetchall()}
+    if "stars" not in columns:
+        await conn.execute("ALTER TABLE images ADD COLUMN stars INTEGER NOT NULL DEFAULT 0")
+        await conn.commit()
+
+
+async def refresh_stored_stars(db_path: str) -> int:
+    """Persist the current projection into ``images.stars`` (diff-write).
+
+    Returns the number of rows whose stored stars changed. The projection
+    cache is dropped first so a refresh scheduled after an Elo write never
+    persists a pre-write snapshot. Demotions write 0 so filters never keep a
+    photo that fell out of its band.
+    """
+
+    invalidate_elo_stars_cache()
+    _, by_id = await _load_projection(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        await _ensure_stars_column(conn)
+        rows = await (
+            await conn.execute("SELECT id, stars FROM images WHERE COALESCE(stars, 0) != 0")
+        ).fetchall()
+        stored = {int(row["id"]): int(row["stars"]) for row in rows}
+        updates = [
+            (stars, image_id)
+            for image_id, stars in by_id.items()
+            if stored.get(image_id) != stars
+        ]
+        updates.extend((0, image_id) for image_id in stored if image_id not in by_id)
+        if updates:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                await conn.executemany("UPDATE images SET stars = ? WHERE id = ?", updates)
+                await conn.commit()
+            except Exception:
+                await conn.rollback()
+                raise
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if updates:
+        _invalidate_star_dependent_caches()
+    return len(updates)
+
+
+def _invalidate_star_dependent_caches() -> None:
+    """Stored stars feed min_stars counts/facets and card payloads."""
+
+    try:
+        from core import cache_events
+
+        cache_events.invalidate_rating_facet_caches()
+        cache_events.invalidate_rating_ranking_count_cache()
+        cache_events.invalidate_rankings_cache()
+    except Exception:
+        log.debug("Star-dependent cache invalidation skipped", exc_info=True)
+
+
+_REFRESH_DEBOUNCE_SECONDS = 2.0
+# db_path → rerun-requested flag; presence means a debounce task is live.
+_refresh_pending: dict[str, bool] = {}
+
+
+def schedule_stored_stars_refresh(db_path: str, *, delay: float = _REFRESH_DEBOUNCE_SECONDS) -> None:
+    """Debounced background persist of the projection after rankings move.
+
+    Refine bursts coalesce into one refresh ``delay`` seconds after the last
+    write. Safe to call from sync code; a no-op without a running event loop
+    (tests call ``refresh_stored_stars`` directly).
+    """
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    if db_path in _refresh_pending:
+        _refresh_pending[db_path] = True
+        return
+    _refresh_pending[db_path] = False
+
+    async def _debounced() -> None:
+        try:
+            while True:
+                await asyncio.sleep(delay)
+                _refresh_pending[db_path] = False
+                try:
+                    await refresh_stored_stars(db_path)
+                except Exception:
+                    log.warning("Stored star refresh failed", exc_info=True)
+                if not _refresh_pending.get(db_path):
+                    return
+        finally:
+            _refresh_pending.pop(db_path, None)
+
+    from core.background import track_background_task
+
+    track_background_task(_debounced())
 
 
 async def elo_stars_for_hashes(db_path: str, content_hashes: list[str] | None = None) -> dict[str, int]:

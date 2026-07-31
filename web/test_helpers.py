@@ -18,6 +18,7 @@ class ImageHelperTests(unittest.TestCase):
             "elo": 1200.0,
             "comparisons": 0,
             "propagated_updates": 0,
+            "stars": 0,
             "status": "kept",
             "flag": "unflagged",
             "orientation": "landscape",
@@ -100,8 +101,8 @@ class ImageHelperTests(unittest.TestCase):
     def test_filter_dimensions(self):
         images = [
             self.image(1, orientation="landscape", comparisons=0, elo=1200.0, flag="unflagged"),
-            self.image(2, orientation="portrait", comparisons=2, elo=1400.0, flag="picked"),
-            self.image(3, orientation="landscape", comparisons=10, elo=1510.0, flag="rejected"),
+            self.image(2, orientation="portrait", comparisons=2, elo=1400.0, stars=4, flag="picked"),
+            self.image(3, orientation="landscape", comparisons=10, elo=1510.0, stars=5, flag="rejected"),
         ]
 
         self.assertEqual(
@@ -155,9 +156,17 @@ class ImageHelperTests(unittest.TestCase):
         self.assertEqual([img["id"] for img in filtered], [1, 2])
         self.assertIsNot(filtered[0], images[0])
 
+    def test_min_stars_filters_on_stored_projection_not_elo(self):
+        # Stars are the stored Elo projection; a high raw Elo without a stored
+        # star must not pass the filter.
+        filtered = helpers.filter_compare_mosaic_candidates(
+            [self.image(1, elo=1900.0, stars=0), self.image(2, elo=1301.0, stars=4)],
+            min_stars=4,
+        )
+        self.assertEqual([img["id"] for img in filtered], [2])
+
     def test_db_backed_helpers_use_configured_providers(self):
         old_cached = helpers._cached_image_ids_provider
-        old_thresholds = helpers._star_thresholds
         calls = []
 
         async def fake_cached_image_ids(image_ids, size, cache_root):
@@ -165,21 +174,12 @@ class ImageHelperTests(unittest.TestCase):
             return {2, 3}
 
         try:
-            helpers.configure(
-                cached_image_ids=fake_cached_image_ids,
-                star_thresholds={4: 1300},
-            )
+            helpers.configure(cached_image_ids=fake_cached_image_ids)
             cached = asyncio.run(helpers.cached_image_ids([1, "2", "bad", 2, 3], "sm", "/tmp/cache"))
-            filtered = helpers.filter_compare_mosaic_candidates(
-                [self.image(1, elo=1299), self.image(2, elo=1301)],
-                min_stars=4,
-            )
         finally:
             helpers._cached_image_ids_provider = old_cached
-            helpers._star_thresholds = old_thresholds
 
         self.assertEqual(cached, {2, 3})
-        self.assertEqual([img["id"] for img in filtered], [2])
         self.assertIn(("cached", (1, 2, 3), "sm", "/tmp/cache"), calls)
 
 

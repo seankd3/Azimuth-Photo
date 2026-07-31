@@ -110,7 +110,7 @@ function renderChips() {
         const labels = { compared: 'Ranked', uncompared: 'Unranked', direct_uncompared: 'Not compared yet', confident: 'High confidence' };
         chips.push(chipHtml('compared', labels[scope.compared] || scope.compared));
     }
-    if (scope.min_stars) chips.push(chipHtml('min_stars', `Elo ${scope.min_stars}+`));
+    if (scope.min_stars) chips.push(chipHtml('min_stars', `${scope.min_stars}+ stars`));
     if (viewState.bestOf) chips.push(chipHtml('bestOf', 'Best of'));
     if (chips.length > 1) chips.push(`<button class="chip ghost" data-clear-all="1">${icon('x')}<span>Clear all</span></button>`);
     document.getElementById('ctx-crumbs').innerHTML = chips.join('');

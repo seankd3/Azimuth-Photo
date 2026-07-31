@@ -512,6 +512,22 @@ async def run_startup(
 
     track_background_task(_warm_collection_suggestions())
 
+    async def _reconcile_stored_stars():
+        # Stars are a stored projection of Elo; reconcile once per boot so
+        # catalogs ranked before the column existed (or while the app was
+        # down) filter and sort correctly without waiting for the next pick.
+        await wait_for_user_gap()
+        try:
+            import db as _db
+            from features.sync import elo_stars as _elo_stars
+            await _elo_stars.refresh_stored_stars(_db.DB_PATH)
+        except Exception:
+            log.debug("stored star reconcile skipped", exc_info=True)
+
+    # The daemon delay keeps short-lived processes (tests, --help launches)
+    # from touching the catalog: cancellation lands in the sleep, not mid-query.
+    track_background_task(_start_background_daemon(_reconcile_stored_stars, delay=10.0))
+
     async def _warm_disk_path_index():
         # Otherwise the first request that gates a tile on cache truth pays the
         # whole-table index build inline (771ms on a 240k-row cache). It reads

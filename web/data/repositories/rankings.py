@@ -16,6 +16,9 @@ log = logging.getLogger(__name__)
 RANKING_SORTS = {
     "elo": "i.elo DESC",
     "elo_asc": "i.elo ASC",
+    # Stored Elo projection first, Elo inside a band; starless photos trail.
+    "stars": "COALESCE(i.stars, 0) DESC, i.elo DESC, i.id ASC",
+    "stars_asc": "COALESCE(i.stars, 0) ASC, i.elo ASC, i.id ASC",
     "comparisons": "i.comparisons DESC",
     "least_compared": "i.comparisons ASC",
     # Sampler-only: random tie-break so compare/Refine pools cover the whole
@@ -100,7 +103,6 @@ VISIBLE_CACHE_FIRST_SORTS = {
     "resolution_asc",
 }
 
-STAR_THRESHOLDS = {5: 1500, 4: 1350, 3: 1250, 2: 1150, 1: 0}
 RANKING_COUNT_CACHE_TTL_SECONDS = 30.0
 FACET_CACHE_TTL_SECONDS = 30.0
 RANKING_VISIBLE_ID_FILTER_LIMIT = 5000
@@ -120,7 +122,7 @@ FILE_TYPE_GROUPS = {
 }
 IMAGE_ROW_SELECT = (
     "i.id, i.source_id, i.filename, i.filepath, i.elo, i.comparisons, "
-    "i.propagated_updates, "
+    "i.propagated_updates, COALESCE(i.stars, 0) AS stars, "
     "i.status, i.flag, i.aspect_ratio, "
     "i.date_taken, i.date_source, i.camera_make, i.camera_model, i.lens, i.file_ext, i.file_size, "
     "i.file_modified_at, i.width, i.height, i.latitude, i.longitude, i.created_at"
@@ -463,9 +465,10 @@ def ranking_filter_parts(
     elif compared == "confident":
         conditions.append("i.comparisons >= 10")
 
-    if min_stars > 0 and min_stars in STAR_THRESHOLDS:
-        conditions.append("i.elo >= ?")
-        params.append(STAR_THRESHOLDS[min_stars])
+    if 1 <= min_stars <= 5:
+        # Stored Elo projection (images.stars) — the same value grids display.
+        conditions.append("COALESCE(i.stars, 0) >= ?")
+        params.append(int(min_stars))
 
     folder_filter = folder_filter_sql(folder)
     if folder_filter is not None:

@@ -237,21 +237,24 @@ async def api_set_image_flag(image_id: int, request: Request):
 
 @router.get("/api/image/{image_id}/rating")
 async def api_get_image_rating(image_id: int):
+    """Read-only star projection. Stars are computed from Elo — there is no
+    manual star write anywhere; Refine is the only way to change a star."""
     _configured()
     image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
-    rating = await image_repository.get_image_rating(_configured_db_path(), image_id)
     from features.sync import elo_stars as elo_stars_mod
     from features.sync import shoot_rank as shoot_rank_mod
 
     row = dict(image) if not isinstance(image, dict) else image
+    stars = int(row.get("stars") or 0)
     content_hash = str(row.get("content_hash") or "")
     projected = 0
     if content_hash:
         by_hash = await elo_stars_mod.elo_stars_for_hashes(_configured_db_path(), [content_hash])
         projected = int(by_hash.get(content_hash) or 0)
-    base_whisper = elo_stars_mod.whisper_for_stars(projected) if projected else None
+    display = stars or projected
+    base_whisper = elo_stars_mod.whisper_for_stars(display) if display else None
     rank_in_shoot = None
     filepath = str(row.get("filepath") or "")
     if base_whisper and filepath:
@@ -260,33 +263,13 @@ async def api_get_image_rating(image_id: int):
     return {
         "ok": True,
         "id": image_id,
-        "rating": rating,
-        "lr_rating": rating,
-        "elo_stars": projected,
+        "stars": display,
+        # Compatibility alias for clients that predate the stored projection.
+        "rating": display,
+        "elo_stars": display,
         "elo_stars_whisper": whisper,
         "rank_in_shoot": rank_in_shoot,
-        "yours": bool(rating and int(rating) > 0),
     }
-
-
-@router.post("/api/image/{image_id}/rating")
-async def api_set_image_rating(image_id: int, request: Request):
-    _configured()
-    body, error = await json_object(request)
-    if error:
-        return error
-    rating = body.get("rating", 0)
-    if isinstance(rating, bool) or not isinstance(rating, (int, float)) or int(rating) != rating or not 0 <= int(rating) <= 5:
-        return JSONResponse({"error": "rating must be an integer 0-5"}, status_code=400)
-    rating = int(rating)
-
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
-    if not image:
-        return JSONResponse({"error": "Image not found"}, status_code=404)
-
-    await image_repository.set_image_rating(_configured_db_path(), image_id, rating)
-    await oplog.append_rating(_configured_db_path(), image_id, rating)
-    return {"ok": True, "id": image_id, "rating": rating}
 
 
 @router.post("/api/images/flag")

@@ -89,8 +89,7 @@ function caption(img) {
     const elo = Math.round(Number(img.elo) || 0);
     const flag = esc(flagLabel(img.flag || 'unflagged'));
     const stars = starsMarkup({
-        eloStars: img.elo_stars,
-        lrRating: img.lr_rating ?? img.rating,
+        stars: img.stars ?? img.elo_stars,
         whisper: img.elo_stars_whisper,
     });
     return [name, `${index + 1} / ${scopeTotal() || images().length}`, stars || `Elo ${elo}`, flag]
@@ -100,15 +99,14 @@ function caption(img) {
 
 async function loadStarProjection(img) {
     const imageId = Number(img?.id);
-    if (!imageId || img.elo_stars != null || img.lr_rating != null) return;
+    if (!imageId || img.elo_stars_whisper != null) return;
     try {
         const response = await fetch(`/api/image/${imageId}/rating`, { headers: { Accept: 'application/json' } });
         if (!response.ok) return;
         const data = await response.json();
-        img.elo_stars = Number(data.elo_stars) || 0;
-        img.lr_rating = Number(data.lr_rating ?? data.rating) || 0;
+        img.stars = Number(data.stars ?? data.elo_stars) || 0;
+        img.elo_stars = img.stars;
         img.elo_stars_whisper = data.elo_stars_whisper || '';
-        img.rating = img.lr_rating;
         if (open && currentIs(imageId)) updateInfoOverlay();
         const host = document.getElementById('loupe-caption');
         if (host && open && currentIs(imageId)) host.innerHTML = caption(img);

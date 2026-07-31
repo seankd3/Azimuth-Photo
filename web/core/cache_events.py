@@ -145,6 +145,7 @@ def invalidate_rating_stats_cache() -> None:
     invalidate_rating_facet_caches()
     invalidate_rating_ranking_count_cache()
     invalidate_ai_status_counts_cache()
+    _schedule_stored_star_refresh()
 
 
 def invalidate_people_dependent_caches(*, filter_options_invalidator=None) -> None:
@@ -196,6 +197,18 @@ def patch_direct_rating_stats_cache(pair_delta: int, rated_image_delta: int) -> 
 
     invalidate_rating_facet_caches()
     invalidate_rating_ranking_count_cache()
+    _schedule_stored_star_refresh()
+
+
+def _schedule_stored_star_refresh() -> None:
+    """Stars are a stored projection of Elo — re-persist after rankings move."""
+    try:
+        import db
+        from features.sync import elo_stars
+
+        elo_stars.schedule_stored_stars_refresh(db.DB_PATH)
+    except Exception:
+        logger.debug("Stored star refresh scheduling skipped", exc_info=True)
 
 
 def invalidate_filter_options_cache() -> None:

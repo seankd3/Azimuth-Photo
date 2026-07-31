@@ -108,12 +108,6 @@ export async function writeFlags(imageIds, flag) {
     return outcome;
 }
 
-export async function writeRating(imageId, rating) {
-    const outcome = enqueueWrite(`/api/image/${imageId}/rating`, { rating });
-    outcome.then((result) => emit('rating-write', { imageId: Number(imageId), rating, ...result }));
-    return outcome;
-}
-
 // Refine: same typed payloads as the compare mosaic and undo API.
 export async function mosaicNext(n, params, exclude = '') {
     const query = new URLSearchParams(params);

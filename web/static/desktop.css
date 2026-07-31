@@ -1063,10 +1063,12 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .elo-stars-display .elo-star { display: inline-flex; color: var(--text-3); opacity: .35; }
 .elo-stars-display .elo-star .icon { width: 12px; height: 12px; }
 .elo-stars-display .elo-star.on { color: var(--accent); opacity: 1; }
-.elo-stars-yours {
-    margin-left: 4px; color: var(--text-3); font-size: var(--fs-micro); font-style: normal;
-    letter-spacing: .02em; opacity: .75;
-}
+/* Grid cards: stars are always visible (never hover-gated) and show only the
+   earned glyphs — the unfilled remainder reads as noise at grid density. */
+.c-elo.has-stars { opacity: 1; }
+.c-elo.has-stars .elo-stars-display { background: rgba(13,14,16,.62); padding: 1px 5px; border-radius: var(--r-media); }
+.c-elo.has-stars .elo-star:not(.on) { display: none; }
+.c-elo.has-stars .elo-star .icon { width: 10px; height: 10px; }
 body:has(#view-loupe.active) #toast { transform: translateX(-50%) translateY(-70px); }
 body:has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-56px); }
 body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-50%) translateY(-126px); }
