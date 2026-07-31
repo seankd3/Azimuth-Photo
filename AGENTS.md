@@ -71,9 +71,9 @@ changes the contract.
   cleanup, dedup, or free-up path may read, move, rename, or delete anything
   under it.
 - The archive roots are `Edits/`, `Raws/`, and `Snapshots/`, spelled exactly so.
-  The archive filesystem is case-sensitive, so `RAWS` and `Raws` are different
-  directories; never normalise or guess root casing, and never create a root
-  that does not already exist.
+  Match whatever spelling readdir reports and never create a root that does not
+  already exist. Case behaviour is per-volume (the hub's exFAT archive is
+  case-insensitive; an ext4 archive is not) — never normalise or guess casing.
 - Destructive photo operations require collision-proof destinations,
   full-byte verification, and a recoverable Trash/Undo path.
 - Exact duplicate cleanup keeps the oldest filesystem-modified file; the
