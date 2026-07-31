@@ -229,6 +229,8 @@ they need a measurement, not a build.
 | 20 | Smart collections: boolean operators, ranges, multi-value facets | 1.9 | next |
 | 21 | Overlay stragglers: system drawer + Deliver still scrim the app | 1.9 | next |
 | 22 | Hub pairing without URL/port thinking | 1.3 | next |
+| 27 | Satellite cold-start pull: hub takes minutes to build a full catalog export and the rc.1 puller aborts at its short timeout, so the laptop mirror never completes cursor-0; chunk the export server-side and ship a desktop build with the 600s timeout already on main | 1.3 | next |
+| 28 | Deploy updated hub code BEFORE Sean renames RAWS/Exported Edits/Film Scans, then run the relocation tool immediately after -- renaming first repeats the dead-rows event at 4x size | 1.4 | **sequenced, Sean's call** |
 | 23 | Retire `C:\Pictures` — everything hash-proven except the newer 2025 LrC catalog (16.9 GB) + 2 loose files; archive those first, deletion stays Sean's | 1.4 | Sean+agent |
 | 24 | Reject verb ships once #10 is proven | 1.14 | after 10 |
 | 25 | Gallery/website shared styling | 1.8 | next |
