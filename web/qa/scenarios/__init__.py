@@ -35,6 +35,7 @@ from qa.scenarios.library import (
     sort_filter_date_jump,
 )
 from qa.scenarios.photo import loupe_and_develop
+from qa.scenarios.responsive import narrow_right_drawer
 from qa.scenarios.trash import empty_trash_and_leave, trash_empty_offline_hub
 from qa.scenarios.handshake import handshake_skew
 from qa.scenarios.offline import grid_offline_thumbs
@@ -73,6 +74,7 @@ SCENARIOS = [
     Scenario("develop_batch_export_sync", "Develop batch", develop_batch_export_sync),
     Scenario("mobile_smoke", "Mobile", mobile_smoke, mobile_viewport=True),
     Scenario("search", "Search", search),
+    Scenario("narrow_right_drawer", "Responsive panels", narrow_right_drawer),
     # Changes the seeded stack representative; keep after RAW workflows that expect image 1 first.
     Scenario("stack_promote_cover", "Stacks cover", stack_promote_cover),
     # Existing empty-Trash coverage needs the untouched seeded Trash rows.

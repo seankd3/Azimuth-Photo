@@ -34,6 +34,7 @@ let trashTotal = null;
 let collectionsLoading = true;
 let collectionsLoadError = false;
 let drawerOpen = false;
+let rightDrawerVisible = false;
 let collectionMenu = null;
 let collectionMenuReturn = null;
 let deliverOverlay = null;
@@ -1454,6 +1455,7 @@ export function openScopeExportMenu(anchor) {
 
 export function openLeftDrawer() {
     if (!narrowPanel() || drawerOpen) return;
+    closeRightDrawer();
     const shell = document.getElementById('shell');
     const panel = document.getElementById('panel-left');
     const scrim = document.getElementById('panel-scrim');
@@ -1470,12 +1472,41 @@ export function closeLeftDrawer() {
     const scrim = document.getElementById('panel-scrim');
     drawerOpen = false;
     shell.classList.remove('drawer-open');
-    scrim.hidden = true;
+    if (!rightDrawerVisible) scrim.hidden = true;
     releaseFocus(panel);
 }
 
 export function leftDrawerOpen() {
     return drawerOpen;
+}
+
+// ≤880px slide-over mirror of the left drawer for #panel-right, so the
+// Info/Metadata/Keywords/Ranking panes stay reachable at narrow widths.
+export function openRightDrawer() {
+    const shell = document.getElementById('shell');
+    if (!narrowPanel() || rightDrawerVisible || shell.classList.contains('right-hidden')) return;
+    closeLeftDrawer();
+    const panel = document.getElementById('panel-right');
+    const scrim = document.getElementById('panel-scrim');
+    rightDrawerVisible = true;
+    scrim.hidden = false;
+    shell.classList.add('right-drawer-open');
+    trapFocus(panel, panel.querySelector('button, input'));
+}
+
+export function closeRightDrawer() {
+    if (!rightDrawerVisible) return;
+    const shell = document.getElementById('shell');
+    const panel = document.getElementById('panel-right');
+    const scrim = document.getElementById('panel-scrim');
+    rightDrawerVisible = false;
+    shell.classList.remove('right-drawer-open');
+    if (!drawerOpen) scrim.hidden = true;
+    releaseFocus(panel);
+}
+
+export function rightDrawerOpen() {
+    return rightDrawerVisible;
 }
 
 export function toggleLeftPanel() {
@@ -1617,9 +1648,15 @@ export async function initPanel() {
     setCollectionPicker(openCollectionPicker);
     document.getElementById('shell').classList.toggle('left-collapsed', viewState.leftCollapsed);
     document.getElementById('collapse-left').addEventListener('click', toggleLeftPanel);
-    document.getElementById('panel-scrim').addEventListener('click', closeLeftDrawer);
+    document.getElementById('panel-scrim').addEventListener('click', () => {
+        closeLeftDrawer();
+        closeRightDrawer();
+    });
     window.matchMedia('(max-width: 880px)').addEventListener('change', (event) => {
-        if (!event.matches) closeLeftDrawer();
+        if (!event.matches) {
+            closeLeftDrawer();
+            closeRightDrawer();
+        }
     });
     ensureCollectionMenu();
     document.addEventListener('pointerdown', (event) => {

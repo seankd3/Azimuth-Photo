@@ -1589,14 +1589,22 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
         z-index: 90; transform: translateX(-100%); transition: transform var(--dur-slow) var(--ease);
         box-shadow: 16px 0 40px rgba(0,0,0,.42);
     }
-    #panel-right { display: none; }
+    #panel-right {
+        display: block; position: fixed; top: var(--topbar-h); bottom: 0; right: 0; width: var(--right-w);
+        z-index: 90; transform: translateX(100%); transition: transform var(--dur-slow) var(--ease);
+        box-shadow: -16px 0 40px rgba(0,0,0,.42);
+    }
+    #shell.right-hidden #panel-right { display: none; }
     #shell.drawer-open #panel-left { transform: translateX(0); }
+    #shell.right-drawer-open #panel-right { transform: translateX(0); }
     #panel-scrim {
         position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 80; background: rgba(0,0,0,.48);
         display: none;
     }
-    #shell.drawer-open #panel-scrim { display: block; }
+    #shell.drawer-open #panel-scrim, #shell.right-drawer-open #panel-scrim { display: block; }
     #shell.left-collapsed #panel-left { border-right: 1px solid var(--line); overflow-y: auto; }
+    #shell.right-collapsed #panel-right { border-left: 1px solid var(--line); overflow-y: auto; }
+    #shell.right-collapsed #panel-right .right-inner { visibility: visible; }
     .edge-btn { display: none; }
     .brand { flex-basis: auto; }
     #top-right { flex-basis: auto; }
@@ -1640,6 +1648,16 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-layout.right-collapsed { grid-template-columns: 200px minmax(0, 1fr) 0; }
 .develop-layout.right-collapsed #develop-right { border-width: 0; overflow: visible; }
 .develop-layout.right-collapsed #develop-panels { visibility: hidden; }
+@media (max-width: 1050px) {
+    .develop-layout { grid-template-columns: minmax(0, 1fr) 264px; }
+    .develop-layout.right-collapsed { grid-template-columns: minmax(0, 1fr) 0; }
+    #develop-presets { display: none; }
+}
+@media (max-width: 880px) {
+    .develop-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 42vh); }
+    .develop-layout.right-collapsed { grid-template-rows: minmax(0, 1fr) 0; }
+    #develop-right { border-left: 0; border-top: 1px solid var(--line); }
+}
 .develop-workspace { position: relative; display: grid; grid-template-rows: 42px minmax(0, 1fr) 88px; min-width: 0; min-height: 0; }
 .develop-layout.filmstrip-collapsed .develop-workspace { grid-template-rows: 42px minmax(0, 1fr) 0; }
 .develop-layout.filmstrip-collapsed #develop-filmstrip { display: none; }

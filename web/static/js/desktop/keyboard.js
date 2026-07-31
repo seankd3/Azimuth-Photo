@@ -15,7 +15,7 @@ import {
 import {
     cycleDensity, emit, on, patchPrefs, patchScope, scope, toggleBestOf, viewState,
 } from './state.js';
-import { closeLeftDrawer, leftDrawerOpen, toggleLeftPanel } from './panel.js';
+import { closeLeftDrawer, closeRightDrawer, leftDrawerOpen, rightDrawerOpen, toggleLeftPanel } from './panel.js';
 import { closeSystemDrawer, systemDrawerOpen } from './drawer.js';
 import { toggleRightPanel } from './panel_right.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -273,6 +273,10 @@ function escapeOneLayer() {
     }
     if (systemDrawerOpen()) {
         closeSystemDrawer();
+        return true;
+    }
+    if (rightDrawerOpen()) {
+        closeRightDrawer();
         return true;
     }
     if (leftDrawerOpen()) {

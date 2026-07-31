@@ -158,10 +158,12 @@ class ProbeServer:
             return
         try:
             if os.name == "nt":
-                if sig == signal.SIGKILL:
-                    self.process.kill()
-                else:
+                # signal.SIGKILL does not exist on Windows; escalate anything
+                # beyond SIGTERM to a hard kill.
+                if sig == signal.SIGTERM:
                     self.process.terminate()
+                else:
+                    self.process.kill()
             else:
                 os.killpg(self.process.pid, sig)
         except ProcessLookupError:
