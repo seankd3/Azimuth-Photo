@@ -22,6 +22,30 @@ MISSING_MARK_BUSY_TIMEOUT_SECONDS = 0.1
 MISSING_MARK_RETRY_BACKOFF_SECONDS = 0.1
 _missing_mark_states: dict[tuple[int, str], dict] = {}
 
+# Offline-storage circuit breaker: archive drives sleep and unmount, so one
+# pass that would newly mark more than this share of a source's live rows
+# missing looks like unavailable storage, not real deletions. Halt the pass and
+# keep every row instead of mass-marking. A handful of rows below the floor is
+# always a normal deletion. AZIMUTH_ALLOW_MASS_MISSING=1 overrides the breaker
+# for deliberate bulk removals.
+MISSING_MARK_HALT_FRACTION = 0.05
+MISSING_MARK_HALT_MIN_ROWS = 10
+MISSING_MARK_OVERRIDE_ENV = "AZIMUTH_ALLOW_MASS_MISSING"
+
+
+def mass_missing_override_enabled() -> bool:
+    return os.environ.get(MISSING_MARK_OVERRIDE_ENV, "").strip().lower() in {"1", "true", "yes"}
+
+
+def would_mass_mark_missing(newly_missing: int, live_total: int) -> bool:
+    """One choke point for every pass that marks catalog rows missing."""
+
+    if newly_missing < MISSING_MARK_HALT_MIN_ROWS:
+        return False
+    if newly_missing <= live_total * MISSING_MARK_HALT_FRACTION:
+        return False
+    return not mass_missing_override_enabled()
+
 
 class SourceOfflineDuringScan(RuntimeError):
     """Raised when a source disappears before a scan can be finalized safely."""
@@ -29,6 +53,10 @@ class SourceOfflineDuringScan(RuntimeError):
 
 class SuspiciousEmptyScan(RuntimeError):
     """Raised when an empty online scan is unsafe to apply to existing images."""
+
+
+class StorageUnavailableDuringScan(RuntimeError):
+    """Raised when a pass would mass-mark a source missing; every row is preserved."""
 
 
 def normalize_source_path(path: str) -> str:
@@ -551,15 +579,33 @@ async def mark_source_missing_files_on_conn(
         "AND vc_of IS NULL AND COALESCE(file_size, -1) != 0",
         (source_id,),
     )
-    await conn.execute(
-        "UPDATE images SET missing_at = ? "
-        "WHERE source_id = ? AND missing_at IS NULL "
+    unseen_condition = (
+        "source_id = ? AND missing_at IS NULL "
         "AND vc_of IS NULL "
         "AND filepath NOT IN (SELECT filepath FROM source_scan_seen) "
         "AND NOT EXISTS ("
         "  SELECT 1 FROM source_scan_excluded "
         "  WHERE instr(images.filepath, source_scan_excluded.directory_prefix) = 1"
-        ")",
+        ")"
+    )
+    cursor = await conn.execute(
+        f"SELECT COUNT(*) FROM images WHERE {unseen_condition}",
+        (source_id,),
+    )
+    newly_missing = int((await cursor.fetchone())[0])
+    cursor = await conn.execute(
+        "SELECT COUNT(*) FROM images "
+        "WHERE source_id = ? AND missing_at IS NULL AND vc_of IS NULL",
+        (source_id,),
+    )
+    live_total = int((await cursor.fetchone())[0])
+    if would_mass_mark_missing(newly_missing, live_total):
+        raise StorageUnavailableDuringScan(
+            f"Storage looks unavailable: {newly_missing} of {live_total} cataloged photos "
+            "were not visible to this scan. Nothing was marked missing."
+        )
+    await conn.execute(
+        f"UPDATE images SET missing_at = ? WHERE {unseen_condition}",
         (missing_at, source_id),
     )
     await conn.execute(_CASCADE_SOURCE_VIRTUAL_COPY_MISSING_SQL, (source_id,))
@@ -630,13 +676,24 @@ async def mark_source_scan_finished(
             (now, now, 1, source_id),
         )
         if seen_filepaths is not None and not suspicious_empty_scan:
-            await mark_source_missing_files_on_conn(
-                conn,
-                source_id,
-                seen_filepaths,
-                now,
-                excluded_directory_paths=excluded_directory_paths,
-            )
+            try:
+                await mark_source_missing_files_on_conn(
+                    conn,
+                    source_id,
+                    seen_filepaths,
+                    now,
+                    excluded_directory_paths=excluded_directory_paths,
+                )
+            except StorageUnavailableDuringScan:
+                # Keep every row and the old last_scan_at, and surface the
+                # storage-unavailable state instead of flipping row status.
+                await conn.rollback()
+                await conn.execute(
+                    "UPDATE catalog_sources SET online = 0 WHERE id = ?",
+                    (int(source_id),),
+                )
+                await conn.commit()
+                raise
         await update_source_counts_on_conn(conn, source_id)
         await conn.commit()
         if suspicious_empty_scan:
@@ -680,10 +737,35 @@ def cascade_virtual_copy_missing_sync_on_conn(
         conn.execute(cascade_sql, cascade_ids)
 
 
+def _source_root_unreachable(path: str) -> bool:
+    """An absent root means the storage is unavailable, not that photos are gone."""
+
+    if not path or path == HUB_MIRROR_SOURCE_PATH:
+        return False
+    return not os.path.isdir(path)
+
+
 def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | None = None) -> bool:
     when = _time.time() if missing_at is None else float(missing_at)
     conn = connection.open_sync(db_path)
     try:
+        guard = conn.execute(
+            "SELECT s.id AS source_id, s.path FROM images i "
+            "JOIN catalog_sources s ON s.id = i.source_id "
+            "WHERE i.id = ? AND i.missing_at IS NULL",
+            (int(image_id),),
+        ).fetchone()
+        if (
+            guard is not None
+            and _source_root_unreachable(str(guard["path"] or ""))
+            and not mass_missing_override_enabled()
+        ):
+            conn.execute(
+                "UPDATE catalog_sources SET online = 0 WHERE id = ?",
+                (int(guard["source_id"]),),
+            )
+            conn.commit()
+            return False
         cursor = conn.execute(
             "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL "
             "AND COALESCE(hub_remote, 0) = 0",
@@ -707,6 +789,26 @@ def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | Non
         connection.close_sync(conn, db_path=db_path)
 
 
+async def _offline_source_ids_for_images_on_conn(conn, image_ids: list[int]) -> set[int]:
+    """Sources whose root is unreachable right now; their rows stay unmarked."""
+
+    if mass_missing_override_enabled():
+        return set()
+    placeholders = ",".join("?" for _ in image_ids)
+    cursor = await conn.execute(
+        "SELECT DISTINCT s.id, s.path FROM images i "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        f"WHERE i.id IN ({placeholders})",
+        image_ids,
+    )
+    rows = await cursor.fetchall()
+    offline: set[int] = set()
+    for source_id, path in ((int(row["id"]), str(row["path"] or "")) for row in rows):
+        if await asyncio.to_thread(_source_root_unreachable, path):
+            offline.add(source_id)
+    return offline
+
+
 async def _write_missing_mark_batch(db_path: str, requests: list[tuple[int, float]]) -> set[int]:
     timestamps: dict[int, float] = {}
     for image_id, missing_at in requests:
@@ -716,6 +818,7 @@ async def _write_missing_mark_batch(db_path: str, requests: list[tuple[int, floa
     async def _write() -> set[int]:
         conn = await connection.open_async(db_path)
         try:
+            offline_source_ids = await _offline_source_ids_for_images_on_conn(conn, ids)
             await conn.execute("BEGIN IMMEDIATE")
             placeholders = ",".join("?" for _ in ids)
             cursor = await conn.execute(
@@ -725,7 +828,21 @@ async def _write_missing_mark_batch(db_path: str, requests: list[tuple[int, floa
                 ids,
             )
             rows = await cursor.fetchall()
-            changed_ids = {int(row["id"]) for row in rows}
+            skipped_source_ids = {
+                int(row["source_id"])
+                for row in rows
+                if row["source_id"] is not None and int(row["source_id"]) in offline_source_ids
+            }
+            if skipped_source_ids:
+                await conn.executemany(
+                    "UPDATE catalog_sources SET online = 0 WHERE id = ?",
+                    [(source_id,) for source_id in skipped_source_ids],
+                )
+            changed_ids = {
+                int(row["id"])
+                for row in rows
+                if row["source_id"] is None or int(row["source_id"]) not in offline_source_ids
+            }
             if changed_ids:
                 await conn.executemany(
                     "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
@@ -797,6 +914,26 @@ async def mark_image_missing(db_path: str, image_id: int, missing_at: float | No
     return bool(await future)
 
 
+async def _halt_if_zero_byte_mass_marking_on_conn(conn, rows: list[dict]) -> None:
+    per_source: dict[int, int] = {}
+    for row in rows:
+        if row.get("source_id") is not None:
+            source_id = int(row["source_id"])
+            per_source[source_id] = per_source.get(source_id, 0) + 1
+    for source_id, newly_missing in per_source.items():
+        cursor = await conn.execute(
+            "SELECT COUNT(*) FROM images "
+            "WHERE source_id = ? AND missing_at IS NULL AND vc_of IS NULL",
+            (source_id,),
+        )
+        live_total = int((await cursor.fetchone())[0])
+        if would_mass_mark_missing(newly_missing, live_total):
+            raise StorageUnavailableDuringScan(
+                f"Storage looks unavailable: {newly_missing} of {live_total} cataloged photos "
+                "read as zero bytes. Nothing was marked missing."
+            )
+
+
 async def mark_zero_byte_images_missing(db_path: str, filepaths: list[str]) -> list[dict]:
     """Quarantine newly seen zero-byte files and return only rows changed now."""
     if not filepaths:
@@ -815,19 +952,19 @@ async def mark_zero_byte_images_missing(db_path: str, filepaths: list[str]) -> l
                 f"AND file_size = 0 AND filepath IN ({placeholders})",
                 paths,
             )
-            rows = [dict(row) for row in await cursor.fetchall()]
-            if rows:
-                await conn.executemany(
-                    "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
-                    [(now, int(row["id"])) for row in rows],
-                )
-                cascade_sql, cascade_ids = _virtual_copy_missing_cascade(
-                    [int(row["id"]) for row in rows]
-                )
-                await conn.execute(cascade_sql, cascade_ids)
-                for row in rows:
-                    await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(row["id"]),))
-                changed.extend(rows)
+            changed.extend(dict(row) for row in await cursor.fetchall())
+        if changed:
+            await _halt_if_zero_byte_mass_marking_on_conn(conn, changed)
+            await conn.executemany(
+                "UPDATE images SET missing_at = ? WHERE id = ? AND missing_at IS NULL",
+                [(now, int(row["id"])) for row in changed],
+            )
+            cascade_sql, cascade_ids = _virtual_copy_missing_cascade(
+                [int(row["id"]) for row in changed]
+            )
+            await conn.execute(cascade_sql, cascade_ids)
+            for row in changed:
+                await conn.execute(_REPAIR_COLLECTION_COVER_SQL, (int(row["id"]),))
         for source_id in sorted(
             {int(row["source_id"]) for row in changed if row.get("source_id") is not None}
         ):

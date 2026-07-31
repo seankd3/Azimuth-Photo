@@ -114,6 +114,64 @@ class CatalogSourceRouteTests(BackendTestCase):
         self.assertIsNotNone(master["missing_at"])
         self.assertEqual((await self._image_row(copy_id))["missing_at"], master["missing_at"])
 
+    async def _source_online(self, source_id) -> int:
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT online FROM catalog_sources WHERE id = ?",
+                (source_id,),
+            )).fetchone()
+        finally:
+            await conn.close()
+        return int(row["online"])
+
+    async def test_missing_mark_refused_while_source_root_unreachable(self):
+        source = await self._source("missing-guard-async")
+        image_id = await self._image(source["id"], "still-on-disk.jpg")
+        os.rename(source["path"], source["path"] + "-detached")
+
+        changed = await catalog_repository.mark_image_missing(db.DB_PATH, image_id, 111.0)
+
+        self.assertFalse(changed)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+        self.assertEqual(await self._source_online(source["id"]), 0)
+
+    async def test_sync_missing_mark_refused_while_source_root_unreachable(self):
+        source = await self._source("missing-guard-sync")
+        image_id = await self._image(source["id"], "still-on-disk.jpg")
+        os.rename(source["path"], source["path"] + "-detached")
+
+        changed = catalog_repository.mark_image_missing_sync(db.DB_PATH, image_id, 111.0)
+
+        self.assertFalse(changed)
+        self.assertIsNone((await self._image_row(image_id))["missing_at"])
+        self.assertEqual(await self._source_online(source["id"]), 0)
+
+    async def test_zero_byte_quarantine_halts_on_mass_zero_byte_pass(self):
+        source = await self._source("zero-byte-breaker")
+        image_ids = [
+            await self._image(source["id"], f"img-{i}.jpg") for i in range(20)
+        ]
+        filepaths = [
+            (await self._image_row(image_id))["filepath"] for image_id in image_ids[:16]
+        ]
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET file_size = 0 WHERE id IN "
+                f"({','.join('?' for _ in image_ids[:16])})",
+                image_ids[:16],
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        with self.assertRaises(catalog_repository.StorageUnavailableDuringScan):
+            await catalog_repository.mark_zero_byte_images_missing(db.DB_PATH, filepaths)
+
+        for image_id in image_ids:
+            self.assertIsNone((await self._image_row(image_id))["missing_at"])
+
     async def test_exact_path_restore_cascades_to_virtual_copy(self):
         source = await self._source("exact-path-restore-vc")
         master_id = await self._image(source["id"], "returned.jpg")

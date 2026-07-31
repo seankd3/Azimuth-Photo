@@ -4,7 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from core.source_files import inspect_source_file
-from data.repositories.catalog import SuspiciousEmptyScan
+from data.repositories.catalog import StorageUnavailableDuringScan, SuspiciousEmptyScan
 from image_headers import HEADER_GEOMETRY_EXTENSIONS, read_header_dimensions
 
 SUPPORTED_EXTENSIONS = HEADER_GEOMETRY_EXTENSIONS - {".bmp", ".gif"}
@@ -202,6 +202,16 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
         scan_state["warning"] = str(exc)
         log.warning(
             "worker=catalog_scan source_id=%s folder=%r warning: %s",
+            source_id,
+            folder,
+            exc,
+        )
+    except StorageUnavailableDuringScan as exc:
+        scan_state["error"] = str(exc)
+        scan_state["recoverable"] = True
+        scan_state["action"] = "Try again"
+        log.warning(
+            "worker=catalog_scan source_id=%s folder=%r halted: %s",
             source_id,
             folder,
             exc,
