@@ -208,7 +208,7 @@ they need a measurement, not a build.
 | # | Item | From | Wave |
 |---|---|---|---|
 | 1 | `is_satellite_mode()` treats `standalone` as satellite — installed desktop app silently runs with AI/faces/captions/pregen off | 1.3 | fleet-1 |
-| 2 | Three-root readiness: `Edits/ Raws/ Snapshots/` constants, tolerate legacy names during Sean's manual rename, never create roots, kill the stale "canonical" comment in `taxonomy.py:45` | 1.4 | fleet-1 |
+| 2 | Three-root readiness: `Edits/ Raws/ Snapshots/` constants, tolerate legacy names during Sean's manual rename, never create roots, kill the stale "canonical" comment in `taxonomy.py:45` Census 07-31: of 2,411 stuck rows, 1,821 = Takeout Trash deliberately quarantined at `.pending-delete/takeout-trash/` (retire rows, never rewrite into library); 573 relocated into `Exported Edits/` (unique basename+size match; check existing-row duplicates first); 17 collision pairs need flag surgery; **0 truly lost** (sample n=80, zero unresolved). | 1.4 | fleet-1 |
 | 3 | Offline-storage circuit breaker: a scan that would mark >5% of a root missing halts as "storage unavailable" — never mass-trash (the guard Immich refused) | 1.4 | fleet-1 |
 | 4 | Multi-vendor RAW phase 1: scanner+catalog+embedded-preview thumbs for ARW/NEF/ORF/RAF/RW2; import stops silently filing what the catalog rejects | 1.12 | fleet-1 |
 | 5 | Stars as Elo's face: real computed `rating`, filter/sort on desktop, retire the dead mobile write | 1.12 | fleet-1 |
