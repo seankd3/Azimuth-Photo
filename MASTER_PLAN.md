@@ -49,7 +49,7 @@ global `CLAUDE.md`.
 ### 1.2 Speed
 
 - `open` "Speed is the bar" — 07-31 · **the release gate, above feature parity.** A missing feature is acceptable; a slow one is not. Nothing ships that misses its latency budget, even if scope must be cut to make it. Directly bounds "100% Lightroom parity" (1.1): parity never justifies shipping something slow.
-- `runtime` "the data should all be there somewhere we really want to focus on extreame preformace too
+- `runtime` "the data should all be there somewhere we really want to focus on extreame preformace too, LRCs fatal flaw is how slow it is, our biggest pitch is lightnight fast speed that feels like magic, this is 2026 and you are AGI, we shouldnt be afraid to use low level code if we need to to accelerate and hyper optomize the program." — 07-10 · `web/core/host_profile.py:1`, `web/thumbnails/demosaic_pool.py:1`, `desktop/src-tauri/src/engine.rs:49` — quality bar; settle with standing-bench p50/p95 vs Lightroom on the same catalog. Adaptive budgets and a demosaic pool exist; only a boot number is measured today.
 - `runtime` "I want every part of this app hyper optimized like VLC levels, it should be wayyyyy faster than anything else, most software is horribly inefficent." — 07-16 · `web/test_perf_budgets.py:30`, `web/perf/baseline.json`, `scripts/bench.py:50` — "VLC levels / way faster than anything else" is comparative and subjective; settle with a same-machine browse/open latency bakeoff against peer apps using the standing fixture metrics.
 - `runtime` "no bloat, no slop, just extreamly good engineering to make this app the fastest photo app ever made." — 07-16 · `web/perf/standing.py:1`, `scripts/perfbench.py:1`, `web/test_perf_budgets.py:30` — "Fastest photo app ever / no bloat" cannot be proven from source; settle with end-to-end wall-clock and RSS on a large catalog versus named competitors, not internal budgets alone.
 - `runtime` "I want this running as fast and as snappy on any system as its physically possible." — 07-16 · `web/core/host_profile.py:37`, `web/settings.py:345`, `web/thumbnails/demosaic_pool.py:35` — "As fast as physically possible on any system" is an unbounded ceiling; settle by measuring interactive p50/p95 and resource use on 8GB, 16GB, and 64GB hosts after host_profile tuning.
@@ -186,51 +186,53 @@ goal — it is permission to stop.
 - `open` "Ask which, then commit" — 07-31 · **first run forks once, at the top: existing library, or a card.** Someone escaping Lightroom arrives with fifteen years of photos; a fresh shoot is the demo. Both are real arrivals and onboarding must not assume either — today it silently assumes the first (`web/templates/setup.html:138`).
 - `open` "all of them with both words and rich buttons filters and context based suggestions" — 07-31 · **one search that resolves people, places, visual meaning and technical facets, in one box.** Typed words and rich filter chips are the same system, not two; suggestions are context-aware rather than a static list. The hardest thing here is not capability but *latency* — under 1.2 speed is the release bar, so every added modality has to stay inside the search budget or it does not ship.
 
+### 1.15 Storage policy, vocabulary, export, collections
+
+- `open` "Evict by age only" — 07-31 · **the laptop cache policy, settled.** One ceiling the user sets, filled in priority order: every thumbnail first, then originals by recency with RAWs prioritised. Eviction is **pure age** — not export state, not sync state. Rejected deliberately: evict-once-exported, because predictability beats reclamation. The user should always be able to answer "what is on my laptop?" with "the newest N GB", without modelling what the app knows about export. Supersedes the "workshop it" hold in 1.3; this row is now buildable.
+- `open` "Rethink the words entirely" — 07-31 · **the vocabulary is being redesigned, not merely harmonised.** Today one concept carries several names — Refine is the ranking game on desktop but a filter sheet on Android, Map versus Places, Picked/Favorited/Favorite for one column, and desktop draws `picked` with a star that collides with the Elo star. Sean rejected "make Android match desktop": the words are confusing on every client, not just inconsistent between them. **Blocked pending the proposed vocabulary** — one noun per concept, agreed with Sean, then applied across all three clients in one pass.
+- `open` "Both equally, always interchangeable" — 07-31 · **folders and collections are two lenses on one surface.** Any folder view can become a collection; any collection browses like a folder. Neither is the "real" one. This is the most powerful option and the hardest to keep simple, so it constrains the UI: there must not be two different browsers, two selection models, or two vocabularies for the same act.
+- `open` "Right, but Pick not Keep" — 07-31 · **the canonical vocabulary, one noun per concept, applied across all three clients in one pass:** Refine = the pairwise ranking game · Filters = narrowing what you see (Android's "Refine" sheet renames) · **Pick / Reject** = the cull verb, replacing Pick/Picked/Favorited/Favorite (Pick kept over Keep for Lightroom muscle memory) · Stars = computed quality · Places = the geographic page, Map is only the widget · Galleries = public website output (today `features/publish/`) · Deliveries = client, token-gated output (today `features/publishing/`).
+  - **Two hard rules fall out.** The star glyph means quality and nothing else, so Pick/Reject use flags (which also matches Lightroom) and the desktop grid stops drawing `picked` with a star. And `publish` versus `publishing` must not survive: two different products with near-identical names, where grepping "publishing" lands you in the privacy-sensitive one by accident.
+- `open` "I dont want images to get dubted... it would be nice if the exported where cleanly sorted into something more meaningful than just dates but idk what he right taxonimny there is" — 07-31 · **one edit, one file, filed by date; meaning comes from collections.** Exports land at `Edits/YYYY/YYYY-MM-DD/` with the filename derived from the original. Collection-named export folders were considered and rejected precisely because they duplicate: a photo in three collections would export three times. Instead the same law as 1.15 collections applies — the edit exists once and "Hollands Wedding" is a collection *containing* it, not a folder copying it. Meaningful grouping, zero duplicated bytes.
+  - **Re-export never duplicates.** If an edit already exists for that original, export versions or replaces it and never writes a second file. This is the actual guarantee behind Sean's "I dont want images to get dubted".
+  - **Client delivery is not archive structure.** Sending a wedding is a bundle generated on demand to a chosen destination, transient and outside `Edits/`. Deliveries never reshape the archive.
+  - Recorded as Fable's recommendation answering Sean's direct "what do you think?" — the date default is his, the no-duplication architecture is the proposal. Reversible if it feels wrong in use.
+
 ## 2. Derived queue
 
-Everything section 1 says is not done. Ordered by what unblocks the most.
-`runtime` rows are absent on purpose: they need a measurement, not a build, and
-the measurement is listed in the row's own note.
+Consolidated 07-31 after the design pass. Ordered by leverage. `fleet-1` rows are
+in tonight's overnight wave; each lands on its own branch and is merged only
+after an adversarial review plus a human diff read. `runtime` rows stay out —
+they need a measurement, not a build.
 
-### Blocking product decisions already made
-
-| # | Item | From | Status |
+| # | Item | From | Wave |
 |---|---|---|---|
-| 1 | **Three-root taxonomy** `Edits/` `Raws/` `Snapshots/` — state and intent, not format. Film scans fold into Raws; Personal Photos becomes Snapshots | 1.4 | `open`, directive 07-31 |
-| 2 | **Follow the roots Sean renamed by hand.** He does the one-time move; agents make the app correct against it — taxonomy constants, never re-create old roots, repair catalog paths | 1.4 | `open`, decided 07-31 |
-| 3 | **Ambiguity review queue** at import — auto-file confident cases from provenance, hold unclear ones rather than filing them wrong silently | 1.4 | `open`, decided 07-31 |
-| 4 | **Retire `C:\Pictures`** — 9,911/10,689 hash-proven in hub; 778 still need homes before anything is removed | 1.4 | `open`, restated twice |
-| 5 | **Collapse import to one action.** Detection already works (`classify_source_kind`); this is UI collapse, not classification | 1.4 | `open`, decided 07-31 |
-| 6 | **Two storage modes** — local-only and desktop+server, canonical as a role rather than a drive, chosen at onboarding | 1.3 | `open`, architecture 07-31 |
-
-### Half-built — the dangerous ones
-
-These read as done in any status report and do not survive contact with the app.
-
-| # | Item | From | Status |
-|---|---|---|---|
-| 7 | Free up space is manual; backup works, reclamation never happens on its own | 1.3 | `partial` |
-| 8 | Phone free-up is a no-op — `FreeUpSpace.runIfEnabled` does nothing, and defaults off | 1.7 | `partial` |
-| 9 | No processing on arrival at the hub — files are verified and catalogued, thumbs and AI come later | 1.3 | `partial` |
-| 10 | Read-once is not universal — free-up confirmation and other hash paths re-read originals | 1.3 | `partial` |
-| 11 | Perf history is written to a runtime dir, not logged into commits as asked | 1.2 | `partial` |
-| 12 | No overnight bottleneck loop — the measuring tools exist, the repeating automation does not | 1.2 | `partial` |
-| 13 | LrC migration has no UI — the `lrcat` importer exists but nothing in the app calls it | 1.4 | `partial` |
-| 14 | Hub pairing still asks for a URL and port, so "never think about ports" is not met | 1.3 | `partial` |
-
-### Refine
-
-| # | Item | From | Status |
-|---|---|---|---|
-| 15 | Diverse mode still picks a high-cosine partner, so it serves lookalikes | 1.6 | `open` |
-| 16 | Aspect-ratio matching in Dual — orientation is a filter, not pairing | 1.6 | `open` |
-
-### Publishing
-
-| # | Item | From | Status |
-|---|---|---|---|
-| 17 | Website and app share no styling — the gallery owns its own CSS/JS and shows no app UI | 1.8 | `open` |
-| 18 | No first-publish approval gate; only republish confirms | 1.8 | `partial` |
+| 1 | `is_satellite_mode()` treats `standalone` as satellite — installed desktop app silently runs with AI/faces/captions/pregen off | 1.3 | fleet-1 |
+| 2 | Three-root readiness: `Edits/ Raws/ Snapshots/` constants, tolerate legacy names during Sean's manual rename, never create roots, kill the stale "canonical" comment in `taxonomy.py:45` | 1.4 | fleet-1 |
+| 3 | Offline-storage circuit breaker: a scan that would mark >5% of a root missing halts as "storage unavailable" — never mass-trash (the guard Immich refused) | 1.4 | fleet-1 |
+| 4 | Multi-vendor RAW phase 1: scanner+catalog+embedded-preview thumbs for ARW/NEF/ORF/RAF/RW2; import stops silently filing what the catalog rejects | 1.12 | fleet-1 |
+| 5 | Stars as Elo's face: real computed `rating`, filter/sort on desktop, retire the dead mobile write | 1.12 | fleet-1 |
+| 6 | Refine: diverse mode spread fix + aspect-ratio pairing in Dual (same files, one lane) | 1.6 | fleet-1 |
+| 7 | Responsive: ≤880px dead right-panel button; `.develop-layout` narrow breakpoint | 1.9 | fleet-1 |
+| 8 | Develop right rail + filmstrip whole-panel collapse | 1.9 | fleet-1 |
+| 9 | Video custody affordance replacing the grey 320×180 rectangle | 1.14 | fleet-1 |
+| 10 | Trash hardening: empty/restore/count provably correct on large selections — the gate before Reject ships | 1.14 | fleet-1 |
+| 11 | Perf gates wired into CI: the three existing `--check` harnesses actually run; history logged into commits | 1.2 | fleet-1 |
+| 12 | LrC migration UI: wire the orphaned `/api/develop/lrcat` importer into Connect Lightroom | 1.4 | fleet-1 |
+| 13 | Suggestions: distinct kind badges, grouped review rail | 1.9 | fleet-1 |
+| 14 | Import one-action collapse over existing detection; minimal UI, morning review | 1.4 | fleet-1 |
+| 15 | Vocabulary pass (Refine/Filters/Pick/Reject/Stars/Places/Galleries/Deliveries) incl. `publish`→`publishing` split kill — repo-wide, runs alone AFTER fleet-1 merges to avoid conflicts | 1.15 | next |
+| 16 | Develop open p50 ≤400ms (today 1,377) | 1.13 | next |
+| 17 | Automatic laptop reclamation per the age-only cache policy | 1.15 | next |
+| 18 | Two storage modes at onboarding; first-run fork (library vs card) | 1.3/1.14 | next |
+| 19 | One-box search across people/places/semantics/facets | 1.14 | next |
+| 20 | Smart collections: boolean operators, ranges, multi-value facets | 1.9 | next |
+| 21 | Overlay stragglers: system drawer + Deliver still scrim the app | 1.9 | next |
+| 22 | Hub pairing without URL/port thinking | 1.3 | next |
+| 23 | Retire `C:\Pictures` — everything hash-proven except the newer 2025 LrC catalog (16.9 GB) + 2 loose files; archive those first, deletion stays Sean's | 1.4 | Sean+agent |
+| 24 | Reject verb ships once #10 is proven | 1.14 | after 10 |
+| 25 | Gallery/website shared styling | 1.8 | next |
+| 26 | Integrity Checks as a first-class scheduled report (untracked files, missing refs, checksum mismatches) | Immich study | next |
 
 ## 3. Keeping this file honest
 
@@ -274,15 +276,3 @@ to Sean on 07-31:
   development survives.
 - **C4 storage** — resolved into new architecture: two modes, local-only and
   desktop+server, with canonical as a role rather than a fixed drive.
-
-### 1.15 Storage policy, vocabulary, export, collections
-
-- `open` "Evict by age only" — 07-31 · **the laptop cache policy, settled.** One ceiling the user sets, filled in priority order: every thumbnail first, then originals by recency with RAWs prioritised. Eviction is **pure age** — not export state, not sync state. Rejected deliberately: evict-once-exported, because predictability beats reclamation. The user should always be able to answer "what is on my laptop?" with "the newest N GB", without modelling what the app knows about export. Supersedes the "workshop it" hold in 1.3; this row is now buildable.
-- `open` "Rethink the words entirely" — 07-31 · **the vocabulary is being redesigned, not merely harmonised.** Today one concept carries several names — Refine is the ranking game on desktop but a filter sheet on Android, Map versus Places, Picked/Favorited/Favorite for one column, and desktop draws `picked` with a star that collides with the Elo star. Sean rejected "make Android match desktop": the words are confusing on every client, not just inconsistent between them. **Blocked pending the proposed vocabulary** — one noun per concept, agreed with Sean, then applied across all three clients in one pass.
-- `open` "Both equally, always interchangeable" — 07-31 · **folders and collections are two lenses on one surface.** Any folder view can become a collection; any collection browses like a folder. Neither is the "real" one. This is the most powerful option and the hardest to keep simple, so it constrains the UI: there must not be two different browsers, two selection models, or two vocabularies for the same act.
-- `open` "Right, but Pick not Keep" — 07-31 · **the canonical vocabulary, one noun per concept, applied across all three clients in one pass:** Refine = the pairwise ranking game · Filters = narrowing what you see (Android's "Refine" sheet renames) · **Pick / Reject** = the cull verb, replacing Pick/Picked/Favorited/Favorite (Pick kept over Keep for Lightroom muscle memory) · Stars = computed quality · Places = the geographic page, Map is only the widget · Galleries = public website output (today `features/publish/`) · Deliveries = client, token-gated output (today `features/publishing/`).
-  - **Two hard rules fall out.** The star glyph means quality and nothing else, so Pick/Reject use flags (which also matches Lightroom) and the desktop grid stops drawing `picked` with a star. And `publish` versus `publishing` must not survive: two different products with near-identical names, where grepping "publishing" lands you in the privacy-sensitive one by accident.
-- `open` "I dont want images to get dubted... it would be nice if the exported where cleanly sorted into something more meaningful than just dates but idk what he right taxonimny there is" — 07-31 · **one edit, one file, filed by date; meaning comes from collections.** Exports land at `Edits/YYYY/YYYY-MM-DD/` with the filename derived from the original. Collection-named export folders were considered and rejected precisely because they duplicate: a photo in three collections would export three times. Instead the same law as 1.15 collections applies — the edit exists once and "Hollands Wedding" is a collection *containing* it, not a folder copying it. Meaningful grouping, zero duplicated bytes.
-  - **Re-export never duplicates.** If an edit already exists for that original, export versions or replaces it and never writes a second file. This is the actual guarantee behind Sean's "I dont want images to get dubted".
-  - **Client delivery is not archive structure.** Sending a wedding is a bundle generated on demand to a chosen destination, transient and outside `Edits/`. Deliveries never reshape the archive.
-  - Recorded as Fable's recommendation answering Sean's direct "what do you think?" — the date default is his, the no-duplication architecture is the proposal. Reversible if it feels wrong in use.
