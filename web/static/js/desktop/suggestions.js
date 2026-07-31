@@ -356,6 +356,9 @@ function stepIndex(visible, from, direction) {
 function handleKeydown(event) {
     if (!mounted || event.ctrlKey || event.metaKey || event.altKey) return;
     if (foregroundLayerOpen()) return;
+    // A focused group header owns Enter/Space (toggle the group) — the global
+    // Enter branch below would otherwise create a real collection silently.
+    if (event.target.closest && event.target.closest('.suggest-rail-group .psec-head')) return;
     const visible = currentSuggestions();
     const key = event.key.toLowerCase();
     if (key === 'escape') {
