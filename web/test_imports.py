@@ -128,3 +128,18 @@ class ImportTests(BackendTestCase):
         self.assertIn("Past imports", importer)
         self.assertIn("listImports(12)", importer)
         self.assertIn("import_root: { type: 'text' }", drawer)
+
+    async def test_one_import_action_contract(self):
+        """One Import entry in the chrome; film scans and the ambiguity-only
+        category override live inside the staging canvas (one-action import)."""
+        base_dir = os.path.dirname(__file__)
+        with open(os.path.join(base_dir, "templates", "desktop.html"), encoding="utf-8") as fh:
+            desktop_template = fh.read()
+        with open(os.path.join(base_dir, "static", "js", "desktop", "import_stage.js"), encoding="utf-8") as fh:
+            stage = fh.read()
+
+        self.assertNotIn('id="import-film"', desktop_template)  # the two-button fork is gone
+        self.assertIn('id="import-film-file"', desktop_template)  # film picker mechanism stays
+        self.assertIn('id="imps-as" hidden', desktop_template)  # override hidden by default
+        self.assertIn('data-film="1"', stage)  # film scans reachable inside the stage
+        self.assertIn("source_kind === 'unknown'", stage)  # override surfaces only on ambiguity

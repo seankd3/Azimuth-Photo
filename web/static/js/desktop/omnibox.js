@@ -59,7 +59,7 @@ const COMMANDS = [
     { icon: 'layers', label: 'Stacks', run: () => emit('duplicates:open') },
     { icon: 'sparkles', label: 'Review suggested collections', run: openSuggestionsReview },
     { icon: 'funnel', label: 'Filter…', run: () => emit('filters:open') },
-    { icon: 'upload', label: 'Import from card', run: () => emit('import:open') },
+    { icon: 'upload', label: 'Import photos', run: () => emit('import:open') },
     { icon: 'archive', label: 'Import film scans', run: () => emit('import:film') },
     { icon: 'star', label: 'Toggle Best of', kbd: 'B', run: toggleBestOf },
     { icon: 'download', label: 'Export CSV', run: () => exportCurrentScope('csv') },

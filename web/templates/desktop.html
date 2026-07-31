@@ -97,8 +97,7 @@
                         <button class="nav-row" id="export-view"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></span><span class="nr-label">Export view</span></button>
                         <button class="nav-row" id="shared-view" data-tip="Shared"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-share-2"></use></svg></span><span class="nr-label">Shared</span></button>
                         <button class="nav-row" id="find-duplicates"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span><span class="nr-label">Stacks</span></button>
-                        <button class="nav-row" id="import-view"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg></span><span class="nr-label">Import from card</span></button>
-                        <button class="nav-row" id="import-film"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-archive"></use></svg></span><span class="nr-label">Import film scans</span></button>
+                        <button class="nav-row" id="import-view"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg></span><span class="nr-label">Import</span></button>
                         <input id="import-film-file" type="file" accept=".zip,.tif,.tiff" multiple hidden>
                     </section>
                 </div>
@@ -250,7 +249,7 @@
                                     <button id="imps-mode-copy" class="active" aria-pressed="true" data-tip="Copy into the originals tree, organized by date">Copy</button>
                                     <button id="imps-mode-add" aria-pressed="false" data-tip="Register in place without copying">Add</button>
                                 </div>
-                                <span id="imps-status" class="imps-statusline" role="status" aria-live="polite">Choose a card or folder to stage photos.</span>
+                                <span id="imps-status" class="imps-statusline" role="status" aria-live="polite">Choose a card, folder, or film scans to stage photos.</span>
                                 <button id="imps-close" class="icon-btn" data-tip="Close (Esc)" aria-label="Close import"><svg class="icon" aria-hidden="true"><use href="#i-x"></use></svg></button>
                             </header>
                             <div id="imps-scanbar"><i></i></div>
@@ -298,7 +297,7 @@
                             </aside>
                             <footer class="imps-commitbar">
                                 <span id="imps-summary">Nothing staged</span>
-                                <label class="imps-as">as <select id="imps-category" aria-label="Import category">
+                                <label class="imps-as" id="imps-as" hidden><span id="imps-as-text">file source as</span> <select id="imps-category" aria-label="Import category" data-tip="Remembered for this source — you won’t be asked again">
                                     <option value="">Auto</option>
                                     <option value="raw">RAW shoot</option>
                                     <option value="personal">Personal</option>
