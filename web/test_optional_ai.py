@@ -192,6 +192,62 @@ assert app.app.title == 'Azimuth Photo'
         self.assertEqual(tracked, [])
         self.assertTrue(statuses["search"]["available"])
 
+    def test_standalone_startup_arms_the_workers_a_hub_arms(self):
+        # The installed desktop app runs standalone with no hub: it holds the
+        # canonical library, so AI, faces, and captions must all arm.
+        available = {
+            key: {"available": True, "install_command": ""}
+            for key in ("search", "people", "captions")
+        }
+        tracked = []
+
+        class Worker:
+            def __init__(self):
+                self.resumed = False
+
+            def resume_face_worker(self, persist=False):
+                self.resumed = True
+
+            def resume_caption_worker(self, persist=False):
+                self.resumed = True
+
+            async def run_face_worker(self):
+                pass
+
+            async def run_caption_worker(self):
+                pass
+
+            def mark_dependencies_unavailable(self, _status):
+                raise AssertionError("every pack is available in this test")
+
+        class Settings:
+            def get_settings(self):
+                return {"caption_scan_enabled": True}
+
+        people_worker = Worker()
+        captions_worker = Worker()
+        with patch.dict(
+            os.environ, {"AZIMUTH_MODE": "standalone", "AZIMUTH_HUB_URL": ""}
+        ), patch("features.sync.satellite._stored_hub_url", ""), patch.object(
+            background.capabilities,
+            "capability_status",
+            side_effect=lambda key: available[key],
+        ), patch.object(embedding_worker, "resume_embedding_worker") as resume_embeddings:
+            statuses = background.schedule_optional_workers(
+                track_background_task=tracked.append,
+                settings=Settings(),
+                face_worker=people_worker,
+                caption_worker=captions_worker,
+            )
+        for daemon in tracked:
+            daemon.close()
+
+        self.assertEqual(len(tracked), 3)
+        resume_embeddings.assert_called_once()
+        self.assertTrue(people_worker.resumed)
+        self.assertTrue(captions_worker.resumed)
+        self.assertTrue(statuses["search"]["available"])
+
     def test_missing_pack_resume_routes_return_409_before_starting_work(self):
         people = missing_capability("people")
         captions = missing_capability("captions")
