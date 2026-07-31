@@ -163,9 +163,9 @@ async def api_import_taxonomy():
             },
             {
                 "id": "raws",
-                "folder": taxonomy.DEST_RAWS,
+                "folder": taxonomy.DEST_DIGITAL,
                 "label": "Raws",
-                "rule": "Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …)",
+                "rule": "Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …), filed on the Digital shelf",
             },
             {
                 "id": "film_scans",

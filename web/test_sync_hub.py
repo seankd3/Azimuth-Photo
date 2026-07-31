@@ -162,7 +162,7 @@ class SyncHubTests(unittest.TestCase):
         payload = self.image_bytes("field.jpg", (12, 34, 56))
         content_hash = self.declare("field.jpg", payload)
         image_id = self.upload(content_hash, payload, split=len(payload) // 2)
-        destination = self.raws / "2024" / "2024-06-07" / "field.jpg"
+        destination = self.raws / "Digital" / "2024" / "2024-06-07" / "field.jpg"
         self.assertEqual(destination.read_bytes(), payload)
         original = self.client.get(f"/api/sync/original/{image_id}")
         self.assertEqual(original.status_code, 200, original.text)
@@ -672,7 +672,7 @@ class SyncHubTests(unittest.TestCase):
         payload = self.image_bytes("legacy.jpg", (44, 55, 66))
         content_hash = self.declare("legacy.jpg", payload)
         self.upload(content_hash, payload)
-        destination = self.raws / "2024" / "2024-06-07" / "legacy.jpg"
+        destination = self.raws / "Digital" / "2024" / "2024-06-07" / "legacy.jpg"
         self.assertEqual(destination.read_bytes(), payload)
 
     def test_finalize_rejects_corrupt_bytes_then_accepts_good_retry(self):
@@ -915,7 +915,7 @@ class SyncHubTests(unittest.TestCase):
         payload = self.image_bytes("ghost.jpg", (70, 80, 90))
         content_hash = self.declare("ghost.jpg", payload)
         image_id = self.upload(content_hash, payload)
-        destination = self.raws / "2024" / "2024-06-07" / "ghost.jpg"
+        destination = self.raws / "Digital" / "2024" / "2024-06-07" / "ghost.jpg"
         self.assertTrue(destination.is_file())
 
         destination.unlink()
@@ -977,7 +977,7 @@ class SyncHubTests(unittest.TestCase):
         payload = self.image_bytes("stale-cache.jpg", (11, 22, 33))
         content_hash = self.declare("stale-cache.jpg", payload)
         image_id = self.upload(content_hash, payload)
-        destination = self.raws / "2024" / "2024-06-07" / "stale-cache.jpg"
+        destination = self.raws / "Digital" / "2024" / "2024-06-07" / "stale-cache.jpg"
         self.assertTrue(destination.is_file())
 
         # Warm the manifest bulk cache with a positive proof.
@@ -1013,7 +1013,7 @@ class SyncHubTests(unittest.TestCase):
         payload = self.image_bytes("null-size.jpg", (44, 55, 66))
         content_hash = self.declare("null-size.jpg", payload)
         image_id = self.upload(content_hash, payload)
-        destination = self.raws / "2024" / "2024-06-07" / "null-size.jpg"
+        destination = self.raws / "Digital" / "2024" / "2024-06-07" / "null-size.jpg"
 
         conn = sqlite3.connect(self.db_path)
         try:
@@ -1105,7 +1105,7 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(finish.status_code, 200, finish.text)
         image_id = int(finish.json()["image_id"])
-        destination = self.raws / "2026" / "2026-07-16" / "freeze.jpg"
+        destination = self.raws / "Digital" / "2026" / "2026-07-16" / "freeze.jpg"
         # placed_relpath was locked on first sighting (freeze.jpg), not the rename.
         self.assertTrue(destination.is_file())
         self.assertEqual(destination.read_bytes(), payload)

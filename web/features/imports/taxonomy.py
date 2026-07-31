@@ -6,8 +6,13 @@ Three top-level roots under the library root (siblings, never nested):
 |------------|-------------------------------------------------------------------|
 | Edits      | Our own edited exports, ready for sharing                         |
 | Raws       | Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …) and film  |
-|            | scans (a scan is a negative; batches land in `Raws/Film Scans/`)  |
+|            | scans (a scan is a negative). Exactly two shelves inside:         |
+|            | `Raws/Digital/` (date folders) and `Raws/Film Scans/` (batches)   |
 | Snapshots  | Phone stills, takeout dumps, memes — browsed, never developed     |
+
+The three roots (plus `Video`) are enforced: routing can never mint a new
+top-level sibling, and provenance decides the root — a RAW shot on a phone
+is still a snapshot; the extension alone never picks the root.
 
 The archive filesystem is case-sensitive and the spellings above are exact
 (`RAWS` and `Raws` are different directories — never normalise or guess case).
@@ -47,6 +52,9 @@ DEST_SNAPSHOTS = "Snapshots"
 DEST_VIDEO = "Video"
 # Film scans are Raws; batches keep their own subtree under the Raws root.
 DEST_FILM = f"{DEST_RAWS}/Film Scans"
+# Digital-camera files are also Raws. The Raws root holds exactly two shelves —
+# Digital and Film Scans — so nothing new files bare under Raws itself.
+DEST_DIGITAL = f"{DEST_RAWS}/Digital"
 
 DESTINATIONS: tuple[str, ...] = (
     DEST_EDITS,
@@ -218,6 +226,12 @@ def infer_source_kind(
         return "film_scan"
     ext = extension_of(filename)
     if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        # A folder name alone is not provenance against camera evidence: a
+        # camera-only RAW off a card is a camera file even inside a takeout
+        # or Camera Roll dump. Without EXIF here, the card flag is the only
+        # camera evidence available.
+        if ext in UNAMBIGUOUS_RAW_EXTENSIONS and card_source:
+            return "camera_card"
         return "phone"
     # An unambiguous camera-RAW file is a camera file no matter what folder it
     # sits in — this beats the weak "/camera/" markers and the card flag.
@@ -256,7 +270,7 @@ CATEGORY_BY_KIND = {
     "film_scan": "film", "export": "export", "video": "video",
 }
 DEST_BY_CATEGORY = {
-    "raw": DEST_RAWS, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
+    "raw": DEST_DIGITAL, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
     "export": DEST_EDITS, "video": DEST_VIDEO,
 }
 KIND_BY_CATEGORY = {
@@ -277,8 +291,9 @@ def classify_source_kind(
     software: str = "",
 ) -> SourceKind:
     """infer_source_kind plus EXIF provenance, with explicit precedence:
-    strong path markers > unambiguous RAW extension > EXIF software/make >
-    weak path markers / HEIC > card flag > TIFF > unknown."""
+    strong path markers (unless the file itself carries camera evidence) >
+    unambiguous RAW extension > EXIF software/make > weak path markers /
+    HEIC > card flag > TIFF > unknown."""
     if kind == "video":
         return "video"
     haystack = " ".join(
@@ -288,18 +303,28 @@ def classify_source_kind(
         return "export"
     if any(marker in haystack for marker in _FILM_PATH_MARKERS):
         return "film_scan"
-    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
-        return "phone"
     ext = extension_of(filename)
+    make = (camera_make or "").lower()
+    phone_make = bool(make) and any(marker in make for marker in PHONE_MAKES)
+    scanner = bool(make) and any(marker in make for marker in SCANNER_MAKES)
+    if any(marker in haystack for marker in _STRONG_PHONE_PATH_MARKERS):
+        # A folder name alone is not provenance when the file itself carries
+        # camera evidence: a camera-only RAW backed by camera EXIF or a card
+        # source is a camera file even inside a takeout or Camera Roll dump.
+        # A phone-make DNG (Pixel, iPhone, Galaxy) stays phone.
+        if ext in UNAMBIGUOUS_RAW_EXTENSIONS and (
+            card_source or (make and not phone_make and not scanner)
+        ):
+            return "camera_card"
+        return "phone"
     if ext in UNAMBIGUOUS_RAW_EXTENSIONS:
         return "camera_card"
-    make = (camera_make or "").lower()
     stamped = (software or "").lower()
     if stamped and any(marker in stamped for marker in EXPORT_SOFTWARE):
         return "export"
-    if make and any(marker in make for marker in SCANNER_MAKES):
+    if scanner:
         return "film_scan"
-    if make and any(marker in make for marker in PHONE_MAKES):
+    if phone_make:
         return "phone"
     if any(marker in haystack for marker in _WEAK_PHONE_PATH_MARKERS):
         return "phone"
@@ -320,25 +345,37 @@ def route_destination(
 ) -> str:
     """Return the library-relative destination folder for an incoming file.
 
+    Every destination lives inside the enforced roots — Edits, Raws (on its
+    Digital or Film Scans shelf), Snapshots — plus Video. Routing can never
+    mint a new top-level sibling.
+
     Mapping table (first match wins):
 
-    1. Explicit folder hint naming a retired root → its canonical destination
-       (older clients still say "Personal Photos"; never re-create a dead root)
-    2. Explicit custom folder hint → that name (caller places under library root)
+    1. Folder hint naming a root, current or retired → its canonical
+       destination (older clients still say "Personal Photos"; never
+       re-create a dead root); a bare Raws hint lands on the Digital shelf
+    2. Any other folder hint → that folder inside Snapshots (device folders
+       like "Screenshots" from phone sync; never a stray sibling root)
     3. source_kind=video → Video
     4. source_kind=export → Edits
     5. source_kind=film_scan → Raws/Film Scans
-    6. source_kind=phone → Snapshots (phone DNG/RAW included)
-    7. RAW camera extensions → Raws
+    6. source_kind=phone → Snapshots. Provenance decides the root: a
+       phone-provenance DNG/RAW stays in Snapshots. Classification only
+       says "phone" on strong provenance (strong path marker, phone EXIF
+       make, explicit phone source), so the extension never overrides it
+    7. RAW camera extensions → Raws/Digital
     8. Film-scan extensions (TIFF) → Raws/Film Scans
-    9. Phone still extensions when source is phone/unknown-but-HEIC already handled
-       → Snapshots only for .heic/.heif; JPEG without phone source stays Raws
-       for camera-card companions and legacy sync seeds
-    10. Default → Raws
+    9. .heic/.heif → Snapshots
+    10. Default (camera-card JPEG companions, legacy sync seeds) → Raws/Digital
     """
     hint = normalize_folder_hint(folder_hint) if folder_hint else None
     if hint:
-        return normalize_destination(hint)
+        dest = normalize_destination(hint)
+        if dest == DEST_RAWS:
+            return DEST_DIGITAL
+        if Path(dest).parts[0] in {DEST_EDITS, DEST_RAWS, DEST_SNAPSHOTS, DEST_VIDEO}:
+            return dest
+        return f"{DEST_SNAPSHOTS}/{hint}"
 
     kind = (source_kind or "unknown").strip().lower() or "unknown"
     ext = extension_of(filename)
@@ -349,16 +386,15 @@ def route_destination(
     if kind == "film_scan":
         return DEST_FILM
     if kind == "phone":
-        # A camera RAW is never a phone still, regardless of inferred kind.
-        return DEST_RAWS if ext in UNAMBIGUOUS_RAW_EXTENSIONS else DEST_SNAPSHOTS
+        return DEST_SNAPSHOTS
 
     if ext in RAW_CAMERA_EXTENSIONS:
-        return DEST_RAWS
+        return DEST_DIGITAL
     if ext in FILM_SCAN_EXTENSIONS:
         return DEST_FILM
     if ext in {".heic", ".heif"}:
         return DEST_SNAPSHOTS
-    return DEST_RAWS
+    return DEST_DIGITAL
 
 
 # Canonical root → its retired name, for write-time tolerance while the

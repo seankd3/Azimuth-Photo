@@ -47,8 +47,9 @@ class StagedImportTests(BackendTestCase):
             shot.write_bytes(b"copied by a crashed import")
 
             # A previous import copied and verified this file but crashed before
-            # registering it: bytes on disk, no catalog row.
-            stranded_dir = originals / "RAWS" / "2026" / "2026-07-12"
+            # registering it: bytes on disk, no catalog row. The legacy RAWS
+            # tree exists, so write tolerance keeps the Digital shelf under it.
+            stranded_dir = originals / "RAWS" / "Digital" / "2026" / "2026-07-12"
             stranded_dir.mkdir(parents=True)
             stranded = stranded_dir / shot.name
             stranded.write_bytes(shot.read_bytes())
@@ -278,7 +279,7 @@ class StagedImportTests(BackendTestCase):
 
             self.assertEqual(job.phase, "complete")
             self.assertEqual(job.skipped_duplicates, 1)
-            landed = sorted((originals / "RAWS" / "2026" / "2026-07-12").glob("CANON9999*"))
+            landed = sorted((originals / "Raws" / "Digital" / "2026" / "2026-07-12").glob("CANON9999*"))
             self.assertEqual([path.name for path in landed], ["CANON9999-2.CR3", "CANON9999.CR3"])
             self.assertFalse(one.exists())
             self.assertFalse(two.exists())

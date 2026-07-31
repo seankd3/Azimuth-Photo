@@ -63,12 +63,27 @@ def _walk_library_files(library: Path) -> dict[tuple[str, int], list[Path]]:
     return index
 
 
-def _renamed_relative(rel_parts: tuple[str, ...]) -> tuple[str, ...] | None:
-    """Apply the documented root renames to a library-relative path."""
-    canonical = taxonomy.normalize_destination(rel_parts[0])
-    if canonical == rel_parts[0]:
-        return None
-    return (*Path(canonical).parts, *rel_parts[1:])
+_RAWS_SHELF_NAMES = frozenset(
+    Path(shelf).parts[1] for shelf in (taxonomy.DEST_DIGITAL, taxonomy.DEST_FILM)
+)
+
+
+def _relative_candidates(rel_parts: tuple[str, ...]) -> list[tuple[str, ...]]:
+    """Documented renames of a library-relative path, most specific first.
+
+    Covers the root renames (RAWS→Raws, Personal Photos→Snapshots, …) and the
+    Raws shelves: a date tree formerly bare under the Raws root now lives on
+    the ``Raws/Digital`` shelf.
+    """
+    candidates: list[tuple[str, ...]] = []
+    canonical = (*Path(taxonomy.normalize_destination(rel_parts[0])).parts, *rel_parts[1:])
+    if canonical != rel_parts:
+        candidates.append(canonical)
+    if canonical[0] == taxonomy.DEST_RAWS and (
+        len(canonical) < 2 or canonical[1] not in _RAWS_SHELF_NAMES
+    ):
+        candidates.append((canonical[0], "Digital", *canonical[1:]))
+    return candidates
 
 
 def _proven(row: dict, candidate: Path, hash_cache: dict[Path, str | None]) -> bool:
@@ -159,11 +174,11 @@ async def relocate_catalog(
         target: Path | None = None
         method = ""
 
-        renamed = _renamed_relative(row["_rel_parts"])
-        if renamed is not None:
+        for renamed in _relative_candidates(row["_rel_parts"]):
             probe = library.joinpath(*renamed)
             if probe.is_file() and _proven(row, probe, hash_cache):
                 target, method = probe, "relative_path"
+                break
 
         if target is None:
             if index is None:
