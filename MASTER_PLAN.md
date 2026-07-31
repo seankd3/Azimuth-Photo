@@ -212,15 +212,15 @@ they need a measurement, not a build.
 | 3 | Offline-storage circuit breaker: a scan that would mark >5% of a root missing halts as "storage unavailable" — never mass-trash (the guard Immich refused) | 1.4 | **merged 07-31 444b5aeb** |
 | 4 | Multi-vendor RAW phase 1: scanner+catalog+embedded-preview thumbs for ARW/NEF/ORF/RAF/RW2; import stops silently filing what the catalog rejects | 1.12 | **merged 07-31 4af4d7f0** |
 | 5 | Stars as Elo's face: real computed `rating`, filter/sort on desktop, retire the dead mobile write | 1.12 | **merged 07-31 8a72bc77** |
-| 6 | Refine: diverse mode spread fix + aspect-ratio pairing in Dual (same files, one lane) | 1.6 | fleet-1 |
-| 7 | Responsive: ≤880px dead right-panel button; `.develop-layout` narrow breakpoint | 1.9 | fleet-1 |
-| 8 | Develop right rail + filmstrip whole-panel collapse | 1.9 | fleet-1 |
-| 9 | Video custody affordance replacing the grey 320×180 rectangle | 1.14 | fleet-1 |
-| 10 | Trash hardening: empty/restore/count provably correct on large selections — the gate before Reject ships | 1.14 | fleet-1 |
-| 11 | Perf gates wired into CI: the three existing `--check` harnesses actually run; history logged into commits | 1.2 | fleet-1 |
-| 12 | LrC migration UI: wire the orphaned `/api/develop/lrcat` importer into Connect Lightroom | 1.4 | fleet-1 |
-| 13 | Suggestions: distinct kind badges, grouped review rail | 1.9 | fleet-1 |
-| 14 | Import one-action collapse over existing detection; minimal UI, morning review | 1.4 | fleet-1 |
+| 6 | Refine: diverse mode spread fix + aspect-ratio pairing in Dual (same files, one lane) | 1.6 | **merged 07-31** |
+| 7 | Responsive: ≤880px dead right-panel button; `.develop-layout` narrow breakpoint | 1.9 | **merged 07-31** |
+| 8 | Develop right rail + filmstrip whole-panel collapse | 1.9 | **merged 07-31** |
+| 9 | Video custody affordance replacing the grey 320×180 rectangle | 1.14 | **merged 07-31** |
+| 10 | Trash hardening: empty/restore/count provably correct on large selections — the gate before Reject ships | 1.14 | **lane built+reviewed; NOT merged — one satellite test regressed vs main, under investigation** |
+| 11 | Perf gates wired into CI: the three existing `--check` harnesses actually run; history logged into commits | 1.2 | **merged 07-31** |
+| 12 | LrC migration UI: wire the orphaned `/api/develop/lrcat` importer into Connect Lightroom | 1.4 | **merged 07-31** |
+| 13 | Suggestions: distinct kind badges, grouped review rail | 1.9 | **merged 07-31** |
+| 14 | Import one-action collapse over existing detection; minimal UI, morning review | 1.4 | **merged 07-31, morning review pending** |
 | 15 | Vocabulary pass (Refine/Filters/Pick/Reject/Stars/Places/Galleries/Deliveries) incl. `publish`→`publishing` split kill — repo-wide, runs alone AFTER fleet-1 merges to avoid conflicts | 1.15 | next |
 | 16 | Develop open p50 ≤400ms (today 1,377) | 1.13 | next |
 | 17 | Automatic laptop reclamation per the age-only cache policy | 1.15 | next |
