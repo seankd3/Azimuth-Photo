@@ -23,9 +23,14 @@ import httpx
 
 
 # Initial LAN budgets — to be ratified. See docs/PERF_BUDGETS.md.
+# Every measured class carries a budget; a metric without one is a number
+# nobody is held to.
 BUDGETS_MS = {
     "grid": {"p95": 150.0},
     "thumb_sm": {"p95": 80.0},
+    "thumb_md": {"p95": 150.0},
+    "search": {"p95": 300.0},
+    "rankings": {"p95": 150.0},
 }
 
 DEFAULT_LOOPS = 10

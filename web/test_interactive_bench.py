@@ -47,3 +47,14 @@ def test_warmup_exclusion_rejects_negative():
 def test_initial_budgets_are_documented_targets():
     assert interactive.BUDGETS_MS["grid"]["p95"] == 150.0
     assert interactive.BUDGETS_MS["thumb_sm"]["p95"] == 80.0
+    assert interactive.BUDGETS_MS["thumb_md"]["p95"] == 150.0
+    assert interactive.BUDGETS_MS["search"]["p95"] == 300.0
+    assert interactive.BUDGETS_MS["rankings"]["p95"] == 150.0
+
+
+def test_every_measured_class_has_a_p95_budget():
+    # A measured class without a budget is a number nobody is held to.
+    measured = {name for name, _weight in interactive.CYCLE_WEIGHTS}
+    assert set(interactive.BUDGETS_MS) == measured
+    for limits in interactive.BUDGETS_MS.values():
+        assert limits["p95"] > 0
