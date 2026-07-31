@@ -128,6 +128,12 @@ one row per ask, before starting the work. A message carrying several asks gets
 several rows. Do not paraphrase into a task title, and do not delete a row to
 mark it finished; change its status instead.
 
+Before building against a statement, check whether it contradicts an earlier one.
+If it does, ask the user which wins rather than picking the newer, the older, or
+a blend, and record the answer as a new dated row. Ask the same way when a
+statement is too ambiguous to build from. Unresolved contradictions live in
+`MASTER_PLAN.md` section 4 and block work on the area they affect.
+
 ## Handoff
 
 Finish with the user-visible outcome, files changed, exact verification
