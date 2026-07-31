@@ -45,6 +45,19 @@ def test_scanner_skips_symlinked_media_outside_source(tmp_path: Path):
     assert [row[0] for row in rows] == ["camera.jpg"]
 
 
+def test_scanner_catalogs_multi_vendor_raw_extensions(tmp_path: Path):
+    # The importer files ARW/NEF/ORF/RAF/RW2 into the archive; the scanner must
+    # catalog them too or they become invisible custody (MASTER_PLAN 1.12).
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in ("a.arw", "b.nef", "c.orf", "d.raf", "e.rw2", "f.xyz"):
+        (source / name).write_bytes(b"stub")
+
+    rows = list(scanner.walk_images(str(source)))
+
+    assert sorted(row[0] for row in rows) == ["a.arw", "b.nef", "c.orf", "d.raf", "e.rw2"]
+
+
 def test_develop_importer_does_not_restore_skipped_raw_symlinks(tmp_path: Path):
     source = tmp_path / "source"
     source.mkdir()
