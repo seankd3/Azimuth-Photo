@@ -247,7 +247,8 @@
                             <header class="imps-top">
                                 <h2 class="imps-title">Import</h2>
                                 <div class="imps-seg" role="group" aria-label="Import mode">
-                                    <button id="imps-mode-copy" class="active" aria-pressed="true" data-tip="Copy into the originals tree, organized by date">Copy</button>
+                                    <button id="imps-mode-move" class="active" aria-pressed="true" data-tip="Copy into the library, verify every byte, then clear the source">Move</button>
+                                    <button id="imps-mode-copy" aria-pressed="false" data-tip="Copy into the originals tree, organized by date">Copy</button>
                                     <button id="imps-mode-add" aria-pressed="false" data-tip="Register in place without copying">Add</button>
                                 </div>
                                 <span id="imps-status" class="imps-statusline" role="status" aria-live="polite">Choose a card, folder, or film scans to stage photos.</span>
@@ -282,7 +283,7 @@
                                     <summary><span>File handling</span></summary>
                                     <div class="imps-panel">
                                         <label class="imps-toggle"><input id="imps-skip-suspects" type="checkbox" checked> Don’t import suspected duplicates</label>
-                                        <label class="imps-toggle" id="imps-clear-card-row" hidden><input id="imps-clear-card" type="checkbox" checked> Clear card as files verify</label>
+                                        <label class="imps-toggle" id="imps-clear-card-row" hidden><input id="imps-clear-card" type="checkbox"> Clear card as files verify</label>
                                     </div>
                                 </details>
                                 <details class="dr-details" open>

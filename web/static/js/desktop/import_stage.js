@@ -38,9 +38,9 @@ let checked = new Set();        // entry keys staged for import
 let insertedEntryKeys = new Set();
 let filter = 'new';             // new | all
 let anchorIndex = null;         // shift-range anchor into the visible list
-let mode = 'copy';
+let mode = 'move';
 let skipSuspects = true;
-let clearCard = true;
+let clearCard = false;
 let thumbPx = Number(localStorage.getItem('importThumbPx')) || 148;
 let categoryOverride = '';            // '' = the app decides (per-file EXIF/source diagnosis)
 let committing = false;
@@ -79,6 +79,25 @@ function effectiveCategory(entry) {
     return categoryOverride || entry.category || 'raw';
 }
 
+// Cards and staged folders default to Move — a photographer pulling from a
+// card wants the card drained, not duplicated — and the last choice is
+// remembered per source kind (the importThumbPx precedent).
+const MODES = ['move', 'copy', 'add'];
+
+function rememberedMode(kind) {
+    if (kind === 'film') return 'copy';
+    const saved = localStorage.getItem(`importMode.${kind}`);
+    return MODES.includes(saved) ? saved : 'move';
+}
+
+function setMode(next) {
+    mode = next;
+    if (source && source.kind !== 'film') localStorage.setItem(`importMode.${source.kind}`, next);
+    syncModeSeg();
+    syncCommit();
+    syncDestination();
+}
+
 // ---------------------------------------------------------------- sources rail
 
 async function loadSources() {
@@ -102,23 +121,23 @@ function sourceRowHtml(row) {
             + `${icon('image')}<span class="imps-source-text"><b>${esc(row.label)}</b>`
             + (meta ? `<small>${esc(meta)}</small>` : '') + '</span></button>';
     }
-    return `<button class="imps-source ${active ? 'active' : ''}" data-path="${esc(row.path)}" data-dir="1">`
+    return `<button class="imps-source ${active ? 'active' : ''}" data-path="${esc(row.path)}" data-dir="1" data-lib="${row.library ? '1' : ''}">`
         + `${icon('folder')}<span class="imps-source-text"><b>${esc(row.label)}</b></span>`
         + `<span class="imps-twist ${expandedDirs.has(row.path) ? 'open' : ''}" data-twist="${esc(row.path)}"></span></button>`
-        + dirChildrenHtml(row.path, 1);
+        + dirChildrenHtml(row.path, 1, Boolean(row.library));
 }
 
-function dirChildrenHtml(path, depth) {
+function dirChildrenHtml(path, depth, library) {
     const children = expandedDirs.get(path);
     if (!children) return '';
     if (!children.length) return `<div class="imps-dir-empty" style="--depth:${depth}">No subfolders</div>`;
     return children.map((dir) => {
         const active = source && source.path === dir.path;
-        return `<button class="imps-source imps-dir ${active ? 'active' : ''}" style="--depth:${depth}" data-path="${esc(dir.path)}" data-dir="1" data-label="${esc(dir.name)}">`
+        return `<button class="imps-source imps-dir ${active ? 'active' : ''}" style="--depth:${depth}" data-path="${esc(dir.path)}" data-dir="1" data-label="${esc(dir.name)}" data-lib="${library ? '1' : ''}">`
             + `${icon('folder')}<span class="imps-source-text"><b>${esc(dir.name)}</b>`
             + (dir.file_count ? `<small>${fmt(dir.file_count)} files</small>` : '') + '</span>'
             + `<span class="imps-twist ${expandedDirs.has(dir.path) ? 'open' : ''}" data-twist="${esc(dir.path)}"></span></button>`
-            + dirChildrenHtml(dir.path, depth + 1);
+            + dirChildrenHtml(dir.path, depth + 1, library);
     }).join('');
 }
 
@@ -147,7 +166,7 @@ async function toggleDir(path) {
 
 function selectSource(row) {
     source = row;
-    mode = 'copy';
+    mode = rememberedMode(row.kind === 'card' ? 'card' : 'root');
     categoryOverride = '';
     if (els.category) els.category.value = '';
     renderSources();
@@ -367,7 +386,10 @@ function syncDestination() {
         els.destination.innerHTML = '<div class="imps-dest-add">Nothing staged yet.</div>';
         return;
     }
-    const lines = [];
+    // Move from inside the library would relocate catalog data, not drain a
+    // card: the server keeps the sources, so say so up front.
+    const lines = mode === 'move' && source?.library
+        ? ['<div class="imps-dest-add">Already in your library space — copying.</div>'] : [];
     for (const [tree, years] of [...trees.entries()].sort()) {
         lines.push(`<div class="imps-dest-tree">${esc(tree)}</div>`);
         for (const [year, dates] of [...years.entries()].sort()) {
@@ -385,14 +407,18 @@ function syncDestination() {
 function syncModeSeg() {
     const isCard = source?.kind === 'card';
     const isFilm = source?.kind === 'film';
-    els.modeCopy.classList.toggle('active', mode === 'copy');
-    els.modeCopy.setAttribute('aria-pressed', String(mode === 'copy'));
-    els.modeAdd.classList.toggle('active', mode === 'add');
-    els.modeAdd.setAttribute('aria-pressed', String(mode === 'add'));
-    els.modeAdd.disabled = isCard || isFilm; // cards + film staging are forced Copy
-    els.modeAdd.dataset.tip = isCard ? 'Cards must be copied before import'
+    for (const [button, name] of [[els.modeMove, 'move'], [els.modeCopy, 'copy'], [els.modeAdd, 'add']]) {
+        button.classList.toggle('active', mode === name);
+        button.setAttribute('aria-pressed', String(mode === name));
+    }
+    els.modeMove.disabled = isFilm; // film staging is server-side spill, forced Copy
+    els.modeMove.dataset.tip = source?.library
+        ? 'Already in your library space — copying'
+        : 'Copy into the library, verify every byte, then clear the source';
+    els.modeAdd.disabled = isCard || isFilm; // cards must land in the library first
+    els.modeAdd.dataset.tip = isCard ? 'Cards must be copied or moved before import'
         : (isFilm ? 'Film scans are copied into the library' : 'Register in place without copying');
-    els.clearCardRow.hidden = !isCard;
+    els.clearCardRow.hidden = !isCard || mode !== 'copy'; // Move already drains the card
     // Film destination is the archive folder — a category override would lie.
     if (els.category) els.category.disabled = isFilm;
 }
@@ -434,8 +460,9 @@ function syncCommit() {
         ? ' — ' + [...byCategory.entries()].sort((a, b) => b[1] - a[1])
             .map(([category, count]) => `${fmt(count)} ${CATEGORY_SHORT[category] || category}`).join(' · ')
         : '';
+    const verb = mode === 'move' && !source?.library ? 'Move' : 'Import';
     els.summary.innerHTML = staged.length
-        ? `Import <b>${fmt(staged.length)}</b> photo${staged.length === 1 ? '' : 's'} (${fmtBytes(bytes)})${breakdown}`
+        ? `${verb} <b>${fmt(staged.length)}</b> photo${staged.length === 1 ? '' : 's'} (${fmtBytes(bytes)})${breakdown}`
             + (skipped ? ` · ${fmt(skipped)} duplicate${skipped === 1 ? '' : 's'} skipped` : '')
         : 'Nothing staged';
     if (els.category && !committing) {
@@ -492,7 +519,7 @@ async function commit() {
         keys: staged.map((entry) => entry.key),
         mode,
         skip_suspects: skipSuspects,
-        clear_card: source?.kind === 'card' && clearCard,
+        clear_card: source?.kind === 'card' && mode === 'copy' && clearCard,
         category: categoryOverride || null,
         keywords: els.keywords.value.split(',').map((word) => word.trim()).filter(Boolean),
     };
@@ -504,7 +531,7 @@ async function commit() {
         return;
     }
     const label = source?.label || `Import ${result.batch_id}`;
-    const clearingCard = body.clear_card;
+    const clearingCard = body.clear_card || (mode === 'move' && source?.kind === 'card');
     closeImport();
     resetStage();
     setScope({ import_batch: String(result.batch_id), importBatchLabel: label, sort: 'date_taken' });
@@ -650,6 +677,7 @@ export function initImportStage() {
     els = {
         sources: root.querySelector('#imps-sources'),
         subfolders: root.querySelector('#imps-subfolders'),
+        modeMove: root.querySelector('#imps-mode-move'),
         modeCopy: root.querySelector('#imps-mode-copy'),
         modeAdd: root.querySelector('#imps-mode-add'),
         filterNew: root.querySelector('#imps-filter-new'),
@@ -704,18 +732,23 @@ export function initImportStage() {
         if (row.dataset.film) { pickFilmFiles(); return; }
         const path = row.dataset.path;
         const known = sources.find((candidate) => candidate.path === path);
-        selectSource(known || { id: `root:${path}`, kind: 'root', label: row.dataset.label || path.split('/').pop() || path, path });
+        selectSource(known || {
+            id: `root:${path}`, kind: 'root', label: row.dataset.label || path.split('/').pop() || path,
+            path, library: Boolean(row.dataset.lib),
+        });
     });
     els.subfolders.addEventListener('change', () => {
         includeSubfolders = els.subfolders.checked;
         if (source) startScan();
     });
-    els.modeCopy.addEventListener('click', () => { mode = 'copy'; syncModeSeg(); syncDestination(); });
+    els.modeMove.addEventListener('click', () => {
+        if (source?.kind === 'film') return;
+        setMode('move');
+    });
+    els.modeCopy.addEventListener('click', () => setMode('copy'));
     els.modeAdd.addEventListener('click', () => {
-        if (source?.kind === 'card') return;
-        mode = 'add';
-        syncModeSeg();
-        syncDestination();
+        if (source?.kind === 'card' || source?.kind === 'film') return;
+        setMode('add');
     });
     els.filterNew.addEventListener('click', () => { filter = 'new'; anchorIndex = null; syncFilterSeg(); rerenderGrid(); });
     els.filterAll.addEventListener('click', () => { filter = 'all'; anchorIndex = null; syncFilterSeg(); rerenderGrid(); });
