@@ -60,8 +60,17 @@ export function visibleSuggestions() {
     return (suggestions || []).filter((suggestion) => !suggestionFingerprints(suggestion).some((fingerprint) => gone.has(fingerprint)));
 }
 
+const collapsedKinds = new Set();
+
 function currentSuggestions() {
-    const visible = visibleSuggestions();
+    // Grouped by kind (best-ranked kind first), ranking preserved within each group.
+    const buckets = new Map();
+    for (const suggestion of visibleSuggestions()) {
+        const kind = suggestionKind(suggestion);
+        if (!buckets.has(kind)) buckets.set(kind, []);
+        buckets.get(kind).push(suggestion);
+    }
+    const visible = [...buckets.values()].flat();
     if (activeIndex >= visible.length) activeIndex = Math.max(0, visible.length - 1);
     return visible;
 }
@@ -144,10 +153,21 @@ export function dismissSuggestion(suggestion) {
     });
 }
 
-function kindLabel(kind) {
-    if (kind === 'theme') return 'Theme';
-    if (kind === 'cluster') return 'Cluster';
-    return 'Shoot';
+const KIND_META = {
+    shoot: { label: 'Shoot', icon: 'camera' },
+    event: { label: 'Event', icon: 'calendar-days' },
+    cluster: { label: 'Cluster', icon: 'layers' },
+    theme: { label: 'Theme', icon: 'tag' },
+};
+
+function suggestionKind(suggestion) {
+    return KIND_META[suggestion?.kind] ? suggestion.kind : 'shoot';
+}
+
+function kindBadge(suggestion) {
+    const kind = suggestionKind(suggestion);
+    const meta = KIND_META[kind];
+    return `<span class="suggest-kind-badge" data-kind="${kind}">${icon(meta.icon)}${esc(meta.label)}</span>`;
 }
 
 function liveMark(suggestion) {
@@ -171,9 +191,30 @@ function rowHtml(suggestion, index) {
     return `<button class="suggest-review-row ${active ? 'active' : ''}" data-suggest-index="${index}" type="button">`
         + `<span class="suggest-row-cover">${suggestion.cover_image_id ? `<img src="${esc(thumbUrl('sm', suggestion.cover_image_id))}" alt="">` : icon('sparkles')}</span>`
         + '<span class="suggest-row-copy">'
-        + `<b title="${esc(suggestion.title)}"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveMark(suggestion)}${esc(suggestion.title)}</b>`
+        + `<b title="${esc(suggestion.title)}">${liveMark(suggestion)}${esc(suggestion.title)}</b>`
         + `<span title="${esc(`${suggestion.reason || 'Suggested'} · ${fmt(suggestion.count)} photos`)}">${esc(suggestion.reason || 'Suggested')} · ${fmt(suggestion.count)} photos</span>`
         + '</span></button>';
+}
+
+function railHtml(visible) {
+    const groups = [];
+    visible.forEach((suggestion, index) => {
+        const kind = suggestionKind(suggestion);
+        const last = groups[groups.length - 1];
+        if (last && last.kind === kind) last.rows.push(rowHtml(suggestion, index));
+        else groups.push({ kind, rows: [rowHtml(suggestion, index)] });
+    });
+    return groups.map((group) => {
+        const meta = KIND_META[group.kind];
+        const collapsed = collapsedKinds.has(group.kind);
+        return `<section class="psec suggest-rail-group ${collapsed ? 'collapsed' : ''}" data-kind-group="${group.kind}">`
+            + '<div class="psec-head" tabindex="0">'
+            + `<button class="psec-toggle" type="button" aria-label="Toggle ${meta.label}" aria-expanded="${collapsed ? 'false' : 'true'}" tabindex="-1">${icon('chevron-down')}</button>`
+            + `<h3>${icon(meta.icon)}${esc(meta.label)}</h3>`
+            + `<span class="num">${group.rows.length}</span></div>`
+            + group.rows.join('')
+            + '</section>';
+    }).join('');
 }
 
 function previewHtml(suggestion) {
@@ -249,11 +290,11 @@ function render() {
     const liveCopy = suggestion.mode === 'smart' || suggestion.query ? 'Live' : '';
     root.innerHTML = '<div class="suggest-review">'
         + headerHtml(visible.length)
-        + `<aside class="suggest-review-rail">${visible.map(rowHtml).join('')}</aside>`
+        + `<aside class="suggest-review-rail">${railHtml(visible)}</aside>`
         + '<section class="suggest-review-main">'
         + '<header class="suggest-review-head">'
         + '<div>'
-        + `<div class="suggest-head-meta"><span class="suggest-kind-badge">${esc(kindLabel(suggestion.kind))}</span>${liveCopy ? `<span class="suggest-live-copy" title="Updates automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
+        + `<div class="suggest-head-meta">${kindBadge(suggestion)}${liveCopy ? `<span class="suggest-live-copy" title="Updates automatically">${icon('sparkles')}${esc(liveCopy)}</span>` : ''}</div>`
         + `<h2 title="${esc(suggestion.title)}">${esc(suggestion.title)}</h2>`
         + `<p>${esc(suggestion.reason || 'Suggested')} · ${esc(suggestion.subtitle || `${fmt(suggestion.count)} photos`)}</p>`
         + evidenceHtml(suggestion)
@@ -273,6 +314,27 @@ function render() {
             render();
         });
     }
+    for (const head of root.querySelectorAll('.suggest-rail-group .psec-head')) {
+        const toggleGroup = () => {
+            const kind = head.closest('.suggest-rail-group')?.dataset.kindGroup;
+            if (!kind) return;
+            if (collapsedKinds.has(kind)) collapsedKinds.delete(kind);
+            else {
+                collapsedKinds.add(kind);
+                if (suggestionKind(visible[activeIndex]) === kind) {
+                    const next = visible.findIndex((s) => !collapsedKinds.has(suggestionKind(s)));
+                    if (next >= 0) activeIndex = next;
+                }
+            }
+            render();
+        };
+        head.addEventListener('click', toggleGroup);
+        head.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            toggleGroup();
+        });
+    }
     root.querySelector('#suggest-create')?.addEventListener('click', async () => {
         await createSuggestion(suggestion);
         currentSuggestions();
@@ -281,6 +343,14 @@ function render() {
         dismissSuggestion(suggestion);
         currentSuggestions();
     });
+}
+
+function stepIndex(visible, from, direction) {
+    // Arrow navigation skips rows hidden inside collapsed groups.
+    for (let index = from + direction; index >= 0 && index < visible.length; index += direction) {
+        if (!collapsedKinds.has(suggestionKind(visible[index]))) return index;
+    }
+    return from;
 }
 
 function handleKeydown(event) {
@@ -295,12 +365,12 @@ function handleKeydown(event) {
     } else if (event.key === 'ArrowDown') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        activeIndex = Math.min(visible.length - 1, activeIndex + 1);
+        activeIndex = stepIndex(visible, activeIndex, 1);
         render();
     } else if (event.key === 'ArrowUp') {
         event.preventDefault();
         event.stopImmediatePropagation();
-        activeIndex = Math.max(0, activeIndex - 1);
+        activeIndex = stepIndex(visible, activeIndex, -1);
         render();
     } else if (event.key === 'Enter' && visible[activeIndex]) {
         event.preventDefault();
