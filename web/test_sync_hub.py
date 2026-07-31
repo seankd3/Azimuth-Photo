@@ -40,7 +40,15 @@ class DefaultRootTests(unittest.TestCase):
                 intake = hub.default_intake_root()
                 raws = hub.default_raws_root()
         self.assertEqual(intake, Path(home) / "data" / "photos" / "_intake")
-        self.assertEqual(raws, Path(home) / "data" / "photos" / "RAWS")
+        self.assertEqual(raws, Path(home) / "data" / "photos" / "Raws")
+
+    def test_default_raws_root_keeps_unrenamed_legacy_tree(self):
+        with tempfile.TemporaryDirectory() as home:
+            legacy = Path(home) / "data" / "photos" / "RAWS"
+            legacy.mkdir(parents=True)
+            with self._env(AZIMUTH_HOME=home):
+                raws = hub.default_raws_root()
+        self.assertEqual(raws, legacy)
 
     def test_env_overrides_beat_layout(self):
         with tempfile.TemporaryDirectory() as home:
@@ -59,7 +67,7 @@ class SyncHubTests(unittest.TestCase):
         self.root = Path(self.tempdir.name)
         self.db_path = str(self.root / "hub.db")
         self.intake = self.root / "_intake"
-        self.raws = self.root / "RAWS"
+        self.raws = self.root / "Raws"
         self.cache = self.root / "base-cache"
         self.old_db_path = db.DB_PATH
         self.old_base_cache_dir = rawproc.BASE_CACHE_DIR
@@ -636,9 +644,11 @@ class SyncHubTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200, response.text)
         self.upload(content_hash, payload)
-        destination = self.root / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg"
+        # The legacy "Personal Photos" hint routes to Snapshots, a sibling of Raws.
+        destination = self.root / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg"
         self.assertEqual(destination.read_bytes(), payload)
-        self.assertFalse((self.raws / "Personal Photos" / "2024" / "2024-06-07" / "personal.jpg").exists())
+        self.assertFalse((self.root / "Personal Photos").exists())
+        self.assertFalse((self.raws / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg").exists())
         self.assertFalse((self.raws / "2024" / "2024-06-07" / "personal.jpg").exists())
 
     def test_manifest_rejects_invalid_folder_paths(self):
@@ -705,7 +715,7 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
 
         image_id = self.upload(content_hash, good)
-        destination = self.root / "Film Scans" / "2026" / "2026-07-16" / "000018240006.tif"
+        destination = self.raws / "Film Scans" / "2026" / "2026-07-16" / "000018240006.tif"
         self.assertTrue(destination.is_file())
         self.assertEqual(destination.read_bytes(), good)
         self.assertGreater(image_id, 0)
@@ -735,7 +745,7 @@ class SyncHubTests(unittest.TestCase):
             ).fetchone()[0]
         finally:
             conn.close()
-        self.assertEqual(locked, "Film Scans/2026/2026-07-16/roll.jpg")
+        self.assertEqual(locked, "Raws/Film Scans/2026/2026-07-16/roll.jpg")
 
         # A later manifest with a different date must not move the locked path.
         second = self.client.post(
@@ -766,8 +776,8 @@ class SyncHubTests(unittest.TestCase):
         image_id = self.upload(content_hash, payload)
         self.assertTrue(destination.is_file())
         self.assertEqual(destination.read_bytes(), payload)
-        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
-        self.assertFalse((self.root / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
+        self.assertFalse((self.raws / "Film Scans" / "2026" / "2026-01-01" / "roll.jpg").exists())
+        self.assertFalse((self.raws / "Film Scans" / "2026" / "2026-07-16" / "roll-2.jpg").exists())
 
         # Different bytes already at the locked path → per-identity suffix, no overwrite.
         other = b"ROLL-COLLISION-" + (b"D" * 2047)
@@ -815,7 +825,7 @@ class SyncHubTests(unittest.TestCase):
             ).fetchall()
         finally:
             conn.close()
-        self.assertEqual(other_path, f"Film Scans/2026/2026-07-16/roll-{other_hash[:8]}.jpg")
+        self.assertEqual(other_path, f"Raws/Film Scans/2026/2026-07-16/roll-{other_hash[:8]}.jpg")
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0][0], image_id)
         self.assertEqual(rows[0][1], content_hash)
@@ -874,7 +884,7 @@ class SyncHubTests(unittest.TestCase):
         image_ids = {int(row["image_id"]) for row in results}
         self.assertEqual(len(image_ids), 2)
 
-        preferred = self.root / "Film Scans" / "2026" / "2026-07-16" / "shared.jpg"
+        preferred = self.raws / "Film Scans" / "2026" / "2026-07-16" / "shared.jpg"
         conn = sqlite3.connect(self.db_path)
         try:
             rows = conn.execute(

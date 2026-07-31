@@ -476,9 +476,9 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
     except ValueError:
         parsed = safe_datetime_fromtimestamp(entry.get("mtime")) or datetime.now()
     library_root = originals_root()
-    # If import_root was pointed at the RAWS tree itself, climb to the library root
-    # so destinations stay siblings (Personal Photos must not nest under RAWS).
-    if library_root.name == taxonomy.DEST_RAWS:
+    # If import_root was pointed at the Raws tree itself, climb to the library root
+    # so destinations stay siblings (Snapshots must not nest under Raws).
+    if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     return taxonomy.destination_directory(
         library_root,
@@ -491,19 +491,19 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
 
 def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
     """Scan dates are not shoot dates: one archive/batch lands in one folder
-    named from the archive filename, never a date-guessed RAWS-style tree."""
+    named from the archive filename, never a date-guessed Raws-style tree."""
     library_root = originals_root()
-    if library_root.name == taxonomy.DEST_RAWS:
+    if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     parts = str(entry.get("rel_path") or "").split("/")
     folder = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
-    return library_root / taxonomy.DEST_FILM / folder
+    return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / folder
 
 
 def _catalog_source_root_for_destination(destination: str | Path) -> str:
     path = Path(destination)
     library_root = originals_root()
-    if library_root.name == taxonomy.DEST_RAWS:
+    if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     try:
         top = path.relative_to(library_root).parts[0]

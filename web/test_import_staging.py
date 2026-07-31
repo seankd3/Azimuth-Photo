@@ -160,10 +160,10 @@ class StagedImportTests(BackendTestCase):
             await self._wait(job)
             self.assertEqual(job.phase, "complete")
             landed = {path.name: path for path in originals.rglob("*") if path.is_file()}
-            self.assertIn("RAWS", str(landed["CANON0001.CR3"]))
-            self.assertIn("Personal Photos", str(landed["PXL_PLAIN.jpg"]))
-            self.assertIn("Exported Edits", str(landed["final-edit.jpg"]))
-            self.assertIn("Film Scans", str(landed["roll12-frame08.tif"]))
+            self.assertIn("Raws", str(landed["CANON0001.CR3"]))
+            self.assertIn("Snapshots", str(landed["PXL_PLAIN.jpg"]))
+            self.assertIn("Edits", str(landed["final-edit.jpg"]))
+            self.assertIn(str(Path("Raws") / "Film Scans"), str(landed["roll12-frame08.tif"]))
         finally:
             if old_root is None:
                 os.environ.pop("AZIMUTH_ORIGINALS_DIR", None)
@@ -184,7 +184,7 @@ class StagedImportTests(BackendTestCase):
 
             scan = staging.Scan(id="scan-mem1", path=str(scans_dir), include_subfolders=False, card_source=False, status="done")
             staging._enumerate_scan(scan)
-            self.assertEqual(scan.entries[0]["category"], "raw")  # bare JPEG defaults to RAWS
+            self.assertEqual(scan.entries[0]["category"], "raw")  # bare JPEG defaults to Raws
             staging._scans[scan.id] = scan
             job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None, category="film")
             await self._wait(job)
@@ -426,7 +426,7 @@ class StagedImportTests(BackendTestCase):
                     ["evil.tif", "frame01.tif", "frame02.tif"],
                 )
                 for path in landed:
-                    self.assertEqual(path.parent, originals / "Film Scans" / "roll12")
+                    self.assertEqual(path.parent, originals / "Raws" / "Film Scans" / "roll12")
                 batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
                 self.assertEqual(batch["name"], "roll12")
                 # A clean full commit reclaims the transient extraction dir.
@@ -456,7 +456,7 @@ class StagedImportTests(BackendTestCase):
                 job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
                 await self._wait(job)
                 self.assertEqual(job.phase, "complete")
-                landed = sorted(path.name for path in (originals / "Film Scans" / staged["label"]).glob("*"))
+                landed = sorted(path.name for path in (originals / "Raws" / "Film Scans" / staged["label"]).glob("*"))
                 self.assertEqual(landed, ["frame-2.tif", "frame.tif"])
         finally:
             if old_root is None:
