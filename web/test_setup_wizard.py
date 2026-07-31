@@ -37,6 +37,7 @@ class ModePredicateTests(unittest.TestCase):
         with ModeEnv():
             self.assertFalse(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
+            self.assertFalse(satellite.defers_bulk_compute())
             self.assertEqual(satellite.bootstrap_payload(), {"mode": "hub", "has_hub": False})
 
     def test_satellite_without_hub_is_standalone(self):
@@ -44,6 +45,7 @@ class ModePredicateTests(unittest.TestCase):
             os.environ["AZIMUTH_MODE"] = "satellite"
             self.assertTrue(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
+            self.assertTrue(satellite.defers_bulk_compute())
             self.assertEqual(
                 satellite.bootstrap_payload(), {"mode": "satellite", "has_hub": False}
             )
@@ -54,11 +56,25 @@ class ModePredicateTests(unittest.TestCase):
             self.assertTrue(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
 
+    def test_standalone_holds_the_full_engine(self):
+        # The installed desktop app is standalone: it holds the canonical
+        # library, so it never defers bulk compute to a hub it does not have.
+        with ModeEnv():
+            os.environ["AZIMUTH_MODE"] = "standalone"
+            self.assertFalse(satellite.defers_bulk_compute())
+
+    def test_standalone_with_attached_hub_defers_bulk_compute(self):
+        with ModeEnv():
+            os.environ["AZIMUTH_MODE"] = "standalone"
+            satellite._stored_hub_url = "http://stored-hub:8000"
+            self.assertTrue(satellite.defers_bulk_compute())
+
     def test_hub_url_alone_implies_satellite(self):
         with ModeEnv():
             os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000/"
             self.assertTrue(satellite.is_satellite_mode())
             self.assertTrue(satellite.has_hub())
+            self.assertTrue(satellite.defers_bulk_compute())
             self.assertEqual(satellite.hub_url(), "http://hub:8000")
 
     def test_explicit_hub_mode_wins_over_hub_url(self):
@@ -67,6 +83,7 @@ class ModePredicateTests(unittest.TestCase):
             os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000"
             self.assertFalse(satellite.is_satellite_mode())
             self.assertFalse(satellite.has_hub())
+            self.assertFalse(satellite.defers_bulk_compute())
 
     def test_stored_hub_counts_without_env(self):
         with ModeEnv():

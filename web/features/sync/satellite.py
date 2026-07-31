@@ -88,6 +88,17 @@ def has_hub() -> bool:
     return is_satellite_mode() and bool(hub_url())
 
 
+def defers_bulk_compute() -> bool:
+    """Only a hub-backed peer defers bulk engine work to its hub.
+
+    A standalone install holds the canonical library, so it arms everything a
+    hub arms — AI, faces, captions, preview pregen — budgeted for its host.
+    """
+
+    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
+    return mode == "satellite" or has_hub()
+
+
 def bootstrap_payload() -> dict:
     return {
         "mode": "satellite" if is_satellite_mode() else "hub",

@@ -128,7 +128,11 @@ async def _start_background_daemon(coro_factory, delay: float = 5.0):
 
 
 def schedule_optional_workers(*, track_background_task, settings, face_worker, caption_worker) -> dict:
-    """Arm hub inference workers whose explicit dependency packs are present."""
+    """Arm inference workers whose explicit dependency packs are present.
+
+    Hub and standalone installs both hold the canonical library, so both run
+    the full engine; only a hub-backed satellite defers inference to its hub.
+    """
 
     statuses = {
         key: capabilities.capability_status(key)
@@ -136,8 +140,8 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
     }
     from features.sync import satellite
 
-    if satellite.is_satellite_mode():
-        log.info("worker=optional_ai skipped reason=satellite_mode")
+    if satellite.defers_bulk_compute():
+        log.info("worker=optional_ai skipped reason=hub_backed_satellite")
         return statuses
 
     if statuses["search"]["available"]:
@@ -535,9 +539,10 @@ async def run_startup(
     from features.sync import satellite as _satellite
 
     # Auto-resume bulk workers that were running before the last shutdown.
-    # Pregen and cloud vault own the hub's archive disk. Satellites keep only
-    # interactive/on-demand previews and receive generated work through sync.
-    if not _satellite.is_satellite_mode():
+    # Pregen and cloud vault own the canonical archive disk — a hub's or a
+    # standalone install's. Hub-backed satellites keep only interactive/
+    # on-demand previews and receive generated work through sync.
+    if not _satellite.defers_bulk_compute():
         try:
             from core import bulk_scheduler as _bulk_scheduler
 
@@ -547,7 +552,7 @@ async def run_startup(
         except Exception:
             log.exception("worker=pregen auto-resume failed")
     else:
-        log.info("worker=pregen auto-resume skipped reason=satellite_mode")
+        log.info("worker=pregen auto-resume skipped reason=hub_backed_satellite")
 
     try:
         import db as _db
@@ -562,7 +567,7 @@ async def run_startup(
     except Exception:
         log.exception("worker=catalog_backup scheduler failed to arm")
 
-    if not _satellite.is_satellite_mode():
+    if not _satellite.defers_bulk_compute():
         try:
             import db as _db
             from core import bulk_scheduler as _bulk_scheduler
@@ -593,7 +598,7 @@ async def run_startup(
         except Exception:
             log.exception("worker=cloud_backup scheduler failed to arm")
     else:
-        log.info("worker=cloud_backup skipped reason=satellite_mode")
+        log.info("worker=cloud_backup skipped reason=hub_backed_satellite")
 
     try:
         import db as _db
