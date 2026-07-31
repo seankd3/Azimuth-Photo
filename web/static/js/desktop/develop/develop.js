@@ -1,6 +1,6 @@
 import { previewThumbUrl, thumbUrl } from '../api.js';
 import { fetchOptionsWithTimeout } from '../../api.js';
-import { on, selection, viewState } from '../state.js';
+import { on, selection, setDevelopFilmstripCollapsed, setDevelopRightCollapsed, viewState } from '../state.js';
 import { applyFlags } from '../selection.js';
 import { showToast } from '../toast.js';
 import { releaseFocus, trapFocus } from '../focusTrap.js';
@@ -1187,6 +1187,20 @@ function bindUi() {
     });
     document.addEventListener('keydown', handleKey, true);
     document.addEventListener('keyup', handleKeyUp, true);
+    const layout = root.querySelector('.develop-layout');
+    layout.classList.toggle('right-collapsed', viewState.developRightCollapsed);
+    layout.classList.toggle('filmstrip-collapsed', viewState.developFilmstripCollapsed);
+    document.getElementById('develop-collapse-right').addEventListener('click', () => setDevelopRightCollapsed(!viewState.developRightCollapsed));
+    document.getElementById('develop-collapse-filmstrip').addEventListener('click', () => setDevelopFilmstripCollapsed(!viewState.developFilmstripCollapsed));
+    on('developrightpanel', (collapsed) => {
+        layout.classList.toggle('right-collapsed', collapsed);
+        applyZoomState();
+    });
+    on('developfilmstrip', (collapsed) => {
+        layout.classList.toggle('filmstrip-collapsed', collapsed);
+        applyZoomState();
+        if (!collapsed && mounted) syncFilmstrip();
+    });
     on('selection', updateTabState);
     on('focus', updateTabState);
     on('scope', updateTabState);
@@ -1262,6 +1276,12 @@ function handleKey(event) {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) masking?.togglePanel();
     } else if (key === 'z') {
         event.preventDefault(); event.stopImmediatePropagation(); if (!event.repeat) toggleZoom();
+    } else if (key === ']') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) setDevelopRightCollapsed(!viewState.developRightCollapsed);
+    } else if (key === 'f') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) setDevelopFilmstripCollapsed(!viewState.developFilmstripCollapsed);
     } else if (event.shiftKey && key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {
