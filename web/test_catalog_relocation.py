@@ -11,11 +11,11 @@ from features.imports import relocation
 from features.sync.hashing import compute_content_hash
 
 
-class RenamedRelativeTests(unittest.TestCase):
+class RelativeCandidatesTests(unittest.TestCase):
     """Pure mapping — covers RAWS→Raws, which case-folding filesystems
-    cannot exercise with real directories."""
+    cannot exercise with real directories, plus the Raws/Digital shelf."""
 
-    def test_legacy_roots_map_to_canonical(self):
+    def test_legacy_roots_map_to_canonical_first(self):
         cases = [
             (("RAWS", "2024", "x.cr3"), ("Raws", "2024", "x.cr3")),
             (("Personal Photos", "2024", "a.jpg"), ("Snapshots", "2024", "a.jpg")),
@@ -23,11 +23,30 @@ class RenamedRelativeTests(unittest.TestCase):
             (("Film Scans", "roll12", "c.tif"), ("Raws", "Film Scans", "roll12", "c.tif")),
         ]
         for old, expected in cases:
-            self.assertEqual(relocation._renamed_relative(old), expected, old)
+            candidates = relocation._relative_candidates(old)
+            self.assertTrue(candidates, old)
+            self.assertEqual(candidates[0], expected, old)
+
+    def test_bare_raws_paths_also_probe_the_digital_shelf(self):
+        self.assertEqual(
+            relocation._relative_candidates(("Raws", "2024", "x.cr3")),
+            [("Raws", "Digital", "2024", "x.cr3")],
+        )
+        self.assertEqual(
+            relocation._relative_candidates(("RAWS", "2024", "x.cr3")),
+            [("Raws", "2024", "x.cr3"), ("Raws", "Digital", "2024", "x.cr3")],
+        )
+        # Paths already on a shelf never get re-shelved.
+        self.assertEqual(
+            relocation._relative_candidates(("Raws", "Digital", "2024", "x.cr3")), []
+        )
+        self.assertEqual(
+            relocation._relative_candidates(("Raws", "Film Scans", "roll12", "c.tif")), []
+        )
 
     def test_canonical_roots_are_left_alone(self):
-        self.assertIsNone(relocation._renamed_relative(("Snapshots", "2024", "a.jpg")))
-        self.assertIsNone(relocation._renamed_relative(("Custom Folder", "a.jpg")))
+        self.assertEqual(relocation._relative_candidates(("Snapshots", "2024", "a.jpg")), [])
+        self.assertEqual(relocation._relative_candidates(("Custom Folder", "a.jpg")), [])
 
 
 class RelocationFixtureTests(BackendTestCase):
@@ -147,6 +166,35 @@ class RelocationFixtureTests(BackendTestCase):
         # Idempotent: nothing left to repair on a second pass.
         again = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
         self.assertEqual(again["rows_missing_file"], 0)
+
+    async def test_file_moved_onto_digital_shelf_is_found_by_relative_path(self):
+        moved = self._file("Raws/Digital/2024/2024-06-07/d.cr3", b"digital-shelf-raw")
+        ids = [
+            # Bare under the canonical Raws root before the shelf existed.
+            await self._row(
+                "Raws/2024/2024-06-07/d.cr3",
+                size=moved.stat().st_size,
+                source_top="Raws",
+                content_hash=compute_content_hash(moved),
+            ),
+        ]
+        legacy = self._file("Raws/Digital/2023/2023-01-05/e.cr3", b"legacy-root-raw")
+        ids.append(
+            # Bare under the retired RAWS spelling — both renames at once.
+            await self._row(
+                "RAWS/2023/2023-01-05/e.cr3",
+                size=legacy.stat().st_size,
+                source_top="RAWS",
+                content_hash=compute_content_hash(legacy),
+            )
+        )
+
+        report = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        self.assertEqual(report["relocated"], 2)
+        self.assertEqual(report["matched_by"]["relative_path"], 2)
+        self.assertEqual(report["unmatched_total"], 0)
+        self.assertEqual((await self._images(ids[0]))["filepath"], str(moved))
+        self.assertEqual((await self._images(ids[1]))["filepath"], str(legacy))
 
     async def test_reshuffle_matches_by_basename_size_then_content_hash(self):
         moved = self._file("Snapshots/2020/2020-05-05/moved.jpg", b"reshuffled-payload")
