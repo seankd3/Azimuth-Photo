@@ -25,7 +25,9 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertIn("drain-write-queue", queue)
         self.assertNotIn("write-outcome", queue)
         self.assertIn("emit('flag-write'", api)
-        self.assertIn("emit('rating-write'", api)
+        # Stars are Elo's computed projection; the manual rating write path is
+        # retired and must not return.
+        self.assertNotIn("rating-write", api)
         self.assertNotIn("'#mv-pick'", self.read("static", "js", "mobile", "bootstrap.js"))
 
     def test_offline_pins_and_queued_writes_survive_upgrades(self):
@@ -162,20 +164,23 @@ class MobileOfflineContractsTests(unittest.TestCase):
         self.assertLess(loader.index(guard), loader.index("monthOffsets = [];"))
         self.assertIn("loadHistogram(gen)", timeline)
 
-    def test_info_sheet_rating_stays_bound_to_its_displayed_photo(self):
+    def test_info_sheet_stars_stay_bound_to_their_displayed_photo(self):
         viewer = self.read("static", "js", "mobile", "viewer.js")
         info_sheet = viewer[viewer.index("function infoSheet()") :]
-        rating_handler = info_sheet[
-            info_sheet.index("for (const button of sheet.querySelectorAll('[data-rating]'))"):
+        stars_region = info_sheet[
+            info_sheet.index("syncStarsRow(sheet, imageStars(image));"):
             info_sheet.index("sheet.querySelector('#mv-similar').addEventListener")
         ]
 
-        self.assertIn("const target = image;", rating_handler)
-        self.assertNotIn("current()", rating_handler)
-        self.assertIn("const known = byId.get(Number(target.id));", rating_handler)
-        self.assertIn("void writeRating(target.id, rating).then((result) => {", rating_handler)
-        self.assertIn("imageRating(target) !== rating", rating_handler)
-        self.assertIn("target.rating = previous;", rating_handler)
+        # Stars are read-only (computed from Elo). The async refresh must stay
+        # bound to the photo the sheet was opened for, never the swiped-to one,
+        # and the retired manual write path must not return.
+        self.assertNotIn("current()", stars_region)
+        self.assertNotIn("writeRating", info_sheet)
+        self.assertNotIn("[data-rating]", info_sheet)
+        self.assertIn("viewerRequestCurrent(image.id, ratingGeneration)", stars_region)
+        self.assertIn("const known = byId.get(Number(image.id));", stars_region)
+        self.assertIn("if (sheet.isConnected) syncStarsRow(sheet, imageStars(image)", stars_region)
 
     def test_smart_collection_scopes_hide_membership_actions(self):
         state = self.read("static", "js", "mobile", "state.js")
