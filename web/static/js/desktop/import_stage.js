@@ -251,11 +251,20 @@ async function pollScan(token) {
 
 // ---------------------------------------------------------------- staged grid
 
+function fileExt(name) {
+    const dot = String(name || '').lastIndexOf('.');
+    return dot > 0 ? name.slice(dot + 1).toUpperCase() : 'VIDEO';
+}
+
 function cellHtml(entry, index) {
     const isChecked = checked.has(entry.key);
+    // Videos are custody-only (imported, stored, backed up — no playback):
+    // a deliberate filmstrip tile, never a decoded frame or a fake thumbnail.
+    const media = entry.kind === 'video'
+        ? `<span class="imps-video" role="img" aria-label="${esc(entry.name)}">${icon('film')}<b>${esc(fileExt(entry.name))}</b></span>`
+        : `<img data-src="/api/import/scan/${esc(scanId)}/thumb/${esc(entry.key)}" loading="lazy" decoding="async" alt="${esc(entry.name)}">`;
     return `<figure class="imps-cell ${entry.suspect ? 'suspect' : ''} ${isChecked ? 'on' : ''}" data-key="${esc(entry.key)}" data-idx="${index}" tabindex="-1">`
-        + `<span class="imps-thumb"><img data-src="/api/import/scan/${esc(scanId)}/thumb/${esc(entry.key)}" loading="lazy" decoding="async" alt="${esc(entry.name)}">`
-        + (entry.kind === 'video' ? '<span class="imps-kind"><i></i></span>' : '')
+        + `<span class="imps-thumb">${media}`
         + (entry.suspect ? '<span class="imps-badge">Already imported</span>' : '')
         + `<button class="imps-check" aria-label="Include in import" aria-pressed="${isChecked}">${icon('check')}</button></span>`
         + `<figcaption>${esc(entry.name)}</figcaption></figure>`;
