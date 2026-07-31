@@ -1277,6 +1277,66 @@ def _compete_semantic_tiebreak(
     )[:count]
 
 
+# A duel is unreadable when its two frames differ wildly in shape, so pairing
+# holds partners inside a narrow aspect band and only widens when the pool
+# cannot supply one.
+DUEL_ASPECT_TOLERANCE = 0.15
+
+
+def _candidate_aspect(candidate) -> float | None:
+    aspect = candidate_value(candidate, "aspect_ratio")
+    if not aspect:
+        width = candidate_value(candidate, "width", 0) or 0
+        height = candidate_value(candidate, "height", 0) or 0
+        if width and height:
+            aspect = width / height
+    try:
+        aspect = float(aspect)
+    except (TypeError, ValueError):
+        return None
+    return aspect if aspect > 0 else None
+
+
+def duel_aspect_pool(seed, candidates: list[dict]) -> list[dict]:
+    """Aspect-compatible duel partners for the seed.
+
+    Tolerance band first (ratios within DUEL_ASPECT_TOLERANCE of each other),
+    then orientation as the coarse gate, then the full pool, so a thin scope
+    still duels instead of starving.
+    """
+    seed_aspect = _candidate_aspect(seed)
+    if seed_aspect is None:
+        return candidates
+    banded = []
+    same_orientation = []
+    for candidate in candidates:
+        aspect = _candidate_aspect(candidate)
+        if aspect is None:
+            continue
+        if max(aspect, seed_aspect) / min(aspect, seed_aspect) <= 1.0 + DUEL_ASPECT_TOLERANCE:
+            banded.append(candidate)
+        elif (aspect >= 1.0) == (seed_aspect >= 1.0):
+            same_orientation.append(candidate)
+    return banded or same_orientation or candidates
+
+
+def _aspect_align_duel(sample: list[dict], candidates: list[dict]) -> list[dict]:
+    """Repair a strategy-drawn duel whose two images mismatch in aspect."""
+    if len(sample) != 2:
+        return sample
+    import random
+
+    seed = sample[0]
+    pool = duel_aspect_pool(seed, candidates)
+    pool_ids = {_candidate_id(img) for img in pool}
+    if _candidate_id(sample[1]) in pool_ids:
+        return sample
+    replacements = [img for img in pool if _candidate_id(img) != _candidate_id(seed)]
+    if not replacements:
+        return sample
+    return [seed, random.choice(replacements)]
+
+
 async def _semantic_context_for(candidates: list[dict]):
     if not settings.get_settings().get("refine_semantic_pairing", True):
         return None
@@ -1297,7 +1357,8 @@ async def _semantic_duel_sample(
     if count != 2 or len(candidates) < 2:
         return [], "strategy"
     if random.random() < semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE:
-        return await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo), "strategy"
+        sample = await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo)
+        return _aspect_align_duel(sample, candidates), "strategy"
 
     if strategy == "diverse":
         seed_sample = await diverse_sample(candidates, 1)
@@ -1315,13 +1376,21 @@ async def _semantic_duel_sample(
     seed = seed_sample[0]
     strategy_scores = _strategy_scores(score_pool, score_weights)
     # The partner search reads one embedding row per candidate, so look at a
-    # pre-shuffled window rather than the whole scope.
-    partner_pool = candidates
+    # pre-shuffled window rather than the whole scope. Aspect gating happens
+    # here, in pairing, so every partner path below inherits it.
+    partner_pool = duel_aspect_pool(seed, candidates)
     if len(partner_pool) > semantic_pairing.SEMANTIC_PARTNER_WINDOW:
         partner_pool = random.sample(partner_pool, semantic_pairing.SEMANTIC_PARTNER_WINDOW)
-    partner = semantic_pairing.best_partner(seed, partner_pool, strategy_scores, context)
+    if strategy == "diverse":
+        # Diverse duels feed Elo propagation across clusters, so the partner
+        # is the least similar image the pool offers, not the most.
+        partner = semantic_pairing.most_different_partner(seed, partner_pool, strategy_scores, context)
+    else:
+        partner = semantic_pairing.best_partner(seed, partner_pool, strategy_scores, context)
     if partner is None:
-        remaining = [img for img in candidates if int(img["id"]) != int(seed["id"])]
+        remaining = [img for img in partner_pool if int(img["id"]) != int(seed["id"])]
+        if not remaining:
+            remaining = [img for img in candidates if int(img["id"]) != int(seed["id"])]
         remaining_weights = [strategy_scores.get(int(img["id"]), 1.0) for img in remaining]
         fallback = _weighted_unique_sample(remaining, remaining_weights, 1)
         if not fallback:
@@ -1359,6 +1428,8 @@ async def _refine_sample(
             grid_elo=grid_elo,
             context=context,
         )
+    if count == 2:
+        sample = _aspect_align_duel(sample, candidates)
     return sample, "strategy"
 
 
