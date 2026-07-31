@@ -282,21 +282,20 @@ def preview_path(scan: Scan, entry: dict) -> Path:
 
 
 def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
+    if entry["kind"] == "video":
+        # Custody-only: videos are imported, stored and backed up, never decoded.
+        # The client draws its own video tile — a fake still would read as a bug.
+        raise ValueError("Videos are stored without a preview")
     cached = preview_path(scan, entry)
     if cached.is_file():
         os.utime(cached, None)
         return cached.read_bytes()
     cached.parent.mkdir(parents=True, exist_ok=True)
-    if entry["kind"] == "video":
-        from PIL import Image
-        from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
-        image = Image.new("RGB", (320, 180), (45, 45, 45))
-    else:
-        image = thumbnails.generation.load_source_image(
-            entry["path"], THUMB_MAX_EDGE, True,
-            jpeg_extensions=thumbnails.JPEG_EXTENSIONS,
-            raw_extensions=thumbnails.RAW_EXTENSIONS,
-        )
+    image = thumbnails.generation.load_source_image(
+        entry["path"], THUMB_MAX_EDGE, True,
+        jpeg_extensions=thumbnails.JPEG_EXTENSIONS,
+        raw_extensions=thumbnails.RAW_EXTENSIONS,
+    )
     try:
         resized = thumbnails.generation.resize_to_long_side(image, THUMB_MAX_EDGE)
         if resized.mode not in ("RGB", "L"):

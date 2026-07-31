@@ -2273,8 +2273,11 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .imps-cell.suspect .imps-thumb img.ld { opacity: .35; }
 .imps-cell.suspect.on .imps-thumb img.ld { opacity: .75; }
 .imps-badge { position: absolute; bottom: 6px; left: 6px; right: 6px; text-align: center; font-size: var(--fs-micro); color: var(--text-2); background: rgba(0, 0, 0, .55); border-radius: 4px; padding: 2px 4px; pointer-events: none; }
-.imps-kind { position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; display: grid; place-items: center; border-radius: 50%; background: rgba(0, 0, 0, .5); color: var(--text-2); pointer-events: none; }
-.imps-kind i { width: 0; height: 0; border-style: solid; border-width: 5px 0 5px 8px; border-color: transparent transparent transparent currentColor; margin-left: 2px; }
+.imps-video { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: var(--s1); background: var(--card); color: var(--text-3); pointer-events: none; }
+.imps-video .icon { width: 26px; height: 26px; }
+.imps-video b { font-size: var(--fs-micro); font-weight: 600; letter-spacing: .08em; color: var(--text-4); }
+.imps-cell.suspect .imps-video { opacity: .35; }
+.imps-cell.suspect.on .imps-video { opacity: .75; }
 .imps-empty-state[hidden] { display: none; }
 .imps-empty-state { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: var(--s1); color: var(--text-3); padding: var(--s6); }
 .imps-empty-state b { color: var(--text-2); }

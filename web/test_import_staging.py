@@ -122,6 +122,18 @@ class StagedImportTests(BackendTestCase):
         data = staging.thumbnail_bytes(scan, scan.entries[0])
         self.assertEqual(data[:3], b"\xff\xd8\xff")
 
+    async def test_video_entries_have_no_server_preview(self):
+        # Custody-only: no fake grey still, no decode — the client draws the tile.
+        root = Path(self.tempdir.name)
+        source = root / "clip.mp4"
+        source.write_bytes(b"not decoded either way")
+        scan = await self._card_scan(root, [self._entry(root, source)])
+        with self.assertRaises(ValueError):
+            staging.thumbnail_bytes(scan, scan.entries[0])
+        with TestClient(app_module.app) as client:
+            response = client.get(f"/api/import/scan/{scan.id}/thumb/{scan.entries[0]['key']}")
+            self.assertEqual(response.status_code, 422)
+
     async def test_mixed_folder_classifies_itself_from_provenance(self):
         from PIL import Image
 
