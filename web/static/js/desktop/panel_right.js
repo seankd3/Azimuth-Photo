@@ -2,6 +2,7 @@ import {
     byId, on, selection, setRightCollapsed, setScope, viewState,
 } from './state.js';
 import { getImageCaption, getImageExif, saveImageCaption } from './api.js';
+import { closeRightDrawer, openRightDrawer, rightDrawerOpen } from './panel.js';
 import { showToast } from './toast.js';
 import { escapeHtml as esc, formatCount as fmt } from './dom.js';
 
@@ -446,6 +447,16 @@ function renderFocus() {
 }
 
 export function toggleRightPanel() {
+    if (window.matchMedia('(max-width: 880px)').matches) {
+        if (rightDrawerOpen()) {
+            closeRightDrawer();
+            return;
+        }
+        openRightDrawer();
+        // Renders are skipped while collapsed/hidden — refresh on open.
+        if (rightDrawerOpen()) renderSet();
+        return;
+    }
     setRightCollapsed(!viewState.rightCollapsed);
 }
 

@@ -1589,14 +1589,22 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
         z-index: 90; transform: translateX(-100%); transition: transform var(--dur-slow) var(--ease);
         box-shadow: 16px 0 40px rgba(0,0,0,.42);
     }
-    #panel-right { display: none; }
+    #panel-right {
+        display: block; position: fixed; top: var(--topbar-h); bottom: 0; right: 0; width: var(--right-w);
+        z-index: 90; transform: translateX(100%); transition: transform var(--dur-slow) var(--ease);
+        box-shadow: -16px 0 40px rgba(0,0,0,.42);
+    }
+    #shell.right-hidden #panel-right { display: none; }
     #shell.drawer-open #panel-left { transform: translateX(0); }
+    #shell.right-drawer-open #panel-right { transform: translateX(0); }
     #panel-scrim {
         position: fixed; inset: var(--topbar-h) 0 0 0; z-index: 80; background: rgba(0,0,0,.48);
         display: none;
     }
-    #shell.drawer-open #panel-scrim { display: block; }
+    #shell.drawer-open #panel-scrim, #shell.right-drawer-open #panel-scrim { display: block; }
     #shell.left-collapsed #panel-left { border-right: 1px solid var(--line); overflow-y: auto; }
+    #shell.right-collapsed #panel-right { border-left: 1px solid var(--line); overflow-y: auto; }
+    #shell.right-collapsed #panel-right .right-inner { visibility: visible; }
     .edge-btn { display: none; }
     .brand { flex-basis: auto; }
     #top-right { flex-basis: auto; }
@@ -1637,6 +1645,14 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #view-switch [data-view="develop"][aria-disabled="true"] { color: var(--text-3); }
 #view-develop.active { display: block; width: 100%; height: 100%; }
 .develop-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; width: 100%; height: 100%; min-height: 0; background: var(--surface-raised); }
+@media (max-width: 1050px) {
+    .develop-layout { grid-template-columns: minmax(0, 1fr) 264px; }
+    #develop-presets { display: none; }
+}
+@media (max-width: 880px) {
+    .develop-layout { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 42vh); }
+    #develop-right { border-left: 0; border-top: 1px solid var(--line); }
+}
 .develop-workspace { display: grid; grid-template-rows: 42px minmax(0, 1fr) 88px; min-width: 0; min-height: 0; }
 #develop-toolbar { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 5px 10px; border-bottom: 1px solid var(--line); background: var(--surface-chrome); }
 #develop-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: var(--r-ctl); color: var(--text-2); font-size: 11px; background: transparent; }
