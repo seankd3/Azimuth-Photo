@@ -142,6 +142,11 @@ a blend, and record the answer as a new dated row. Ask the same way when a
 statement is too ambiguous to build from. Unresolved contradictions live in
 `MASTER_PLAN.md` section 4 and block work on the area they affect.
 
+- A merge to `main` that changes product behavior is not finished until the
+  installed Windows desktop app is rebuilt and reinstalled
+  (`scripts/build_windows_desktop.ps1`), so the owner is never testing a stale
+  bundle. Coordinate across sessions so exactly one rebuild runs per batch.
+
 ## Handoff
 
 Finish with the user-visible outcome, files changed, exact verification
