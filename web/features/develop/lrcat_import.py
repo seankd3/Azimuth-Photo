@@ -42,6 +42,7 @@ _CURVE_PREFIX = "ToneCurvePV2012"
 _status_lock = threading.Lock()
 _status: dict[str, Any] = {
     "running": False,
+    "dry_run": False,
     "catalogs": 0,
     "images": 0,
     "matched": 0,
@@ -58,13 +59,13 @@ def import_status() -> dict[str, Any]:
         return result
 
 
-def begin_scan() -> bool:
+def begin_scan(dry_run: bool = False) -> bool:
     """Claim the LRCAT importer before its background task is scheduled."""
 
     with _status_lock:
         if _status["running"]:
             return False
-        _status.update(running=True, catalogs=0, images=0, matched=0, errors=0, current="", results=[])
+        _status.update(running=True, dry_run=dry_run, catalogs=0, images=0, matched=0, errors=0, current="", results=[])
         return True
 
 
@@ -507,7 +508,7 @@ def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict
 def scan_catalogs(paths: Iterable[str], db_path: str, *, dry_run: bool = False, claimed: bool = False) -> list[dict[str, Any]]:
     """Run selected catalogs serially so each temporary copy is released quickly."""
 
-    if not claimed and not begin_scan():
+    if not claimed and not begin_scan(dry_run=dry_run):
         return []
     results: list[dict[str, Any]] = []
     try:
