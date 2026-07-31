@@ -95,6 +95,40 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn(guard, history)
         self.assertLess(history.index(guard), history.index("controller.setHistory(fresh);"))
 
+    def test_develop_right_rail_and_filmstrip_collapse_with_persisted_state(self):
+        template = (WEB / "templates" / "desktop.html").read_text(encoding="utf-8")
+        state = read("state.js")
+        develop = read("develop", "develop.js")
+        css = (WEB / "static" / "desktop.css").read_text(encoding="utf-8")
+
+        # Whole-panel collapse controls exist on both develop panels.
+        self.assertIn('id="develop-collapse-right"', template)
+        self.assertIn('id="develop-collapse-filmstrip"', template)
+
+        # Same persistence mechanism as the library panels: localStorage-backed
+        # viewState flags with dedicated setters that emit toggle events.
+        self.assertIn("const DEVELOP_RIGHT_KEY = 'pa_d_develop_right_collapsed';", state)
+        self.assertIn("const DEVELOP_FILMSTRIP_KEY = 'pa_d_develop_filmstrip_collapsed';", state)
+        self.assertIn("export function setDevelopRightCollapsed(", state)
+        self.assertIn("export function setDevelopFilmstripCollapsed(", state)
+
+        # Develop applies the persisted state at bind time and refits the
+        # canvas whenever a panel toggles.
+        self.assertIn("layout.classList.toggle('right-collapsed', viewState.developRightCollapsed);", develop)
+        self.assertIn("layout.classList.toggle('filmstrip-collapsed', viewState.developFilmstripCollapsed);", develop)
+        self.assertLess(develop.index("on('developrightpanel'"), develop.index("on('selection', updateTabState);"))
+        self.assertIn("on('developfilmstrip'", develop)
+
+        # The canvas reclaims the space: collapsed tracks go to zero.
+        self.assertIn(".develop-layout.right-collapsed { grid-template-columns: 200px minmax(0, 1fr) 0; }", css)
+        self.assertIn(".develop-layout.filmstrip-collapsed .develop-workspace { grid-template-rows: 42px minmax(0, 1fr) 0; }", css)
+
+        # Keyboard parity with the library panels: ] toggles the right rail,
+        # F toggles the filmstrip, both inside develop's own key map.
+        handler = develop[develop.index("function handleKey(") : develop.index("function handleKeyUp(")]
+        self.assertIn("setDevelopRightCollapsed(!viewState.developRightCollapsed)", handler)
+        self.assertIn("setDevelopFilmstripCollapsed(!viewState.developFilmstripCollapsed)", handler)
+
     def test_develop_status_allows_the_retry_control_to_be_absent(self):
         develop = read("develop", "develop.js")
         start = develop.index("function setStatus(")

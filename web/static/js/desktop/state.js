@@ -4,6 +4,8 @@ import { applyExcludeSources, clearQuietReveal, quietRevealActive } from './quie
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
 const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
+const DEVELOP_RIGHT_KEY = 'pa_d_develop_right_collapsed';
+const DEVELOP_FILMSTRIP_KEY = 'pa_d_develop_filmstrip_collapsed';
 const THUMB_KEY = 'pa_d_thumb_size';
 const PREFS_KEY = 'pa_d_prefs';
 const LENS_KEY = 'pa_d_lens';
@@ -115,6 +117,8 @@ export const viewState = {
     thumbSize: Number(localStorage.getItem(THUMB_KEY) || 176),
     leftCollapsed: localStorage.getItem(PANEL_KEY) === '1',
     rightCollapsed: localStorage.getItem(RIGHT_PANEL_KEY) === '1',
+    developRightCollapsed: localStorage.getItem(DEVELOP_RIGHT_KEY) === '1',
+    developFilmstripCollapsed: localStorage.getItem(DEVELOP_FILMSTRIP_KEY) === '1',
     prefs: readPrefs(),
     focusIndex: 0,
     activeLens: readLens(),
@@ -479,6 +483,18 @@ export function setRightCollapsed(collapsed) {
     viewState.rightCollapsed = Boolean(collapsed);
     localStorage.setItem(RIGHT_PANEL_KEY, viewState.rightCollapsed ? '1' : '0');
     emit('rightpanel', viewState.rightCollapsed);
+}
+
+export function setDevelopRightCollapsed(collapsed) {
+    viewState.developRightCollapsed = Boolean(collapsed);
+    localStorage.setItem(DEVELOP_RIGHT_KEY, viewState.developRightCollapsed ? '1' : '0');
+    emit('developrightpanel', viewState.developRightCollapsed);
+}
+
+export function setDevelopFilmstripCollapsed(collapsed) {
+    viewState.developFilmstripCollapsed = Boolean(collapsed);
+    localStorage.setItem(DEVELOP_FILMSTRIP_KEY, viewState.developFilmstripCollapsed ? '1' : '0');
+    emit('developfilmstrip', viewState.developFilmstripCollapsed);
 }
 
 export function patchPrefs(patch = {}) {

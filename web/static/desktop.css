@@ -1637,7 +1637,16 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 #view-switch [data-view="develop"][aria-disabled="true"] { color: var(--text-3); }
 #view-develop.active { display: block; width: 100%; height: 100%; }
 .develop-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr) 320px; width: 100%; height: 100%; min-height: 0; background: var(--surface-raised); }
-.develop-workspace { display: grid; grid-template-rows: 42px minmax(0, 1fr) 88px; min-width: 0; min-height: 0; }
+.develop-layout.right-collapsed { grid-template-columns: 200px minmax(0, 1fr) 0; }
+.develop-layout.right-collapsed #develop-right { border-width: 0; overflow: visible; }
+.develop-layout.right-collapsed #develop-panels { visibility: hidden; }
+.develop-workspace { position: relative; display: grid; grid-template-rows: 42px minmax(0, 1fr) 88px; min-width: 0; min-height: 0; }
+.develop-layout.filmstrip-collapsed .develop-workspace { grid-template-rows: 42px minmax(0, 1fr) 0; }
+.develop-layout.filmstrip-collapsed #develop-filmstrip { display: none; }
+.strip-edge { top: auto; right: auto; bottom: 81px; left: 50%; width: 76px; height: 14px; transform: translateX(-50%); }
+.strip-edge:not(.ctx-edge)::before { width: 30px; height: 4px; }
+.strip-edge:not(.ctx-edge):hover::before, .strip-edge:not(.ctx-edge):focus-visible::before { width: 46px; height: 4px; }
+.develop-layout.filmstrip-collapsed .strip-edge { bottom: 0; }
 #develop-toolbar { display: flex; align-items: center; gap: 4px; min-width: 0; padding: 5px 10px; border-bottom: 1px solid var(--line); background: var(--surface-chrome); }
 #develop-toolbar button { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; height: 30px; padding: 0 9px; border: 1px solid transparent; border-radius: var(--r-ctl); color: var(--text-2); font-size: 11px; background: transparent; }
 #develop-toolbar button:hover,
@@ -1683,7 +1692,8 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 .develop-thumb.cur img { opacity: 1; }
 .develop-thumb.cur { border-color: #fff; box-shadow: 0 0 0 1px #000; }
 .develop-thumb.not-raw::after { content: "RAW only"; position: absolute; inset: auto 2px 2px; padding: 2px; color: #ddd; font-size: 8px; text-transform: uppercase; background: rgba(0,0,0,.72); }
-#develop-right { min-width: 0; min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--panel); scrollbar-width: thin; }
+#develop-right { position: relative; min-width: 0; min-height: 0; border-left: 1px solid var(--line); background: var(--panel); }
+#develop-panels { height: 100%; overflow-y: auto; scrollbar-width: thin; }
 #develop-panels[inert] { opacity: .48; }
 .develop-section { border-bottom: 1px solid var(--line); }
 .develop-detail-note { margin: 0; padding: 8px 12px 2px; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.35; }
@@ -1870,6 +1880,7 @@ body.develop-active #canvas > .view:not(#view-develop) { display: none !importan
 
 @media (max-width: 1050px) {
     .develop-layout { grid-template-columns: minmax(0, 1fr) 286px; }
+    .develop-layout.right-collapsed { grid-template-columns: minmax(0, 1fr) 0; }
     #develop-presets { display: none; }
     .develop-slider { grid-template-columns: 66px minmax(56px, 1fr) 40px; gap: 5px; }
     .develop-slider-value { width: 40px; }
