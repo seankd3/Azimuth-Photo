@@ -1469,6 +1469,189 @@ class CompareTests(BackendTestCase):
         self.assertGreaterEqual(strategy_draws, 10)
         self.assertLessEqual(strategy_draws, 35)
 
+    async def test_refine_diverse_duel_pairs_most_different_partner(self):
+        image_ids = [1, 2, 3, 4, 5, 6]
+        candidates = [
+            {
+                "id": image_id,
+                "elo": 1200.0,
+                "comparisons": 0,
+                "propagated_updates": 0,
+                "aspect_ratio": 1.5,
+            }
+            for image_id in image_ids
+        ]
+        # Five near-identical images and one outlier: a low-cosine duel must
+        # always surface the outlier, where best_partner would pick a clone.
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.999, 0.045],
+                [0.998, 0.063],
+                [0.997, 0.077],
+                [0.996, 0.089],
+                [0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+        index_by_id = {image_id: idx for idx, image_id in enumerate(image_ids)}
+        context = semantic_pairing.SemanticContext(matrix=matrix, index_by_id=index_by_id)
+
+        async def fake_get_matrix(_model_key=None):
+            return image_ids, matrix
+
+        def fake_get_index(_model_key=None):
+            return dict(index_by_id)
+
+        old_rate = semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE
+        elo_propagation.embed_cache.get_matrix = fake_get_matrix
+        elo_propagation.embed_cache.get_index = fake_get_index
+        semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = 0.0
+        try:
+            random.seed(7)
+            for _ in range(30):
+                sample, pairing_mode = await compare_service._semantic_duel_sample(
+                    candidates,
+                    2,
+                    strategy="diverse",
+                    grid_elo=0,
+                    context=context,
+                )
+                self.assertEqual(pairing_mode, "semantic")
+                pair_ids = {image["id"] for image in sample}
+                self.assertIn(6, pair_ids)
+                left, right = (index_by_id[image_id] for image_id in pair_ids)
+                self.assertLess(float(matrix[left] @ matrix[right]), 0.5)
+        finally:
+            semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
+
+    async def test_refine_duel_pairs_similar_aspect_ratios(self):
+        image_ids = [1, 2, 3, 4]
+        aspects = {1: 1.5, 2: 1.6, 3: 0.6, 4: 0.65}
+        candidates = [
+            {
+                "id": image_id,
+                "elo": 1200.0,
+                "comparisons": 0,
+                "propagated_updates": 0,
+                "aspect_ratio": aspects[image_id],
+            }
+            for image_id in image_ids
+        ]
+        # Cross-aspect images share the highest cosine, so an ungated
+        # best_partner would pair landscape with portrait every round.
+        matrix = np.array(
+            [
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.999, 0.045],
+                [0.045, 0.999],
+            ],
+            dtype=np.float32,
+        )
+        index_by_id = {image_id: idx for idx, image_id in enumerate(image_ids)}
+        context = semantic_pairing.SemanticContext(matrix=matrix, index_by_id=index_by_id)
+
+        old_rate = semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE
+        semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = 0.0
+        try:
+            random.seed(19)
+            for strategy in ("random", "diverse"):
+                if strategy == "diverse":
+                    async def fake_get_matrix(_model_key=None):
+                        return image_ids, matrix
+
+                    def fake_get_index(_model_key=None):
+                        return dict(index_by_id)
+
+                    elo_propagation.embed_cache.get_matrix = fake_get_matrix
+                    elo_propagation.embed_cache.get_index = fake_get_index
+                for _ in range(20):
+                    sample, _pairing_mode = await compare_service._semantic_duel_sample(
+                        candidates,
+                        2,
+                        strategy=strategy,
+                        grid_elo=0,
+                        context=context,
+                    )
+                    self.assertEqual(len(sample), 2)
+                    first, second = (image["aspect_ratio"] for image in sample)
+                    self.assertLessEqual(
+                        max(first, second) / min(first, second),
+                        1.0 + compare_service.DUEL_ASPECT_TOLERANCE,
+                    )
+        finally:
+            semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
+
+    async def test_refine_duel_aspect_falls_back_when_pool_is_thin(self):
+        image_ids = [1, 2]
+        candidates = [
+            {
+                "id": 1,
+                "elo": 1200.0,
+                "comparisons": 0,
+                "propagated_updates": 0,
+                "aspect_ratio": 1.5,
+            },
+            {
+                "id": 2,
+                "elo": 1200.0,
+                "comparisons": 0,
+                "propagated_updates": 0,
+                "aspect_ratio": 0.6,
+            },
+        ]
+        matrix = np.array([[1.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+        context = semantic_pairing.SemanticContext(
+            matrix=matrix,
+            index_by_id={image_id: idx for idx, image_id in enumerate(image_ids)},
+        )
+
+        old_rate = semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE
+        semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = 0.0
+        try:
+            random.seed(3)
+            sample, _pairing_mode = await compare_service._semantic_duel_sample(
+                candidates,
+                2,
+                strategy="random",
+                grid_elo=0,
+                context=context,
+            )
+        finally:
+            semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
+
+        self.assertEqual({image["id"] for image in sample}, {1, 2})
+
+    async def test_refine_duel_strategy_fallback_keeps_aspect_pairing(self):
+        settings.save_settings({"refine_semantic_pairing": False})
+        aspects = {1: 1.5, 2: 1.6, 3: 0.6, 4: 0.65}
+        candidates = [
+            {
+                "id": image_id,
+                "elo": 1200.0,
+                "comparisons": 0,
+                "propagated_updates": 0,
+                "aspect_ratio": aspect,
+            }
+            for image_id, aspect in aspects.items()
+        ]
+
+        random.seed(29)
+        for _ in range(40):
+            sample, pairing_mode = await compare_service._refine_sample(
+                candidates,
+                2,
+                strategy="random",
+            )
+            self.assertEqual(pairing_mode, "strategy")
+            self.assertEqual(len(sample), 2)
+            first, second = (image["aspect_ratio"] for image in sample)
+            self.assertLessEqual(
+                max(first, second) / min(first, second),
+                1.0 + compare_service.DUEL_ASPECT_TOLERANCE,
+            )
+
     async def test_refine_mosaic_keeps_strategy_pairing_with_embeddings(self):
         source = await self._source()
         warm_ids = [
