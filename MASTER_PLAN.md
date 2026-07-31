@@ -78,6 +78,8 @@ global `CLAUDE.md`.
 - `runtime` "Its kinda all a mess and I want to make it so its not a mess and I never have to think too much about it again" — 07-16 · `web/features/imports/taxonomy.py:15`, `web/features/imports/taxonomy.py:387` — Subjective archive cleanliness; settle it by auditing the live library for misplaced trees and unrepaired mess, not from source alone.
 - `superseded 07-31` "person photos is for cellphone shots, Raws are for digital camera raws, exported edits are for well exported edits, and maybe we need another one for film scans." — 07-13 · shipped as four destinations (`web/features/imports/taxonomy.py:39`), superseded by the three-root directive below
 - `open` "I think Edits/ Raws/ and Snapshots/ is the right top ordering these define the image state and desire, Edits are edited images ready for sharing, RAWs/ are camera raws and film tiff scans or astro tiffs etc, and snapshots is cellphone pics that may be raws or jgp or random memes or family photos or facebook takeout data, etc that arent inteded to be edited or shared, but are still nice to browse through quickyl search and manage" — 07-31 · **the taxonomy.** Three roots, not four. The axis is *state and intent*, not file format: `Film Scans` folds into `Raws/` (a scan is a negative), and `Personal Photos` becomes `Snapshots/` with a wider remit (takeout dumps, memes, family photos). Supersedes the 07-13 four-destination split.
+- `open` "Rename the roots, move files" — 07-31 · answering how the three roots reach an archive already filed under the old four: **physically migrate**. `Film Scans/` moves into `Raws/`, `Personal Photos/` into `Snapshots/`. One shape on disk, no legacy trees. This is a destructive pipeline over ~100k filed images, so it is collision-proof before any source deletion, hash-verified as the gate for deleting anything, and verified against the final state rather than an intermediate one. Reconcile with "dont rearrange the files more than you have too" (07-31): the one-time move to the canonical shape is sanctioned; ongoing churn is not.
+- `open` "Ask me when ambiguous" — 07-31 · how import decides between `Snapshots/` and `Raws/`, given the axis is intent rather than format. Auto-file the confident cases from source provenance (`classify_source_kind` already does this), and hold genuinely unclear ones — a DNG from an unrecognised source — in a small review queue. Filing something wrong silently is worse than asking.
 - `superseded 07-31` "on desktop I want 2 simple import buttons, import from card, (raws on external cards get important and sorted into raws) and import film scans (opens file picket to import film scans, often tiffs in a zip or rar file, imported and sorted under film scans automatically)." — 07-29 · shipped (card + film routes in `web/features/imports/routes.py`), but superseded as the destination: asked on 07-31, Sean chose one button now. The two routes stay as the mechanism behind it.
 - `live` "id like the catlog and images to be organized like this D / pictures / lightroom / catolog file and D / pictures / YYYY / (current year images organized yyyy-mm-dd)" — 07-19 · `D:\Pictures\{2026,Lightroom}` verified on disk 07-31
 - **`open`** "id like to retire and remove c/pictures once we have propperly moved everything to its new home" — 07-19 · `C:\Pictures` still holds `2025\`, `Lightroom\`, and loose files. Restated 07-31: *"you never fixed the folders what are pictures?"*
@@ -143,17 +145,49 @@ global `CLAUDE.md`.
 
 ## 2. Derived queue
 
-Only items whose status above is `open` or `partial`. Everything else is either
-already true or has never been checked — checking is itself the first job.
+Everything section 1 says is not done. Ordered by what unblocks the most.
+`runtime` rows are absent on purpose: they need a measurement, not a build, and
+the measurement is listed in the row's own note.
+
+### Blocking product decisions already made
 
 | # | Item | From | Status |
 |---|---|---|---|
-| 1 | Retire and remove `C:\Pictures` after proving every file has a home | 1.4 | `open`, restated twice; 07-31 audit: 9,911/10,689 hash-proven in hub, 778 need homes first |
-| 1b | Edits / Raws / Phone auto-sorted taxonomy — view over the canonical archive + imports physically filed into it | 1.4 | `open`, directive 07-31 |
-| 2 | Diverse refine mode returns visually similar images; fix the sampling so it spans clusters | 1.6 | `open` |
-| 3 | Aspect-ratio matching in Dual (orientation pairing is not the same thing) | 1.6 | `partial` |
-| 4 | One-click invisible import: confirm what of `INVISIBLE_IMPORT.md` actually shipped | 1.4 | `partial` |
-| 5 | Verification sweep: convert §1 `unverified` entries to `live`/`open` | §1 | 60+ entries |
+| 1 | **Three-root taxonomy** `Edits/` `Raws/` `Snapshots/` — state and intent, not format. Film scans fold into Raws; Personal Photos becomes Snapshots | 1.4 | `open`, directive 07-31 |
+| 2 | **Physical migration to the three roots** over ~100k filed images. Collision-proof before any source deletion, hash-verified as the deletion gate, verify the final state not intermediates | 1.4 | `open`, decided 07-31 |
+| 3 | **Ambiguity review queue** at import — auto-file confident cases from provenance, hold unclear ones rather than filing them wrong silently | 1.4 | `open`, decided 07-31 |
+| 4 | **Retire `C:\Pictures`** — 9,911/10,689 hash-proven in hub; 778 still need homes before anything is removed | 1.4 | `open`, restated twice |
+| 5 | **Collapse import to one action.** Detection already works (`classify_source_kind`); this is UI collapse, not classification | 1.4 | `open`, decided 07-31 |
+| 6 | **Two storage modes** — local-only and desktop+server, canonical as a role rather than a drive, chosen at onboarding | 1.3 | `open`, architecture 07-31 |
+
+### Half-built — the dangerous ones
+
+These read as done in any status report and do not survive contact with the app.
+
+| # | Item | From | Status |
+|---|---|---|---|
+| 7 | Free up space is manual; backup works, reclamation never happens on its own | 1.3 | `partial` |
+| 8 | Phone free-up is a no-op — `FreeUpSpace.runIfEnabled` does nothing, and defaults off | 1.7 | `partial` |
+| 9 | No processing on arrival at the hub — files are verified and catalogued, thumbs and AI come later | 1.3 | `partial` |
+| 10 | Read-once is not universal — free-up confirmation and other hash paths re-read originals | 1.3 | `partial` |
+| 11 | Perf history is written to a runtime dir, not logged into commits as asked | 1.2 | `partial` |
+| 12 | No overnight bottleneck loop — the measuring tools exist, the repeating automation does not | 1.2 | `partial` |
+| 13 | LrC migration has no UI — the `lrcat` importer exists but nothing in the app calls it | 1.4 | `partial` |
+| 14 | Hub pairing still asks for a URL and port, so "never think about ports" is not met | 1.3 | `partial` |
+
+### Refine
+
+| # | Item | From | Status |
+|---|---|---|---|
+| 15 | Diverse mode still picks a high-cosine partner, so it serves lookalikes | 1.6 | `open` |
+| 16 | Aspect-ratio matching in Dual — orientation is a filter, not pairing | 1.6 | `open` |
+
+### Publishing
+
+| # | Item | From | Status |
+|---|---|---|---|
+| 17 | Website and app share no styling — the gallery owns its own CSS/JS and shows no app UI | 1.8 | `open` |
+| 18 | No first-publish approval gate; only republish confirms | 1.8 | `partial` |
 
 ## 3. Keeping this file honest
 
