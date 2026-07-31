@@ -109,6 +109,7 @@ Each durable fact has one owner:
 
 - `AGENTS.md` — public agent rules and safety boundaries.
 - `AGENTS.local.md` — ignored installation-specific deployment truth.
+- `MASTER_PLAN.md` — what the user asked for, verbatim, and whether it is done.
 - `docs/TOPOLOGY.md` — portable runtime roles and storage architecture.
 - `docs/development.md` — setup, edit map, and verification commands.
 - `docs/CODEBASE_MAP.md` — module and route ownership.
@@ -117,7 +118,15 @@ Each durable fact has one owner:
 
 Update the owning document instead of adding a new summary. Do not commit
 one-off audits, plans, handoff reports, generated receipts, scratch notes, or
-dated status files. `CLAUDE.md` is only a compatibility pointer to this file.
+dated status files. `MASTER_PLAN.md` is an owner document, not a status file, and
+is never deleted under this rule. `CLAUDE.md` is only a compatibility pointer to
+this file.
+
+When the user states something he wants from the product, record it in
+`MASTER_PLAN.md` section 1 verbatim and dated, in the same session he says it —
+one row per ask, before starting the work. A message carrying several asks gets
+several rows. Do not paraphrase into a task title, and do not delete a row to
+mark it finished; change its status instead.
 
 ## Handoff
 
