@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import gzip
 import json
 import time
@@ -40,13 +41,13 @@ _IMAGE_COLUMNS = {
 _MIRROR_COMMIT_EVERY = 250
 
 
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
+async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, timeout: float = 20) -> tuple[int, dict[str, str], bytes]:
     def request() -> tuple[int, dict[str, str], bytes]:
         request_headers = dict(headers or {})
         request_headers.update(satellite.hub_request_headers())
         req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
         try:
-            with urllib.request.urlopen(req, timeout=20) as response:  # noqa: S310 - configured tailnet hub.
+            with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - configured tailnet hub.
                 return response.status, dict(response.headers), response.read()
         except urllib.error.HTTPError as error:
             return error.code, dict(error.headers or {}), error.read()
@@ -80,6 +81,10 @@ class MirrorPuller:
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
+        # The catalog export is the whole library since the cursor — tens of
+        # MB that a busy hub takes minutes to produce over the tailnet. The
+        # interactive 20s default would abandon every full refresh.
+        self._bulk_request = request or functools.partial(_urllib_request, timeout=600)
         self._status: dict[str, Any] = {
             "cursor": 0,
             "rows_applied": 0,
@@ -97,7 +102,7 @@ class MirrorPuller:
         await ensure_mirror_schema(self.db_path)
         cursor = await self._state_int("cursor")
         query = urlencode({"cursor": cursor})
-        status, _headers, body = await self._request("GET", f"{self.hub}/api/sync/catalog/export?{query}")
+        status, _headers, body = await self._bulk_request("GET", f"{self.hub}/api/sync/catalog/export?{query}")
         if not 200 <= status < 300:
             raise RuntimeError(f"mirror export failed ({status}): {body.decode(errors='replace')[:300]}")
         try:
