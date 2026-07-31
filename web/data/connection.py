@@ -85,7 +85,9 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
     if pool_key is not None:
         idle = _idle_connections.get(pool_key)
         if idle:
-            return idle.pop()
+            conn = idle.pop()
+            conn._azimuth_shelved = False
+            return conn
     effective_timeout = _effective_timeout(timeout)
     conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
     conn.row_factory = aiosqlite.Row
@@ -120,6 +122,7 @@ async def close_shared_readers() -> None:
 # and during boot that queue backs up to 0.6-1.5s per tile (measured 07-30).
 # For sub-millisecond reads the loop itself is the fastest executor there is.
 _inline_readers: dict[str, sqlite3.Connection] = {}
+_inline_unsuitable: set[str] = set()
 
 
 def inline_reader(db_path: str) -> sqlite3.Connection:
@@ -134,6 +137,8 @@ def inline_reader(db_path: str) -> sqlite3.Connection:
     conn = _inline_readers.get(db_path)
     if conn is not None:
         return conn
+    if db_path in _inline_unsuitable:
+        raise sqlite3.OperationalError(f"catalog is not WAL: {db_path}")
     conn = sqlite3.connect(
         f"file:{db_path}?mode=ro",
         uri=True,
@@ -145,6 +150,13 @@ def inline_reader(db_path: str) -> sqlite3.Connection:
         conn.execute("PRAGMA mmap_size=268435456")
     except Exception:
         pass
+    # Only WAL catalogs are safe to read on the loop — anywhere else a busy
+    # writer blocks readers, and the loop must never inherit that wait.
+    mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+    if str(mode).lower() != "wal":
+        conn.close()
+        _inline_unsuitable.add(db_path)
+        raise sqlite3.OperationalError(f"catalog is not WAL: {db_path}")
     _inline_readers[db_path] = conn
     return conn
 
@@ -242,12 +254,21 @@ def close_sync(conn: sqlite3.Connection, *, db_path: str | None = None) -> None:
 
 async def close_async(conn, *, db_path: str | None = None) -> None:
     pool_key = getattr(conn, "_azimuth_pool_key", None)
-    if pool_key is not None:
+    if pool_key is not None and not getattr(conn, "_azimuth_shelved", False):
         try:
             if conn.in_transaction:
                 await conn.rollback()
+            # Temp tables used to die with the connection; a shelved
+            # connection must not carry one caller's staging into the next
+            # (filter facets CREATE TEMP TABLE and rely on it being gone).
+            cursor = await conn.execute(
+                "SELECT name FROM sqlite_temp_master WHERE type='table'"
+            )
+            for (name,) in await cursor.fetchall():
+                await conn.execute(f'DROP TABLE temp."{name}"')
             idle = _idle_connections.setdefault(pool_key, [])
             if len(idle) < _POOL_MAX_IDLE:
+                conn._azimuth_shelved = True
                 idle.append(conn)
                 return
         except Exception:
