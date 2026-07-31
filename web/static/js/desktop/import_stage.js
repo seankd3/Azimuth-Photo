@@ -128,7 +128,10 @@ function renderSources() {
     els.sources.innerHTML = (cards.length
         ? `<h3>Cards</h3>${cards.map(sourceRowHtml).join('')}`
         : '<h3>Cards</h3><div class="imps-rail-empty">No card detected</div>')
-        + `<h3>Folders</h3>${roots.map(sourceRowHtml).join('')}`;
+        + `<h3>Folders</h3>${roots.map(sourceRowHtml).join('')}`
+        // One Import entry in the chrome; film scans stay reachable as a source here.
+        + `<h3>Film scans</h3><button class="imps-source ${source?.kind === 'film' ? 'active' : ''}" data-film="1">`
+        + `${icon('archive')}<span class="imps-source-text"><b>${source?.kind === 'film' ? esc(source.label) : 'Choose ZIP or TIFF…'}</b></span></button>`;
 }
 
 async function toggleDir(path) {
@@ -404,7 +407,7 @@ function syncFilterSeg() {
 
 function syncStatus() {
     if (!source) {
-        els.status.textContent = 'Choose a card or folder to stage photos.';
+        els.status.textContent = 'Choose a card, folder, or film scans to stage photos.';
     } else if (scanStatus === 'scanning') {
         els.status.textContent = `Scanning ${source.label}… ${fmt(entries.length)} found`;
     } else if (scanStatus === 'error') {
@@ -439,6 +442,14 @@ function syncCommit() {
         const dominant = [...byCategory.entries()].sort((a, b) => b[1] - a[1])[0];
         els.category.options[0].text = dominant && !categoryOverride
             ? `Auto — ${CATEGORY_TREES[dominant[0]] || 'Raws'}` : 'Auto';
+    }
+    // "Ask me when ambiguous": the override only surfaces when detection could
+    // not settle a staged file (source_kind unknown). The answer applies to the
+    // whole source and is remembered server-side, so it never asks again.
+    if (els.asWrap) {
+        const unclear = staged.filter((entry) => entry.source_kind === 'unknown').length;
+        els.asWrap.hidden = source?.kind === 'film' || (!unclear && !categoryOverride);
+        els.asText.textContent = unclear ? `${fmt(unclear)} unclear — file source as` : 'file source as';
     }
     els.commit.disabled = !staged.length || committing || validating
         || scanStatus === 'scanning' || scanStatus === 'error'; // server rejects non-done scans
@@ -658,6 +669,8 @@ export function initImportStage() {
         keywords: root.querySelector('#imps-keywords'),
         destination: root.querySelector('#imps-destination'),
         summary: root.querySelector('#imps-summary'),
+        asWrap: root.querySelector('#imps-as'),
+        asText: root.querySelector('#imps-as-text'),
         category: root.querySelector('#imps-category'),
         commit: root.querySelector('#imps-commit'),
         peek: document.getElementById('import-peek'),
@@ -680,12 +693,15 @@ export function initImportStage() {
     }, { root: els.scroll, rootMargin: '900px' });
     sentinelObserver.observe(els.sentinel);
 
+    const filmInput = document.getElementById('import-film-file');
+    const pickFilmFiles = () => filmInput?.click();
     root.querySelector('#imps-close').addEventListener('click', () => closeImport());
     els.sources.addEventListener('click', (event) => {
         const twist = event.target.closest('[data-twist]');
         if (twist) { event.stopPropagation(); toggleDir(twist.dataset.twist); return; }
         const row = event.target.closest('.imps-source');
         if (!row) return;
+        if (row.dataset.film) { pickFilmFiles(); return; }
         const path = row.dataset.path;
         const known = sources.find((candidate) => candidate.path === path);
         selectSource(known || { id: `root:${path}`, kind: 'root', label: row.dataset.label || path.split('/').pop() || path, path });
@@ -722,9 +738,6 @@ export function initImportStage() {
 
     els.peek?.addEventListener('click', openImport);
     document.getElementById('import-view')?.addEventListener('click', openImport);
-    const filmInput = document.getElementById('import-film-file');
-    const pickFilmFiles = () => filmInput?.click();
-    document.getElementById('import-film')?.addEventListener('click', pickFilmFiles);
     filmInput?.addEventListener('change', () => {
         const files = [...(filmInput.files || [])];
         filmInput.value = ''; // picking the same archive again must re-fire change
