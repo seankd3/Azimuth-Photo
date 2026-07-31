@@ -10,19 +10,15 @@ from data.repositories import rankings as ranking_repository
 
 CachedImageIdsProvider = Callable[[list[int], str, str], Awaitable[set[int]]]
 _cached_image_ids_provider: CachedImageIdsProvider | None = None
-_star_thresholds: dict[int, int] = ranking_repository.STAR_THRESHOLDS
 
 
 def configure(
     *,
     cached_image_ids: CachedImageIdsProvider | None = None,
-    star_thresholds: dict[int, int] | None = None,
 ) -> None:
-    global _cached_image_ids_provider, _star_thresholds
+    global _cached_image_ids_provider
     if cached_image_ids is not None:
         _cached_image_ids_provider = cached_image_ids
-    if star_thresholds is not None:
-        _star_thresholds = star_thresholds
 
 
 def _configured(provider, name: str):
@@ -139,8 +135,8 @@ def filter_compare_mosaic_candidates(
     elif compared == "confident":
         candidates = [c for c in candidates if _as_int(c.get("comparisons")) >= 10]
     if min_stars > 0:
-        threshold = _star_thresholds.get(min_stars, 0)
-        candidates = [c for c in candidates if _as_float(c.get("elo"), 1200.0) >= threshold]
+        # Stored Elo projection (images.stars) — matches the grid filter SQL.
+        candidates = [c for c in candidates if _as_int(c.get("stars")) >= min_stars]
     if folder:
         candidates = [c for c in candidates if f"/{folder}/" in c.get("filepath", "")]
     if flag in ("picked", "unflagged", "rejected"):

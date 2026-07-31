@@ -70,6 +70,7 @@ def image_card(
         "elo": _rounded_elo(_get(image, "elo") if elo_value is _MISSING else elo_value),
         "comparisons": _as_int(_get(image, "comparisons")),
         "propagated_updates": _as_int(_get(image, "propagated_updates")),
+        "stars": _as_int(_get(image, "stars")),
         "status": _get(image, "status") or "kept",
         "flag": _get(image, "flag") or "unflagged",
         "aspect_ratio": _as_float(_get(image, "aspect_ratio"), 1.5) or 1.5,

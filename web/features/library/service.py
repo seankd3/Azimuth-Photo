@@ -560,10 +560,9 @@ def _blend_card_kwargs(data: dict, blend_context: dict) -> dict:
 def _passes_blended_star_filter(data: dict, min_stars: int) -> bool:
     if min_stars <= 0:
         return True
-    threshold = ranking_repository.STAR_THRESHOLDS.get(int(min_stars or 0))
-    if threshold is None:
-        return True
-    return float(data.get("_display_score") or data.get("elo") or 1200.0) >= threshold
+    # Stored Elo projection (images.stars) — the taste blend reorders but the
+    # star band a photo belongs to never depends on the blend.
+    return int(data.get("stars") or 0) >= int(min_stars)
 
 
 def _normalized_import_batch_id(value) -> int:
