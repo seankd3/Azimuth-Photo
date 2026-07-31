@@ -14,7 +14,7 @@ from urllib.parse import urlencode
 from core import cache_events
 from data import connection
 from data.repositories import catalog as catalog_repository
-from features.sync import family_clock, satellite
+from features.sync import elo_stars, family_clock, satellite
 from features.sync.develop_merge import preserve_local_rating
 from features.sync.executor import run_sync_work
 from features.trash import service as trash_service
@@ -140,6 +140,8 @@ class MirrorPuller:
         if applied > 0:
             cache_events.invalidate_stats_cache()
             trash_service.invalidate_pending_hub_trash_refs(self.db_path)
+            # Mirrored rows carry hub Elo; re-persist the local star projection.
+            elo_stars.schedule_stored_stars_refresh(self.db_path)
 
         self._status.update(
             cursor=new_cursor,
