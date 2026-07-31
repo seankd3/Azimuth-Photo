@@ -30,17 +30,21 @@ def _assert_scope_menu(qa, anchor, *, reveal_available: bool, expect_rescan: boo
         assert "Rescan" in text
 
 
+# A mirrored library contributes plain folders, so its rows carry no source id.
+MIRRORED_LIBRARY_ROOT = "#folder-tree .folder-source-row[data-source-id='0']"
+
+
 def source_context_menu(qa) -> None:
     qa.goto_desktop()
-    qa.mark("right-click local and hub folder roots; only local folders offer Explorer; sources offer Rescan")
-    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False, expect_rescan=True)
+    qa.mark("right-click mirrored and local folder roots; only local folders offer Explorer and Rescan")
+    _assert_scope_menu(qa, qa.page.locator(MIRRORED_LIBRARY_ROOT).first, reveal_available=False)
     _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True, expect_rescan=True)
 
 
 def folder_context_menu(qa) -> None:
     qa.goto_desktop()
-    qa.mark("right-click local and hub folder roots; only local folders offer Explorer")
-    _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path='hub://']"), reveal_available=False, expect_rescan=True)
+    qa.mark("right-click mirrored and local folder roots; only local folders offer Explorer")
+    _assert_scope_menu(qa, qa.page.locator(MIRRORED_LIBRARY_ROOT).first, reveal_available=False)
     _assert_scope_menu(qa, qa.page.locator("#folder-tree [data-folder-source-path]").filter(has_text="QA Primary"), reveal_available=True, expect_rescan=True)
 
 

@@ -1003,7 +1003,10 @@ def folder_directory_counts_by_source(db_path: str, source_ids: list[int]) -> di
                 "AND filename IS NOT NULL "
                 "AND filename != '' "
                 "GROUP BY source_id, directory",
-                (os.sep, *chunk),
+                # Trim both separators: a mirrored library stores the paths of
+                # the machine that holds the originals, which need not match
+                # this one.
+                ("/\\", *chunk),
             ).fetchall()
             for source_id, directory, count in rows:
                 directory_counts = counts_by_source.setdefault(int(source_id), {})

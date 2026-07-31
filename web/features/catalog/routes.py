@@ -673,7 +673,85 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
     return {"folders": folders, "root": root}
 
 
-def parts_under_source(source_path: str, directory: str) -> list[str]:
+_PATH_SYNTAX_NAMES = frozenset({"", os.curdir, os.pardir, ".", ".."})
+
+
+def folder_name_segments(path: str) -> list[str]:
+    """Folder names in *path*, separator-agnostic and free of path syntax.
+
+    Never returns ``.``, ``..`` or an empty name: those are path grammar, not
+    folders, and must never reach the library.
+    """
+
+    return [
+        part
+        for part in str(path or "").replace("\\", "/").split("/")
+        if part not in _PATH_SYNTAX_NAMES
+    ]
+
+
+def namespace_directory(source_path: str, directory: str) -> str:
+    """A namespace source's directory with the namespace itself removed.
+
+    ``hub://`` is a library name, not a folder. When a row records it inline
+    (``hub://archive/2024``) the scheme comes off before anything is read as a
+    folder name.
+    """
+
+    text = str(directory or "")
+    prefix = str(source_path or "")
+    if prefix and text.startswith(prefix):
+        return text[len(prefix):]
+    # A row can also carry the namespace with its slashes collapsed
+    # ("hub:/archive/2024"). The scheme is still plumbing, not a folder.
+    scheme = prefix.split("/", 1)[0]
+    segments = folder_name_segments(text)
+    if scheme.endswith(":") and segments[:1] == [scheme]:
+        return "/".join(segments[1:])
+    return text
+
+
+def library_namespace_root(source_path: str, directories) -> str:
+    """The folder a mirrored library hangs from.
+
+    A namespace source such as ``hub://`` names a library, not a place on this
+    machine: its rows record directories from the machine that holds the
+    originals. There is no local root to subtract, so the library's own common
+    ancestor becomes the root and the folders below it become the library.
+    """
+
+    listed = [namespace_directory(source_path, directory) for directory in directories]
+    segmented = [segments for segments in map(folder_name_segments, listed) if segments]
+    if not segmented:
+        return ""
+    root = segmented[0]
+    for segments in segmented[1:]:
+        shared = 0
+        while shared < min(len(root), len(segments)) and root[shared] == segments[shared]:
+            shared += 1
+        root = root[:shared]
+        if not root:
+            break
+    # Photos sitting directly in the root would lose their folder once the
+    # root's children become the library's top level. Back off one folder so
+    # they keep a named home.
+    while root and any(segments == root for segments in segmented):
+        root = root[:-1]
+    lead = "/" if any(path.replace("\\", "/").startswith("/") for path in listed) else ""
+    return lead + "/".join(root)
+
+
+def parts_under_source(source_path: str, directory: str, *, library_root: str = "") -> list[str]:
+    if not catalog_reveal.source_has_local_folders(source_path):
+        # A namespace source's directories live on another machine. Normalizing
+        # them against this machine's working directory is what turned a whole
+        # mirrored library into folders literally named "..".
+        segments = folder_name_segments(namespace_directory(source_path, directory))
+        root_segments = folder_name_segments(library_root)
+        if root_segments and segments[:len(root_segments)] == root_segments:
+            return segments[len(root_segments):]
+        return segments
+
     source_root = catalog_repository.normalize_source_path(source_path).rstrip(os.sep)
     current = catalog_repository.normalize_source_path(directory or source_path).rstrip(os.sep)
     if not source_root:
@@ -685,10 +763,22 @@ def parts_under_source(source_path: str, directory: str) -> list[str]:
         rel = current[len(root_prefix):]
     else:
         rel = safe_relpath(current, source_root) or ""
-    return [part for part in rel.split(os.sep) if part and part != "."]
+    parts = [part for part in rel.split(os.sep) if part and part != os.curdir]
+    # A directory on the same drive but outside the source root relativises to
+    # something that climbs out, like "../../Pictures". Those segments are not
+    # folder names. A directory we cannot express beneath the source belongs to
+    # its root, which is already how a cross-drive path is handled.
+    if any(part in _PATH_SYNTAX_NAMES for part in parts):
+        return []
+    return parts
 
 
-def folder_path_for_parts(source_path: str, parts: list[str]) -> str:
+def folder_path_for_parts(source_path: str, parts: list[str], *, library_root: str = "") -> str:
+    if not catalog_reveal.source_has_local_folders(source_path):
+        base = str(library_root or "").rstrip("/")
+        if not parts:
+            return base
+        return f"{base}/{'/'.join(parts)}" if base else "/".join(parts)
     if not parts:
         return catalog_repository.normalize_source_path(source_path)
     return os.path.join(catalog_repository.normalize_source_path(source_path), *parts)
@@ -700,11 +790,12 @@ def make_folder_node(
     *,
     source_id: int = 0,
     reveal_available: bool = True,
+    library_root: str = "",
 ) -> dict:
-    path = folder_path_for_parts(source_path, parts)
+    path = folder_path_for_parts(source_path, parts, library_root=library_root)
     return {
         "path": path,
-        "name": os.path.basename(path.rstrip(os.sep)) or path,
+        "name": (folder_name_segments(path) or [path])[-1],
         "source_id": source_id,
         "reveal_available": reveal_available,
         "count": 0,
@@ -716,6 +807,9 @@ def make_folder_node(
 
 def serialize_folder_node(node: dict) -> dict | None:
     if int(node.get("total_count") or 0) <= 0:
+        return None
+    # Last line of defence: path grammar is never a folder a user can see.
+    if str(node.get("name") or "") in _PATH_SYNTAX_NAMES:
         return None
     children = []
     for child in sorted(
@@ -749,17 +843,24 @@ def build_folder_tree_payload_from_rows(
         source_id = int(source.get("id") or 0)
         source_path = source.get("path") or ""
         reveal_available = catalog_reveal.source_has_local_folders(source_path)
+        directory_counts = directory_counts_by_source.get(source_id, {})
+        # A namespace source (a mirrored hub library) is not a place; it is the
+        # library. Its folders join the catalog at the top level instead of
+        # hanging under a branch named after the plumbing.
+        library_namespace = not reveal_available
+        library_root = library_namespace_root(source_path, directory_counts) if library_namespace else ""
         root = make_folder_node(
             source_path,
             [],
             source_id=source_id,
             reveal_available=reveal_available,
+            library_root=library_root,
         )
-        for directory, raw_count in directory_counts_by_source.get(source_id, {}).items():
+        for directory, raw_count in directory_counts.items():
             count = int(raw_count or 0)
             if count <= 0:
                 continue
-            parts = parts_under_source(source_path, directory)
+            parts = parts_under_source(source_path, directory, library_root=library_root)
             capped_parts = parts[:capped_depth]
             root["total_count"] += count
             if not parts:
@@ -776,6 +877,7 @@ def build_folder_tree_payload_from_rows(
                         capped_parts[:depth + 1],
                         source_id=source_id,
                         reveal_available=reveal_available,
+                        library_root=library_root,
                     )
                     node["_children_by_name"][name] = child
                 child["total_count"] += count
@@ -789,6 +891,7 @@ def build_folder_tree_payload_from_rows(
             "display_name": source.get("display_name") or catalog_repository.source_display_name(source_path),
             "online": bool(source.get("online")),
             "reveal_available": reveal_available,
+            "library_namespace": library_namespace,
             "count": int(root["count"] or 0),
             "total_count": int(root["total_count"] or 0),
             "folders": [

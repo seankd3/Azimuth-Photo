@@ -23,7 +23,8 @@ def grid_offline_thumbs(qa) -> None:
 
     qa.mark("open the dead-hub source and resolve thumbnail cells to offline placeholders")
     qa.page.route("**/api/thumb/sm/**", lambda route: route.fulfill(status=204))
-    qa.page.locator("#folder-tree [data-folder-source-path='hub://'] .folder-main").click()
+    # A mirrored library contributes plain folders, so its rows carry no source id.
+    qa.page.locator("#folder-tree .folder-source-row[data-source-id='0'] .folder-main").first.click()
     qa.page.locator("#grid-flow .cell[data-id]").first.wait_for(state="visible")
     qa.page.wait_for_function(
         """() => {

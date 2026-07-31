@@ -3000,6 +3000,108 @@ class LibraryTests(BackendTestCase):
         self.assertFalse(source["folders"][0]["reveal_available"])
         self.assertEqual(source["folders"][0]["source_id"], 7)
 
+    def test_folder_tree_never_names_a_folder_after_path_syntax(self):
+        # A folder row called "." or ".." is path grammar leaking into the
+        # product. Whatever a catalog row records, no such name may be emitted.
+        sources = [
+            {"id": 1, "path": "hub://", "display_name": "Hub library", "online": 1},
+            {"id": 2, "path": os.path.abspath("/archive/main"), "display_name": "Main", "online": 1},
+        ]
+        counts = {
+            1: {"/mnt/expansion/Photos/RAWS/2024": 3, "/mnt/expansion/Photos/Scans": 2},
+            2: {
+                os.path.abspath("/archive/main/Family"): 4,
+                os.path.abspath("/archive/elsewhere/Pictures"): 1,
+            },
+        }
+
+        result = catalog_routes.build_folder_tree_payload_from_rows(sources, counts)
+
+        names = []
+
+        def collect(nodes):
+            for node in nodes:
+                names.append(node["name"])
+                collect(node["children"])
+
+        for source in result["sources"]:
+            collect(source["folders"])
+        self.assertTrue(names)
+        for name in names:
+            self.assertNotIn(name, ("", ".", ".."))
+
+    def test_parts_under_source_never_climbs_out_of_the_source(self):
+        source = os.path.abspath("/archive/main")
+        outside = os.path.abspath("/archive/elsewhere/Pictures")
+        self.assertEqual(catalog_routes.parts_under_source(source, outside), [])
+        inside = os.path.abspath("/archive/main/Family/Trip")
+        self.assertEqual(catalog_routes.parts_under_source(source, inside), ["Family", "Trip"])
+
+    def test_mirrored_library_folders_replace_the_namespace_branch(self):
+        # The hub mirror's source path is a library name, not a folder. Its
+        # own folders are the library, so they must arrive as real, scopable
+        # top-level folders instead of a branch named after the plumbing.
+        result = catalog_routes.build_folder_tree_payload_from_rows(
+            [{"id": 3, "path": "hub://", "display_name": "Hub library", "online": 1}],
+            {
+                3: {
+                    "/mnt/expansion/Photos/RAWS/2024": 5,
+                    "/mnt/expansion/Photos/RAWS/2025": 7,
+                    "/mnt/expansion/Photos/Scans": 2,
+                },
+            },
+        )
+
+        source = result["sources"][0]
+        self.assertTrue(source["library_namespace"])
+        self.assertEqual(source["total_count"], 14)
+        # Nothing is stranded on the namespace itself.
+        self.assertEqual(source["count"], 0)
+        self.assertEqual([folder["name"] for folder in source["folders"]], ["RAWS", "Scans"])
+        raws = source["folders"][0]
+        self.assertEqual(raws["path"], "/mnt/expansion/Photos/RAWS")
+        self.assertEqual(raws["total_count"], 12)
+        self.assertEqual([child["name"] for child in raws["children"]], ["2024", "2025"])
+
+    def test_local_sources_still_present_as_their_own_folder(self):
+        result = catalog_routes.build_folder_tree_payload_from_rows(
+            [{"id": 4, "path": os.path.abspath("/archive/main"), "display_name": "Main", "online": 1}],
+            {4: {os.path.abspath("/archive/main/Family"): 2}},
+        )
+
+        source = result["sources"][0]
+        self.assertFalse(source["library_namespace"])
+        self.assertEqual([folder["name"] for folder in source["folders"]], ["Family"])
+
+    def test_mirrored_library_root_keeps_photos_that_sit_in_it(self):
+        # If every folder shares an ancestor that also holds photos directly,
+        # that ancestor must stay a folder or those photos lose their home.
+        result = catalog_routes.build_folder_tree_payload_from_rows(
+            [{"id": 5, "path": "hub://", "display_name": "Hub library", "online": 1}],
+            {5: {"/srv/library": 3, "/srv/library/Trips": 4}},
+        )
+
+        source = result["sources"][0]
+        self.assertEqual(source["count"], 0)
+        self.assertEqual([folder["name"] for folder in source["folders"]], ["library"])
+        library = source["folders"][0]
+        self.assertEqual(library["path"], "/srv/library")
+        self.assertEqual(library["count"], 3)
+        self.assertEqual(library["total_count"], 7)
+        self.assertEqual([child["name"] for child in library["children"]], ["Trips"])
+
+    def test_inline_namespace_prefix_is_not_a_folder_name(self):
+        for recorded in ("hub://archive/{}", "hub:/archive/{}"):
+            with self.subTest(recorded=recorded):
+                result = catalog_routes.build_folder_tree_payload_from_rows(
+                    [{"id": 6, "path": "hub://", "display_name": "Hub library", "online": 1}],
+                    {6: {recorded.format("2024"): 2, recorded.format("2025"): 3}},
+                )
+
+                folders = result["sources"][0]["folders"]
+                self.assertEqual([folder["name"] for folder in folders], ["2024", "2025"])
+                self.assertEqual(folders[0]["path"], "archive/2024")
+
     async def test_absolute_nested_folder_scope_matches_subtree(self):
         source = await self._source("scope-source")
         paths = [

@@ -244,13 +244,6 @@ body.loupe-lights-out #ctxbar { display: none; }
 .nr-tag { font-size: var(--fs-micro); text-transform: uppercase; letter-spacing: var(--ls-tag); color: var(--warn); border: 1px solid rgba(212,160,79,.35); padding: 0 4px; border-radius: 3px; }
 .folder-source-row.is-quiet { opacity: 0.58; }
 .folder-source-row.is-quiet .folder-count { font-style: italic; }
-.source-quiet-toggle { width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: var(--r-ctl); color: var(--text-3); opacity: 0; pointer-events: none; }
-.folder-source-row:hover .source-quiet-toggle,
-.folder-source-row:focus-within .source-quiet-toggle,
-.source-quiet-toggle:focus-visible { opacity: 1; pointer-events: auto; }
-.source-quiet-toggle:hover,
-.source-quiet-toggle[aria-pressed="true"] { color: var(--text); background: rgba(255,255,255,.06); }
-.source-quiet-toggle[aria-pressed="true"] { opacity: 1; pointer-events: auto; }
 .quiet-source-note,
 .quiet-search-note { margin: 8px 12px 0; font-size: 12px; color: var(--text-3); }
 .quiet-search-note button { color: var(--accent); text-decoration: underline; margin-left: 4px; }
@@ -262,7 +255,7 @@ body.loupe-lights-out #ctxbar { display: none; }
 .folder-source { margin: 5px 0 2px; }
 .folder-source:first-child { margin-top: 0; }
 .folder-source-row, .folder-row { width: 100%; min-height: 30px; display: flex; align-items: center; gap: 9px; padding: 6px 8px; border-radius: var(--r-ctl); color: var(--text-2); position: relative; text-align: left; font-size: 13px; transition: background var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease); }
-.folder-source-row { font-weight: 600; padding-right: 2px; gap: 2px; }
+.folder-source-row { font-weight: 600; gap: 2px; }
 .folder-source-row > .folder-expander { margin-right: 7px; }
 .folder-row { padding-left: calc(8px + (var(--folder-level, 0) * 14px)); }
 .folder-row::before { content: ""; position: absolute; left: calc(17px + (var(--folder-level, 0) * 14px)); top: -2px; bottom: -2px; width: 1px; background: rgba(255,255,255,.035); }

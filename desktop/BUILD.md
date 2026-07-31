@@ -52,6 +52,26 @@ Use a Windows account with no existing Azimuth Photo data:
 App data belongs under `%LOCALAPPDATA%\Azimuth Photo` and
 `%APPDATA%\Azimuth Photo`. Originals remain in the selected folders.
 
+## Open an existing library
+
+A first install keeps its own data under `%LOCALAPPDATA%\Azimuth Photo`. A
+person who already has a library keeps that library instead: write a pointer
+file at `%APPDATA%\Azimuth Photo\library.json` before the first launch.
+
+```json
+{
+  "data_root": "C:\\Azimuth Photo",
+  "mode": "satellite",
+  "preview_root": "C:\\Azimuth Photo\\thumbs"
+}
+```
+
+All three fields are optional. Each field that is present replaces one engine
+default: `data_root` selects the library folder, `mode` selects `standalone`,
+`satellite`, or `hub`, and `preview_root` selects the preview cache. A missing,
+empty, or damaged pointer file keeps the packaged defaults, so a bad edit can
+never stop the app from starting.
+
 ## Developer override
 
 A developer may run the shell against another frozen engine by setting

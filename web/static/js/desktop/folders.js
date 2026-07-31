@@ -12,6 +12,7 @@ import { icon } from '../icons.js';
 const EXPANDED_KEY = 'pa_d_folder_expanded';
 
 let sources = [];
+let roots = [];
 let expanded = readExpanded();
 let closeDrawer = () => {};
 let menu = null;
@@ -61,9 +62,41 @@ function normalizeSource(source) {
         display_name: source?.display_name || leafName(source?.path),
         online: Boolean(source?.online),
         reveal_available: source?.reveal_available !== false,
+        library_namespace: Boolean(source?.library_namespace),
         total_count: Number(source?.total_count || 0),
         folders: Array.isArray(source?.folders) ? source.folders : [],
     };
+}
+
+/**
+ * The library as one catalog, not a map of where bytes live.
+ *
+ * A source that is a library namespace (a mirrored hub library) has no place
+ * on this machine to stand for: its folders are the library, so they join the
+ * top level beside the folders of the sources that do live here.
+ */
+function libraryRoots(list) {
+    const out = [];
+    for (const source of list) {
+        if (!source.library_namespace) {
+            out.push(source);
+            continue;
+        }
+        for (const folder of source.folders) {
+            out.push({
+                id: 0,
+                source_id: source.id,
+                path: folder.path,
+                display_name: folder.name || leafName(folder.path),
+                online: source.online,
+                reveal_available: folder.reveal_available !== false,
+                total_count: Number(folder.total_count || 0),
+                folders: Array.isArray(folder.children) ? folder.children : [],
+            });
+        }
+    }
+    return out.sort((a, b) => a.display_name.localeCompare(b.display_name, undefined, { sensitivity: 'base' })
+        || a.path.localeCompare(b.path));
 }
 
 function nodeMatches(node, query) {
@@ -268,7 +301,7 @@ function renderFolderChildren(node, level, query = '') {
     return children.map((child) => renderFolderNode(child, level, query)).join('');
 }
 
-function renderSource(source, query = '') {
+function renderLibraryRoot(source, query = '') {
     const folders = source.folders.filter((folder) => nodeMatches(folder, query));
     const sourceMatches = !query || `${source.display_name} ${source.path}`.toLowerCase().includes(query);
     if (query && !sourceMatches && !folders.length) return '';
@@ -283,7 +316,6 @@ function renderSource(source, query = '') {
         + `<span class="nr-dot ${source.online ? 'on' : 'off'}"></span>`
         + `<span class="folder-label" title="${esc(source.display_name)}">${esc(source.display_name)}</span>`
         + `<span class="folder-count">${countLabel}</span></button>`
-        + `<button type="button" class="source-quiet-toggle" data-quiet-toggle aria-pressed="${quiet ? 'true' : 'false'}" aria-label="${quiet ? 'Show in library views' : 'Hide from library views'}" title="${quiet ? 'Show in library views' : 'Hide from library views'}">${icon('eye')}</button>`
         + '</div>'
         + `<div class="folder-children source-children" data-folder-source-children="${esc(source.path)}"${isOpen ? '' : ' hidden'}>`
         + (isOpen ? folders.map((folder) => renderFolderNode(folder, 0, query)).join('') : '')
@@ -305,7 +337,7 @@ function renderTree() {
         host.querySelector('#folder-tree-retry')?.addEventListener('click', () => refreshFoldersPanel());
         return;
     }
-    if (!sources.length) {
+    if (!roots.length) {
         host.innerHTML = '<div class="chrome-empty"><span class="chrome-empty-glyph">'
             + icon('folder')
             + '</span><span>No folders yet.</span><button type="button" id="folders-add-source">Add a source</button></div>';
@@ -314,7 +346,7 @@ function renderTree() {
         });
         return;
     }
-    const html = sources.map((source) => renderSource(source, query)).filter(Boolean).join('');
+    const html = roots.map((root) => renderLibraryRoot(root, query)).filter(Boolean).join('');
     host.innerHTML = html || '<div class="chrome-empty"><span class="chrome-empty-glyph">'
         + icon('search')
         + '</span><span>No matching folders.</span></div>';
@@ -333,7 +365,7 @@ function ensureRenderedChildren(row, query = '') {
 }
 
 function findNode(path) {
-    const stack = sources.flatMap((source) => source.folders);
+    const stack = roots.flatMap((root) => root.folders);
     while (stack.length) {
         const node = stack.shift();
         if (node.path === path) return node;
@@ -343,8 +375,8 @@ function findNode(path) {
 }
 
 function findScopeNode(path) {
-    const source = sources.find((item) => item.path === path);
-    if (source) return source;
+    const root = roots.find((item) => item.path === path);
+    if (root) return root;
     return findNode(path);
 }
 
@@ -398,21 +430,11 @@ function bindTreeEvents(root, query = '') {
             const container = document.querySelector(`[data-folder-source-children="${CSS.escape(path)}"]`);
             if (!container) return;
             if (nextOpen && !container.innerHTML.trim()) {
-                const source = sources.find((item) => item.path === path);
-                container.innerHTML = (source?.folders || []).map((folder) => renderFolderNode(folder, 0)).join('');
+                const libraryRoot = roots.find((item) => item.path === path);
+                container.innerHTML = (libraryRoot?.folders || []).map((folder) => renderFolderNode(folder, 0)).join('');
                 bindTreeEvents(container);
             }
             container.hidden = !nextOpen;
-        });
-    }
-    for (const button of root.querySelectorAll('[data-quiet-toggle]')) {
-        button.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            const row = button.closest('[data-source-id]');
-            const sourceId = Number(row?.dataset.sourceId) || 0;
-            if (!sourceId) return;
-            applyQuietToggle(sourceId);
         });
     }
 }
@@ -435,11 +457,13 @@ export async function refreshFoldersPanel({ toastEmpty = false } = {}) {
         const data = await getFolderTree();
         if (seq !== refreshGeneration) return;
         sources = ((data && data.sources) || []).map(normalizeSource);
+        roots = libraryRoots(sources);
         rememberSources(sources);
-        if (toastEmpty && !sources.length) showToast('No folder tree yet');
+        if (toastEmpty && !roots.length) showToast('No folder tree yet');
     } catch {
         if (seq !== refreshGeneration) return;
         sources = [];
+        roots = [];
         rememberSources([]);
         loadError = true;
     } finally {

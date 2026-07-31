@@ -9,8 +9,9 @@ import {
     stopMetadataScan, startFreeUpSpace, cancelFreeUpJob, getStorageOverview, revealFolder,
 } from './api.js';
 import {
-    emit, on, patchPrefs, setActiveLens, setThumbSize, viewState,
+    emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
 } from './state.js';
+import { isSourceQuiet, toggleSourceQuiet } from './quiet_sources.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
 import { afterMotion } from './motion.js';
 import { showToast } from './toast.js';
@@ -527,6 +528,7 @@ function renderSources() {
             + `<div class="sc-sub">${esc(sourceStatusLine(source))}</div>`
             + '<div class="src-actions">'
             + `<button class="mini-btn" data-act="rescan" ${online ? '' : 'aria-disabled="true" disabled'}>Rescan</button>`
+            + `<button class="mini-btn" data-act="quiet" aria-pressed="${isSourceQuiet(id) ? 'true' : 'false'}">${isSourceQuiet(id) ? 'Show in library' : 'Hide from library'}</button>`
             + '<button class="mini-btn btn-danger" data-act="remove">Remove</button></div>'
             + `<div class="remove-choice" hidden><button class="mini-btn" data-mode="keep">Keep photos</button><button class="mini-btn btn-danger" data-mode="delete">Remove from library index</button><button class="mini-btn" data-remove-cancel>Cancel</button></div>`
             + `<div class="scan-progress" ${scanning ? '' : 'hidden'}>Scanning…</div>`
@@ -1290,6 +1292,14 @@ async function handleSourceAction(card, action) {
             showToast('Rescan started');
             pollScanUntilDone(sourceId);
         } else showToast('Couldn’t start rescan');
+    } else if (action === 'quiet') {
+        // Sources are plumbing: their visibility switch lives here, not in the
+        // library tree. A mirrored hub library has no folder row to carry it.
+        const quiet = toggleSourceQuiet(sourceId);
+        renderCurrentSystemSurface();
+        emit('quiet:changed');
+        emit('scope', scope);
+        showToast(quiet ? 'Hidden from library views' : 'Shown in library views');
     } else if (action === 'remove') {
         card.querySelector('.remove-choice').hidden = false;
     }
@@ -1802,6 +1812,8 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             openSourceRevealMenu(card.dataset.sourcePath || '', card, card.dataset.sourceCount, {
                 sourceId: card.dataset.sourceId,
                 revealAvailable: !String(card.dataset.sourcePath || '').toLowerCase().startsWith('hub:'),
+                quiet: isSourceQuiet(card.dataset.sourceId),
+                onQuietToggle: () => handleSourceAction(card, 'quiet'),
             });
         });
     }
