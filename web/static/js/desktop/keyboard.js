@@ -506,11 +506,13 @@ export function initKeyboard() {
             const next = cycleDensity();
             showToast(`Density: ${next[0].toUpperCase()}${next.slice(1)}`);
         } else if (/^[1-5]$/.test(event.key)) {
+            // 1-5 filters — it never rates. Stars are computed from Elo and
+            // Refine is the only way to change them.
             event.preventDefault();
-            const rating = Number(event.key);
-            const next = Number(scope.min_stars || 0) === rating ? '' : rating;
+            const stars = Number(event.key);
+            const next = Number(scope.min_stars || 0) === stars ? '' : stars;
             patchScope({ min_stars: next });
-            showToast(next ? `Elo ${rating}+` : 'Elo filter cleared');
+            showToast(next ? `${stars}+ stars` : 'Star filter cleared');
         } else if (event.key === 'Delete' || event.key === 'Backspace') {
             if (selection.size) {
                 event.preventDefault();

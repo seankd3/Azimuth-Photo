@@ -5,7 +5,7 @@
 //   double-tap → 1x ↔ 2.5x at the tap point
 // Flags are real writes with undo.
 
-import { getExif, getImageCaption, getSimilar, thumbUrl, writeRating } from './api.js';
+import { getExif, getImageCaption, getSimilar, thumbUrl } from './api.js';
 import { applyFlags } from './flags.js';
 import { byId, emit, isOffline, nav as appNav, on, rememberImages, setScope } from './state.js';
 import { dismissSheetThen, openCollectionSheet, openSheet } from './selection.js';
@@ -343,17 +343,20 @@ function dismissViewerThen(afterClose = null) {
     dismissLayerThen('viewer', closeViewer, afterClose);
 }
 
-function imageRating(image) {
-    const value = Number(image?.rating ?? image?.stars ?? image?._lr_rating ?? 0);
+function imageStars(image) {
+    const value = Number(image?.stars ?? image?.rating ?? 0);
     return Number.isFinite(value) ? clamp(Math.round(value), 0, 5) : 0;
 }
 
-function syncRatingButtons(sheet, rating) {
-    for (const button of sheet.querySelectorAll('[data-rating]')) {
-        const value = Number(button.dataset.rating);
-        const active = value <= rating;
-        button.classList.toggle('on', active);
-        button.setAttribute('aria-pressed', String(active));
+// Read-only: stars are the stored projection of Elo — ranking in Refine is
+// the only way to change them, so the sheet displays and never writes.
+function syncStarsRow(sheet, stars, whisper = '') {
+    const row = sheet.querySelector('.sheet-rating');
+    if (!row) return;
+    row.hidden = stars <= 0;
+    if (whisper) row.title = whisper;
+    for (const glyph of sheet.querySelectorAll('[data-star-level]')) {
+        glyph.classList.toggle('on', Number(glyph.dataset.starLevel) <= stars);
     }
 }
 
@@ -382,9 +385,9 @@ function infoSheet() {
     const sheet = openSheet(
         '<h3>Info</h3>'
         + `<button class="sheet-row" id="mv-similar"><span class="g">${icon('scan-search')}</span>Find similar</button>`
-        + '<div class="sheet-rating"><span>Rating</span><div class="sheet-stars" role="group" aria-label="Star rating">'
-        + [1, 2, 3, 4, 5].map((rating) =>
-            `<button type="button" data-rating="${rating}" aria-label="Set ${rating} star rating">${icon('star')}</button>`
+        + '<div class="sheet-rating" hidden><span>Stars</span><div class="sheet-stars" aria-label="Stars — computed from your ranking">'
+        + [1, 2, 3, 4, 5].map((level) =>
+            `<span class="sheet-star" data-star-level="${level}" aria-hidden="true">${icon('star')}</span>`
         ).join('')
         + '</div></div>'
         + '<div class="sheet-caption" id="mv-caption">'
@@ -397,36 +400,19 @@ function infoSheet() {
         + '<details class="sheet-details"><summary>More details</summary>'
         + '<div class="sheet-meta" id="mv-exif"><div><span>Loading</span><b>…</b></div></div></details>'
     );
-    syncRatingButtons(sheet, imageRating(image));
+    syncStarsRow(sheet, imageStars(image));
     const ratingGeneration = loadToken;
     fetch(`/api/image/${image.id}/rating`, { headers: { Accept: 'application/json' } })
         .then((response) => (response.ok ? response.json() : null))
         .then((data) => {
             if (!data || !viewerRequestCurrent(image.id, ratingGeneration)) return;
-            image.rating = data.rating;
+            const stars = Number(data.stars ?? data.rating) || 0;
+            image.stars = stars;
             const known = byId.get(Number(image.id));
-            if (known) known.rating = data.rating;
-            if (sheet.isConnected) syncRatingButtons(sheet, imageRating(image));
+            if (known) known.stars = stars;
+            if (sheet.isConnected) syncStarsRow(sheet, imageStars(image), data.elo_stars_whisper || '');
         })
         .catch(() => {});
-    for (const button of sheet.querySelectorAll('[data-rating]')) {
-        button.addEventListener('click', () => {
-            const target = image;
-            const value = Number(button.dataset.rating);
-            const previous = imageRating(target);
-            const rating = previous === value ? 0 : value;
-            target.rating = rating;
-            const known = byId.get(Number(target.id));
-            if (known) known.rating = rating;
-            syncRatingButtons(sheet, rating);
-            void writeRating(target.id, rating).then((result) => {
-                if (result.status !== 'failed' || imageRating(target) !== rating) return;
-                target.rating = previous;
-                if (known) known.rating = previous;
-                if (sheet.isConnected) syncRatingButtons(sheet, previous);
-            });
-        });
-    }
     sheet.querySelector('#mv-similar').addEventListener('click', async () => {
         let data = null;
         try {
@@ -810,10 +796,6 @@ export function initViewer() {
     }
 
     on('flags', syncFlagButtons);
-    on('rating-write', ({ status, imageId }) => {
-        if (status !== 'committed') return;
-        emit('rating', { imageId, rating: imageRating(byId.get(imageId)) });
-    });
     on('offline-availability', syncOfflineButton);
     installGestures();
 }

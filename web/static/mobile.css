@@ -1514,17 +1514,17 @@ body.sheet-keyboard #m-sheet {
     color: var(--text-2);
     font-size: 13px;
 }
+.sheet-rating[hidden] { display: none; }
 .sheet-stars { display: flex; align-items: center; gap: 2px; }
-.sheet-stars button {
+.sheet-star {
     display: grid;
     place-items: center;
-    width: 34px;
-    height: 34px;
-    padding: 0;
+    width: 24px;
+    height: 24px;
     color: var(--text-3);
+    opacity: .35;
 }
-.sheet-stars button.on { color: var(--accent); }
-.sheet-stars button:active { transform: scale(.9); }
+.sheet-star.on { color: var(--accent); opacity: 1; }
 .sheet-caption {
     padding: 8px 4px 10px;
     border-bottom: 1px solid var(--line);

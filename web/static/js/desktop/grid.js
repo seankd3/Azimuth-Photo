@@ -17,6 +17,7 @@ import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
 import { escapeHtml as esc, photoAspect as aspect } from './dom.js';
+import { starsMarkup } from './elo_stars_display.js';
 import { openSystemSettings } from './drawer.js';
 import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';
 import { revealQuietForQuery, quietRevealActive } from './quiet_sources.js';
@@ -85,6 +86,14 @@ function flagGlyph(flag) {
     return '';
 }
 
+// Read-only: stars are the stored projection of Elo. Starred cards show their
+// stars persistently; unstarred cards keep the hover-only Elo chip.
+function eloBadgeHtml(img) {
+    const stars = Number(img.stars) || 0;
+    if (stars > 0) return `<span class="c-elo has-stars">${starsMarkup({ stars })}</span>`;
+    return `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`;
+}
+
 export function cellHtml(img, index) {
     const flag = img.flag || 'unflagged';
     const stackId = Number(img.stack_id) || 0;
@@ -106,7 +115,7 @@ export function cellHtml(img, index) {
         + `<button class="c-check" aria-label="Select photo" tabindex="-1">${icon('check')}</button>`
         + `<span class="c-idx">${index + 1}</span>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
-        + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
+        + eloBadgeHtml(img)
         + `<button class="c-menu" data-tip="Photo actions" aria-label="Photo actions" tabindex="-1">${icon('ellipsis')}</button></figure>`;
 }
 

@@ -29,6 +29,7 @@ const SMART_ACTIVE_KEYS = SMART_QUERY_KEYS.filter((key) => key !== 'sort');
 const SORT_VARIANTS = {
     similarity: { desc: 'similarity', asc: 'similarity' },
     elo: { desc: 'elo', asc: 'elo_asc' },
+    stars: { desc: 'stars', asc: 'stars_asc' },
     taste: { desc: 'taste', asc: 'taste' },
     date_taken: { desc: 'date_taken', asc: 'date_taken_asc' },
     camera: { desc: 'camera_desc', asc: 'camera' },
