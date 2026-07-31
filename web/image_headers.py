@@ -7,6 +7,7 @@ import struct
 import time
 
 
+# Also the scanner's catalog acceptance list (scanner.SUPPORTED_EXTENSIONS).
 HEADER_GEOMETRY_EXTENSIONS = {
     ".jpg",
     ".jpeg",
@@ -14,6 +15,11 @@ HEADER_GEOMETRY_EXTENSIONS = {
     ".dng",
     ".cr2",
     ".cr3",
+    ".arw",
+    ".nef",
+    ".orf",
+    ".raf",
+    ".rw2",
     ".tif",
     ".tiff",
     ".webp",
@@ -161,9 +167,10 @@ def _tiff_root(data: bytes, base: int):
     if base < 0 or base + 8 > len(data):
         return None
     marker = data[base:base + 4]
-    if marker == b"II*\x00":
+    # Olympus ORF is TIFF under vendor magics (IIRO/IIRS little, MMOR big).
+    if marker in {b"II*\x00", b"IIRO", b"IIRS"}:
         endian = "<"
-    elif marker == b"MM\x00*":
+    elif marker in {b"MM\x00*", b"MMOR"}:
         endian = ">"
     else:
         return None
@@ -186,6 +193,16 @@ def _tiff_geometry(data: bytes, base: int = 0):
         exif_fields = _tiff_ifd(data, base, endian, int(exif_pointer))
         width = (exif_fields.get(0xA002) or [width])[0]
         height = (exif_fields.get(0xA003) or [height])[0]
+    # NEF/DNG-style raws describe a small preview in IFD0 and keep the full
+    # frame in a SubIFD, so prefer the largest frame any SubIFD offers.
+    for pointer in (fields.get(0x014A) or [])[:8]:
+        sub_fields = _tiff_ifd(data, base, endian, int(pointer))
+        sub_width = (sub_fields.get(0x0100) or [None])[0]
+        sub_height = (sub_fields.get(0x0101) or [None])[0]
+        if not sub_width or not sub_height:
+            continue
+        if not width or not height or int(sub_width) * int(sub_height) > int(width) * int(height):
+            width, height = sub_width, sub_height
     if width is None or height is None:
         return None
     return int(width), int(height), orientation
@@ -241,6 +258,37 @@ def _iso_bmff_geometry(data: bytes):
     return int(width), int(height), orientation
 
 
+def _rw2_geometry(data: bytes):
+    """Panasonic RW2: TIFF layout under an IIU magic; the visible frame is
+    recorded as sensor crop borders instead of ImageWidth/ImageLength."""
+    if len(data) < 8:
+        return None
+    first_ifd = struct.unpack_from("<I", data, 4)[0]
+    fields = _tiff_ifd(data, 0, "<", first_ifd)
+    if not fields:
+        return None
+    top, left, bottom, right = (
+        int((fields.get(tag) or [0])[0]) for tag in (0x0004, 0x0005, 0x0006, 0x0007)
+    )
+    width = right - left
+    height = bottom - top
+    if width <= 0 or height <= 0:
+        return None
+    orientation = int((fields.get(0x0112) or [1])[0])
+    return width, height, orientation
+
+
+def _raf_geometry(data: bytes):
+    """Fujifilm RAF: geometry lives in the embedded JPEG addressed by a
+    big-endian offset at byte 84 of the fixed header."""
+    if len(data) < 92:
+        return None
+    jpeg_offset = struct.unpack_from(">I", data, 84)[0]
+    if jpeg_offset < 92 or jpeg_offset >= len(data):
+        return None
+    return _jpeg_geometry(data[jpeg_offset:])
+
+
 def _webp_geometry(data: bytes):
     if data[:4] != b"RIFF" or data[8:12] != b"WEBP":
         return None
@@ -253,8 +301,12 @@ def _webp_geometry(data: bytes):
 
 
 def _parse_header_geometry(data: bytes):
-    if data.startswith((b"II*\x00", b"MM\x00*")):
+    if data.startswith((b"II*\x00", b"MM\x00*", b"IIRO", b"IIRS", b"MMOR")):
         return _tiff_geometry(data)
+    if data.startswith(b"IIU\x00"):
+        return _rw2_geometry(data)
+    if data.startswith(b"FUJIFILMCCD-RAW"):
+        return _raf_geometry(data)
     if data.startswith(b"\xff\xd8"):
         return _jpeg_geometry(data)
     if data.startswith(b"\x89PNG\r\n\x1a\n") and len(data) >= 24:

@@ -322,7 +322,19 @@ async def _image_or_error(image_id: int):
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
     image = dict(image)
-    if not rawproc.is_develop_path(image.get("filepath") or ""):
+    filepath = image.get("filepath") or ""
+    if not rawproc.is_develop_path(filepath):
+        suffix = os.path.splitext(filepath)[1].lower()
+        if suffix in rawproc.UNFITTED_RAW_EXTENSIONS:
+            return None, JSONResponse(
+                {
+                    "error": (
+                        f"Develop can't render {suffix.lstrip('.').upper()} faithfully yet - "
+                        "this photo stays cataloged and browsable, and its XMP settings are preserved"
+                    )
+                },
+                status_code=400,
+            )
         return None, JSONResponse(
             {
                 "error": (

@@ -22,7 +22,9 @@ from features.develop.xmp_write import parse_xmp_text
 
 
 DEFAULT_RAWS_ROOT = default_raw_import_root()
-RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
+# Matches xmp_write._RAW_EXTENSIONS: any raw we write sidecars for must also
+# have its Lightroom sidecars imported back.
+RAW_EXTENSIONS = frozenset({".arw", ".cr2", ".cr3", ".dng", ".nef", ".orf", ".raf", ".rw2"})
 _LOG = logging.getLogger(__name__)
 
 _status_lock = threading.Lock()

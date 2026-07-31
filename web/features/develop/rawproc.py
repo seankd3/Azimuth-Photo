@@ -39,6 +39,10 @@ from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
 
 RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
+# Cataloged multi-vendor raws (scanned, thumbnailed, XMP write-back) whose
+# Develop color pipeline is not fitted yet — entry refuses honestly instead of
+# rendering badly. Widen RAW_EXTENSIONS per vendor once acceptance covers it.
+UNFITTED_RAW_EXTENSIONS = {".arw", ".nef", ".orf", ".raf", ".rw2"}
 DISPLAY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
 OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
 BASE_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)

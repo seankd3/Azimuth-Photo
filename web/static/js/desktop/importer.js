@@ -296,7 +296,7 @@ function modalHtml() {
         + '<div class="mo-body">'
         + '<div id="import-drop-zone" class="import-drop" tabindex="0"><b>Drop photos or folders</b><span id="import-selection-summary">No photos selected</span></div>'
         + '<div class="import-actions"><button class="btn" id="import-files">Choose files</button><button class="btn" id="import-folder">Choose folder</button></div>'
-        + '<input id="import-file-input" type="file" multiple accept="image/*,.dng,.cr3,.tif,.tiff,.webp" hidden><input id="import-folder-input" type="file" webkitdirectory directory multiple hidden>'
+        + '<input id="import-file-input" type="file" multiple accept="image/*,.dng,.cr3,.cr2,.arw,.nef,.orf,.raf,.rw2,.tif,.tiff,.webp" hidden><input id="import-folder-input" type="file" webkitdirectory directory multiple hidden>'
         + '<div id="import-preview-grid" class="import-preview-grid" aria-label="Selected photo previews" hidden></div>'
         + '<div class="import-grid">'
         + '<label>Shoot name<input id="import-shoot-name" autocomplete="off"></label>'
