@@ -22,14 +22,15 @@ CATALOG_FIELDS = frozenset({
     "quality_sharpness", "quality_subject_sharpness", "quality_exposure_clip",
     "quality_motion_blur", "quality_eyes_open", "stack_id", "stack_kind",
     "stack_is_representative", "kind", "is_representative", "collection_ids", "keywords", "develop_settings",
-    "develop_updated_at", "develop_origin", "rating", "rating_winner_key", "status", "filepath", "row_version",
+    "develop_updated_at", "develop_origin", "rating", "rating_winner_key", "status", "filepath",
+    "missing_at", "row_version",
 })
 
 _IMAGE_COLUMNS = (
     "i.id AS hub_image_id, i.content_hash, i.filename, i.file_ext, i.file_size, i.date_taken, "
     "i.width, i.height, i.orientation, i.camera_make, i.camera_model, i.lens, i.latitude, "
     "i.longitude, i.location_source, i.flag, i.elo, i.comparisons, i.status, i.filepath, "
-    "i.row_version, sm.stack_id, s.kind AS stack_kind, "
+    "i.missing_at, i.row_version, sm.stack_id, s.kind AS stack_kind, "
     "CASE WHEN s.representative_image_id = i.id THEN 1 ELSE 0 END AS stack_is_representative, "
     "s.kind AS kind, CASE WHEN s.representative_image_id = i.id THEN 1 ELSE 0 END AS is_representative, "
     "ds.settings AS develop_settings, ds.updated_at AS develop_updated_at, ds.origin AS develop_origin, "
