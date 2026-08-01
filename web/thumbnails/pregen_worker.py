@@ -9,7 +9,7 @@ from collections import deque
 from functools import partial
 
 from core import memory_pressure, work_coordination
-from thumbnails.config import EMBEDDED_PREVIEW_EXTENSIONS, RAW_EXTENSIONS
+from thumbnails.config import EMBEDDED_PREVIEW_EXTENSIONS, RAW_EXTENSIONS, SIZES
 from thumbnails.decode_budget import bulk_decode_budget, estimate_decode_bytes
 
 try:
@@ -88,6 +88,7 @@ def _item_decode_estimate(item: dict) -> int:
         embedded_preview=ext in EMBEDDED_PREVIEW_EXTENSIONS,
         width=item.get("width"),
         height=item.get("height"),
+        max_target=max(SIZES.values()),
     )
     # Whole-file buffers stay in RAM across decode after the HDD slot split —
     # charge source bytes on top of the demosaic peak.
@@ -210,7 +211,7 @@ async def run_pregen_bulk_batch(
                 )
             except (KeyError, IndexError, TypeError, ValueError):
                 need_metadata = False
-            out.append({
+            candidate = {
                 "id": int(row["id"]),
                 "filepath": row["filepath"],
                 "signatures": size_signatures,
@@ -220,7 +221,23 @@ async def run_pregen_bulk_batch(
                 "height": _row_dimension(row, "height"),
                 "need_hash": need_hash,
                 "need_metadata": need_metadata,
-            })
+            }
+            estimate = _item_decode_estimate(candidate)
+            if estimate > bulk_decode_budget.max_bytes:
+                # The budget clamps an oversized weight to its own ceiling,
+                # which admits a frame at a price the machine cannot pay:
+                # measured on the hub, one 4.2GB RAW panorama charged 768MB,
+                # ran alone, and the kernel OOM-killed the service — four times
+                # in an hour. Leave it to the on-demand path, which decodes one
+                # photo for one waiting person instead of alongside a batch.
+                log.info(
+                    "Bulk preview skips %s: needs ~%.1fGB to decode, budget is %.1fGB",
+                    row["filepath"],
+                    estimate / 1024**3,
+                    bulk_decode_budget.max_bytes / 1024**3,
+                )
+                continue
+            out.append(candidate)
             if len(out) >= room_left:
                 break
         return out
@@ -420,6 +437,20 @@ async def run_pregen_bulk_batch(
             pressure_abort = True
             return False
         estimate = _item_decode_estimate(item)
+        if estimate > bulk_decode_budget.max_bytes:
+            # The budget clamps an oversized weight to its own ceiling, which
+            # admits the frame at a price it cannot pay: measured on the hub, a
+            # single 4.2GB RAW panorama charged 768MB, ran alone, and the kernel
+            # OOM-killed the service — four times in one hour. Leave it for the
+            # on-demand path, which decodes one photo for one waiting person.
+            _diag("pump too big for this machine", item=item["id"], estimate=estimate)
+            log.info(
+                "Skipping bulk thumbnail for %s: needs ~%.1fGB to decode, budget is %.1fGB",
+                item.get("filepath"),
+                estimate / 1024**3,
+                bulk_decode_budget.max_bytes / 1024**3,
+            )
+            return False
         _diag("pump acquire", item=item["id"], estimate=estimate, used=bulk_decode_budget.used_bytes, in_flight=len(in_flight))
         if in_flight:
             # Never block on budget while holding in-flight work: releases

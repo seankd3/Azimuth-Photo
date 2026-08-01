@@ -52,6 +52,7 @@ def estimate_decode_bytes(
     embedded_preview: bool = False,
     width: int | None = None,
     height: int | None = None,
+    max_target: int | None = None,
 ) -> int:
     """Estimate peak decode working set.
 
@@ -63,6 +64,13 @@ def estimate_decode_bytes(
     JPEG decode is that much cheaper than a full postprocess.
     """
     pixels = max(0, int(width or 0)) * max(0, int(height or 0))
+    if pixels > 0 and max_target and not raw:
+        # Non-RAW decoding is done at draft scale, so a 527MP panorama is never
+        # read at 527MP to make a 400px tile. Charging its full size made the
+        # budget refuse to run anything alongside it — or, worse, admit it at a
+        # clamped price and let the process be OOM-killed. RAW is excluded: a
+        # demosaic reads the whole sensor whatever the target is.
+        pixels = min(pixels, (max_target * 2) ** 2)
     if pixels > 0:
         output_bytes = pixels * _RGB_BYTES_PER_PIXEL
         if raw and embedded_preview:
