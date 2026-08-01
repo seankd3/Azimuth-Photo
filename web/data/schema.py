@@ -1,6 +1,7 @@
 """Schema contract checks for the SQLite catalog database."""
 
 import asyncio
+import logging
 import os
 import sqlite3
 import uuid
@@ -9,6 +10,8 @@ from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 from data.people_schema import PEOPLE_QUERY_SCHEMA
 from core.path_groups import safe_commonpath
+
+log = logging.getLogger(__name__)
 
 EXPECTED_EMBEDDING_DIM = 2048  # Qwen3-VL-Embedding-2B native dimension
 # 29 = develop wave (comparisons compat), 30 = main wave (people compat);
@@ -2122,6 +2125,19 @@ async def normalize_legacy_image_state(conn) -> bool:
 
     # Status used to control membership in older versions. Sources now own
     # source membership, but trash still uses status as an explicit exclusion.
+    # This runs on every start, so it is also the thing that quietly undoes any
+    # repair that parked rows under a status the app does not know. Say so:
+    # a silent mass rewrite of user-visible state is how a fix looks like it
+    # never applied.
+    cursor = await conn.execute(
+        "SELECT status, COUNT(*) AS rows FROM images "
+        "WHERE status IS NULL OR status NOT IN ('kept', 'maybe', 'trashed') "
+        "GROUP BY status"
+    )
+    unknown = await cursor.fetchall()
+    if unknown:
+        summary = ", ".join(f"{row['status']!r}={row['rows']}" for row in unknown)
+        log.warning("catalog: returning %s to 'kept' — not a known status", summary)
     cursor = await conn.execute(
         "UPDATE images SET status = 'kept' "
         "WHERE status IS NULL OR status NOT IN ('kept', 'maybe', 'trashed')"
