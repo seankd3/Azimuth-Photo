@@ -134,6 +134,24 @@ class SyncMirrorExportTests(unittest.TestCase):
         self.assertEqual(payload["flag"], "rejected")
         self.assertGreater(terminator["cursor"], cursor)
 
+    def test_export_carries_the_fields_a_satellite_mirrors_from(self):
+        """A satellite can only mirror a move, a retirement, or a loss it is told about."""
+        image_id = self._image("retired.jpg", "d" * 32)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE images SET filepath = ?, status = 'removed', missing_at = 1753900000.0 WHERE id = ?",
+                (str(self.root / "moved" / "retired.jpg"), image_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        payload, _terminator = self._catalog_lines()
+        self.assertEqual(payload["filepath"], str(self.root / "moved" / "retired.jpg"))
+        self.assertEqual(payload["status"], "removed")
+        self.assertEqual(payload["missing_at"], 1753900000.0)
+
     def test_rating_exports_with_its_own_family_winner(self):
         image_id = self._image("rated.jpg", "f" * 32)
         conn = sqlite3.connect(self.db_path)
