@@ -1244,8 +1244,19 @@ async def _pregen_bulk_candidate_batch(limit: int):
     # unactionable rows advance the cursor inside tiny priority scan windows
     # and strand real thumb-pending work behind false "no progress" passes.
     # Originals use ``_pregen_full_candidate_batch`` / ``run_full_warm_batch``.
+    # Ask for tiers that can actually take another thumbnail, not merely tiers
+    # with a budget line. A full tier still has a budget, so selecting on budget
+    # pulls in every row that lacks only that tier — rows the candidate filter
+    # then drops for having nowhere to put the result. Measured on the hub: lg
+    # was full (room 0) while sm and md had 2.8GB and 30GB, so page after page
+    # came back "8 rows, 0 pending", the wave gave up after 64 of them, and the
+    # 81,090 photos genuinely missing a small thumbnail were never reached.
+    tier_budgets = _bulk_tier_budgets()
+    tier_room = _bulk_tier_room(tier_budgets)
     missing_sizes = [
-        size for size in THUMB_TIERS if _background_tier_budget(size) > 0
+        size for size in THUMB_TIERS
+        if _background_tier_budget(size) > 0
+        and tier_room.get(size, 0) >= estimated_tier_bytes(size)
     ]
     if _replace_stale_thumbnails or not missing_sizes:
         return await pregen.candidate_batch(
