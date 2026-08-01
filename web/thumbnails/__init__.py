@@ -704,14 +704,13 @@ def _load_raw_preview(filepath: str, max_target: int):
 
 
 def _load_source_image(
-    filepath: str, max_target: int, prefer_draft: bool, image_id: int | None = None
+    filepath: str, max_target: int, image_id: int | None = None
 ) -> Image.Image:
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
 
     return generation.load_source_image(
         filepath,
         max_target,
-        prefer_draft,
         jpeg_extensions=JPEG_EXTENSIONS,
         raw_extensions=RAW_EXTENSIONS,
         image_id=image_id,
@@ -722,7 +721,6 @@ def _load_source_image_from_bytes(
     filepath: str,
     data: bytes,
     max_target: int,
-    prefer_draft: bool,
 ) -> Image.Image:
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
 
@@ -730,7 +728,6 @@ def _load_source_image_from_bytes(
         filepath,
         data,
         max_target,
-        prefer_draft,
         jpeg_extensions=JPEG_EXTENSIONS,
         raw_extensions=RAW_EXTENSIONS,
     )

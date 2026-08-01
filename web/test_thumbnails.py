@@ -2059,8 +2059,8 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
             return f"{filepath}:{size}:{item_id}"
 
         def make_helpers(calls):
-            def load_source(filepath, max_target, *, prefer_draft, image_id=None):
-                calls.append(("load", filepath, max_target, prefer_draft))
+            def load_source(filepath, max_target, *, image_id=None):
+                calls.append(("load", filepath, max_target))
                 return Image.new("RGB", (40, 20), color=(20, 40, 60))
 
             def queue_orientation(item_id, img):

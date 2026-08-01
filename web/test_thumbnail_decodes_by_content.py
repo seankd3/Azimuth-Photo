@@ -45,7 +45,7 @@ class DecodeByContentTests(unittest.TestCase):
 
     def _load(self, path: str):
         return load_source_image(
-            path, 256, False,
+            path, 256,
             jpeg_extensions=JPEG_EXTENSIONS,
             raw_extensions=RAW_EXTENSIONS,
         )
@@ -132,7 +132,7 @@ class DecodeBytesByContentTests(unittest.TestCase):
 
     def _load(self, name: str, data: bytes):
         return load_source_image_from_bytes(
-            name, data, 256, False,
+            name, data, 256,
             jpeg_extensions=JPEG_EXTENSIONS,
             raw_extensions=RAW_EXTENSIONS,
         )

@@ -137,12 +137,19 @@ def is_raw_original(
     return not head.startswith(_JPEG_MAGIC)
 
 
-def _open_by_content(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
-    """Decode a still image by what it contains, ignoring what it is named."""
+def _open_by_content(filepath: str, max_target: int) -> Image.Image:
+    """Decode a still image by what it contains, ignoring what it is named.
+
+    Always at the smallest scale that still oversamples the thumbnail being
+    built. ``draft`` never returns fewer pixels than asked for and is a no-op
+    for formats that cannot scale on decode, so there is nothing to decide:
+    the archive holds photos up to 527 megapixels — 1.5GB of RGB each — and
+    decoding one of those in full to make a 400px tile is how the hub grew to
+    6.6GB and started swapping.
+    """
 
     with Image.open(filepath) as source:
-        if prefer_draft:
-            source.draft("RGB", (max_target * 2, max_target * 2))
+        source.draft("RGB", (max_target * 2, max_target * 2))
         source.load()
         img = ImageOps.exif_transpose(source)
         if img is source:
@@ -153,7 +160,6 @@ def _open_by_content(filepath: str, max_target: int, prefer_draft: bool) -> Imag
 def load_source_image(
     filepath: str,
     max_target: int,
-    prefer_draft: bool,
     *,
     jpeg_extensions: set[str],
     raw_extensions: set[str],
@@ -169,15 +175,14 @@ def load_source_image(
             return preview
         return demosaic_raw_for_thumbnail(filepath, max_target)
 
-    return _open_by_content(filepath, max_target, prefer_draft or ext in jpeg_extensions)
+    return _open_by_content(filepath, max_target)
 
 
-def _open_bytes_by_content(data: bytes, max_target: int, prefer_draft: bool) -> Image.Image:
-    """Decode an in-RAM original by what it contains, ignoring its name."""
+def _open_bytes_by_content(data: bytes, max_target: int) -> Image.Image:
+    """Decode an in-RAM original by content, at the scale the thumbnail needs."""
 
     with Image.open(io.BytesIO(data)) as source:
-        if prefer_draft:
-            source.draft("RGB", (max_target * 2, max_target * 2))
+        source.draft("RGB", (max_target * 2, max_target * 2))
         source.load()
         img = ImageOps.exif_transpose(source)
         if img is source:
@@ -189,7 +194,6 @@ def load_source_image_from_bytes(
     filepath: str,
     data: bytes,
     max_target: int,
-    prefer_draft: bool,
     *,
     jpeg_extensions: set[str],
     raw_extensions: set[str],
@@ -202,9 +206,7 @@ def load_source_image_from_bytes(
             return preview
         return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
 
-    return _open_bytes_by_content(
-        data, max_target, prefer_draft or ext in jpeg_extensions
-    )
+    return _open_bytes_by_content(data, max_target)
 
 
 def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orientation_queue) -> None:
@@ -602,17 +604,15 @@ def generate_missing_thumbnails(
                         requested_data = group_requested
         else:
             max_target = max(sizes[size] for size in needed_sizes)
-            prefer_draft = max_target <= sizes["sm"]
             if source_data is not None and load_source_image_from_bytes is not None:
                 img = load_source_image_from_bytes(
                     filepath,
                     source_data,
                     max_target,
-                    prefer_draft=prefer_draft,
                 )
             else:
                 img = load_source_image(
-                    filepath, max_target, prefer_draft=prefer_draft, image_id=image_id
+                    filepath, max_target, image_id=image_id
                 )
             if on_source_loaded is not None:
                 on_source_loaded(source_data, img)
@@ -738,7 +738,6 @@ def generate_thumbnail_set(
                 and is_browser_displayable_original(filepath)
             ):
                 max_target = max(sizes[size] for size in needed_sizes)
-                prefer_draft = max_target <= sizes["sm"]
                 if file_bytes is None:
                     with open(filepath, "rb") as f:
                         file_bytes = f.read()
@@ -750,7 +749,6 @@ def generate_thumbnail_set(
                     filepath,
                     file_bytes,
                     max_target,
-                    prefer_draft=prefer_draft,
                 )
                 metrics["source_bytes"] = len(file_bytes)
                 if on_source_loaded is not None:
@@ -870,13 +868,11 @@ def generate_thumbnail_set(
                 )
             else:
                 max_target = max(sizes[size] for size in needed_sizes)
-                prefer_draft = max_target <= sizes["sm"]
                 if file_bytes is not None:
                     img = load_source_image_from_bytes(
                         filepath,
                         file_bytes,
                         max_target,
-                        prefer_draft=prefer_draft,
                     )
                     metrics["source_bytes"] = len(file_bytes)
                     metrics["read_seconds"] = 0.0
@@ -884,7 +880,7 @@ def generate_thumbnail_set(
                         on_source_loaded(file_bytes, img)
                 else:
                     img = load_source_image(
-                        filepath, max_target, prefer_draft=prefer_draft, image_id=image_id
+                        filepath, max_target, image_id=image_id
                     )
                     metrics["source_bytes"] = int(source_bytes or 0)
                     metrics["read_seconds"] = max(0.0, monotonic_provider() - read_started)
@@ -1018,7 +1014,7 @@ def load_embedding_image(
 
     try:
         md_size = sizes["md"]
-        img = load_source_image(filepath, md_size, prefer_draft=False, image_id=image_id)
+        img = load_source_image(filepath, md_size, image_id=image_id)
         resized = resize_to_long_side(img, md_size)
         if resized is not img:
             img.close()
