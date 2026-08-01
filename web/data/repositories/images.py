@@ -2,6 +2,7 @@
 
 
 from data import connection
+from data.repositories.catalog import active_image_condition, visible_image_condition
 from data.repositories.common import chunked
 
 
@@ -73,9 +74,7 @@ async def get_active_images_by_ids(db_path: str, image_ids: list[int]) -> dict[i
             cursor = await conn.execute(
                 f"SELECT i.* FROM images i NOT INDEXED "
                 f"JOIN catalog_sources s ON s.id = i.source_id "
-                f"WHERE s.included = 1 "
-                f"AND i.status IN ('kept', 'maybe') "
-                f"AND i.missing_at IS NULL "
+                f"WHERE {active_image_condition()} "
                 f"AND i.id IN ({placeholders})",
                 chunk,
             )
@@ -110,9 +109,8 @@ async def get_top_images(db_path: str, *, limit: int, catalog_counts: dict):
             "i.camera_make, i.camera_model, i.lens, i.file_ext, i.file_size, "
             "i.width, i.height, i.file_modified_at, i.latitude, i.longitude, i.created_at "
             "FROM images i INDEXED BY idx_images_active_elo "
-            "WHERE i.status IN ('kept', 'maybe') "
+            f"WHERE {visible_image_condition()} "
             f"{source_filter}"
-            "AND i.missing_at IS NULL "
             "ORDER BY i.elo DESC LIMIT ?",
             (limit,),
         )
@@ -160,10 +158,8 @@ async def get_unclassified_images(
         cursor = await conn.execute(
             "SELECT i.id, i.filepath, s.path AS source_root FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE i.orientation IS NULL AND s.included = 1 "
+            f"WHERE i.orientation IS NULL AND {active_image_condition()} "
             "AND s.online = 1 "
-            "AND i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
             "AND COALESCE(i.hub_remote, 0) = 0 "
             f"{extension_clause}"
             "LIMIT ?",
@@ -200,8 +196,7 @@ async def get_images_needing_metadata(
             "i.metadata_scanned_at IS NULL "
             "OR i.metadata_version IS NULL "
             "OR i.metadata_version < ?) "
-            "AND i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "AND COALESCE(i.hub_remote, 0) = 0 "
             "LIMIT ?",
             (metadata_version, limit),
@@ -254,9 +249,7 @@ async def get_recent_active_images(db_path: str, limit: int = 10):
         cursor = await conn.execute(
             "SELECT i.id, i.filename, i.filepath FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 "
-            "AND i.status IN ('kept', 'maybe') "
-            "AND i.missing_at IS NULL "
+            f"WHERE {active_image_condition()} "
             "ORDER BY i.id DESC LIMIT ?",
             (limit,),
         )

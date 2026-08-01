@@ -79,9 +79,29 @@ def active_source_condition(source_alias: str = "s") -> str:
 
 
 def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
+    """The one answer to "is this photo in the library".
+
+    A photo is in the library when its source is included, the owner has not
+    trashed it, and the file is where the catalog says it is. Every query that
+    lists, counts or ranks photos should ask through here rather than spell the
+    rule out again — a rule written in two hundred places is two hundred
+    chances to disagree, and it cannot be repaired or reasoned about.
+
+    Use `visible_image_condition` when the query is already scoped to one
+    source and only needs the photo half of the rule.
+    """
+
     return (
         f"{source_alias}.included = 1 "
-        f"AND {image_alias}.status IN ('kept', 'maybe') "
+        f"AND {visible_image_condition(image_alias)}"
+    )
+
+
+def visible_image_condition(image_alias: str = "i") -> str:
+    """The photo half of the rule, for queries already scoped to a source."""
+
+    return (
+        f"{image_alias}.status IN ('kept', 'maybe') "
         f"AND {image_alias}.missing_at IS NULL"
     )
 
