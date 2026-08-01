@@ -106,6 +106,19 @@ def partition_raw_thumbnail_tiers(
 VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
 
 
+def _open_by_content(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
+    """Decode a still image by what it contains, ignoring what it is named."""
+
+    with Image.open(filepath) as source:
+        if prefer_draft:
+            source.draft("RGB", (max_target * 2, max_target * 2))
+        source.load()
+        img = ImageOps.exif_transpose(source)
+        if img is source:
+            img = source.copy()
+        return img
+
+
 def load_source_image(
     filepath: str,
     max_target: int,
@@ -123,16 +136,21 @@ def load_source_image(
         preview = load_raw_preview(filepath, max_target)
         if preview is not None:
             return preview
-        return demosaic_raw_for_thumbnail(filepath, max_target)
+        try:
+            return demosaic_raw_for_thumbnail(filepath, max_target)
+        except Exception as raw_error:
+            # A name is not a format. Measured in this archive: 1,306 files
+            # named .CR2 that are really full-resolution JPEGs, which open
+            # perfectly in the viewer and which LibRaw refuses as "not a raw
+            # file" — so they could never get a thumbnail. Decode by what the
+            # file actually is; if that fails too, the RAW error was the honest
+            # one and is what gets raised.
+            try:
+                return _open_by_content(filepath, max_target, prefer_draft)
+            except Exception:
+                raise raw_error from None
 
-    with Image.open(filepath) as source:
-        if ext in jpeg_extensions:
-            source.draft("RGB", (max_target * 2, max_target * 2))
-        source.load()
-        img = ImageOps.exif_transpose(source)
-        if img is source:
-            img = source.copy()
-        return img
+    return _open_by_content(filepath, max_target, ext in jpeg_extensions)
 
 
 def load_source_image_from_bytes(
