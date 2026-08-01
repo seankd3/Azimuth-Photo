@@ -1,4 +1,3 @@
-import asyncio
 import io
 import inspect
 import json
@@ -8,6 +7,7 @@ import sys
 import tempfile
 from types import SimpleNamespace
 import time
+import asyncio
 import unittest
 
 import numpy as np
@@ -76,6 +76,15 @@ class HeaderRequest:
 
 
 class BackendTestCase(unittest.IsolatedAsyncioTestCase):
+    def _setupAsyncioRunner(self):
+        # IsolatedAsyncioTestCase runs the loop in debug mode, which makes every
+        # future capture a stack trace. Measured on this suite: a test that does
+        # nothing at all cost 2.09s, almost all of it linecache.checkcache
+        # stat-ing source files for those traces. Debug mode catches unawaited
+        # coroutines and slow callbacks, neither of which this suite relies on,
+        # and a suite too slow to run is worth less than the warnings.
+        self._asyncioRunner = asyncio.Runner(debug=False)
+
     async def asyncSetUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         # Every aiosqlite connection keeps a worker thread holding the DB file
