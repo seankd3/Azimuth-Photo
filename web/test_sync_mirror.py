@@ -416,3 +416,20 @@ class MirrorDevelopGuardTests(BackendTestCase):
 
         self.assertEqual(json.loads(row["settings"]), {"Exposure2012": 1.0})
         self.assertEqual(row["updated_at"], "2026-07-16T02:00:00Z")
+
+
+def test_the_mirror_applies_where_a_photo_sits_in_the_library():
+    """A satellite cannot draw folders from structure it never receives."""
+
+    from features.sync import mirror
+
+    assert "relative_path" in mirror._IMAGE_COLUMNS
+
+
+def test_relative_path_is_content_not_identity():
+    """filepath and the hub ids are decided by _apply_row; this rides the copier."""
+
+    from features.sync import mirror
+
+    assert "relative_path" not in {"hub_image_id", "hub_remote", "filepath"}
+    assert "relative_path" in mirror._IMAGE_COLUMNS

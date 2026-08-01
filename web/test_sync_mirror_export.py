@@ -278,3 +278,30 @@ class SyncMirrorExportTests(unittest.TestCase):
         finally:
             stored.close()
         self.assertIn("Table_76A0B063E42C9E5E6F6319F80EE5595C", kept)
+
+    def test_the_export_carries_where_a_photo_sits_inside_the_library(self):
+        """Only the hub knows its own root, so it has to say.
+
+        With this, a satellite draws its folder tree from stored structure
+        instead of reverse-engineering one from absolute hub paths at request
+        time — which is what the hub:// namespace handling exists to do.
+        """
+
+        image_id = self._image("filed.jpg", "hash-relative")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE images SET relative_path = ? WHERE id = ?",
+                ("Edits/2026/2026-01-02/filed.jpg", image_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        row = next(line for line in self._catalog_lines() if line["hub_image_id"] == image_id)
+        self.assertEqual(row["relative_path"], "Edits/2026/2026-01-02/filed.jpg")
+
+    def test_a_photo_with_no_derived_relative_path_still_exports(self):
+        image_id = self._image("unfiled.jpg", "hash-unfiled")
+        row = next(line for line in self._catalog_lines() if line["hub_image_id"] == image_id)
+        self.assertIsNone(row["relative_path"], "absent stays absent rather than guessed")

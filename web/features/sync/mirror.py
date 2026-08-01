@@ -60,6 +60,10 @@ _IMAGE_COLUMNS = {
     "filename", "filepath", "content_hash", "elo", "comparisons", "status", "flag",
     "orientation", "date_taken", "camera_make", "camera_model", "lens", "file_ext",
     "file_size", "width", "height", "latitude", "longitude", "location_source", "missing_at", "trashed_at",
+    # Where the photo sits inside the hub's library. Only the hub can know it,
+    # and with it a satellite draws its folder tree from stored structure
+    # instead of reverse-engineering one from absolute strings at request time.
+    "relative_path",
     "hub_image_id", "hub_remote",
 }
 # Commit mirror batches so a long hub export never holds a write lock for seconds
