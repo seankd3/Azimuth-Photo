@@ -6,6 +6,8 @@ import functools
 import gzip
 import inspect
 import json
+import logging
+import sqlite3
 import time
 import urllib.error
 import urllib.request
@@ -21,6 +23,8 @@ from features.sync.develop_merge import preserve_local_rating
 from features.sync.executor import run_sync_work
 from features.trash import service as trash_service
 
+
+log = logging.getLogger(__name__)
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
 _MIRROR_DDL = """
@@ -104,6 +108,7 @@ class MirrorPuller:
             "cursor": 0,
             "rows_applied": 0,
             "skipped_unhashed": 0,
+            "skipped_conflicts": 0,
             "last_refresh_at": None,
             "last_error": "",
         }
@@ -116,6 +121,7 @@ class MirrorPuller:
         result = await self._refresh_page()
         total_applied = int(result.get("rows_applied") or 0)
         total_skipped = int(result.get("skipped_unhashed") or 0)
+        total_conflicts = int(result.get("skipped_conflicts") or 0)
         for _round in range(400):
             cursor_before = int(result.get("cursor") or 0)
             if int(result.get("rows_applied") or 0) <= 0:
@@ -123,9 +129,14 @@ class MirrorPuller:
             result = await self._refresh_page()
             total_applied += int(result.get("rows_applied") or 0)
             total_skipped += int(result.get("skipped_unhashed") or 0)
+            total_conflicts += int(result.get("skipped_conflicts") or 0)
             if int(result.get("cursor") or 0) <= cursor_before:
                 break
-        self._status.update(rows_applied=total_applied, skipped_unhashed=total_skipped)
+        self._status.update(
+            rows_applied=total_applied,
+            skipped_unhashed=total_skipped,
+            skipped_conflicts=total_conflicts,
+        )
         return self.status()
 
     async def _refresh_page(self) -> dict[str, Any]:
@@ -148,6 +159,7 @@ class MirrorPuller:
 
         applied = 0
         skipped_unhashed = 0
+        skipped_conflicts = 0
         new_cursor = cursor
         conn = await connection.open_async(self.db_path)
         try:
@@ -165,7 +177,15 @@ class MirrorPuller:
                 if not row.get("content_hash"):
                     skipped_unhashed += 1
                     continue
-                await self._apply_row(conn, source_id, row, available_columns)
+                try:
+                    skipped_conflicts += await self._apply_row(conn, source_id, row, available_columns)
+                except sqlite3.IntegrityError as error:
+                    # One row this catalog cannot hold must never cost the rest
+                    # of the page. SQLite backs out the failed statement only,
+                    # so the page stays intact and the next refresh retries.
+                    skipped_conflicts += 1
+                    log.warning("mirror skipped hub image %s: %s", row.get("hub_image_id"), error)
+                    continue
                 applied += 1
                 if applied % _MIRROR_COMMIT_EVERY == 0:
                     await conn.commit()
@@ -188,6 +208,7 @@ class MirrorPuller:
             cursor=new_cursor,
             rows_applied=applied,
             skipped_unhashed=skipped_unhashed,
+            skipped_conflicts=skipped_conflicts,
             last_refresh_at=time.time(),
             last_error="",
         )
@@ -220,11 +241,13 @@ class MirrorPuller:
         row = await (await conn.execute("SELECT id FROM catalog_sources WHERE path = ?", (_HUB_SOURCE_PATH,))).fetchone()
         return int(row["id"])
 
-    async def _apply_row(self, conn, source_id: int, remote: dict[str, Any], available_columns: set[str]) -> None:
+    async def _apply_row(self, conn, source_id: int, remote: dict[str, Any], available_columns: set[str]) -> int:
+        """Apply one hub row; returns 1 when the hub's path could not be taken."""
+
         content_hash = str(remote["content_hash"])
         hub_image_id = int(remote["hub_image_id"])
         existing = await (await conn.execute(
-            "SELECT id, hub_remote FROM images WHERE content_hash = ? OR hub_image_id = ? ORDER BY hub_remote ASC, id ASC LIMIT 1",
+            "SELECT id, hub_remote, filepath FROM images WHERE content_hash = ? OR hub_image_id = ? ORDER BY hub_remote ASC, id ASC LIMIT 1",
             (content_hash, hub_image_id),
         )).fetchone()
         # The same photo can be two rows: a local import matched by hash and a
@@ -235,12 +258,13 @@ class MirrorPuller:
         # row that already holds the identity keeps it; the local duplicate
         # stays untouched and leaves with its retired source.
         holder = await (await conn.execute(
-            "SELECT id, hub_remote FROM images WHERE hub_image_id = ?",
+            "SELECT id, hub_remote, filepath FROM images WHERE hub_image_id = ?",
             (hub_image_id,),
         )).fetchone()
         if holder is not None:
             existing = holder
         values = self._image_values(remote, available_columns)
+        path_conflicts = 0
         if existing is None:
             values.update(source_id=source_id, hub_image_id=hub_image_id, hub_remote=1, filepath=str(remote.get("filepath") or ""))
             columns = list(values)
@@ -255,23 +279,61 @@ class MirrorPuller:
             if not int(existing["hub_remote"] or 0):
                 values.pop("filepath", None)
                 values.pop("source_id", None)
+                # missing_at describes the file at a path, and this row keeps
+                # its own local one: the hub losing its copy is not this file
+                # going missing.
+                values.pop("missing_at", None)
                 values["hub_remote"] = 0
             else:
-                # Hub paths can move (mount migrations, re-filed folders) — the
-                # mirror must follow, or the folder tree shows the old layout forever.
-                values["filepath"] = str(remote.get("filepath") or "")
+                path_conflicts = await self._apply_hub_filepath(conn, values, remote, existing)
             values["hub_image_id"] = hub_image_id
             assignments = ", ".join(f"{column} = ?" for column in values)
             await conn.execute(f"UPDATE images SET {assignments} WHERE id = ?", (*values.values(), image_id))
         await self._apply_develop(conn, image_id, remote)
         await self._apply_rating(conn, image_id, remote, available_columns)
         await self._apply_keywords(conn, image_id, remote.get("keywords"))
+        return path_conflicts
+
+    @staticmethod
+    async def _apply_hub_filepath(conn, values: dict[str, Any], remote: dict[str, Any], existing) -> int:
+        """Follow a mirrored row's hub path, unless another row still holds it.
+
+        Hub paths move (mount migrations, re-filed folders) and a mirror that
+        ignores the move shows the retired folder tree forever. Two guards:
+        an older hub sends no ``filepath`` at all, and silence is not an
+        instruction to blank the local one; and ``images(filepath)`` is unique,
+        so writing a path another row holds aborts the statement. The holder
+        keeps it, and the next refresh takes the path once that row moves on.
+        """
+
+        incoming = str(remote.get("filepath") or "")
+        image_id = int(existing["id"])
+        # Almost every row in a refresh has not moved: cost that case nothing.
+        if not incoming or incoming == str(existing["filepath"] or ""):
+            return 0
+        holder = await (await conn.execute(
+            "SELECT id FROM images WHERE filepath = ? AND vc_of IS NULL AND id <> ? LIMIT 1",
+            (incoming, image_id),
+        )).fetchone()
+        if holder is not None:
+            log.warning(
+                "mirror kept image %s at its old path: image %s still holds %s",
+                image_id, int(holder["id"]), incoming,
+            )
+            return 1
+        values["filepath"] = incoming
+        return 0
 
     @staticmethod
     def _image_values(remote: dict[str, Any], available_columns: set[str]) -> dict[str, Any]:
         aliases = {"file_ext": "file_ext", "file_size": "file_size", "date_taken": "date_taken"}
         values: dict[str, Any] = {}
         for column in _IMAGE_COLUMNS & available_columns:
+            # The hub owns every field it sends, on insert and on update alike —
+            # a retirement (status) or a loss (missing_at) has to reach the
+            # satellite, or the laptop keeps showing photos the hub retired.
+            # Identity and filepath are the exceptions: both carry a unique
+            # index, so _apply_row decides them itself.
             if column in {"hub_image_id", "hub_remote", "filepath"}:
                 continue
             source = aliases.get(column, column)

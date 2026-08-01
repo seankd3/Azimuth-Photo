@@ -79,6 +79,42 @@ class MirrorAcceptanceTests(BackendTestCase):
         response = self.client.request(method, url.removeprefix("http://hub"), content=body, headers=headers)
         return response.status_code, dict(response.headers), response.content
 
+    def _mirror(self) -> MirrorPuller:
+        return MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
+
+    async def _repull(self, mirror: MirrorPuller) -> dict:
+        """Re-read the whole export the way a satellite does after hub edits."""
+        conn = await db.get_db()
+        try:
+            await conn.execute("DELETE FROM sync_mirror_state WHERE key = 'cursor'")
+            await conn.commit()
+        finally:
+            await conn.close()
+        return await mirror.refresh()
+
+    async def _mirrored(self, hub_image_id: int) -> dict | None:
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT * FROM images WHERE hub_image_id = ?", (hub_image_id,)
+            )).fetchone()
+            return dict(row) if row is not None else None
+        finally:
+            await conn.close()
+
+    async def _visible_count(self) -> int:
+        # The catalog's own visibility predicate: a photo counts only while it
+        # is kept and present.
+        conn = await db.get_db()
+        try:
+            row = await (await conn.execute(
+                "SELECT COUNT(*) AS c FROM images "
+                "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
+            )).fetchone()
+            return int(row["c"])
+        finally:
+            await conn.close()
+
     async def test_v2_mirror_acceptance_scenario(self):
         source = await self._source("field-import")
         field_image = await self._image(source["id"], "already-local.jpg")
@@ -124,29 +160,120 @@ class MirrorAcceptanceTests(BackendTestCase):
 
     async def test_mirror_follows_hub_filepath_moves(self):
         """Hub paths can move (mount migrations, re-filed folders); the mirror must follow."""
-        mirror = MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
+        mirror = self._mirror()
         first = await mirror.refresh()
         self.assertEqual(first["rows_applied"], 200)
 
         moved = "/hub-moved/2026/hub-1.jpg"
         self.rows[0]["filepath"] = moved
+        await self._repull(mirror)
+
+        row = await self._mirrored(1)
+        self.assertEqual(int(row["hub_remote"]), 1)
+        self.assertEqual(row["filepath"], moved)
+
+    async def test_mirror_keeps_its_path_when_the_hub_stops_sending_one(self):
+        """An older hub omits filepath; that is silence, not an instruction to blank it."""
+        mirror = self._mirror()
+        await mirror.refresh()
+        original = (await self._mirrored(1))["filepath"]
+
+        self.rows[0].pop("filepath")
+        await self._repull(mirror)
+
+        self.assertEqual((await self._mirrored(1))["filepath"], original)
+
+    async def test_mirror_follows_hub_retirement(self):
+        """A photo the hub retires must stop counting here; the hub owns status."""
+        mirror = self._mirror()
+        await mirror.refresh()
+        self.assertEqual(await self._visible_count(), 200)
+
+        self.rows[0]["status"] = "removed"
+        await self._repull(mirror)
+
+        self.assertEqual((await self._mirrored(1))["status"], "removed")
+        self.assertEqual(await self._visible_count(), 199)
         conn = await db.get_db()
         try:
-            await conn.execute("DELETE FROM sync_mirror_state WHERE key = 'cursor'")
+            source = await (await conn.execute(
+                "SELECT active_image_count FROM catalog_sources WHERE path = 'hub://'"
+            )).fetchone()
+        finally:
+            await conn.close()
+        self.assertEqual(int(source["active_image_count"]), 199)
+
+    async def test_mirror_follows_hub_missing_at(self):
+        """A photo the hub knows is missing must not stay visible on the satellite."""
+        mirror = self._mirror()
+        await mirror.refresh()
+        self.assertIsNone((await self._mirrored(2))["missing_at"])
+
+        self.rows[1]["missing_at"] = 1753900000.0
+        await self._repull(mirror)
+
+        self.assertEqual(float((await self._mirrored(2))["missing_at"]), 1753900000.0)
+        self.assertEqual(await self._visible_count(), 199)
+
+    async def test_local_import_keeps_its_own_file_when_it_gains_a_hub_identity(self):
+        """A field import only gains the hub identity; its own file stays its truth."""
+        source = await self._source("field-import")
+        field_image = await self._image(source["id"], "already-local.jpg")
+        local_path = (await self._image_row(field_image))["filepath"]
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "UPDATE images SET content_hash = ? WHERE id = ?",
+                (self.rows[0]["content_hash"], field_image),
+            )
             await conn.commit()
         finally:
             await conn.close()
+        # The hub's copy moved and then went missing. The local file did neither.
+        self.rows[0]["filepath"] = "/hub-moved/2026/hub-1.jpg"
+        self.rows[0]["missing_at"] = 1753900000.0
 
+        await self._mirror().refresh()
+
+        row = await self._image_row(field_image)
+        self.assertEqual(int(row["hub_image_id"]), 1)
+        self.assertEqual(int(row["hub_remote"]), 0)
+        self.assertEqual(row["filepath"], local_path)
+        self.assertEqual(int(row["source_id"]), int(source["id"]))
+        self.assertIsNone(row["missing_at"])
+
+    async def test_taken_filepath_skips_one_row_without_aborting_the_page(self):
+        """One unusable path must never cost the rest of the page."""
+        mirror = self._mirror()
         await mirror.refresh()
+
+        held = self.rows[1]["filepath"]
+        self.rows[0]["filepath"] = held  # a move into a path another row still holds
+        moved = "/hub/2027/hub-3-moved.jpg"
+        self.rows[2]["filepath"] = moved  # a legal move later in the same page
+        self.rows.append({  # a new photo whose path is already taken
+            "hub_image_id": 900,
+            "content_hash": f"{900:032x}",
+            "filename": "collides.jpg",
+            "filepath": self.rows[4]["filepath"],
+            "file_ext": ".jpg",
+            "status": "kept",
+        })
+
+        result = await self._repull(mirror)
+
+        self.assertEqual((await self._mirrored(1))["filepath"], "/hub/2026/hub-1.jpg")
+        self.assertEqual((await self._mirrored(2))["filepath"], held)
+        self.assertEqual((await self._mirrored(3))["filepath"], moved)
+        self.assertEqual((await self._mirrored(5))["filepath"], self.rows[4]["filepath"])
+        self.assertIsNone(await self._mirrored(900))
+        self.assertEqual(result["skipped_conflicts"], 2)
         conn = await db.get_db()
         try:
-            row = await (await conn.execute(
-                "SELECT filepath, hub_remote FROM images WHERE hub_image_id = 1"
-            )).fetchone()
-            self.assertEqual(int(row["hub_remote"]), 1)
-            self.assertEqual(row["filepath"], moved)
+            count = await (await conn.execute("SELECT COUNT(*) AS c FROM images")).fetchone()
         finally:
             await conn.close()
+        self.assertEqual(int(count["c"]), 200)
 
     async def test_mirror_reports_skipped_unhashed_rows(self):
         self.rows = [
