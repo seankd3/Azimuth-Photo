@@ -106,6 +106,37 @@ def partition_raw_thumbnail_tiers(
 VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
 
 
+# A name is not a format. This archive holds 1,306 files named .CR2 that are
+# really full-resolution JPEGs: they open fine in the viewer, LibRaw refuses
+# them as "not a raw file", and every RAW branch below used to be chosen by
+# extension alone — so those photos could never get a thumbnail. Decide once,
+# by the first bytes. When the original is already in RAM this costs nothing;
+# otherwise it is a 3-byte read of a file that is about to be read in full.
+_JPEG_MAGIC = b"\xff\xd8\xff"
+
+
+def is_raw_original(
+    filepath: str,
+    ext: str,
+    raw_extensions: set[str] | None,
+    *,
+    source_data: bytes | None = None,
+) -> bool:
+    """Whether RAW decoding applies — by content, not by file name."""
+
+    if not raw_extensions or ext not in raw_extensions:
+        return False
+    if source_data is not None:
+        head = source_data[:3]
+    else:
+        try:
+            with open(filepath, "rb") as handle:
+                head = handle.read(3)
+        except OSError:
+            head = b""  # unreadable: let the RAW path report the real error
+    return not head.startswith(_JPEG_MAGIC)
+
+
 def _open_by_content(filepath: str, max_target: int, prefer_draft: bool) -> Image.Image:
     """Decode a still image by what it contains, ignoring what it is named."""
 
@@ -129,28 +160,16 @@ def load_source_image(
     image_id: int | None = None,
 ) -> Image.Image:
     ext = os.path.splitext(filepath)[1].lower()
-    if ext in raw_extensions:
+    if is_raw_original(filepath, ext, raw_extensions):
         # Library / on-demand thumbs: embedded when large enough, else a single
         # LibRaw demosaic. Never touch Develop's base-cache gzip path here —
         # that stays lazy for the editor.
         preview = load_raw_preview(filepath, max_target)
         if preview is not None:
             return preview
-        try:
-            return demosaic_raw_for_thumbnail(filepath, max_target)
-        except Exception as raw_error:
-            # A name is not a format. Measured in this archive: 1,306 files
-            # named .CR2 that are really full-resolution JPEGs, which open
-            # perfectly in the viewer and which LibRaw refuses as "not a raw
-            # file" — so they could never get a thumbnail. Decode by what the
-            # file actually is; if that fails too, the RAW error was the honest
-            # one and is what gets raised.
-            try:
-                return _open_by_content(filepath, max_target, prefer_draft)
-            except Exception:
-                raise raw_error from None
+        return demosaic_raw_for_thumbnail(filepath, max_target)
 
-    return _open_by_content(filepath, max_target, ext in jpeg_extensions)
+    return _open_by_content(filepath, max_target, prefer_draft or ext in jpeg_extensions)
 
 
 def _open_bytes_by_content(data: bytes, max_target: int, prefer_draft: bool) -> Image.Image:
@@ -176,25 +195,16 @@ def load_source_image_from_bytes(
     raw_extensions: set[str],
 ) -> Image.Image:
     """Decode from an in-RAM original buffer — no second spindle touch."""
-    del prefer_draft  # draft sizing is applied for JPEG below; kept for API parity
     ext = os.path.splitext(filepath)[1].lower()
-    if ext in raw_extensions:
+    if is_raw_original(filepath, ext, raw_extensions, source_data=data):
         preview = load_raw_preview(filepath, max_target, source_data=data)
         if preview is not None:
             return preview
-        try:
-            return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
-        except Exception as raw_error:
-            # Same as the on-disk path: a name is not a format. The bulk
-            # generator reads originals into RAM first and comes through here,
-            # so the fallback has to exist on both or the files it was written
-            # for still never get a thumbnail.
-            try:
-                return _open_bytes_by_content(data, max_target, True)
-            except Exception:
-                raise raw_error from None
+        return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
 
-    return _open_bytes_by_content(data, max_target, ext in jpeg_extensions)
+    return _open_bytes_by_content(
+        data, max_target, prefer_draft or ext in jpeg_extensions
+    )
 
 
 def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orientation_queue) -> None:
@@ -521,7 +531,7 @@ def generate_missing_thumbnails(
 
     try:
         ext = os.path.splitext(filepath)[1].lower()
-        use_raw_split = raw_extensions is not None and ext in raw_extensions
+        use_raw_split = is_raw_original(filepath, ext, raw_extensions, source_data=source_data)
 
         if use_raw_split:
             # Embedded preview stays on this thread (releases GIL). Demosaic
@@ -713,8 +723,7 @@ def generate_thumbnail_set(
     try:
         if needed_sizes:
             use_raw_split = (
-                raw_extensions is not None
-                and ext in raw_extensions
+                is_raw_original(filepath, ext, raw_extensions, source_data=file_bytes)
                 and not (
                     full_item
                     and full_item.get("filepath") == filepath
