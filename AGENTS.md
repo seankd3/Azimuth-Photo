@@ -93,6 +93,20 @@ changes the contract.
   read-only live check. Use isolated test homes and fixtures for writes.
 - `AZIMUTH_SMOKE_MODE=1` is test-only. Never use it for a real hub or satellite.
 
+## Simplicity
+
+- Reliability comes from having one of each thing, not from more checks. One
+  rule for whether a photo is in the library, in one place, used everywhere. A
+  rule copied into two hundred queries is two hundred chances to disagree, and
+  it cannot be repaired or reasoned about.
+- Leave the tree tidy: no merged worktrees, dead branches, or one-off scripts
+  left lying around. The next person's speed is set by how much clutter they
+  have to read past.
+- No test may take longer than 30 seconds. A slow suite does not get run, and a
+  suite that does not get run is not protecting anything. Develop against
+  `scripts/make_test_library.py` (a few hundred photos on fast local disk),
+  never the real archive.
+
 ## Verification
 
 Use the smallest check that proves the change, then expand in proportion to
