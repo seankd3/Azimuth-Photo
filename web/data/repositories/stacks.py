@@ -9,6 +9,7 @@ from collections.abc import Iterable
 
 import helpers as app_helpers
 from data import connection as data_connection
+from data.repositories.catalog import active_image_condition, visible_image_condition
 from data.repositories.common import chunked
 
 
@@ -258,7 +259,7 @@ async def get_stack(db_path: str, stack_id: int) -> dict | None:
             "FROM stack_members sm JOIN images i ON i.id = sm.image_id "
             "LEFT JOIN catalog_sources cs ON cs.id = i.source_id "
             "WHERE sm.stack_id = ? "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "ORDER BY CASE WHEN i.id = ? THEN 0 ELSE 1 END, sm.score DESC, i.id ASC",
             (int(stack_id), int(stack_row["representative_image_id"])),
         )
@@ -311,7 +312,7 @@ async def list_stacks(
             "SELECT s.*, COUNT(i.id) AS member_count "
             "FROM stacks s JOIN stack_members sm ON sm.stack_id = s.id "
             "JOIN images i ON i.id = sm.image_id "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             f"{where} GROUP BY s.id "
             "ORDER BY s.updated_at DESC, s.id DESC LIMIT ? OFFSET ?",
             [*params, safe_limit, safe_offset],
@@ -326,7 +327,7 @@ async def list_stacks(
                 "FROM stack_members sm JOIN images i ON i.id = sm.image_id "
                 "LEFT JOIN catalog_sources cs ON cs.id = i.source_id "
                 f"WHERE sm.stack_id IN ({placeholders}) "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                f"AND {visible_image_condition()} "
                 "ORDER BY sm.stack_id ASC, sm.score DESC, i.id ASC",
                 stack_ids,
             )
@@ -415,7 +416,7 @@ async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict
                 "JOIN images i ON i.id = sm.image_id "
                 "JOIN catalog_sources cs ON cs.id = i.source_id "
                 f"WHERE s.representative_image_id IN ({placeholders}) "
-                "AND cs.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+                f"AND {active_image_condition('i', 'cs')} "
                 "GROUP BY s.id",
                 chunk,
             )
