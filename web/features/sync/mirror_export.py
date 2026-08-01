@@ -13,6 +13,7 @@ import thumbnails
 
 from data import connection
 from features.library import keywords
+from features.sync import develop_merge
 
 
 CATALOG_FIELDS = frozenset({
@@ -97,6 +98,11 @@ async def build_row_payload(conn, row: Any) -> dict[str, Any]:
     if not isinstance(payload["develop_settings"], dict):
         payload["develop_settings"] = {}
     payload["develop_settings"].pop("_lr_rating", None)
+    # Profile lookup tables are the bulk of this payload and the satellite
+    # renders from none of them: measured on a real page, 480 of 5,000 rows
+    # carried a table, those tables were 88% of the bytes, and only two
+    # distinct tables existed — one repeated 479 times.
+    payload["develop_settings"] = develop_merge.without_profile_tables(payload["develop_settings"])
     return payload
 
 

@@ -239,3 +239,42 @@ class SyncMirrorExportTests(unittest.TestCase):
                     archive.extractfile(".azimuth-trailer.json").read()
                 )
             self.assertEqual(trailer["after_id"], low_id)
+
+    def test_export_leaves_the_camera_profile_tables_on_the_hub(self):
+        image_id = self._image("profiled.jpg", "hash-profile")
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "UPDATE develop_settings SET settings = ? WHERE image_id = ?",
+                (
+                    json.dumps({
+                        "Exposure2012": 1.25,
+                        "Table_76A0B063E42C9E5E6F6319F80EE5595C": [0.1] * 4096,
+                        "Table_6702BFD3A5E8B81B69B4C6E5DB53CC78": [0.2] * 4096,
+                    }),
+                    image_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        row = next(line for line in self._catalog_lines() if line["hub_image_id"] == image_id)
+        settings = row["develop_settings"]
+        self.assertEqual(settings["Exposure2012"], 1.25)
+        self.assertEqual(
+            [key for key in settings if key.startswith("Table_")],
+            [],
+            "profile tables are 88% of a real export page and nothing renders from them",
+        )
+
+        stored = sqlite3.connect(self.db_path)
+        try:
+            kept = json.loads(
+                stored.execute(
+                    "SELECT settings FROM develop_settings WHERE image_id = ?", (image_id,)
+                ).fetchone()[0]
+            )
+        finally:
+            stored.close()
+        self.assertIn("Table_76A0B063E42C9E5E6F6319F80EE5595C", kept)

@@ -27,7 +27,7 @@ from data.repositories import common
 from features.imports import taxonomy
 from features.library import keywords
 from features.sync import family_clock
-from features.sync.develop_merge import preserve_local_rating
+from features.sync.develop_merge import preserve_local_rating, preserve_profile_tables
 from features.sync.hashing import compute_content_hash, compute_full_hash, compute_hash_pair
 from features.sync.validation import validate_content_hash
 from core import hdd_governor
@@ -956,7 +956,11 @@ async def _merge_develop(conn, image_id: int, content_hash: str, item: dict[str,
     existing = family_clock.newest_key(row_key, state_key)
     if not _is_newer(incoming, existing):
         return False, "hub-newer-or-equal"
-    settings = preserve_local_rating(item["develop_settings"], row["settings"] if row else None)
+    current = row["settings"] if row else None
+    settings = preserve_local_rating(item["develop_settings"], current)
+    # The satellite was never sent the profile tables, so an edit coming back
+    # must not be read as a decision to delete them.
+    settings = preserve_profile_tables(settings, current)
     encoded = json.dumps(settings, separators=(",", ":"), sort_keys=True)
     await conn.execute(
         "INSERT INTO develop_settings(image_id, settings, origin, updated_at) VALUES (?, ?, 'sync', ?) "
