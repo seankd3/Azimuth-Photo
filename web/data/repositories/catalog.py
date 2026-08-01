@@ -98,11 +98,15 @@ def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> s
 
 
 def visible_image_condition(image_alias: str = "i") -> str:
-    """The photo half of the rule, for queries already scoped to a source."""
+    """The photo half of the rule, for queries already scoped to a source.
 
+    Pass an empty alias for a single-table query that names columns bare.
+    """
+
+    prefix = f"{image_alias}." if image_alias else ""
     return (
-        f"{image_alias}.status IN ('kept', 'maybe') "
-        f"AND {image_alias}.missing_at IS NULL"
+        f"{prefix}status IN ('kept', 'maybe') "
+        f"AND {prefix}missing_at IS NULL"
     )
 
 
