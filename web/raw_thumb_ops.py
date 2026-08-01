@@ -15,6 +15,8 @@ import subprocess
 
 from PIL import Image
 
+from core import pil_limits  # noqa: F401  # process-wide Pillow policy
+
 
 def apply_raw_orientation(img: Image.Image, flip: int) -> Image.Image:
     """Apply libraw's container orientation to an untagged RAW image."""

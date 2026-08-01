@@ -214,6 +214,7 @@ def _write_atomic(path: Path, data: bytes) -> None:
 def _write_preview(binary: bytes, preview_path: Path) -> None:
     import numpy as np  # deferred: keeps numpy off boot until a hub base preview is materialized
     from PIL import Image  # deferred: keeps Pillow off boot until a hub base preview is materialized
+    from core import pil_limits  # noqa: F401  # process-wide Pillow policy
 
     payload = gzip.decompress(binary)
     width = int.from_bytes(payload[8:12], "little")
