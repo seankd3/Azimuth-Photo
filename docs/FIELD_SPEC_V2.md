@@ -10,7 +10,9 @@ photo lives.
    file_size, date_taken, width/height/orientation, camera/lens fields, latitude/longitude/
    location_source, flag, elo + comparisons, quality score fields, stack membership
    (stack_id/kind/is_representative), collection ids, keywords (paths), develop_settings
-   (JSON + updated_at + origin). Terminator line `{"cursor": <new_cursor>}`. Cursor = a hub-side
+   (JSON + updated_at + origin), filepath, status, missing_at. Terminator line
+   `{"cursor": <new_cursor>}`. Fields are additive: an older satellite ignores names it does not
+   know, and a newer satellite leaves a field alone when an older hub omits it. Cursor = a hub-side
    monotonically increasing change counter: add `row_version INTEGER` to images bumped by trigger on
    UPDATE/INSERT (additive migration + backfill), so incremental export = `WHERE row_version > ?`.
 2. Satellite mirror puller (`features/sync/mirror.py`): applies rows into the local catalog.
@@ -21,6 +23,15 @@ photo lives.
      (display only). CRITICAL: source-availability and missing-file logic MUST treat hub_remote rows
      as online-and-remote — never mark missing, never "source offline", never decode locally.
    - Deletes/trash propagate as status changes in the export rows (no hard deletes).
+   - The hub owns `filepath`, `status` and `missing_at` for `hub_remote=1` rows, on every refresh
+     and not only on insert. A move, a retirement or a lost original that stops at the hub leaves
+     the satellite showing a layout the hub has retired. This does not weaken the rule above —
+     satellite-side detection still never marks a mirrored row missing; only the hub's own
+     `missing_at` travels. A row matched to a local field import keeps its own filepath,
+     source_id and missing_at, because those describe the file it actually holds.
+   - `images(filepath)` is unique, so an incoming path another row still holds is refused: the
+     holder keeps it, the mirror logs and counts the row (`skipped_conflicts`), and the next
+     refresh takes the path once the holder moves on. One refused row never aborts a page.
    - `POST /api/sync/mirror/refresh` + status in `GET /api/sync/status` (rows applied, cursor,
      last_refresh_at). Auto-refresh every 10 min when hub reachable, plus after each sync push.
 3. Thumb tier mirror: `GET /api/sync/thumbs/pack?size=sm&after_id=N&limit=500` (hub): a single
