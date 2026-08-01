@@ -144,6 +144,11 @@ async def run_pregen_bulk_batch(
         _diag("bulk batch abort: flush failed under metadata backoff")
         return 0
     tier_room = bulk_tier_room(tier_budgets)
+    # Room, not budget, is what decides whether a photo can be offered — and a
+    # tier with no room swallows every row silently, which reads from outside as
+    # an endless empty scan. Budgets were already logged and looked healthy
+    # while the hub generated nothing for hours, so log the number that matters.
+    _diag("bulk batch room", tier_room=tier_room, backoff=cache_metadata_backoff_active())
     if all(room <= 0 for room in tier_room.values()) and cache_metadata_backoff_active():
         _diag("bulk batch abort: no tier room under metadata backoff", tier_room=tier_room)
         return 0
