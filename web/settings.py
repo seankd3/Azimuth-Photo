@@ -98,6 +98,7 @@ DEFAULT_SETTINGS = {
     "import_category_memory": {},
     "sync_bandwidth_mbps": 0,
     "sync_thumb_budget_gb": 0,  # 0 = auto (adapts to free disk)
+    "develop_cache_gb": 0,  # 0 = auto (a quarter of the drive); evicted by age
     "hub_url": "",
     "device_token": "",
     "paired_hub_id": "",
@@ -179,6 +180,7 @@ INT_RANGES = {
     "caption_batch_size": (1, 4),
     "sync_bandwidth_mbps": (0, 10000),
     "sync_thumb_budget_gb": (0, 1024),
+    "develop_cache_gb": (0, 4096),
 }
 
 FLOAT_RANGES = {

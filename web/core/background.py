@@ -546,11 +546,30 @@ async def run_startup(
         # not been reconciled yet. Cheap by construction — a pass that finds
         # nothing stats the directories and reads none of them.
         import db as app_db
+        from data import connection as data_connection
         from features.catalog import synchronize
 
+        if data_connection.is_ephemeral_db_path(app_db.DB_PATH):
+            # A temp catalog belongs to a test, and a worker still holding it
+            # when the fixture tears down is a Windows deletability failure.
+            return
         await synchronize.run_reconcile_worker(lambda: app_db.DB_PATH)
 
     track_background_task(_start_background_daemon(_reconcile_folders, delay=30.0))
+
+    async def _hold_develop_cache_to_budget():
+        # A decode cache with no ceiling is a slow leak: it reached 77GB on the
+        # hub, which is also why it ended up on the archive disk. Oldest out
+        # first, the same law as the laptop cache.
+        import db as app_db
+        from data import connection as data_connection
+        from features.develop import base_cache_budget
+
+        if data_connection.is_ephemeral_db_path(app_db.DB_PATH):
+            return
+        await base_cache_budget.run_base_cache_budget_worker()
+
+    track_background_task(_start_background_daemon(_hold_develop_cache_to_budget, delay=45.0))
 
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
