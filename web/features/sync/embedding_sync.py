@@ -108,10 +108,18 @@ class EmbeddingPuller:
         )
 
     async def refresh(self, *, max_pages: int = 400) -> dict[str, Any]:
-        """Pull pages until the satellite has caught up with the hub."""
+        """Pull pages until the satellite has caught up with the hub.
+
+        A vector for a photo the catalog mirror has not delivered yet cannot be
+        stored, and the cursor would otherwise sail past it and never come back.
+        So the lowest such id is remembered and the next pass resumes from
+        there: the overlap shrinks to nothing as the mirror catches up, and no
+        vector is left behind.
+        """
 
         applied = unknown = wrong_model = 0
-        cursor = await self._cursor()
+        cursor = min(await self._cursor(), await self._retry_floor() or await self._cursor())
+        lowest_unknown = 0
         for _page in range(max_pages):
             status, _headers, body = await self._request(
                 "GET", f"{self.hub}/api/sync/embeddings/pack?cursor={cursor}&limit={PAGE_LIMIT}"
@@ -123,24 +131,65 @@ class EmbeddingPuller:
             if not rows:
                 cursor = next_cursor or cursor
                 break
-            page_applied, page_unknown, page_wrong = await self._apply(rows, next_cursor)
+            page_applied, page_unknown, page_wrong, page_lowest = await self._apply(rows, next_cursor)
             applied += page_applied
             unknown += page_unknown
             wrong_model += page_wrong
+            if page_lowest and (not lowest_unknown or page_lowest < lowest_unknown):
+                lowest_unknown = page_lowest
             if next_cursor <= cursor:
                 break
             cursor = next_cursor
 
+        await self._set_retry_floor(lowest_unknown)
         self._status.update(
             cursor=cursor,
             rows_applied=applied,
             skipped_unknown_image=unknown,
             skipped_wrong_model=wrong_model,
+            retry_from=lowest_unknown,
         )
         return self.status()
 
-    async def _apply(self, rows: list[dict], next_cursor: int) -> tuple[int, int, int]:
+    async def _retry_floor(self) -> int:
+        conn = await connection.open_async(self.db_path)
+        try:
+            await conn.executescript(
+                "CREATE TABLE IF NOT EXISTS sync_embedding_state ("
+                "key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+            )
+            row = await (await conn.execute(
+                "SELECT value FROM sync_embedding_state WHERE key = ?",
+                (f"retry_from:{self.model_key}",),
+            )).fetchone()
+        finally:
+            await connection.close_async(conn, db_path=self.db_path)
+        return int(row["value"]) if row else 0
+
+    async def _set_retry_floor(self, value: int) -> None:
+        conn = await connection.open_async(self.db_path)
+        try:
+            await conn.executescript(
+                "CREATE TABLE IF NOT EXISTS sync_embedding_state ("
+                "key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+            )
+            key = f"retry_from:{self.model_key}"
+            if value:
+                # Resume from just before the first vector that had nowhere to go.
+                await conn.execute(
+                    "INSERT INTO sync_embedding_state(key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, str(max(0, int(value) - 1))),
+                )
+            else:
+                await conn.execute("DELETE FROM sync_embedding_state WHERE key = ?", (key,))
+            await conn.commit()
+        finally:
+            await connection.close_async(conn, db_path=self.db_path)
+
+    async def _apply(self, rows: list[dict], next_cursor: int) -> tuple[int, int, int, int]:
         applied = unknown = wrong_model = 0
+        lowest_unknown = 0
         conn = await connection.open_async(self.db_path)
         try:
             hub_ids = [int(row["hub_image_id"]) for row in rows]
@@ -159,9 +208,12 @@ class EmbeddingPuller:
                     continue
                 image_id = mapping.get(int(row["hub_image_id"]))
                 if image_id is None:
-                    # The catalog mirror has not reached this photo yet; the
-                    # next pass picks it up once the row exists.
+                    # The catalog mirror has not reached this photo yet. Remember
+                    # where to come back to, or the cursor sails past it forever.
                     unknown += 1
+                    hub_id = int(row["hub_image_id"])
+                    if not lowest_unknown or hub_id < lowest_unknown:
+                        lowest_unknown = hub_id
                     continue
                 payload.append((self.model_key, image_id, base64.b64decode(row["embedding"]), self.dimension))
             if payload:
@@ -175,7 +227,7 @@ class EmbeddingPuller:
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=self.db_path)
-        return applied, unknown, wrong_model
+        return applied, unknown, wrong_model, lowest_unknown
 
 
 def _decode_page(body: bytes) -> tuple[list[dict], int]:

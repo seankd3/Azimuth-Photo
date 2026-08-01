@@ -174,25 +174,33 @@ class EmbeddingSyncTests(unittest.TestCase):
         self.assertEqual(status["skipped_wrong_model"], 4)
         self.assertEqual(self._satellite_vectors(), {}, "a foreign vector is meaningless, not merely worse")
 
-    def test_a_photo_the_mirror_has_not_reached_yet_is_skipped_not_lost(self):
+    def test_a_photo_the_mirror_has_not_reached_yet_is_collected_later(self):
+        """A skipped vector must come back on its own, with nothing reset by hand."""
+
         hub_ids = self._seed_hub(4)
         self._mirror_onto_satellite(hub_ids[:2])
 
         status = asyncio.run(self._puller().refresh())
         self.assertEqual(status["rows_applied"], 2)
         self.assertEqual(status["skipped_unknown_image"], 2)
+        self.assertTrue(status["retry_from"], "the cursor must remember where to come back to")
 
-        # Once the catalog mirror catches up, a pass from the start fills them
-        # in — the vectors were skipped, never dropped.
+        # The catalog mirror catches up. No cursor surgery, no manual reset.
         self._mirror_onto_satellite(hub_ids[2:])
-        conn = sqlite3.connect(self.satellite_path)
-        try:
-            conn.execute("DELETE FROM sync_embedding_state")
-            conn.commit()
-        finally:
-            conn.close()
-        asyncio.run(self._puller().refresh())
+        again = asyncio.run(self._puller().refresh())
+        self.assertEqual(again["rows_applied"], 2, "the skipped vectors return by themselves")
+        self.assertEqual(again["skipped_unknown_image"], 0)
+        self.assertFalse(again["retry_from"], "nothing is owed once they all landed")
         self.assertEqual(len(self._satellite_vectors()), 4)
+
+    def test_a_caught_up_satellite_stops_re_reading(self):
+        hub_ids = self._seed_hub(3)
+        self._mirror_onto_satellite(hub_ids)
+        asyncio.run(self._puller().refresh())
+
+        again = asyncio.run(self._puller().refresh())
+        self.assertEqual(again["rows_applied"], 0)
+        self.assertFalse(again["retry_from"])
 
 
 if __name__ == "__main__":
