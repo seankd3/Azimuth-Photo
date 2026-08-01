@@ -153,6 +153,19 @@ def load_source_image(
     return _open_by_content(filepath, max_target, ext in jpeg_extensions)
 
 
+def _open_bytes_by_content(data: bytes, max_target: int, prefer_draft: bool) -> Image.Image:
+    """Decode an in-RAM original by what it contains, ignoring its name."""
+
+    with Image.open(io.BytesIO(data)) as source:
+        if prefer_draft:
+            source.draft("RGB", (max_target * 2, max_target * 2))
+        source.load()
+        img = ImageOps.exif_transpose(source)
+        if img is source:
+            img = source.copy()
+        return img
+
+
 def load_source_image_from_bytes(
     filepath: str,
     data: bytes,
@@ -169,16 +182,19 @@ def load_source_image_from_bytes(
         preview = load_raw_preview(filepath, max_target, source_data=data)
         if preview is not None:
             return preview
-        return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
+        try:
+            return demosaic_raw_for_thumbnail(filepath, max_target, source_data=data)
+        except Exception as raw_error:
+            # Same as the on-disk path: a name is not a format. The bulk
+            # generator reads originals into RAM first and comes through here,
+            # so the fallback has to exist on both or the files it was written
+            # for still never get a thumbnail.
+            try:
+                return _open_bytes_by_content(data, max_target, True)
+            except Exception:
+                raise raw_error from None
 
-    with Image.open(io.BytesIO(data)) as source:
-        if ext in jpeg_extensions:
-            source.draft("RGB", (max_target * 2, max_target * 2))
-        source.load()
-        img = ImageOps.exif_transpose(source)
-        if img is source:
-            img = source.copy()
-        return img
+    return _open_bytes_by_content(data, max_target, ext in jpeg_extensions)
 
 
 def queue_orientation(image_id: int, img: Image.Image, *, orientation_lock, orientation_queue) -> None:

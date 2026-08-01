@@ -13,7 +13,7 @@ import unittest
 
 from PIL import Image
 
-from thumbnails.generation import load_source_image
+from thumbnails.generation import load_source_image, load_source_image_from_bytes
 
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
 RAW_EXTENSIONS = {".cr2", ".cr3", ".nef", ".arw", ".dng"}
@@ -72,6 +72,34 @@ class DecodeByContentTests(unittest.TestCase):
         with self.assertRaises(Exception) as caught:
             self._load(path)
         self.assertNotIsInstance(caught.exception, SystemExit)
+
+
+class DecodeBytesByContentTests(unittest.TestCase):
+    """The bulk generator reads originals into RAM, so it uses the other door."""
+
+    def _jpeg_bytes(self) -> bytes:
+        buffer = io.BytesIO()
+        Image.new("RGB", (48, 32), (200, 60, 10)).save(buffer, format="JPEG")
+        return buffer.getvalue()
+
+    def _load(self, name: str, data: bytes):
+        return load_source_image_from_bytes(
+            name, data, 256, False,
+            jpeg_extensions=JPEG_EXTENSIONS,
+            raw_extensions=RAW_EXTENSIONS,
+        )
+
+    def test_a_jpeg_named_cr2_decodes_from_memory_too(self):
+        with self._load("IMG_2347.CR2", self._jpeg_bytes()) as image:
+            self.assertEqual(image.size, (48, 32))
+
+    def test_an_ordinary_jpeg_from_memory_is_unaffected(self):
+        with self._load("holiday.jpg", self._jpeg_bytes()) as image:
+            self.assertEqual(image.size, (48, 32))
+
+    def test_bytes_that_are_not_an_image_still_raise(self):
+        with self.assertRaises(Exception):
+            self._load("broken.CR2", b"not an image")
 
 
 if __name__ == "__main__":
