@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 import caption_worker
 import settings
 from core import capabilities
+from features.sync import satellite
 from core.background import track_background_task
 
 
@@ -139,13 +140,20 @@ async def caption_status_payload() -> dict:
     caption_config = settings.active_caption_config(config)
     worker = caption_worker.get_worker_status()
     capability = capabilities.capability_status("captions")
-    if not capability["available"]:
+    # Same as faces: a hub-backed satellite never captions anything itself, so
+    # a perpetual "Refreshing…" was describing work that would never start.
+    deferred = satellite.defers_bulk_compute()
+    if not capability["available"] or deferred:
         worker = {
             **worker,
             "state": "unavailable",
             "ready": False,
             "running": False,
-            "message": capability["message"],
+            "message": (
+                "Captions are written on the hub; this device shows the results."
+                if deferred and capability["available"]
+                else capability["message"]
+            ),
             "last_error": "",
         }
     counts, counts_stale = await _cached_caption_counts(caption_config, worker)

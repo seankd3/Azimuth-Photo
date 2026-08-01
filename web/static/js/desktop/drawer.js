@@ -384,6 +384,13 @@ function statusText(name, data) {
 }
 
 function activityStatusText(name, data) {
+    // A worker that cannot run is not refreshing. Counts may genuinely still be
+    // in flight (status_stale is true and honest about that), but saying
+    // "Refreshing…" for work with nothing to do it described a wait that never
+    // ends — the desktop app ships without the faces and captions packs, so
+    // both rows said it permanently.
+    const workerState = (data && data.worker && data.worker.state) || '';
+    if (workerState === 'unavailable') return 'unavailable';
     if (data && data.status_stale) return 'Refreshing…';
     if (name === 'AI') {
         return `${fmtCompact(data.embedded)} / ${fmtCompact(data.total_images)} · ${data.worker_state || 'idle'}`;
