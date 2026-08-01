@@ -20,7 +20,9 @@ JPEG = bytes.fromhex(
 )
 
 
-class SynchronizeFolderTests(unittest.TestCase):
+class LibraryFixture:
+    """A disposable catalog over a real little folder tree."""
+
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
@@ -65,6 +67,8 @@ class SynchronizeFolderTests(unittest.TestCase):
     def _survey(self) -> synchronize.Plan:
         return asyncio.run(synchronize.survey(self.db_path, str(self.library)))
 
+
+class SynchronizeFolderTests(LibraryFixture, unittest.TestCase):
     def test_a_renamed_folder_reads_as_moved_not_lost(self):
         """The failure that cost a day: a rename must not look like deletion."""
 
@@ -139,6 +143,63 @@ class SynchronizeFolderTests(unittest.TestCase):
         self.assertEqual(plan.unchanged, 3)
         result = asyncio.run(synchronize.apply(self.db_path, plan))
         self.assertFalse(result["applied"])
+
+
+class DirectoryFastPathTests(LibraryFixture, unittest.TestCase):
+    """A second pass must not re-read directories that did not change."""
+
+    def _apply(self) -> synchronize.Plan:
+        plan = self._survey()
+        asyncio.run(synchronize.apply(self.db_path, plan))
+        return plan
+
+    def test_an_unchanged_tree_is_not_read_twice(self):
+        for day in range(4):
+            self._photo(f"Edits/2026/2026-01-0{day}/a.jpg")
+        self._catalog(*sorted(self.library.rglob("*.jpg")))
+
+        first = self._apply()
+        self.assertGreater(first.directories_read, 0, "the first pass must read everything")
+        self.assertEqual(first.directories_read, first.directories_seen)
+
+        second = self._survey()
+        self.assertEqual(second.directories_seen, first.directories_seen)
+        self.assertEqual(second.directories_read, 0, "nothing changed, so nothing needs listing")
+        self.assertTrue(second.is_empty)
+        self.assertEqual(second.unchanged, 4, "the catalog answers for untouched directories")
+
+    def test_a_change_is_still_seen_after_the_tree_was_remembered(self):
+        kept = self._photo("Snapshots/2026/2026-02-01/kept.jpg")
+        self._catalog(kept)
+        self._apply()
+
+        self._photo("Snapshots/2026/2026-02-01/arrived.jpg")
+        plan = self._survey()
+        self.assertEqual(plan.directories_read, 1, "only the directory that moved is listed")
+        self.assertEqual([os.path.basename(p) for p in plan.added], ["arrived.jpg"])
+
+    def test_full_ignores_what_was_remembered(self):
+        self._catalog(self._photo("Raws/2026/2026-03-01/a.jpg"))
+        first = self._apply()
+        self.assertEqual(self._survey().directories_read, 0)
+
+        forced = asyncio.run(synchronize.survey(self.db_path, str(self.library), full=True))
+        self.assertEqual(forced.directories_read, first.directories_seen)
+        self.assertTrue(forced.is_empty)
+
+    def test_a_recreated_directory_is_not_mistaken_for_the_old_one(self):
+        first_photo = self._photo("Edits/2026/2026-04-01/one.jpg")
+        self._catalog(first_photo)
+        self._apply()
+
+        shutil.rmtree(self.library / "Edits" / "2026" / "2026-04-01")
+        plan = self._survey()
+        asyncio.run(synchronize.apply(self.db_path, plan))
+        self.assertEqual(len(plan.gone), 1)
+
+        self._photo("Edits/2026/2026-04-01/two.jpg")
+        again = self._survey()
+        self.assertEqual([os.path.basename(p) for p in again.added], ["two.jpg"])
 
 
 if __name__ == "__main__":
