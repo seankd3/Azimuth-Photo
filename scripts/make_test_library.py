@@ -25,9 +25,10 @@ LIBRARY = Path(r"C:\Azimuth Test\Photos")
 ROOTS = ("Edits", "Raws/Digital", "Snapshots")
 RAW_EXTENSIONS = {".dng", ".cr3", ".cr2", ".nef", ".arw", ".orf", ".raf", ".rw2"}
 JPEG_EXTENSIONS = {".jpg", ".jpeg", ".heic", ".png", ".tif", ".tiff"}
-# Big enough to exercise grids, folders and ranking; small enough to rebuild
-# in under a minute.
-WANTED = {"Edits": 120, "Raws/Digital": 40, "Snapshots": 120}
+# Deliberately tiny. Enough photos to have folders, dates and all three roots;
+# few enough that a scan, a sync and a full verification finish while you watch.
+# If proving something needs more than this, the proof is designed wrong.
+WANTED = {"Edits": 12, "Raws/Digital": 8, "Snapshots": 12}
 MAX_BYTES = {"Edits": 40_000_000, "Raws/Digital": 60_000_000, "Snapshots": 40_000_000}
 
 
