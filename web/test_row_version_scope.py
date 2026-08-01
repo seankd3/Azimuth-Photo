@@ -77,6 +77,43 @@ class RowVersionScopeTests(unittest.TestCase):
             self._update(column, value)
             self.assertEqual(self._version(), before, f"{column} is not exported")
 
+    def test_an_older_trigger_is_replaced_on_a_catalog_that_looks_current(self):
+        """The trap this fell into: a fix that only runs when something else looks stale."""
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("DROP TRIGGER IF EXISTS images_row_version_au")
+            conn.execute("""
+                CREATE TRIGGER images_row_version_au AFTER UPDATE ON images
+                WHEN NEW.row_version = OLD.row_version BEGIN
+                    UPDATE images SET row_version = (
+                        SELECT COALESCE(MAX(row_version), 0) + 1 FROM images
+                    ) WHERE id = NEW.id;
+                END;
+            """)
+            conn.commit()
+            self.assertNotIn("UPDATE OF", conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name='images_row_version_au'"
+            ).fetchone()[0], "fixture should start with the old trigger")
+        finally:
+            conn.close()
+
+        # A boot where nothing else looks out of date must still correct it.
+        asyncio.run(db.init_db())
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            sql = conn.execute(
+                "SELECT sql FROM sqlite_master WHERE name='images_row_version_au'"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertIn("UPDATE OF", sql, "the costlier trigger must not survive a normal boot")
+
+        before = self._version()
+        self._update("relative_path", "somewhere.jpg")
+        self.assertEqual(self._version(), before)
+
     def test_the_trigger_covers_every_exported_image_column(self):
         """The guard: adding a field to the export must not silently stop syncing."""
 

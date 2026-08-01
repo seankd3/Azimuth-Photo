@@ -323,6 +323,11 @@ async def init_db():
             await _backup_before_migration(db)
         if db_exists and await _schema_is_current(db):
             await _normalize_legacy_image_state(db)
+            # Cheap, and it must not wait for some *other* thing to look out of
+            # date: the row-version trigger decides how much every satellite
+            # re-downloads, and a catalog that already looks current would
+            # otherwise keep an older, costlier one forever.
+            await data_schema.ensure_catalog_export_row_versions(db)
             await _refresh_source_online_states_on_conn(db)
             await _check_embedding_dimension(db)
             _ensured_embedding_model_keys.clear()
