@@ -540,6 +540,18 @@ async def run_startup(
 
     track_background_task(_warm_disk_path_index())
 
+    async def _reconcile_folders():
+        # The catalog follows the folders on its own: renaming or reorganising a
+        # tree outside the app is not damage to repair, it is a folder that has
+        # not been reconciled yet. Cheap by construction — a pass that finds
+        # nothing stats the directories and reads none of them.
+        import db as app_db
+        from features.catalog import synchronize
+
+        await synchronize.run_reconcile_worker(lambda: app_db.DB_PATH)
+
+    track_background_task(_start_background_daemon(_reconcile_folders, delay=30.0))
+
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
     track_background_task(_sweep_phantom_cache_entries())

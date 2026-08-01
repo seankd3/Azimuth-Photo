@@ -202,5 +202,146 @@ class DirectoryFastPathTests(LibraryFixture, unittest.TestCase):
         self.assertEqual([os.path.basename(p) for p in again.added], ["two.jpg"])
 
 
+class ReconcileTests(LibraryFixture, unittest.TestCase):
+    """The catalog keeps itself matching the folders, with no user action."""
+
+    def _source(self) -> dict:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO catalog_sources(path, display_name) VALUES (?, ?)",
+                (str(self.library), "Photos"),
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT id, path, included FROM catalog_sources WHERE path = ?", (str(self.library),)
+            ).fetchone()
+        finally:
+            conn.close()
+        return {"id": row[0], "path": row[1], "included": row[2]}
+
+    def _paths(self) -> set[str]:
+        conn = sqlite3.connect(self.db_path)
+        try:
+            return {r[0] for r in conn.execute("SELECT filepath FROM images")}
+        finally:
+            conn.close()
+
+    def test_a_file_dropped_into_the_library_joins_it(self):
+        self.library.mkdir(parents=True, exist_ok=True)
+        source = self._source()
+        arrived = self._photo("Raws/Digital/2026/2026-05-01/new.jpg")
+
+        result = asyncio.run(synchronize.reconcile_source(self.db_path, source))
+        self.assertEqual(result["adopted"], 1, result)
+        self.assertIn(str(arrived), self._paths())
+
+        again = asyncio.run(synchronize.reconcile_source(self.db_path, source))
+        self.assertFalse(again["applied"], "a settled library needs no second pass")
+
+    def test_reconcile_once_skips_a_mirrored_source(self):
+        self.library.mkdir(parents=True, exist_ok=True)
+        self._source()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT OR IGNORE INTO catalog_sources(path, display_name) VALUES ('hub://', 'Hub library')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._photo("Edits/2026/2026-06-01/a.jpg")
+
+        results = asyncio.run(synchronize.reconcile_once(self.db_path))
+        self.assertEqual(len(results), 1, "only the real folder is reconciled")
+        self.assertEqual(results[0]["adopted"], 1)
+
+
+    def test_a_renamed_root_moves_the_source_rather_than_losing_the_photos(self):
+        """The failure that cost a day, at the root level."""
+
+        self.library.mkdir(parents=True, exist_ok=True)
+        photos = [self._photo(f"Snapshots/2026/2026-01-0{n}/a.jpg") for n in range(1, 4)]
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO catalog_sources(path, display_name) VALUES (?, 'Snapshots')",
+                (str(self.library / "Snapshots"),),
+            )
+            source_id = conn.execute(
+                "SELECT id FROM catalog_sources WHERE path = ?",
+                (str(self.library / "Snapshots"),),
+            ).fetchone()[0]
+            for path in photos:
+                conn.execute(
+                    "INSERT INTO images(source_id, filename, filepath, file_size, status) "
+                    "VALUES (?, ?, ?, ?, 'kept')",
+                    (source_id, path.name, str(path), path.stat().st_size),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        os.rename(self.library / "Snapshots", self.library / "Personal Photos")
+        asyncio.run(synchronize.reconcile_once(self.db_path))
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            root = conn.execute(
+                "SELECT path FROM catalog_sources WHERE id = ?", (source_id,)
+            ).fetchone()[0]
+            missing = conn.execute(
+                "SELECT count(*) FROM images WHERE missing_at IS NOT NULL"
+            ).fetchone()[0]
+            live = conn.execute(
+                "SELECT count(*) FROM images WHERE status = 'kept' AND missing_at IS NULL"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertTrue(root.endswith("Personal Photos"), f"the source should follow: {root}")
+        self.assertEqual(missing, 0, "a rename must not lose a single photo")
+        self.assertEqual(live, 3)
+
+    def test_an_unplugged_root_is_left_alone_rather_than_rebound(self):
+        self.library.mkdir(parents=True, exist_ok=True)
+        photos = [self._photo(f"Raws/2026/{n}.jpg") for n in range(3)]
+        decoy = self.library / "Something Else"
+        decoy.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO catalog_sources(path, display_name) VALUES (?, 'Raws')",
+                (str(self.library / "Raws"),),
+            )
+            source_id = conn.execute(
+                "SELECT id FROM catalog_sources WHERE path = ?", (str(self.library / "Raws"),)
+            ).fetchone()[0]
+            for path in photos:
+                conn.execute(
+                    "INSERT INTO images(source_id, filename, filepath, file_size, status) "
+                    "VALUES (?, ?, ?, ?, 'kept')",
+                    (source_id, path.name, str(path), path.stat().st_size),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        shutil.rmtree(self.library / "Raws")
+        asyncio.run(synchronize.reconcile_once(self.db_path))
+
+        conn = sqlite3.connect(self.db_path)
+        try:
+            root = conn.execute(
+                "SELECT path FROM catalog_sources WHERE id = ?", (source_id,)
+            ).fetchone()[0]
+            missing = conn.execute(
+                "SELECT count(*) FROM images WHERE missing_at IS NOT NULL"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertTrue(root.endswith("Raws"), "nothing matched, so the source must not move")
+        self.assertEqual(missing, 0, "an absent root is not proof the photos are gone")
+
+
 if __name__ == "__main__":
     unittest.main()

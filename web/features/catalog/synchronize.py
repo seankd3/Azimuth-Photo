@@ -23,12 +23,16 @@ unplugged" and "the owner deleted everything" look identical from here.
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
 from dataclasses import dataclass, field
 
 import scanner
 from data import connection
 from data.repositories import catalog as catalog_repository
+
+log = logging.getLogger(__name__)
 
 # Astrophotography is out of scope and is never read, per AGENTS.md.
 _SKIPPED_DIR_NAMES = frozenset({"Astrophotography"})
@@ -301,11 +305,203 @@ async def apply(db_path: str, plan: Plan, *, source_id: int | None = None) -> di
     finally:
         await connection.close_async(conn, db_path=db_path)
 
+    adopted = 0
+    if plan.added and source_id is not None:
+        adopted = await _adopt(db_path, plan.added, source_id)
+
     return {
         **plan.summary(),
         "applied": True,
         "moved_applied": len(plan.moved),
         "gone_applied": len(plan.gone),
-        "added_pending_scan": len(plan.added),
+        "adopted": adopted,
+        "added_pending_scan": len(plan.added) - adopted,
         "source_id": source_id,
     }
+
+
+async def _adopt(db_path: str, paths: list[str], source_id: int) -> int:
+    """Catalog files that are in the folder but not in the library.
+
+    What is in the three roots is what the owner has, so a file that appears
+    there joins the library rather than waiting in a queue. It goes in through
+    the same batch insert the scanner uses, so an adopted photo is
+    indistinguishable from a scanned one.
+    """
+
+    rows = []
+    for path in paths:
+        try:
+            stat = os.stat(path)
+        except OSError:
+            continue
+        rows.append((
+            os.path.basename(path),
+            path,
+            os.path.splitext(path)[1].lower(),
+            int(stat.st_size),
+            float(stat.st_mtime),
+            None,   # orientation — the metadata worker fills this in
+            None,   # aspect_ratio
+        ))
+    if not rows:
+        return 0
+    await catalog_repository.insert_images_batch(db_path, rows, source_id=source_id)
+    return len(rows)
+
+
+async def reconcile_source(db_path: str, source: dict, *, full: bool = False) -> dict:
+    """Make one source's catalog rows match what is in its folder."""
+
+    plan = await survey(db_path, str(source["path"]), full=full)
+    return await apply(db_path, plan, source_id=int(source["id"]))
+
+
+async def rebind_moved_source(db_path: str, source: dict, *, sample: int = 50) -> str | None:
+    """A root that vanished has usually just been renamed. Find it and follow.
+
+    This is the case that cost a day: the owner renames `Personal Photos` to
+    `Snapshots` in a file manager and every path in the catalog is suddenly
+    wrong. Rather than repair a hundred thousand rows, move the one row that
+    says where the root is — every photo's path is derived from it.
+
+    Proven, not guessed: a candidate only wins if the source's own photos are
+    actually found underneath it at the same relative paths.
+    """
+
+    old_root = os.path.normpath(str(source["path"]))
+    parent = os.path.dirname(old_root)
+    if not parent or not os.path.isdir(parent):
+        return None
+
+    conn = await connection.open_async(db_path)
+    try:
+        rows = await (await conn.execute(
+            "SELECT filepath FROM images WHERE source_id = ? AND vc_of IS NULL "
+            "AND status != 'trashed' LIMIT ?",
+            (int(source["id"]), sample),
+        )).fetchall()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    relatives = []
+    for row in rows:
+        path = os.path.normpath(str(row["filepath"] or ""))
+        if path.startswith(os.path.join(old_root, "")):
+            relatives.append(os.path.relpath(path, old_root))
+    if not relatives:
+        return None
+
+    best: tuple[int, str] | None = None
+    for entry in os.scandir(parent):
+        if not entry.is_dir() or os.path.normpath(entry.path) == old_root:
+            continue
+        hits = sum(1 for rel in relatives if os.path.isfile(os.path.join(entry.path, rel)))
+        if hits and (best is None or hits > best[0]):
+            best = (hits, os.path.normpath(entry.path))
+
+    # A clear majority of this source's photos must be there. A couple of
+    # coincidental filename matches is not a renamed folder.
+    if best is None or best[0] < max(1, int(len(relatives) * 0.8)):
+        return None
+
+    new_root = best[1]
+    conn = await connection.open_async(db_path)
+    try:
+        held = await (await conn.execute(
+            "SELECT id FROM catalog_sources WHERE path = ? AND id <> ?",
+            (new_root, int(source["id"])),
+        )).fetchone()
+        if held is not None:
+            # Something already claims that folder; leave both alone.
+            return None
+        await conn.execute(
+            "UPDATE catalog_sources SET path = ?, display_name = ?, online = 1, "
+            "included = 1, removed_at = NULL WHERE id = ?",
+            (new_root, os.path.basename(new_root) or new_root, int(source["id"])),
+        )
+        # Every path under this root moves with it, in one indexed statement
+        # rather than a hundred thousand individual repairs. Compared by prefix
+        # length instead of GLOB so a bracket in a folder name cannot match
+        # something else.
+        old_prefix = os.path.join(old_root, "")
+        new_prefix = os.path.join(new_root, "")
+        await conn.execute(
+            "UPDATE images SET filepath = ? || substr(filepath, ?) "
+            "WHERE source_id = ? AND substr(filepath, 1, ?) = ?",
+            (new_prefix, len(old_prefix) + 1, int(source["id"]), len(old_prefix), old_prefix),
+        )
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+    log.info("source %s followed a rename: %s -> %s", source["id"], old_root, new_root)
+    return new_root
+
+
+async def reconcile_once(db_path: str, *, full: bool = False) -> list[dict]:
+    """Reconcile every source that is a real folder on this machine.
+
+    A satellite's library is a mirror rather than a folder, so it has nothing to
+    reconcile here — its `hub://` source is not a filesystem path and is skipped.
+    """
+
+    from features.catalog import reveal as catalog_reveal
+
+    sources = await catalog_repository.get_catalog_sources(db_path)
+    results = []
+    for source in sources:
+        path = str(source["path"] or "")
+        if not int(source["included"] or 0) or not catalog_reveal.source_has_local_folders(path):
+            continue
+        if not os.path.isdir(path):
+            # A root that is gone was usually renamed, not unplugged. Follow it
+            # if its photos can be found; otherwise leave the source entirely,
+            # because an unplugged drive is not an empty library.
+            moved_to = await rebind_moved_source(db_path, source)
+            if moved_to is None:
+                continue
+            source = {**dict(source), "path": moved_to}
+        try:
+            results.append(await reconcile_source(db_path, source, full=full))
+        except catalog_repository.StorageUnavailableDuringScan as refused:
+            log.warning("reconcile refused for %s: %s", path, refused)
+        except Exception:
+            log.exception("reconcile failed for %s", path)
+    return results
+
+
+def reconcile_interval_seconds(default: float = 300.0) -> float:
+    """How often to look. Overridable so a check does not cost five minutes."""
+
+    try:
+        value = float(os.environ.get("AZIMUTH_RECONCILE_INTERVAL_SECONDS", "") or default)
+    except ValueError:
+        return default
+    return max(5.0, value)
+
+
+async def run_reconcile_worker(db_path_provider, *, interval_seconds: float | None = None) -> None:
+    """Keep the catalog matching the folders, quietly and forever.
+
+    Cheap by construction: a pass that finds nothing stats the directories and
+    reads none of them. It still waits for a gap in interactive work first,
+    because on a slow archive even stat-ing competes with browsing.
+    """
+
+    from core.background import wait_for_user_gap
+
+    if interval_seconds is None:
+        interval_seconds = reconcile_interval_seconds()
+    while True:
+        try:
+            await wait_for_user_gap()
+            results = await reconcile_once(db_path_provider())
+            changed = [r for r in results if r.get("applied")]
+            if changed:
+                log.info("reconcile applied %s", changed)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("reconcile worker pass failed")
+        await asyncio.sleep(interval_seconds)
