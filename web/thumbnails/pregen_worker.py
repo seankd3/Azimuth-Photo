@@ -156,10 +156,6 @@ async def run_pregen_bulk_batch(
     # actionable pages was the false-complete loop that stranded backfill.
     max_scan_batches = 4
     max_empty_scan_batches = 64
-    # Ceiling for the widened search used while pages come back empty. One
-    # indexed page of this size is cheap; the cost that mattered was never
-    # the query, it was giving up after a few hundred rows.
-    _WARM_REGION_SCAN_BATCH = 4096
     candidates_scanned = 0
     empty_scan_batches = 0
     loop = asyncio.get_running_loop()
@@ -294,28 +290,14 @@ async def run_pregen_bulk_batch(
                 ):
                     break
 
-                # Widen only the bulk cursor's page, and only while pages come
-                # back empty: those rows are all already warm, so advancing past
-                # a wide page skips nothing. Priority keeps its own narrow page —
-                # its cursor semantics are different and must not be disturbed.
-                # Measured on the hub: eight rows a page, giving up after
-                # sixty-four empty pages, examines 512 rows of 147,482, so a
-                # backfill with 79,000 images left reported "pending_total=0"
-                # and sat idle on a half-idle machine.
-                bulk_scan_batch = candidate_scan_batch
-                if empty_scan_batches:
-                    bulk_scan_batch = min(
-                        _WARM_REGION_SCAN_BATCH,
-                        max(candidate_scan_batch, scan_batch * (1 << min(empty_scan_batches, 9))),
-                    )
-                rows = await pregen_bulk_candidate_batch(bulk_scan_batch)
+                rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
                 if not rows:
                     reset_pregen_bulk_cursor()
                     reached_end = True
                     if pending or added_total or queued_total:
                         candidates_exhausted = True
                         break
-                    rows = await pregen_bulk_candidate_batch(bulk_scan_batch)
+                    rows = await pregen_bulk_candidate_batch(candidate_scan_batch)
                     if not rows:
                         candidates_exhausted = True
                         break
