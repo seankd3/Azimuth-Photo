@@ -1986,16 +1986,36 @@ async def backfill_relative_paths(conn) -> int:
     return len(updates)
 
 
+# The columns a satellite actually receives. Bumping a photo's version tells
+# every satellite to re-download that row, so only a change to something they
+# consume should do it. Adding `relative_path` rewrote 149,602 rows and told a
+# laptop almost the whole library had changed; it re-applied 150,000 rows to
+# discover that 16 had genuinely moved, pegging three cores and starving the
+# grid behind it. A derived column no satellite reads must not cost a resync.
+#
+# Kept in step with features/sync/mirror_export by test_row_version_scope.
+EXPORTED_IMAGE_COLUMNS = (
+    "camera_make", "camera_model", "comparisons", "content_hash", "date_taken",
+    "elo", "file_ext", "file_size", "filename", "filepath", "flag", "height",
+    "latitude", "lens", "location_source", "longitude", "missing_at",
+    "orientation", "status", "width",
+)
+
+
 async def ensure_catalog_export_row_versions(conn) -> None:
     await conn.execute("UPDATE images SET row_version = id WHERE row_version = 0")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_row_version ON images(row_version)")
-    await conn.executescript("""
+    watched = ", ".join(EXPORTED_IMAGE_COLUMNS)
+    # Dropped rather than IF NOT EXISTS: an existing catalog carries the older
+    # fire-on-any-column form, and leaving it would keep the cost it caused.
+    await conn.execute("DROP TRIGGER IF EXISTS images_row_version_au")
+    await conn.executescript(f"""
     CREATE TRIGGER IF NOT EXISTS images_row_version_ai AFTER INSERT ON images BEGIN
         UPDATE images SET row_version = (
             SELECT COALESCE(MAX(row_version), 0) + 1 FROM images WHERE id != NEW.id
         ) WHERE id = NEW.id;
     END;
-    CREATE TRIGGER IF NOT EXISTS images_row_version_au AFTER UPDATE ON images
+    CREATE TRIGGER images_row_version_au AFTER UPDATE OF {watched} ON images
     WHEN NEW.row_version = OLD.row_version BEGIN
         UPDATE images SET row_version = (
             SELECT COALESCE(MAX(row_version), 0) + 1 FROM images
