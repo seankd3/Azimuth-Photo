@@ -8,14 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from core.background import track_background_task
 from core.requests import RequestBodyTooLarge, read_body_limited
 from core.source_files import source_file_is_safe
 from data.repositories import images as image_repository
-from features.sync import device_auth, hub, mirror_export
+from features.sync import device_auth, embedding_sync, hub, mirror_export
 from features.system import client_bundle
 
 
@@ -223,6 +223,22 @@ async def api_sync_catalog_export(cursor: int = 0, limit: int = 0):
     limit = max(0, min(int(limit or 0), 20000))
     return StreamingResponse(
         mirror_export.gzip_catalog_export_stream(_configured_db_path(), parsed_cursor, limit),
+        media_type="application/x-ndjson",
+        headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"},
+    )
+
+
+@router.get("/api/sync/embeddings/pack")
+async def api_sync_embedding_pack(cursor: int = 0, limit: int = 0):
+    """Semantic vectors, so a satellite can search without asking the hub."""
+
+    body = await embedding_sync.export_page(
+        _configured_db_path(),
+        cursor=max(0, int(cursor or 0)),
+        limit=int(limit or embedding_sync.PAGE_LIMIT),
+    )
+    return Response(
+        content=body,
         media_type="application/x-ndjson",
         headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"},
     )

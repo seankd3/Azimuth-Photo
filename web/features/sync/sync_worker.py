@@ -14,6 +14,7 @@ from typing import Any
 
 import settings
 from data import connection
+from features.sync.embedding_sync import EmbeddingPuller
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from features.sync import client_update, contract, oplog, preview_mirror, satellite
@@ -59,6 +60,8 @@ class SyncWorker:
         self.hub = (hub or satellite.hub_url()).rstrip("/")
         self._request = request or _urllib_request
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
+        self._embedding_status: dict = {"rows_applied": 0, "cursor": 0, "last_error": ""}
+        self._embeddings_checked_at = 0.0
         self.prefetch = ThumbPrefetcher(db_path=db_path, hub=self.hub, request=self._hub_request)
         self.preview_mirror = preview_mirror.PreviewMirrorFiller(
             db_path=db_path, hub=self.hub, request=self._hub_request
@@ -95,6 +98,7 @@ class SyncWorker:
             **self._status,
             "paused": self._paused,
             "mirror": self.mirror.status(),
+            "embeddings": self._embedding_status,
             "prefetch": self.prefetch.status(),
             "preview_mirror": self.preview_mirror.status(),
             **contract.hub_status(self.hub),
@@ -242,6 +246,7 @@ class SyncWorker:
         oplog_result = await self._exchange_oplog()
         pushed = bool(oplog_result["pushed"]) or pushed
         await self._refresh_mirror(force=pushed or self._force_mirror_refresh)
+        await self._refresh_embeddings()
         self._force_mirror_refresh = False
         if not self._paused:
             await self._run_prefetch()
@@ -376,6 +381,33 @@ class SyncWorker:
         except Exception as error:
             # A v1 hub remains usable for field uploads while its v2 catalog route rolls out.
             self.mirror._status["last_error"] = str(error)
+
+    async def _refresh_embeddings(self) -> None:
+        """Pull the hub's vectors so search works with the hub unreachable.
+
+        A hub-backed satellite never computes an embedding of its own, so this
+        is the only way it gets any. Cheap to repeat: the cursor means a caught-up
+        satellite transfers one empty page.
+        """
+
+        if time.time() - self._embeddings_checked_at < 600:
+            return
+        self._embeddings_checked_at = time.time()
+        try:
+            import settings as app_settings
+
+            config = app_settings.active_embedding_config()
+            puller = EmbeddingPuller(
+                db_path=self.db_path,
+                hub=self.hub,
+                request=self._hub_request,
+                model_key=str(config["model_key"]),
+                dimension=int(config["dimension"]),
+            )
+            self._embedding_status = await puller.refresh()
+        except Exception as error:
+            # A hub without the route stays perfectly usable for everything else.
+            self._embedding_status = {**self._embedding_status, "last_error": str(error)}
 
     async def _exchange_oplog(self) -> dict[str, int]:
         try:
