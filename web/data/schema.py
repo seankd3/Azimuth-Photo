@@ -9,7 +9,7 @@ import uuid
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
 from data.people_schema import PEOPLE_QUERY_SCHEMA
-from core.path_groups import safe_commonpath
+from core.path_groups import safe_commonpath, safe_relpath
 
 log = logging.getLogger(__name__)
 
@@ -975,6 +975,11 @@ PRE_SCHEMA_CATALOG_SOURCES_DDL = (
 
 IMAGE_COMPAT_COLUMNS = (
     ("source_id", "INTEGER REFERENCES catalog_sources(id)"),
+    # Where the photo sits *inside* its source. `filepath` stays as the
+    # absolute form every reader and every external contract already uses,
+    # but this is the durable half: renaming a root rewrites one
+    # catalog_sources row instead of every path in the library.
+    ("relative_path", "TEXT DEFAULT NULL"),
     ("orientation", "TEXT DEFAULT NULL"),
     ("flag", "TEXT DEFAULT 'unflagged'"),
     ("propagated_updates", "INTEGER DEFAULT 0"),
@@ -1071,6 +1076,14 @@ IMAGE_CAPTION_COMPAT_COLUMNS = (
 
 COMPAT_INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_images_flag ON images(flag)",
+    (
+        # One photo per place in a source. Partial on vc_of like the
+        # absolute-path index, because virtual copies deliberately share
+        # their parent's file.
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_source_relative_path "
+        "ON images(source_id, relative_path) "
+        "WHERE vc_of IS NULL AND relative_path IS NOT NULL"
+    ),
     (
         "CREATE INDEX IF NOT EXISTS idx_images_content_hash "
         "ON images(content_hash) WHERE content_hash IS NOT NULL"
@@ -1504,6 +1517,7 @@ REQUIRED_INDEXES = {
     "idx_images_hub_image_id",
     "idx_images_hub_remote",
     "idx_images_original_filepath",
+    "idx_images_source_relative_path",
 }
 
 
@@ -1930,6 +1944,48 @@ async def ensure_collection_uuids(conn) -> None:
     )
 
 
+async def backfill_relative_paths(conn) -> int:
+    """Derive each photo's place inside its source, without guessing.
+
+    A row whose absolute path does not actually sit under its source keeps a
+    NULL relative path rather than being given a plausible-looking one. That is
+    the whole point: this column is meant to be the trustworthy half, so a value
+    that cannot be derived is left absent and stays visibly absent.
+
+    Purely additive — `filepath` is untouched, so nothing that reads it changes
+    behaviour and a bad backfill is recoverable by re-deriving.
+    """
+
+    cursor = await conn.execute(
+        "SELECT i.id, i.filepath, s.path AS source_path FROM images i "
+        "JOIN catalog_sources s ON s.id = i.source_id "
+        "WHERE i.relative_path IS NULL AND i.filepath IS NOT NULL AND s.path IS NOT NULL"
+    )
+    rows = await cursor.fetchall()
+    if not rows:
+        return 0
+
+    updates = []
+    for row in rows:
+        source_path = str(row["source_path"] or "")
+        filepath = str(row["filepath"] or "")
+        # A namespace source (`hub://`) is not a place on this machine; its rows
+        # carry the hub's own absolute path and are relative to the hub's root,
+        # which this side cannot know. Left for the mirror to supply.
+        if not source_path or "://" in source_path:
+            continue
+        relative = safe_relpath(filepath, source_path)
+        if not relative or relative.startswith(".."):
+            continue
+        updates.append((relative.replace("\\", "/"), int(row["id"])))
+
+    if updates:
+        await conn.executemany(
+            "UPDATE images SET relative_path = ? WHERE id = ?", updates
+        )
+    return len(updates)
+
+
 async def ensure_catalog_export_row_versions(conn) -> None:
     await conn.execute("UPDATE images SET row_version = id WHERE row_version = 0")
     await conn.execute("CREATE INDEX IF NOT EXISTS idx_images_row_version ON images(row_version)")
@@ -2089,6 +2145,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await ensure_compatibility_indexes(conn)
         await ensure_collection_uuids(conn)
         await ensure_catalog_export_row_versions(conn)
+        await backfill_relative_paths(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
         # PATCH: quality lane — additive image_quality table (CREATE IF NOT EXISTS; no version bump)
