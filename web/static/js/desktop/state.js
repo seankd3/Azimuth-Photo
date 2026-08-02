@@ -1,6 +1,12 @@
 import { MONTH_NAMES } from './dom.js';
 import { applyExcludeSources, clearQuietReveal, quietRevealActive } from './quiet_sources.js';
 
+// What the library opens on. Newest first: the photos you just took are the
+// ones you came to look at, and a rating order is something you choose, not
+// something you should have to undo.
+export const DEFAULT_SORT = 'date_taken';
+
+
 const listeners = new Map();
 const PANEL_KEY = 'pa_d_left_collapsed';
 const RIGHT_PANEL_KEY = 'pa_d_right_collapsed';
@@ -52,11 +58,11 @@ function sortVariant(sort) {
     for (const [base, variants] of Object.entries(SORT_VARIANTS)) {
         if (clean === variants.desc || clean === variants.asc) return { base, ...variants };
     }
-    return { base: clean || 'elo', desc: clean || 'elo', asc: `${clean || 'elo'}_asc` };
+    return { base: clean || DEFAULT_SORT, desc: clean || DEFAULT_SORT, asc: `${clean || DEFAULT_SORT}_asc` };
 }
 
 function normalizeSort(sort) {
-    return SORT_ALIASES[String(sort || '')] || String(sort || 'elo');
+    return SORT_ALIASES[String(sort || '')] || String(sort || DEFAULT_SORT);
 }
 
 export function sortBase(sort = scope.sort) {
@@ -97,7 +103,7 @@ export const scope = {
     collectionId: '',
     collectionName: '',
     collectionSmart: false,
-    sort: 'elo',
+    sort: DEFAULT_SORT,
 };
 
 export const viewState = {
@@ -295,7 +301,7 @@ export function setScope(patch = {}, { merge = false, pushHash = true } = {}) {
         folder: [], date_taken: '', file_type: '', camera: '', lens: '',
         tag: '', orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
         similarIds: [], similarSourceId: '', similarLimit: 100, similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
-        sort: scope.sort || 'elo', ...patch,
+        sort: scope.sort || DEFAULT_SORT, ...patch,
     };
     preserveSearchSort(next);
     if (!Array.isArray(next.similarIds)) next.similarIds = [];
@@ -338,7 +344,7 @@ function preserveSearchSort(next, { merge = false } = {}) {
     const nextQ = merge && !Object.prototype.hasOwnProperty.call(next, 'q') ? scope.q : next.q;
     const nextSort = merge && !Object.prototype.hasOwnProperty.call(next, 'sort') ? scope.sort : next.sort;
     if (!scope.q && nextQ && nextSort === 'similarity') {
-        viewState.searchPreviousSort = scope.sort === 'similarity' ? 'elo' : (scope.sort || 'elo');
+        viewState.searchPreviousSort = scope.sort === 'similarity' ? DEFAULT_SORT : (scope.sort || DEFAULT_SORT);
     } else if (scope.q && !nextQ && viewState.searchPreviousSort) {
         next.sort = viewState.searchPreviousSort;
         viewState.searchPreviousSort = null;
@@ -373,13 +379,13 @@ export function setBestOf(enabled) {
         viewState.bestOf = true;
         viewState.bestOfLimit = null;
         viewState.bestOfTotal = 0;
-        viewState.bestOfPreviousSort = scope.sort || 'elo';
+        viewState.bestOfPreviousSort = scope.sort || DEFAULT_SORT;
         emit('bestof', true);
         patchScope({ sort: 'elo' });
         return;
     }
     if (!enabled && viewState.bestOf) {
-        const restoreSort = viewState.bestOfPreviousSort || 'elo';
+        const restoreSort = viewState.bestOfPreviousSort || DEFAULT_SORT;
         clearBestOfState();
         emit('bestof', false);
         patchScope({ sort: restoreSort });
@@ -400,11 +406,11 @@ export function setSort(sort) {
 }
 
 export function setSortBase(sort) {
-    setSort(sortWithDirection(sort || 'elo', sortAscending()));
+    setSort(sortWithDirection(sort || DEFAULT_SORT, sortAscending()));
 }
 
 export function setSortDirection(ascending) {
-    setSort(sortWithDirection(scope.sort || 'elo', Boolean(ascending)));
+    setSort(sortWithDirection(scope.sort || DEFAULT_SORT, Boolean(ascending)));
 }
 
 export function toggleSortDirection() {
@@ -619,7 +625,7 @@ export function smartQueryFromScope() {
         }
         if (scope[key] !== undefined && scope[key] !== null && scope[key] !== '') query[key] = scope[key];
     }
-    if (!query.sort) query.sort = scope.sort || 'elo';
+    if (!query.sort) query.sort = scope.sort || DEFAULT_SORT;
     return query;
 }
 
@@ -659,7 +665,7 @@ export function scopePatchFromSmartQuery(query = {}) {
         folder: [], date_taken: '', file_type: '', camera: '', lens: '',
         tag: '', orientation: '', compared: '', min_stars: '', import_batch: '', importBatchLabel: '',
         similarIds: [], similarSourceId: '', similarLimit: 100, similarLabel: '', collectionId: '', collectionName: '', collectionSmart: false,
-        sort: query.sort || 'elo',
+        sort: query.sort || DEFAULT_SORT,
     };
     for (const key of SMART_ACTIVE_KEYS) {
         if (query[key] !== undefined && query[key] !== null) patch[key] = key === 'folder' ? [String(query[key])] : String(query[key]);
