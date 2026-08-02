@@ -47,6 +47,40 @@ async def _urllib_request(method: str, url: str, *, body: bytes | None = None, h
     return await run_sync_work(request)
 
 
+async def _give_hub_identity_to_one_row(conn, content_hash: str, hub_image_id: int) -> None:
+    """A hub photo names exactly one local row, never every copy of it.
+
+    Libraries hold the same photo twice all the time — a re-import, an export
+    written back beside its original, a Takeout archive. Stamping the hub's id
+    onto every row with that content hash asks the unique index for the
+    impossible, and because this ran as one statement inside the upload
+    bookkeeping, the failure took the whole batch with it: measured on the
+    owner's laptop, 10,689 content hashes span more than one row, and the
+    resulting "UNIQUE constraint failed: images.hub_image_id" is what stopped
+    sync from finishing.
+
+    So: if some row already carries this hub identity, it keeps it. Otherwise
+    the oldest unclaimed copy takes it. The other copies stay exactly as they
+    are — they are still that photo, they simply are not the one the hub knows.
+    """
+
+    taken = await (await conn.execute(
+        "SELECT 1 FROM images WHERE hub_image_id = ? LIMIT 1", (hub_image_id,)
+    )).fetchone()
+    if taken is not None:
+        return
+    row = await (await conn.execute(
+        "SELECT id FROM images WHERE content_hash = ? AND hub_image_id IS NULL "
+        "ORDER BY id LIMIT 1",
+        (content_hash,),
+    )).fetchone()
+    if row is None:
+        return
+    await conn.execute(
+        "UPDATE images SET hub_image_id = ? WHERE id = ?", (hub_image_id, int(row["id"]))
+    )
+
+
 class SyncWorker:
     def __init__(
         self,
@@ -595,7 +629,7 @@ class SyncWorker:
         uploading = self._status.get("current_file") is not None
         return self.updater.request_restart_if_safe(uploading=uploading)
 
-    async def _set_uploaded(
+    async def _set_uploaded(  # noqa: D401 - see _give_hub_identity_to_one_row
         self,
         content_hashes: set[str],
         *,
@@ -620,10 +654,7 @@ class SyncWorker:
                     "UPDATE sync_state SET hub_image_id = ? WHERE content_hash = ?",
                     (int(image_id), content_hash),
                 )
-                await conn.execute(
-                    "UPDATE images SET hub_image_id = ? WHERE content_hash = ?",
-                    (int(image_id), content_hash),
-                )
+                await _give_hub_identity_to_one_row(conn, content_hash, int(image_id))
             await conn.commit()
         finally:
             await connection.close_async(conn, db_path=self.db_path)

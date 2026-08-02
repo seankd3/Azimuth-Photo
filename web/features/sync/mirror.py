@@ -277,9 +277,17 @@ class MirrorPuller:
 
         content_hash = str(remote["content_hash"])
         hub_image_id = int(remote["hub_image_id"])
+        # Matching by content hash finds copies too, and a copy that already
+        # belongs to a different hub photo is not this one — taking its identity
+        # would either break the unique index or silently move a hub photo onto
+        # the wrong row. Only an unclaimed row, or the row that already holds
+        # this identity, can be the match.
         existing = await (await conn.execute(
-            "SELECT id, hub_remote, filepath FROM images WHERE content_hash = ? OR hub_image_id = ? ORDER BY hub_remote ASC, id ASC LIMIT 1",
-            (content_hash, hub_image_id),
+            "SELECT id, hub_remote, filepath FROM images "
+            "WHERE (content_hash = ? OR hub_image_id = ?) "
+            "AND (hub_image_id IS NULL OR hub_image_id = ?) "
+            "ORDER BY hub_remote ASC, id ASC LIMIT 1",
+            (content_hash, hub_image_id, hub_image_id),
         )).fetchone()
         # The same photo can be two rows: a local import matched by hash and a
         # mirror row already holding this hub identity. Stamping the identity
