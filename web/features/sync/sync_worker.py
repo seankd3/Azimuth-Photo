@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 
 # Must stay at or under the hub's ManifestRequest cap (hub_routes.py).
 MANIFEST_BATCH = 2000
+# Must stay at or under the hub's MetadataRequest cap (hub_routes.py).
+METADATA_PUSH_LIMIT = 5000
 CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 _BASE_IDLE_SECONDS = 15.0
@@ -396,15 +398,31 @@ class SyncWorker:
             await asyncio.sleep(target_seconds - elapsed)
 
     async def _push_dirty_metadata(self) -> bool:
+        """Send local flags and ratings up, in helpings the hub will accept.
+
+        The hub caps a metadata post at METADATA_PUSH_LIMIT items. Sending
+        everything owed in one request meant a library with more local photos
+        than that could never push at all — measured on the owner's laptop,
+        10,689 items against a 5,000 cap, rejected 422 on every single cycle, so
+        no flag or rating ever left the machine. Marking each helping as it
+        lands also means an interruption costs one helping, not the lot.
+        """
+
         rows = await self._dirty_metadata_rows()
         if not rows:
             return False
-        snapshot = time.time()
-        response = await self._json("POST", "/api/sync/metadata", {"items": [row["item"] for row in rows]})
-        if response is None:
-            return False
-        await self._mark_pushed([row["content_hash"] for row in rows], snapshot)
-        return True
+        pushed_any = False
+        for start in range(0, len(rows), METADATA_PUSH_LIMIT):
+            helping = rows[start:start + METADATA_PUSH_LIMIT]
+            snapshot = time.time()
+            response = await self._json(
+                "POST", "/api/sync/metadata", {"items": [row["item"] for row in helping]}
+            )
+            if response is None:
+                return pushed_any
+            await self._mark_pushed([row["content_hash"] for row in helping], snapshot)
+            pushed_any = True
+        return pushed_any
 
     async def _refresh_mirror(self, *, force: bool) -> None:
         last_refresh = self.mirror.status().get("last_refresh_at") or 0
