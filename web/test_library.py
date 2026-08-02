@@ -1169,7 +1169,7 @@ class LibraryTests(BackendTestCase):
         compute_calls = 0
         ranking_limits = []
         original_compute = taste_service._compute_similarity_and_scaled_scores
-        original_get_rankings = library_service._get_rankings
+        original_get_rankings = db.get_rankings
 
         def counted_compute(*args, **kwargs):
             nonlocal compute_calls
@@ -1181,7 +1181,7 @@ class LibraryTests(BackendTestCase):
             return await original_get_rankings(**kwargs)
 
         taste_service._compute_similarity_and_scaled_scores = counted_compute
-        library_service._get_rankings = counted_get_rankings
+        db.get_rankings = counted_get_rankings
         try:
             # The request path never builds the blend — it asks for the warm one
             # and warms in the background — so a test about *reuse* warms first.
@@ -1196,7 +1196,7 @@ class LibraryTests(BackendTestCase):
             second = await library_routes.api_rankings(limit=20, offset=20, sort="elo")
         finally:
             taste_service._compute_similarity_and_scaled_scores = original_compute
-            library_service._get_rankings = original_get_rankings
+            db.get_rankings = original_get_rankings
 
         self.assertEqual(len(first["images"]), 20)
         self.assertEqual(len(second["images"]), 20)

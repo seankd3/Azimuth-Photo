@@ -6,6 +6,8 @@ Rebuilt when the embedding count changes (new images embedded).
 """
 
 from __future__ import annotations
+
+from core.catalog_path import catalog_path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,19 +44,15 @@ _rebuild_lock = asyncio.Lock()
 ActiveEmbeddingModelKey = Callable[[], str]
 DbPath = Callable[[], str]
 _active_embedding_model_key: ActiveEmbeddingModelKey | None = None
-_db_path: DbPath | None = None
 
 
 def configure(
     *,
     active_embedding_model_key: ActiveEmbeddingModelKey | None = None,
-    db_path: DbPath | None = None,
 ) -> None:
-    global _active_embedding_model_key, _db_path
+    global _active_embedding_model_key
     if active_embedding_model_key is not None:
         _active_embedding_model_key = active_embedding_model_key
-    if db_path is not None:
-        _db_path = db_path
 
 
 def _configured(provider, name: str):
@@ -114,7 +112,7 @@ def _rows_to_matrix(rows, *, overallocate: bool = True):
 
 def _embedding_source_signature(model_key: str) -> list[str | int]:
     """Stable snapshot identity unaffected by unrelated catalog/cache writes."""
-    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
+    conn = sqlite3.connect(catalog_path(), timeout=30)
     try:
         row = conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(e.rowid), 0), "
@@ -197,7 +195,7 @@ def _save_snapshot_sync(image_ids: list[int], matrix: np.ndarray, model_key: str
 
 
 def _get_embedding_count_sync(model_key: str) -> int:
-    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
+    conn = sqlite3.connect(catalog_path(), timeout=30)
     try:
         return conn.execute(
             "SELECT COUNT(*) FROM embeddings_by_model e "
@@ -216,7 +214,7 @@ def _load_embeddings_sync(expected_count: int, model_key: str):
     if snapshot is not None:
         return snapshot
 
-    conn = sqlite3.connect(_configured(_db_path, "db_path")(), timeout=30)
+    conn = sqlite3.connect(catalog_path(), timeout=30)
     try:
         rows = conn.execute(
             "SELECT e.image_id, e.embedding FROM embeddings_by_model e "
