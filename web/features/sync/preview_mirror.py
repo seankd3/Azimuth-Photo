@@ -383,7 +383,7 @@ async def fetch_and_store(
         return None
     version = preview_version_for_image(image)
     if request is None:
-        from features.sync.prefetch import _urllib_request as request  # type: ignore[assignment]
+        from features.sync.executor import hub_request as request  # type: ignore[assignment]
 
     status_code, _headers, data = await request(
         "GET",
@@ -572,9 +572,9 @@ class PreviewMirrorFiller:
                 if self.refuse_if_busy():
                     break
                 if self._request is None:
-                    from features.sync.prefetch import _urllib_request
+                    from features.sync.executor import hub_request
 
-                    request = _urllib_request
+                    request = hub_request
                 else:
                     request = self._request
                 code, _headers, body = await request(

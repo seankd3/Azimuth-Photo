@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import pathlib
 import hashlib
 import io
@@ -10,8 +11,6 @@ import json
 import os
 import tarfile
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +19,7 @@ from urllib.parse import urlencode
 from core import user_activity
 from data import connection
 from features.sync import satellite
-from features.sync.executor import run_foreground_sync_work, run_sync_work
+from features.sync.executor import hub_request, run_sync_work
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -101,50 +100,6 @@ CREATE TABLE IF NOT EXISTS sync_prefetch_state (
 """
 
 
-async def _request_with_runner(
-    runner,
-    method: str,
-    url: str,
-    *,
-    body: bytes | None = None,
-    headers: dict | None = None,
-    timeout: float,
-) -> tuple[int, dict[str, str], bytes]:
-    def request() -> tuple[int, dict[str, str], bytes]:
-        request_headers = dict(headers or {})
-        request_headers.update(satellite.hub_request_headers())
-        req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - configured tailnet hub.
-                return response.status, dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read()
-
-    return await runner(request)
-
-
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
-    return await _request_with_runner(
-        run_sync_work,
-        method,
-        url,
-        body=body,
-        headers=headers,
-        timeout=10,
-    )
-
-
-async def _foreground_urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None) -> tuple[int, dict[str, str], bytes]:
-    return await _request_with_runner(
-        run_foreground_sync_work,
-        method,
-        url,
-        body=body,
-        headers=headers,
-        timeout=2,
-    )
-
-
 def _store_with_thumbnail_cache(size: str, image_id: int, signature: str, data: bytes) -> None:
     if size in {"sm", "md"} and str(signature).startswith("pv:"):
         from features.sync import preview_mirror
@@ -177,7 +132,7 @@ class ThumbPrefetcher:
     def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None, store: StoreFn | None = None, cache_root: str | None = None, budget_bytes: int | None = None):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or _urllib_request
+        self._request = request or functools.partial(hub_request, timeout=10)
         self._store = store or _store_with_thumbnail_cache
         self.cache_root = cache_root
         self._budget_override = budget_bytes is not None

@@ -6,8 +6,6 @@ import asyncio
 import json
 import logging
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -18,7 +16,7 @@ from features.sync.embedding_sync import EmbeddingPuller
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from features.sync import client_update, contract, oplog, preview_mirror, satellite
-from features.sync.executor import run_sync_work
+from features.sync.executor import hub_request
 from features.trash import remote as trash_remote
 from features.trash import service as trash_service
 
@@ -34,19 +32,6 @@ RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 _BASE_IDLE_SECONDS = 15.0
 _MAX_BACKOFF_SECONDS = 300.0
 _HEALTH_PROBE_SECONDS = 30.0
-
-
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, timeout: float = 30) -> tuple[int, dict, bytes]:
-    def request() -> tuple[int, dict, bytes]:
-        request_headers = dict(headers or {})
-        request_headers.update(satellite.hub_request_headers())
-        req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:
-                return response.status, dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read()
-    return await run_sync_work(request)
 
 
 async def _give_hub_identity_to_one_row(conn, content_hash: str, hub_image_id: int) -> None:
@@ -94,7 +79,7 @@ class SyncWorker:
     ):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or _urllib_request
+        self._request = request or hub_request
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
         self._embedding_status: dict = {"rows_applied": 0, "cursor": 0, "last_error": ""}
         self._embeddings_checked_at = 0.0

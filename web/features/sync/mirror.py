@@ -9,8 +9,6 @@ import json
 import logging
 import sqlite3
 import time
-import urllib.error
-import urllib.request
 from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlencode
@@ -20,7 +18,7 @@ from data import connection
 from data.repositories import catalog as catalog_repository
 from features.sync import elo_stars, family_clock, satellite
 from features.sync.develop_merge import preserve_local_rating
-from features.sync.executor import run_sync_work
+from features.sync.executor import hub_request
 from features.trash import service as trash_service
 
 
@@ -48,20 +46,6 @@ _IMAGE_COLUMNS = {
 # Commit mirror batches so a long hub export never holds a write lock for seconds
 # while interactive reads (stats/grid) wait on busy_timeout.
 _MIRROR_COMMIT_EVERY = 250
-
-
-async def _urllib_request(method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, timeout: float = 20) -> tuple[int, dict[str, str], bytes]:
-    def request() -> tuple[int, dict[str, str], bytes]:
-        request_headers = dict(headers or {})
-        request_headers.update(satellite.hub_request_headers())
-        req = urllib.request.Request(url, data=body, headers=request_headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as response:  # noqa: S310 - configured tailnet hub.
-                return response.status, dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read()
-
-    return await run_sync_work(request)
 
 
 def _accepts_timeout(request) -> bool:
@@ -122,7 +106,7 @@ class MirrorPuller:
     def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or _urllib_request
+        self._request = request or functools.partial(hub_request, timeout=20)
         # An export page still takes minutes on a busy hub over the tailnet;
         # the interactive 20s default abandons it. Only widen the timeout when
         # the transport actually accepts one — injected test fakes may not.
