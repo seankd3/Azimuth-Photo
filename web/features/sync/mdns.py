@@ -48,6 +48,45 @@ def _local_ipv4() -> str:
         return "127.0.0.1"
 
 
+def _candidate_ipv4s() -> list[str]:
+    """Every address this machine answers on, default route first."""
+
+    addresses = [_local_ipv4()]
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            address = info[4][0]
+            if address not in addresses:
+                addresses.append(address)
+    except OSError:
+        pass
+    return addresses
+
+
+def _accepts(host: str, port: int, *, timeout: float = 0.4) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _reachable_ipv4(port: int) -> str:
+    """The address a client can actually reach this hub on.
+
+    The default route is not it when the server is bound to one interface —
+    measured on the owner's hub, which serves only its Tailscale address while
+    advertising the LAN one, so the single result a laptop found on the network
+    was an address nothing was listening on. Ask the socket instead of guessing:
+    uvicorn is already listening by the time startup events run.
+    """
+
+    for address in _candidate_ipv4s():
+        if _accepts(address, port):
+            return address
+    # Nothing answered — announce the old guess rather than nothing at all.
+    return _local_ipv4()
+
+
 def _service_name(display_name: str) -> str:
     safe = "".join(ch if ch.isalnum() or ch in "-_ " else "-" for ch in display_name).strip() or "Azimuth Photo"
     return f"{safe}._azimuth._tcp.local."
@@ -64,7 +103,7 @@ class HubAnnouncer:
         self._info: Any = None
 
     def start(self) -> None:
-        host = _local_ipv4()
+        host = _reachable_ipv4(self.port)
         props = {
             b"hub_id": self.hub_id.encode("utf-8"),
             b"name": self.name.encode("utf-8"),
