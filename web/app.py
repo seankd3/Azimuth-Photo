@@ -177,6 +177,32 @@ async def _resume_publish_hook_retries():
     await publish_routes.resume_pending_hook_retries()
 
 
+@app.on_event("startup")
+async def _repair_metadata_search_index():
+    """Put a drifted search index back in step — after the grid is serving.
+
+    Rebuilding costs seconds on a large library, and nothing about opening the
+    app should wait for it. Metadata search keeps working throughout: the index
+    is a speed path, and a drifted one is still almost entirely right.
+    """
+
+    async def _repair() -> None:
+        import logging
+
+        from data import schema as data_schema
+
+        conn = await _db.get_db()
+        drift = await data_schema.metadata_fts_drift(conn)
+        if drift <= 0:
+            return
+        logging.getLogger(__name__).info(
+            "Repairing metadata search index (off by %s rows)", drift
+        )
+        await data_schema.rebuild_metadata_fts(conn)
+
+    app.state.azimuth_shell.track_background_task(_repair())
+
+
 @app.on_event("shutdown")
 async def _stop_hub_mdns():
     mdns.stop_hub_announce()
