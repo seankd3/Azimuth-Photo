@@ -6,12 +6,12 @@ from features.share.visitor import (
     attachment_name as _attachment_name,
 )
 
-import asyncio
 import json
 import zipfile
 from http.client import IncompleteRead
 from pathlib import Path
 
+from core import on_the_loop
 from core.source_files import source_file_is_safe
 from features.sync import readthrough
 
@@ -40,7 +40,7 @@ def zip_gallery(gallery: dict, destination: str) -> dict:
                         raise FileNotFoundError("Local original unavailable")
                     archive.write(image["filepath"], arcname=_attachment_name(image_id, filename.name))
                 else:
-                    data = asyncio.run(thumbnails.get_thumbnail(image["filepath"], size, image_id))
+                    data = on_the_loop.run(thumbnails.get_thumbnail(image["filepath"], size, image_id))
                     if not data:
                         raise FileNotFoundError("Preview unavailable")
                     archive.writestr(_attachment_name(image_id, filename.name, suffix=".jpg"), data)

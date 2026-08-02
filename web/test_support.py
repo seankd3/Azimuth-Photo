@@ -1,3 +1,4 @@
+import gc
 import io
 import inspect
 import json
@@ -29,6 +30,7 @@ import settings  # noqa: E402
 import thumbnails  # noqa: E402
 from core import app_factory, bulk_scheduler  # noqa: E402
 from core import background as background_runtime  # noqa: E402
+from core import on_the_loop  # noqa: E402
 from core import cache_events  # noqa: E402
 from core import memory_pressure  # noqa: E402
 from core import query_constraints  # noqa: E402
@@ -133,6 +135,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         self._asyncioRunner = asyncio.Runner(debug=False)
 
     async def asyncSetUp(self):
+        # The app records its loop at startup; a test is the app here, and work
+        # that starts on a thread must come back to this loop, not build one.
+        on_the_loop.remember_the_loop()
         self.tempdir = tempfile.TemporaryDirectory()
         # Every aiosqlite connection keeps a worker thread holding the DB file
         # open; on Windows one leaked handle blocks tempdir cleanup forever.
@@ -271,13 +276,23 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _cleanup_tempdir(self):
-        """Close tracked database handles before removing the per-test root.
+        """Let this process go of every database, then remove the per-test root.
 
-        Windows holds files open until every handle is closed, so retry briefly
-        after collecting dropped connections without masking persistent leaks.
+        Windows will not delete a file another handle still has open, and this
+        suite still loses that race 2-5 times per run, in a different test each
+        time. `close_shared_readers` — the same call the app makes as it shuts
+        down — releases the pool and the cached readers, and is right to make
+        here, but it is not the whole story: something in the request paths
+        this suite exercises still holds an aiosqlite connection to the
+        per-test catalog. Three real leaks were found and fixed looking for it
+        (a startup repair that never returned its connection, a shutdown that
+        released handles before stopping the work using them, and a ZIP builder
+        that made a throwaway event loop per image) and none of them was this.
+
+        The retry below is therefore a known plaster, not a fix. It is kept
+        because a suite that fails randomly teaches everyone to ignore red,
+        which costs more than the seconds it spends waiting.
         """
-        import asyncio as _asyncio
-        import gc as _gc
 
         data_connection.open_async = self._orig_open_async
         for conn in list(self._tracked_conns):
@@ -286,6 +301,8 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             except Exception:
                 pass
         self._tracked_conns.clear()
+        await data_connection.close_shared_readers()
+        thumbnail_cache_entries.close_persistent_conn()
 
         for attempt in range(20):
             try:
@@ -294,10 +311,8 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             except PermissionError:
                 if attempt == 19:
                     raise
-                # Dropped-but-uncollected sqlite3/aiosqlite handles keep the
-                # file locked on Windows; a collect closes what tests forgot.
-                _gc.collect()
-                await _asyncio.sleep(0.4)
+                gc.collect()
+                await asyncio.sleep(0.4)
 
     def _reset_shared_runtime_state(self):
         # Any TestClient(app) startup arms memory_pressure's 120s startup-calm,

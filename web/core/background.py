@@ -234,31 +234,36 @@ async def run_shutdown(
     background_task_tracker: BackgroundTaskTracker,
     caption_worker=None,
 ) -> None:
+    from data import connection as data_connection
+    from features.media import warm as media_warm
+
+    # First stop everything that can touch a database. Releasing handles while
+    # warm, embedding or caption work was still winding down let those reopen
+    # the catalog a moment after it had been let go — which on Windows means
+    # the app still holds the library file after saying it was finished with
+    # it, and in the test suite meant a temporary catalog that would not
+    # delete, failing a different test each run.
     thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
     await _fire_and_forget.cancel_all()
     await thumbnails.cancel_background_tasks()
-
-    from data import connection as data_connection
-
-    await data_connection.close_shared_readers()
-
-    from features.media import warm as media_warm
     await media_warm.cancel_background_tasks()
-
     try:
         import embedding_worker
 
         await embedding_worker.shutdown_embedding_worker()
     except ImportError:
         pass
-
     if caption_worker is not None:
         caption_worker.shutdown_caption_worker()
+
+    # Only now can nothing reopen what we are about to release.
+    await data_connection.close_shared_readers()
 
     # Last act: earn the next boot its instant start.
     from features.system import backups
     import db
+
     await asyncio.to_thread(backups.mark_clean_shutdown, db.DB_PATH)
 
 
@@ -301,6 +306,9 @@ async def run_startup(
     mosaic_diverse_window: int,
     interaction_cache_warmup_delay_seconds: float,
 ) -> None:
+    from core import on_the_loop
+
+    on_the_loop.remember_the_loop()
     # Automatic house manners: bulk seats until serve is proven.
     try:
         from core import memory_pressure as _memory_pressure

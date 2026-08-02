@@ -193,14 +193,19 @@ async def _repair_metadata_search_index():
 
         from data import schema as data_schema
 
+        from data import connection as data_connection
+
         conn = await _db.get_db()
-        drift = await data_schema.metadata_fts_drift(conn)
-        if drift <= 0:
-            return
-        logging.getLogger(__name__).info(
-            "Repairing metadata search index (off by %s rows)", drift
-        )
-        await data_schema.rebuild_metadata_fts(conn)
+        try:
+            drift = await data_schema.metadata_fts_drift(conn)
+            if drift <= 0:
+                return
+            logging.getLogger(__name__).info(
+                "Repairing metadata search index (off by %s rows)", drift
+            )
+            await data_schema.rebuild_metadata_fts(conn)
+        finally:
+            await data_connection.close_async(conn, db_path=_db.DB_PATH)
 
     app.state.azimuth_shell.track_background_task(_repair())
 
