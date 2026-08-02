@@ -115,6 +115,26 @@ class SweepLockTests(unittest.TestCase):
         self.assertEqual(result["batches"], 1)
         self.assertEqual(result["scanned"], 50)
 
+    def test_it_stands_aside_between_batches(self):
+        """A chore with tens of thousands of rows must not run flat out."""
+
+        waits = []
+        maintenance.sweep_missing_cache_entries(
+            meta_lock=self.lock,
+            db_connect=lambda: _KeptOpen(self.raw),
+            remove_cache_entry_locked=lambda conn, row: None,
+            path_exists=lambda path: True,
+            batch_size=50,
+            stand_aside=lambda: waits.append(1),
+        )
+        self.assertGreater(len(waits), 0, "120 rows in batches of 50 is more than one pass")
+
+    def test_standing_aside_is_optional(self):
+        """Nothing should require the caller to supply one."""
+
+        result = self._sweep(lambda path: True)
+        self.assertEqual(result["scanned"], 120)
+
     def test_an_empty_cache_is_not_an_error(self):
         self.raw.execute("DELETE FROM cache_entries")
         self.raw.commit()

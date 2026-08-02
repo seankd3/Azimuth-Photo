@@ -183,6 +183,18 @@ def cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
     return _cleanup_stale_cache_temps(max_age_seconds=max_age_seconds)
 
 
+def _wait_while_someone_is_browsing() -> None:
+    """Hold a background chore while the app is being used.
+
+    The same courtesy the catalog mirror already shows. A repair with tens of
+    thousands of rows to clear otherwise runs flat out for minutes at exactly
+    the moment someone has opened their library.
+    """
+
+    while get_idle_seconds() < 1.0:
+        time.sleep(0.25)
+
+
 def sweep_missing_cache_entries(
     *,
     batch_size: int = 500,
@@ -197,6 +209,7 @@ def sweep_missing_cache_entries(
         invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
         batch_size=batch_size,
         max_batches=max_batches,
+        stand_aside=_wait_while_someone_is_browsing,
     )
 
 

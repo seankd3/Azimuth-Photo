@@ -90,12 +90,17 @@ def sweep_missing_cache_entries(
     batch_size: int = 500,
     max_batches: int | None = None,
     path_exists: Callable[[str], bool] = os.path.exists,
+    stand_aside: Callable[[], None] | None = None,
 ) -> dict:
     """Delete cache_entries rows whose files are gone (phantom preview_ready).
 
     Cheap idle-time repair: batched, resumable via ``after_rowid``, once per
     process start. Does not delete real files — only rows already pointing at
     missing paths.
+
+    ``stand_aside`` is called between batches so the repair waits while someone
+    is actually browsing. On a library with tens of thousands of stale rows this
+    is the difference between a chore and an outage.
 
     The file checks happen outside the lock on purpose. They are the slow part
     — one filesystem call per cached preview, and this laptop has 121,826 of
@@ -150,6 +155,8 @@ def sweep_missing_cache_entries(
                     conn.close()
         if len(rows) < batch:
             break
+        if stand_aside is not None:
+            stand_aside()
     if removed and invalidate_disk_stats_cache is not None:
         invalidate_disk_stats_cache()
     return {
