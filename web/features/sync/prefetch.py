@@ -162,6 +162,24 @@ class _QueuedItem:
     kind: str = field(compare=False, default="thumb")
 
 
+async def _wait_while_someone_is_browsing() -> None:
+    """Hold the preview catch-up while the app is being used.
+
+    Pulling a library's previews down is a migration: 57,000 of them still owed
+    on the owner's laptop. Run flat out and it drowns the thing it is for —
+    measured, the first page of photos took minutes while this ran, and 0.23
+    seconds with it paused. The catalog mirror already shows this courtesy;
+    the preview puller must too.
+    """
+
+    try:
+        import thumbnails
+    except Exception:
+        return
+    while thumbnails.get_idle_seconds() < 1.0:
+        await asyncio.sleep(0.25)
+
+
 class ThumbPrefetcher:
     """Resumable newest-first thumb pack fetcher plus a tiny predictive queue.
 
@@ -270,6 +288,7 @@ class ThumbPrefetcher:
                 self._status.update(library_cached=cached, library_total=total)
                 self._status.update(state="budget", size=size, tier="loupe")
                 return self.status()
+        await _wait_while_someone_is_browsing()
         after_id = await self._state_int(f"after:{size}")
         tier = "browse" if size == self.BROWSE_SIZE else "loupe"
         self._status.update(state="fetching", size=size, after_id=after_id, tier=tier)
