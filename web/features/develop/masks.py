@@ -6,6 +6,8 @@ quarter-resolution float fields, matching ``mask_raster.js`` and the GL atlas.
 
 from __future__ import annotations
 
+from features.develop.numbers import setting as _number
+
 import logging
 import math
 import re
@@ -29,13 +31,6 @@ _LOCAL_KEYS = (
     "LocalTexture", "LocalTemperature", "LocalTint", "LocalSaturation", "LocalHue",
 )
 
-
-def _number(values: Mapping[str, object], key: str, default: float = 0.0) -> float:
-    try:
-        value = float(values.get(key, default))
-        return value if math.isfinite(value) else default
-    except (TypeError, ValueError):
-        return default
 
 
 def _truth(value: object, default: bool = False) -> bool:

@@ -7,6 +7,8 @@ values.  Coordinates are normalized in the oriented image space.
 
 from __future__ import annotations
 
+from features.develop.numbers import number as _number
+
 import json
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -25,13 +27,6 @@ RETOUCH_RING_TAPS = getattr(C, "RETOUCH_RING_TAPS", 8)
 RETOUCH_RING_SCALE = getattr(C, "RETOUCH_RING_SCALE", 1.5)
 RETOUCH_MIN_RADIUS = getattr(C, "RETOUCH_MIN_RADIUS", 1e-4)
 
-
-def _number(value: Any, fallback: float) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return fallback
-    return number if np.isfinite(number) else fallback
 
 
 def _unit(value: Any, fallback: float) -> float:

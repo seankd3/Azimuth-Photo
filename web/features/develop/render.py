@@ -10,6 +10,8 @@ or pano/HDR settings.
 
 from __future__ import annotations
 
+from features.develop.numbers import setting as _number
+
 import asyncio
 import io
 import math
@@ -72,12 +74,6 @@ class ProofTile:
     source_width: int
     source_height: int
 
-
-def _number(settings: Mapping[str, object], key: str, default: float) -> float:
-    try:
-        return float(settings.get(key, default))
-    except (TypeError, ValueError):
-        return default
 
 
 def decode_full_resolution(path: str | Path) -> np.ndarray:

@@ -8,6 +8,8 @@ forward source-to-output homography; renderers sample its inverse.
 
 from __future__ import annotations
 
+from features.develop.numbers import setting as _number
+
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -34,13 +36,6 @@ TRANSFORM_KEYS = (
     "PerspectiveUpright",
 )
 
-
-def _number(settings: Mapping[str, object] | None, key: str, default: float) -> float:
-    try:
-        value = float((settings or {}).get(key, default))
-    except (TypeError, ValueError):
-        return default
-    return value if np.isfinite(value) else default
 
 
 def transform_settings(settings: Mapping[str, object] | None) -> dict[str, float | str]:

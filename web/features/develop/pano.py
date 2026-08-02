@@ -17,9 +17,10 @@ The stored EXR / PABASE is this recovered linear estimate. Kind tag: ``pano``.
 
 from __future__ import annotations
 
+from features.develop.numbers import number as _number
+
 import gzip
 import json
-import math
 import os
 import sqlite3
 import threading
@@ -79,13 +80,6 @@ def _set_status(**changes: Any) -> None:
     with _status_lock:
         _status.update(changes)
 
-
-def _number(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
 
 
 def _same_optical_setup(first: dict[str, Any], second: dict[str, Any]) -> bool:

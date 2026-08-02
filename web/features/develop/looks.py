@@ -7,6 +7,8 @@ faithfully apply without Adobe's unavailable 3D LookTable.
 
 from __future__ import annotations
 
+from features.develop.numbers import number as _number
+
 import re
 import xml.etree.ElementTree as etree
 from collections.abc import Mapping, Sequence
@@ -130,13 +132,6 @@ def look_amount(settings: Mapping[str, object] | None) -> float:
 def look_curve(settings: Mapping[str, object] | None) -> object:
     return look_parameters(settings).get("ToneCurvePV2012")
 
-
-def _number(value: object, default: float = 0.0) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return default
-    return number if np.isfinite(number) else default
 
 
 def _bool(value: object) -> bool:

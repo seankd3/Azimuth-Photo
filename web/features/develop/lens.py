@@ -6,6 +6,8 @@ calibration terms; the NumPy and WebGL twins apply those terms with shared math.
 
 from __future__ import annotations
 
+from features.develop.numbers import number as _number
+
 import json
 import math
 import shutil
@@ -71,13 +73,6 @@ def distortion_auto_crop_scale(
             maximum = max(maximum, distortion_radial_scale(math.hypot(px, py), distortion))
     return min(1.0, 1.0 / max(maximum, C.TONE_EPSILON))
 
-
-def _number(value: object, default: float | None = None) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return default
-    return number if math.isfinite(number) else default
 
 
 @lru_cache(maxsize=256)

@@ -9,6 +9,8 @@ when the base is uploaded to the renderer.
 
 from __future__ import annotations
 
+from features.develop.numbers import number as _number
+
 import gzip
 import json
 import math
@@ -58,13 +60,6 @@ def _set_status(**changes: Any) -> None:
     with _status_lock:
         _status.update(changes)
 
-
-def _number(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) else None
 
 
 def _timestamp(value: Any) -> float | None:

@@ -7,6 +7,8 @@ read only so the post-crop vignette is positioned in the same space as export.
 
 from __future__ import annotations
 
+from features.develop.numbers import setting as _number
+
 import math
 from collections.abc import Mapping, Sequence
 
@@ -17,13 +19,6 @@ from .film import apply_film
 from .lens import distortion_auto_crop_scale
 from .looks import compose_curve_luts, effective_settings, look_amount, look_curve
 
-
-def _number(settings: Mapping[str, object], key: str, default: float = 0.0) -> float:
-    value = settings.get(key, default)
-    try:
-        return float(value)  # Lightroom XMP values arrive as strings.
-    except (TypeError, ValueError):
-        return default
 
 
 def _slider(settings: Mapping[str, object], key: str) -> float:
