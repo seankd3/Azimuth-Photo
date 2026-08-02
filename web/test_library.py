@@ -1210,6 +1210,23 @@ class LibraryTests(BackendTestCase):
         await self._cache_entry(measured, "sm")
         await self._cache_entry(predicted, "sm")
 
+        # The blend is a refinement of a rating the catalog already holds, so the
+        # first view never waits for it — it warms in the background and the
+        # next view is blended. See _ranking_taste_blend_context.
+        first = await library_routes.api_rankings(
+            limit=10,
+            sort="elo",
+            ids=f"{measured},{predicted}",
+        )
+        self.assertEqual(
+            [image["id"] for image in first["images"][:2]],
+            [measured, predicted],
+            "the first view shows the stored rating rather than waiting",
+        )
+        warming = library_service._taste_warm_task
+        if warming is not None:
+            await warming
+
         result = await library_routes.api_rankings(
             limit=10,
             sort="elo",

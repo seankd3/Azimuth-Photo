@@ -222,6 +222,36 @@ async def taste_similarity_scores(taste: dict) -> dict[int, float] | None:
     return similarities if isinstance(similarities, dict) else None
 
 
+async def taste_scaled_scores_if_warm(taste: dict) -> dict[int, float] | None:
+    """The taste scores, but only if they are already computed.
+
+    Blending taste into the displayed rating is a refinement of a number the
+    catalog already holds. Computing it means loading every embedding in the
+    library and multiplying through all of them — 42,937 vectors on the owner's
+    laptop — and the default grid view waited for that on every cold start,
+    while sorting by any other field answered in a second. A refinement must
+    never be the reason you cannot see your photos.
+
+    So: hand back what is warm, and let the caller ask for the rest in the
+    background. The next refresh shows the blended order.
+    """
+
+    if not taste.get("available") or taste.get("vector") is None:
+        return None
+    scores = _prediction_cache.get("scores")
+    if not isinstance(scores, dict) or not scores:
+        return None
+    warm_key = _prediction_cache.get("key")
+    if not warm_key:
+        return None
+    signature = taste_vector_signature(taste)
+    # The cached key carries (cache_key, signature, count, matrix identity);
+    # a changed taste vector must not be served from a stale blend.
+    if warm_key[0] != taste.get("_cache_key") or warm_key[1] != signature:
+        return None
+    return scores
+
+
 async def taste_scaled_scores(taste: dict) -> dict[int, float] | None:
     """Return image_id -> taste-scaled Elo prediction for the warm embedding matrix."""
     payload = await _taste_score_payload(taste)
@@ -247,8 +277,11 @@ async def _taste_score_payload(taste: dict) -> dict | None:
             "scores": _prediction_cache.get("scores"),
         }
 
-    similarities, scores = _compute_similarity_and_scaled_scores(
-        image_ids, matrix, taste["vector"]
+    # One matmul across every embedding in the library. On the loop it stops
+    # every other request for its whole duration, which is how a refinement of
+    # the displayed rating became the reason the grid would not load.
+    similarities, scores = await asyncio.to_thread(
+        _compute_similarity_and_scaled_scores, image_ids, matrix, taste["vector"]
     )
     _prediction_cache.update({
         "key": cache_key,

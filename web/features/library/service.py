@@ -201,6 +201,22 @@ def _ranking_taste_blend_settings() -> tuple[bool, int]:
     )
 
 
+_taste_warm_task = None
+
+
+def _schedule_taste_scores(taste: dict) -> None:
+    """Compute the taste blend off the request, once at a time."""
+
+    global _taste_warm_task
+    if _taste_warm_task is not None and not _taste_warm_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    _taste_warm_task = loop.create_task(taste_service.taste_scaled_scores(taste))
+
+
 async def _ranking_taste_blend_context(db_sort: str) -> dict:
     enabled, min_signal = _ranking_taste_blend_settings()
     if db_sort not in ELO_FAMILY_SORTS:
@@ -216,11 +232,16 @@ async def _ranking_taste_blend_context(db_sort: str) -> dict:
             "active": False,
             "cache_key": ("taste_blend", "disabled", True, min_signal, signature),
         }
-    scores = await taste_service.taste_scaled_scores(taste)
+    # Warm only. Computing this means loading every embedding in the library and
+    # multiplying through all of them; the grid must never wait for it. When it
+    # is not ready the stored rating is shown — which is the number being
+    # refined — and the blend arrives on a later refresh.
+    scores = await taste_service.taste_scaled_scores_if_warm(taste)
     if not scores:
+        _schedule_taste_scores(taste)
         return {
             "active": False,
-            "cache_key": ("taste_blend", "no_scores", True, min_signal, signature),
+            "cache_key": ("taste_blend", "warming", True, min_signal, signature),
         }
     return {
         "active": True,
