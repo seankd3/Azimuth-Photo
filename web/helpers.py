@@ -1,3 +1,4 @@
+from core.numbers import field as _get, integer as _as_int, number as _as_float
 from collections.abc import Awaitable, Callable
 
 from core.responses import (
@@ -27,27 +28,7 @@ def _configured(provider, name: str):
     return provider
 
 
-def _get(image, key: str, default=None):
-    if hasattr(image, "get"):
-        return image.get(key, default)
-    try:
-        return image[key]
-    except (KeyError, IndexError, TypeError):
-        return default
 
-
-def _as_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _as_float(value, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
 
 
 def ranking_signal_count(image: dict) -> int:

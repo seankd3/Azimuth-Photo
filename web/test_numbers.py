@@ -1,14 +1,17 @@
-"""One rule for reading a number out of settings that came from elsewhere.
+"""One rule for making a number out of whatever arrived.
 
-Develop settings arrive from XMP, from Lightroom catalogs, from JSON on the wire
-and from the editor. Any of those can hand over a string, a None or a NaN, and
-nine modules in this package had each written their own four lines to cope.
+Values reach this app as strings from XMP, as None from a half-filled catalog
+row, as NaN from a pipeline that divided by nothing. Eleven modules had each
+written their own four lines to cope, in three shapes that were one shape.
+
+A non-finite number is not a number here: it cannot be drawn, and `json.dumps`
+writes it as a bare `NaN` that a strict client refuses to parse.
 """
 
 import unittest
 
-from features.develop import numbers
-from features.develop.numbers import number, setting
+from core import numbers
+from core.numbers import field, integer, number, setting
 
 
 class NumberTests(unittest.TestCase):

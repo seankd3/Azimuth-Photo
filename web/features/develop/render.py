@@ -10,7 +10,7 @@ or pano/HDR settings.
 
 from __future__ import annotations
 
-from features.develop.numbers import setting as _number
+from core.numbers import setting as _number
 
 import asyncio
 import io

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from features.develop.ramps import smoothstep as _smoothstep
 
-from features.develop.numbers import number as _number
+from core.numbers import number as _number
 
 import json
 from collections.abc import Mapping, Sequence

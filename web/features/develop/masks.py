@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from features.develop.ramps import smoothstep as _smoothstep, gaussian_ev as _gaussian_ev
 
-from features.develop.numbers import setting as _number
+from core.numbers import setting as _number
 
 import logging
 import math

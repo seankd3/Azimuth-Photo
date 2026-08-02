@@ -9,7 +9,7 @@ when the base is uploaded to the renderer.
 
 from __future__ import annotations
 
-from features.develop.numbers import number as _number
+from core.numbers import number as _number
 
 import gzip
 import json

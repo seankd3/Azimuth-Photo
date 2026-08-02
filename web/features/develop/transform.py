@@ -8,7 +8,7 @@ forward source-to-output homography; renderers sample its inverse.
 
 from __future__ import annotations
 
-from features.develop.numbers import setting as _number
+from core.numbers import setting as _number
 
 from collections.abc import Mapping, Sequence
 from typing import Any

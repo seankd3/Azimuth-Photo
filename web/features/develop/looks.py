@@ -7,7 +7,7 @@ faithfully apply without Adobe's unavailable 3D LookTable.
 
 from __future__ import annotations
 
-from features.develop.numbers import number as _number
+from core.numbers import number as _number
 
 import re
 import xml.etree.ElementTree as etree
