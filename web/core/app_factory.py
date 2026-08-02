@@ -385,7 +385,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     wiring.configure_shared_routes()
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
-        db_path=lambda: db.DB_PATH,
         get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
     wiring.configure_settings_routes(

@@ -1,5 +1,6 @@
 """Search feature vector helpers and response caches."""
 
+from core.catalog_path import catalog_path
 import heapq
 from collections.abc import Callable
 
@@ -10,13 +11,11 @@ from data.repositories import images as image_repository
 _duplicates_cache = {"key": None, "data": None}
 
 _cache_root: Callable[[], str] | None = None
-_db_path: Callable[[], str] | None = None
 
 
-def configure(*, cache_root: Callable[[], str], db_path: Callable[[], str]) -> None:
-    global _cache_root, _db_path
+def configure(*, cache_root: Callable[[], str]) -> None:
+    global _cache_root
     _cache_root = cache_root
-    _db_path = db_path
 
 
 def _configured_cache_root() -> str:
@@ -24,11 +23,6 @@ def _configured_cache_root() -> str:
         raise RuntimeError("Search service is not configured")
     return _cache_root()
 
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Search service is not configured")
-    return _db_path()
 
 
 async def visible_embedding_page(
@@ -40,7 +34,7 @@ async def visible_embedding_page(
     exclude_id: int | None = None,
     model_key: str | None = None,
 ) -> tuple[list[dict], int, int]:
-    db_path = _configured_db_path()
+    db_path = catalog_path()
     candidate_ids = {int(image_id) for image_id in image_ids}
     if exclude_id is not None:
         candidate_ids.discard(int(exclude_id))

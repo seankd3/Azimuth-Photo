@@ -8,6 +8,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+import db
 from pathlib import Path
 from unittest import mock
 
@@ -318,7 +320,7 @@ class CloudBackupRouteTests(unittest.TestCase):
         settings.reset_settings()
         self.addCleanup(self._restore_settings)
 
-        cloud_routes.configure(db_path=lambda: str(self.db))
+        db.DB_PATH = str(self.db)
         from core import bulk_scheduler
 
         bulk_scheduler.reset_for_tests(

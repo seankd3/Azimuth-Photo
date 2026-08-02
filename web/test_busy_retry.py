@@ -94,8 +94,6 @@ class UserFacingBusyRetryTests(BackendTestCase):
     async def test_develop_settings_put_retries_transient_lock(self):
         source = await self._source("busy-dev")
         image_id = await self._image(source["id"], "c.dng")
-        old_db = develop_routes._db_path
-        develop_routes.configure(db_path=lambda: db.DB_PATH)
         attempts = {"n": 0}
         real_open = connection.open_async
 
@@ -105,14 +103,11 @@ class UserFacingBusyRetryTests(BackendTestCase):
                 raise sqlite3.OperationalError("database is locked")
             return await real_open(db_path, **kwargs)
 
-        try:
-            with (
-                mock.patch.object(connection, "open_async", side_effect=flaky_open),
-                mock.patch.object(connection.asyncio, "sleep", new=mock.AsyncMock()),
-            ):
-                saved = await develop_routes._upsert_settings(image_id, {"Exposure2012": 0.5}, "Busy")
-        finally:
-            develop_routes._db_path = old_db
+        with (
+            mock.patch.object(connection, "open_async", side_effect=flaky_open),
+            mock.patch.object(connection.asyncio, "sleep", new=mock.AsyncMock()),
+        ):
+            saved = await develop_routes._upsert_settings(image_id, {"Exposure2012": 0.5}, "Busy")
 
         self.assertEqual(saved["settings"]["Exposure2012"], 0.5)
         self.assertGreaterEqual(attempts["n"], 2)

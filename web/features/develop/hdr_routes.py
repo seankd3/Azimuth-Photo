@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 from collections.abc import Callable
 
@@ -13,7 +15,6 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 
 class HdrDetectBody(BaseModel):
@@ -24,22 +25,13 @@ class HdrMergeBody(BaseModel):
     image_ids: list[int] = Field(min_length=3, max_length=12)
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("HDR routes are not configured")
-    return _db_path()
 
 
 @router.post("/api/develop/hdr/detect")
 async def api_detect_hdr_brackets(body: HdrDetectBody):
     from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
 
-    brackets = await asyncio.to_thread(hdr.detect_brackets, _configured_db_path(), body.image_ids)
+    brackets = await asyncio.to_thread(hdr.detect_brackets, catalog_path(), body.image_ids)
     return {"brackets": brackets}
 
 
@@ -50,7 +42,7 @@ async def api_merge_hdr(body: HdrMergeBody):
     image_ids = list(dict.fromkeys(image_id for image_id in body.image_ids if image_id > 0))
     if len(image_ids) < 3:
         return JSONResponse({"error": "HDR merge needs at least three images"}, status_code=400)
-    if not hdr.begin_merge(_configured_db_path(), image_ids):
+    if not hdr.begin_merge(catalog_path(), image_ids):
         return JSONResponse({"error": "An HDR merge is already running", "status": hdr.hdr_status()}, status_code=409)
     return {"queued": image_ids, "status": hdr.hdr_status()}
 

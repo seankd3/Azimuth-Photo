@@ -63,7 +63,6 @@ class CollectionTests(BackendTestCase):
                 db.DB_PATH,
                 db_signature=db.DB_PATH,
             ),
-            db_path=lambda: db.DB_PATH,
         )
 
     async def test_collection_api_creates_reads_and_updates_membership(self):

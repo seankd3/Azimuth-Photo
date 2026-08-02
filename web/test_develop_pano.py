@@ -7,6 +7,8 @@ import os
 import sqlite3
 import tempfile
 import unittest
+
+import db
 from pathlib import Path
 from unittest import mock
 
@@ -168,7 +170,7 @@ class PanoMergeCacheTests(unittest.TestCase):
 class PanoRouteTests(unittest.TestCase):
     def test_detect_merge_and_status_routes(self):
         app = FastAPI()
-        pano_routes.configure(db_path=lambda: "unused.db")
+        db.DB_PATH = "unused.db"
         app.include_router(pano_routes.router)
         with mock.patch.object(pano, "detect_sequences", return_value=[{"image_ids": [1, 2, 3]}]):
             with mock.patch.object(pano, "begin_merge", return_value=True) as begin:

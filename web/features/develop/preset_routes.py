@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import os
 from collections.abc import Callable
 from typing import Any
@@ -16,7 +18,6 @@ from features.develop import presets as presets_mod
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 _lr_import_attempted = False
 
 
@@ -44,19 +45,10 @@ class PresetApplyBody(BaseModel):
     image_id: int = Field(gt=0)
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Develop preset routes are not configured")
-    return _db_path()
 
 
 async def _conn():
-    return await connection.open_async(_configured_db_path())
+    return await connection.open_async(catalog_path())
 
 
 async def _maybe_import_lr(conn) -> None:
@@ -81,7 +73,7 @@ async def api_list_presets():
         items = await presets_mod.list_presets(conn)
         return {"presets": items, "import": presets_mod.import_report()}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.post("/api/develop/presets")
@@ -96,7 +88,7 @@ async def api_create_preset(body: PresetCreateBody):
         )
         return {"preset": preset}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.post("/api/develop/presets/import-lightroom")
@@ -109,7 +101,7 @@ async def api_import_lightroom_presets():
         report = await presets_mod.import_lightroom_presets(conn)
         return {"import": report, "presets": await presets_mod.list_presets(conn)}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.get("/api/develop/presets/{preset_id}")
@@ -121,7 +113,7 @@ async def api_get_preset(preset_id: int):
             return JSONResponse({"error": "Preset not found"}, status_code=404)
         return {"preset": preset}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.patch("/api/develop/presets/{preset_id}")
@@ -137,7 +129,7 @@ async def api_rename_preset(preset_id: int, body: PresetRenameBody):
             return JSONResponse({"error": "Preset not found"}, status_code=404)
         return {"preset": preset}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.delete("/api/develop/presets/{preset_id}")
@@ -149,7 +141,7 @@ async def api_delete_preset(preset_id: int):
             return JSONResponse({"error": "Preset not found"}, status_code=404)
         return {"deleted": True, "id": preset_id}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.post("/api/develop/presets/{preset_id}/apply")
@@ -161,4 +153,4 @@ async def api_apply_preset(preset_id: int, body: PresetApplyBody):
             return JSONResponse({"error": "Preset not found"}, status_code=404)
         return result
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())

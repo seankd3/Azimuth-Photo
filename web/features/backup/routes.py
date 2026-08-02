@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 from collections.abc import Callable
 from typing import Any
 
@@ -14,7 +16,6 @@ from features.backup import cloud
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 
 class CloudBackupConfigBody(BaseModel):
@@ -26,20 +27,11 @@ class CloudBackupConfigBody(BaseModel):
     nightly_enabled: bool = False
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Cloud Backup routes are not configured")
-    return _db_path()
 
 
 @router.get("/api/backup/cloud/status")
 async def api_cloud_backup_status() -> dict[str, Any]:
-    return cloud.status_payload(db_path=_configured_db_path())
+    return cloud.status_payload(db_path=catalog_path())
 
 
 @router.get("/api/backup/cloud/remotes")
@@ -98,7 +90,7 @@ async def api_cloud_backup_start():
             status_code=503,
         )
     try:
-        payload = cloud.start_sync(_configured_db_path(), manual_override=True)
+        payload = cloud.start_sync(catalog_path(), manual_override=True)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
     except RuntimeError as exc:

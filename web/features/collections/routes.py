@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 from core.requests import parse_exclude_sources
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -43,7 +44,6 @@ _resolve_smart_detail: ResolveSmartDetail | None = None
 _resolve_smart_summary: ResolveSmartSummary | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None
 _resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None
-_db_path: DbPath | None = None
 _get_images_by_ids: GetImagesByIds | None = None
 
 
@@ -92,7 +92,6 @@ def configure(
     resolve_smart_summary: ResolveSmartSummary | None = None,
     resolve_smart_image_ids: ResolveSmartImageIds | None = None,
     resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None,
-    db_path: DbPath | None = None,
     get_images_by_ids: GetImagesByIds | None = None,
 ) -> None:
     global _create_collection, _list_collections, _get_collection
@@ -100,7 +99,7 @@ def configure(
     global _add_collection_images, _remove_collection_images, _get_suggestions
     global _collection_is_smart, _resolve_smart_detail, _resolve_smart_summary
     global _resolve_smart_image_ids, _resolve_smart_materialized_image_ids
-    global _db_path, _get_images_by_ids
+    global _get_images_by_ids
     _create_collection = create_collection
     _list_collections = list_collections
     _get_collection = get_collection
@@ -114,7 +113,6 @@ def configure(
     _resolve_smart_summary = resolve_smart_summary
     _resolve_smart_image_ids = resolve_smart_image_ids
     _resolve_smart_materialized_image_ids = resolve_smart_materialized_image_ids
-    _db_path = db_path
     _get_images_by_ids = get_images_by_ids
 
 
@@ -133,7 +131,7 @@ def _configured() -> None:
 
 def _graph_configured() -> None:
     _configured()
-    if _db_path is None or _get_images_by_ids is None or _resolve_smart_image_ids is None:
+    if _get_images_by_ids is None or _resolve_smart_image_ids is None:
         raise RuntimeError("Collection graph routes are not configured")
 
 
@@ -160,24 +158,18 @@ def _invalidate_suggestions_cache() -> None:
 
 
 async def _collection_oplog_payload(collection_id: int) -> dict | None:
-    if _db_path is None:
-        return None
-    return await oplog.collection_meta_payload(_db_path(), collection_id)
+    return await oplog.collection_meta_payload(catalog_path(), collection_id)
 
 
 async def _append_collection_meta(collection_id: int, *, deleted: bool = False, payload: dict | None = None) -> None:
-    if _db_path is None:
-        return
     payload = payload or await _collection_oplog_payload(collection_id)
     if payload is None:
         return
-    await oplog.append_collection_meta(_db_path(), {**payload, "deleted": deleted})
+    await oplog.append_collection_meta(catalog_path(), {**payload, "deleted": deleted})
 
 
 async def _append_collection_memberships(collection_id: int, image_ids: list[int], *, member: bool) -> None:
-    if _db_path is None:
-        return
-    await oplog.append_collection_memberships(_db_path(), collection_id, image_ids, member=member)
+    await oplog.append_collection_memberships(catalog_path(), collection_id, image_ids, member=member)
 
 
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
@@ -297,10 +289,10 @@ async def api_collection_suggestions(exclude_sources: str = ""):
         return {"suggestions": []}
     payload = await _get_suggestions()
     excluded = parse_exclude_sources(exclude_sources)
-    if not excluded or _db_path is None:
+    if not excluded:
         return payload
     return await collection_suggestions.filter_suggestions_excluding_sources(
-        _db_path(),
+        catalog_path(),
         payload,
         excluded,
     )
@@ -311,7 +303,7 @@ async def api_add_collection_link(collection_id: int, payload: CollectionLinkBod
     _graph_configured()
     try:
         link = await graph.add_link(
-            _db_path(),
+            catalog_path(),
             collection_id,
             payload.child_id,
             payload.position,
@@ -334,7 +326,7 @@ async def api_delete_collection_link(
     target_child_id = child_id if child_id is not None else payload.child_id if payload else None
     if target_child_id is None:
         return JSONResponse({"error": "child_id is required"}, status_code=422)
-    deleted = await graph.delete_link(_db_path(), collection_id, target_child_id)
+    deleted = await graph.delete_link(catalog_path(), collection_id, target_child_id)
     if deleted is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if not deleted:
@@ -346,7 +338,7 @@ async def api_delete_collection_link(
 @router.get("/api/collections/tree")
 async def api_collection_tree():
     _graph_configured()
-    return await graph.workspace_tree(_db_path())
+    return await graph.workspace_tree(catalog_path())
 
 
 @router.get("/api/collections/{collection_id}/images")
@@ -354,7 +346,7 @@ async def api_collection_graph_images(collection_id: int, recursive: int = 0):
     _graph_configured()
     try:
         result = await graph.recursive_images(
-            _db_path(),
+            catalog_path(),
             collection_id,
             recursive=bool(recursive),
             resolve_smart_image_ids=_resolve_smart_image_ids,

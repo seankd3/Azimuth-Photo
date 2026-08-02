@@ -56,9 +56,14 @@ async def _health_snapshot(*, initial_wait_seconds: float) -> dict[str, Any]:
     }
 
 
-def configure(*, db_path: DbPathProvider) -> None:
+def reset_for_tests() -> None:
+    """Forget the cached snapshot, so one test's health is not another's.
+
+    This was the real work of the old `configure()`; the catalog path it also
+    took is now asked for directly.
+    """
+
     global _health_cache, _health_cache_at, _health_refresh_task
-    health.configure(db_path=db_path)
     _health_cache = None
     _health_cache_at = 0.0
     _health_refresh_task = None

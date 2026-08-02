@@ -6,6 +6,8 @@ gallery is a private share token scoped to a collection snapshot.
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 from features.share.visitor import (
     attachment_name as _attachment_name,
     brand as _brand_payload,
@@ -35,7 +37,6 @@ from features.sync import readthrough
 router = APIRouter()
 DbPathProvider = Callable[[], str]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
-_db_path: DbPathProvider | None = None
 _thumbnail_response: ThumbnailResponse | None = None
 _unlock_failures: dict[str, tuple[int, float]] = {}
 _templates = Jinja2Templates(directory=str(Path(__file__).resolve().parents[2] / "templates"))
@@ -55,16 +56,9 @@ class GalleryBody(BaseModel):
     download_size: str = "lg"
 
 
-def configure(*, db_path: DbPathProvider, thumbnail_response: ThumbnailResponse) -> None:
-    global _db_path, _thumbnail_response
-    _db_path = db_path
+def configure(*, thumbnail_response: ThumbnailResponse) -> None:
+    global _thumbnail_response
     _thumbnail_response = thumbnail_response
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Gallery routes are not configured")
-    return _db_path()
 
 
 def _configured_thumbnail_response() -> ThumbnailResponse:
@@ -75,7 +69,7 @@ def _configured_thumbnail_response() -> ThumbnailResponse:
 
 async def _collection_snapshot(collection_id: int) -> dict | None:
     """Read the current collection exactly once, then freeze this order."""
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute("SELECT id, name, query FROM collections WHERE id = ?", (collection_id,))
         collection = await cursor.fetchone()
@@ -96,7 +90,7 @@ async def _collection_snapshot(collection_id: int) -> dict | None:
             "image_ids": [int(row["image_id"]) for row in await cursor.fetchall()],
         }
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 def _options(body: GalleryBody) -> dict:
@@ -114,7 +108,7 @@ def _owner_payload(request: Request, gallery: dict) -> dict:
 
 @router.get("/api/user-collections/{collection_id}/galleries")
 async def api_list_galleries(collection_id: int, request: Request):
-    return {"galleries": [_owner_payload(request, item) for item in await galleries.list_galleries(_configured_db_path(), collection_id)]}
+    return {"galleries": [_owner_payload(request, item) for item in await galleries.list_galleries(catalog_path(), collection_id)]}
 
 
 @router.post("/api/user-collections/{collection_id}/galleries")
@@ -125,7 +119,7 @@ async def api_create_gallery(collection_id: int, body: GalleryBody, request: Req
     if snapshot["smart"]:
         return JSONResponse({"error": "Materialize this smart collection before creating a frozen client gallery."}, status_code=409)
     gallery = await galleries.create_gallery(
-        _configured_db_path(), collection_id=collection_id,
+        catalog_path(), collection_id=collection_id,
         title=(body.title or snapshot["name"] or "Client gallery"), image_ids=snapshot["image_ids"],
         options=_options(body),
         password_hash=await asyncio.to_thread(auth.hash_password, body.password) if body.password else None,
@@ -135,7 +129,7 @@ async def api_create_gallery(collection_id: int, body: GalleryBody, request: Req
 
 @router.patch("/api/user-collections/{collection_id}/galleries/{gallery_id}")
 async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryBody, request: Request):
-    current = await galleries.get_gallery(_configured_db_path(), gallery_id)
+    current = await galleries.get_gallery(catalog_path(), gallery_id)
     if current is None or current["collection_id"] != collection_id:
         return JSONResponse({"error": "Gallery not found"}, status_code=404)
     password_hash: object = ...
@@ -144,7 +138,7 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
     elif body.password is not None:
         password_hash = await asyncio.to_thread(auth.hash_password, body.password) if body.password else None
     updated = await galleries.update_gallery(
-        _configured_db_path(), gallery_id, title=body.title,
+        catalog_path(), gallery_id, title=body.title,
         options=_options(body), password_hash=password_hash,
     )
     return {"ok": True, "gallery": _owner_payload(request, updated)}
@@ -152,10 +146,10 @@ async def api_update_gallery(collection_id: int, gallery_id: int, body: GalleryB
 
 @router.delete("/api/user-collections/{collection_id}/galleries/{gallery_id}")
 async def api_delete_gallery(collection_id: int, gallery_id: int):
-    current = await galleries.get_gallery(_configured_db_path(), gallery_id)
+    current = await galleries.get_gallery(catalog_path(), gallery_id)
     if current is None or current["collection_id"] != collection_id:
         return JSONResponse({"error": "Gallery not found"}, status_code=404)
-    await galleries.delete_gallery(_configured_db_path(), gallery_id)
+    await galleries.delete_gallery(catalog_path(), gallery_id)
     return {"ok": True}
 
 
@@ -244,13 +238,13 @@ def _is_unlocked(request: Request, gallery: dict) -> bool:
 
 @router.get("/s/gallery/{token}", response_class=HTMLResponse)
 async def public_gallery(token: str, request: Request):
-    gallery = await galleries.resolve_token(_configured_db_path(), token)
+    gallery = await galleries.resolve_token(catalog_path(), token)
     if gallery is None:
         return _public_response(HTMLResponse("<h1>Gallery unavailable</h1>", status_code=404))
     if not _is_unlocked(request, gallery):
         return _public_response(_locked_response(request, token, gallery, unlock_error=request.query_params.get("e") == "1"))
     if not request.cookies.get(auth.VIEW_COOKIE_NAME):
-        await galleries.record_view(_configured_db_path(), token)
+        await galleries.record_view(catalog_path(), token)
     response = _gallery_response(request, gallery)
     auth.set_view_cookie(
         response,
@@ -274,7 +268,7 @@ def _unlock_retry_after(token: str) -> int | None:
 
 @router.post("/s/gallery/{token}/unlock")
 async def public_gallery_unlock(token: str, request: Request):
-    gallery = await galleries.resolve_token(_configured_db_path(), token)
+    gallery = await galleries.resolve_token(catalog_path(), token)
     if gallery is None:
         return _public_response(HTMLResponse("<h1>Gallery unavailable</h1>", status_code=404))
     if _unlock_retry_after(token) is not None:
@@ -296,7 +290,7 @@ async def public_gallery_unlock(token: str, request: Request):
 
 
 async def _public_gallery(token: str, request: Request) -> dict | None:
-    gallery = await galleries.resolve_token(_configured_db_path(), token)
+    gallery = await galleries.resolve_token(catalog_path(), token)
     if gallery is None or not _is_unlocked(request, gallery):
         return None
     return gallery
@@ -305,7 +299,7 @@ async def _public_gallery(token: str, request: Request) -> dict | None:
 @router.get("/s/gallery/{token}/thumb/{size}/{image_id}")
 async def public_gallery_thumbnail(token: str, size: str, image_id: int, request: Request):
     gallery = await _public_gallery(token, request)
-    if gallery is None or size not in {"sm", "md", "lg"} or not await galleries.gallery_allows_image(_configured_db_path(), token, image_id):
+    if gallery is None or size not in {"sm", "md", "lg"} or not await galleries.gallery_allows_image(catalog_path(), token, image_id):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     return _public_response(await _configured_thumbnail_response()(request, size, image_id))
 
@@ -315,7 +309,7 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
     gallery = await _public_gallery(token, request)
     if gallery is None or size not in galleries.VALID_DOWNLOAD_SIZES or size != gallery["download_size"]:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    image = await galleries.image_file(_configured_db_path(), token, image_id)
+    image = await galleries.image_file(catalog_path(), token, image_id)
     if image is None:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     if size != "original":

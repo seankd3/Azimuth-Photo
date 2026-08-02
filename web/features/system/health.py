@@ -6,6 +6,8 @@ Cheap enough for a 30s poll. Optional subsystems (cloud vault) report
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import logging
 import os
 import shutil
@@ -32,18 +34,8 @@ DISK_OK_FREE_BYTES = 5 * 1024**3
 DISK_WARN_FREE_BYTES = 1 * 1024**3
 
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("System health is not configured")
-    return _db_path()
 
 
 def _now() -> float:
@@ -586,7 +578,7 @@ def _recent_imports_sync(db_path: str) -> list[dict[str, Any]]:
 
 def collect_health(*, db_path: str | None = None) -> dict[str, Any]:
     """Compose all health checks into one owner-facing payload."""
-    path = db_path or _configured_db_path()
+    path = db_path or catalog_path()
     checked_at = _now()
     checks = [
         check_catalog_db(path),

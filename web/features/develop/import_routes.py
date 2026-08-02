@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -17,21 +19,13 @@ from features.develop import importer, lrcat_import
 router = APIRouter()
 DbPath = Callable[[], str]
 PrefetchThumbnails = Callable[[list[dict]], Awaitable[int]]
-_db_path: DbPath | None = None
 _prefetch_thumbnails: PrefetchThumbnails | None = None
 _LOG = logging.getLogger(__name__)
 
 
-def configure(*, db_path: DbPath, prefetch_thumbnails: PrefetchThumbnails | None = None) -> None:
-    global _db_path, _prefetch_thumbnails
-    _db_path = db_path
+def configure(*, prefetch_thumbnails: PrefetchThumbnails | None = None) -> None:
+    global _prefetch_thumbnails
     _prefetch_thumbnails = prefetch_thumbnails
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Develop import routes are not configured")
-    return _db_path()
 
 
 async def _scan_in_background(root: str, db_path: str) -> None:
@@ -59,7 +53,7 @@ async def api_scan_develop_import(request: Request):
         return JSONResponse({"error": str(exc)}, status_code=400)
     if claimed_root is None:
         return JSONResponse({"error": "Develop import is already running", "status": importer.import_status()}, status_code=409)
-    track_background_task(_scan_in_background(claimed_root, _configured_db_path()))
+    track_background_task(_scan_in_background(claimed_root, catalog_path()))
     return {"started": True, "status": importer.import_status()}
 
 
@@ -95,7 +89,7 @@ async def api_scan_lrcat(request: Request):
         return JSONResponse({"error": "No Lightroom catalogs found"}, status_code=404)
     if not lrcat_import.begin_scan(dry_run=dry_run):
         return JSONResponse({"error": "Lightroom catalog import is already running", "status": lrcat_import.import_status()}, status_code=409)
-    track_background_task(_scan_lrcat_in_background(paths, _configured_db_path(), dry_run))
+    track_background_task(_scan_lrcat_in_background(paths, catalog_path(), dry_run))
     return {"started": True, "catalogs": paths, "status": lrcat_import.import_status()}
 
 

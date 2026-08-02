@@ -37,8 +37,8 @@ class PairingTests(unittest.TestCase):
         settings.save_settings(settings.DEFAULT_SETTINGS)
         asyncio.run(db.init_db())
         pairing.clear_pending_codes_for_tests()
-        pair_routes.configure(db_path=lambda: self.db_path)
-        hub_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
+        db.DB_PATH = self.db_path
         api = FastAPI()
         api.include_router(pair_routes.router)
         api.include_router(hub_routes.router)
@@ -167,7 +167,7 @@ class PairConnectTests(unittest.TestCase):
         satellite._stored_hub_url = ""
         satellite._stored_device_token = ""
         asyncio.run(db.init_db())
-        pair_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
         api = FastAPI()
         api.include_router(pair_routes.router)
         self.client_context = TestClient(api)

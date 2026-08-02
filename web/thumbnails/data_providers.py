@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -13,7 +15,6 @@ MarkImageMissingSync = Callable[[int], Any]
 InvalidateCachedImageIdsCache = Callable[..., Any]
 NoteCachedImageIdsAdded = Callable[[str, str, object], Any]
 
-_db_path: DbPath | None = None
 _get_db: AsyncConnectionProvider | None = None
 _batch_set_orientations: BatchSetOrientations | None = None
 _mark_image_missing_sync: MarkImageMissingSync | None = None
@@ -23,17 +24,14 @@ _note_cached_image_ids_added: NoteCachedImageIdsAdded | None = None
 
 def configure(
     *,
-    db_path: DbPath | None = None,
     get_db: AsyncConnectionProvider | None = None,
     batch_set_orientations: BatchSetOrientations | None = None,
     mark_image_missing_sync: MarkImageMissingSync | None = None,
     invalidate_cached_image_ids_cache: InvalidateCachedImageIdsCache | None = None,
     note_cached_image_ids_added: NoteCachedImageIdsAdded | None = None,
 ) -> None:
-    global _db_path, _get_db, _batch_set_orientations, _mark_image_missing_sync
+    global _get_db, _batch_set_orientations, _mark_image_missing_sync
     global _invalidate_cached_image_ids_cache, _note_cached_image_ids_added
-    if db_path is not None:
-        _db_path = db_path
     if get_db is not None:
         _get_db = get_db
     if batch_set_orientations is not None:
@@ -53,7 +51,7 @@ def _configured(provider, name: str):
 
 
 def db_path() -> str:
-    return _configured(_db_path, "db_path")()
+    return catalog_path()
 
 
 async def get_db():

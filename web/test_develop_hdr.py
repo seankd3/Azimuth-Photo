@@ -7,6 +7,8 @@ import os
 import sqlite3
 import tempfile
 import unittest
+
+import db
 from pathlib import Path
 from unittest import mock
 
@@ -115,7 +117,7 @@ class HdrMergeCacheTests(unittest.TestCase):
         self.assertEqual(base.dtype, np.dtype("<u2"))
 
         app = FastAPI()
-        develop_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
         app.include_router(develop_routes.router)
         original_is_raw = rawproc.is_raw_path
         with mock.patch.object(rawproc, "is_raw_path", side_effect=lambda path: original_is_raw(path) or Path(path).suffix.lower() == ".exr"):
@@ -137,7 +139,7 @@ class HdrMergeCacheTests(unittest.TestCase):
 class HdrRouteTests(unittest.TestCase):
     def test_detect_and_status_routes(self):
         app = FastAPI()
-        hdr_routes.configure(db_path=lambda: "unused.db")
+        db.DB_PATH = "unused.db"
         app.include_router(hdr_routes.router)
         with mock.patch.object(hdr, "detect_brackets", return_value=[{"image_ids": [1, 2, 3]}]):
             with TestClient(app) as client:

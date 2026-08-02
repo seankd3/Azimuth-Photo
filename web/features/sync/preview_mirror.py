@@ -7,6 +7,7 @@ catalog change is a lazy miss, not a push invalidation.
 
 from __future__ import annotations
 
+
 import logging
 import os
 import sqlite3
@@ -110,12 +111,6 @@ def _ensure_write_budget(size: str) -> None:
     current = int(thumbnails._disk_allocations.get(size, 0) or 0)
     if current < cap:
         thumbnails._disk_allocations[size] = cap
-
-
-def _db_path() -> str:
-    import db
-
-    return str(db.DB_PATH)
 
 
 def get_local(

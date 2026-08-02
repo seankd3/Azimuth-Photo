@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import db
+
 import asyncio
 from pathlib import Path
 
@@ -111,7 +113,7 @@ def test_public_download_filename_cannot_inject_response_headers():
 def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(hub, "MAX_CHUNK_BYTES", 4)
     monkeypatch.setattr(device_auth, "require_device_token_enabled", lambda: False)
-    hub_routes.configure(db_path=lambda: str(tmp_path / "unused.db"))
+    db.DB_PATH = str(tmp_path / "unused.db")
     app = FastAPI()
     app.include_router(hub_routes.router)
 

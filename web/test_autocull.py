@@ -17,7 +17,6 @@ from test_support import BackendTestCase
 class AutocullTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        quality_routes.configure(db_path=lambda: db.DB_PATH)
 
     async def _stack(self, image_ids: list[int], *, kind: str = "burst") -> int:
         conn = await db.get_db()

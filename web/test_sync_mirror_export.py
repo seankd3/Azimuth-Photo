@@ -29,7 +29,7 @@ class SyncMirrorExportTests(unittest.TestCase):
             device_auth, "require_device_token_enabled", return_value=False
         )
         self.auth_patch.start()
-        hub_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
         api = FastAPI()
         api.include_router(hub_routes.router)
         self.client_context = TestClient(api)

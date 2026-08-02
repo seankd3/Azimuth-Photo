@@ -107,7 +107,6 @@ class QualityScorerUnitTests(unittest.TestCase):
 class QualityRoutesTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        quality_routes.configure(db_path=lambda: db.DB_PATH)
         # Reset scan state between tests.
         with quality_routes._scan_lock:
             quality_routes._scan_state.update(

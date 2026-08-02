@@ -1,6 +1,6 @@
 """Aggregate count queries and caches for catalog and AI status surfaces."""
 
-from core.cache_events import increment_cached_int as _increment_cached_int
+from core.numbers import increment_cached_int as _increment_cached_int
 import asyncio
 import logging
 import time as _time

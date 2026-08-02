@@ -8,6 +8,8 @@ from unittest import mock
 import tempfile
 import unittest
 
+import db
+
 from features.develop import lrcat_import
 
 
@@ -179,7 +181,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(import_routes.router)
-        import_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
         return TestClient(app)
 
     def test_catalogs_route_lists_discovered_catalogs(self):

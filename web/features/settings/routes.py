@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
@@ -44,7 +45,6 @@ _copy_settings_response: CopyResponse | None = None
 _track_background_task: TrackTask | None = None
 _get_refreshing: GetRefreshing | None = None
 _set_refreshing: SetRefreshing | None = None
-_db_path: DbPathProvider | None = None
 _get_stats: BuildResponse | None = None
 _refresh_source_online_states: AsyncBoolBuilder | None = None
 _build_cache_status: AsyncDictBuilder | None = None
@@ -68,7 +68,6 @@ def configure(
     track_background_task: TrackTask,
     get_refreshing: GetRefreshing,
     set_refreshing: SetRefreshing,
-    db_path: DbPathProvider,
     get_stats: BuildResponse,
     refresh_source_online_states: AsyncBoolBuilder,
     build_cache_status: AsyncDictBuilder,
@@ -84,7 +83,7 @@ def configure(
 ) -> None:
     global _settings_response_cache, _settings_response_cache_ttl_seconds
     global _build_settings_response, _copy_settings_response, _track_background_task
-    global _get_refreshing, _set_refreshing, _db_path, _get_stats, _refresh_source_online_states
+    global _get_refreshing, _set_refreshing, _get_stats, _refresh_source_online_states
     global _build_cache_status, _build_ai_status, _people_status_payload
     global _invalidate_image_flag_caches, _invalidate_pairing_cache, _invalidate_cache_status_cache
     global _invalidate_ai_status_response_cache, _invalidate_settings_response_cache
@@ -96,7 +95,6 @@ def configure(
     _track_background_task = track_background_task
     _get_refreshing = get_refreshing
     _set_refreshing = set_refreshing
-    _db_path = db_path
     _get_stats = get_stats
     _refresh_source_online_states = refresh_source_online_states
     _build_cache_status = build_cache_status
@@ -120,7 +118,7 @@ def _configured():
         _track_background_task,
         _get_refreshing,
         _set_refreshing,
-        _db_path,
+        catalog_path,
         _get_stats,
         _refresh_source_online_states,
         _build_cache_status,
@@ -138,16 +136,11 @@ def _configured():
         raise RuntimeError("Settings routes are not configured")
 
 
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Settings routes are not configured")
-    return _db_path()
-
 
 async def _catalog_summary_payload() -> dict:
     _configured()
     return await catalog_repository.catalog_summary_cached(
-        _configured_db_path(),
+        catalog_path(),
         get_stats=_get_stats,
         refresh_source_online_states=_refresh_source_online_states,
     )
@@ -224,12 +217,12 @@ async def api_set_image_flag(image_id: int, request: Request):
     if flag not in ("picked", "unflagged", "rejected"):
         return JSONResponse({"error": "Invalid flag"}, status_code=400)
 
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
 
-    await image_repository.set_image_flag(_configured_db_path(), image_id, flag)
-    await oplog.append_flags(_configured_db_path(), [image_id], flag)
+    await image_repository.set_image_flag(catalog_path(), image_id, flag)
+    await oplog.append_flags(catalog_path(), [image_id], flag)
     _invalidate_image_flag_caches()
     _invalidate_pairing_cache()
     return {"ok": True, "id": image_id, "flag": flag}
@@ -240,7 +233,7 @@ async def api_get_image_rating(image_id: int):
     """Read-only star projection. Stars are computed from Elo — there is no
     manual star write anywhere; Refine is the only way to change a star."""
     _configured()
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
     from features.sync import elo_stars as elo_stars_mod
@@ -251,14 +244,14 @@ async def api_get_image_rating(image_id: int):
     content_hash = str(row.get("content_hash") or "")
     projected = 0
     if content_hash:
-        by_hash = await elo_stars_mod.elo_stars_for_hashes(_configured_db_path(), [content_hash])
+        by_hash = await elo_stars_mod.elo_stars_for_hashes(catalog_path(), [content_hash])
         projected = int(by_hash.get(content_hash) or 0)
     display = stars or projected
     base_whisper = elo_stars_mod.whisper_for_stars(display) if display else None
     rank_in_shoot = None
     filepath = str(row.get("filepath") or "")
     if base_whisper and filepath:
-        rank_in_shoot = await shoot_rank_mod.rank_in_shoot_for_filepath(_configured_db_path(), filepath)
+        rank_in_shoot = await shoot_rank_mod.rank_in_shoot_for_filepath(catalog_path(), filepath)
     whisper = shoot_rank_mod.compose_star_whisper(base_whisper, rank_in_shoot)
     return {
         "ok": True,
@@ -305,8 +298,8 @@ async def api_batch_set_flag(request: Request):
     if not normalized_ids:
         return JSONResponse({"error": "No valid image ids"}, status_code=400)
 
-    count = await image_repository.batch_set_image_flags(_configured_db_path(), normalized_ids, flag)
-    await oplog.append_flags(_configured_db_path(), normalized_ids, flag)
+    count = await image_repository.batch_set_image_flags(catalog_path(), normalized_ids, flag)
+    await oplog.append_flags(catalog_path(), normalized_ids, flag)
     if count:
         _invalidate_image_flag_caches()
     _invalidate_pairing_cache()

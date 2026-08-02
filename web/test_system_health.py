@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import db
+
 import asyncio
 import sqlite3
 import tempfile
@@ -65,7 +67,7 @@ class HealthAggregationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.db_path = _make_catalog(Path(self.tmp.name) / "catalog.db")
-        health.configure(db_path=lambda: str(self.db_path))
+        db.DB_PATH = str(self.db_path)
         # Seed a cached quick_check result so collect_health does not re-probe.
         with mock.patch.object(
             health.backups,
@@ -277,7 +279,8 @@ class HealthRouteTests(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.db_path = _make_catalog(Path(self.tmp.name) / "catalog.db")
         app = FastAPI()
-        health_routes.configure(db_path=lambda: str(self.db_path))
+        db.DB_PATH = str(self.db_path)
+        health_routes.reset_for_tests()
         app.include_router(health_routes.router)
         self.client = TestClient(app)
 

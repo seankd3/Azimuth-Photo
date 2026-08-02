@@ -6,9 +6,7 @@ from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
-from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
-from features.backup import routes as cloud_backup_routes
-from features.system import backup_routes, health_routes
+from features.develop import import_routes
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
@@ -37,7 +35,6 @@ def configure_database_backed_providers() -> None:
 
     embed_cache.configure(
         active_embedding_model_key=lambda: db.active_embedding_model_key(),
-        db_path=lambda: db.DB_PATH,
     )
     embedding_worker.configure(
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
@@ -65,7 +62,6 @@ def configure_database_backed_providers() -> None:
         cluster_unassigned_faces=lambda **kwargs: db.cluster_unassigned_faces(**kwargs),
     )
     thumbnails.configure_data_providers(
-        db_path=lambda: db.DB_PATH,
         get_db=lambda: db.get_db(),
         batch_set_orientations=lambda updates: db.batch_set_orientations(updates),
         mark_image_missing_sync=lambda image_id: db.mark_image_missing_sync(image_id),
@@ -83,7 +79,6 @@ def configure_database_backed_providers() -> None:
         cached_image_ids=lambda image_ids, size, cache_root: db.get_cached_image_ids(image_ids, size, cache_root),
     )
     catalog_metadata.configure(
-        db_path=lambda: db.DB_PATH,
         invalidate_filter_options_cache=db._invalidate_filter_options_cache,
         invalidate_rankings_cache=cache_events.invalidate_rankings_cache,
     )
@@ -123,25 +118,21 @@ def configure_status_media_search_providers() -> None:
 
     cache_status_service.configure(
         cache_root=lambda: thumbnails.SSD_CACHE_DIR,
-        db_path=lambda: db.DB_PATH,
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         expire_settings_response_cache=settings_status.expire_settings_response_cache,
     )
     search_service.configure(
         cache_root=lambda: thumbnails.SSD_CACHE_DIR,
-        db_path=lambda: db.DB_PATH,
     )
     media_routes.configure(
         cached_image_ids=media_warm.cached_image_ids,
         schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
-        db_path=lambda: db.DB_PATH,
         mark_image_missing=lambda image_id: db.mark_image_missing(image_id),
     )
     settings_status.configure(
         build_cache_status=cache_status_service.build_cache_status,
         build_ai_status=ai_routes.build_ai_status,
         people_status_payload=lambda: people_routes.people_status_payload(),
-        db_path=lambda: db.DB_PATH,
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         refresh_source_online_states=lambda: db.refresh_source_online_states(),
     )
@@ -189,7 +180,6 @@ def configure_catalog_routes() -> None:
     catalog_routes.configure(
         invalidate_pairing_cache=lambda **kwargs: cache_events.invalidate_pairing_cache(**kwargs),
         invalidate_cache_status_cache=cache_status_service.invalidate_cache_status_cache,
-        db_path=lambda: db.DB_PATH,
         get_recent_active_images=lambda **kwargs: db.get_recent_active_images(**kwargs),
         add_or_restore_source=lambda path: db.add_or_restore_source(path),
         get_scan_folder=lambda: db.get_scan_folder(),
@@ -203,17 +193,14 @@ def configure_catalog_routes() -> None:
 
 
 def configure_develop_routes() -> None:
-    import db
+    pass
 
-    develop_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_develop_import_routes() -> None:
-    import db
     import thumbnails
 
     import_routes.configure(
-        db_path=lambda: db.DB_PATH,
         prefetch_thumbnails=lambda images: thumbnails.prefetch_images(
             images, "sm", limit=len(images)
         ),
@@ -221,51 +208,43 @@ def configure_develop_import_routes() -> None:
 
 
 def configure_develop_preset_routes() -> None:
-    import db
+    pass
 
-    preset_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_develop_ai_mask_routes() -> None:
-    import db
+    pass
 
-    ai_mask_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_develop_hdr_routes() -> None:
-    import db
+    pass
 
-    hdr_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_develop_pano_routes() -> None:
-    import db
+    pass
 
-    pano_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_develop_xmp_write_routes() -> None:
-    import db
+    pass
 
-    xmp_write_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_system_backup_routes() -> None:
-    import db
+    pass
 
-    backup_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_cloud_backup_routes() -> None:
-    import db
+    pass
 
-    cloud_backup_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_system_health_routes() -> None:
-    import db
+    pass
 
-    health_routes.configure(db_path=lambda: db.DB_PATH)
 
 
 def configure_library_routes() -> None:
@@ -372,7 +351,6 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
         resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
-        db_path=lambda: db.DB_PATH,
         get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
         get_suggestions=lambda: collection_suggestions.collection_suggestions(
             db.DB_PATH,
@@ -382,7 +360,6 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
 
 
 def configure_stack_routes() -> None:
-    import db
     from core import cache_events
 
     def invalidate_stack_dependent_caches() -> None:
@@ -391,13 +368,11 @@ def configure_stack_routes() -> None:
         cache_events.invalidate_facet_caches()
 
     stack_routes.configure(
-        db_path=lambda: db.DB_PATH,
         invalidate_rankings_cache=invalidate_stack_dependent_caches,
     )
 
 
 def configure_trash_routes() -> None:
-    import db
     from core import cache_events
     from features.cache import status as cache_status_service
     from features.settings import status as settings_status
@@ -414,7 +389,6 @@ def configure_trash_routes() -> None:
         settings_status.invalidate_settings_response_cache()
 
     trash_routes.configure(
-        db_path=lambda: db.DB_PATH,
         invalidate=invalidate_trash_dependent_caches,
     )
 
@@ -493,7 +467,6 @@ def configure_publish_routes(*, templates, resolve_library_constraints=None, tra
         slug_available=lambda slug, **kwargs: db.collection_publish_slug_available(slug, **kwargs),
         thumbnails=thumbnails,
         track_background_task=track_background_task,
-        db_path=lambda: db.DB_PATH,
         create_published_node_share=lambda node_id, **kwargs: db.create_published_node_share(
             node_id,
             **kwargs,
@@ -544,7 +517,6 @@ def configure_library_service(
     from features.library import taste as taste_service
 
     taste_service.configure(
-        db_path=lambda: db.DB_PATH,
         db_signature=lambda: db.DB_PATH,
     )
     library_service.configure(
@@ -600,7 +572,6 @@ def configure_settings_routes(
     invalidate_settings_response_cache,
     invalidate_rankings_cache,
     invalidate_vector_derived_caches,
-    db_path=None,
     get_stats=None,
     refresh_source_online_states=None,
 ) -> None:
@@ -614,7 +585,6 @@ def configure_settings_routes(
         track_background_task=track_background_task,
         get_refreshing=get_refreshing,
         set_refreshing=set_refreshing,
-        db_path=db_path or (lambda: db.DB_PATH),
         get_stats=get_stats or (lambda: db.get_stats()),
         refresh_source_online_states=(
             refresh_source_online_states
@@ -765,7 +735,6 @@ def configure_query_constraints(
 def configure_export_routes(
     *,
     resolve_library_constraints,
-    db_path,
     get_import_batch_image_ids=None,
 ) -> None:
     from features.library import service as library_service
@@ -773,6 +742,5 @@ def configure_export_routes(
     export_routes.configure(
         resolve_library_constraints=resolve_library_constraints,
         resolve_collection_scope=library_service._resolve_collection_scope,
-        db_path=db_path,
         get_import_batch_image_ids=get_import_batch_image_ids,
     )

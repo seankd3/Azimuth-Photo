@@ -15,8 +15,9 @@ likes.
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
-from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -24,12 +25,6 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
-_db_path_provider: Callable[[], str] | None = None
-
-
-def configure(*, db_path_provider: Callable[[], str]) -> None:
-    global _db_path_provider
-    _db_path_provider = db_path_provider
 
 
 def _is_local(request: Request) -> bool:
@@ -43,10 +38,7 @@ async def prepare_quit(request: Request):
 
     if not _is_local(request):
         return JSONResponse({"error": "Only this computer can close the library"}, status_code=403)
-    if _db_path_provider is None:
-        return JSONResponse({"error": "System routes are not configured"}, status_code=503)
-
-    db_path = _db_path_provider()
+    db_path = catalog_path()
     folded = await asyncio.to_thread(_fold_write_log, db_path)
 
     from features.system import backups

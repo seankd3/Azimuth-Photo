@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import logging
 import os
@@ -20,7 +22,6 @@ from features.quality import autocull
 router = APIRouter()
 log = logging.getLogger(__name__)
 
-_db_path = None
 _THROTTLE_SECONDS = 0.05
 _DEFAULT_LIMIT = 50
 _MAX_LIMIT = 500
@@ -42,16 +43,6 @@ _scan_state: dict[str, Any] = {
 }
 
 
-def configure(*, db_path) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _resolve_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Quality routes are not configured")
-    path = _db_path() if callable(_db_path) else _db_path
-    return str(path)
 
 
 class ScanBody(BaseModel):
@@ -90,7 +81,7 @@ def _status_payload() -> dict[str, Any]:
 async def _open_conn():
     from data import connection
 
-    return await connection.open_async(_resolve_db_path())
+    return await connection.open_async(catalog_path())
 
 
 async def _ensure_table(conn) -> None:

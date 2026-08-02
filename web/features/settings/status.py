@@ -1,5 +1,6 @@
 """Settings aggregate status/cache helpers owned by the settings feature."""
 
+from core.catalog_path import catalog_path
 import asyncio
 import time
 from collections.abc import Awaitable, Callable
@@ -25,7 +26,6 @@ TrackTask = Callable[[Awaitable], object]
 _build_cache_status: AsyncDictBuilder | None = None
 _build_ai_status: AsyncDictBuilder | None = None
 _people_status_payload: BuildSettingsResponse | None = None
-_db_path: DbPathProvider | None = None
 _get_catalog_image_counts: BuildSettingsResponse | None = None
 _refresh_source_online_states: AsyncBoolBuilder | None = None
 
@@ -40,16 +40,14 @@ def configure(
     build_cache_status: AsyncDictBuilder,
     build_ai_status: AsyncDictBuilder,
     people_status_payload: BuildSettingsResponse,
-    db_path: DbPathProvider,
     get_catalog_image_counts: BuildSettingsResponse,
     refresh_source_online_states: AsyncBoolBuilder,
 ) -> None:
     global _build_cache_status, _build_ai_status, _people_status_payload
-    global _db_path, _get_catalog_image_counts, _refresh_source_online_states
+    global _get_catalog_image_counts, _refresh_source_online_states
     _build_cache_status = build_cache_status
     _build_ai_status = build_ai_status
     _people_status_payload = people_status_payload
-    _db_path = db_path
     _get_catalog_image_counts = get_catalog_image_counts
     _refresh_source_online_states = refresh_source_online_states
 
@@ -66,7 +64,6 @@ def _configured() -> tuple[
         _build_cache_status is None
         or _build_ai_status is None
         or _people_status_payload is None
-        or _db_path is None
         or _get_catalog_image_counts is None
         or _refresh_source_online_states is None
     ):
@@ -75,7 +72,7 @@ def _configured() -> tuple[
         _build_cache_status,
         _build_ai_status,
         _people_status_payload,
-        _db_path,
+        catalog_path,
         _get_catalog_image_counts,
         _refresh_source_online_states,
     )

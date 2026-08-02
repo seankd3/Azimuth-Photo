@@ -8,6 +8,8 @@ import sqlite3
 from contextlib import closing
 import tempfile
 import unittest
+
+import db
 from pathlib import Path
 
 from features.develop import xmp_write, xmp_write_routes
@@ -260,7 +262,7 @@ class XmpWriteTests(unittest.TestCase):
     def test_api_contract_exposes_individual_mode_and_sidecar_batch(self):
         self._image(7, ".dng", settings={"Exposure2012": 0.5})
         self._image(8, ".cr3", settings={"Exposure2012": -0.5})
-        xmp_write_routes.configure(db_path=lambda: self.db_path)
+        db.DB_PATH = self.db_path
 
         individual = asyncio.run(
             xmp_write_routes.api_write_xmp(

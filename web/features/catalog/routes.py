@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 import logging
 import os
@@ -48,7 +49,6 @@ PurgeSourceCatalogDataProvider = Callable[[int], Awaitable[dict]]
 GetCatalogImageCountsProvider = Callable[[], Awaitable[dict]]
 _invalidate_pairing_cache: InvalidatePairing | None = None
 _invalidate_cache_status_cache: InvalidateCacheStatus | None = None
-_db_path: DbPathProvider | None = None
 _get_recent_active_images: RecentActiveImagesProvider | None = None
 _add_or_restore_source: AddOrRestoreSourceProvider | None = None
 _get_scan_folder: GetScanFolderProvider | None = None
@@ -70,7 +70,6 @@ def configure(
     *,
     invalidate_pairing_cache: InvalidatePairing,
     invalidate_cache_status_cache: InvalidateCacheStatus,
-    db_path: DbPathProvider,
     get_recent_active_images: RecentActiveImagesProvider,
     add_or_restore_source: AddOrRestoreSourceProvider,
     get_scan_folder: GetScanFolderProvider,
@@ -82,13 +81,12 @@ def configure(
     get_catalog_image_counts: GetCatalogImageCountsProvider,
 ) -> None:
     global _invalidate_pairing_cache, _invalidate_cache_status_cache
-    global _db_path, _get_recent_active_images, _add_or_restore_source
+    global _get_recent_active_images, _add_or_restore_source
     global _get_scan_folder, _get_catalog_summary, _get_source
     global _remove_source_keep_data, _get_source_image_ids
     global _purge_source_catalog_data, _get_catalog_image_counts
     _invalidate_pairing_cache = invalidate_pairing_cache
     _invalidate_cache_status_cache = invalidate_cache_status_cache
-    _db_path = db_path
     _get_recent_active_images = get_recent_active_images
     _add_or_restore_source = add_or_restore_source
     _get_scan_folder = get_scan_folder
@@ -104,10 +102,6 @@ def _configured(provider):
     if provider is None:
         raise RuntimeError("Catalog routes are not configured")
     return provider
-
-
-def _configured_db_path() -> str:
-    return _configured(_db_path)()
 
 
 def _invalidate_embedding_cache() -> None:
@@ -627,7 +621,7 @@ def build_source_level_folders_payload(sources: list[tuple[int, str, int]]) -> d
 def build_folders_payload(max_depth: int | None = None) -> dict:
     sources = [
         source
-        for source in catalog_repository.folder_source_rows(_configured_db_path())
+        for source in catalog_repository.folder_source_rows(catalog_path())
         if is_filesystem_source(source[1])
     ]
     if max_depth == 0:
@@ -639,7 +633,7 @@ def build_folders_payload(max_depth: int | None = None) -> dict:
         for source_id, _source_path, active_image_count in sources
         if int(active_image_count or 0) > 0
     ]
-    paths_by_source = catalog_repository.folder_image_filepaths_by_source(_configured_db_path(), active_source_ids)
+    paths_by_source = catalog_repository.folder_image_filepaths_by_source(catalog_path(), active_source_ids)
     directory_counts = {}
     fallback_dirs = []
     for source_id, source_path, _active_image_count in sources:
@@ -910,13 +904,13 @@ def build_folder_tree_payload_from_rows(
 
 
 def build_folder_tree_payload() -> dict:
-    sources = catalog_repository.folder_tree_source_rows(_configured_db_path())
+    sources = catalog_repository.folder_tree_source_rows(catalog_path())
     active_source_ids = [
         int(source["id"])
         for source in sources
         if int(source.get("active_image_count") or 0) > 0
     ]
-    directory_counts = catalog_repository.folder_directory_counts_by_source(_configured_db_path(), active_source_ids)
+    directory_counts = catalog_repository.folder_directory_counts_by_source(catalog_path(), active_source_ids)
     return build_folder_tree_payload_from_rows(sources, directory_counts)
 
 
@@ -990,13 +984,13 @@ async def api_reveal(body: RevealBody):
             status_code=400,
         )
     if body.source_id is not None:
-        source = await catalog_repository.get_source(_configured_db_path(), body.source_id)
+        source = await catalog_repository.get_source(catalog_path(), body.source_id)
         if source is not None and not catalog_reveal.source_has_local_folders(source["path"]):
             return JSONResponse(
                 {"ok": False, "error": "Reveal is only available for local folders"},
                 status_code=400,
             )
-    roots = await import_repository.catalog_source_paths(_configured_db_path())
+    roots = await import_repository.catalog_source_paths(catalog_path())
     result = await asyncio.to_thread(catalog_reveal.reveal_folder, body.path, roots)
     if result.get("ok"):
         return {"ok": True}

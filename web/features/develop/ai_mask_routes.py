@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import os
 from collections.abc import Callable
@@ -16,28 +18,18 @@ from data.repositories import images as image_repository
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 
 class AiMaskRequest(BaseModel):
     kind: Literal["subject", "sky"]
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Develop AI mask routes are not configured")
-    return _db_path()
 
 
 async def _image_or_error(image_id: int):
     from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until an AI-mask request
 
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
     image = dict(image)

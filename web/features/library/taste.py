@@ -1,6 +1,8 @@
 """Personal taste vector construction for Library sorting."""
 
 from __future__ import annotations
+
+from core.catalog_path import catalog_path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -30,7 +32,6 @@ TASTE_SOURCE_VERIFY_TTL_SECONDS = 5.0
 DbPath = Callable[[], str]
 DbSignature = Callable[[], str]
 
-_db_path: DbPath | None = None
 _db_signature: DbSignature | None = None
 _cache: dict[str, object] = {
     "key": None,
@@ -46,9 +47,8 @@ _row_norms_cache: dict[int, object] = {}
 _cache_generation = 0
 
 
-def configure(*, db_path: DbPath, db_signature: DbSignature) -> None:
-    global _db_path, _db_signature
-    _db_path = db_path
+def configure(*, db_signature: DbSignature) -> None:
+    global _db_signature
     _db_signature = db_signature
     from core import cache_events
 
@@ -356,7 +356,7 @@ def taste_vector_if_warm() -> dict | None:
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()
-    db_path = _configured(_db_path, "db_path")()
+    db_path = catalog_path()
     db_signature = _configured(_db_signature, "db_signature")()
     now = time.monotonic()
     cached_payload = _cache.get("payload")

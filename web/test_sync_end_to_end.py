@@ -37,8 +37,8 @@ class SyncEndToEndAcceptanceTests(unittest.TestCase):
             device_auth, "require_device_token_enabled", return_value=False
         )
         self.auth_patch.start()
-        hub_routes.configure(db_path=lambda: self.hub_db)
-        oplog_routes.configure(db_path=lambda: self.hub_db)
+        db.DB_PATH = self.hub_db
+        db.DB_PATH = self.hub_db
         app = FastAPI()
         app.include_router(hub_routes.router)
         app.include_router(oplog_routes.router)

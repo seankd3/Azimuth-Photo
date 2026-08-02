@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 import logging
 import os
@@ -26,7 +27,6 @@ DbPathProvider = Callable[[], str]
 MarkImageMissing = Callable[[int], Awaitable[bool]]
 _cached_image_ids: CachedImageIds | None = None
 _schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm | None = None
-_db_path: DbPathProvider | None = None
 _mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
@@ -48,20 +48,13 @@ def configure(
     *,
     cached_image_ids: CachedImageIds,
     schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm,
-    db_path: DbPathProvider,
     mark_image_missing: MarkImageMissing,
 ) -> None:
-    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _db_path, _mark_image_missing
+    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _mark_image_missing
     _cached_image_ids = cached_image_ids
     _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
-    _db_path = db_path
     _mark_image_missing = mark_image_missing
 
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Media routes are not configured")
-    return _db_path()
 
 
 def _cache_headers(signature: str) -> dict:
@@ -374,7 +367,7 @@ async def _thumbnail_response_inner(
     cache_only = cached
     mirror_version: str | None = None
     if not cached:
-        image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+        image = await image_repository.get_media_image_by_id(catalog_path(), image_id)
         mark("catalog_row")
         if not image:
             return JSONResponse({"error": "Image not found"}, status_code=404)
@@ -529,7 +522,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             return Response(status_code=304, headers=headers)
         return FileResponse(path, headers=headers)
 
-    image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_media_image_by_id(catalog_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
 
@@ -731,7 +724,7 @@ async def warm_images(request: Request):
         return {"scheduled": {}, "images": 0}
 
     try:
-        rows_by_id = await image_repository.get_active_images_by_ids(_configured_db_path(), list(all_ids))
+        rows_by_id = await image_repository.get_active_images_by_ids(catalog_path(), list(all_ids))
     except (sqlite3.OperationalError, OSError) as exc:
         log.warning("worker=media_warm image_ids=%s lookup skipped: %s", sorted(all_ids), exc)
         return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}

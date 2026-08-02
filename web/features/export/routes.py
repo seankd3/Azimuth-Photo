@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 import csv
 import io
@@ -29,7 +30,6 @@ DbPathProvider = Callable[[], str]
 GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
 _resolve_library_constraints: ResolveLibraryConstraints | None = None
 _resolve_collection_scope: ResolveCollectionScope | None = None
-_db_path: DbPathProvider | None = None
 _get_import_batch_image_ids: GetImportBatchImageIds | None = None
 
 EXPORT_FIELD_NAMES = (
@@ -68,20 +68,13 @@ def configure(
     *,
     resolve_library_constraints: ResolveLibraryConstraints,
     resolve_collection_scope: ResolveCollectionScope,
-    db_path: DbPathProvider,
     get_import_batch_image_ids: GetImportBatchImageIds | None = None,
 ) -> None:
-    global _resolve_library_constraints, _resolve_collection_scope, _db_path, _get_import_batch_image_ids
+    global _resolve_library_constraints, _resolve_collection_scope, _get_import_batch_image_ids
     _resolve_library_constraints = resolve_library_constraints
     _resolve_collection_scope = resolve_collection_scope
-    _db_path = db_path
     _get_import_batch_image_ids = get_import_batch_image_ids
 
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Export routes are not configured")
-    return _db_path()
 
 
 async def _get_export_images(
@@ -106,7 +99,7 @@ async def _get_export_images(
     collection_id: int = 0,
     stacks: str = "expanded",
 ):
-    db_path = _configured_db_path()
+    db_path = catalog_path()
     if ids:
         id_list = _parse_ids(ids)
         images_dict = await image_repository.get_images_by_ids(db_path, id_list)
@@ -238,7 +231,7 @@ def _zip_source_for_image(image: dict, size: str) -> tuple[str | None, str]:
 
 
 def _active_source_roots() -> list[str]:
-    rows = catalog_repository.folder_source_rows(_configured_db_path())
+    rows = catalog_repository.folder_source_rows(catalog_path())
     roots = []
     for _source_id, source_path, _active_count in rows:
         if source_path:

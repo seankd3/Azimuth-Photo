@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 from collections.abc import Callable
 
@@ -13,7 +15,6 @@ from pydantic import BaseModel, Field
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 
 class PanoDetectBody(BaseModel):
@@ -24,22 +25,13 @@ class PanoMergeBody(BaseModel):
     image_ids: list[int] = Field(min_length=2, max_length=8)
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Panorama routes are not configured")
-    return _db_path()
 
 
 @router.post("/api/develop/pano/detect")
 async def api_detect_pano_sequences(body: PanoDetectBody):
     from features.develop import pano  # deferred: keeps panorama pixel libraries off boot until a panorama request
 
-    sequences = await asyncio.to_thread(pano.detect_sequences, _configured_db_path(), body.image_ids)
+    sequences = await asyncio.to_thread(pano.detect_sequences, catalog_path(), body.image_ids)
     return {"sequences": sequences}
 
 
@@ -52,7 +44,7 @@ async def api_merge_pano(body: PanoMergeBody):
         return JSONResponse({"error": "Panorama merge needs at least two images"}, status_code=400)
     if len(image_ids) > 8:
         return JSONResponse({"error": "Panorama merge accepts at most eight images"}, status_code=400)
-    if not pano.begin_merge(_configured_db_path(), image_ids):
+    if not pano.begin_merge(catalog_path(), image_ids):
         return JSONResponse({"error": "A panorama merge is already running", "status": pano.pano_status()}, status_code=409)
     return {"queued": image_ids, "status": pano.pano_status()}
 

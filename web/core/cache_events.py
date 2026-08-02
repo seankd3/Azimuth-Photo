@@ -1,4 +1,6 @@
 import logging
+
+from core.numbers import increment_cached_int  # noqa: F401  (re-exported)
 from collections.abc import Callable
 import time as _time
 
@@ -155,15 +157,6 @@ def invalidate_people_dependent_caches(*, filter_options_invalidator=None) -> No
         invalidate_filter_options_cache()
     else:
         filter_options_invalidator()
-
-
-def increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None) -> None:
-    if key not in mapping:
-        return
-    value = max(0, int(mapping.get(key) or 0) + int(delta))
-    if cap is not None:
-        value = min(value, cap)
-    mapping[key] = value
 
 
 def patch_direct_rating_stats_cache(pair_delta: int, rated_image_delta: int) -> None:

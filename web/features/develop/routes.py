@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import json
 import os
@@ -26,7 +28,6 @@ from features.sync import oplog
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
 _base_generation_tasks: dict[int, asyncio.Task] = {}
@@ -161,15 +162,6 @@ class DevelopSyncBody(BaseModel):
     label: str | None = Field(default=None, max_length=160)
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Develop routes are not configured")
-    return _db_path()
 
 
 def _now() -> str:
@@ -261,7 +253,7 @@ async def _write_synced_settings(
     replace: bool = False,
 ) -> dict[str, Any]:
     """Merge a sync slice into a target and append a history entry."""
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         await conn.execute("BEGIN")
         cursor = await conn.execute(
@@ -306,19 +298,19 @@ async def _write_synced_settings(
             (image_id, settings_json, label, now),
         )
         await conn.commit()
-        await oplog.append_develop(_configured_db_path(), image_id)
+        await oplog.append_develop(catalog_path(), image_id)
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
         raise
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 async def _image_or_error(image_id: int):
     from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a Develop request
 
-    image = await image_repository.get_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return None, JSONResponse({"error": "Image not found"}, status_code=404)
     image = dict(image)
@@ -350,7 +342,7 @@ async def _image_or_error(image_id: int):
 
 
 async def _load_settings(image_id: int) -> dict[str, Any] | None:
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute(
             "SELECT settings, origin, xmp_path, xmp_mtime, updated_at FROM develop_settings WHERE image_id = ?",
@@ -361,11 +353,11 @@ async def _load_settings(image_id: int) -> dict[str, Any] | None:
             return None
         return dict(row)
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 async def _history(image_id: int) -> list[dict[str, Any]]:
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute(
             # Named snapshots are pinned separately from edits, but each lane is capped.
@@ -383,11 +375,11 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
             for row in await cursor.fetchall()
         ]
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 async def _snapshots(image_id: int) -> list[dict[str, Any]]:
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute(
             "SELECT id, settings, label, created_at FROM develop_history "
@@ -399,7 +391,7 @@ async def _snapshots(image_id: int) -> list[dict[str, Any]]:
             for row in await cursor.fetchall()
         ]
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, dict[str, Any]]:
@@ -489,7 +481,7 @@ def _cached_base_or_pending(
 
 async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str | None) -> dict[str, Any]:
     async def _write() -> dict[str, Any]:
-        conn = await connection.open_async(_configured_db_path())
+        conn = await connection.open_async(catalog_path())
         try:
             await conn.execute("BEGIN")
             cursor = await conn.execute(
@@ -536,19 +528,19 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
                 (image_id, settings_json, label, now),
             )
             await conn.commit()
-            await oplog.append_develop(_configured_db_path(), image_id)
+            await oplog.append_develop(catalog_path(), image_id)
             return {"settings": merged, "origin": origin, "updated_at": now}
         except Exception:
             await conn.rollback()
             raise
         finally:
-            await connection.close_async(conn, db_path=_configured_db_path())
+            await connection.close_async(conn, db_path=catalog_path())
 
     return await connection.run_with_busy_retry(_write)
 
 
 async def _reset_settings(image_id: int) -> dict[str, Any]:
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         await conn.execute("BEGIN")
         cursor = await conn.execute(
@@ -594,13 +586,13 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             (image_id, encoded, "Reset", now),
         )
         await conn.commit()
-        await oplog.append_develop(_configured_db_path(), image_id)
+        await oplog.append_develop(catalog_path(), image_id)
         return {"settings": snapshot, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
         raise
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.get("/api/develop/{image_id}/base.bin")
@@ -820,7 +812,7 @@ async def api_create_virtual_copy(image_id: int):
     _image, error = await _image_or_error(image_id)
     if error:
         return error
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         await conn.execute("BEGIN")
         copy = await virtual_copies.create_virtual_copy(conn, image_id)
@@ -833,7 +825,7 @@ async def api_create_virtual_copy(image_id: int):
         await conn.rollback()
         raise
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.get("/api/develop/{image_id}/virtual-copies")
@@ -841,12 +833,12 @@ async def api_list_virtual_copies(image_id: int):
     _image, error = await _image_or_error(image_id)
     if error:
         return error
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         copies = await virtual_copies.list_virtual_copies(conn, image_id)
         return {"virtual_copies": copies or []}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.delete("/api/develop/{image_id}/virtual-copy/{copy_id}")
@@ -854,7 +846,7 @@ async def api_delete_virtual_copy(image_id: int, copy_id: int):
     _image, error = await _image_or_error(image_id)
     if error:
         return error
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         await conn.execute("BEGIN")
         if not await virtual_copies.is_virtual_copy_of(conn, image_id, copy_id):
@@ -870,7 +862,7 @@ async def api_delete_virtual_copy(image_id: int, copy_id: int):
         await conn.rollback()
         raise
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.get("/api/develop/{image_id}/snapshots")
@@ -892,7 +884,7 @@ async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
         "label": f"Snapshot: {body.label.strip()}",
         "created_at": now,
     }
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute(
             "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
@@ -901,12 +893,12 @@ async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
         await conn.commit()
         return {"id": int(cursor.lastrowid), **entry}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.delete("/api/develop/{image_id}/snapshots/{history_id}")
 async def api_delete_snapshot(image_id: int, history_id: int):
-    conn = await connection.open_async(_configured_db_path())
+    conn = await connection.open_async(catalog_path())
     try:
         cursor = await conn.execute(
             "DELETE FROM develop_history WHERE id = ? AND image_id = ? AND label LIKE 'Snapshot:%'",
@@ -917,7 +909,7 @@ async def api_delete_snapshot(image_id: int, history_id: int):
             return JSONResponse({"error": "Snapshot not found"}, status_code=404)
         return {"deleted": history_id}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.put("/api/develop/{image_id}")
@@ -1016,12 +1008,12 @@ async def api_export_develop(image_id: int, body: DevelopExportBody):
             library_info = await asyncio.to_thread(
                 save_export_to_library,
                 output_path,
-                db_path=_configured_db_path(),
+                db_path=catalog_path(),
                 source_image=image,
                 download_name=filename,
             )
             library_info["version_stack"] = await stack_repository.join_version_stack(
-                _configured_db_path(), int(image.get("vc_of") or image_id), int(library_info["library_image_id"])
+                catalog_path(), int(image.get("vc_of") or image_id), int(library_info["library_image_id"])
             )
         except Exception as exc:
             return JSONResponse({"error": f"Export rendered but library save failed: {exc}"}, status_code=422)
@@ -1108,12 +1100,12 @@ async def _run_batch_export(body: DevelopBatchExportBody) -> None:
                 result["library"] = await asyncio.to_thread(
                     save_export_to_library,
                     output_path,
-                    db_path=_configured_db_path(),
+                    db_path=catalog_path(),
                     source_image=image,
                     download_name=filename,
                 )
                 result["library"]["version_stack"] = await stack_repository.join_version_stack(
-                    _configured_db_path(), int(image.get("vc_of") or image_id), int(result["library"]["library_image_id"])
+                    catalog_path(), int(image.get("vc_of") or image_id), int(result["library"]["library_image_id"])
                 )
             _batch_status["results"].append(result)
         except (rawproc.RawDecodeError, RenderError, ValueError, OSError) as exc:

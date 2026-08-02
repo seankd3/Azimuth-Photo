@@ -15,11 +15,9 @@ class WatchedFolderTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self.api = FastAPI()
-        watched_routes.configure(db_path=lambda: db.DB_PATH)
         self.api.include_router(watched_routes.router)
 
     async def asyncTearDown(self):
-        watched_routes.configure(db_path=lambda: db.DB_PATH)
         await super().asyncTearDown()
 
     async def test_manual_scan_registers_only_new_images_and_status_is_honest(self):

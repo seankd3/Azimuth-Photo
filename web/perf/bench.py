@@ -475,7 +475,6 @@ def benchmark_pregen(
 
     db.DB_PATH = str(db_path)
     thumbnails.configure_data_providers(
-        db_path=lambda: db.DB_PATH,
         get_db=lambda: db.get_db(),
         batch_set_orientations=lambda updates: db.batch_set_orientations(updates),
         mark_image_missing_sync=lambda image_id: db.mark_image_missing_sync(image_id),

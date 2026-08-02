@@ -1,5 +1,6 @@
 """Cache-status builder owned by the cache feature."""
 
+from core.catalog_path import catalog_path
 import asyncio
 import os
 import shutil
@@ -18,7 +19,6 @@ DbPathProvider = Callable[[], str]
 ExpireSettingsResponseCache = Callable[[], None]
 
 _cache_root_provider: CacheRootProvider | None = None
-_db_path: DbPathProvider | None = None
 _get_catalog_image_counts: AsyncDictBuilder | None = None
 _expire_settings_response_cache: ExpireSettingsResponseCache | None = None
 
@@ -33,14 +33,12 @@ _browser_original_count_cache_ttl_seconds = 30.0
 def configure(
     *,
     cache_root: CacheRootProvider,
-    db_path: DbPathProvider,
     get_catalog_image_counts: AsyncDictBuilder,
     expire_settings_response_cache: ExpireSettingsResponseCache,
 ) -> None:
-    global _cache_root_provider, _db_path, _get_catalog_image_counts
+    global _cache_root_provider, _get_catalog_image_counts
     global _expire_settings_response_cache
     _cache_root_provider = cache_root
-    _db_path = db_path
     _get_catalog_image_counts = get_catalog_image_counts
     _expire_settings_response_cache = expire_settings_response_cache
 
@@ -50,11 +48,6 @@ def _cache_root() -> str:
         raise RuntimeError("Cache status is not configured")
     return _cache_root_provider()
 
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Cache status is not configured")
-    return _db_path()
 
 
 async def _catalog_image_counts() -> dict:
@@ -87,7 +80,7 @@ async def _browser_original_summary() -> dict:
         }
 
     summary = await stats_repository.browser_original_summary(
-        _configured_db_path(),
+        catalog_path(),
         catalog_counts=await _catalog_image_counts(),
         browser_extensions=tuple(sorted(thumbnails.BROWSER_ORIGINAL_EXTENSIONS)),
         is_browser_displayable_original=thumbnails.is_browser_displayable_original,
@@ -401,7 +394,7 @@ async def build_cache_status(
 
     if ahead > 0:
         ahead_counts = await stats_repository.cache_ahead_counts(
-            _configured_db_path(),
+            catalog_path(),
             ahead=ahead,
             cache_root=_cache_root(),
             size="lg",

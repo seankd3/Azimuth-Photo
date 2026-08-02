@@ -176,11 +176,7 @@ class PreviewMirrorTests(BackendTestCase):
         hit = preview_mirror.read_local(self.image_id, "md", self.version)
         self.assertEqual(hit[1], b"remote-md-bytes")
 
-        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
-            media_routes,
-            "_configured_db_path",
-            return_value=db.DB_PATH,
-        ):
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue:
             response = await media_routes.thumbnail_response(HeaderRequest(), "md", self.image_id)
         self.assertEqual(response.status_code, 200)
         if hasattr(response, "path"):
@@ -192,11 +188,7 @@ class PreviewMirrorTests(BackendTestCase):
         enqueue.assert_not_called()
 
     async def test_remote_miss_returns_pending_and_enqueues_background_fill(self):
-        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
-            media_routes,
-            "_configured_db_path",
-            return_value=db.DB_PATH,
-        ):
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue:
             response = await media_routes.thumbnail_response(HeaderRequest(), "sm", self.image_id)
         self.assertEqual(response.status_code, 204)
         enqueue.assert_called_once()
@@ -210,11 +202,7 @@ class PreviewMirrorTests(BackendTestCase):
         self.assertTrue(preview_mirror.put(self.image_id, "sm", self.version, payload))
         thumbnails._flush_write_queue()
 
-        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue, mock.patch.object(
-            media_routes,
-            "_configured_db_path",
-            return_value=db.DB_PATH,
-        ):
+        with mock.patch.object(media_routes, "_schedule_remote_media_prefetch") as enqueue:
             response = await media_routes.thumbnail_response(HeaderRequest(), "sm", self.image_id)
         self.assertEqual(response.status_code, 200)
         enqueue.assert_not_called()

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 from collections.abc import Callable
 from pathlib import Path
@@ -20,7 +22,6 @@ from features.system import client_bundle
 
 
 router = APIRouter(tags=["sync"], dependencies=[Depends(device_auth.enforce_device_token)])
-_db_path: Callable[[], str] | None = None
 _intake_root: Callable[[], Path] = hub.default_intake_root
 _raws_root: Callable[[], Path] | None = None
 _backfill_status: dict[str, Any] = {"state": "idle", "counts": {}, "error": ""}
@@ -71,23 +72,14 @@ class FullProofRequest(BaseModel):
 
 def configure(
     *,
-    db_path: Callable[[], str],
     intake_root: Callable[[], str | Path] | None = None,
     raws_root: Callable[[], str | Path] | None = None,
 ) -> None:
-    global _db_path, _intake_root, _raws_root
-    _db_path = db_path
-    device_auth.configure(db_path=db_path)
+    global _intake_root, _raws_root
     if intake_root is not None:
         _intake_root = lambda: Path(intake_root())
     if raws_root is not None:
         _raws_root = lambda: Path(raws_root())
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("hub sync routes are not configured")
-    return _db_path()
 
 
 def _configured_intake_root() -> Path:
@@ -102,7 +94,7 @@ def _configured_raws_root() -> Path:
 async def api_sync_manifest(body: ManifestRequest):
     try:
         return await hub.manifest(
-            _configured_db_path(),
+            catalog_path(),
             [item.model_dump() for item in body.items],
             intake_root=_configured_intake_root(),
         )
@@ -113,7 +105,7 @@ async def api_sync_manifest(body: ManifestRequest):
 @router.post("/api/sync/have")
 async def api_sync_have(body: HaveRequest):
     try:
-        present = await hub.have_content_hashes(_configured_db_path(), body.content_hashes)
+        present = await hub.have_content_hashes(catalog_path(), body.content_hashes)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"present": present}
@@ -123,7 +115,7 @@ async def api_sync_have(body: HaveRequest):
 async def api_sync_have_full(body: FullProofRequest):
     try:
         present = await hub.have_full_hashes(
-            _configured_db_path(),
+            catalog_path(),
             [item.model_dump() for item in body.items],
         )
     except ValueError as exc:
@@ -152,7 +144,7 @@ async def api_sync_upload(
         return JSONResponse({"error": "Upload chunk is too large"}, status_code=413)
     try:
         return await hub.append_upload_chunk(
-            _configured_db_path(),
+            catalog_path(),
             _configured_intake_root(),
             _configured_raws_root(),
             content_hash,
@@ -174,7 +166,7 @@ async def api_sync_upload(
 async def api_sync_metadata(body: MetadataRequest):
     try:
         return await hub.merge_metadata(
-            _configured_db_path(), [item.model_dump(exclude_none=True) for item in body.items]
+            catalog_path(), [item.model_dump(exclude_none=True) for item in body.items]
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -183,7 +175,7 @@ async def api_sync_metadata(body: MetadataRequest):
 @router.get("/api/sync/base/{content_hash}")
 async def api_sync_base(content_hash: str):
     try:
-        paths, _meta = await hub.base_artifacts(_configured_db_path(), content_hash)
+        paths, _meta = await hub.base_artifacts(catalog_path(), content_hash)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
@@ -199,7 +191,7 @@ async def api_sync_base(content_hash: str):
 
 @router.get("/api/sync/original/{image_id}")
 async def api_sync_original(image_id: int):
-    image = await image_repository.get_media_image_by_id(_configured_db_path(), image_id)
+    image = await image_repository.get_media_image_by_id(catalog_path(), image_id)
     if (
         image is None
         or int(image["hub_remote"] or 0) == 1
@@ -222,7 +214,7 @@ async def api_sync_catalog_export(cursor: int = 0, limit: int = 0):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     limit = max(0, min(int(limit or 0), 20000))
     return StreamingResponse(
-        mirror_export.gzip_catalog_export_stream(_configured_db_path(), parsed_cursor, limit),
+        mirror_export.gzip_catalog_export_stream(catalog_path(), parsed_cursor, limit),
         media_type="application/x-ndjson",
         headers={"Content-Encoding": "gzip", "Cache-Control": "no-store"},
     )
@@ -233,7 +225,7 @@ async def api_sync_embedding_pack(cursor: int = 0, limit: int = 0):
     """Semantic vectors, so a satellite can search without asking the hub."""
 
     body = await embedding_sync.export_page(
-        _configured_db_path(),
+        catalog_path(),
         cursor=max(0, int(cursor or 0)),
         limit=int(limit or embedding_sync.PAGE_LIMIT),
     )
@@ -256,7 +248,7 @@ async def api_sync_thumb_pack(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return StreamingResponse(
         mirror_export.thumbnail_pack_stream(
-            _configured_db_path(),
+            catalog_path(),
             size=size,
             after_id=after_id,
             limit=limit,
@@ -274,7 +266,7 @@ async def api_sync_hash_backfill():
         return {"ok": True, "started": False, "backfill": dict(_backfill_status)}
     _backfill_status.clear()
     _backfill_status.update(state="queued", counts={}, error="")
-    _backfill_task = track_background_task(hub.run_hash_backfill(_configured_db_path(), _backfill_status))
+    _backfill_task = track_background_task(hub.run_hash_backfill(catalog_path(), _backfill_status))
     return {"ok": True, "started": True, "backfill": dict(_backfill_status)}
 
 

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import os
 import platform as py_platform
 import socket
 import time
-from collections.abc import Callable
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request as UrlRequest, urlopen
@@ -16,11 +17,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 import settings
-from features.sync import device_auth, mdns, pairing, satellite
+from features.sync import mdns, pairing, satellite
 
 
 router = APIRouter(tags=["pairing"])
-_db_path: Callable[[], str] | None = None
 
 # Redeem stays public by necessity, so failures share one throttled bucket
 # (same budget as share unlock).
@@ -63,18 +63,6 @@ class ConnectRequest(BaseModel):
     code: str = Field(min_length=4, max_length=16)
     device_name: str = Field(default="", max_length=120)
     platform: str = Field(default="", max_length=64)
-
-
-def configure(*, db_path: Callable[[], str]) -> None:
-    global _db_path
-    _db_path = db_path
-    device_auth.configure(db_path=db_path)
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("pairing routes are not configured")
-    return _db_path()
 
 
 def _hub_public_url(request: Request) -> str:
@@ -130,7 +118,7 @@ async def api_pair(body: PairRequest):
         )
     try:
         return await pairing.pair_device(
-            _configured_db_path(),
+            catalog_path(),
             code=body.code,
             device_name=body.device_name,
             platform=body.platform,
@@ -145,8 +133,8 @@ async def api_pair(body: PairRequest):
 
 @router.get("/api/devices")
 async def api_list_devices():
-    hub_id = await pairing.get_hub_id(_configured_db_path())
-    devices = await pairing.list_devices(_configured_db_path())
+    hub_id = await pairing.get_hub_id(catalog_path())
+    devices = await pairing.list_devices(catalog_path())
     return {
         "hub_id": hub_id,
         "devices": devices,
@@ -157,7 +145,7 @@ async def api_list_devices():
 @router.post("/api/devices/{device_id}/revoke")
 async def api_revoke_device(device_id: int):
     try:
-        return await pairing.revoke_device(_configured_db_path(), device_id)
+        return await pairing.revoke_device(catalog_path(), device_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -169,7 +157,7 @@ async def api_discover():
     # owner's laptop: two results, one of them itself.
     hubs = await mdns.browse_hubs(timeout_seconds=2.0)
     try:
-        self_id = await pairing.get_hub_id(_configured_db_path())
+        self_id = await pairing.get_hub_id(catalog_path())
     except Exception:
         self_id = ""
     if self_id:

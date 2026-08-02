@@ -568,7 +568,7 @@ class BackupRouteTests(unittest.TestCase):
             )
 
         app = FastAPI()
-        backup_routes.configure(db_path=lambda: str(self.db_path))
+        db.DB_PATH = str(self.db_path)
         app.include_router(backup_routes.router)
         self.client = TestClient(app)
 
@@ -693,7 +693,6 @@ class CatalogRecoveryTests(unittest.TestCase):
 
             unused = lambda *_args, **_kwargs: None
             server = FastAPI()
-            backup_routes.configure(db_path=lambda: db.DB_PATH)
             server.include_router(backup_routes.router)
 
             @server.on_event("startup")

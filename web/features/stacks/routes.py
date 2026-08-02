@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import logging
 import time
@@ -22,7 +24,6 @@ log = logging.getLogger(__name__)
 DbPath = Callable[[], str]
 Invalidate = Callable[[], None]
 
-_db_path: DbPath | None = None
 _invalidate_rankings_cache: Invalidate | None = None
 _rebuild_status: dict = {
     "state": "idle",
@@ -51,16 +52,9 @@ class IdenticalCleanupBody(BaseModel):
     token: str = Field(min_length=1, max_length=64)
 
 
-def configure(*, db_path: DbPath, invalidate_rankings_cache: Invalidate | None = None) -> None:
-    global _db_path, _invalidate_rankings_cache
-    _db_path = db_path
+def configure(*, invalidate_rankings_cache: Invalidate | None = None) -> None:
+    global _invalidate_rankings_cache
     _invalidate_rankings_cache = invalidate_rankings_cache
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Stack routes are not configured")
-    return _db_path()
 
 
 def _invalidate() -> None:
@@ -89,7 +83,7 @@ async def _run_rebuild_task(kinds: list[str]) -> None:
         "error": "",
     })
     try:
-        result = await asyncio.to_thread(builders.rebuild_stacks, _configured_db_path(), kinds)
+        result = await asyncio.to_thread(builders.rebuild_stacks, catalog_path(), kinds)
         _rebuild_status.update({
             "state": "complete",
             "finished_at": time.time(),
@@ -110,7 +104,7 @@ async def _run_rebuild_task(kinds: list[str]) -> None:
 @router.get("/api/stacks")
 async def api_stacks(kind: str = "", limit: int = 50, offset: int = 0):
     response = await stack_repository.list_stacks(
-        _configured_db_path(),
+        catalog_path(),
         kind=kind or None,
         limit=limit,
         offset=offset,
@@ -128,7 +122,7 @@ async def api_stacks_rebuild_status():
 async def api_identical_stacks(limit: int = 25, offset: int = 0):
     return await asyncio.to_thread(
         identical.list_candidates,
-        _configured_db_path(),
+        catalog_path(),
         limit=limit,
         offset=offset,
     )
@@ -141,7 +135,7 @@ async def api_identical_status():
 
 @router.get("/api/stacks/identical/summary")
 async def api_identical_summary():
-    return {"summary": await asyncio.to_thread(identical.candidate_summary, _configured_db_path())}
+    return {"summary": await asyncio.to_thread(identical.candidate_summary, catalog_path())}
 
 
 @router.post("/api/stacks/identical/verify", status_code=202)
@@ -149,7 +143,7 @@ async def api_verify_identical_stacks(background_tasks: BackgroundTasks):
     token = identical.queue_verification()
     if token is None:
         return JSONResponse({"error": "Identical-file verification is already running"}, status_code=409)
-    background_tasks.add_task(identical.run_verification, _configured_db_path(), token)
+    background_tasks.add_task(identical.run_verification, catalog_path(), token)
     return {"accepted": True, "verification_status": identical.verification_status()}
 
 
@@ -167,7 +161,7 @@ async def api_cleanup_identical_stacks(body: IdenticalCleanupBody):
             {"error": "No verified copies are still safe to move", "skipped_groups": skipped_groups},
             status_code=409,
         )
-    result = await trash_service.trash_images(_configured_db_path(), image_ids)
+    result = await trash_service.trash_images(catalog_path(), image_ids)
     result["skipped_groups"] = skipped_groups
     result["requested"] = len(image_ids)
     if result.get("trashed"):
@@ -189,7 +183,7 @@ async def api_stack_representatives(image_ids: str = ""):
             ids.append(image_id)
         if len(ids) >= 500:
             break
-    counts = await stack_repository.representative_stack_counts(_configured_db_path(), ids)
+    counts = await stack_repository.representative_stack_counts(catalog_path(), ids)
     return {"representatives": {str(image_id): value for image_id, value in counts.items()}}
 
 
@@ -215,7 +209,7 @@ async def api_scan_version_stacks(background_tasks: BackgroundTasks):
 
 @router.get("/api/stacks/{stack_id}")
 async def api_stack(stack_id: int):
-    stack = await stack_repository.get_stack(_configured_db_path(), stack_id)
+    stack = await stack_repository.get_stack(catalog_path(), stack_id)
     if stack is None:
         return JSONResponse({"error": "Stack not found"}, status_code=404)
     return stack
@@ -237,7 +231,7 @@ async def api_create_stack(body: CreateStackBody):
         return JSONResponse({"error": "Representative must be one of the stack images"}, status_code=400)
     try:
         stack = await stack_repository.create_stack(
-            _configured_db_path(),
+            catalog_path(),
             kind="manual",
             representative_image_id=representative_id,
             member_rows=[{"image_id": image_id} for image_id in image_ids],
@@ -260,7 +254,7 @@ async def api_create_stack(body: CreateStackBody):
 @router.post("/api/stacks/{stack_id}/representative")
 async def api_set_stack_representative(stack_id: int, body: RepresentativeBody):
     stack = await stack_repository.set_representative(
-        _configured_db_path(),
+        catalog_path(),
         stack_id,
         int(body.image_id),
     )
@@ -272,7 +266,7 @@ async def api_set_stack_representative(stack_id: int, body: RepresentativeBody):
 
 @router.post("/api/stacks/{stack_id}/unstack")
 async def api_unstack(stack_id: int):
-    deleted = await stack_repository.unstack(_configured_db_path(), stack_id)
+    deleted = await stack_repository.unstack(catalog_path(), stack_id)
     if not deleted:
         return JSONResponse({"error": "Stack not found"}, status_code=404)
     _invalidate()

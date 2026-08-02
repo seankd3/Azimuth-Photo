@@ -22,13 +22,11 @@ SKIPPED_DIRECTORIES = {".venv", "node_modules", "__pycache__", "migrations", "bu
 # A body this short is a stub or a one-line delegation, not a duplicated idea.
 MEANINGFUL_STATEMENTS = 3
 
-# Each entry needs a reason and a way out, or it is just a longer copy.
-ALLOWED = {
-    # 28 modules keep a private `_db_path` global set by a `configure()` call
-    # that production always hands the same `lambda: db.DB_PATH`. Removing the
-    # ceremony outright is the fix, not sharing it — tracked separately.
-    "configure",
-}
+# Each entry needs a reason and a way out, or it is just a longer copy. Empty
+# is the goal, and currently the truth: the last entry here was `configure`,
+# duplicated across two sync route modules only to pass the catalog path around.
+# Both are gone — see core/catalog_path.py.
+ALLOWED: set[str] = set()
 
 
 def _duplicate_bodies() -> dict[str, set[str]]:

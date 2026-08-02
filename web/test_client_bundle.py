@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import tempfile
 import unittest
+
+import db
 from pathlib import Path
 from unittest import mock
 
@@ -117,7 +119,7 @@ class ClientBundleRouteTests(unittest.TestCase):
             device_auth, "require_device_token_enabled", return_value=False
         )
         self.auth_patch.start()
-        hub_routes.configure(db_path=lambda: str(Path(self.tempdir.name) / "hub.db"))
+        db.DB_PATH = str(Path(self.tempdir.name) / "hub.db")
         app = FastAPI()
         app.include_router(hub_routes.router)
         self.client_context = TestClient(app)

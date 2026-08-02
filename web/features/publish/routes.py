@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import asyncio
 import logging
 import re
@@ -58,7 +60,6 @@ _track_background_task: TrackBackgroundTask | None = None
 _deployer: GalleryDeployer | None = None
 _thumbnails = None
 _jobs: dict[int, dict] = {}
-_db_path: DbPath | None = None
 _create_published_node_share: CreatePublishedNodeShare | None = None
 _scheduled_hook_retries: set[int] = set()
 
@@ -111,13 +112,12 @@ def configure(
     thumbnails,
     deployer: GalleryDeployer | None = None,
     track_background_task: TrackBackgroundTask | None = None,
-    db_path: DbPath | None = None,
     create_published_node_share: CreatePublishedNodeShare | None = None,
 ) -> None:
     global _templates, _get_collection, _get_images_by_ids, _collection_image_ids
     global _resolve_smart_image_ids, _get_publish, _list_publishes
     global _upsert_publish, _delete_publish, _slug_available, _track_background_task
-    global _deployer, _thumbnails, _db_path, _create_published_node_share
+    global _deployer, _thumbnails, _create_published_node_share
     _templates = templates
     _get_collection = get_collection
     _get_images_by_ids = get_images_by_ids
@@ -131,7 +131,6 @@ def configure(
     _track_background_task = track_background_task
     _deployer = deployer or GalleryDeployer()
     _thumbnails = thumbnails
-    _db_path = db_path
     _create_published_node_share = create_published_node_share
 
 
@@ -155,7 +154,7 @@ def _configured() -> None:
 
 def _nodes_configured() -> None:
     _configured()
-    if _db_path is None or _create_published_node_share is None:
+    if _create_published_node_share is None:
         raise RuntimeError("Published node routes are not configured")
 
 
@@ -163,7 +162,7 @@ def _nodes_configured() -> None:
 async def api_published_tree(area: str):
     _nodes_configured()
     try:
-        return await published_nodes.published_tree(_db_path(), area)
+        return await published_nodes.published_tree(catalog_path(), area)
     except published_nodes.PublishedNodeConflict as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
@@ -173,7 +172,7 @@ async def api_create_published_node(payload: CreatePublishedNodeBody):
     _nodes_configured()
     try:
         node = await published_nodes.create_snapshot_tree(
-            _db_path(),
+            catalog_path(),
             area=payload.area,
             parent_id=payload.parent_id,
             source_collection_id=payload.source_collection_id,
@@ -190,7 +189,7 @@ async def api_create_published_node(payload: CreatePublishedNodeBody):
     share = None
     if node["area"] == "private":
         share = await _ensure_private_node_shares(root_node_id=int(node["id"]))
-        node = await published_nodes.get_node(_db_path(), int(node["id"]))
+        node = await published_nodes.get_node(catalog_path(), int(node["id"]))
     return {"ok": True, "node": node, "share": _published_share_payload(share)}
 
 
@@ -203,7 +202,7 @@ async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody
         if name in {"title", "slug", "position", "parent_id"}
     }
     try:
-        node = await published_nodes.patch_node(_db_path(), node_id, fields)
+        node = await published_nodes.patch_node(catalog_path(), node_id, fields)
     except published_nodes.PublishedNodeNotFound as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)
     except published_nodes.PublishedNodeConflict as exc:
@@ -216,7 +215,7 @@ async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody
 @router.delete("/api/published/nodes/{node_id}")
 async def api_delete_published_node(node_id: int):
     _nodes_configured()
-    if not await published_nodes.delete_node(_db_path(), node_id):
+    if not await published_nodes.delete_node(catalog_path(), node_id):
         return JSONResponse({"error": "Published node not found"}, status_code=404)
     return {"ok": True}
 
@@ -225,7 +224,7 @@ async def api_delete_published_node(node_id: int):
 async def api_published_node_diff(node_id: int):
     _nodes_configured()
     diff = await published_nodes.node_diff(
-        _db_path(),
+        catalog_path(),
         node_id,
         resolve_smart_image_ids=_resolve_smart_image_ids,
     )
@@ -241,7 +240,7 @@ async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBo
     _nodes_configured()
     try:
         node = await published_nodes.update_node(
-            _db_path(),
+            catalog_path(),
             node_id,
             add_image_ids=payload.add_image_ids,
             remove_image_ids=payload.remove_image_ids,
@@ -260,7 +259,7 @@ async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBo
 @router.post("/api/published/nodes/{node_id}/share")
 async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody):
     _nodes_configured()
-    node = await published_nodes.get_node(_db_path(), node_id)
+    node = await published_nodes.get_node(catalog_path(), node_id)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
     if node["area"] != "private":
@@ -281,11 +280,11 @@ async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody
 @router.delete("/api/published/nodes/{node_id}/share")
 async def api_revoke_published_node_share(node_id: int):
     _nodes_configured()
-    node = await published_nodes.get_node(_db_path(), node_id)
+    node = await published_nodes.get_node(catalog_path(), node_id)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
     revoked = await share_repository.revoke_share(
-        _db_path(),
+        catalog_path(),
         published_node_id=node_id,
     )
     if not revoked:
@@ -305,7 +304,7 @@ async def api_export_published_area(area: str):
             status_code=409,
         )
     manifest = await export_website_tree(
-        db_path=_db_path(),
+        db_path=catalog_path(),
         destination=publish_dir,
         templates=_templates,
         thumbnails=_thumbnails,

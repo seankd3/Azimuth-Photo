@@ -1,5 +1,6 @@
 """Catalog metadata and orientation backfill workers."""
 
+from core.catalog_path import catalog_path
 import asyncio
 import logging
 import os
@@ -43,7 +44,6 @@ async def _run_catalog_work(func, /, *args, **kwargs):
 DbPathProvider = Callable[[], str]
 Invalidator = Callable[[], None]
 
-_db_path: DbPathProvider | None = None
 _invalidate_filter_options_cache: Invalidator | None = None
 _invalidate_rankings_cache: Invalidator | None = None
 _metadata_manual_pause = True
@@ -65,20 +65,12 @@ _status = {
 
 def configure(
     *,
-    db_path: DbPathProvider,
     invalidate_filter_options_cache: Invalidator,
     invalidate_rankings_cache: Invalidator,
 ) -> None:
-    global _db_path, _invalidate_filter_options_cache, _invalidate_rankings_cache
-    _db_path = db_path
+    global _invalidate_filter_options_cache, _invalidate_rankings_cache
     _invalidate_filter_options_cache = invalidate_filter_options_cache
     _invalidate_rankings_cache = invalidate_rankings_cache
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Catalog metadata workers are not configured")
-    return _db_path()
 
 
 def _invalidate_filter_options() -> None:
@@ -115,20 +107,20 @@ async def get_unclassified_images(limit: int = 200):
     import photo_metadata  # deferred: keeps Pillow off boot until catalog metadata work runs
 
     return await image_repository.get_unclassified_images(
-        _configured_db_path(),
+        catalog_path(),
         limit,
         file_extensions=photo_metadata.PILLOW_METADATA_EXTENSIONS,
     )
 
 
 async def batch_set_orientations(updates: list[tuple[str, float, int]]):
-    await image_repository.batch_set_orientations(_configured_db_path(), updates)
+    await image_repository.batch_set_orientations(catalog_path(), updates)
     _invalidate_filter_options()
 
 
 async def get_images_needing_metadata(limit: int = 100, metadata_version: int = 1):
     return await image_repository.get_images_needing_metadata(
-        _configured_db_path(),
+        catalog_path(),
         limit=limit,
         metadata_version=metadata_version,
     )
@@ -137,7 +129,7 @@ async def get_images_needing_metadata(limit: int = 100, metadata_version: int = 
 async def batch_update_metadata(updates: list[tuple]):
     if not updates:
         return
-    await image_repository.batch_update_metadata(_configured_db_path(), updates)
+    await image_repository.batch_update_metadata(catalog_path(), updates)
     _invalidate_filter_options()
 
 
@@ -298,7 +290,7 @@ async def classify_orientations_background():
                     continue
                 _orientation_retry_ledger.pop(image_id, None)
                 changed = await catalog_repository.mark_image_missing(
-                    _configured_db_path(),
+                    catalog_path(),
                     image_id,
                 )
                 if changed:

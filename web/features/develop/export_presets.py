@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.catalog_path import catalog_path
+
 import json
 from collections.abc import Callable
 from typing import Any
@@ -15,7 +17,6 @@ from data import connection
 
 router = APIRouter()
 DbPathProvider = Callable[[], str]
-_db_path: DbPathProvider | None = None
 
 EXPORT_PRESETS_DDL = """
 CREATE TABLE IF NOT EXISTS develop_export_presets (
@@ -42,15 +43,6 @@ class ExportPresetBody(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
-def configure(*, db_path: DbPathProvider) -> None:
-    global _db_path
-    _db_path = db_path
-
-
-def _configured_db_path() -> str:
-    if _db_path is None:
-        raise RuntimeError("Develop export presets are not configured")
-    return _db_path()
 
 
 async def ensure_export_presets(conn) -> None:
@@ -148,7 +140,7 @@ async def delete_export_preset(conn, preset_id: int) -> bool:
 
 
 async def _open_conn():
-    return await connection.open_async(_configured_db_path())
+    return await connection.open_async(catalog_path())
 
 
 @router.get("/api/develop/export-presets")
@@ -157,7 +149,7 @@ async def api_list_export_presets():
     try:
         return {"presets": await list_export_presets(conn)}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.post("/api/develop/export-presets")
@@ -169,7 +161,7 @@ async def api_save_export_preset(body: ExportPresetBody):
         preset = await save_export_preset(conn, name=body.name, options=body.options, now=time.time())
         return {"preset": preset}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.delete("/api/develop/export-presets/{preset_id}")
@@ -180,4 +172,4 @@ async def api_delete_export_preset(preset_id: int):
             return JSONResponse({"error": "Export preset not found"}, status_code=404)
         return {"deleted": True, "id": preset_id}
     finally:
-        await connection.close_async(conn, db_path=_configured_db_path())
+        await connection.close_async(conn, db_path=catalog_path())

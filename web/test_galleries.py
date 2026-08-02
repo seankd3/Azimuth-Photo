@@ -9,6 +9,8 @@ import sqlite3
 from contextlib import closing
 import time
 import unittest
+
+import db
 import zipfile
 from pathlib import Path
 from unittest import mock
@@ -42,8 +44,7 @@ class GalleryTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self._mounted_routes = _mount_owned_routers()
-        gallery_routes.configure(db_path=lambda: db.DB_PATH, thumbnail_response=self._thumbnail_response)
-        export_presets.configure(db_path=lambda: db.DB_PATH)
+        db.DB_PATH = db.DB_PATH, thumbnail_response=self._thumbnail_response
         gallery_routes._unlock_failures.clear()
 
     async def asyncTearDown(self):

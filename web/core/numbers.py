@@ -51,3 +51,19 @@ def field(row: Any, key: str, default: Any = None) -> Any:
         return row[key]
     except (KeyError, IndexError, TypeError):
         return default
+
+
+def increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None) -> None:
+    """Adjust a counter a cache already holds, never below zero.
+
+    A key that is absent stays absent: this keeps a cached payload in step with
+    a change that just happened, and inventing a count nobody measured would
+    make the cache claim to know something it does not.
+    """
+
+    if key not in mapping:
+        return
+    value = max(0, int(mapping.get(key) or 0) + int(delta))
+    if cap is not None:
+        value = min(value, cap)
+    mapping[key] = value
