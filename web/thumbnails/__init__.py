@@ -199,7 +199,7 @@ def sweep_missing_cache_entries(
         invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
         batch_size=batch_size,
         max_batches=max_batches,
-        stand_aside=user_activity.wait_for_quiet_sync,
+        step_politely=user_activity.politely_sync,
     )
 
 

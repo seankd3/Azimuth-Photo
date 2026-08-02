@@ -7,6 +7,7 @@ the app started a repair and browsing queued behind it. Measured on the owner's
 laptop: the first page of photos never arrived at all.
 """
 
+import re
 import sqlite3
 import threading
 import unittest
@@ -168,6 +169,26 @@ class SweepLockTests(unittest.TestCase):
         self.raw.commit()
         result = self._sweep(lambda path: True)
         self.assertEqual((result["scanned"], result["removed"]), (0, 0))
+
+
+class TheWrapperAgreesWithTheSweepTests(unittest.TestCase):
+    """A rename that misses one caller is a crash at runtime, not a red test.
+
+    Every test here calls the implementation directly, so renaming one of its
+    parameters and forgetting the wrapper stayed green and broke the app. This
+    compares the two without needing the app wired up.
+    """
+
+    def test_the_wrapper_passes_only_arguments_the_sweep_accepts(self):
+        import inspect
+
+        import thumbnails
+        from thumbnails import maintenance
+
+        accepted = set(inspect.signature(maintenance.sweep_missing_cache_entries).parameters)
+        source = inspect.getsource(thumbnails.sweep_missing_cache_entries)
+        passed = set(re.findall(r"^\s*(\w+)=", source, re.M))
+        self.assertTrue(passed <= accepted, f"wrapper passes unknown: {passed - accepted}")
 
 
 if __name__ == "__main__":
