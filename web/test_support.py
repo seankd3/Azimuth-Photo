@@ -279,19 +279,16 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         """Let this process go of every database, then remove the per-test root.
 
         Windows will not delete a file another handle still has open, and this
-        suite still loses that race 2-5 times per run, in a different test each
-        time. `close_shared_readers` — the same call the app makes as it shuts
-        down — releases the pool and the cached readers, and is right to make
-        here, but it is not the whole story: something in the request paths
-        this suite exercises still holds an aiosqlite connection to the
-        per-test catalog. Three real leaks were found and fixed looking for it
-        (a startup repair that never returned its connection, a shutdown that
-        released handles before stopping the work using them, and a ZIP builder
-        that made a throwaway event loop per image) and none of them was this.
+        suite used to lose 2-6 tests a run to exactly that — a different test
+        each time, which is the most expensive kind of red because it teaches
+        everyone to ignore red.
 
-        The retry below is therefore a known plaster, not a fix. It is kept
-        because a suite that fails randomly teaches everyone to ignore red,
-        which costs more than the seconds it spends waiting.
+        The cause was in `open_async`, not here: a connection is a live worker
+        thread the moment aiosqlite returns it, and four awaits stood between
+        that moment and the caller receiving it. A request abandoned in that
+        window left a connection nobody held and nobody could close. The retry
+        loop that used to stand here was waiting for a garbage collection that
+        was never going to help.
         """
 
         data_connection.open_async = self._orig_open_async
@@ -303,16 +300,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         self._tracked_conns.clear()
         await data_connection.close_shared_readers()
         thumbnail_cache_entries.close_persistent_conn()
-
-        for attempt in range(20):
-            try:
-                self.tempdir.cleanup()
-                return
-            except PermissionError:
-                if attempt == 19:
-                    raise
-                gc.collect()
-                await asyncio.sleep(0.4)
+        self.tempdir.cleanup()
 
     def _reset_shared_runtime_state(self):
         # Any TestClient(app) startup arms memory_pressure's 120s startup-calm,

@@ -10,8 +10,11 @@ is that `close_shared_readers` releases *every* store, so a new one added later
 cannot quietly reintroduce this.
 """
 
+import asyncio
+import contextlib
 import os
 import sqlite3
+import threading
 import tempfile
 import unittest
 
@@ -79,3 +82,100 @@ class ReleasingACatalogTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AbandonedWorkTests(unittest.IsolatedAsyncioTestCase):
+    """A request that is given up on must not keep the catalog open.
+
+    An aiosqlite connection is a live worker thread holding the file from the
+    moment `connect` returns — before the caller has it, and before any
+    `finally` exists to close it. Four PRAGMAs stood in that window. A request
+    abandoned there left a connection nobody held and nobody could release:
+    invisible on a server until the threads add up, and on Windows a library
+    file that could not be deleted. It cost this suite 2-6 random failures a
+    run for months.
+    """
+
+    def setUp(self):
+        self.directory = tempfile.mkdtemp()
+        self.path = _wal_catalog(self.directory)
+
+    async def asyncTearDown(self):
+        await data_connection.close_shared_readers()
+
+    def _open_connections(self) -> int:
+        return sum(1 for thread in threading.enumerate() if "aiosqlite" in thread.name.lower())
+
+    async def test_cancelling_an_open_leaves_nothing_behind(self):
+        before = self._open_connections()
+        for _ in range(6):
+            task = asyncio.create_task(data_connection.open_async(self.path))
+            await asyncio.sleep(0)  # let it reach the first await, then give up
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+        for _ in range(40):
+            if self._open_connections() <= before:
+                break
+            await asyncio.sleep(0.05)
+        self.assertLessEqual(
+            self._open_connections(),
+            before,
+            "a cancelled open left a worker thread holding the catalog",
+        )
+
+    async def test_the_file_can_still_be_deleted(self):
+        """The symptom, stated as itself: Windows refuses while a handle is open.
+
+        Cancelled once the connection is up and its PRAGMAs are running — the
+        window a real abandoned request lands in. Cancelling inside aiosqlite's
+        own connect has a residual moment this code cannot reach from the event
+        loop thread, and the connection there is thread-affine; the two
+        thread-count tests above cover what is guaranteed.
+        """
+
+        task = asyncio.create_task(data_connection.open_async(self.path))
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.3)
+
+        conn = await data_connection.open_async(self.path)
+        await data_connection.close_async(conn, db_path=self.path)
+        await data_connection.close_shared_readers()
+
+        # The claim is that the handle is released, not that the worker thread
+        # has already been scheduled out — so wait for it, briefly, rather than
+        # asserting on the operating system's timing.
+        for _ in range(40):
+            try:
+                os.unlink(self.path)
+                return
+            except PermissionError:
+                await asyncio.sleep(0.05)
+        self.fail("the catalog was still held two seconds after every close")
+
+    async def test_a_cancelled_reader_still_hands_its_connection_back(self):
+        """`finally` runs, but its awaits are cancelled too — hence the shield."""
+
+        async def read_and_be_cancelled():
+            conn = await data_connection.open_async(self.path)
+            try:
+                await asyncio.sleep(5)
+            finally:
+                await data_connection.close_async(conn, db_path=self.path)
+
+        before = self._open_connections()
+        task = asyncio.create_task(read_and_be_cancelled())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+        for _ in range(40):
+            if self._open_connections() <= before:
+                break
+            await asyncio.sleep(0.05)
+        self.assertLessEqual(self._open_connections(), before)

@@ -44,7 +44,7 @@ class GalleryTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
         self._mounted_routes = _mount_owned_routers()
-        db.DB_PATH = db.DB_PATH, thumbnail_response=self._thumbnail_response
+        gallery_routes.configure(thumbnail_response=self._thumbnail_response)
         gallery_routes._unlock_failures.clear()
 
     async def asyncTearDown(self):

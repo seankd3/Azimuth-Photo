@@ -97,20 +97,37 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
             conn._azimuth_shelved = False
             await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
             return conn
-    conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
-    conn.row_factory = aiosqlite.Row
-    await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
-    await conn.execute("PRAGMA foreign_keys=ON")
-    await conn.execute("PRAGMA synchronous=NORMAL")
-    await conn.execute("PRAGMA temp_store=MEMORY")
+    # `aiosqlite.connect` hands back the connection object before it is opened;
+    # awaiting it is what starts the worker thread. Holding the object first
+    # means that from the very first await onwards there is something to close.
+    #
+    # That matters because from here the connection is a live thread holding an
+    # open catalog, and it is not yet anyone else's to release. Five awaits
+    # stand between here and the caller receiving it, and a request abandoned in
+    # that window — a browser tab closed mid-scroll, a client shutting down —
+    # would otherwise leave a connection nobody held and nobody could close.
+    conn = aiosqlite.connect(db_path, timeout=effective_timeout)
     try:
-        # Best-effort tuning; some filesystems reject mmap or large caches.
-        await conn.execute("PRAGMA cache_size=-32000")
-        await conn.execute("PRAGMA mmap_size=268435456")
-    except Exception:
-        pass
-    conn._azimuth_pool_key = pool_key
-    return conn
+        await conn
+        conn.row_factory = aiosqlite.Row
+        await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
+        await conn.execute("PRAGMA foreign_keys=ON")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        await conn.execute("PRAGMA temp_store=MEMORY")
+        try:
+            # Best-effort tuning; some filesystems reject mmap or large caches.
+            await conn.execute("PRAGMA cache_size=-32000")
+            await conn.execute("PRAGMA mmap_size=268435456")
+        except Exception:
+            pass
+        conn._azimuth_pool_key = pool_key
+        return conn
+    except BaseException:
+        try:
+            await asyncio.shield(conn.close())
+        except Exception:
+            pass
+        raise
 
 
 async def release_database(db_path: str) -> None:
@@ -280,6 +297,24 @@ def close_sync(conn: sqlite3.Connection, *, db_path: str | None = None) -> None:
 
 
 async def close_async(conn, *, db_path: str | None = None) -> None:
+    """Hand a connection back, even if the caller is being cancelled.
+
+    Every reader does its close in a `finally`, which is correct and still not
+    enough: `finally` runs, but the awaits inside it are cancelled along with
+    the task, so the close never completes. A request that is abandoned — a
+    browser tab closed mid-scroll, a test client shut down between pages —
+    therefore leaked an aiosqlite connection, which is a worker thread plus an
+    open catalog handle. Invisible on a server until the threads add up; on
+    Windows, a library file that cannot be deleted.
+
+    Shielding the close is the whole fix: the caller still sees its
+    cancellation, and the connection still goes home.
+    """
+
+    await asyncio.shield(_close_async(conn, db_path=db_path))
+
+
+async def _close_async(conn, *, db_path: str | None = None) -> None:
     pool_key = getattr(conn, "_azimuth_pool_key", None)
     if pool_key is not None and not getattr(conn, "_azimuth_shelved", False):
         try:
