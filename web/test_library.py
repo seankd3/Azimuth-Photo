@@ -1183,6 +1183,14 @@ class LibraryTests(BackendTestCase):
         taste_service._compute_similarity_and_scaled_scores = counted_compute
         library_service._get_rankings = counted_get_rankings
         try:
+            # The request path never builds the blend — it asks for the warm one
+            # and warms in the background — so a test about *reuse* warms first.
+            await library_routes.api_rankings(limit=1, offset=0, sort="elo")
+            warming = library_service._taste_warm_task
+            if warming is not None:
+                await warming
+            library_service._rankings_response_cache.clear()
+
             first = await library_routes.api_rankings(limit=20, offset=0, sort="elo")
             library_service._rankings_response_cache.clear()
             second = await library_routes.api_rankings(limit=20, offset=20, sort="elo")

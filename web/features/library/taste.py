@@ -337,6 +337,22 @@ def _compute_similarity_and_scaled_scores(
     return sim_map, score_map
 
 
+def taste_vector_if_warm() -> dict | None:
+    """The learned taste vector, but only if it is already built.
+
+    Building it loads every embedding in the library, which is exactly what the
+    default grid view must never wait for. Ask for the warm one on a request
+    path and build it in the background.
+    """
+
+    cached = _cache.get("payload")
+    if not isinstance(cached, dict):
+        return None
+    if cached.get("model_key") != _active_model_key():
+        return None
+    return dict(cached)
+
+
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()

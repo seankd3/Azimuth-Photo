@@ -204,6 +204,24 @@ def _ranking_taste_blend_settings() -> tuple[bool, int]:
 _taste_warm_task = None
 
 
+def _schedule_taste_vector() -> None:
+    """Build the taste vector off the request path."""
+
+    global _taste_warm_task
+    if _taste_warm_task is not None and not _taste_warm_task.done():
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+
+    async def _warm() -> None:
+        taste = await taste_service.taste_vector()
+        await taste_service.taste_scaled_scores(taste)
+
+    _taste_warm_task = loop.create_task(_warm())
+
+
 def _schedule_taste_scores(taste: dict) -> None:
     """Compute the taste blend off the request, once at a time."""
 
@@ -224,7 +242,12 @@ async def _ranking_taste_blend_context(db_sort: str) -> dict:
     if not enabled:
         return {"active": False, "cache_key": ("taste_blend", "off", False, min_signal)}
 
-    taste = await taste_service.taste_vector()
+    # Warm only: building the taste vector loads every embedding in the library,
+    # and the default grid view must never wait for that. See taste.py.
+    taste = taste_service.taste_vector_if_warm()
+    if taste is None:
+        _schedule_taste_vector()
+        return {"active": False, "cache_key": ("taste_blend", "warming", True, min_signal)}
     signature = taste_service.taste_vector_signature(taste)
     signal_count = int(taste.get("signal_count") or 0)
     if not taste.get("available") or signal_count < min_signal:
