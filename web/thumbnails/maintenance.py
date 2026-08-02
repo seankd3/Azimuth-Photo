@@ -119,6 +119,11 @@ def sweep_missing_cache_entries(
     while True:
         if max_batches is not None and batches >= max_batches:
             break
+        # Before the first batch as well as between them: someone who opens
+        # their library and starts browsing should not have a repair begin
+        # underneath them.
+        if stand_aside is not None:
+            stand_aside()
         with meta_lock:
             conn = db_connect()
             try:
@@ -155,8 +160,6 @@ def sweep_missing_cache_entries(
                     conn.close()
         if len(rows) < batch:
             break
-        if stand_aside is not None:
-            stand_aside()
     if removed and invalidate_disk_stats_cache is not None:
         invalidate_disk_stats_cache()
     return {
