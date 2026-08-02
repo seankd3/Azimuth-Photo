@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
+
 import asyncio
-import os
 from contextlib import asynccontextmanager
 
+from core.env_names import env_bytes, env_get
 
-_GIB = 1024**3
+# Soft cap on concurrent demosaic/decode working sets in the bulk path.
+# Full-res RAW postprocess alone can peak near this for one 40–60MP frame.
+MAX_INFLIGHT_DECODE_BYTES = env_bytes("BULK_DECODE_BYTES", 768 * 1024 * 1024)
+MIN_DECODE_ESTIMATE_BYTES = 16 * 1024 * 1024
+# Acquire waits forever only if holders never release — bound the wait so a
+# leaked weight cannot freeze the pregen loop indefinitely.
+DECODE_BUDGET_WAIT_SECONDS = float(env_get("DECODE_BUDGET_WAIT_SECONDS", "30"))
+
 _RGB_BYTES_PER_PIXEL = 3
 # rawpy peak ≈ raw buffer + demosaic intermediates + RGB output (~3× output).
 _RAW_PEAK_FACTOR = 3
@@ -17,32 +25,6 @@ _NON_RAW_PEAK_FACTOR = 2
 # sensor dimensions (CTO 2026-07-19: load_raw_preview ~0.2s, not the bottleneck).
 _EMBEDDED_RAW_COST_DIVISOR = 10
 
-
-def _env_bytes(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        lowered = raw.lower()
-        if lowered.endswith("g"):
-            return int(float(lowered[:-1]) * _GIB)
-        if lowered.endswith("m"):
-            return int(float(lowered[:-1]) * 1024 * 1024)
-        return int(raw)
-    except ValueError:
-        return default
-
-
-# Soft cap on concurrent demosaic/decode working sets in the bulk path.
-# Full-res RAW postprocess alone can peak near this for one 40–60MP frame.
-MAX_INFLIGHT_DECODE_BYTES = _env_bytes(
-    "AZIMUTH_BULK_DECODE_BYTES",
-    768 * 1024 * 1024,
-)
-MIN_DECODE_ESTIMATE_BYTES = 16 * 1024 * 1024
-# Acquire waits forever only if holders never release — bound the wait so a
-# leaked weight cannot freeze the pregen loop indefinitely.
-DECODE_BUDGET_WAIT_SECONDS = float(os.environ.get("AZIMUTH_DECODE_BUDGET_WAIT_SECONDS", "30"))
 
 
 def estimate_decode_bytes(

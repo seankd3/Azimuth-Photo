@@ -1,5 +1,6 @@
 """Aggregate count queries and caches for catalog and AI status surfaces."""
 
+from core.cache_events import increment_cached_int as _increment_cached_int
 import asyncio
 import logging
 import time as _time
@@ -353,14 +354,6 @@ async def ai_status_source_counts(db_path: str) -> dict:
     finally:
         await connection.close_async(conn, db_path=db_path)
 
-
-def _increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None = None):
-    if key not in mapping:
-        return
-    value = max(0, int(mapping.get(key) or 0) + int(delta))
-    if cap is not None:
-        value = min(value, cap)
-    mapping[key] = value
 
 
 def patch_ai_status_direct_rating_counts(

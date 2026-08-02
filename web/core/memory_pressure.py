@@ -20,6 +20,8 @@ recomputed automatically from these signals.
 
 from __future__ import annotations
 
+from core.env_names import env_bytes as _env_bytes, env_float
+
 import gc
 import logging
 import os
@@ -43,30 +45,6 @@ _MAX_HEADROOM_BYTES = 2 * _GIB
 _FALLBACK_SOFT_FRACTION = 0.55
 _FALLBACK_HARD_FRACTION = 0.72
 
-
-def _env_bytes(name: str, default: int) -> int:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        lowered = raw.lower()
-        if lowered.endswith("g"):
-            return int(float(lowered[:-1]) * _GIB)
-        if lowered.endswith("m"):
-            return int(float(lowered[:-1]) * 1024 * 1024)
-        return int(raw)
-    except ValueError:
-        return default
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        return max(0.0, float(raw))
-    except ValueError:
-        return default
 
 
 def _read_cgroup_limit(path: Path) -> int | None:
@@ -166,19 +144,16 @@ def _default_watermarks() -> tuple[int, int, int]:
 
 
 _DEFAULT_SOFT, _DEFAULT_HARD, _DEFAULT_RESUME = _default_watermarks()
-SOFT_WATERMARK_BYTES = _env_bytes("AZIMUTH_MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
-HARD_WATERMARK_BYTES = _env_bytes("AZIMUTH_MEMORY_HARD_BYTES", _DEFAULT_HARD)
-RESUME_WATERMARK_BYTES = _env_bytes(
-    "AZIMUTH_MEMORY_RESUME_BYTES",
-    _DEFAULT_RESUME,
-)
+SOFT_WATERMARK_BYTES = _env_bytes("MEMORY_SOFT_BYTES", _DEFAULT_SOFT)
+HARD_WATERMARK_BYTES = _env_bytes("MEMORY_HARD_BYTES", _DEFAULT_HARD)
+RESUME_WATERMARK_BYTES = _env_bytes("MEMORY_RESUME_BYTES", _DEFAULT_RESUME)
 
 # Idle model residency TTL (seconds). Used by workers / pool idle shed.
-MODEL_IDLE_TTL_SECONDS = _env_float("AZIMUTH_MODEL_IDLE_TTL_SECONDS", 120.0)
+MODEL_IDLE_TTL_SECONDS = env_float("MODEL_IDLE_TTL_SECONDS", 120.0)
 
 # After restart/heal: bulk work waits this long so the library proves Ready
 # before models reload. Automatic — no operator step.
-STARTUP_CALM_SECONDS = _env_float("AZIMUTH_STARTUP_CALM_SECONDS", 120.0)
+STARTUP_CALM_SECONDS = env_float("STARTUP_CALM_SECONDS", 120.0)
 
 # Host MemAvailable floors (the room, not only our cgroup). Below soft →
 # pause bulk; below hard → pause + shed models. Resume needs soft + slack.
@@ -195,15 +170,9 @@ def _default_host_floors() -> tuple[int, int, int]:
 
 
 _DEFAULT_HOST_SOFT, _DEFAULT_HOST_HARD, _DEFAULT_HOST_RESUME = _default_host_floors()
-HOST_SOFT_AVAILABLE_BYTES = _env_bytes(
-    "AZIMUTH_HOST_SOFT_AVAILABLE_BYTES", _DEFAULT_HOST_SOFT
-)
-HOST_HARD_AVAILABLE_BYTES = _env_bytes(
-    "AZIMUTH_HOST_HARD_AVAILABLE_BYTES", _DEFAULT_HOST_HARD
-)
-HOST_RESUME_AVAILABLE_BYTES = _env_bytes(
-    "AZIMUTH_HOST_RESUME_AVAILABLE_BYTES", _DEFAULT_HOST_RESUME
-)
+HOST_SOFT_AVAILABLE_BYTES = _env_bytes("HOST_SOFT_AVAILABLE_BYTES", _DEFAULT_HOST_SOFT)
+HOST_HARD_AVAILABLE_BYTES = _env_bytes("HOST_HARD_AVAILABLE_BYTES", _DEFAULT_HOST_HARD)
+HOST_RESUME_AVAILABLE_BYTES = _env_bytes("HOST_RESUME_AVAILABLE_BYTES", _DEFAULT_HOST_RESUME)
 
 _lock = threading.Lock()
 _paused = False

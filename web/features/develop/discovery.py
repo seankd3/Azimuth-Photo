@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.runtime_paths import _platform_family as _family
+
 import ntpath
 import os
 import posixpath
@@ -9,14 +11,6 @@ import sys
 from pathlib import Path
 from typing import Mapping
 
-
-def _family(platform_name: str) -> str:
-    value = str(platform_name or "").lower()
-    if value.startswith("win"):
-        return "windows"
-    if value == "darwin":
-        return "macos"
-    return "linux"
 
 
 def _path_module(family: str):
