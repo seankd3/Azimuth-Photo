@@ -603,15 +603,7 @@ class PublishRouteTests(BackendTestCase):
         self.thumbs = FakeThumbnails(self.cache)
         publish_routes.configure(
             templates=templates,
-            get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
-            get_images_by_ids=lambda image_ids: db.get_images_by_ids(image_ids),
-            collection_image_ids=lambda collection_id: db.collection_image_ids(collection_id),
             resolve_smart_image_ids=lambda _query: [],
-            get_publish=lambda collection_id: db.get_collection_publish(collection_id),
-            list_publishes=lambda: db.list_collection_publishes(),
-            upsert_publish=lambda **kwargs: db.upsert_collection_publish(**kwargs),
-            delete_publish=lambda collection_id: db.delete_collection_publish(collection_id),
-            slug_available=lambda slug, **kwargs: db.collection_publish_slug_available(slug, **kwargs),
             thumbnails=self.thumbs,
             deployer=FakeDeployer(),
             track_background_task=lambda coro: self.tasks.append(coro),
