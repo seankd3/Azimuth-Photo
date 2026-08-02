@@ -79,7 +79,6 @@ class SyncHubTests(unittest.TestCase):
         )
         self.auth_patch.start()
         hub_routes.configure(
-            db_path=lambda: self.db_path,
             intake_root=lambda: self.intake,
             raws_root=lambda: self.raws,
         )

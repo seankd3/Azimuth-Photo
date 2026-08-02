@@ -436,7 +436,6 @@ class HubPhoneUnderRawsRegressionTests(unittest.TestCase):
         db.DB_PATH = self.db_path
         asyncio.run(db.init_db())
         hub_routes.configure(
-            db_path=lambda: self.db_path,
             intake_root=lambda: self.intake,
             raws_root=lambda: self.raws,
         )
