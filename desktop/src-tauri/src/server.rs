@@ -13,6 +13,8 @@ const BASE_URL: &str = "http://127.0.0.1:8010";
 const LIBRARY_URL: &str = "http://127.0.0.1:8010/d";
 const READY_TIMEOUT: Duration = Duration::from_secs(45);
 const READY_POLL: Duration = Duration::from_millis(500);
+/// Long enough to fold a large write log, short enough that quitting still feels instant.
+const PREPARE_QUIT_TIMEOUT: Duration = Duration::from_secs(20);
 
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 
@@ -88,8 +90,17 @@ pub fn start(app: AppHandle) {
     );
 }
 
-/// Kill the child server, if we spawned one. Idempotent.
+/// Ask the engine to put the library away, then stop it. Idempotent.
+///
+/// Killing the child outright is fine for the process and not fine for the
+/// catalog: the engine never gets to fold its write log back in or record that
+/// it closed in a known state, so the *next* launch treats an ordinary quit as
+/// a crash and reads the whole catalog before it will answer anything —
+/// measured at 9.1 seconds on a 2.1GB library, every single launch.
 pub fn shutdown() {
+    let _ = agent(PREPARE_QUIT_TIMEOUT)
+        .post(format!("{BASE_URL}/api/system/prepare-quit").as_str())
+        .send_empty();
     if let Some(mut child) = CHILD.lock().unwrap().take() {
         let _ = child.kill();
         let _ = child.wait();
