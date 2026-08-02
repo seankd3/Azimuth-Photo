@@ -230,7 +230,7 @@ class ThumbPrefetcher:
             self.budget_bytes = budget
         else:
             budget = self.budget_bytes
-        cached, total = await self._mirror_progress()
+        cached, total, browse_cached, browse_total = await self._mirror_progress()
         disk_total = 0
         try:
             disk_total = int(_disk_usage(self.cache_root).total)
@@ -242,6 +242,8 @@ class ThumbPrefetcher:
             disk_total_bytes=disk_total,
             mirror_cached=cached,
             mirror_total=total,
+            library_cached=browse_cached,
+            library_total=browse_total,
             avg_sm_bytes=avg_sm,
             avg_md_bytes=avg_md,
         )
@@ -588,12 +590,18 @@ class ThumbPrefetcher:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-    async def _mirror_progress(self) -> tuple[int, int]:
-        """sm+md local thumb rows vs 2× hub-remote catalog count."""
+    async def _mirror_progress(self) -> tuple[int, int, int, int]:
+        """sm+md local thumb rows vs 2× hub-remote catalog count.
+
+        Also returns the browse tier on its own, because that is the number the
+        sync chip shows. It used to be filled in only while a prefetch was
+        running, so a satellite holding 83,627 previews opened saying
+        "Library: 0 photos · thumbs 0%" until something happened to kick it.
+        """
 
         sm_cached, total = await self._library_progress(self.BROWSE_SIZE)
         md_cached, _ = await self._library_progress(self.LOUPE_SIZE)
-        return sm_cached + md_cached, total * 2
+        return sm_cached + md_cached, total * 2, sm_cached, total
 
     async def _estimate_needed_bytes(self) -> tuple[int, int, int, int]:
         if self.cache_root is None:
