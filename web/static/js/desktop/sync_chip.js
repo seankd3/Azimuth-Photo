@@ -4,6 +4,7 @@ import { fetchOptionsWithTimeout } from '../api.js';
 import { emit } from './state.js';
 import { showToast } from './toast.js';
 import { openSystemSettings } from './drawer.js';
+import { noteLibraryCatchingUp } from './api.js';
 
 const POLL_MS = 3000;
 let timer = null;
@@ -105,6 +106,9 @@ function patch(status) {
     const pendingOps = Number(status.pending_ops) || 0;
     const libraryTotal = Number(status.prefetch?.library_total) || 0;
     const libraryCached = Number(status.prefetch?.library_cached) || 0;
+    // So a timed-out read can say what is actually happening rather than
+    // claiming a library on this machine stopped responding.
+    noteLibraryCatchingUp(libraryTotal - libraryCached, libraryTotal);
     const thumbPercent = libraryTotal ? Math.round((libraryCached / libraryTotal) * 100) : 0;
     const action = status.paused ? 'Resume' : 'Pause';
     const count = pendingOps

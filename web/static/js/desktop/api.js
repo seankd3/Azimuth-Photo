@@ -2,10 +2,31 @@ import { FetchJsonError, fetchJson as sharedFetchJson, fetchOptionsWithTimeout }
 import { previewThumbUrl as sharedPreviewThumbUrl } from '../previews.js';
 import { showToast } from './toast.js';
 
+// A library on this machine does not stop responding — it gets busy. When a
+// read times out during a first sync there is a true thing to say, and the app
+// already knows it, so say that instead of a network app's excuse.
+let catchingUpUntil = 0;
+let catchingUpText = '';
+
+export function noteLibraryCatchingUp(remaining, total) {
+    const left = Math.max(0, Number(remaining) || 0);
+    if (!left || !total) {
+        catchingUpUntil = 0;
+        catchingUpText = '';
+        return;
+    }
+    catchingUpUntil = Date.now() + 15_000;
+    catchingUpText = `Your library is still catching up — ${left.toLocaleString('en-US')} photos to go.`;
+}
+
 function reportApiFailure({ status = 0, error = null } = {}) {
     const cause = error?.cause || error;
     if (!status || cause?.name === 'AbortError' || cause?.name === 'TimeoutError') {
-        showToast("The library isn't responding.");
+        if (Date.now() < catchingUpUntil && catchingUpText) {
+            showToast(catchingUpText);
+            return;
+        }
+        showToast('Your library is busy. This will catch up in a moment.');
         return;
     }
     showToast(`Request failed (${status})`);
