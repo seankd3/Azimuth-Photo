@@ -292,7 +292,6 @@ def configure_search_routes() -> None:
 
 def configure_collection_routes(*, resolve_library_constraints=None) -> None:
     import db
-    from features.collections import suggestions as collection_suggestions
     from features.collections import smart as smart_collections
 
     async def resolve_smart_detail(query, *, limit=200, offset=0):
@@ -339,23 +338,10 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         )
 
     collection_routes.configure(
-        create_collection=lambda **kwargs: db.create_collection(**kwargs),
-        list_collections=lambda: db.list_collections(),
-        get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
-        rename_collection=lambda collection_id, **kwargs: db.rename_collection(collection_id, **kwargs),
-        delete_collection=lambda collection_id: db.delete_collection(collection_id),
-        add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
-        remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(collection_id, image_ids),
-        collection_is_smart=lambda collection_id: db.collection_is_smart(collection_id),
         resolve_smart_detail=resolve_smart_detail,
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
         resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
-        get_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
-        get_suggestions=lambda: collection_suggestions.collection_suggestions(
-            db.DB_PATH,
-            db_signature=db.DB_PATH,
-        ),
     )
 
 

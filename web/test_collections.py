@@ -22,17 +22,6 @@ class CollectionTests(BackendTestCase):
 
     def _configure_collection_routes(self):
         collection_routes.configure(
-            create_collection=lambda **kwargs: db.create_collection(**kwargs),
-            list_collections=lambda: db.list_collections(),
-            get_collection=lambda collection_id, **kwargs: db.get_collection(collection_id, **kwargs),
-            rename_collection=lambda collection_id, **kwargs: db.rename_collection(collection_id, **kwargs),
-            delete_collection=lambda collection_id: db.delete_collection(collection_id),
-            add_collection_images=lambda collection_id, image_ids: db.add_collection_images(collection_id, image_ids),
-            remove_collection_images=lambda collection_id, image_ids: db.remove_collection_images(
-                collection_id,
-                image_ids,
-            ),
-            collection_is_smart=lambda collection_id: db.collection_is_smart(collection_id),
             resolve_smart_detail=lambda query, **kwargs: smart_collections.resolve_detail(
                 query,
                 resolve_library_constraints=self._resolve_library_constraints,
@@ -58,10 +47,6 @@ class CollectionTests(BackendTestCase):
                 resolve_library_constraints=self._resolve_library_constraints,
                 count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
                 get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
-            ),
-            get_suggestions=lambda: collection_suggestions.collection_suggestions(
-                db.DB_PATH,
-                db_signature=db.DB_PATH,
             ),
         )
 

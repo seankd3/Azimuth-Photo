@@ -3,6 +3,7 @@ from core.requests import parse_exclude_sources
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+import db
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -14,37 +15,17 @@ from features.sync import oplog
 
 
 router = APIRouter()
-CreateCollection = Callable[..., Awaitable[dict]]
-ListCollections = Callable[[], Awaitable[list[dict]]]
-GetCollection = Callable[..., Awaitable[dict | None]]
-RenameCollection = Callable[..., Awaitable[dict | None]]
-DeleteCollection = Callable[[int], Awaitable[bool]]
-MutateCollectionImages = Callable[[int, list[int]], Awaitable[dict | None]]
-GetSuggestions = Callable[[], Awaitable[dict]]
-CollectionIsSmart = Callable[[int], Awaitable[bool | None]]
 ResolveSmartDetail = Callable[..., Awaitable[dict]]
 ResolveSmartSummary = Callable[[dict], Awaitable[dict]]
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
-DbPath = Callable[[], str]
-GetImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
 
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 MAX_COLLECTION_NAME_LENGTH = 160
 
-_create_collection: CreateCollection | None = None
-_list_collections: ListCollections | None = None
-_get_collection: GetCollection | None = None
-_rename_collection: RenameCollection | None = None
-_delete_collection: DeleteCollection | None = None
-_add_collection_images: MutateCollectionImages | None = None
-_remove_collection_images: MutateCollectionImages | None = None
-_get_suggestions: GetSuggestions | None = None
-_collection_is_smart: CollectionIsSmart | None = None
 _resolve_smart_detail: ResolveSmartDetail | None = None
 _resolve_smart_summary: ResolveSmartSummary | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None
 _resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None
-_get_images_by_ids: GetImagesByIds | None = None
 
 
 class CreateCollectionBody(BaseModel):
@@ -79,59 +60,27 @@ class UpdateCollectionBody(BaseModel):
 
 def configure(
     *,
-    create_collection: CreateCollection,
-    list_collections: ListCollections,
-    get_collection: GetCollection,
-    rename_collection: RenameCollection,
-    delete_collection: DeleteCollection,
-    add_collection_images: MutateCollectionImages,
-    remove_collection_images: MutateCollectionImages,
-    get_suggestions: GetSuggestions | None = None,
-    collection_is_smart: CollectionIsSmart | None = None,
     resolve_smart_detail: ResolveSmartDetail | None = None,
     resolve_smart_summary: ResolveSmartSummary | None = None,
     resolve_smart_image_ids: ResolveSmartImageIds | None = None,
     resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None,
-    get_images_by_ids: GetImagesByIds | None = None,
 ) -> None:
-    global _create_collection, _list_collections, _get_collection
-    global _rename_collection, _delete_collection
-    global _add_collection_images, _remove_collection_images, _get_suggestions
-    global _collection_is_smart, _resolve_smart_detail, _resolve_smart_summary
+    """Hand over the smart-collection resolvers.
+
+    Everything else this module needs it now asks `db` for directly. These four
+    close over the library constraint resolver, so they are still built above.
+    """
+
+    global _resolve_smart_detail, _resolve_smart_summary
     global _resolve_smart_image_ids, _resolve_smart_materialized_image_ids
-    global _get_images_by_ids
-    _create_collection = create_collection
-    _list_collections = list_collections
-    _get_collection = get_collection
-    _rename_collection = rename_collection
-    _delete_collection = delete_collection
-    _add_collection_images = add_collection_images
-    _remove_collection_images = remove_collection_images
-    _get_suggestions = get_suggestions
-    _collection_is_smart = collection_is_smart
     _resolve_smart_detail = resolve_smart_detail
     _resolve_smart_summary = resolve_smart_summary
     _resolve_smart_image_ids = resolve_smart_image_ids
     _resolve_smart_materialized_image_ids = resolve_smart_materialized_image_ids
-    _get_images_by_ids = get_images_by_ids
-
-
-def _configured() -> None:
-    if (
-        _create_collection is None
-        or _list_collections is None
-        or _get_collection is None
-        or _rename_collection is None
-        or _delete_collection is None
-        or _add_collection_images is None
-        or _remove_collection_images is None
-    ):
-        raise RuntimeError("Collection routes are not configured")
 
 
 def _graph_configured() -> None:
-    _configured()
-    if _get_images_by_ids is None or _resolve_smart_image_ids is None:
+    if _resolve_smart_image_ids is None:
         raise RuntimeError("Collection graph routes are not configured")
 
 
@@ -173,9 +122,7 @@ async def _append_collection_memberships(collection_id: int, image_ids: list[int
 
 
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
-    if _collection_is_smart is None:
-        return None
-    smart_state = await _collection_is_smart(collection_id)
+    smart_state = await db.collection_is_smart(collection_id)
     if smart_state is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if smart_state:
@@ -199,7 +146,6 @@ async def _collection_update(
     *,
     require_name: bool,
 ):
-    _configured()
     fields = _fields_set(payload)
     clean_name = None
     if "name" in fields or require_name:
@@ -219,7 +165,7 @@ async def _collection_update(
     if bool(payload.materialize):
         if _resolve_smart_materialized_image_ids is None:
             raise RuntimeError("Collection routes are not configured")
-        current = await _get_collection(collection_id, limit=1, offset=0)
+        current = await db.get_collection(collection_id, limit=1, offset=0)
         if current is None:
             return JSONResponse({"error": "Collection not found"}, status_code=404)
         if current.get("smart"):
@@ -235,7 +181,7 @@ async def _collection_update(
                     status_code=409,
                 )
 
-    collection = await _rename_collection(
+    collection = await db.rename_collection(
         collection_id,
         name=clean_name,
         query=query_json if query_supplied else None,
@@ -253,21 +199,19 @@ async def _collection_update(
 
 @router.get("/api/user-collections")
 async def api_user_collections():
-    _configured()
     collections = []
-    for collection in await _list_collections():
+    for collection in await db.list_collections():
         collections.append(await _with_smart_summary(collection))
     return {"collections": collections}
 
 
 @router.post("/api/user-collections")
 async def api_create_collection(payload: CreateCollectionBody):
-    _configured()
     try:
         query_json = smart.query_to_json(payload.query)
     except smart.SmartCollectionQueryError as exc:
         return _invalid_query_response(exc)
-    collection = await _create_collection(
+    collection = await db.create_collection(
         name=payload.name,
         description=payload.description,
         image_ids=payload.image_ids,
@@ -284,10 +228,9 @@ async def api_create_collection(payload: CreateCollectionBody):
 
 @router.get("/api/collections/suggestions")
 async def api_collection_suggestions(exclude_sources: str = ""):
-    _configured()
-    if _get_suggestions is None:
-        return {"suggestions": []}
-    payload = await _get_suggestions()
+    payload = await collection_suggestions.collection_suggestions(
+        catalog_path(), db_signature=catalog_path()
+    )
     excluded = parse_exclude_sources(exclude_sources)
     if not excluded:
         return payload
@@ -350,7 +293,7 @@ async def api_collection_graph_images(collection_id: int, recursive: int = 0):
             collection_id,
             recursive=bool(recursive),
             resolve_smart_image_ids=_resolve_smart_image_ids,
-            get_images_by_ids=_get_images_by_ids,
+            get_images_by_ids=db.get_active_images_by_ids,
         )
     except graph.CollectionGraphConflict as exc:
         return JSONResponse({"error": str(exc)}, status_code=409)
@@ -368,8 +311,7 @@ async def api_collection_graph_images(collection_id: int, recursive: int = 0):
 
 @router.get("/api/user-collections/{collection_id}")
 async def api_collection(collection_id: int, limit: int = 200, offset: int = 0):
-    _configured()
-    collection = await _get_collection(collection_id, limit=limit, offset=offset)
+    collection = await db.get_collection(collection_id, limit=limit, offset=offset)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if collection.get("smart"):
@@ -392,9 +334,8 @@ async def api_update_collection(collection_id: int, payload: UpdateCollectionBod
 
 @router.post("/api/user-collections/{collection_id}/delete")
 async def api_delete_collection(collection_id: int):
-    _configured()
     oplog_payload = await _collection_oplog_payload(collection_id)
-    deleted = await _delete_collection(collection_id)
+    deleted = await db.delete_collection(collection_id)
     if not deleted:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_meta(collection_id, deleted=True, payload=oplog_payload)
@@ -404,13 +345,12 @@ async def api_delete_collection(collection_id: int):
 
 @router.post("/api/user-collections/{collection_id}/images")
 async def api_add_collection_images(collection_id: int, payload: CollectionImagesBody):
-    _configured()
     if not payload.image_ids:
         return JSONResponse({"error": "image_ids is required"}, status_code=400)
     conflict = await _smart_collection_conflict(collection_id)
     if conflict is not None:
         return conflict
-    collection = await _add_collection_images(collection_id, payload.image_ids)
+    collection = await db.add_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_memberships(collection_id, payload.image_ids, member=True)
@@ -420,13 +360,12 @@ async def api_add_collection_images(collection_id: int, payload: CollectionImage
 
 @router.post("/api/user-collections/{collection_id}/images/remove")
 async def api_remove_collection_images_post(collection_id: int, payload: CollectionImagesBody):
-    _configured()
     if not payload.image_ids:
         return JSONResponse({"error": "image_ids is required"}, status_code=400)
     conflict = await _smart_collection_conflict(collection_id)
     if conflict is not None:
         return conflict
-    collection = await _remove_collection_images(collection_id, payload.image_ids)
+    collection = await db.remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_memberships(collection_id, payload.image_ids, member=False)
@@ -438,13 +377,12 @@ async def api_remove_collection_images_post(collection_id: int, payload: Collect
 async def api_remove_collection_images(collection_id: int, payload: CollectionImagesBody):
     # Kept for compatibility; proxies that strip DELETE bodies should use the
     # POST /images/remove route instead.
-    _configured()
     if not payload.image_ids:
         return JSONResponse({"error": "image_ids is required"}, status_code=400)
     conflict = await _smart_collection_conflict(collection_id)
     if conflict is not None:
         return conflict
-    collection = await _remove_collection_images(collection_id, payload.image_ids)
+    collection = await db.remove_collection_images(collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_memberships(collection_id, payload.image_ids, member=False)
