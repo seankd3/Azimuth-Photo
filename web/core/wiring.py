@@ -158,22 +158,12 @@ def configure_cache_events() -> None:
 
 
 def configure_catalog_routes() -> None:
-    import db
     from core import cache_events
     from features.cache import status as cache_status_service
 
     catalog_routes.configure(
         invalidate_pairing_cache=lambda **kwargs: cache_events.invalidate_pairing_cache(**kwargs),
         invalidate_cache_status_cache=cache_status_service.invalidate_cache_status_cache,
-        get_recent_active_images=lambda **kwargs: db.get_recent_active_images(**kwargs),
-        add_or_restore_source=lambda path: db.add_or_restore_source(path),
-        get_scan_folder=lambda: db.get_scan_folder(),
-        get_catalog_summary=lambda: db.get_catalog_summary(),
-        get_source=lambda source_id: db.get_source(source_id),
-        remove_source_keep_data=lambda source_id: db.remove_source_keep_data(source_id),
-        get_source_image_ids=lambda source_id: db.get_source_image_ids(source_id),
-        purge_source_catalog_data=lambda source_id: db.purge_source_catalog_data(source_id),
-        get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
     )
 
 
