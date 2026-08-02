@@ -216,6 +216,16 @@ def _schedule_taste_vector() -> None:
         return
 
     async def _warm() -> None:
+        # Reading every embedding in the library is a chore like any other, and
+        # it arrived here because someone opened the grid. Wait until they stop
+        # looking before spending the disk on it.
+        try:
+            import thumbnails
+
+            while thumbnails.get_idle_seconds() < 2.0:
+                await asyncio.sleep(0.5)
+        except Exception:
+            pass
         taste = await taste_service.taste_vector()
         await taste_service.taste_scaled_scores(taste)
 
