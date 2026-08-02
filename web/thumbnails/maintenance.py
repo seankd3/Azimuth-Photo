@@ -81,6 +81,11 @@ def cleanup_stale_cache_temps(
     return result
 
 
+# How many rows the sweep may delete while holding the thumbnail lock. Small
+# enough that a grid request waiting behind it waits for a blink.
+_DELETE_GROUP = 25
+
+
 def sweep_missing_cache_entries(
     *,
     meta_lock,
@@ -148,11 +153,17 @@ def sweep_missing_cache_entries(
                 continue
             missing.append(row)
 
-        if missing:
+        # Delete in small groups. Standing aside is not enough on its own: a
+        # request that is already waiting for this lock does not look like
+        # activity, so the sweep sees an idle app and takes the lock straight
+        # back. Holding it for a handful of rows instead of a whole batch caps
+        # what a waiting grid request can ever wait for.
+        for start in range(0, len(missing), _DELETE_GROUP):
+            group = missing[start:start + _DELETE_GROUP]
             with meta_lock:
                 conn = db_connect()
                 try:
-                    for row in missing:
+                    for row in group:
                         remove_cache_entry_locked(conn, row)
                         removed += 1
                     conn.commit()

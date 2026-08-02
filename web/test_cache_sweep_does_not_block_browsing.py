@@ -135,6 +135,34 @@ class SweepLockTests(unittest.TestCase):
         result = self._sweep(lambda path: True)
         self.assertEqual(result["scanned"], 120)
 
+    def test_the_lock_is_never_held_for_a_whole_batch_of_deletes(self):
+        """A request already waiting for this lock does not look like activity,
+        so the sweep will take it straight back — it must hold it only briefly."""
+
+        holds = []
+        original_enter = type(self.lock).__enter__
+
+        def counting_enter(lock):
+            holds.append(0)
+            return original_enter(lock)
+
+        def remove(conn, row):
+            holds[-1] += 1
+
+        type(self.lock).__enter__ = counting_enter
+        try:
+            maintenance.sweep_missing_cache_entries(
+                meta_lock=self.lock,
+                db_connect=lambda: _KeptOpen(self.raw),
+                remove_cache_entry_locked=remove,
+                path_exists=lambda path: False,
+                batch_size=120,
+            )
+        finally:
+            type(self.lock).__enter__ = original_enter
+        self.assertLessEqual(max(holds), 25, "one hold deleted a whole batch")
+        self.assertEqual(sum(holds), 120, "every missing row is still removed")
+
     def test_an_empty_cache_is_not_an_error(self):
         self.raw.execute("DELETE FROM cache_entries")
         self.raw.commit()
