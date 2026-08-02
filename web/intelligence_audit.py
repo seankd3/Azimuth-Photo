@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from core.runtime_paths import resolve_runtime_paths
@@ -191,7 +192,7 @@ def main() -> None:
 
     config = settings.get_settings()
     database_uri = f"file:{args.db.resolve()}?mode=ro"
-    with sqlite3.connect(database_uri, uri=True, timeout=10) as conn:
+    with closing(sqlite3.connect(database_uri, uri=True, timeout=10)) as conn, conn:
         conn.execute("PRAGMA query_only = ON")
         health = collect_health(
             conn,

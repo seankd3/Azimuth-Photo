@@ -105,6 +105,25 @@ async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite
     return conn
 
 
+async def release_database(db_path: str) -> None:
+    """Let go of every connection this process holds to one database file.
+
+    Windows will not delete a file another handle still has open, so a test that
+    unlinks its temporary catalog while the pool still holds an idle connection
+    fails — randomly, and in a different test each run, which teaches everyone
+    reading the suite to ignore red. Releasing by path makes it deterministic,
+    and gives production a way to hand a database back (a library switch) that
+    does not mean tearing down every other one too.
+    """
+
+    drop_inline_reader(db_path)
+    for conn in _idle_connections.pop(db_path, []):
+        try:
+            await conn.close()
+        except Exception:
+            pass
+
+
 async def close_shared_readers() -> None:
     for db_path in list(_inline_readers):
         drop_inline_reader(db_path)

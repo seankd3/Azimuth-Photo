@@ -130,7 +130,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_populated_version_zero_catalog_is_backed_up(self):
         version_zero_db = os.path.join(self.tmp.name, "version-zero.db")
         _make_db(version_zero_db, 0)
-        with sqlite3.connect(version_zero_db) as conn:
+        with closing(sqlite3.connect(version_zero_db)) as conn, conn:
             conn.execute("INSERT INTO images DEFAULT VALUES")
         conn = await data_connection.open_async(version_zero_db)
         try:
@@ -148,7 +148,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_populated_version_zero_catalog_refuses_failed_backup(self):
         version_zero_db = os.path.join(self.tmp.name, "version-zero-failed.db")
         _make_db(version_zero_db, 0)
-        with sqlite3.connect(version_zero_db) as conn:
+        with closing(sqlite3.connect(version_zero_db)) as conn, conn:
             conn.execute("INSERT INTO images DEFAULT VALUES")
         with (
             mock.patch.object(app_db, "DB_PATH", version_zero_db),

@@ -1,11 +1,11 @@
 import json
-import os
 import random
 import sqlite3
 from contextlib import closing
-import tempfile
 import time
 import unittest
+
+from test_support import TempCatalogTestCase
 
 from features.sync import hub, oplog
 
@@ -61,18 +61,9 @@ INSERT INTO images(id, content_hash) VALUES (2, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 """
 
 
-class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
+class OplogConvergenceTests(TempCatalogTestCase):
     def _catalog(self) -> str:
-        handle, path = tempfile.mkstemp(suffix=".db")
-        os.close(handle)
-        self.addCleanup(lambda: os.path.exists(path) and os.unlink(path))
-        conn = sqlite3.connect(path)
-        try:
-            conn.executescript(CATALOG_DDL)
-            conn.commit()
-        finally:
-            conn.close()
-        return path
+        return self.temp_catalog(CATALOG_DDL)
 
     @staticmethod
     def _count(path: str) -> int:
@@ -270,7 +261,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
                     await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
                     await hub.merge_metadata(path, [legacy])
 
-                with sqlite3.connect(path) as conn:
+                with closing(sqlite3.connect(path)) as conn, conn:
                     settings = json.loads(conn.execute(
                         "SELECT settings FROM develop_settings WHERE image_id = 1"
                     ).fetchone()[0])
@@ -305,7 +296,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
                     await hub.merge_metadata(path, [legacy])
                     await oplog.apply_entries(path, [oplog_entry], applied_from="satellite", receive_time=500.0)
 
-                with sqlite3.connect(path) as conn:
+                with closing(sqlite3.connect(path)) as conn, conn:
                     settings = json.loads(conn.execute(
                         "SELECT settings FROM develop_settings WHERE image_id = 1"
                     ).fetchone()[0])
@@ -314,7 +305,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_imported_develop_row_without_family_clock_beats_older_oplog(self):
         path = self._catalog()
         newer_updated_at = oplog._iso_timestamp(200.0)
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
                 "VALUES (1, ?, 'lrcat', ?)",
@@ -335,7 +326,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 100.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             settings, origin, updated_at = conn.execute(
                 "SELECT settings, origin, updated_at FROM develop_settings WHERE image_id = 1"
             ).fetchone()
@@ -353,7 +344,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
         path = self._catalog()
         await oplog.ensure_schema(path)
         newer_updated_at = oplog._iso_timestamp(200.0)
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.executescript(oplog.KEYWORD_IPTC_DDL)
             conn.execute(
                 "INSERT INTO iptc_fields(image_id, title, caption, copyright, creator, updated_at) "
@@ -374,7 +365,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 100.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             title, updated_at = conn.execute(
                 "SELECT title, updated_at FROM iptc_fields WHERE image_id = 1"
             ).fetchone()
@@ -383,7 +374,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pre_unification_legacy_clock_is_migrated_before_oplog_apply(self):
         path = self._catalog()
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE sync_metadata_state (
                     image_id INTEGER NOT NULL,
@@ -416,7 +407,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
             "ts": 100.0,
         }], applied_from="satellite", receive_time=500.0)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             settings = json.loads(conn.execute(
                 "SELECT settings FROM develop_settings WHERE image_id = 1"
             ).fetchone()[0])
@@ -644,7 +635,7 @@ class OplogConvergenceTests(unittest.IsolatedAsyncioTestCase):
         await oplog.apply_entries(path, [entry], applied_from="hub", receive_time=500.0)
         self.assertEqual(await oplog.pending_entry_count(path), 1)
 
-        with sqlite3.connect(path) as conn:
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute("INSERT INTO images(id, content_hash) VALUES (3, ?)", (HASH_C,))
             conn.commit()
         await oplog.retry_pending_entries(path)

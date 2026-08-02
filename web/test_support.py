@@ -75,6 +75,53 @@ class HeaderRequest:
         self.headers = headers or {}
 
 
+class TempCatalogTestCase(unittest.IsolatedAsyncioTestCase):
+    """A test that owns real SQLite files on disk.
+
+    Windows will not delete a file any handle still has open, and the code under
+    test opens connections of its own — an inline reader, a pooled one — that
+    outlive the call. Tests that unlink their temporary catalog directly fail
+    on that, randomly, in a different test each run, which teaches everyone
+    reading the suite that red means nothing. Ask the process to let the
+    database go first, then delete, and give a closing worker thread a moment
+    if it has not finished.
+    """
+
+    def _setupAsyncioRunner(self):
+        # Same reason as BackendTestCase: debug mode makes every future capture
+        # a stack trace, and this suite does not rely on the warnings.
+        self._asyncioRunner = asyncio.Runner(debug=False)
+
+    def temp_catalog(self, ddl: str = "") -> str:
+        """A throwaway catalog file that is really gone when the test ends."""
+
+        handle, path = tempfile.mkstemp(suffix=".db")
+        os.close(handle)
+        if ddl:
+            conn = sqlite3.connect(path)
+            try:
+                conn.executescript(ddl)
+                conn.commit()
+            finally:
+                conn.close()
+        self.addAsyncCleanup(self._let_the_catalog_go, path)
+        return path
+
+    async def _let_the_catalog_go(self, path: str) -> None:
+        await data_connection.release_database(path)
+        for attempt in range(20):
+            try:
+                for suffix in ("-wal", "-shm", ""):
+                    target = path + suffix
+                    if os.path.exists(target):
+                        os.unlink(target)
+                return
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                await asyncio.sleep(0.05)
+
+
 class BackendTestCase(unittest.IsolatedAsyncioTestCase):
     def _setupAsyncioRunner(self):
         # IsolatedAsyncioTestCase runs the loop in debug mode, which makes every
