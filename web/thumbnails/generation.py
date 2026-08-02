@@ -5,7 +5,8 @@ import time
 from PIL import Image, ImageOps
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
-from raw_thumb_ops import (
+from thumbnails.raw_ops import (
+    _raw_open_target,
     apply_raw_orientation,
     demosaic_raw_for_thumbnail,
     demosaic_tier_jpegs as _demosaic_tier_jpegs_local,
@@ -20,12 +21,6 @@ def _raw_preview_flip(raw, filepath: str) -> int:
     flip = getattr(getattr(raw, "sizes", None), "flip", None)
     return int(flip) if flip is not None else _exiftool_raw_flip(filepath)
 
-
-def _raw_open_target(filepath: str, source_data: bytes | None = None):
-    """Path or BytesIO for rawpy.imread — caller must keep BytesIO alive."""
-    if source_data is not None:
-        return io.BytesIO(source_data)
-    return filepath
 
 
 def extract_embedded_raw_preview(

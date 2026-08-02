@@ -35,7 +35,7 @@ def find_r5_dngs(n: int = 12) -> list[Path]:
 
 
 def demosaic_one_thread(path: Path) -> dict:
-    from raw_thumb_ops import demosaic_tier_jpegs
+    from thumbnails.raw_ops import demosaic_tier_jpegs
 
     return demosaic_tier_jpegs(str(path), ["md", "lg"], SIZES, QUALITY)
 
@@ -148,7 +148,7 @@ def main() -> int:
     )
 
     # Correctness spot-check: first file path-pool vs in-process
-    from raw_thumb_ops import demosaic_tier_jpegs
+    from thumbnails.raw_ops import demosaic_tier_jpegs
     from thumbnails import demosaic_pool
 
     os.environ["AZIMUTH_DEMOSAIC_PROCESSES"] = "2"

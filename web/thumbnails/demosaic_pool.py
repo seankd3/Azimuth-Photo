@@ -189,7 +189,7 @@ def run_demosaic_tier_jpegs(
     if not uncovered_sizes:
         return {"jpegs": {}, "width": 0, "height": 0}
 
-    from raw_thumb_ops import demosaic_tier_jpegs
+    from thumbnails.raw_ops import demosaic_tier_jpegs
 
     pool = ensure_pool()
     if pool is None:

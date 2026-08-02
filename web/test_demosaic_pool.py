@@ -74,7 +74,7 @@ class DemosaicPoolParityTests(unittest.TestCase):
     def test_process_pool_jpeg_matches_inprocess(self):
         if not self.available:
             self.skipTest("opt-in R5 DNG corpus probe: set AZIMUTH_RUN_RAW_CORPUS=1 with the corpus mounted")
-        from raw_thumb_ops import demosaic_tier_jpegs
+        from thumbnails.raw_ops import demosaic_tier_jpegs
 
         sizes = {"md": 1920, "lg": 3840}
         local = demosaic_tier_jpegs(
