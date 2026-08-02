@@ -96,6 +96,14 @@ def sweep_missing_cache_entries(
     Cheap idle-time repair: batched, resumable via ``after_rowid``, once per
     process start. Does not delete real files — only rows already pointing at
     missing paths.
+
+    The file checks happen outside the lock on purpose. They are the slow part
+    — one filesystem call per cached preview, and this laptop has 121,826 of
+    them — and the grid needs that same lock to know whether a photo has a
+    preview yet. Holding it across a batch of checks meant opening the app
+    started a repair that browsing then queued behind: measured, the first page
+    of photos never arrived at all. Now the lock is held only to read a batch of
+    rows and to delete the ones that turned out to be missing.
     """
 
     removed = 0
@@ -115,20 +123,31 @@ def sweep_missing_cache_entries(
                     "ORDER BY rowid ASC LIMIT ?",
                     (after_rowid, batch),
                 ).fetchall()
-                if not rows:
-                    break
-                batches += 1
-                for row in rows:
-                    after_rowid = int(row["rowid"])
-                    scanned += 1
-                    path = str(row["path"] or "")
-                    if path and path_exists(path):
-                        continue
-                    remove_cache_entry_locked(conn, row)
-                    removed += 1
-                conn.commit()
             finally:
                 conn.close()
+        if not rows:
+            break
+        batches += 1
+
+        missing = []
+        for row in rows:
+            after_rowid = int(row["rowid"])
+            scanned += 1
+            path = str(row["path"] or "")
+            if path and path_exists(path):
+                continue
+            missing.append(row)
+
+        if missing:
+            with meta_lock:
+                conn = db_connect()
+                try:
+                    for row in missing:
+                        remove_cache_entry_locked(conn, row)
+                        removed += 1
+                    conn.commit()
+                finally:
+                    conn.close()
         if len(rows) < batch:
             break
     if removed and invalidate_disk_stats_cache is not None:
