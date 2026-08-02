@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from core.durable import fsync_directory as _fsync_directory
+
 import errno
 import hashlib
 import os
@@ -146,15 +148,6 @@ def _fsync_file(path: Path) -> None:
     with path.open("rb+") as handle:
         os.fsync(handle.fileno())
 
-
-def _fsync_directory(path: Path) -> None:
-    if sys.platform.startswith("win"):
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _destination_candidates(directory: Path, filename: str) -> Iterable[Path]:

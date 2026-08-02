@@ -7,6 +7,8 @@ it writes ``azimuth.restored.db`` beside it and returns human instructions.
 
 from __future__ import annotations
 
+from core.durable import fsync_directory as _fsync_directory
+
 import asyncio
 import gzip
 import hashlib
@@ -16,7 +18,6 @@ import os
 import re
 import shutil
 import sqlite3
-import sys
 import threading
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -1024,15 +1025,6 @@ def _fsync_file(path: Path) -> None:
         handle.flush()
         os.fsync(handle.fileno())
 
-
-def _fsync_directory(path: Path) -> None:
-    if sys.platform.startswith("win"):
-        return
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _select_integrity_candidates(conn: sqlite3.Connection, limit: int) -> list[sqlite3.Row]:

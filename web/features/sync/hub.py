@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from core.durable import fsync_directory as _fsync_directory
+
 import asyncio
 import json
 import ntpath
 import os
-import sys
 import re
 import shutil
 import tempfile
@@ -493,15 +494,6 @@ def upload_part_path(intake_root: Path, content_hash: str) -> Path:
 def upload_offset_path(intake_root: Path, content_hash: str) -> Path:
     return intake_root / f"{validate_content_hash(content_hash)}.offset"
 
-
-def _fsync_directory(path: Path) -> None:
-    if sys.platform.startswith("win"):
-        return  # Windows cannot open directories; os.replace is already durable-atomic on NTFS
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _write_committed_offset(offset_path: Path, offset: int) -> None:
