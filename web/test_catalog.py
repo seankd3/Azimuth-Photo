@@ -246,7 +246,7 @@ class CatalogSourceRouteTests(BackendTestCase):
         old_allocations = dict(thumbnails._disk_allocations)
         old_manual_mode = thumbnails._pregen_manual_mode
         old_manual_pause = thumbnails._pregen_manual_pause
-        old_last_activity = thumbnails._last_user_activity
+        old_last_activity = thumbnails.get_idle_seconds()
         worker = None
         try:
             settings.save_settings({"setup_completed": False})
@@ -255,7 +255,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             thumbnails._disk_allocations = {tier: 0 for tier in thumbnails.ALL_TIERS}
             thumbnails._pregen_manual_mode = False
             thumbnails._pregen_manual_pause = True
-            thumbnails._last_user_activity = time.monotonic() - 30
+            thumbnails.note_user_activity(time.monotonic() - 30)
             thumbnails._ensure_disk_cache_dirs()
             catalog_metadata.pause_catalog_metadata()
 
@@ -300,7 +300,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             thumbnails._disk_allocations = old_allocations
             thumbnails._pregen_manual_mode = old_manual_mode
             thumbnails._pregen_manual_pause = old_manual_pause
-            thumbnails._last_user_activity = old_last_activity
+            thumbnails.note_user_activity(time.monotonic() - old_last_activity)
 
     async def test_existing_library_scan_preserves_paused_workers(self):
         await self._source("existing-library")

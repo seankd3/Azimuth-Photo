@@ -435,7 +435,7 @@ class CacheStatusTests(BackendTestCase):
 
     async def test_thumbnail_memory_warm_reads_cached_sm_md_and_lg(self):
         calls = []
-        thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
+        thumbnails.note_user_activity(thumbnails.time.monotonic() - 30.0)
 
         def fake_read(size, image_id, source_signature=None, *, populate_memory=False):
             calls.append((size, image_id, source_signature, populate_memory))
@@ -470,7 +470,7 @@ class CacheStatusTests(BackendTestCase):
     async def test_result_thumbnail_memory_warm_reads_small_batch_while_active(self):
         calls = []
         rows = [{"id": idx} for idx in range(1001, 1010)]
-        thumbnails._last_user_activity = thumbnails.time.monotonic()
+        thumbnails.note_user_activity()
 
         def fake_read(size, image_id, source_signature=None, *, populate_memory=False):
             calls.append((size, image_id, populate_memory))
