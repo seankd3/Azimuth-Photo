@@ -6,6 +6,8 @@ quarter-resolution float fields, matching ``mask_raster.js`` and the GL atlas.
 
 from __future__ import annotations
 
+from features.develop.ramps import smoothstep as _smoothstep, gaussian_ev as _gaussian_ev
+
 from features.develop.numbers import setting as _number
 
 import logging
@@ -55,12 +57,6 @@ def localToSlider(local: Mapping[str, object], key: str) -> float:
 
 local_to_slider = localToSlider
 
-
-def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
-    if abs(edge1 - edge0) <= C.LOCAL_RANGE_EPSILON:
-        return (value >= edge1).astype(np.float32)
-    t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
-    return (t * t * (3.0 - 2.0 * t)).astype(np.float32)
 
 
 def _grid(
@@ -485,10 +481,6 @@ def upsample_mask(mask: np.ndarray, width: int, height: int) -> np.ndarray:
 def _luma(rgb: np.ndarray) -> np.ndarray:
     return (rgb[..., 0] * C.LUMA_RED + rgb[..., 1] * C.LUMA_GREEN + rgb[..., 2] * C.LUMA_BLUE).astype(np.float32)
 
-
-def _gaussian_ev(ev: np.ndarray, center: float) -> np.ndarray:
-    z = (ev - center) / C.TONE_EV_SIGMA
-    return np.exp(-0.5 * z * z).astype(np.float32)
 
 
 def _soft_clamp(value: np.ndarray) -> np.ndarray:

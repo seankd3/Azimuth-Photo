@@ -7,6 +7,8 @@ read only so the post-crop vignette is positioned in the same space as export.
 
 from __future__ import annotations
 
+from features.develop.ramps import smoothstep as _smoothstep, gaussian_ev as _gaussian_ev
+
 from features.develop.numbers import setting as _number
 
 import math
@@ -30,14 +32,6 @@ def _bool(settings: Mapping[str, object], key: str) -> bool:
     return value is True or value == 1 or str(value).strip().lower() == "true"
 
 
-def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
-    t = np.clip((value - edge0) / (edge1 - edge0), 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
-
-
-def _gaussian_ev(ev: np.ndarray, center: float, sigma: float = C.TONE_EV_SIGMA) -> np.ndarray:
-    z = (ev - center) / max(sigma, C.TONE_EPSILON)
-    return np.exp(-0.5 * z * z).astype(np.float32, copy=False)
 
 
 def linear_to_srgb(linear: np.ndarray) -> np.ndarray:

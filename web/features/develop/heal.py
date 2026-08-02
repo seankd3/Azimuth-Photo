@@ -7,6 +7,8 @@ values.  Coordinates are normalized in the oriented image space.
 
 from __future__ import annotations
 
+from features.develop.ramps import smoothstep as _smoothstep
+
 from features.develop.numbers import number as _number
 
 import json
@@ -82,11 +84,6 @@ def _bilinear(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> np.ndarray:
     return ((image[y0, x0] * (1.0 - wx) + image[y0, x1] * wx) * (1.0 - wy)
             + (image[y1, x0] * (1.0 - wx) + image[y1, x1] * wx) * wy)
 
-
-def _smoothstep(edge0: float, edge1: float, value: np.ndarray) -> np.ndarray:
-    span = max(edge1 - edge0, 1e-6)
-    t = np.clip((value - edge0) / span, 0.0, 1.0)
-    return t * t * (3.0 - 2.0 * t)
 
 
 def _spot_weight(distance: np.ndarray, radius: float, feather: float, opacity: float) -> np.ndarray:
