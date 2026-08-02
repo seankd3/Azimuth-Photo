@@ -1,5 +1,5 @@
 import {
-    byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
+    byId, clearFacet, clearSelection, DEFAULT_SORT, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
 import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, getSyncStatus, previewThumbUrl, thumbUrl, unstack } from './api.js';
 import { loadScopePage, similarScopeActive } from './scope_data.js';
@@ -529,7 +529,7 @@ function renderSkeletons() {
 function bindScopeEmptyActions(flow) {
     flow.querySelector('[data-empty-action="clear-query"]')?.addEventListener('click', () => clearFacet('q'));
     flow.querySelector('[data-empty-action="clear-filters"]')?.addEventListener('click', () => {
-        setScope({ q: scope.q, sort: scope.sort || 'elo' });
+        setScope({ q: scope.q, sort: scope.sort || DEFAULT_SORT });
     });
     flow.querySelector('[data-empty-action="clear-view"]')?.addEventListener('click', () => setScope({}));
 }

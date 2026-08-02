@@ -567,7 +567,7 @@ function loadHash() {
     patch.collectionSmart = patch.collectionSmart === '1' || patch.collectionSmart === 'true';
     patch.similarIds = [];
     patch.similarLabel = '';
-    if (!patch.sort) patch.sort = 'elo';
+    if (!patch.sort) patch.sort = DEFAULT_SORT;
     else patch.sort = normalizeSort(patch.sort);
     setScope(patch, { pushHash: false });
 }

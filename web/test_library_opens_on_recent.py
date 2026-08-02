@@ -33,9 +33,25 @@ class DefaultViewTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r"DEFAULT_SORT\s*=\s*'", self.state)), 1)
 
     def test_no_stray_rating_default_is_left_behind(self):
-        """The restores fall back to the app default, not to a hard-coded sort."""
+        """Every fallback is the app default, not a hard-coded sort."""
 
         self.assertNotIn("|| 'elo'", self.state)
+
+    def test_the_startup_path_uses_the_default_too(self):
+        """A url with no sort is how the app always opens, so this one decides."""
+
+        self.assertIn("if (!patch.sort) patch.sort = DEFAULT_SORT;", self.state)
+
+    def test_nothing_else_hard_codes_a_default_sort(self):
+        stray = [
+            line.strip()
+            for line in self.state.splitlines()
+            if "'elo'" in line
+            and "SORT_ALIASES" not in line
+            and "elo:" not in line
+            and "patchScope({ sort: 'elo' })" not in line
+        ]
+        self.assertEqual(stray, [], f"stray rating defaults: {stray}")
 
     def test_best_of_still_ranks_by_rating(self):
         """Best of is a rating question; only the opening view changed."""

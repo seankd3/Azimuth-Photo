@@ -1,6 +1,6 @@
 import {
     clearFacet, describeScope, emit, folderChip, nonSearchFacetCount, on, scope, setBestOf, setScope, setSortBase,
-    setThumbSize, sortAscending, sortBase, toggleBestOf, toggleSortDirection, viewState, folderValues,
+    DEFAULT_SORT, setThumbSize, sortAscending, sortBase, toggleBestOf, toggleSortDirection, viewState, folderValues,
 } from './state.js';
 import { toggleLeftPanel } from './panel.js';
 import { showToast } from './toast.js';
@@ -199,7 +199,7 @@ export function initContextbar() {
     document.getElementById('btn-filter').addEventListener('click', () => emit('filters:toggle'));
     document.getElementById('btn-bestof').addEventListener('click', toggleBestOf);
     document.getElementById('sort-select').addEventListener('change', (event) => {
-        setSortBase(event.target.value || 'elo');
+        setSortBase(event.target.value || DEFAULT_SORT);
     });
     document.getElementById('sort-dir').addEventListener('click', toggleSortDirection);
     document.getElementById('thumb-size').addEventListener('input', (event) => {
