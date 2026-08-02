@@ -115,6 +115,28 @@ async def ensure_mirror_schema(db_path: str) -> None:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def _fold_the_write_log_back_in(conn) -> None:
+    """Keep the catch-up out of every later read.
+
+    SQLite writes into a log beside the database and folds it back in on its
+    own — but only when no reader holds an older snapshot, and this app keeps a
+    pool of long-lived readers. So during a large first sync the automatic fold
+    never wins and the log simply grows: measured on the owner's laptop, 1.92GB
+    of it, against a 3.9MB threshold, which every subsequent read has to search.
+    That is what made the grid say "Couldn't load this view" while the mirror
+    was catching up.
+
+    PASSIVE never takes the exclusive lock, so this can never be the thing that
+    freezes someone mid-browse: it folds in whatever is currently foldable and
+    returns. Across passes that is enough to keep the log bounded.
+    """
+
+    try:
+        await conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+    except Exception:  # a fold that cannot happen now happens next pass
+        pass
+
+
 class MirrorPuller:
     """Incrementally apply the hub's gzip NDJSON catalog stream to one satellite."""
 
@@ -226,6 +248,7 @@ class MirrorPuller:
             # only local/recent imports. Always resync hub:// after refresh.
             await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
+            await _fold_the_write_log_back_in(conn)
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
