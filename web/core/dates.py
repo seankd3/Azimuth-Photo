@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, tzinfo
+from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
 
@@ -64,3 +64,11 @@ def parse_taken_timestamp(value: Any) -> float | None:
         if timestamp is not None:
             return timestamp
     return None
+
+
+def seconds_until_local_hour(hour: int = 2, *, now: datetime | None = None) -> float:
+    moment = now or datetime.now().astimezone()
+    target = moment.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if target <= moment:
+        target += timedelta(days=1)
+    return max(1.0, (target - moment).total_seconds())

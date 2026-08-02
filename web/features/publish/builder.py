@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from features.share.visitor import (
+    brand as _brand_payload,
+)
+
 import asyncio
 import ctypes
 import errno
@@ -15,7 +19,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 from fastapi.templating import Jinja2Templates
 
@@ -487,23 +490,6 @@ def _unique_ids(image_ids) -> list[int]:
             seen.add(image_id)
             unique.append(image_id)
     return unique
-
-
-def _brand_payload() -> dict:
-    config = settings.get_settings()
-    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
-    site_label = _site_label(site_url)
-    name = str(config.get("share_brand_name") or "").strip()
-    if not name:
-        name = site_label or "Your photographer"
-    return {"name": name, "site_url": site_url, "site_label": site_label}
-
-
-def _site_label(site_url: str) -> str:
-    if not site_url:
-        return ""
-    parsed = urlparse(site_url if "://" in site_url else f"https://{site_url}")
-    return (parsed.netloc or parsed.path).removeprefix("www.")
 
 
 def _download_name(image_id: int, filename: str) -> str:

@@ -7,6 +7,9 @@ it writes ``azimuth.restored.db`` beside it and returns human instructions.
 
 from __future__ import annotations
 
+from core.dates import seconds_until_local_hour
+
+
 from core.durable import fsync_directory as _fsync_directory
 
 import asyncio
@@ -20,7 +23,7 @@ import shutil
 import sqlite3
 import threading
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -917,15 +920,6 @@ def restore_backup(db_path: str, name: str) -> dict[str, Any]:
         "instructions": instructions,
         "hot_swapped": False,
     }
-
-
-def seconds_until_local_hour(hour: int = 4, *, now: datetime | None = None) -> float:
-    """Seconds until the next local ``hour:00`` (default 04:00)."""
-    moment = now or datetime.now().astimezone()
-    target = moment.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if target <= moment:
-        target += timedelta(days=1)
-    return max(1.0, (target - moment).total_seconds())
 
 
 async def run_daily_backup_scheduler(db_path_provider, *, hour: int = 4) -> None:

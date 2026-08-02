@@ -18,6 +18,10 @@ The stored EXR / PABASE is this recovered linear estimate. Kind tag: ``pano``.
 from __future__ import annotations
 
 from core.numbers import number as _number
+from features.develop.shots import (
+    same_optical_setup as _same_optical_setup,
+    shutter_seconds as _shutter_seconds,
+)
 
 import gzip
 import json
@@ -80,24 +84,6 @@ def _set_status(**changes: Any) -> None:
     with _status_lock:
         _status.update(changes)
 
-
-
-def _same_optical_setup(first: dict[str, Any], second: dict[str, Any]) -> bool:
-    first_lens, second_lens = first.get("lens_model"), second.get("lens_model")
-    first_focal, second_focal = first.get("focal_length"), second.get("focal_length")
-    if not first_lens or not second_lens or first_lens.casefold() != second_lens.casefold():
-        return False
-    if first_focal is None or second_focal is None:
-        return False
-    return abs(float(first_focal) - float(second_focal)) < 0.01
-
-
-def _shutter_seconds(row: dict[str, Any]) -> float | None:
-    direct = _number(row.get("ExposureTime"))
-    if direct and direct > 0:
-        return direct
-    apex = _number(row.get("ShutterSpeedValue"))
-    return 2.0 ** (-apex) if apex is not None else None
 
 
 def _exposure_signature(row: dict[str, Any]) -> tuple[str, float] | None:

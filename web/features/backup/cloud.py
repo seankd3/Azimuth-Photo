@@ -6,6 +6,8 @@ settings. No host-specific paths. Trashed/rejected exclusions are catalog-driven
 
 from __future__ import annotations
 
+from core.dates import seconds_until_local_hour
+
 import json
 import logging
 import os
@@ -17,7 +19,6 @@ import subprocess
 import tempfile
 import threading
 import time
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable
 
@@ -835,14 +836,6 @@ def reset_runner_for_tests() -> None:
             }
         )
     _scheduler_started = False
-
-
-def seconds_until_local_hour(hour: int = 2, *, now: datetime | None = None) -> float:
-    moment = now or datetime.now().astimezone()
-    target = moment.replace(hour=hour, minute=0, second=0, microsecond=0)
-    if target <= moment:
-        target += timedelta(days=1)
-    return max(1.0, (target - moment).total_seconds())
 
 
 async def run_nightly_scheduler(db_path_provider: DbPathProvider, *, hour: int = 2) -> None:

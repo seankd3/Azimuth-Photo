@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from features.share.visitor import (
+    attachment_name as _attachment_name,
+)
+
 import asyncio
 import json
 import zipfile
@@ -10,13 +14,6 @@ from pathlib import Path
 
 from core.source_files import source_file_is_safe
 from features.sync import readthrough
-
-
-def _attachment_name(image_id: int, filename: str, *, suffix: str = "") -> str:
-    stem, extension = Path(filename or "").name.rsplit(".", 1) if "." in Path(filename or "").name else (Path(filename or "").name, "")
-    safe_stem = "".join(char if char.isalnum() or char in "._- " else "_" for char in stem).strip(" .")[:180] or f"photo-{image_id}"
-    safe_extension = "".join(char for char in (suffix.lstrip(".") or extension).lower() if char.isalnum())[:12]
-    return f"{safe_stem}{f'.{safe_extension}' if safe_extension else ''}"
 
 
 def zip_gallery(gallery: dict, destination: str) -> dict:

@@ -7,6 +7,8 @@ faithfully apply without Adobe's unavailable 3D LookTable.
 
 from __future__ import annotations
 
+from features.develop.xmp_write import _normalize_value
+
 from core.numbers import number as _number
 
 import re
@@ -33,18 +35,6 @@ def _split_name(name: str) -> tuple[str, str]:
 def _is_crs_name(name: str) -> bool:
     namespace, _local = _split_name(name)
     return _CRS_NAMESPACE_MARKER in namespace.lower() or name.startswith("crs:")
-
-
-def _normalize_value(value: object) -> bool | int | float | str:
-    clean = str(value or "").strip()
-    if clean.lower() == "true":
-        return True
-    if clean.lower() == "false":
-        return False
-    if not _NUMBER.fullmatch(clean):
-        return clean
-    numeric = float(clean)
-    return int(numeric) if numeric.is_integer() else numeric
 
 
 def _crs_attributes(element: etree.Element) -> dict[str, Any]:

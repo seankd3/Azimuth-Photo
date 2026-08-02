@@ -1,3 +1,8 @@
+from features.share.visitor import (
+    attachment_name as _attachment_name,
+    brand as _brand_payload,
+    no_leak as _public_response,
+)
 import asyncio
 import json
 import os
@@ -6,15 +11,12 @@ import time
 import zipfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
-import settings
-from features.publishing.downloads import _attachment_name
 from features.share import auth
 
 
@@ -165,29 +167,6 @@ def _share_payload(request: Request, share: dict | None) -> dict | None:
         "first_viewed_at": share.get("first_viewed_at"),
         "last_viewed_at": share.get("last_viewed_at"),
     }
-
-
-def _public_response(response: Response) -> Response:
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = "private, no-store"
-    return response
-
-
-def _brand_payload() -> dict:
-    config = settings.get_settings()
-    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
-    site_label = _site_label(site_url)
-    name = str(config.get("share_brand_name") or "").strip()
-    if not name:
-        name = site_label or "Your photographer"
-    return {"name": name, "site_url": site_url, "site_label": site_label}
-
-
-def _site_label(site_url: str) -> str:
-    if not site_url:
-        return ""
-    parsed = urlparse(site_url if "://" in site_url else f"https://{site_url}")
-    return (parsed.netloc or parsed.path).removeprefix("www.")
 
 
 def _date_subtitle(collection: dict | None) -> str:

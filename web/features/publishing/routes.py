@@ -6,8 +6,13 @@ gallery is a private share token scoped to a collection snapshot.
 
 from __future__ import annotations
 
+from features.share.visitor import (
+    attachment_name as _attachment_name,
+    brand as _brand_payload,
+    no_leak as _public_response,
+)
+
 import asyncio
-import os
 import tempfile
 import time
 from collections.abc import Awaitable, Callable
@@ -25,7 +30,6 @@ from features.publishing import galleries
 from features.publishing.downloads import zip_gallery
 from features.share import auth
 from features.sync import readthrough
-import settings
 
 
 router = APIRouter()
@@ -180,31 +184,6 @@ def _public_page_payload(gallery: dict) -> dict:
         "download_all_url": f"/s/gallery/{token}/download-all" if gallery["allow_download_all"] else "",
         "cover_image": cover["full"] if cover else "",
     }
-
-
-def _brand_payload() -> dict:
-    config = settings.get_settings()
-    site_url = str(config.get("publish_site_base_url") or "").strip().rstrip("/")
-    site_label = site_url.removeprefix("https://").removeprefix("http://").removeprefix("www.")
-    name = str(config.get("share_brand_name") or "").strip() or site_label or "Your photographer"
-    return {"name": name, "site_url": site_url, "site_label": site_label}
-
-
-def _public_response(response: Response) -> Response:
-    response.headers["Referrer-Policy"] = "no-referrer"
-    response.headers["Cache-Control"] = "private, no-store"
-    return response
-
-
-def _attachment_name(image_id: int, filename: str, *, suffix: str = "") -> str:
-    basename = os.path.basename(str(filename or ""))
-    stem, extension = os.path.splitext(basename)
-    safe_stem = "".join(char if char.isalnum() or char in "._- " else "_" for char in stem)
-    safe_stem = safe_stem.strip(" .")[:180] or f"photo-{image_id}"
-    extension_text = (suffix or extension).lower().lstrip(".")
-    safe_extension = "".join(char for char in extension_text if char.isalnum())[:12]
-    safe_extension = f".{safe_extension}" if safe_extension else ""
-    return f"{safe_stem}{safe_extension}"
 
 
 async def _safe_original(image: dict) -> bool:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import json
+from core.stored_json import stored_object as _parse_query
+
 import re
 import sqlite3
 import time
@@ -698,16 +699,6 @@ def _valid_area(area: str) -> str:
 
 def _slugify(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")[:96]
-
-
-def _parse_query(value: str | None) -> dict | None:
-    if value is None:
-        return None
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _unique_ids(values) -> list[int]:

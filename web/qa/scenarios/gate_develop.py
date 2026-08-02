@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-
-def _settings(qa, image_id: int) -> dict:
-    response = qa.page.request.get(f"{qa.base_url}/api/develop/{image_id}")
-    assert response.ok, f"Develop settings returned HTTP {response.status}"
-    return response.json().get("settings") or {}
+from qa.scenarios.develop import _settings
 
 
 def develop_batch_export_sync(qa) -> None:

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import json
+from core.stored_json import stored_object as _parse_query
+
 import time
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
@@ -265,16 +266,6 @@ def _collection_node(row: dict) -> dict:
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
-
-
-def _parse_query(value: str | None) -> dict | None:
-    if value is None:
-        return None
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return None
-    return parsed if isinstance(parsed, dict) else None
 
 
 def _unique_ids(values) -> list[int]:
