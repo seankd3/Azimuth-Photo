@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlencode
 
+from core import user_activity
 from data import connection
 from features.sync import satellite
 from features.sync.executor import run_foreground_sync_work, run_sync_work
@@ -162,22 +163,8 @@ class _QueuedItem:
     kind: str = field(compare=False, default="thumb")
 
 
-async def _wait_while_someone_is_browsing() -> None:
-    """Hold the preview catch-up while the app is being used.
-
-    Pulling a library's previews down is a migration: 57,000 of them still owed
-    on the owner's laptop. Run flat out and it drowns the thing it is for —
-    measured, the first page of photos took minutes while this ran, and 0.23
-    seconds with it paused. The catalog mirror already shows this courtesy;
-    the preview puller must too.
-    """
-
-    try:
-        import thumbnails
-    except Exception:
-        return
-    while thumbnails.get_idle_seconds() < 1.0:
-        await asyncio.sleep(0.25)
+# How many previews to store before asking again whether someone is browsing.
+_QUIET_CHECK_EVERY = 25
 
 
 class ThumbPrefetcher:
@@ -288,7 +275,7 @@ class ThumbPrefetcher:
                 self._status.update(library_cached=cached, library_total=total)
                 self._status.update(state="budget", size=size, tier="loupe")
                 return self.status()
-        await _wait_while_someone_is_browsing()
+        await user_activity.wait_for_quiet()
         after_id = await self._state_int(f"after:{size}")
         tier = "browse" if size == self.BROWSE_SIZE else "loupe"
         self._status.update(state="fetching", size=size, after_id=after_id, tier=tier)
@@ -500,6 +487,12 @@ class ThumbPrefetcher:
                     hub_id = int(stem)
                 except ValueError:
                     continue
+                # A pack holds up to 500 previews and each one costs a catalog
+                # lookup. Waiting for quiet once per pack would mean someone who
+                # arrives mid-pack waits for all of it, so ask again every
+                # handful: the longest anyone waits is a blink.
+                if stored and stored % _QUIET_CHECK_EVERY == 0:
+                    await user_activity.wait_for_quiet()
                 local = await self._local_row_for_hub(hub_id)
                 last_hub_id = max(last_hub_id, hub_id)
                 if local is None or not data:

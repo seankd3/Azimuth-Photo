@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import functools
 import gzip
 import inspect
@@ -16,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from urllib.parse import urlencode
 
-from core import cache_events
+from core import cache_events, user_activity
 from data import connection
 from data.repositories import catalog as catalog_repository
 from features.sync import elo_stars, family_clock, satellite
@@ -26,26 +25,6 @@ from features.trash import service as trash_service
 
 
 log = logging.getLogger(__name__)
-
-# How long the mirror steps aside for after each committed batch while someone
-# is browsing. Long enough that a request in flight gets the disk, short enough
-# that an idle machine still catches up quickly.
-_BUSY_BACKOFF_SECONDS = 0.25
-_IDLE_ENOUGH_SECONDS = 1.0
-
-
-async def _yield_to_the_person_using_the_app() -> None:
-    """Give the event loop and the disk back between batches."""
-
-    try:
-        import thumbnails
-
-        idle = thumbnails.get_idle_seconds()
-    except Exception:
-        # No activity signal available (tests, headless): just yield.
-        await asyncio.sleep(0)
-        return
-    await asyncio.sleep(0 if idle >= _IDLE_ENOUGH_SECONDS else _BUSY_BACKOFF_SECONDS)
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
 _MIRROR_DDL = """
@@ -241,7 +220,7 @@ class MirrorPuller:
                     # database; this yields the loop as well and stands aside
                     # while someone is actually browsing, so a large catch-up
                     # costs patience rather than responsiveness.
-                    await _yield_to_the_person_using_the_app()
+                    await user_activity.wait_for_quiet()
             await self._set_state(conn, "cursor", str(new_cursor))
             # The library service short-circuits on these denormalized counts;
             # a mirror that fills rows without them makes All Photos look like

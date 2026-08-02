@@ -11,6 +11,8 @@ import os
 import sqlite3
 import threading
 import time
+
+from core import user_activity
 from concurrent.futures import ThreadPoolExecutor
 
 from data import connection as data_connection
@@ -67,7 +69,6 @@ _thumbnail_retry_after: dict[tuple[str, int, str], float] = {}
 _orientation_queue: dict[int, tuple[str, float]] = {}
 _orientation_lock = threading.Lock()
 
-_last_user_activity = time.monotonic()
 _prefetching = False
 _pregen_manual_mode = False
 _pregen_manual_pause = True
@@ -151,13 +152,14 @@ def _cache_dir_safe_to_clear() -> tuple[bool, str]:
     )
 
 
-def note_user_activity():
-    global _last_user_activity
-    _last_user_activity = time.monotonic()
+def note_user_activity(at: float | None = None):
+    """Kept as the name the middleware calls; the clock lives in core."""
+
+    user_activity.note_activity(at)
 
 
 def get_idle_seconds() -> float:
-    return max(0.0, time.monotonic() - _last_user_activity)
+    return user_activity.idle_seconds()
 
 
 def _ensure_disk_cache_dirs():
@@ -183,18 +185,6 @@ def cleanup_stale_cache_temps(max_age_seconds: float = 30 * 60) -> dict:
     return _cleanup_stale_cache_temps(max_age_seconds=max_age_seconds)
 
 
-def _wait_while_someone_is_browsing() -> None:
-    """Hold a background chore while the app is being used.
-
-    The same courtesy the catalog mirror already shows. A repair with tens of
-    thousands of rows to clear otherwise runs flat out for minutes at exactly
-    the moment someone has opened their library.
-    """
-
-    while get_idle_seconds() < 1.0:
-        time.sleep(0.25)
-
-
 def sweep_missing_cache_entries(
     *,
     batch_size: int = 500,
@@ -209,7 +199,7 @@ def sweep_missing_cache_entries(
         invalidate_disk_stats_cache=_invalidate_disk_stats_cache,
         batch_size=batch_size,
         max_batches=max_batches,
-        stand_aside=_wait_while_someone_is_browsing,
+        stand_aside=user_activity.wait_for_quiet_sync,
     )
 
 

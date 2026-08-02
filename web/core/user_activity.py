@@ -1,10 +1,20 @@
-"""Classify which HTTP traffic counts as real browsing for pregen politeness.
+"""Whether someone is using the app, and what background work owes them.
 
-Monitoring, health, status, and telemetry must never look like a user in the
-library — otherwise ops pollers clamp bulk waves to ACTIVITY_BURST forever.
+Two jobs, and they belong together. Classifying which HTTP traffic is really a
+person browsing — monitoring, health and telemetry must never look like one,
+or ops pollers clamp bulk waves forever. And holding every background chore to
+one rule about it, because four chores each being politely half-considerate
+adds up to an app that does not respond: measured on a 142k library, browsing
+was 23ms with the chores quiet and minutes with them running.
+
+The rule: a chore waits for quiet before starting a unit of work, and its units
+are small enough that someone arriving mid-unit waits a blink, not a minute.
 """
 
 from __future__ import annotations
+
+import asyncio
+import time
 
 # Exact paths that never count as browsing (ops / health / telemetry).
 NON_BROWSE_PATHS = frozenset(
@@ -66,3 +76,43 @@ def marks_user_activity(path: str) -> bool:
 
 # Back-compat alias used by app factory / middleware wiring.
 IDLE_ACTIVITY_EXCLUDED_PATHS = NON_BROWSE_PATHS
+
+
+# How long since the last real interaction before background work may proceed.
+QUIET_SECONDS = 2.0
+# How often a waiting chore re-asks. Short enough to get going promptly once the
+# app is idle, long enough that waiting costs nothing.
+_POLL_SECONDS = 0.25
+
+_last_activity_at = time.monotonic()
+
+
+def note_activity(at: float | None = None) -> None:
+    """Record that someone did something — now, or at a given monotonic time."""
+
+    global _last_activity_at
+    _last_activity_at = time.monotonic() if at is None else float(at)
+
+
+def idle_seconds() -> float:
+    """How long the app has been left alone."""
+
+    return max(0.0, time.monotonic() - _last_activity_at)
+
+
+def someone_is_here(quiet_seconds: float = QUIET_SECONDS) -> bool:
+    return idle_seconds() < quiet_seconds
+
+
+async def wait_for_quiet(quiet_seconds: float = QUIET_SECONDS) -> None:
+    """Hold an async chore until the app is being left alone."""
+
+    while someone_is_here(quiet_seconds):
+        await asyncio.sleep(_POLL_SECONDS)
+
+
+def wait_for_quiet_sync(quiet_seconds: float = QUIET_SECONDS) -> None:
+    """The same, for a chore running on a worker thread."""
+
+    while someone_is_here(quiet_seconds):
+        time.sleep(_POLL_SECONDS)

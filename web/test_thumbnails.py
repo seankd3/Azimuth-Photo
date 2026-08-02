@@ -1300,7 +1300,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self.old_prefetching = thumbnails._prefetching
         self.old_pregen_manual_mode = thumbnails._pregen_manual_mode
         self.old_pregen_manual_pause = thumbnails._pregen_manual_pause
-        self.old_last_user_activity = thumbnails._last_user_activity
+        self.old_last_user_activity = thumbnails.get_idle_seconds()
         self.old_disk_stats_cache = dict(thumbnails._disk_stats_cache)
 
         thumbnails.SSD_CACHE_DIR = self.tempdir.name
@@ -1357,7 +1357,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         thumbnails._prefetching = True
         thumbnails._pregen_manual_mode = True
         thumbnails._pregen_manual_pause = False
-        thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
+        thumbnails.note_user_activity(thumbnails.time.monotonic() - 30.0)
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
         preview_priority.clear_scopes()
@@ -1386,7 +1386,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         thumbnails._prefetching = self.old_prefetching
         thumbnails._pregen_manual_mode = self.old_pregen_manual_mode
         thumbnails._pregen_manual_pause = self.old_pregen_manual_pause
-        thumbnails._last_user_activity = self.old_last_user_activity
+        thumbnails.note_user_activity(thumbnails.time.monotonic() - self.old_last_user_activity)
         thumbnails._clear_memory_cache()
         thumbnails._clear_disk_index()
         thumbnails._tier_byte_totals.clear()
@@ -2633,7 +2633,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         RAWs that cannot warm full), which strands sparse thumb-pending work.
         """
         thumbnails._disk_allocations[thumbnails.FULL_TIER] = 64 * 1024 * 1024
-        thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
+        thumbnails.note_user_activity(thumbnails.time.monotonic() - 30.0)
         path = self._make_image()
         signatures, file_size, _file_modified_at = self._catalog_signatures(path)
         self._add_catalog_original(1, path)
@@ -2676,7 +2676,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
             # Non-zero full allocation (old bug OR'd it into anti-join) but too
             # small for any original → full_candidate_signature always None.
             thumbnails._disk_allocations[thumbnails.FULL_TIER] = 100
-            thumbnails._last_user_activity = thumbnails.time.monotonic()
+            thumbnails.note_user_activity()
 
             for index in range(40):
                 image_id = index + 1
@@ -2698,7 +2698,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
             thumbnails.PREGENERATE_SCAN_BATCH = old_scan_batch
             thumbnails.PREGENERATE_ACTIVITY_BURST_ITEMS = old_activity
             thumbnails._disk_allocations[thumbnails.FULL_TIER] = old_full
-            thumbnails._last_user_activity = thumbnails.time.monotonic() - 30.0
+            thumbnails.note_user_activity(thumbnails.time.monotonic() - 30.0)
 
     def test_bulk_warmup_treats_failure_only_batch_as_no_progress(self):
         path = self._make_original_file("bad.jpg", 128)
@@ -2768,7 +2768,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         # Full-tilt: the server backfill never throttles for priority/activity.
         thumbnails.note_user_activity()
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
-        thumbnails._last_user_activity = (
+        thumbnails.note_user_activity(
             thumbnails.time.monotonic() - thumbnails.PREGENERATE_IDLE_SECONDS
         )
         self.assertFalse(thumbnails._pregen_should_pause_for_priority())
