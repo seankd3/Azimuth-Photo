@@ -3,6 +3,7 @@
 import { fetchOptionsWithTimeout } from '../api.js';
 import { emit } from './state.js';
 import { showToast } from './toast.js';
+import { openSystemSettings } from './drawer.js';
 
 const POLL_MS = 3000;
 let timer = null;
@@ -219,6 +220,17 @@ function patchOffline() {
     patchText('[data-sync-current]', 'Hub unavailable — changes will retry');
 }
 
+function mountNotConnected(slot) {
+    const chip = document.createElement('div');
+    chip.className = 'sync-chip not-connected';
+    chip.innerHTML = '<button class="sync-chip-button" type="button" '
+        + 'title="This computer is not connected to your hub — photos stored there cannot load">'
+        + '<span class="sync-chip-arrow" aria-hidden="true">!</span>'
+        + '<span data-sync-count>Not connected</span></button>';
+    chip.querySelector('button').addEventListener('click', () => openSystemSettings('connectivity'));
+    slot.replaceChildren(chip);
+}
+
 export async function initSyncChip() {
     const slot = document.getElementById('sync-chip-slot');
     if (!slot) return;
@@ -233,13 +245,20 @@ export async function initSyncChip() {
         return;
     }
     // Always poll on satellite so LR quiet signals (new exports / health) piggyback.
-    // Visual sync chip only when a hub is attached.
     pollOnly = !hasHub;
     if (hasHub) {
         root = document.createElement('div');
         root.className = 'sync-chip';
         slot.replaceChildren(root);
         mount();
+    } else {
+        // A library mirrored from a hub, with no hub attached, used to show
+        // nothing here at all — which is how a laptop ended up displaying
+        // 150,635 photos it could not fetch one pixel of. Say it, and put the
+        // way back one click away. A library that never had a hub is fine and
+        // gets no chip: the server decides, from the catalog, not the run mode.
+        const status = await json('/api/sync/status').catch(() => null);
+        if (status?.hub_health === 'not_connected') mountNotConnected(slot);
     }
     await refresh();
     timer = window.setInterval(refresh, POLL_MS);

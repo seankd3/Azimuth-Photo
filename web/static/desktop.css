@@ -1047,6 +1047,8 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .sync-chip-arrow { color: var(--accent); font-size: 15px; font-weight: 700; }
 .sync-chip.needs-update .sync-chip-button { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 48%, var(--line)); }
 .sync-chip.needs-update .sync-chip-arrow { color: var(--warn); }
+.sync-chip.not-connected .sync-chip-button { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 48%, var(--line)); }
+.sync-chip.not-connected .sync-chip-arrow { color: var(--warn); }
 .sync-chip-sep { color: var(--text-3); }
 .sync-chip-popover { position: absolute; top: calc(100% + var(--s2)); right: 0; z-index: var(--z-popover); width: min(300px, calc(100vw - 24px)); padding: var(--s3); color: var(--text-2); background: var(--surface-popover); border: 1px solid var(--line); border-radius: var(--r-card); box-shadow: 0 16px 48px rgba(0,0,0,.45); }
 .sync-chip-popover-title { display: flex; justify-content: space-between; gap: var(--s3); color: var(--text); font-size: var(--fs-caption); font-weight: 650; }

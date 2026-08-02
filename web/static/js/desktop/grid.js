@@ -1,7 +1,7 @@
 import {
     byId, clearFacet, clearSelection, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
+import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, getSyncStatus, previewThumbUrl, thumbUrl, unstack } from './api.js';
 import { loadScopePage, similarScopeActive } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -258,13 +258,35 @@ function appendPausedPreviewHint(target) {
     target.append(hint);
 }
 
+function appendDisconnectedHubHint(target) {
+    if (!target || target.querySelector('.grid-pending-paused')) return;
+    const hint = document.createElement('span');
+    hint.className = 'grid-pending-paused';
+    hint.append('These photos live on your hub, and this computer is not connected to it — ');
+    const connect = document.createElement('button');
+    connect.type = 'button';
+    connect.className = 'grid-pending-system';
+    connect.textContent = 'Connect';
+    connect.addEventListener('click', () => openSystemSettings('connectivity'));
+    hint.append(connect, '.');
+    target.append(hint);
+}
+
 function loadPausedPreviewHint(target) {
     const request = ++pendingNoticeRequest;
-    getCacheStatus().then((status) => {
-        if (request !== pendingNoticeRequest || !target.isConnected) return;
-        if (cachePregenPaused(status)) appendPausedPreviewHint(target);
-        else target.querySelector('.grid-pending-paused')?.remove();
-    }).catch(() => {});
+    // Two different reasons a photo never sharpens, and they need different
+    // sentences. Locally the preview engine can be paused. On a satellite the
+    // photo can live on a hub this computer is not attached to — which used to
+    // say nothing at all, so the library sat there greyed out with no cause and
+    // no way back.
+    Promise.all([getCacheStatus().catch(() => null), getSyncStatus().catch(() => null)])
+        .then(([cache, sync]) => {
+            if (request !== pendingNoticeRequest || !target.isConnected) return;
+            if (sync?.hub_health === 'not_connected') appendDisconnectedHubHint(target);
+            else if (cachePregenPaused(cache)) appendPausedPreviewHint(target);
+            else target.querySelector('.grid-pending-paused')?.remove();
+        })
+        .catch(() => {});
 }
 
 function renderPendingThumbnailNotice() {

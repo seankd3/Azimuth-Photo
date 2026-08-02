@@ -12,6 +12,7 @@ from core.version import API_REV, app_version
 from features.sync import contract, freeup, oplog, satellite
 from features.sync.sync_worker import get_worker
 from features.trash import service as trash_service
+from data.repositories import catalog as catalog_repository
 
 
 router = APIRouter(tags=["sync"])
@@ -24,6 +25,28 @@ class FreeUpRequest(BaseModel):
 
 class FreeUpCancelRequest(BaseModel):
     pass
+
+
+async def _library_needs_a_hub() -> bool:
+    """Whether this library holds photos that only a hub can serve.
+
+    A satellite with no hub is not healthy, it is unattached — saying "ok" is
+    why this laptop showed 150,635 mirrored photos it could not fetch a single
+    pixel of, with nothing on screen to explain it. But a library that never
+    had a hub is genuinely fine and must not be told it is disconnected, so ask
+    the catalog rather than the run mode: standalone and satellite are the same
+    mode here, and only the mirrored source tells them apart.
+    """
+
+    try:
+        conn = await db.get_db()
+        cursor = await conn.execute(
+            "SELECT 1 FROM catalog_sources WHERE path = ? AND included = 1 LIMIT 1",
+            (catalog_repository.HUB_MIRROR_SOURCE_PATH,),
+        )
+        return await cursor.fetchone() is not None
+    except Exception:
+        return False
 
 
 def _start_manual_sync_task(coro) -> None:
@@ -69,7 +92,13 @@ async def sync_status(lr_exports_since: float = 0.0):
         hub_state = (
             contract.hub_status(satellite.hub_url())
             if satellite.has_hub()
-            else {"hub_health": "ok", "api_rev": API_REV, "app_version": app_version()}
+            else {
+                "hub_health": (
+                    "not_connected" if await _library_needs_a_hub() else "ok"
+                ),
+                "api_rev": API_REV,
+                "app_version": app_version(),
+            }
         )
         status = {"mode": "satellite" if satellite.is_satellite_mode() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "skipped_conflicts": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_state}
     else:
