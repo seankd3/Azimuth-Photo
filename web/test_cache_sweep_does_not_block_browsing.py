@@ -115,8 +115,8 @@ class SweepLockTests(unittest.TestCase):
         self.assertEqual(result["batches"], 1)
         self.assertEqual(result["scanned"], 50)
 
-    def test_it_stands_aside_between_batches(self):
-        """A chore with tens of thousands of rows must not run flat out."""
+    def test_it_steps_politely_rather_than_running_flat_out(self):
+        """A chore with tens of thousands of rows must give way as it goes."""
 
         waits = []
         maintenance.sweep_missing_cache_entries(
@@ -125,12 +125,12 @@ class SweepLockTests(unittest.TestCase):
             remove_cache_entry_locked=lambda conn, row: None,
             path_exists=lambda path: True,
             batch_size=50,
-            stand_aside=lambda: waits.append(1),
+            step_politely=lambda items: (waits.append(1) or items),
         )
-        self.assertGreater(len(waits), 0, "120 rows in batches of 50 is more than one pass")
+        self.assertGreater(len(waits), 0, "the deletes must go through the shared courtesy")
 
-    def test_standing_aside_is_optional(self):
-        """Nothing should require the caller to supply one."""
+    def test_the_default_courtesy_needs_no_argument(self):
+        """A caller supplies nothing; the shared one is the default."""
 
         result = self._sweep(lambda path: True)
         self.assertEqual(result["scanned"], 120)
@@ -160,7 +160,7 @@ class SweepLockTests(unittest.TestCase):
             )
         finally:
             type(self.lock).__enter__ = original_enter
-        self.assertLessEqual(max(holds), 25, "one hold deleted a whole batch")
+        self.assertLessEqual(max(holds), 1, "the lock is held for one row at a time")
         self.assertEqual(sum(holds), 120, "every missing row is still removed")
 
     def test_an_empty_cache_is_not_an_error(self):

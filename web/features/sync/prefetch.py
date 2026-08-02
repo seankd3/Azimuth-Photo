@@ -163,10 +163,6 @@ class _QueuedItem:
     kind: str = field(compare=False, default="thumb")
 
 
-# How many previews to store before asking again whether someone is browsing.
-_QUIET_CHECK_EVERY = 25
-
-
 class ThumbPrefetcher:
     """Resumable newest-first thumb pack fetcher plus a tiny predictive queue.
 
@@ -275,7 +271,6 @@ class ThumbPrefetcher:
                 self._status.update(library_cached=cached, library_total=total)
                 self._status.update(state="budget", size=size, tier="loupe")
                 return self.status()
-        await user_activity.wait_for_quiet()
         after_id = await self._state_int(f"after:{size}")
         tier = "browse" if size == self.BROWSE_SIZE else "loupe"
         self._status.update(state="fetching", size=size, after_id=after_id, tier=tier)
@@ -469,7 +464,7 @@ class ThumbPrefetcher:
             raise RuntimeError("hub returned an invalid thumbnail pack") from error
 
         with archive:
-            for member in archive:
+            async for member in user_activity.politely(archive):
                 if not member.isfile():
                     continue
                 payload = archive.extractfile(member)
@@ -487,12 +482,6 @@ class ThumbPrefetcher:
                     hub_id = int(stem)
                 except ValueError:
                     continue
-                # A pack holds up to 500 previews and each one costs a catalog
-                # lookup. Waiting for quiet once per pack would mean someone who
-                # arrives mid-pack waits for all of it, so ask again every
-                # handful: the longest anyone waits is a blink.
-                if stored and stored % _QUIET_CHECK_EVERY == 0:
-                    await user_activity.wait_for_quiet()
                 local = await self._local_row_for_hub(hub_id)
                 last_hub_id = max(last_hub_id, hub_id)
                 if local is None or not data:

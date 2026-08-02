@@ -191,7 +191,7 @@ class MirrorPuller:
         try:
             source_id = await self._hub_source_id(conn)
             available_columns = {row["name"] for row in await (await conn.execute("PRAGMA table_info(images)")).fetchall()}
-            for line in lines:
+            async for line in user_activity.politely(lines):
                 if not line.strip():
                     continue
                 row = json.loads(line)
@@ -214,13 +214,9 @@ class MirrorPuller:
                     continue
                 applied += 1
                 if applied % _MIRROR_COMMIT_EVERY == 0:
+                    # Bound how long a writer holds the database; `politely`
+                    # above bounds how long anyone waits behind it.
                     await conn.commit()
-                    # Catching up is never worth a frozen grid. Committing in
-                    # batches already bounds how long a writer holds the
-                    # database; this yields the loop as well and stands aside
-                    # while someone is actually browsing, so a large catch-up
-                    # costs patience rather than responsiveness.
-                    await user_activity.wait_for_quiet()
             await self._set_state(conn, "cursor", str(new_cursor))
             # The library service short-circuits on these denormalized counts;
             # a mirror that fills rows without them makes All Photos look like

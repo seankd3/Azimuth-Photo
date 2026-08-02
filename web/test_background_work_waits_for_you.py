@@ -61,36 +61,76 @@ class OneClockTests(unittest.TestCase):
         self.assertGreater(time.monotonic() - started, 0.2)
 
 
-class EveryChoreAsksTests(unittest.TestCase):
-    """The point of one rule is that nobody keeps a private copy."""
+class PolitelyTests(unittest.TestCase):
+    """The courtesy, as one sentence a chore wraps its own loop in."""
+
+    def test_it_gives_way_before_the_first_step(self):
+        gave_way = []
+
+        async def scenario():
+            user_activity.note_activity()
+            work = user_activity.politely(range(3), every=1)
+            task = asyncio.create_task(_drain(work, gave_way))
+            await asyncio.sleep(0.4)
+            started = len(gave_way)
+            user_activity.note_activity(time.monotonic() - 99)
+            await asyncio.wait_for(task, timeout=3)
+            return started
+
+        self.assertEqual(asyncio.run(scenario()), 0, "it began while someone was here")
+
+    def test_every_item_still_arrives(self):
+        seen = []
+        user_activity.note_activity(time.monotonic() - 99)
+        asyncio.run(_drain(user_activity.politely(range(7)), seen))
+        self.assertEqual(seen, list(range(7)))
+
+    def test_the_thread_flavour_yields_the_same_items(self):
+        user_activity.note_activity(time.monotonic() - 99)
+        self.assertEqual(list(user_activity.politely_sync(range(5))), list(range(5)))
+
+    def test_an_empty_chore_does_nothing_at_all(self):
+        user_activity.note_activity()
+        self.assertEqual(list(user_activity.politely_sync([])), [])
+
+
+async def _drain(source, into):
+    async for item in source:
+        into.append(item)
+
+
+class EveryChoreSaysItTheSameWayTests(unittest.TestCase):
+    """One sentence, three chores, no private counters or thresholds."""
 
     CHORES = {
         "features/sync/mirror.py": "the catalog mirror",
         "features/sync/prefetch.py": "the preview catch-up",
-        "features/library/service.py": "the taste blend",
+        "thumbnails/maintenance.py": "the phantom-preview sweep",
     }
 
-    def test_each_chore_asks_the_shared_authority(self):
+    def test_each_chore_steps_politely(self):
         for path, what in self.CHORES.items():
             text = (WEB / path).read_text(encoding="utf-8")
-            self.assertIn("user_activity.wait_for_quiet", text, f"{what} must ask")
+            self.assertRegex(text, r"politely(_sync)?\(", f"{what} must step politely")
 
-    def test_the_sweep_asks_it_too(self):
-        text = (WEB / "thumbnails" / "__init__.py").read_text(encoding="utf-8")
-        self.assertIn("user_activity.wait_for_quiet_sync", text)
+    def test_the_taste_blend_waits_before_it_starts(self):
+        text = (WEB / "features" / "library" / "service.py").read_text(encoding="utf-8")
+        self.assertIn("user_activity.wait_for_quiet", text)
+
+    def test_no_chore_keeps_its_own_threshold_or_counter(self):
+        for path in list(self.CHORES) + ["thumbnails/__init__.py"]:
+            text = (WEB / path).read_text(encoding="utf-8")
+            for private in ("_QUIET_CHECK_EVERY", "_DELETE_GROUP", "_wait_while_someone_is_browsing"):
+                self.assertNotIn(private, text, f"{path} kept {private}")
 
     def test_nobody_keeps_a_private_idle_clock(self):
         for path in list(self.CHORES) + ["thumbnails/__init__.py"]:
             text = (WEB / path).read_text(encoding="utf-8")
             self.assertNotIn("_last_user_activity = time.monotonic()", text)
-            self.assertNotIn("_wait_while_someone_is_browsing", text)
 
-    def test_the_catch_up_re_asks_inside_a_pack(self):
-        """A pack is 500 previews; asking once per pack is asking too rarely."""
-
-        text = (WEB / "features" / "sync" / "prefetch.py").read_text(encoding="utf-8")
-        self.assertIn("_QUIET_CHECK_EVERY", text)
-        self.assertIn("stored % _QUIET_CHECK_EVERY", text)
+    def test_there_is_exactly_one_number(self):
+        text = (WEB / "core" / "user_activity.py").read_text(encoding="utf-8")
+        self.assertEqual(text.count("STEPS_BETWEEN_PAUSES = "), 1)
 
 
 if __name__ == "__main__":

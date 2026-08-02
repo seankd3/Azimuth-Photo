@@ -1,6 +1,8 @@
 """Thumbnail cache-root maintenance helpers."""
 
 import os
+
+from core import user_activity
 import shutil
 import sqlite3
 import time
@@ -81,11 +83,6 @@ def cleanup_stale_cache_temps(
     return result
 
 
-# How many rows the sweep may delete while holding the thumbnail lock. Small
-# enough that a grid request waiting behind it waits for a blink.
-_DELETE_GROUP = 25
-
-
 def sweep_missing_cache_entries(
     *,
     meta_lock,
@@ -95,17 +92,13 @@ def sweep_missing_cache_entries(
     batch_size: int = 500,
     max_batches: int | None = None,
     path_exists: Callable[[str], bool] = os.path.exists,
-    stand_aside: Callable[[], None] | None = None,
+    step_politely=user_activity.politely_sync,
 ) -> dict:
     """Delete cache_entries rows whose files are gone (phantom preview_ready).
 
     Cheap idle-time repair: batched, resumable via ``after_rowid``, once per
     process start. Does not delete real files — only rows already pointing at
     missing paths.
-
-    ``stand_aside`` is called between batches so the repair waits while someone
-    is actually browsing. On a library with tens of thousands of stale rows this
-    is the difference between a chore and an outage.
 
     The file checks happen outside the lock on purpose. They are the slow part
     — one filesystem call per cached preview, and this laptop has 121,826 of
@@ -124,11 +117,6 @@ def sweep_missing_cache_entries(
     while True:
         if max_batches is not None and batches >= max_batches:
             break
-        # Before the first batch as well as between them: someone who opens
-        # their library and starts browsing should not have a repair begin
-        # underneath them.
-        if stand_aside is not None:
-            stand_aside()
         with meta_lock:
             conn = db_connect()
             try:
@@ -153,19 +141,15 @@ def sweep_missing_cache_entries(
                 continue
             missing.append(row)
 
-        # Delete in small groups. Standing aside is not enough on its own: a
-        # request that is already waiting for this lock does not look like
-        # activity, so the sweep sees an idle app and takes the lock straight
-        # back. Holding it for a handful of rows instead of a whole batch caps
-        # what a waiting grid request can ever wait for.
-        for start in range(0, len(missing), _DELETE_GROUP):
-            group = missing[start:start + _DELETE_GROUP]
+        # One row at a time under the lock, given way between. A request already
+        # waiting for this lock does not look like activity, so the sweep would
+        # otherwise take it straight back on top of whoever is waiting.
+        for row in step_politely(missing):
             with meta_lock:
                 conn = db_connect()
                 try:
-                    for row in group:
-                        remove_cache_entry_locked(conn, row)
-                        removed += 1
+                    remove_cache_entry_locked(conn, row)
+                    removed += 1
                     conn.commit()
                 finally:
                     conn.close()

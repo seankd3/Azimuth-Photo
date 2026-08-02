@@ -7,8 +7,9 @@ one rule about it, because four chores each being politely half-considerate
 adds up to an app that does not respond: measured on a 142k library, browsing
 was 23ms with the chores quiet and minutes with them running.
 
-The rule: a chore waits for quiet before starting a unit of work, and its units
-are small enough that someone arriving mid-unit waits a blink, not a minute.
+The rule, in one sentence: a chore steps through its work, and between steps it
+gives way. ``politely`` is that sentence as code — a chore wraps its own loop in
+it and needs no counter, no threshold and no opinion of its own.
 """
 
 from __future__ import annotations
@@ -116,3 +117,33 @@ def wait_for_quiet_sync(quiet_seconds: float = QUIET_SECONDS) -> None:
 
     while someone_is_here(quiet_seconds):
         time.sleep(_POLL_SECONDS)
+
+
+# How many steps a chore may take before giving way again. Small enough that
+# someone arriving mid-chore waits a blink; large enough that asking costs
+# nothing. One number, because one number is easier to reason about than four.
+STEPS_BETWEEN_PAUSES = 25
+
+
+async def politely(items, *, every: int = STEPS_BETWEEN_PAUSES):
+    """Step through work, giving way to whoever is using the app.
+
+    The whole courtesy, in the only place it needs to exist:
+
+        async for row in user_activity.politely(rows):
+            ...
+    """
+
+    for index, item in enumerate(items):
+        if index % every == 0:
+            await wait_for_quiet()
+        yield item
+
+
+def politely_sync(items, *, every: int = STEPS_BETWEEN_PAUSES):
+    """The same, for a chore running on a worker thread."""
+
+    for index, item in enumerate(items):
+        if index % every == 0:
+            wait_for_quiet_sync()
+        yield item
