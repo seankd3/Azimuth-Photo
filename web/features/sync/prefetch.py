@@ -303,6 +303,7 @@ class ThumbPrefetcher:
         self._status.update(
             state="idle",
             after_id=next_cursor,
+            stored_last_pass=stored,
             cached=int(self._status["cached"]) + stored,
             total=int(self._status["total"]) + stored + skipped,
             library_cached=cached,
@@ -321,10 +322,25 @@ class ThumbPrefetcher:
         return total <= 0 or cached >= total
 
     async def prefetch_browse_first(self, *, limit: int = 500) -> dict[str, Any]:
-        """Fill `sm` exclusively until the browse tier is complete, then `md`."""
+        """Fill `sm` first — but first is a priority, not a vow of exclusivity.
+
+        The browse tier can be permanently short: a hub still working through
+        its own backlog has no small preview to send yet, and some photos will
+        never have one (videos, frames too large for the decoder). Waiting for
+        100% before touching `md` meant the tier that makes opening a photo
+        instant stayed half-empty forever — measured on the owner's laptop,
+        38,262 medium previews held locally against 72,844 sitting on the hub,
+        while the browse tier spun on photos the hub could not give it.
+
+        So: ask for `sm`, and if the hub had nothing to send, spend the pass on
+        `md` instead of spinning. The next pass asks for `sm` again, so the
+        browse tier still wins the moment there is anything to win.
+        """
 
         if not await self.browse_tier_complete():
-            return await self.prefetch_once(size=self.BROWSE_SIZE, limit=limit)
+            status = await self.prefetch_once(size=self.BROWSE_SIZE, limit=limit)
+            if int(status.get("stored_last_pass") or 0) > 0 or status.get("state") == "budget":
+                return status
         return await self.prefetch_once(size=self.LOUPE_SIZE, limit=limit)
 
     async def enqueue_loupe_neighbors(self, image_id: int) -> None:
