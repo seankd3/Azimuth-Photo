@@ -164,7 +164,16 @@ async def api_revoke_device(device_id: int):
 
 @router.get("/api/discover")
 async def api_discover():
+    # This machine advertises itself like any other, so an unfiltered browse
+    # offers you your own computer as somewhere to connect to. Measured on the
+    # owner's laptop: two results, one of them itself.
     hubs = await mdns.browse_hubs(timeout_seconds=2.0)
+    try:
+        self_id = await pairing.get_hub_id(_configured_db_path())
+    except Exception:
+        self_id = ""
+    if self_id:
+        hubs = [hub for hub in hubs if hub.get("hub_id") != self_id]
     return {"hubs": hubs, "zeroconf": mdns.zeroconf_available(), "disabled": mdns.mdns_disabled()}
 
 
