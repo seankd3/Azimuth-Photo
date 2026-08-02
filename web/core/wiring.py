@@ -90,22 +90,7 @@ def configure_database_backed_providers() -> None:
 
 
 def configure_people_routes() -> None:
-    import db
-
-    people_routes.configure(
-        get_people_review=lambda **kwargs: db.get_people_review(**kwargs),
-        get_people_status_counts=lambda **kwargs: db.get_people_status_counts(**kwargs),
-        get_face_thumbnail_context=lambda face_id: db.get_face_thumbnail_context(face_id),
-        label_person=lambda person_id, name: db.label_person(person_id, name),
-        merge_people=lambda source_person_id, target_person_id: db.merge_people(
-            source_person_id,
-            target_person_id,
-        ),
-        reject_merge_suggestion=lambda suggestion_id: db.reject_merge_suggestion(suggestion_id),
-        assign_face=lambda face_id, **kwargs: db.assign_face(face_id, **kwargs),
-        ignore_face=lambda face_id: db.ignore_face(face_id),
-        ignore_person=lambda person_id: db.ignore_person(person_id),
-    )
+    people_routes.reset_for_tests()
 
 
 def configure_status_media_search_providers() -> None:

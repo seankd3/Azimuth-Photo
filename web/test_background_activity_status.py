@@ -12,6 +12,8 @@ That is Sean's laptop.
 
 import asyncio
 import unittest
+
+import db
 from unittest import mock
 
 from features.captions import routes as caption_routes
@@ -28,17 +30,22 @@ class SatelliteWorkerHonestyTests(unittest.TestCase):
             get_caption_status_counts=mock.AsyncMock(return_value={}),
             invalidate_settings_response_cache=mock.Mock(),
         )
-        people_routes.configure(
-            get_people_review=mock.AsyncMock(return_value={"counts": {}}),
-            get_people_status_counts=mock.AsyncMock(return_value={"people": 0}),
-            get_face_thumbnail_context=mock.AsyncMock(return_value=None),
-            label_person=mock.AsyncMock(return_value={}),
-            merge_people=mock.AsyncMock(return_value={}),
-            reject_merge_suggestion=mock.AsyncMock(return_value={}),
-            assign_face=mock.AsyncMock(return_value={}),
-            ignore_face=mock.AsyncMock(return_value={}),
-            ignore_person=mock.AsyncMock(return_value={}),
-        )
+        # People routes call db directly now, so the test says so directly.
+        for name, result in (
+            ("get_people_review", {"counts": {}}),
+            ("get_people_status_counts", {"people": 0}),
+            ("get_face_thumbnail_context", None),
+            ("label_person", {}),
+            ("merge_people", {}),
+            ("reject_merge_suggestion", {}),
+            ("assign_face", {}),
+            ("ignore_face", {}),
+            ("ignore_person", {}),
+        ):
+            patcher = mock.patch.object(db, name, mock.AsyncMock(return_value=result))
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        people_routes.reset_for_tests()
 
     def _people(self, *, deferred: bool, capability=INSTALLED) -> dict:
         with mock.patch.object(people_routes.satellite, "defers_bulk_compute", return_value=deferred), \

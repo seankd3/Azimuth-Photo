@@ -26,8 +26,8 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         people_routes.invalidate_people_status_cache()
         try:
             with mock.patch.object(
-                people_routes,
-                "_get_people_status_counts",
+                db,
+                "get_people_status_counts",
                 side_effect=slow_counts,
             ):
                 first = await people_routes.people_status_payload()

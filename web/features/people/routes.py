@@ -1,3 +1,4 @@
+import db
 import asyncio
 import io
 import os
@@ -20,57 +21,13 @@ router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncOptionalDictBuilder = Callable[..., Awaitable[dict | None]]
 
-_get_people_review: AsyncDictBuilder | None = None
-_get_people_status_counts: AsyncDictBuilder | None = None
-_get_face_thumbnail_context: AsyncOptionalDictBuilder | None = None
-_label_person: AsyncDictBuilder | None = None
-_merge_people: AsyncDictBuilder | None = None
-_reject_merge_suggestion: AsyncDictBuilder | None = None
-_assign_face: AsyncDictBuilder | None = None
-_ignore_face: AsyncDictBuilder | None = None
-_ignore_person: AsyncDictBuilder | None = None
 
 
-def configure(
-    *,
-    get_people_review: AsyncDictBuilder,
-    get_people_status_counts: AsyncDictBuilder | None = None,
-    get_face_thumbnail_context: AsyncOptionalDictBuilder,
-    label_person: AsyncDictBuilder,
-    merge_people: AsyncDictBuilder,
-    reject_merge_suggestion: AsyncDictBuilder,
-    assign_face: AsyncDictBuilder,
-    ignore_face: AsyncDictBuilder,
-    ignore_person: AsyncDictBuilder,
-) -> None:
-    global _get_people_review, _get_people_status_counts, _get_face_thumbnail_context, _label_person
-    global _merge_people, _reject_merge_suggestion, _assign_face
-    global _ignore_face, _ignore_person
-    _get_people_review = get_people_review
-    _get_people_status_counts = get_people_status_counts
-    _get_face_thumbnail_context = get_face_thumbnail_context
-    _label_person = label_person
-    _merge_people = merge_people
-    _reject_merge_suggestion = reject_merge_suggestion
-    _assign_face = assign_face
-    _ignore_face = ignore_face
-    _ignore_person = ignore_person
+def reset_for_tests() -> None:
+    """Forget the cached people counts, so one test's totals are not another's."""
+
     invalidate_people_status_cache()
 
-
-def _configured():
-    values = (
-        _get_people_review,
-        _get_face_thumbnail_context,
-        _label_person,
-        _merge_people,
-        _reject_merge_suggestion,
-        _assign_face,
-        _ignore_face,
-        _ignore_person,
-    )
-    if any(value is None for value in values):
-        raise RuntimeError("People routes are not configured")
 
 
 _people_status_counts_cache: dict[str, object] = {"counts": None, "expires": 0.0}
@@ -107,7 +64,7 @@ def _schedule_people_counts_refresh() -> asyncio.Task | None:
     async def refresh() -> None:
         global _people_status_counts_refreshing
         try:
-            counts = await _get_people_status_counts()
+            counts = await db.get_people_status_counts()
             _people_status_counts_cache["counts"] = dict(counts or {})
             _people_status_counts_cache["expires"] = (
                 time.monotonic() + _people_status_counts_cache_ttl_seconds
@@ -119,9 +76,8 @@ def _schedule_people_counts_refresh() -> asyncio.Task | None:
 
 
 async def _fast_people_counts(worker: dict) -> tuple[dict, bool]:
-    if _get_people_status_counts is None:
-        _configured()
-        review = await _get_people_review(limit=12)
+    if db.get_people_status_counts is None:
+        review = await db.get_people_review(limit=12)
         return dict(review.get("counts", {}) if isinstance(review, dict) else {}), False
 
     cached = _people_status_counts_cache.get("counts")
@@ -202,8 +158,7 @@ async def api_people_status():
 
 @router.get("/api/people")
 async def api_people(limit: int = 24):
-    _configured()
-    review = await _get_people_review(limit=limit)
+    review = await db.get_people_review(limit=limit)
     return {**review, "status": await people_status_payload(review)}
 
 
@@ -258,9 +213,8 @@ def _render_face_thumbnail(face: dict, output_size: int) -> tuple[str, bytes] | 
 
 @router.get("/api/people/faces/{face_id}/thumb")
 async def api_people_face_thumb(request: Request, face_id: int, size: int = 160):
-    _configured()
     output_size = max(64, min(int(size or 160), 512))
-    face = await _get_face_thumbnail_context(face_id)
+    face = await db.get_face_thumbnail_context(face_id)
     if face is None:
         return JSONResponse({"error": "Face not found"}, status_code=404)
 
@@ -304,11 +258,10 @@ async def api_people_scan_resume():
 
 @router.post("/api/people/{person_id}/label")
 async def api_label_person(person_id: int, request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
-    result = await _label_person(person_id, body.get("name") or body.get("label") or "")
+    result = await db.label_person(person_id, body.get("name") or body.get("label") or "")
     if not result.get("ok"):
         return JSONResponse({"error": result.get("error") or "Could not label person"}, status_code=400)
     return result
@@ -316,7 +269,6 @@ async def api_label_person(person_id: int, request: Request):
 
 @router.post("/api/people/merge")
 async def api_merge_people(request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
@@ -324,7 +276,7 @@ async def api_merge_people(request: Request):
     target_id = positive_int(body.get("target_person_id"))
     if source_id is None or target_id is None:
         return JSONResponse({"error": "source_person_id and target_person_id are required"}, status_code=400)
-    result = await _merge_people(source_id, target_id)
+    result = await db.merge_people(source_id, target_id)
     if not result.get("ok"):
         return JSONResponse({"error": result.get("error") or "Could not merge people"}, status_code=400)
     return result
@@ -332,8 +284,7 @@ async def api_merge_people(request: Request):
 
 @router.post("/api/people/merge-suggestions/{suggestion_id}/reject")
 async def api_reject_people_merge(suggestion_id: int):
-    _configured()
-    result = await _reject_merge_suggestion(suggestion_id)
+    result = await db.reject_merge_suggestion(suggestion_id)
     if not isinstance(result, dict) or not result.get("ok"):
         error = result.get("error") if isinstance(result, dict) else ""
         return JSONResponse({"error": error or "Could not reject suggestion"}, status_code=400)
@@ -342,12 +293,11 @@ async def api_reject_people_merge(suggestion_id: int):
 
 @router.post("/api/people/faces/{face_id}/assign")
 async def api_assign_face(face_id: int, request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
     person_id = positive_int(body.get("person_id"))
-    result = await _assign_face(face_id, person_id=person_id, name=body.get("name") or "")
+    result = await db.assign_face(face_id, person_id=person_id, name=body.get("name") or "")
     if not result.get("ok"):
         return JSONResponse({"error": result.get("error") or "Could not assign face"}, status_code=400)
     return result
@@ -355,8 +305,7 @@ async def api_assign_face(face_id: int, request: Request):
 
 @router.post("/api/people/faces/{face_id}/ignore")
 async def api_ignore_face(face_id: int):
-    _configured()
-    result = await _ignore_face(face_id)
+    result = await db.ignore_face(face_id)
     if not isinstance(result, dict) or not result.get("ok"):
         error = result.get("error") if isinstance(result, dict) else ""
         return JSONResponse({"error": error or "Could not ignore face"}, status_code=400)
@@ -365,8 +314,7 @@ async def api_ignore_face(face_id: int):
 
 @router.post("/api/people/{person_id}/ignore")
 async def api_ignore_person(person_id: int):
-    _configured()
-    result = await _ignore_person(person_id)
+    result = await db.ignore_person(person_id)
     if not isinstance(result, dict) or not result.get("ok"):
         error = result.get("error") if isinstance(result, dict) else ""
         return JSONResponse({"error": error or "Could not ignore person"}, status_code=400)
