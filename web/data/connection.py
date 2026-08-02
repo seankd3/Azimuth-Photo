@@ -79,27 +79,16 @@ _idle_connections: dict[str, list[aiosqlite.Connection]] = {}
 
 
 async def open_async(db_path: str, *, timeout: float | None = None) -> aiosqlite.Connection:
-    """Open (or reuse) an async SQLite connection with the expected row shape.
+    """Open (or reuse) an async SQLite connection with the expected row shape."""
 
-    How long to wait for a busy database is set with a PRAGMA on checkout, not
-    baked in when the connection is opened. It used to be the latter, which
-    quietly opted every caller asking for a short wait out of the pool — and the
-    callers asking for a short wait are the interactive ones: the grid, compare,
-    trash. So the requests that most need to be quick were the only ones opening
-    a fresh connection, and opening a fresh connection to a large WAL catalog is
-    not quick. Measured on the owner's laptop: 29 of them alive at once, each
-    with its own thread, while the first page of photos waited.
-    """
-
-    effective_timeout = _effective_timeout(timeout)
-    pool_key = None if is_ephemeral_db_path(db_path) else db_path
+    pool_key = db_path if timeout is None and _sqlite_timeout_seconds.get() is None and not is_ephemeral_db_path(db_path) else None
     if pool_key is not None:
         idle = _idle_connections.get(pool_key)
         if idle:
             conn = idle.pop()
             conn._azimuth_shelved = False
-            await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
             return conn
+    effective_timeout = _effective_timeout(timeout)
     conn = await aiosqlite.connect(db_path, timeout=effective_timeout)
     conn.row_factory = aiosqlite.Row
     await conn.execute(f"PRAGMA busy_timeout={int(effective_timeout * 1000)}")
