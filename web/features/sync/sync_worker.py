@@ -188,13 +188,8 @@ class SyncWorker:
         self._status["backoff_seconds"] = 0
 
     def _note_failure(self, error: Exception) -> None:
-        message = str(error).lower()
-        # Timing-out / unreachable hubs must not hot-loop every 15s.
-        transient = any(
-            token in message
-            for token in ("timed out", "timeout", "temporarily unavailable", "connection refused", "unreachable", "name or service not known")
-        )
-        if not transient:
+        # An unreachable hub must not be retried every 15s.
+        if not transport.is_transient(error):
             self._next_idle_seconds = _BASE_IDLE_SECONDS
             self._status["backoff_seconds"] = 0
             return
@@ -451,7 +446,13 @@ class SyncWorker:
         headers = {"Content-Type": "application/json"} if body is not None else {}
         status_code, _headers, response = await self._hub_request(method, self.hub + path, body=body, headers=headers)
         if not 200 <= status_code < 300:
-            raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
+            detail = response.decode(errors="replace")[:300]
+            message = f"sync {method} {path} failed ({status_code}): {detail}"
+            # A hub that is overloaded or restarting will serve this again in a
+            # moment; a hub that rejected the request will not.
+            if status_code >= 500 or status_code == 429:
+                raise transport.HubUnavailable(message)
+            raise RuntimeError(message)
         return json.loads(response or b"{}")
 
     async def refresh_hub_contract(self, *, force: bool = False) -> None:

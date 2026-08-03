@@ -29,6 +29,25 @@ INTERACTIVE = 10.0
 BULK = 300.0
 
 
+class HubUnavailable(RuntimeError):
+    """The hub is there but cannot serve this now — 5xx, or asked us to wait."""
+
+
+def is_transient(error: BaseException) -> bool:
+    """Is retrying later worth anything?
+
+    The sync worker used to answer this by searching the error message for six
+    English words. A 503 matched none of them and hot-looped every fifteen
+    seconds; a French locale would have matched none of them either. Ask what
+    the failure is, not how it was spelled: anything the network raises is worth
+    retrying, and a rejection with a status code is not.
+    """
+
+    if isinstance(error, HubUnavailable):
+        return True
+    return isinstance(error, (urllib.error.URLError, TimeoutError, OSError))
+
+
 class Reply(NamedTuple):
     status: int
     headers: dict[str, str]
