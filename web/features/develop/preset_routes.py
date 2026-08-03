@@ -91,17 +91,6 @@ async def api_create_preset(body: PresetCreateBody):
         await connection.close_async(conn, db_path=catalog_path())
 
 
-@router.post("/api/develop/presets/import-lightroom")
-async def api_import_lightroom_presets():
-    """Explicit re-scan of expansion LR preset folders (idempotent)."""
-    global _lr_import_attempted
-    conn = await _conn()
-    try:
-        _lr_import_attempted = True
-        report = await presets_mod.import_lightroom_presets(conn)
-        return {"import": report, "presets": await presets_mod.list_presets(conn)}
-    finally:
-        await connection.close_async(conn, db_path=catalog_path())
 
 
 @router.get("/api/develop/presets/{preset_id}")

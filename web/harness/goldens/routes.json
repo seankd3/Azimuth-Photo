@@ -311,11 +311,6 @@
       "slug"
     ]
   },
-  "GET /api/develop/hdr/status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
   "GET /api/develop/import/status": {
     "has_body": false,
     "params": [],
@@ -327,11 +322,6 @@
     "required_params": []
   },
   "GET /api/develop/lrcat/status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "GET /api/develop/pano/status": {
     "has_body": false,
     "params": [],
     "required_params": []
@@ -771,11 +761,6 @@
     "required_params": [
       "area"
     ]
-  },
-  "GET /api/quality/status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
   },
   "GET /api/quality/{image_id}": {
     "has_body": false,
@@ -1360,11 +1345,6 @@
     "params": [],
     "required_params": []
   },
-  "POST /api/develop/hdr/detect": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
   "POST /api/develop/hdr/merge": {
     "has_body": true,
     "params": [],
@@ -1380,16 +1360,6 @@
     "params": [],
     "required_params": []
   },
-  "POST /api/develop/pano/detect": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/develop/pano/merge": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
   "POST /api/develop/pregen": {
     "has_body": true,
     "params": [],
@@ -1397,11 +1367,6 @@
   },
   "POST /api/develop/presets": {
     "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/develop/presets/import-lightroom": {
-    "has_body": false,
     "params": [],
     "required_params": []
   },
@@ -1415,11 +1380,6 @@
     ]
   },
   "POST /api/develop/sync": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/develop/write-xmp/batch": {
     "has_body": true,
     "params": [],
     "required_params": []
@@ -1702,11 +1662,6 @@
     "required_params": []
   },
   "POST /api/quality/autocull/apply": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/quality/scan": {
     "has_body": true,
     "params": [],
     "required_params": []

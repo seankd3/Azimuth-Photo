@@ -18,7 +18,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from data import connection as data_connection
-from features.develop import hdr, hdr_routes, rawproc, routes as develop_routes
+from features.develop import hdr, rawproc, routes as develop_routes
 
 
 def _frame(image_id: int, timestamp: float, exposure: float) -> dict:
@@ -134,17 +134,3 @@ class HdrMergeCacheTests(unittest.TestCase):
         ) as open_sync:
             self.assertEqual(hdr._catalog_rows(self.db_path, None), [])
         open_sync.assert_called_once_with(self.db_path)
-
-
-class HdrRouteTests(unittest.TestCase):
-    def test_detect_and_status_routes(self):
-        app = FastAPI()
-        db.DB_PATH = "unused.db"
-        app.include_router(hdr_routes.router)
-        with mock.patch.object(hdr, "detect_brackets", return_value=[{"image_ids": [1, 2, 3]}]):
-            with TestClient(app) as client:
-                detected = client.post("/api/develop/hdr/detect", json={"image_ids": [1, 2, 3]})
-                status = client.get("/api/develop/hdr/status")
-        self.assertEqual(detected.status_code, 200)
-        self.assertEqual(detected.json()["brackets"][0]["image_ids"], [1, 2, 3])
-        self.assertEqual(status.status_code, 200)

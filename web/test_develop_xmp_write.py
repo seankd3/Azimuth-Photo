@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import sqlite3
 from contextlib import closing
 import tempfile
 import unittest
 
-import db
 from pathlib import Path
 
-from features.develop import xmp_write, xmp_write_routes
+from features.develop import xmp_write
 
 
 def torture_settings() -> dict[str, object]:
@@ -258,30 +256,3 @@ class XmpWriteTests(unittest.TestCase):
         self.assertEqual(batch["excluded_hub_remote"], 1)
         self.assertEqual(batch["written"], 1)
         self.assertEqual(batch["skipped"], 0)
-
-    def test_api_contract_exposes_individual_mode_and_sidecar_batch(self):
-        self._image(7, ".dng", settings={"Exposure2012": 0.5})
-        self._image(8, ".cr3", settings={"Exposure2012": -0.5})
-        db.DB_PATH = self.db_path
-
-        individual = asyncio.run(
-            xmp_write_routes.api_write_xmp(
-                7,
-                xmp_write_routes.XmpWriteBody(mode="sidecar"),
-            )
-        )
-        batch = asyncio.run(
-            xmp_write_routes.api_write_xmp_batch(
-                xmp_write_routes.XmpBatchWriteBody(image_ids=[7, 8]),
-            )
-        )
-        contracts = {(route.path, frozenset(route.methods or ())) for route in xmp_write_routes.router.routes}
-
-        self.assertEqual(individual["status"], "written")
-        self.assertEqual(batch["processed"], 2)
-        self.assertIn(("/api/develop/{image_id}/write-xmp", frozenset({"POST"})), contracts)
-        self.assertIn(("/api/develop/write-xmp/batch", frozenset({"POST"})), contracts)
-
-
-if __name__ == "__main__":
-    unittest.main()

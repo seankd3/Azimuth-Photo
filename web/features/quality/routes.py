@@ -349,41 +349,8 @@ async def scan_image_ids(image_ids: list[int]) -> dict[str, int]:
     return result
 
 
-@router.get("/api/quality/status")
-async def api_quality_status():
-    conn = await _open_conn()
-    try:
-        await _ensure_table(conn)
-        pending = await _count_pending(conn)
-        total_scored = await _count_scored(conn)
-    finally:
-        await conn.close()
-    with _scan_lock:
-        _scan_state["pending"] = pending
-        _scan_state["total_scored"] = total_scored
-    return _status_payload()
 
 
-@router.post("/api/quality/scan")
-async def api_quality_scan(body: ScanBody | None = None):
-    limit = int((body.limit if body and body.limit else _DEFAULT_LIMIT))
-    limit = max(1, min(_MAX_LIMIT, limit))
-    with _scan_lock:
-        if _scan_state["running"]:
-            return JSONResponse(
-                {"ok": False, "error": "scan already running", "status": _status_payload()},
-                status_code=409,
-            )
-    thread = threading.Thread(
-        target=_run_scan,
-        args=(limit,),
-        name="quality-scan",
-        daemon=True,
-    )
-    thread.start()
-    # Brief yield so status reflects running.
-    await asyncio.sleep(0.05)
-    return {"ok": True, "limit": limit, "status": _status_payload()}
 
 
 @router.get("/api/quality/{image_id}")

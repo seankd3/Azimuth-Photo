@@ -146,55 +146,6 @@ class QualityRoutesTests(BackendTestCase):
             await conn.close()
         return path
 
-    async def test_ensure_table_and_get_scores_on_demand(self):
-        source = await self._source()
-        image_id = await self._image(source["id"], "sharp.jpg")
-        await self._write_thumb(image_id, _sharp_pattern())
-
-        status = await quality_routes.api_quality_status()
-        self.assertIn("eyes_open_note", status)
-        self.assertEqual(status["total_scored"], 0)
-        self.assertGreaterEqual(status["pending"], 1)
-
-        payload = await quality_routes.api_quality_image(image_id)
-        self.assertTrue(payload["scored"])
-        self.assertIsNone(payload["eyes_open"])
-        self.assertGreater(payload["score"], 0)
-        self.assertIn("landmarks", payload["eyes_open_note"].lower())
-
-        status2 = await quality_routes.api_quality_status()
-        self.assertEqual(status2["total_scored"], 1)
-
-    async def test_scan_scores_unscored_images(self):
-        source = await self._source()
-        sharp_id = await self._image(source["id"], "a_sharp.jpg")
-        blur_id = await self._image(source["id"], "b_blur.jpg")
-        dark_id = await self._image(source["id"], "c_dark.jpg")
-        await self._write_thumb(sharp_id, _sharp_pattern())
-        await self._write_thumb(blur_id, _blurry_pattern())
-        await self._write_thumb(dark_id, _dark_clipped())
-
-        result = await quality_routes.api_quality_scan(quality_routes.ScanBody(limit=10))
-        self.assertTrue(result["ok"])
-
-        # Wait for threaded worker.
-        for _ in range(100):
-            status = await quality_routes.api_quality_status()
-            if not status["running"] and status["scored"] >= 3:
-                break
-            await __import__("asyncio").sleep(0.05)
-        else:
-            self.fail(f"scan did not finish: {status}")
-
-        self.assertEqual(status["errors"], 0)
-        self.assertGreaterEqual(status["scored"], 3)
-
-        sharp = await quality_routes.api_quality_image(sharp_id)
-        blur = await quality_routes.api_quality_image(blur_id)
-        dark = await quality_routes.api_quality_image(dark_id)
-        self.assertGreater(sharp["score"], blur["score"])
-        self.assertGreater(sharp["score"], dark["score"])
-
     async def test_scoped_scan_leaves_unrelated_images_unscored(self):
         source = await self._source()
         imported = await self._image(source["id"], "imported.jpg")

@@ -44,10 +44,3 @@ async def api_write_xmp(image_id: int, body: XmpWriteBody):
     return result
 
 
-@router.post("/api/develop/write-xmp/batch")
-async def api_write_xmp_batch(body: XmpBatchWriteBody):
-    return await asyncio.to_thread(
-        xmp_write.write_batch_xmp,
-        catalog_path(),
-        body.image_ids,
-    )

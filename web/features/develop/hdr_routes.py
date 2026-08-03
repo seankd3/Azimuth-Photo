@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from core.catalog_path import catalog_path
 
-import asyncio
 from collections.abc import Callable
 
 from fastapi import APIRouter
@@ -27,12 +26,6 @@ class HdrMergeBody(BaseModel):
 
 
 
-@router.post("/api/develop/hdr/detect")
-async def api_detect_hdr_brackets(body: HdrDetectBody):
-    from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
-
-    brackets = await asyncio.to_thread(hdr.detect_brackets, catalog_path(), body.image_ids)
-    return {"brackets": brackets}
 
 
 @router.post("/api/develop/hdr/merge", status_code=202)
@@ -47,8 +40,3 @@ async def api_merge_hdr(body: HdrMergeBody):
     return {"queued": image_ids, "status": hdr.hdr_status()}
 
 
-@router.get("/api/develop/hdr/status")
-async def api_hdr_status():
-    from features.develop import hdr  # deferred: keeps HDR pixel libraries off boot until an HDR request
-
-    return hdr.hdr_status()
