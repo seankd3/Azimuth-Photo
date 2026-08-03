@@ -4,6 +4,11 @@ button, input, select { font: inherit; color: inherit; background: none; border:
 button { cursor: pointer; }
 button[aria-disabled="true"], button:disabled { cursor: default; opacity: .46; }
 img { display: block; max-width: 100%; }
+/* hidden means hidden. Any `display` rule beats the attribute otherwise, which
+   is why 29 selectors below restate this one at a time — and why the loupe's
+   Edit RAW button, matched by `.icon-btn { display: inline-flex }`, rendered
+   34px wide for a JPEG with no RAW sibling while its .hidden property was true. */
+[hidden] { display: none !important; }
 :root {
     --bg: #141517; --panel: #1a1c1f; --card: #212428; --card-hi: #262a2f;
     --line: rgba(255,255,255,.07); --line-soft: rgba(255,255,255,.045);
