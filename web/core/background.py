@@ -8,6 +8,7 @@ from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
 
 
 log = logging.getLogger(__name__)
+INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 
 # Re-export for app_factory / tests that still import the frozenset name.
@@ -269,42 +270,57 @@ async def run_shutdown(
 
 async def run_startup(
     *,
-    smoke_mode_enabled,
     warm_templates,
-    thumbnails,
-    settings,
-    face_worker,
-    caption_worker,
     track_background_task,
-    init_db,
-    get_filter_options,
-    get_date_groups,
-    get_catalog_image_counts,
-    get_stats,
-    get_ai_status_counts,
-    get_visible_orientation_pairing_pool_counts,
-    get_catalog_summary,
-    cache_root,
-    build_ai_status,
-    build_cache_status,
-    api_rankings,
-    api_folders,
-    api_map_markers,
-    api_date_groups,
-    api_settings,
-    mosaic_next,
-    default_visible_pairing_candidates,
-    warm_filtered_visible_ranked_candidates,
-    get_visible_past_matchups,
-    classify_orientations_background,
-    scan_metadata_background,
-    swiss_pair_window: int,
-    filtered_swiss_pair_window: int,
-    filtered_mosaic_window: int,
-    mosaic_explore_window: int,
-    mosaic_diverse_window: int,
-    interaction_cache_warmup_delay_seconds: float,
 ) -> None:
+    # The startup warmers reach straight for what they warm. These used to be
+    # 36 keyword parameters, threaded from a 29-field dataclass in app_factory,
+    # so that this module would not import them.
+    import caption_worker
+    import db
+    import face_worker
+    import settings
+    import thumbnails
+    from features.ai import routes as ai_routes
+    from features.cache import status as cache_status_service
+    from features.catalog import metadata as catalog_metadata
+    from features.catalog import routes as catalog_routes
+    from features.compare import routes as compare_routes
+    from features.compare import service as compare_service
+    from features.library import routes as library_routes
+    from features.settings import routes as settings_routes
+
+    init_db = db.init_db
+    get_filter_options = db.get_filter_options
+    get_date_groups = db.get_date_groups
+    get_catalog_image_counts = db.get_catalog_image_counts
+    get_stats = db.get_stats
+    get_ai_status_counts = db.get_ai_status_counts
+    get_visible_orientation_pairing_pool_counts = db.get_visible_orientation_pairing_pool_counts
+    get_catalog_summary = db.get_catalog_summary
+    build_ai_status = ai_routes.build_ai_status
+    build_cache_status = cache_status_service.build_cache_status
+    api_rankings = library_routes.api_rankings
+    api_folders = catalog_routes.api_folders
+    api_map_markers = library_routes.api_map_markers
+    api_date_groups = library_routes.api_date_groups
+    api_settings = settings_routes.api_settings
+    mosaic_next = compare_routes.mosaic_next
+    default_visible_pairing_candidates = compare_service.default_visible_pairing_candidates
+    warm_filtered_visible_ranked_candidates = compare_service.warm_filtered_visible_ranked_candidates
+    get_visible_past_matchups = compare_service.get_visible_past_matchups
+    classify_orientations_background = catalog_metadata.classify_orientations_background
+    scan_metadata_background = catalog_metadata.scan_metadata_background
+    swiss_pair_window = compare_service._SWISS_PAIR_WINDOW
+    filtered_swiss_pair_window = compare_service._FILTERED_SWISS_PAIR_WINDOW
+    filtered_mosaic_window = compare_service._FILTERED_MOSAIC_WINDOW
+    mosaic_explore_window = compare_service._MOSAIC_EXPLORE_WINDOW
+    mosaic_diverse_window = compare_service._MOSAIC_DIVERSE_WINDOW
+    interaction_cache_warmup_delay_seconds = INTERACTION_CACHE_WARMUP_DELAY_SECONDS
+
+    def cache_root() -> str:
+        return thumbnails.SSD_CACHE_DIR
+
     from core import on_the_loop
 
     on_the_loop.remember_the_loop()

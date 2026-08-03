@@ -103,44 +103,6 @@ class AppShell:
         )
 
 
-@dataclass(frozen=True)
-class AppLifecycleDependencies:
-    smoke_mode_enabled: Callable[[], bool]
-    warm_templates: Callable[[], Any]
-    thumbnails: Any
-    settings: Any
-    face_worker: Any
-    caption_worker: Any
-    init_db: Callable[[], Awaitable[Any]]
-    get_filter_options: Callable[[], Awaitable[dict]]
-    get_date_groups: Callable[..., Awaitable[Any]]
-    get_catalog_image_counts: Callable[[], Awaitable[Any]]
-    get_stats: Callable[[], Awaitable[Any]]
-    get_ai_status_counts: Callable[[], Awaitable[Any]]
-    get_visible_orientation_pairing_pool_counts: Callable[..., Awaitable[Any]]
-    get_catalog_summary: Callable[[], Awaitable[Any]]
-    cache_root: Callable[[], str]
-    build_ai_status: Callable[..., Awaitable[Any]]
-    build_cache_status: Callable[..., Awaitable[Any]]
-    api_rankings: Callable[..., Awaitable[Any]]
-    api_folders: Callable[..., Awaitable[Any]]
-    api_map_markers: Callable[..., Awaitable[Any]]
-    api_date_groups: Callable[..., Awaitable[Any]]
-    api_settings: Callable[..., Awaitable[Any]]
-    mosaic_next: Callable[..., Awaitable[Any]]
-    default_visible_pairing_candidates: Callable[..., Awaitable[Any]]
-    warm_filtered_visible_ranked_candidates: Callable[..., Awaitable[Any]]
-    get_visible_past_matchups: Callable[..., Awaitable[Any]]
-    classify_orientations_background: Callable[[], Awaitable[Any]]
-    scan_metadata_background: Callable[[], Awaitable[Any]]
-    swiss_pair_window: int
-    filtered_swiss_pair_window: int
-    filtered_mosaic_window: int
-    mosaic_explore_window: int
-    mosaic_diverse_window: int
-    interaction_cache_warmup_delay_seconds: float
-
-
 class SelectiveGZipMiddleware:
     """Compress text/JSON responses without spending CPU on image streams."""
 
@@ -224,51 +186,21 @@ def create_templates(*, base_dir: str | None = None) -> Jinja2Templates:
     return Jinja2Templates(directory=os.path.join(root, "templates"))
 
 
-def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependencies) -> AppLifecycleHandlers:
+def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
     async def startup() -> None:
         await background_runtime.run_startup(
-            smoke_mode_enabled=dependencies.smoke_mode_enabled,
-            warm_templates=dependencies.warm_templates,
-            thumbnails=dependencies.thumbnails,
-            settings=dependencies.settings,
-            face_worker=dependencies.face_worker,
-            caption_worker=dependencies.caption_worker,
+            warm_templates=shell.warm_templates,
             track_background_task=shell.track_background_task,
-            init_db=dependencies.init_db,
-            get_filter_options=dependencies.get_filter_options,
-            get_date_groups=dependencies.get_date_groups,
-            get_catalog_image_counts=dependencies.get_catalog_image_counts,
-            get_stats=dependencies.get_stats,
-            get_ai_status_counts=dependencies.get_ai_status_counts,
-            get_visible_orientation_pairing_pool_counts=dependencies.get_visible_orientation_pairing_pool_counts,
-            get_catalog_summary=dependencies.get_catalog_summary,
-            cache_root=dependencies.cache_root,
-            build_ai_status=dependencies.build_ai_status,
-            build_cache_status=dependencies.build_cache_status,
-            api_rankings=dependencies.api_rankings,
-            api_folders=dependencies.api_folders,
-            api_map_markers=dependencies.api_map_markers,
-            api_date_groups=dependencies.api_date_groups,
-            api_settings=dependencies.api_settings,
-            mosaic_next=dependencies.mosaic_next,
-            default_visible_pairing_candidates=dependencies.default_visible_pairing_candidates,
-            warm_filtered_visible_ranked_candidates=dependencies.warm_filtered_visible_ranked_candidates,
-            get_visible_past_matchups=dependencies.get_visible_past_matchups,
-            classify_orientations_background=dependencies.classify_orientations_background,
-            scan_metadata_background=dependencies.scan_metadata_background,
-            swiss_pair_window=dependencies.swiss_pair_window,
-            filtered_swiss_pair_window=dependencies.filtered_swiss_pair_window,
-            filtered_mosaic_window=dependencies.filtered_mosaic_window,
-            mosaic_explore_window=dependencies.mosaic_explore_window,
-            mosaic_diverse_window=dependencies.mosaic_diverse_window,
-            interaction_cache_warmup_delay_seconds=dependencies.interaction_cache_warmup_delay_seconds,
         )
 
     async def shutdown() -> None:
+        import caption_worker
+        import thumbnails
+
         await background_runtime.run_shutdown(
-            thumbnails=dependencies.thumbnails,
+            thumbnails=thumbnails,
             background_task_tracker=shell.background_task_tracker,
-            caption_worker=dependencies.caption_worker,
+            caption_worker=caption_worker,
         )
 
     shell.app.router.on_startup.append(startup)
@@ -418,60 +350,7 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
 
 
 def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
-    import caption_worker
-    import db
-    import face_worker
-    import settings
-    import thumbnails
-    from features.cache import status as cache_status_service
-    from features.catalog import metadata as catalog_metadata
-    from features.compare import service as compare_service
-
-    runtime_services = shell.runtime_services
-    if runtime_services is None:
-        raise RuntimeError("App runtime services must be configured before lifecycle wiring")
-
-    lifecycle = register_app_lifecycle(
-        shell,
-        AppLifecycleDependencies(
-            smoke_mode_enabled=background_runtime.smoke_mode_enabled,
-            warm_templates=shell.warm_templates,
-            thumbnails=thumbnails,
-            settings=settings,
-            face_worker=face_worker,
-            caption_worker=caption_worker,
-            init_db=lambda: db.init_db(),
-            get_filter_options=lambda: db.get_filter_options(),
-            get_date_groups=lambda **kwargs: db.get_date_groups(**kwargs),
-            get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
-            get_stats=lambda: db.get_stats(),
-            get_ai_status_counts=lambda: db.get_ai_status_counts(),
-            get_visible_orientation_pairing_pool_counts=lambda size, cache_root, orientation: (
-                db.get_visible_orientation_pairing_pool_counts(size, cache_root, orientation)
-            ),
-            get_catalog_summary=lambda: db.get_catalog_summary(),
-            cache_root=runtime_services.cache_root,
-            build_ai_status=ai_routes.build_ai_status,
-            build_cache_status=cache_status_service.build_cache_status,
-            api_rankings=library_routes.api_rankings,
-            api_folders=catalog_routes.api_folders,
-            api_map_markers=library_routes.api_map_markers,
-            api_date_groups=library_routes.api_date_groups,
-            api_settings=settings_routes.api_settings,
-            mosaic_next=compare_routes.mosaic_next,
-            default_visible_pairing_candidates=compare_service.default_visible_pairing_candidates,
-            warm_filtered_visible_ranked_candidates=compare_service.warm_filtered_visible_ranked_candidates,
-            get_visible_past_matchups=compare_service.get_visible_past_matchups,
-            classify_orientations_background=catalog_metadata.classify_orientations_background,
-            scan_metadata_background=catalog_metadata.scan_metadata_background,
-            swiss_pair_window=compare_service._SWISS_PAIR_WINDOW,
-            filtered_swiss_pair_window=compare_service._FILTERED_SWISS_PAIR_WINDOW,
-            filtered_mosaic_window=compare_service._FILTERED_MOSAIC_WINDOW,
-            mosaic_explore_window=compare_service._MOSAIC_EXPLORE_WINDOW,
-            mosaic_diverse_window=compare_service._MOSAIC_DIVERSE_WINDOW,
-            interaction_cache_warmup_delay_seconds=INTERACTION_CACHE_WARMUP_DELAY_SECONDS,
-        ),
-    )
+    lifecycle = register_app_lifecycle(shell)
     object.__setattr__(shell, "lifecycle", lifecycle)
     return lifecycle
 
