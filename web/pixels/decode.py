@@ -83,12 +83,14 @@ def decode_linear(
     half_size: bool,
     reconstruct: Any = None,
     clip_levels_for: Any = None,
+    color_matrix_for: Any = None,
 ) -> DecodedRaw:
     """Decode one RAW into linear uint16 sRGB-primary pixels.
 
-    ``reconstruct`` and ``clip_levels_for`` inject Develop's highlight recovery
-    so this module stays free of the render pipeline. Omit them and the decode
-    is identical minus that step.
+    ``reconstruct``, ``clip_levels_for`` and ``color_matrix_for`` inject
+    Develop's highlight recovery and its matrix reader, so this module stays
+    free of the render pipeline. Omit them and the decode is identical minus
+    those steps.
     """
 
     if rawpy is None:
@@ -101,6 +103,7 @@ def decode_linear(
             saturation_level = _finite_positive(raw.white_level)
             white_levels = [saturation_level] * 4 if saturation_level is not None else []
             iso = _finite_positive(getattr(getattr(raw, "metadata", None), "iso_speed", None))
+            color_matrix = color_matrix_for(raw) if color_matrix_for is not None else None
 
             arguments = postprocess_arguments(half_size=half_size)
             camera_white = raw.camera_white_level_per_channel
@@ -146,6 +149,7 @@ def decode_linear(
         rgb=rgb,
         camera_wb=camera_wb,
         daylight_wb=daylight_wb,
+        color_matrix=color_matrix,
         iso=iso,
         white_levels=white_levels,
     )

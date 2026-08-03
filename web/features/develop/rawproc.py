@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
 from photo import kind
+from pixels import decode as pixel_decode
 
 
 # Formats Develop has fitted colour for. The rest are catalogued, thumbnailed
@@ -505,59 +506,20 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         iso = _finite_positive(lossy_meta.get("iso"))
     else:
         try:
-            with rawpy.imread(str(source)) as raw:
-                camera_wb = list(raw.camera_whitebalance or [])
-                daylight_wb = list(raw.daylight_whitebalance or [])
-                color_matrix = _rawpy_color_matrix(raw)
-                saturation_level = _finite_positive(raw.white_level)
-                white_levels = [saturation_level] * 4 if saturation_level is not None else []
-                iso = _finite_positive(getattr(getattr(raw, "metadata", None), "iso_speed", None))
-                postprocess_args = {
-                    "use_camera_wb": True,
-                    "output_bps": 16,
-                    "no_auto_bright": True,
-                    "adjust_maximum_thr": 0.0,
-                    "gamma": (1, 1),
-                    "output_color": rawpy.ColorSpace.sRGB,
-                    "highlight_mode": rawpy.HighlightMode.Blend,
-                    "half_size": True,
-                }
-                camera_white = raw.camera_white_level_per_channel
-                if camera_white:
-                    valid_white = [int(value) for value in camera_white if int(value) > 0]
-                    if valid_white:
-                        saturation_level = float(max(valid_white))
-                        postprocess_args["user_sat"] = int(saturation_level)
-                        white_levels = [
-                            float(value) if _finite_positive(value) is not None else saturation_level
-                            for value in camera_white
-                        ]
-                rgb = raw.postprocess(**postprocess_args)
-                valid_wb = [float(value) for value in camera_wb[:4] if _finite_positive(value)]
-                if valid_wb:
-                    # LibRaw normalizes camera WB so its largest multiplier is
-                    # one. DNG reference-neutral semantics divide by the
-                    # unnormalized AsShotNeutral, so restore that discarded
-                    # common gain at the linear decode boundary.
-                    green_wb = _finite_positive(camera_wb[1]) if len(camera_wb) > 1 else None
-                    wb_scale = np.float32(max(valid_wb) / (green_wb or min(valid_wb)))
-                    # In-place ops keep dev-perf's no-temporaries win while the
-                    # float frame is still linear for highlight reconstruction.
-                    linear_rgb = np.asarray(rgb, dtype=np.float32)
-                    np.multiply(linear_rgb, wb_scale, out=linear_rgb)
-                    clip_levels = derive_libraw_clip_levels(
-                        white_levels,
-                        raw.black_level_per_channel,
-                        camera_wb,
-                        saturation_level=saturation_level,
-                    )
-                    if clip_levels is not None:
-                        linear_rgb = reconstruct_highlights(linear_rgb, clip_levels)
-                    np.rint(linear_rgb, out=linear_rgb)
-                    np.clip(linear_rgb, 0, UINT16_FULL_SCALE, out=linear_rgb)
-                    rgb = linear_rgb.astype(np.uint16)
-        except Exception as exc:
-            raise RawDecodeError(f"RAW decode failed: {exc}") from exc
+            decoded = pixel_decode.decode_linear(
+                source,
+                half_size=True,
+                reconstruct=reconstruct_highlights,
+                clip_levels_for=derive_libraw_clip_levels,
+                color_matrix_for=_rawpy_color_matrix,
+            )
+        except pixel_decode.RawDecodeError as exc:
+            raise RawDecodeError(str(exc)) from exc
+        rgb = decoded.rgb
+        camera_wb = decoded.camera_wb
+        daylight_wb = decoded.daylight_wb
+        color_matrix = decoded.color_matrix
+        iso = decoded.iso
     rgb = _resize_linear_uint16(np.asarray(rgb, dtype=np.uint16))
     meta = {
         "as_shot": estimate_as_shot_white_balance(
