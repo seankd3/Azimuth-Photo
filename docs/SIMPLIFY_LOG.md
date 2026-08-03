@@ -156,7 +156,15 @@ was decided at import.
 
 **One hub client** (`archive/transport.py`). Six copies of the same ten lines had
 drifted into eight timeouts. Three named ones now: `CONTRACT`, `INTERACTIVE`,
-`BULK`.
+`BULK`, plus `open_stream` for originals too large to hold in memory.
+
+One hub call still sits outside it: `features/trash/remote.py`, the empty-trash
+forwarding left for E4 because permanently deleting an original wants the laptop
+paired to omarchy before anyone touches it. A commit message here once called
+`_open_hub_stream` "the last raw urlopen outside the transport" — it was not,
+and that contradicted the commit that deliberately left this one. The other five
+`urlopen` calls in the tree are not hub traffic: a model download, a local port
+probe, a benchmark, and two QA readiness checks.
 
 **One way for an edit to travel.** Trashing wrote no oplog entry at all, and the
 mirror copied the hub's status back over the local row — so a photo trashed on
