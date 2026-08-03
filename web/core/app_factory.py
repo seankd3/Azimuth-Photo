@@ -513,7 +513,6 @@ def create_app_shell(
     app.state.azimuth_shell = shell
     from core import wiring
 
-    wiring.configure_database_backed_providers()
     wiring.configure_people_routes()
     wiring.configure_status_media_search_providers()
     wiring.configure_cache_events()

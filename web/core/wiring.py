@@ -20,32 +20,6 @@ from features.settings import routes as settings_routes
 from features.trash import routes as trash_routes
 
 
-def configure_database_backed_providers() -> None:
-    import db
-    import thumbnails
-    from core import cache_events
-    from features.catalog import metadata as catalog_metadata
-
-    thumbnails.configure_data_providers(
-        get_db=lambda: db.get_db(),
-        batch_set_orientations=lambda updates: db.batch_set_orientations(updates),
-        mark_image_missing_sync=lambda image_id: db.mark_image_missing_sync(image_id),
-        invalidate_cached_image_ids_cache=lambda cache_root=None, size=None: db.invalidate_cached_image_ids_cache(
-            cache_root=cache_root,
-            size=size,
-        ),
-        note_cached_image_ids_added=lambda cache_root, size, image_ids: db.note_cached_image_ids_added(
-            cache_root,
-            size,
-            image_ids,
-        ),
-    )
-    catalog_metadata.configure(
-        invalidate_filter_options_cache=db._invalidate_filter_options_cache,
-        invalidate_rankings_cache=cache_events.invalidate_rankings_cache,
-    )
-
-
 def configure_people_routes() -> None:
     people_routes.reset_for_tests()
 

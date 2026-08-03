@@ -37,7 +37,6 @@ from .runtime import current_time as _current_time
 from .runtime import is_sqlite_locked as _is_sqlite_locked
 from .runtime import replace_executor as _replace_executor
 
-configure_data_providers = data_providers.configure
 
 for _name in thumbnail_config.DEFAULT_EXPORT_NAMES:
     globals()[_name] = getattr(thumbnail_config, _name)
