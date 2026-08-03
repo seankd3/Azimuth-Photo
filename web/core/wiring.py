@@ -2,7 +2,6 @@
 
 from features.ai import routes as ai_routes
 from features.collections import routes as collection_routes
-from features.compare import routes as compare_routes
 from features.export import routes as export_routes
 from features.media import routes as media_routes
 from features.publish import routes as publish_routes
@@ -183,41 +182,6 @@ def configure_compare_service(
         schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,
         resolve_smart_collection_image_ids=resolve_smart_collection_image_ids
         or _smart_collection_image_ids_resolver(resolve_library_constraints),
-    )
-
-
-def configure_compare_routes(
-    *,
-    schedule_pairing_propagation,
-    invalidate_pairing_cache,
-    patch_pairing_cache=None,
-    add_past_matchups=None,
-    record_active_mosaic_pick=None,
-    record_active_comparison=None,
-    undo_last_comparison=None,
-    mosaic_next_handler=None,
-) -> None:
-    import db
-    from features.compare import service as compare_service
-
-    compare_routes.configure(
-        patch_pairing_cache=patch_pairing_cache or compare_service.patch_pairing_cache,
-        add_past_matchups=add_past_matchups or compare_service.add_past_matchups,
-        schedule_pairing_propagation=schedule_pairing_propagation,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        record_active_mosaic_pick=record_active_mosaic_pick
-        or (lambda picked_id, other_ids, action_id: db.record_active_mosaic_pick(picked_id, other_ids, action_id)),
-        record_active_comparison=record_active_comparison
-        or (
-            lambda winner_id, loser_id, mode, **kwargs: db.record_active_comparison(
-                winner_id,
-                loser_id,
-                mode,
-                **kwargs,
-            )
-        ),
-        undo_last_comparison=undo_last_comparison or (lambda: db.undo_last_comparison()),
-        mosaic_next_handler=mosaic_next_handler,
     )
 
 

@@ -10,6 +10,11 @@ from core.requests import json_object, parse_exclude_sources, positive_int
 from data import connection as data_connection
 
 
+import db
+from core import cache_events, propagation_queue
+from features.compare import service as compare_service
+
+
 router = APIRouter()
 MAX_SCOPED_IMAGE_IDS = 2000
 MAX_SCOPED_IDS_LENGTH = 20000
@@ -21,14 +26,6 @@ NextHandler = Callable[..., object]
 RecordMosaicPick = Callable[[int, list[int], str], Awaitable[dict]]
 RecordComparison = Callable[..., Awaitable[dict | None]]
 UndoComparison = Callable[[], Awaitable[dict | None]]
-_patch_pairing_cache: PatchPairingCache | None = None
-_add_past_matchups: AddPastMatchups | None = None
-_schedule_pairing_propagation: SchedulePropagation | None = None
-_invalidate_pairing_cache: InvalidatePairing | None = None
-_mosaic_next_handler: NextHandler | None = None
-_record_active_mosaic_pick: RecordMosaicPick | None = None
-_record_active_comparison: RecordComparison | None = None
-_undo_last_comparison: UndoComparison | None = None
 USER_WRITE_TIMEOUT_SECONDS = 5.0
 _user_write_lock: asyncio.Lock | None = None
 _user_write_lock_loop: asyncio.AbstractEventLoop | None = None
@@ -43,42 +40,23 @@ def _user_write_lock_for_loop() -> asyncio.Lock:
     return _user_write_lock
 
 
-def configure(
-    *,
-    patch_pairing_cache: PatchPairingCache,
-    add_past_matchups: AddPastMatchups,
-    schedule_pairing_propagation: SchedulePropagation,
-    invalidate_pairing_cache: InvalidatePairing,
-    record_active_mosaic_pick: RecordMosaicPick,
-    record_active_comparison: RecordComparison,
-    undo_last_comparison: UndoComparison,
-    mosaic_next_handler: NextHandler | None = None,
-) -> None:
-    global _patch_pairing_cache, _add_past_matchups
-    global _schedule_pairing_propagation, _invalidate_pairing_cache
-    global _mosaic_next_handler, _compare_next_handler
-    global _record_active_mosaic_pick, _record_active_comparison, _undo_last_comparison
-    _patch_pairing_cache = patch_pairing_cache
-    _add_past_matchups = add_past_matchups
-    _schedule_pairing_propagation = schedule_pairing_propagation
-    _invalidate_pairing_cache = invalidate_pairing_cache
-    _record_active_mosaic_pick = record_active_mosaic_pick
-    _record_active_comparison = record_active_comparison
-    _undo_last_comparison = undo_last_comparison
-    _mosaic_next_handler = mosaic_next_handler
+
+def _apply_propagated_pairing_updates(*, elo_deltas=None) -> None:
+    """Patch the ids propagation touched; clear only when they are unknown.
+
+    A pick schedules its own propagation, so clearing every reservoir on drain
+    threw away the rows that same pick had just patched and made the next click
+    fully cold.
+    """
+
+    if elo_deltas is None:
+        cache_events.invalidate_pairing_cache()
+        return
+    compare_service.patch_propagated_pairing_cache(elo_deltas)
 
 
-def _configured() -> None:
-    if (
-        _patch_pairing_cache is None
-        or _add_past_matchups is None
-        or _schedule_pairing_propagation is None
-        or _invalidate_pairing_cache is None
-        or _record_active_mosaic_pick is None
-        or _record_active_comparison is None
-        or _undo_last_comparison is None
-    ):
-        raise RuntimeError("Compare routes are not configured")
+def _schedule_propagation(coro) -> None:
+    propagation_queue.schedule(coro, invalidate_callback=_apply_propagated_pairing_updates)
 
 
 def _parse_scoped_ids(ids: str | None) -> tuple[list[int] | None, JSONResponse | None]:
@@ -125,7 +103,7 @@ async def mosaic_next(
     collection_id: int = 0, import_batch: int = 0,
     exclude_sources: str = "",
 ):
-    if _mosaic_next_handler is None:
+    if compare_service.mosaic_next_impl is None:
         raise RuntimeError("Compare routes are not configured")
     scoped_ids, id_error = _parse_scoped_ids(ids)
     if id_error is not None:
@@ -134,7 +112,7 @@ async def mosaic_next(
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
-            response = await _mosaic_next_handler(
+            response = await compare_service.mosaic_next_impl(
                 n=n,
                 exclude=exclude,
                 strategy=strategy,
@@ -186,7 +164,6 @@ async def mosaic_pick(request: Request):
     Body: { "winner_id": int, "loser_ids": [int, ...] }
     K=12 per pair.
     """
-    _configured()
     import elo_propagation  # deferred: keeps numpy off boot until a comparison propagation is queued
     body, error = await json_object(request)
     if error:
@@ -214,7 +191,7 @@ async def mosaic_pick(request: Request):
     try:
         async with _user_write_lock_for_loop():
             with data_connection.sqlite_timeout(USER_WRITE_TIMEOUT_SECONDS):
-                result = await _record_active_mosaic_pick(picked_id, other_ids, action_id)
+                result = await db.record_active_mosaic_pick(picked_id, other_ids, action_id)
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):
             raise
@@ -239,13 +216,13 @@ async def mosaic_pick(request: Request):
     loser_updates = result["loser_updates"]
 
     if pairs_recorded:
-        _patch_pairing_cache(
+        compare_service.patch_pairing_cache(
             [(picked_id, picked_elo, pairs_recorded)]
             + [(image_id, new_elo, 1) for image_id, new_elo in loser_updates]
         )
-    _add_past_matchups([(picked_id, loser_id) for loser_id in other_ids])
+    compare_service.add_past_matchups([(picked_id, loser_id) for loser_id in other_ids])
 
-    _schedule_pairing_propagation(
+    _schedule_propagation(
         elo_propagation.propagate_mosaic(picked_id, other_ids, k=12.0, action_id=action_id)
     )
 
@@ -275,7 +252,6 @@ async def propagation_last():
 
 @router.post("/api/compare")
 async def submit_comparison(request: Request):
-    _configured()
     import elo_propagation  # deferred: keeps numpy off boot until a comparison propagation is queued
     body, error = await json_object(request)
     if error:
@@ -293,7 +269,7 @@ async def submit_comparison(request: Request):
     try:
         async with _user_write_lock_for_loop():
             with data_connection.sqlite_timeout(USER_WRITE_TIMEOUT_SECONDS):
-                result = await _record_active_comparison(winner_id, loser_id, mode, action_id=action_id)
+                result = await db.record_active_comparison(winner_id, loser_id, mode, action_id=action_id)
     except Exception as exc:
         if not data_connection.is_sqlite_locked_error(exc):
             raise
@@ -312,9 +288,9 @@ async def submit_comparison(request: Request):
 
     new_winner_elo = result["winner_elo"]
     new_loser_elo = result["loser_elo"]
-    _patch_pairing_cache([(winner_id, new_winner_elo, 1), (loser_id, new_loser_elo, 1)])
-    _add_past_matchups([(winner_id, loser_id)])
-    _schedule_pairing_propagation(
+    compare_service.patch_pairing_cache([(winner_id, new_winner_elo, 1), (loser_id, new_loser_elo, 1)])
+    compare_service.add_past_matchups([(winner_id, loser_id)])
+    _schedule_propagation(
         elo_propagation.propagate_comparison(winner_id, loser_id, result["k"], action_id=action_id)
     )
 
@@ -328,11 +304,10 @@ async def submit_comparison(request: Request):
 
 @router.post("/api/compare/undo")
 async def compare_undo():
-    _configured()
-    result = await _undo_last_comparison()
+    result = await db.undo_last_comparison()
     if result:
         if result.get("skipped_drift"):
             return {"ok": False, "partial": True, **result}
-        _invalidate_pairing_cache(matchups=True)
+        cache_events.invalidate_pairing_cache(matchups=True)
         return {"ok": True, **result}
     return JSONResponse({"error": "Nothing to undo"}, status_code=400)

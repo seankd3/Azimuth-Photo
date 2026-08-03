@@ -1,7 +1,6 @@
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -46,7 +45,6 @@ class AppRuntimeServices:
     invalidate_rankings_cache: Callable[[], None]
     invalidate_vector_derived_caches: Callable[[], None]
     invalidate_interaction_response_cache: Callable[[], None]
-    schedule_pairing_propagation: Callable[[Awaitable[Any]], None]
     resolve_text_search: Callable[..., Awaitable[dict]]
     resolve_library_constraints: Callable[..., Awaitable[dict]]
 
@@ -208,7 +206,6 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
 
 def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     from core import cache_events, query_constraints, wiring
-    from features.compare import service as compare_service
     from features.library import service as library_service
     from features.media import warm as media_warm
 
@@ -223,26 +220,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
 
     def invalidate_interaction_response_cache() -> None:
         cache_events.invalidate_interaction_response_cache()
-
-    def apply_propagated_pairing_updates(*, elo_deltas=None) -> None:
-        """Patch the ids propagation touched; clear only when they are unknown.
-
-        A pick schedules its own propagation, so clearing every reservoir on
-        drain threw away the rows that same pick had just patched and made the
-        next click fully cold.
-        """
-        if elo_deltas is None:
-            invalidate_pairing_cache()
-            return
-        compare_service.patch_propagated_pairing_cache(elo_deltas)
-
-    def schedule_pairing_propagation(coro) -> None:
-        from core import propagation_queue
-
-        propagation_queue.schedule(
-            coro,
-            invalidate_callback=apply_propagated_pairing_updates,
-        )
 
     async def resolve_text_search(q: str, *, deep: bool = False) -> dict:
         return await query_constraints.resolve_configured_text_search(
@@ -271,11 +248,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     wiring.configure_query_constraints(
         text_search_resolution_cache_ttl_seconds=lambda: query_constraints._text_search_resolution_cache_ttl_seconds,
     )
-    wiring.configure_compare_routes(
-        schedule_pairing_propagation=schedule_pairing_propagation,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        mosaic_next_handler=lambda **kwargs: compare_service.mosaic_next_impl(**kwargs),
-    )
     wiring.configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
@@ -301,7 +273,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_vector_derived_caches=invalidate_vector_derived_caches,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        schedule_pairing_propagation=schedule_pairing_propagation,
         resolve_text_search=resolve_text_search,
         resolve_library_constraints=resolve_library_constraints,
     )

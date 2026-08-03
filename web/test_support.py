@@ -153,7 +153,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
 
         data_connection.open_async = _tracked_open
         self.old_db_path = db.DB_PATH
-        self.old_schedule_pairing_propagation = compare_routes._schedule_pairing_propagation
+        self.old_schedule_propagation = compare_routes._schedule_propagation
         self.old_get_matrix = elo_propagation.embed_cache.get_matrix
         self.old_get_index = elo_propagation.embed_cache.get_index
         self.old_get_vector = elo_propagation.embed_cache.get_vector
@@ -202,14 +202,14 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         async def no_model_load_for_search():
             return False
 
-        compare_routes._schedule_pairing_propagation = close_scheduled
+        compare_routes._schedule_propagation = close_scheduled
         thumbnails.prefetch_images = noop_prefetch
         embedding_worker.ensure_model_loaded_for_search = no_model_load_for_search
         embedding_worker.start_search_model_load = lambda: False
 
     async def asyncTearDown(self):
         await self._close_thumbnail_cache_after_background_tasks()
-        compare_routes._schedule_pairing_propagation = self.old_schedule_pairing_propagation
+        compare_routes._schedule_propagation = self.old_schedule_propagation
         elo_propagation.embed_cache.get_matrix = self.old_get_matrix
         elo_propagation.embed_cache.get_index = self.old_get_index
         elo_propagation.embed_cache.get_vector = self.old_get_vector
