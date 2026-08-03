@@ -27,6 +27,7 @@ from features.catalog import metadata as catalog_metadata
 from features.catalog import reveal as catalog_reveal
 
 
+from features.cache import status as cache_status_service
 router = APIRouter()
 log = logging.getLogger(__name__)
 
@@ -36,11 +37,7 @@ class RevealBody(BaseModel):
     source_id: int | None = Field(default=None, ge=1)
 
 
-InvalidatePairing = Callable[..., None]
-InvalidateCacheStatus = Callable[[], None]
 DbPathProvider = Callable[[], str]
-_invalidate_pairing_cache: InvalidatePairing | None = None
-_invalidate_cache_status_cache: InvalidateCacheStatus | None = None
 _folders_cache: dict[int | None, dict] = {}
 _folders_refreshing: set[int | None] = set()
 _folders_cache_ttl_seconds = 300.0
@@ -48,15 +45,6 @@ _folder_tree_cache: dict = {"data": None, "expires": 0}
 _folder_tree_cache_ttl_seconds = 60.0
 _folder_tree_max_depth = 6
 
-
-def configure(
-    *,
-    invalidate_pairing_cache: InvalidatePairing,
-    invalidate_cache_status_cache: InvalidateCacheStatus,
-) -> None:
-    global _invalidate_pairing_cache, _invalidate_cache_status_cache
-    _invalidate_pairing_cache = invalidate_pairing_cache
-    _invalidate_cache_status_cache = invalidate_cache_status_cache
 
 
 def _configured(provider):
@@ -87,14 +75,14 @@ def clear_folders_cache() -> None:
 
 
 def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> None:
-    if _invalidate_pairing_cache is None:
+    if cache_events.invalidate_pairing_cache is None:
         raise RuntimeError("Catalog routes are not configured")
-    _invalidate_pairing_cache(matchups=matchups)
+    cache_events.invalidate_pairing_cache(matchups=matchups)
     invalidate_folders_cache()
     if cache_status:
-        if _invalidate_cache_status_cache is None:
+        if cache_status_service.invalidate_cache_status_cache is None:
             raise RuntimeError("Catalog routes are not configured")
-        _invalidate_cache_status_cache()
+        cache_status_service.invalidate_cache_status_cache()
     _invalidate_embedding_cache()
 
 
@@ -496,11 +484,11 @@ async def api_remove_catalog_source(source_id: int, request: Request):
     else:
         return JSONResponse({"error": "Invalid removal mode"}, status_code=400)
 
-    if _invalidate_pairing_cache is None or _invalidate_cache_status_cache is None:
+    if cache_events.invalidate_pairing_cache is None or cache_status_service.invalidate_cache_status_cache is None:
         raise RuntimeError("Catalog routes are not configured")
-    _invalidate_pairing_cache(matchups=True)
+    cache_events.invalidate_pairing_cache(matchups=True)
     invalidate_folders_cache()
-    _invalidate_cache_status_cache()
+    cache_status_service.invalidate_cache_status_cache()
     return {"ok": True, "source_id": source_id, **action, "catalog": await _configured(db.get_catalog_summary)()}
 
 

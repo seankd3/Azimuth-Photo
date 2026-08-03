@@ -9,7 +9,6 @@ import socket
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, preset_routes, routes as develop_routes, xmp_write_routes
 from features.library import keyword_routes, saved_views, watched_routes
@@ -35,7 +34,6 @@ async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
             "code": "api_rev_mismatch",
         },
     )
-wiring.configure_develop_import_routes()
 # PATCH: quality lane — register technical quality scorer routes
 import db as _db
 app.include_router(hdr_routes.router)

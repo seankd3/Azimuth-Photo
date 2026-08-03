@@ -3,10 +3,8 @@
 from features.ai import routes as ai_routes
 from features.cache import routes as cache_routes
 from features.captions import routes as caption_routes
-from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
-from features.develop import import_routes
 from features.export import routes as export_routes
 from features.library import routes as library_routes
 from features.media import routes as media_routes
@@ -14,9 +12,7 @@ from features.people import routes as people_routes
 from features.publish import routes as publish_routes
 from features.share import routes as share_routes
 from features.shared import routes as shared_routes
-from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
-from features.trash import routes as trash_routes
 
 
 def configure_people_routes() -> None:
@@ -87,26 +83,6 @@ def configure_cache_events() -> None:
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
 
 
-def configure_catalog_routes() -> None:
-    from core import cache_events
-    from features.cache import status as cache_status_service
-
-    catalog_routes.configure(
-        invalidate_pairing_cache=lambda **kwargs: cache_events.invalidate_pairing_cache(**kwargs),
-        invalidate_cache_status_cache=cache_status_service.invalidate_cache_status_cache,
-    )
-
-
-def configure_develop_import_routes() -> None:
-    import thumbnails
-
-    import_routes.configure(
-        prefetch_thumbnails=lambda images: thumbnails.prefetch_images(
-            images, "sm", limit=len(images)
-        ),
-    )
-
-
 def configure_library_routes() -> None:
     import db
     from features.library import service as library_service
@@ -174,40 +150,6 @@ def configure_collection_routes(*, resolve_library_constraints=None) -> None:
         resolve_smart_summary=resolve_smart_summary,
         resolve_smart_image_ids=resolve_smart_image_ids,
         resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
-    )
-
-
-def configure_stack_routes() -> None:
-    from core import cache_events
-
-    def invalidate_stack_dependent_caches() -> None:
-        cache_events.invalidate_rankings_cache()
-        cache_events.invalidate_ranking_count_cache()
-        cache_events.invalidate_facet_caches()
-
-    stack_routes.configure(
-        invalidate_rankings_cache=invalidate_stack_dependent_caches,
-    )
-
-
-def configure_trash_routes() -> None:
-    from core import cache_events
-    from features.cache import status as cache_status_service
-    from features.settings import status as settings_status
-
-    def invalidate_trash_dependent_caches() -> None:
-        cache_events.invalidate_rankings_cache()
-        cache_events.invalidate_stats_cache()
-        cache_events.invalidate_ranking_count_cache()
-        cache_events.invalidate_facet_caches()
-        cache_events.invalidate_pairing_cache(matchups=True)
-        cache_events.invalidate_cached_image_ids_cache()
-        cache_events.invalidate_filter_options_cache()
-        cache_status_service.invalidate_cache_status_cache()
-        settings_status.invalidate_settings_response_cache()
-
-    trash_routes.configure(
-        invalidate=invalidate_trash_dependent_caches,
     )
 
 

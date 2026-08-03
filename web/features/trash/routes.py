@@ -16,12 +16,24 @@ from features.sync.contract import require_compatible_api_revision
 from features.sync.sync_worker import get_worker
 
 
+def _invalidate_after_trash() -> None:
+    cache_events.invalidate_rankings_cache()
+    cache_events.invalidate_stats_cache()
+    cache_events.invalidate_ranking_count_cache()
+    cache_events.invalidate_facet_caches()
+    cache_events.invalidate_pairing_cache(matchups=True)
+    cache_events.invalidate_cached_image_ids_cache()
+    cache_events.invalidate_filter_options_cache()
+    cache_status_service.invalidate_cache_status_cache()
+    settings_status.invalidate_settings_response_cache()
+
+from core import cache_events
+from features.cache import status as cache_status_service
+from features.settings import status as settings_status
 router = APIRouter()
 DbPath = Callable[[], str]
-Invalidate = Callable[[], None]
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 
-_invalidate: Invalidate | None = None
 
 
 class ImageIdsBody(BaseModel):
@@ -32,14 +44,10 @@ class EmptyTrashBody(BaseModel):
     hub_image_ids: list[int] | None = Field(default=None, max_length=MAX_IMAGE_IDS_PER_REQUEST)
 
 
-def configure(*, invalidate: Invalidate | None = None) -> None:
-    global _invalidate
-    _invalidate = invalidate
-
 
 def _invalidate_after_write() -> None:
-    if _invalidate is not None:
-        _invalidate()
+    if _invalidate_after_trash is not None:
+        _invalidate_after_trash()
 
 
 @router.post("/api/images/trash")

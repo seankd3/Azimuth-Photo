@@ -6,7 +6,7 @@ from core.catalog_path import catalog_path
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -16,16 +16,14 @@ from core.requests import json_object
 from features.develop import importer, lrcat_import
 
 
+def _prefetch_sm(images):
+    return thumbnails.prefetch_images(images, "sm", limit=len(images))
+
+import thumbnails
 router = APIRouter()
 DbPath = Callable[[], str]
-PrefetchThumbnails = Callable[[list[dict]], Awaitable[int]]
-_prefetch_thumbnails: PrefetchThumbnails | None = None
 _LOG = logging.getLogger(__name__)
 
-
-def configure(*, prefetch_thumbnails: PrefetchThumbnails | None = None) -> None:
-    global _prefetch_thumbnails
-    _prefetch_thumbnails = prefetch_thumbnails
 
 
 async def _scan_in_background(root: str, db_path: str) -> None:
@@ -37,8 +35,8 @@ async def _scan_in_background(root: str, db_path: str) -> None:
         return
     # Existing thumbnail generation owns rawpy JPEG/BITMAP extraction and cache
     # writes. Warm only the initial visible batch; the remaining RAWs stay lazy.
-    if _prefetch_thumbnails and result.get("images"):
-        await _prefetch_thumbnails(result["images"][:60])
+    if _prefetch_sm and result.get("images"):
+        await _prefetch_sm(result["images"][:60])
 
 
 @router.post("/api/develop/import/scan")

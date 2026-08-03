@@ -19,12 +19,16 @@ from features.stacks import identical
 from features.trash import service as trash_service
 
 
+def _invalidate_after_stack_change() -> None:
+    cache_events.invalidate_rankings_cache()
+    cache_events.invalidate_ranking_count_cache()
+    cache_events.invalidate_facet_caches()
+
+from core import cache_events
 router = APIRouter()
 log = logging.getLogger(__name__)
 DbPath = Callable[[], str]
-Invalidate = Callable[[], None]
 
-_invalidate_rankings_cache: Invalidate | None = None
 _rebuild_status: dict = {
     "state": "idle",
     "started_at": None,
@@ -52,14 +56,10 @@ class IdenticalCleanupBody(BaseModel):
     token: str = Field(min_length=1, max_length=64)
 
 
-def configure(*, invalidate_rankings_cache: Invalidate | None = None) -> None:
-    global _invalidate_rankings_cache
-    _invalidate_rankings_cache = invalidate_rankings_cache
-
 
 def _invalidate() -> None:
-    if _invalidate_rankings_cache is not None:
-        _invalidate_rankings_cache()
+    if _invalidate_after_stack_change is not None:
+        _invalidate_after_stack_change()
 
 
 def _clean_kinds(kinds) -> list[str]:
