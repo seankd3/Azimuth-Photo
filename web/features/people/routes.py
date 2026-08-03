@@ -12,9 +12,9 @@ import face_worker
 import settings
 import thumbnails
 from core import capabilities
-from features.sync import satellite
 from core.background import track_background_task
 from core.requests import json_object, positive_int
+from archive import role
 
 
 router = APIRouter()
@@ -97,7 +97,7 @@ async def people_status_payload(review: dict | None = None) -> dict:
     # the satellite receives the results. Saying so is the honest answer. The
     # old fall-through left the counts cache permanently unfilled, so the panel
     # showed "Refreshing…" forever for something that was never going to run.
-    deferred = satellite.defers_bulk_compute()
+    deferred = role.defers_bulk_compute()
     if not capability["available"] or deferred:
         worker = {
             **worker,

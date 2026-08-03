@@ -10,12 +10,12 @@ from pydantic import BaseModel, Field
 import caption_worker
 import settings
 from core import capabilities
-from features.sync import satellite
 from core.background import track_background_task
 
 
 import db
 from features.settings import status as settings_status
+from archive import role
 
 
 router = APIRouter()
@@ -104,7 +104,7 @@ async def caption_status_payload() -> dict:
     capability = capabilities.capability_status("captions")
     # Same as faces: a hub-backed satellite never captions anything itself, so
     # a perpetual "Refreshing…" was describing work that would never start.
-    deferred = satellite.defers_bulk_compute()
+    deferred = role.defers_bulk_compute()
     if not capability["available"] or deferred:
         worker = {
             **worker,

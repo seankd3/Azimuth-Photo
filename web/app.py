@@ -36,6 +36,7 @@ async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
     )
 # PATCH: quality lane — register technical quality scorer routes
 import db as _db
+from archive import role
 app.include_router(hdr_routes.router)
 app.include_router(ai_mask_routes.router)
 app.include_router(preset_routes.router)
@@ -61,12 +62,12 @@ app.include_router(pair_routes.router)
 # Keep the worker out of hub processes entirely. Standalone (satellite with no
 # hub) runs everything except sync; attaching a hub at runtime starts it.
 satellite.load_stored_hub()
-if satellite.is_satellite_mode():
+if role.works_in_someone_elses_archive():
 
     _sync_worker_lock = asyncio.Lock()
 
     async def _start_sync_worker() -> bool:
-        if not satellite.has_hub():
+        if not role.has_hub():
             return False
         async with _sync_worker_lock:
             if getattr(app.state, "azimuth_sync_worker", None) is not None:
@@ -114,7 +115,7 @@ if satellite.is_satellite_mode():
 async def _prepare_hub_client_bundle_identity():
     """Prepare the updater bundle after the library is ready to serve."""
 
-    if satellite.is_satellite_mode():
+    if role.works_in_someone_elses_archive():
         return
     from features.system import client_bundle
 
@@ -134,7 +135,7 @@ async def _prepare_hub_client_bundle_identity():
 
 @app.on_event("startup")
 async def _start_hub_mdns():
-    if not mdns.is_hub_mode():
+    if not role.serves_the_archive():
         return
     import settings as _settings
 

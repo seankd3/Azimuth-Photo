@@ -15,6 +15,8 @@ from features.sync.hashing import (
 from features.sync.executor import run_sync_work
 from features.sync.validation import validate_content_hash
 
+from archive import role
+
 
 SYNC_STATE_DDL = """
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -70,36 +72,10 @@ def hub_request_headers() -> dict[str, str]:
     return {**device_auth_headers(), **request_headers()}
 
 
-def is_satellite_mode() -> bool:
-    """Standalone counts: satellite semantics do not require a hub."""
-
-    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
-    if mode in ("satellite", "standalone"):
-        return True
-    if mode:
-        return False
-    return bool(hub_url())
-
-
-def has_hub() -> bool:
-    return is_satellite_mode() and bool(hub_url())
-
-
-def defers_bulk_compute() -> bool:
-    """Only a hub-backed peer defers bulk engine work to its hub.
-
-    A standalone install holds the canonical library, so it arms everything a
-    hub arms — AI, faces, captions, preview pregen — budgeted for its host.
-    """
-
-    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
-    return mode == "satellite" or has_hub()
-
-
 def bootstrap_payload() -> dict:
     return {
-        "mode": "satellite" if is_satellite_mode() else "hub",
-        "has_hub": has_hub(),
+        "mode": "satellite" if role.works_in_someone_elses_archive() else "hub",
+        "has_hub": role.has_hub(),
     }
 
 
@@ -435,7 +411,7 @@ async def pending_upload_snapshot(db_path: str) -> list[dict]:
 async def mark_images_dirty(image_ids: Iterable[int], *, db_path: str | None = None) -> None:
     """Mark metadata changed by local user writes without affecting hub mode."""
 
-    if not is_satellite_mode():
+    if not role.works_in_someone_elses_archive():
         return
     if db_path is None:
         import db

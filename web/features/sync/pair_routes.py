@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 import settings
 from features.sync import mdns, pairing, satellite
+from archive import role
 
 
 router = APIRouter(tags=["pairing"])
@@ -96,7 +97,7 @@ def _redeem_pair_request(req: UrlRequest) -> tuple[int, bytes]:
 @router.post("/api/devices/link")
 async def api_devices_link(request: Request):
     """Hub: mint a one-time pair code + QR for the Devices panel."""
-    if not mdns.is_hub_mode() and os.environ.get("AZIMUTH_MODE", "").strip().lower() == "satellite":
+    if not role.serves_the_archive() and os.environ.get("AZIMUTH_MODE", "").strip().lower() == "satellite":
         # Allow link codes on any instance that owns a catalog; satellite can still
         # act as a temporary hub in tests. Prefer hub mode in production.
         pass
@@ -211,7 +212,7 @@ async def api_pair_connect(body: ConnectRequest):
         "hub_id": hub_id,
         "device_name": device_name,
         "platform": plat,
-        "has_hub": satellite.has_hub(),
+        "has_hub": role.has_hub(),
         "settings": {
             "hub_url": saved.get("hub_url"),
             "paired_hub_id": saved.get("paired_hub_id"),
@@ -224,8 +225,8 @@ async def api_pair_connect(body: ConnectRequest):
 async def api_pair_status() -> dict[str, Any]:
     cfg = settings.get_settings()
     return {
-        "mode": "satellite" if satellite.is_satellite_mode() else ("hub" if mdns.is_hub_mode() else "standalone"),
-        "has_hub": satellite.has_hub(),
+        "mode": "satellite" if role.works_in_someone_elses_archive() else ("hub" if role.serves_the_archive() else "standalone"),
+        "has_hub": role.has_hub(),
         "hub_url": satellite.hub_url(),
         "paired_hub_id": str(cfg.get("paired_hub_id") or ""),
         "has_device_token": bool(str(cfg.get("device_token") or "").strip()),

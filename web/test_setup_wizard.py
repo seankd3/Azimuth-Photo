@@ -8,6 +8,7 @@ from test_support import BackendTestCase
 import settings as app_settings
 from features.pages import routes as pages_routes
 from features.sync import satellite
+from archive import role
 
 
 MODE_KEYS = ("AZIMUTH_MODE", "AZIMUTH_HUB_URL", "AZIMUTH_DEVICE_TOKEN")
@@ -35,17 +36,17 @@ class ModeEnv:
 class ModePredicateTests(unittest.TestCase):
     def test_default_is_hub(self):
         with ModeEnv():
-            self.assertFalse(satellite.is_satellite_mode())
-            self.assertFalse(satellite.has_hub())
-            self.assertFalse(satellite.defers_bulk_compute())
+            self.assertFalse(role.works_in_someone_elses_archive())
+            self.assertFalse(role.has_hub())
+            self.assertFalse(role.defers_bulk_compute())
             self.assertEqual(satellite.bootstrap_payload(), {"mode": "hub", "has_hub": False})
 
     def test_satellite_without_hub_is_standalone(self):
         with ModeEnv():
             os.environ["AZIMUTH_MODE"] = "satellite"
-            self.assertTrue(satellite.is_satellite_mode())
-            self.assertFalse(satellite.has_hub())
-            self.assertTrue(satellite.defers_bulk_compute())
+            self.assertTrue(role.works_in_someone_elses_archive())
+            self.assertFalse(role.has_hub())
+            self.assertTrue(role.defers_bulk_compute())
             self.assertEqual(
                 satellite.bootstrap_payload(), {"mode": "satellite", "has_hub": False}
             )
@@ -53,43 +54,43 @@ class ModePredicateTests(unittest.TestCase):
     def test_standalone_alias(self):
         with ModeEnv():
             os.environ["AZIMUTH_MODE"] = "standalone"
-            self.assertTrue(satellite.is_satellite_mode())
-            self.assertFalse(satellite.has_hub())
+            self.assertTrue(role.works_in_someone_elses_archive())
+            self.assertFalse(role.has_hub())
 
     def test_standalone_holds_the_full_engine(self):
         # The installed desktop app is standalone: it holds the canonical
         # library, so it never defers bulk compute to a hub it does not have.
         with ModeEnv():
             os.environ["AZIMUTH_MODE"] = "standalone"
-            self.assertFalse(satellite.defers_bulk_compute())
+            self.assertFalse(role.defers_bulk_compute())
 
     def test_standalone_with_attached_hub_defers_bulk_compute(self):
         with ModeEnv():
             os.environ["AZIMUTH_MODE"] = "standalone"
             satellite._stored_hub_url = "http://stored-hub:8000"
-            self.assertTrue(satellite.defers_bulk_compute())
+            self.assertTrue(role.defers_bulk_compute())
 
     def test_hub_url_alone_implies_satellite(self):
         with ModeEnv():
             os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000/"
-            self.assertTrue(satellite.is_satellite_mode())
-            self.assertTrue(satellite.has_hub())
-            self.assertTrue(satellite.defers_bulk_compute())
+            self.assertTrue(role.works_in_someone_elses_archive())
+            self.assertTrue(role.has_hub())
+            self.assertTrue(role.defers_bulk_compute())
             self.assertEqual(satellite.hub_url(), "http://hub:8000")
 
     def test_explicit_hub_mode_wins_over_hub_url(self):
         with ModeEnv():
             os.environ["AZIMUTH_MODE"] = "hub"
             os.environ["AZIMUTH_HUB_URL"] = "http://hub:8000"
-            self.assertFalse(satellite.is_satellite_mode())
-            self.assertFalse(satellite.has_hub())
-            self.assertFalse(satellite.defers_bulk_compute())
+            self.assertFalse(role.works_in_someone_elses_archive())
+            self.assertFalse(role.has_hub())
+            self.assertFalse(role.defers_bulk_compute())
 
     def test_stored_hub_counts_without_env(self):
         with ModeEnv():
             satellite._stored_hub_url = "http://stored-hub:8000"
-            self.assertTrue(satellite.is_satellite_mode())
-            self.assertTrue(satellite.has_hub())
+            self.assertTrue(role.works_in_someone_elses_archive())
+            self.assertTrue(role.has_hub())
 
 
 class SetupGateTests(BackendTestCase):
@@ -189,7 +190,7 @@ class AttachHubTests(BackendTestCase):
 
             self.assertEqual(result, {"hub": "http://hub:8000", "sync_started": True})
             self.assertEqual(started, [True])
-            self.assertTrue(satellite.has_hub())
+            self.assertTrue(role.has_hub())
             self.assertEqual(satellite.hub_url(), "http://hub:8000")
             self.assertEqual(satellite.device_token(), "tok-123")
             config = app_settings.get_settings()
@@ -205,7 +206,7 @@ class AttachHubTests(BackendTestCase):
             os.environ["AZIMUTH_MODE"] = "standalone"
             with self.assertRaises(ValueError):
                 await satellite.attach_hub("hub:8000")
-            self.assertFalse(satellite.has_hub())
+            self.assertFalse(role.has_hub())
 
 
 if __name__ == "__main__":

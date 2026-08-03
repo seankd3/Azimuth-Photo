@@ -13,6 +13,7 @@ from features.sync import contract, freeup, oplog, satellite
 from features.sync.sync_worker import get_worker
 from features.trash import service as trash_service
 from data.repositories import catalog as catalog_repository
+from archive import role
 
 
 router = APIRouter(tags=["sync"])
@@ -73,7 +74,7 @@ async def _prefetch_browse_tier(worker) -> None:
 async def attach_hub(request: Request):
     """Runtime standalone → satellite upgrade: store the hub and start syncing."""
 
-    if not satellite.is_satellite_mode():
+    if not role.works_in_someone_elses_archive():
         return JSONResponse({"error": "A hub cannot attach to another hub"}, status_code=400)
     body = await request.json()
     try:
@@ -88,10 +89,10 @@ async def attach_hub(request: Request):
 @router.get("/api/sync/status")
 async def sync_status(lr_exports_since: float = 0.0):
     worker = get_worker()
-    if not satellite.is_satellite_mode() or worker is None:
+    if not role.works_in_someone_elses_archive() or worker is None:
         hub_state = (
             contract.hub_status(satellite.hub_url())
-            if satellite.has_hub()
+            if role.has_hub()
             else {
                 "hub_health": (
                     "not_connected" if await _library_needs_a_hub() else "ok"
@@ -100,12 +101,12 @@ async def sync_status(lr_exports_since: float = 0.0):
                 "app_version": app_version(),
             }
         )
-        status = {"mode": "satellite" if satellite.is_satellite_mode() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "skipped_conflicts": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_state}
+        status = {"mode": "satellite" if role.works_in_someone_elses_archive() else "hub", "paused": False, "queue_depth": 0, "bytes_remaining": 0, "throughput_bps": 0, "current_file": None, "recent_errors": [], "mirror": {"cursor": 0, "rows_applied": 0, "skipped_unhashed": 0, "skipped_conflicts": 0, "last_refresh_at": None}, "prefetch": {"state": "idle", "cached": 0, "total": 0}, **hub_state}
     else:
         status = worker.status()
     pending = (
         await trash_service.pending_hub_trash_refs(db.DB_PATH)
-        if satellite.is_satellite_mode()
+        if role.works_in_someone_elses_archive()
         else {"count": 0}
     )
     status["pending_hub_trash"] = int(pending["count"])
@@ -148,7 +149,7 @@ async def sync_now():
 async def sync_freeable(
     older_than_days: int = Query(default=30, ge=0, le=36500),
 ):
-    if not satellite.has_hub():
+    if not role.has_hub():
         return JSONResponse(
             {"error": "A connected satellite is required to free local originals"},
             status_code=400,
@@ -161,7 +162,7 @@ async def sync_freeable(
 
 @router.post("/api/sync/freeup")
 async def sync_freeup(body: FreeUpRequest):
-    if not satellite.has_hub():
+    if not role.has_hub():
         return JSONResponse(
             {"error": "A connected satellite is required to free local originals"},
             status_code=400,

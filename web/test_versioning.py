@@ -74,7 +74,7 @@ class HubContractTests(unittest.TestCase):
             worker = SyncWorker(db_path=":memory:", hub="http://old-hub", request=request)
             await worker.refresh_hub_contract(force=True)
             with patch("features.sync.satellite_routes.get_worker", return_value=worker), patch(
-                "features.sync.satellite_routes.satellite.is_satellite_mode", return_value=True
+                "archive.role.works_in_someone_elses_archive", return_value=True
             ), patch(
                 "features.sync.satellite_routes.trash_service.pending_hub_trash_refs",
                 new_callable=AsyncMock,

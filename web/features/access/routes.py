@@ -7,6 +7,7 @@ import os
 from fastapi import APIRouter, Request
 
 from features.access import tailscale as ts
+from archive import role
 
 
 router = APIRouter()
@@ -42,7 +43,7 @@ def _enrich_urls(probe: dict, request: Request) -> dict:
 
 @router.get("/api/remote-access")
 async def api_remote_access(request: Request):
-    hub_mode = ts.is_hub_mode()
+    hub_mode = role.serves_the_archive()
     probe = _enrich_urls(ts.probe(), request) if hub_mode else {
         "state": "absent",
         "available": False,
@@ -70,7 +71,7 @@ async def api_remote_access(request: Request):
 @router.post("/api/remote-access/serve")
 async def api_remote_access_serve(request: Request):
     """Apply ``tailscale serve`` from FIELD_HTTPS.md — user-click only."""
-    if not ts.is_hub_mode():
+    if not role.serves_the_archive():
         return {
             "ok": False,
             "dry_run": ts.dry_run_enabled(),

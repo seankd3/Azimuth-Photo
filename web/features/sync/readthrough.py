@@ -32,6 +32,7 @@ from urllib.request import Request, urlopen
 
 from data import connection as data_connection
 from features.sync import satellite
+from archive import role
 
 
 _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
@@ -50,16 +51,12 @@ class BaseReadthroughError(RuntimeError):
     """The hub could not provide a usable Develop base artifact."""
 
 
-def is_satellite_mode() -> bool:
-    return satellite.is_satellite_mode()
-
-
 def hub_url() -> str | None:
     return satellite.hub_url() or None
 
 
 def can_read_through() -> bool:
-    return is_satellite_mode() and hub_url() is not None
+    return role.works_in_someone_elses_archive() and hub_url() is not None
 
 
 def _content_hash_for_image(image_id: int, db_path: str) -> str | None:

@@ -61,17 +61,6 @@ def force_state() -> str | None:
     return raw if raw in {"absent", "logged-out", "up"} else None
 
 
-def is_hub_mode() -> bool:
-    """Hub mode only — Remote access panel stays hidden for standalone/satellite."""
-    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
-    hub = os.environ.get("AZIMUTH_HUB_URL", "").strip()
-    if hub:
-        return False
-    if mode in {"satellite", "standalone"}:
-        return False
-    return True
-
-
 def serve_command(*, local_target: str | None = None) -> str:
     target = (local_target or DEFAULT_LOCAL_TARGET).rstrip("/")
     return f"sudo tailscale serve --bg --https={SERVE_HTTPS_PORT} {target}"

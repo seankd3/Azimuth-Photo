@@ -20,7 +20,7 @@ from core import responses as response_helpers
 from data.repositories import rankings as ranking_repository
 from features.library import preview_priority
 from features.library import taste as taste_service
-from features.sync import satellite
+from archive import role
 
 
 _rankings_response_cache: dict[tuple, dict] = {}
@@ -632,7 +632,7 @@ def _ranking_preview_metadata(total_images: int, preview_ready_images: int) -> d
 
 
 def _visible_thumb_size_for_scope(import_batch: int = 0) -> str:
-    return "" if satellite.is_satellite_mode() or _normalized_import_batch_id(import_batch) else "sm"
+    return "" if role.works_in_someone_elses_archive() or _normalized_import_batch_id(import_batch) else "sm"
 
 
 def _preview_thumb_size_for_scope() -> str:
@@ -776,7 +776,7 @@ async def map_markers_payload(
         text_query=search.get("text_query") or "",
         exclude_sources=exclude_sources,
     )
-    if not satellite.is_satellite_mode() or not payload.get("markers"):
+    if not role.works_in_someone_elses_archive() or not payload.get("markers"):
         return payload
     markers = [dict(marker) for marker in payload["markers"]]
     cached_ids = await db.get_cached_image_ids(

@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 import helpers as app_helpers
 import photo_metadata
 from features.search.similarity import scan_duplicate_pairs
-from features.sync import satellite
+from archive import role
 
 
 router = APIRouter()
@@ -99,7 +99,7 @@ async def api_similar(image_id: int, limit: int = 50):
         image_ids,
         similarities,
         limit,
-        "" if satellite.is_satellite_mode() else "sm",
+        "" if role.works_in_someone_elses_archive() else "sm",
         exclude_id=image_id,
         model_key=db.active_embedding_model_key(),
     )
@@ -112,7 +112,7 @@ async def api_similar(image_id: int, limit: int = 50):
         card = app_helpers.image_card(img, "sm", similarity=score)
         card["preview_ready"] = True
         results.append(card)
-    if satellite.is_satellite_mode() and results:
+    if role.works_in_someone_elses_archive() and results:
         cached_ids = await media_warm.cached_image_ids([int(result["id"]) for result in results], "sm")
         for result in results:
             ready = int(result["id"]) in cached_ids

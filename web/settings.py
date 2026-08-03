@@ -5,6 +5,7 @@ import threading
 
 from core.runtime_paths import resolve_runtime_paths
 from core import env_names
+from archive import role
 
 WEB_DIR = os.path.dirname(__file__)
 SETTINGS_PATH = resolve_runtime_paths().settings_file
@@ -301,9 +302,7 @@ def default_memory_cache_gb() -> float:
     """
 
     try:
-        from features.sync import satellite
-
-        if not satellite.is_satellite_mode():
+        if not role.works_in_someone_elses_archive():
             try:
                 from core.host_profile import detect_host_profile
 

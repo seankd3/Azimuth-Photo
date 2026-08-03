@@ -8,6 +8,8 @@ import os
 import socket
 from typing import Any
 
+from archive import role
+
 log = logging.getLogger(__name__)
 
 SERVICE_TYPE = "_azimuth._tcp.local."
@@ -28,15 +30,6 @@ def zeroconf_available() -> bool:
 
 def mdns_disabled() -> bool:
     return os.environ.get("AZIMUTH_NO_MDNS", "").strip() in ("1", "true", "yes", "on")
-
-
-def is_hub_mode() -> bool:
-    mode = os.environ.get("AZIMUTH_MODE", "").strip().lower()
-    if mode in ("satellite", "standalone"):
-        return False
-    if os.environ.get("AZIMUTH_HUB_URL", "").strip():
-        return False
-    return mode in ("", "hub")
 
 
 def _local_ipv4() -> str:
@@ -135,7 +128,7 @@ class HubAnnouncer:
 
 def start_hub_announce(*, name: str, port: int, hub_id: str) -> HubAnnouncer | None:
     global _announcer
-    if mdns_disabled() or not is_hub_mode():
+    if mdns_disabled() or not role.serves_the_archive():
         return None
     if not _ZEROCONF_AVAILABLE:
         log.warning("AZIMUTH mDNS skipped: zeroconf not installed")

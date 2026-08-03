@@ -5,6 +5,7 @@ import time
 
 from core import capabilities
 from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
+from archive import role
 
 
 log = logging.getLogger(__name__)
@@ -139,9 +140,7 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
         key: capabilities.capability_status(key)
         for key in ("search", "people", "captions")
     }
-    from features.sync import satellite
-
-    if satellite.defers_bulk_compute():
+    if role.defers_bulk_compute():
         log.info("worker=optional_ai skipped reason=hub_backed_satellite")
         return statuses
 
@@ -605,13 +604,11 @@ async def run_startup(
         caption_worker=caption_worker,
     )
 
-    from features.sync import satellite as _satellite
-
     # Auto-resume bulk workers that were running before the last shutdown.
     # Pregen and cloud vault own the canonical archive disk — a hub's or a
     # standalone install's. Hub-backed satellites keep only interactive/
     # on-demand previews and receive generated work through sync.
-    if not _satellite.defers_bulk_compute():
+    if not role.defers_bulk_compute():
         try:
             from core import bulk_scheduler as _bulk_scheduler
 
@@ -636,7 +633,7 @@ async def run_startup(
     except Exception:
         log.exception("worker=catalog_backup scheduler failed to arm")
 
-    if not _satellite.defers_bulk_compute():
+    if not role.defers_bulk_compute():
         try:
             import db as _db
             from core import bulk_scheduler as _bulk_scheduler

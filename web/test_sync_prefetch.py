@@ -237,7 +237,7 @@ def test_auto_budget_adapts_to_disk_and_library(tmp_path):
     import unittest.mock as mock
 
     # Legacy hub path: 25% of FREE, clamped 8-64GB.
-    with mock.patch.object(prefetch_mod.satellite, "is_satellite_mode", return_value=False):
+    with mock.patch("archive.role.works_in_someone_elses_archive", return_value=False):
         with mock.patch.object(
             real_shutil, "disk_usage", return_value=mock.Mock(free=200 * 1024 ** 3, total=500 * 1024 ** 3)
         ):
@@ -249,7 +249,7 @@ def test_auto_budget_adapts_to_disk_and_library(tmp_path):
 
     # Satellite: clamp(needed*1.2, floor 8GB, cap 25% of TOTAL).
     # 32GB sm+md on a 500GB disk → 38.4GB (under 125GB cap).
-    with mock.patch.object(prefetch_mod.satellite, "is_satellite_mode", return_value=True):
+    with mock.patch("archive.role.works_in_someone_elses_archive", return_value=True):
         with mock.patch.object(
             real_shutil, "disk_usage", return_value=mock.Mock(free=100 * 1024 ** 3, total=500 * 1024 ** 3)
         ):

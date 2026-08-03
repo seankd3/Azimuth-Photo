@@ -20,6 +20,7 @@ from core import user_activity
 from data import connection
 from features.sync import satellite
 from features.sync.executor import hub_request, run_sync_work
+from archive import role
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -78,7 +79,7 @@ def auto_thumb_budget_bytes(
     except OSError:
         return floor
 
-    if not satellite.is_satellite_mode():
+    if not role.works_in_someone_elses_archive():
         auto = int(usage.free * AUTO_BUDGET_FREE_FRACTION)
         return min(AUTO_BUDGET_CEILING_GB * 1024 ** 3, max(floor, auto))
 

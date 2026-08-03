@@ -11,7 +11,6 @@ from pydantic import BaseModel, Field
 
 from features.trash import service as trash_service
 from features.trash.remote import FORWARDED_HEADER
-from features.sync import satellite
 from features.sync.contract import require_compatible_api_revision
 from features.sync.sync_worker import get_worker
 
@@ -30,6 +29,7 @@ def _invalidate_after_trash() -> None:
 from core import cache_events
 from features.cache import status as cache_status_service
 from features.settings import status as settings_status
+from archive import role
 router = APIRouter()
 DbPath = Callable[[], str]
 MAX_IMAGE_IDS_PER_REQUEST = 10000
@@ -80,7 +80,7 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
     await require_compatible_api_revision(request)
     forwarded = request.headers.get(FORWARDED_HEADER) == "1"
     target_ids = _payload.hub_image_ids if _payload is not None else None
-    if not (satellite.is_satellite_mode() and not forwarded):
+    if not (role.works_in_someone_elses_archive() and not forwarded):
         result = await trash_service.empty_trash(catalog_path(), image_ids=target_ids)
         if result["deleted_count"]:
             _invalidate_after_write()

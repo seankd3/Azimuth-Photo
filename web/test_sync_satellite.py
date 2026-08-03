@@ -339,9 +339,9 @@ class SatelliteSyncTests(BackendTestCase):
 
         worker = Worker()
         old_get_worker = satellite_routes.get_worker
-        old_satellite_mode = satellite_routes.satellite.is_satellite_mode
+        old_satellite_mode = satellite_routes.role.works_in_someone_elses_archive
         satellite_routes.get_worker = lambda: worker
-        satellite_routes.satellite.is_satellite_mode = lambda: True
+        satellite_routes.role.works_in_someone_elses_archive = lambda: True
         try:
             def drive():
                 with TestClient(app_module.app) as client:
@@ -352,7 +352,7 @@ class SatelliteSyncTests(BackendTestCase):
             now, paused, resumed = await __import__("asyncio").to_thread(drive)
         finally:
             satellite_routes.get_worker = old_get_worker
-            satellite_routes.satellite.is_satellite_mode = old_satellite_mode
+            satellite_routes.role.works_in_someone_elses_archive = old_satellite_mode
         self.assertEqual(now.status_code, 200)
         self.assertEqual(worker.now_calls, 1)
         self.assertTrue(paused.json()["paused"])

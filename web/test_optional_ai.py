@@ -78,7 +78,7 @@ class OptionalAiPackagingTests(unittest.TestCase):
             "model_dir": "/tmp/test",
             "dimension": 4096,
         }
-        with patch.object(ai_routes, "_configured"), patch.object(
+        with patch.object(
             ai_routes.capabilities, "capability_status", return_value=capability
         ), patch.object(ai_routes.settings, "active_embedding_config", return_value=config):
             response = asyncio.run(ai_routes.api_resume_embeddings())
@@ -181,7 +181,7 @@ assert app.app.title == 'Azimuth Photo'
             background.capabilities,
             "capability_status",
             side_effect=lambda key: available[key],
-        ), patch("features.sync.satellite.is_satellite_mode", return_value=True):
+        ), patch("archive.role.works_in_someone_elses_archive", return_value=True):
             statuses = background.schedule_optional_workers(
                 track_background_task=tracked.append,
                 settings=object(),
@@ -261,14 +261,14 @@ assert app.app.title == 'Azimuth Photo'
             pregen.assert_not_called()
             resume.assert_not_called()
 
-        with patch.object(caption_routes, "_configured"), patch.object(
+        with patch.object(
             caption_routes.capabilities, "capability_status", return_value=captions
         ), patch.object(caption_routes.caption_worker, "resume_caption_worker") as resume:
             response = asyncio.run(caption_routes.api_resume_captions())
             self.assertEqual(response.status_code, 409)
             resume.assert_not_called()
 
-        with patch.object(ai_routes, "_configured"), patch.object(
+        with patch.object(
             ai_routes.capabilities, "capability_status", return_value=search
         ), patch.object(ai_routes.ai_models, "start_model_install") as install:
             response = asyncio.run(ai_routes.api_install_ai_model())
@@ -291,9 +291,9 @@ assert app.app.title == 'Azimuth Photo'
             "dimension": 4,
         }
         with patch.object(ai_routes.capabilities, "capability_status", return_value=search), patch.object(
-            ai_routes, "_get_ai_status_counts", get_ai_counts
-        ), patch.object(ai_routes, "_count_embeddings_for_model", lambda **_kwargs: asyncio.sleep(0, result=7)), patch.object(
-            ai_routes, "_invalidate_settings_response_cache", lambda: None
+            ai_routes.db, "get_ai_status_counts", get_ai_counts
+        ), patch.object(
+            ai_routes.settings_status, "invalidate_settings_response_cache", lambda: None
         ):
             status = asyncio.run(ai_routes.build_ai_status(model_status, force=True))
         self.assertEqual(status["embedded"], 7)
@@ -311,10 +311,10 @@ assert app.app.title == 'Azimuth Photo'
 
         captions = missing_capability("captions")
         with patch.object(caption_routes.capabilities, "capability_status", return_value=captions), patch.object(
-            caption_routes,
-            "_get_caption_status_counts",
+            caption_routes.db,
+            "get_caption_status_counts",
             lambda **_kwargs: asyncio.sleep(0, result={"captioned": 9}),
-        ), patch.object(caption_routes, "_invalidate_settings_response_cache", lambda: None):
+        ), patch.object(caption_routes.settings_status, "invalidate_settings_response_cache", lambda: None):
             status = asyncio.run(caption_routes.caption_status_payload())
         self.assertEqual(status["counts"]["captioned"], 9)
         self.assertFalse(status["active"])

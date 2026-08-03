@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 from features.access import routes as access_routes
 from features.access import tailscale as ts
+from archive import role
 
 
 def _completed(stdout: str = "", stderr: str = "", returncode: int = 0) -> subprocess.CompletedProcess[str]:
@@ -45,16 +46,16 @@ class TailscaleProbeTests(unittest.TestCase):
                 os.environ[key] = value
 
     def test_hub_mode_predicate(self):
-        self.assertTrue(ts.is_hub_mode())
+        self.assertTrue(role.serves_the_archive())
         os.environ["AZIMUTH_MODE"] = "hub"
-        self.assertTrue(ts.is_hub_mode())
+        self.assertTrue(role.serves_the_archive())
         os.environ["AZIMUTH_MODE"] = "standalone"
-        self.assertFalse(ts.is_hub_mode())
+        self.assertFalse(role.serves_the_archive())
         os.environ["AZIMUTH_MODE"] = "satellite"
-        self.assertFalse(ts.is_hub_mode())
+        self.assertFalse(role.serves_the_archive())
         os.environ.pop("AZIMUTH_MODE", None)
         os.environ["AZIMUTH_HUB_URL"] = "http://hub.example"
-        self.assertFalse(ts.is_hub_mode())
+        self.assertFalse(role.serves_the_archive())
 
     def test_force_states(self):
         os.environ["AZIMUTH_TS_FORCE_STATE"] = "absent"
