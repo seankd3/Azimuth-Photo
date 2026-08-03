@@ -8,12 +8,16 @@ and what is known to be broken. Newest first.
 
 | | main | now |
 |---|---|---|
-| Non-test Python | 104,185 | 88,747 |
-| Test Python | 53,541 | 32,689 |
-| Static JS | 38,619 | 37,680 |
-| API routes | 305 | 269 |
+| Non-test Python | 104,185 | 92,569 |
+| Test Python | 53,541 | 43,410 |
+| Static JS | 38,619 | 37,739 |
+| API routes | 305 | 282 |
 
-55 commits. **48,231 deletions against 5,418 insertions.**
+About 22,600 lines out of 196,000 — 12%. The number was 48,000 before the audit
+put back what should not have gone, and the honest figure is the one that
+survives checking. What left for good: the injection layer, the Playwright
+scenario suite, 424 assertions on literal source text, six duplicate hub
+clients, the v1 metadata push, and routes with neither a caller nor an intent.
 
 ## Known red
 
