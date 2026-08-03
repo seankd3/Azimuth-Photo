@@ -26,7 +26,11 @@ STANDALONE = "standalone"
 
 
 def _hub_url() -> str:
-    # Imported here: features/ may import archive/, never the reverse.
+    # Imported here, not at module scope, because the hub URL and device token
+    # still live in features/sync/satellite.py. archive/ importing features/ is
+    # backwards and the lazy import only hides it: the state belongs here, and
+    # moving it is 47 call sites through the pairing path. Recorded in
+    # docs/SIMPLIFY_LOG.md rather than left looking deliberate.
     from features.sync import satellite
 
     return satellite.hub_url()

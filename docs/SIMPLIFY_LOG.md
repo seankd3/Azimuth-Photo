@@ -181,6 +181,14 @@ defined three times, and one of the three was a flag nothing ever set.
 
 ## Measured, not yet done
 
+**archive/ imports features/, which is backwards.** `pixels/` and `photo/` are
+clean; `archive/role.py` and `archive/transport.py` reach into
+`features/sync/satellite.py` for the hub URL and device token, behind lazy
+imports that hide the direction rather than fix it. That state belongs in
+`archive/`. Moving it is 47 call sites through the pairing and auth path, so it
+wants its own session; the comments now say so instead of claiming the rule is
+being followed.
+
 **Two app-assembly sites, still two.** `web/app.py` (196 lines) and
 `core/app_factory.py` (269) both register routers and both run configure calls,
 and the order between them is load-bearing but untyped. The injection layer they
