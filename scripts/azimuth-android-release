@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APK="$ROOT/outputs/azimuth-android-debug.apk"
+ARTIFACT_DIR="${AZIMUTH_ANDROID_RELEASE_ARTIFACTS:-$ROOT/outputs/android-release}"
+DOWNLOAD_URL="${AZIMUTH_ANDROID_DOWNLOAD_URL:-}"
+
+if [[ -z "$DOWNLOAD_URL" ]]; then
+    echo "Set AZIMUTH_ANDROID_DOWNLOAD_URL to the published APK URL." >&2
+    exit 2
+fi
+
+mkdir -p "$ARTIFACT_DIR"
+
+"$ROOT/scripts/azimuth-android-e2e" >"$ARTIFACT_DIR/release.log" 2>&1 || {
+    cat "$ARTIFACT_DIR/release.log" >&2
+    exit 1
+}
+
+if [[ ! -f "$APK" ]]; then
+    echo "Missing release APK at $APK" >&2
+    exit 1
+fi
+
+LOCAL_HASH="$(sha256sum "$APK" | awk '{print $1}')"
+CHECK_APK="$ARTIFACT_DIR/download-check.apk"
+
+curl -fsSL --max-time 30 "$DOWNLOAD_URL" -o "$CHECK_APK"
+REMOTE_HASH="$(sha256sum "$CHECK_APK" | awk '{print $1}')"
+
+if [[ "$LOCAL_HASH" != "$REMOTE_HASH" ]]; then
+    echo "Published APK is stale." >&2
+    echo "local:  $LOCAL_HASH $APK" >&2
+    echo "remote: $REMOTE_HASH $DOWNLOAD_URL" >&2
+    exit 1
+fi
+
+cat <<EOF
+Azimuth Photo Android is ready.
+Download: $DOWNLOAD_URL
+SHA-256:  $LOCAL_HASH
+EOF
