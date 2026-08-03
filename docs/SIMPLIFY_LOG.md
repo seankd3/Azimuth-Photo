@@ -22,8 +22,6 @@ and what is known to be broken. Newest first.
 - `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
   — passes alone, fails in a batch with `database is locked`. Lock contention,
   not logic.
-- `test_develop_discovery.py` — two cases about explicit develop roots.
-  Pre-existing, verified at the previous commit.
 - The suite is order-dependent. `test_support.py` monkeypatches ~20 module
   globals and 42 files import it with `*`. Files pass alone that fail in a run.
 
@@ -134,3 +132,6 @@ returned an empty list when nobody had wired them. Neither said anything.
 - `python -m harness --check` stays green. A commit that changes a golden says
   why in the message.
 - `./scripts/smoke` exit code is the result — never read through `tail`.
+- `pytest --collect-only` after any deletion. It imports all 162 test modules in
+  under three seconds and catches references the deleted code left behind —
+  including ones inside strings, which no import checker sees.
