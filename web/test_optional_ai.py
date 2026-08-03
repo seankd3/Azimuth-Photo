@@ -250,6 +250,9 @@ assert app.app.title == 'Azimuth Photo'
 
     def test_missing_pack_resume_routes_return_409_before_starting_work(self):
         people = missing_capability("people")
+        # caption_status_payload holds a TTL cache keyed by model; a
+        # different test's stub is still in it otherwise.
+        caption_routes._caption_counts_cache.clear()
         captions = missing_capability("captions")
         search = missing_capability("search")
 

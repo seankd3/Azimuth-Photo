@@ -55,6 +55,7 @@ class SatelliteWorkerHonestyTests(unittest.TestCase):
             return asyncio.run(people_routes.people_status_payload())
 
     def _captions(self, *, deferred: bool, capability=INSTALLED) -> dict:
+        caption_routes._caption_counts_cache.clear()
         with mock.patch.object(caption_routes.role, "defers_bulk_compute", return_value=deferred), \
              mock.patch.object(caption_routes.capabilities, "capability_status", return_value=capability):
             return asyncio.run(caption_routes.caption_status_payload())
