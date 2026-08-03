@@ -435,12 +435,12 @@ def bench_db(iterations: int):
     print_query_plan(
         "pregen md candidates",
         "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at "
-        "FROM images i INDEXED BY idx_images_missing_source_filepath_id "
+        "FROM images i INDEXED BY idx_images_missing_date_taken_id "
         "JOIN catalog_sources s ON s.id = i.source_id "
         "WHERE s.included = 1 AND s.online = 1 AND i.missing_at IS NULL "
-        "AND (i.source_id > ? OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))) "
-        "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC LIMIT 1024",
-        (0, 0, "", "", 0),
+        "AND (i.date_taken < ? OR (i.date_taken IS ? AND i.id < ?)) "
+        "ORDER BY i.date_taken DESC, i.id DESC LIMIT 1024",
+        ("9999", "9999", 0),
     )
     print_query_plan(
         "embedding md-ready",

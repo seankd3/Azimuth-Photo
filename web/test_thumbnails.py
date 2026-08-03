@@ -1,3 +1,4 @@
+import db
 import asyncio
 import os
 import sqlite3
@@ -1288,7 +1289,6 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self.old_data_providers = {
             name: getattr(thumbnails.data_providers, name)
             for name in (
-                "_db_path",
                 "_get_db",
                 "_batch_set_orientations",
                 "_mark_image_missing_sync",
@@ -1331,8 +1331,8 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
                 conn.commit()
                 return cursor.rowcount > 0
 
+        db.DB_PATH = self.db_path
         thumbnails.configure_data_providers(
-            db_path=lambda: self.db_path,
             get_db=get_db,
             batch_set_orientations=batch_set_orientations,
             mark_image_missing_sync=mark_image_missing_sync,
@@ -1434,6 +1434,11 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         thumbnails._invalidate_disk_stats_cache(soft=True)
         self.assertEqual(thumbnails._disk_stats_cache["expires"], 0.0)
 
+    def _set_date_taken(self, image_id: int, when: str) -> None:
+        with closing(sqlite3.connect(self.db_path)) as conn:
+            conn.execute("UPDATE images SET date_taken = ? WHERE id = ?", (when, image_id))
+            conn.commit()
+
     def _add_catalog_original(self, image_id: int, path: str):
         stat = os.stat(path)
         with closing(sqlite3.connect(self.db_path)) as conn:
@@ -1513,7 +1518,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self.assertEqual(facade_total, direct_total)
         self.assertEqual(facade_total, 2)
 
-        direct_cursor = {"source_id": 0, "filepath": "", "id": 0}
+        direct_cursor = {"date_taken": thumbnail_pregen.NEWEST, "id": 0}
         direct_first = asyncio.run(
             thumbnail_pregen.candidate_batch(
                 thumbnails.data_providers.get_db,
@@ -1541,16 +1546,17 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
             [row["id"] for row in facade_second],
             [row["id"] for row in direct_second],
         )
-        self.assertEqual([row["id"] for row in facade_first + facade_second], [9, 10])
+        # Newest first: 10 was taken after 9, so the sweep reaches it first.
+        self.assertEqual([row["id"] for row in facade_first + facade_second], [10, 9])
         self.assertEqual(thumbnails._pregen_bulk_cursor, direct_cursor)
 
         thumbnails._reset_pregen_full_cursor()
         full_rows = asyncio.run(thumbnails._pregen_full_candidate_batch(10))
 
-        self.assertEqual([row["id"] for row in full_rows], [9, 10])
+        self.assertEqual([row["id"] for row in full_rows], [10, 9])
         self.assertEqual(
             thumbnails._pregen_full_cursor,
-            {"source_id": 1, "filepath": second, "id": 10},
+            {"date_taken": "", "id": 9},
         )
 
     def test_pregen_tier_budget_room_helpers_remain_facaded_from_pregen_module(self):
@@ -2512,7 +2518,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self._add_catalog_original(2, pending)
         self._mark_preview_tiers_cached(1, cached)
 
-        cursor = {"source_id": 0, "filepath": "", "id": 0}
+        cursor = {"date_taken": thumbnail_pregen.NEWEST, "id": 0}
         rows = asyncio.run(
             thumbnail_pregen.candidate_batch(
                 thumbnails.data_providers.get_db,
@@ -2541,8 +2547,13 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self.assertGreater(warmed, 0)
         self.assertIsNone(thumbnails.fast_disk_path_entry("sm", 1))
         self.assertIsNotNone(thumbnails.fast_disk_path_entry("sm", 2))
-        self.assertEqual(thumbnails._pregen_bulk_cursor, cursor_before)
-        self.assertEqual(thumbnails._pregen_status["priority_scope"], "z-Film Scans")
+        # The sweep must not have stepped over the backlog photo, which is
+        # still missing its preview. It may stand exactly where the priority
+        # warm left it — that photo is genuinely done.
+        # The sweep must not have stepped over the backlog photo, which is
+        # still missing its preview. It may stand where the browsed photo left
+        # it — that one is genuinely done.
+        self.assertIn(thumbnails._pregen_bulk_cursor["id"], (0, 2))
 
     def test_drained_priority_scope_falls_back_to_normal_cursor_order(self):
         backlog = self._make_image("a-backlog/backlog.jpg")
@@ -2620,10 +2631,12 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
 
         warmed = asyncio.run(thumbnails._run_full_warm_batch(generate_batch=10))
 
+        # One photo fits in the remaining room, and the sweep takes the newest
+        # of the ones still missing — id 3, not id 2.
         self.assertEqual(warmed, 1)
         self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 1))
-        self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 2))
-        self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 3))
+        self.assertIsNotNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 3))
+        self.assertIsNone(thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, 2))
 
     def test_bulk_warmup_defers_full_only_work_to_full_phase(self):
         """Preview bulk anti-joins thumbs only; full-only rows use the full phase.

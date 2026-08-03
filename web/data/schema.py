@@ -389,8 +389,10 @@ CREATE INDEX IF NOT EXISTS idx_images_source_missing_filepath_filename
 ON images(source_id, missing_at, filepath, filename);
 CREATE INDEX IF NOT EXISTS idx_images_source_missing_id
 ON images(source_id, missing_at, id);
-CREATE INDEX IF NOT EXISTS idx_images_missing_source_filepath_id
-ON images(missing_at, source_id, filepath ASC, id ASC);
+-- The preview sweep walks newest photo first, so it can read this in order and
+-- stop at the page size instead of sorting the whole library for every page.
+CREATE INDEX IF NOT EXISTS idx_images_missing_date_taken_id
+ON images(missing_at, COALESCE(date_taken, '') DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_images_active_orientation_count
 ON images(orientation, missing_at) WHERE status IN ('kept', 'maybe');
 CREATE INDEX IF NOT EXISTS idx_images_missing_file_ext_source
@@ -1137,8 +1139,8 @@ COMPAT_INDEX_SQL = (
     ),
     "CREATE INDEX IF NOT EXISTS idx_images_source_missing_id ON images(source_id, missing_at, id)",
     (
-        "CREATE INDEX IF NOT EXISTS idx_images_missing_source_filepath_id "
-        "ON images(missing_at, source_id, filepath ASC, id ASC)"
+        "CREATE INDEX IF NOT EXISTS idx_images_missing_date_taken_id "
+        "ON images(missing_at, COALESCE(date_taken, '') DESC, id DESC)"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_images_active_orientation_count "
@@ -1457,7 +1459,7 @@ REQUIRED_INDEXES = {
     "idx_devices_token_hash",
     "idx_devices_revoked_at",
     "idx_catalog_sources_active",
-    "idx_images_missing_source_filepath_id",
+    "idx_images_missing_date_taken_id",
     "idx_images_source_missing_id",
     "idx_images_source_missing_rating_signal",
     "idx_images_active_visible_orientation_elo",

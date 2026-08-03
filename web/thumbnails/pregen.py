@@ -41,15 +41,19 @@ class SessionBookkeeping:
         self.source_read_failures = source_read_failures
 
 
+# Sorts after every real date, so "older than here" starts at the newest photo
+# and a cursor left over from the previous ordering simply starts again.
+# Undated photos read as "" — swept last, rather than never.
+NEWEST = "9999"
+
+
 def reset_cursor(cursor: dict) -> None:
-    cursor["source_id"] = 0
-    cursor["filepath"] = ""
+    cursor["date_taken"] = NEWEST
     cursor["id"] = 0
 
 
 def update_cursor_from_row(cursor: dict, row) -> None:
-    cursor["source_id"] = int(row["source_id"] or 0)
-    cursor["filepath"] = str(row["filepath"] or "")
+    cursor["date_taken"] = row["date_taken"] or ""
     cursor["id"] = int(row["id"] or 0)
 
 
@@ -81,20 +85,23 @@ async def candidate_batch(
     ``cache_entries`` for every requested size are excluded in SQL. That keeps
     selection O(pending) instead of re-walking a long already-warmed prefix.
 
-    Candidates are ordered by ``(source_id, filepath, id)`` so the bulk HDD
-    sweep walks folder-by-folder. On the expansion archive (exFAT, no FIEMAP),
-    filepath order is the reliable proxy for physical disk order and avoids
-    seek-thrashing between scattered folders.
+    Candidates are ordered newest photo first, because that is where the owner
+    is looking: the grid opens on the most recent day, so those are the tiles
+    that are blank while they wait.
+
+    This used to walk ``(source_id, filepath, id)`` — alphabetically, to keep
+    the bulk sweep folder-by-folder and avoid seek-thrashing across the archive
+    HDD. Ordering by date keeps that locality rather than losing it: the
+    archive is filed by date (``Raws/Film Scans/2026/2026-07-16 …``), so a run
+    of photos taken together is a run of files written together. Date order
+    visits the same folders, newest ones first, instead of A to Z.
     """
     sizes = tuple(size for size in (missing_sizes or ()) if size)
     missing_clause = ""
-    params: list = [
-        int(cursor_state.get("source_id") or 0),
-        int(cursor_state.get("source_id") or 0),
-        str(cursor_state.get("filepath") or ""),
-        str(cursor_state.get("filepath") or ""),
-        int(cursor_state.get("id") or 0),
-    ]
+    # `.get(key, default)`, not `or`: "" is a real position — the undated
+    # photos — and `"" or NEWEST` would send the sweep back to the top forever.
+    taken = cursor_state.get("date_taken", NEWEST)
+    params: list = [taken, taken, int(cursor_state.get("id") or 0)]
     if cache_root and sizes:
         missing_parts = []
         for size in sizes:
@@ -112,17 +119,16 @@ async def candidate_batch(
     try:
         cursor = await conn.execute(
             "SELECT i.id, i.source_id, i.filepath, i.file_size, i.file_modified_at, "
-            "i.width, i.height, i.content_hash, i.metadata_scanned_at, i.metadata_version "
+            "i.width, i.height, i.content_hash, i.metadata_scanned_at, i.metadata_version, "
+            "i.date_taken "
             "FROM images i "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE s.included = 1 AND s.online = 1 "
             "AND i.missing_at IS NULL "
-            "AND ("
-            "  i.source_id > ? "
-            "  OR (i.source_id = ? AND (i.filepath > ? OR (i.filepath = ? AND i.id > ?)))"
-            ") "
+            "AND (COALESCE(i.date_taken, '') < ? "
+            "     OR (COALESCE(i.date_taken, '') = ? AND i.id < ?)) "
             + missing_clause
-            + "ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC "
+            + "ORDER BY COALESCE(i.date_taken, '') DESC, i.id DESC "
             "LIMIT ?",
             params,
         )
@@ -212,7 +218,7 @@ async def priority_candidate_batch(
             + scope_join
             + "WHERE "
             + " AND ".join(conditions)
-            + " ORDER BY i.source_id ASC, i.filepath ASC, i.id ASC LIMIT ?",
+            + " ORDER BY i.date_taken DESC, i.id DESC LIMIT ?",
             params,
         )
         return await cursor.fetchall()
