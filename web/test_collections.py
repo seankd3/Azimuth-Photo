@@ -2,6 +2,8 @@ from fastapi.testclient import TestClient
 import json
 from unittest.mock import patch
 
+from core import query_constraints
+import unittest.mock
 from test_support import *  # noqa: F401,F403
 from features.collections import smart as smart_collections
 from features.collections import suggestions as collection_suggestions
@@ -21,33 +23,15 @@ class CollectionTests(BackendTestCase):
         }
 
     def _configure_collection_routes(self):
-        collection_routes.configure(
-            resolve_smart_detail=lambda query, **kwargs: smart_collections.resolve_detail(
-                query,
-                resolve_library_constraints=self._resolve_library_constraints,
-                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
-                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
-                **kwargs,
-            ),
-            resolve_smart_summary=lambda query: smart_collections.resolve_summary(
-                query,
-                resolve_library_constraints=self._resolve_library_constraints,
-                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
-                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
-                db_signature=lambda: db.DB_PATH,
-            ),
-            resolve_smart_image_ids=lambda query: smart_collections.resolve_image_ids(
-                query,
-                resolve_library_constraints=self._resolve_library_constraints,
-                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
-                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
-            ),
-            resolve_smart_materialized_image_ids=lambda query: smart_collections.resolve_materialized_image_ids(
-                query,
-                resolve_library_constraints=self._resolve_library_constraints,
-                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
-                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
-            ),
+        # Routes resolve smart collections themselves now; the stub goes where
+        # they look for it.
+        self._real_resolver = query_constraints.resolve_configured_library_constraints
+        query_constraints.resolve_configured_library_constraints = self._resolve_library_constraints
+        self.addCleanup(
+            setattr,
+            query_constraints,
+            "resolve_configured_library_constraints",
+            self._real_resolver,
         )
 
     async def test_collection_api_creates_reads_and_updates_membership(self):
@@ -386,21 +370,21 @@ class CollectionTests(BackendTestCase):
         created = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(name="Too broad", query={"flag": "picked"})
         )
-        old_resolver = collection_routes._resolve_smart_materialized_image_ids
+        old_resolver = smart_collections.resolve_materialized_image_ids
 
-        async def too_many(_query):
+        async def too_many(_query, **_kwargs):
             raise smart_collections.SmartCollectionMaterializeTooLarge(
                 smart_collections.MAX_MATERIALIZE_IMAGE_IDS + 1
             )
 
-        collection_routes._resolve_smart_materialized_image_ids = too_many
+        smart_collections.resolve_materialized_image_ids = too_many
         try:
             response = await collection_routes.api_update_collection(
                 created["collection"]["id"],
                 collection_routes.UpdateCollectionBody(materialize=True),
             )
         finally:
-            collection_routes._resolve_smart_materialized_image_ids = old_resolver
+            smart_collections.resolve_materialized_image_ids = old_resolver
 
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.body.decode().count("10001"), 1)
@@ -415,12 +399,14 @@ class CollectionTests(BackendTestCase):
         async def get_rankings(**_kwargs):
             raise AssertionError("materialize cap should stop before loading rows")
 
-        with self.assertRaises(smart_collections.SmartCollectionMaterializeTooLarge):
+        with (
+            unittest.mock.patch.object(db, "count_rankings", count_rankings),
+            unittest.mock.patch.object(db, "get_rankings", get_rankings),
+            self.assertRaises(smart_collections.SmartCollectionMaterializeTooLarge),
+        ):
             await smart_collections.resolve_materialized_image_ids(
                 {"flag": "picked"},
                 resolve_library_constraints=resolve_library_constraints,
-                count_rankings=count_rankings,
-                get_rankings=get_rankings,
             )
 
     async def test_collection_mutations_invalidate_suggestions_cache(self):
@@ -505,8 +491,6 @@ class CollectionTests(BackendTestCase):
             resolve_smart_image_ids=lambda query: smart_collections.resolve_image_ids(
                 query,
                 resolve_library_constraints=self._resolve_library_constraints,
-                count_rankings=lambda **count_kwargs: db.count_rankings(**count_kwargs),
-                get_rankings=lambda **ranking_kwargs: db.get_rankings(**ranking_kwargs),
             ),
         )
         created = await collection_routes.api_create_collection(

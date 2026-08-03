@@ -14,6 +14,17 @@ from features.collections import suggestions as collection_suggestions
 from features.sync import oplog
 
 
+from core import query_constraints
+from features.collections import smart as smart_collections
+
+
+async def _smart_image_ids(query):
+    return await smart_collections.resolve_image_ids(
+        query,
+        resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
+    )
+
+
 router = APIRouter()
 ResolveSmartDetail = Callable[..., Awaitable[dict]]
 ResolveSmartSummary = Callable[[dict], Awaitable[dict]]
@@ -22,10 +33,6 @@ ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 MAX_COLLECTION_NAME_LENGTH = 160
 
-_resolve_smart_detail: ResolveSmartDetail | None = None
-_resolve_smart_summary: ResolveSmartSummary | None = None
-_resolve_smart_image_ids: ResolveSmartImageIds | None = None
-_resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None
 
 
 class CreateCollectionBody(BaseModel):
@@ -58,30 +65,6 @@ class UpdateCollectionBody(BaseModel):
     materialize: bool = False
 
 
-def configure(
-    *,
-    resolve_smart_detail: ResolveSmartDetail | None = None,
-    resolve_smart_summary: ResolveSmartSummary | None = None,
-    resolve_smart_image_ids: ResolveSmartImageIds | None = None,
-    resolve_smart_materialized_image_ids: ResolveSmartImageIds | None = None,
-) -> None:
-    """Hand over the smart-collection resolvers.
-
-    Everything else this module needs it now asks `db` for directly. These four
-    close over the library constraint resolver, so they are still built above.
-    """
-
-    global _resolve_smart_detail, _resolve_smart_summary
-    global _resolve_smart_image_ids, _resolve_smart_materialized_image_ids
-    _resolve_smart_detail = resolve_smart_detail
-    _resolve_smart_summary = resolve_smart_summary
-    _resolve_smart_image_ids = resolve_smart_image_ids
-    _resolve_smart_materialized_image_ids = resolve_smart_materialized_image_ids
-
-
-def _graph_configured() -> None:
-    if _resolve_smart_image_ids is None:
-        raise RuntimeError("Collection graph routes are not configured")
 
 
 def _clean_collection_name(name: str) -> str | None:
@@ -134,9 +117,9 @@ async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
 
 
 async def _with_smart_summary(collection: dict) -> dict:
-    if not collection.get("smart") or _resolve_smart_summary is None:
+    if not collection.get("smart"):
         return collection
-    summary = await _resolve_smart_summary(collection["query"] or {})
+    summary = await smart_collections.resolve_summary(collection["query"] or {}, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
     return {**collection, **summary, "smart": True}
 
 
@@ -163,14 +146,12 @@ async def _collection_update(
 
     materialize_ids = None
     if bool(payload.materialize):
-        if _resolve_smart_materialized_image_ids is None:
-            raise RuntimeError("Collection routes are not configured")
         current = await db.get_collection(collection_id, limit=1, offset=0)
         if current is None:
             return JSONResponse({"error": "Collection not found"}, status_code=404)
         if current.get("smart"):
             try:
-                materialize_ids = await _resolve_smart_materialized_image_ids(current["query"] or {})
+                materialize_ids = await smart_collections.resolve_materialized_image_ids(current["query"] or {}, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
             except smart.SmartCollectionMaterializeTooLarge as exc:
                 return JSONResponse(
                     {
@@ -243,7 +224,6 @@ async def api_collection_suggestions(exclude_sources: str = ""):
 
 @router.post("/api/collections/{collection_id}/links")
 async def api_add_collection_link(collection_id: int, payload: CollectionLinkBody):
-    _graph_configured()
     try:
         link = await graph.add_link(
             catalog_path(),
@@ -265,7 +245,6 @@ async def api_delete_collection_link(
     payload: CollectionLinkBody | None = None,
     child_id: int | None = None,
 ):
-    _graph_configured()
     target_child_id = child_id if child_id is not None else payload.child_id if payload else None
     if target_child_id is None:
         return JSONResponse({"error": "child_id is required"}, status_code=422)
@@ -280,19 +259,17 @@ async def api_delete_collection_link(
 
 @router.get("/api/collections/tree")
 async def api_collection_tree():
-    _graph_configured()
     return await graph.workspace_tree(catalog_path())
 
 
 @router.get("/api/collections/{collection_id}/images")
 async def api_collection_graph_images(collection_id: int, recursive: int = 0):
-    _graph_configured()
     try:
         result = await graph.recursive_images(
             catalog_path(),
             collection_id,
             recursive=bool(recursive),
-            resolve_smart_image_ids=_resolve_smart_image_ids,
+            resolve_smart_image_ids=_smart_image_ids,
             get_images_by_ids=db.get_active_images_by_ids,
         )
     except graph.CollectionGraphConflict as exc:
@@ -315,9 +292,7 @@ async def api_collection(collection_id: int, limit: int = 200, offset: int = 0):
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if collection.get("smart"):
-        if _resolve_smart_detail is None:
-            raise RuntimeError("Collection routes are not configured")
-        detail = await _resolve_smart_detail(collection["query"] or {}, limit=limit, offset=offset)
+        detail = await smart_collections.resolve_detail(collection["query"] or {}, limit=limit, offset=offset, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
         collection = {**collection, **detail, "smart": True}
     return {"collection": collection}
 

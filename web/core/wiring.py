@@ -1,7 +1,6 @@
 """Dependency wiring that keeps the app shell out of feature/provider details."""
 
 from features.ai import routes as ai_routes
-from features.collections import routes as collection_routes
 from features.export import routes as export_routes
 from features.media import routes as media_routes
 from features.publish import routes as publish_routes
@@ -25,61 +24,6 @@ def configure_cache_events() -> None:
         elo_propagation=elo_propagation,
     )
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
-
-
-def configure_collection_routes(*, resolve_library_constraints=None) -> None:
-    import db
-    from features.collections import smart as smart_collections
-
-    async def resolve_smart_detail(query, *, limit=200, offset=0):
-        if resolve_library_constraints is None:
-            raise RuntimeError("Smart collection routes are not configured")
-        return await smart_collections.resolve_detail(
-            query,
-            limit=limit,
-            offset=offset,
-            resolve_library_constraints=resolve_library_constraints,
-            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-        )
-
-    async def resolve_smart_summary(query):
-        if resolve_library_constraints is None:
-            raise RuntimeError("Smart collection routes are not configured")
-        return await smart_collections.resolve_summary(
-            query,
-            resolve_library_constraints=resolve_library_constraints,
-            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-            db_signature=lambda: db.DB_PATH,
-        )
-
-    async def resolve_smart_image_ids(query):
-        if resolve_library_constraints is None:
-            raise RuntimeError("Smart collection routes are not configured")
-        return await smart_collections.resolve_image_ids(
-            query,
-            resolve_library_constraints=resolve_library_constraints,
-            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-        )
-
-    async def resolve_smart_materialized_image_ids(query):
-        if resolve_library_constraints is None:
-            raise RuntimeError("Smart collection routes are not configured")
-        return await smart_collections.resolve_materialized_image_ids(
-            query,
-            resolve_library_constraints=resolve_library_constraints,
-            count_rankings=lambda **kwargs: db.count_rankings(**kwargs),
-            get_rankings=lambda **kwargs: db.get_rankings(**kwargs),
-        )
-
-    collection_routes.configure(
-        resolve_smart_detail=resolve_smart_detail,
-        resolve_smart_summary=resolve_smart_summary,
-        resolve_smart_image_ids=resolve_smart_image_ids,
-        resolve_smart_materialized_image_ids=resolve_smart_materialized_image_ids,
-    )
 
 
 def configure_share_routes(*, templates, resolve_library_constraints=None) -> None:

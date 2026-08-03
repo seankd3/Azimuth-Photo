@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from test_support import *  # noqa: F401,F403
 from data import connection as data_connection
 from data import schema as data_schema
-from features.collections import routes as collection_routes
 from features.share import auth as share_auth
 from features.share import routes as share_routes
 
@@ -24,8 +23,6 @@ class ShareTests(BackendTestCase):
         share_routes.configure(
             templates=templates,
             thumbnail_response=self._thumbnail_response,
-        )
-        collection_routes.configure(
         )
         share_routes._unlock_failures.clear()
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Awaitable, Callable
+import db
 
 
 STRING_QUERY_KEYS = {
@@ -136,15 +137,13 @@ async def resolve_detail(
     limit: int,
     offset: int,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
-    count_rankings: Callable[..., Awaitable[int]],
-    get_rankings: Callable[..., Awaitable[list]],
 ) -> dict:
     filters = await _ranking_filter_kwargs(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    total = await count_rankings(**filters)
-    images = await get_rankings(
+    total = await db.count_rankings(**filters)
+    images = await db.get_rankings(
         limit=max(1, min(int(limit), 1000)),
         offset=max(0, int(offset)),
         sort=query.get("sort", "elo"),
@@ -157,11 +156,8 @@ async def resolve_summary(
     query: dict,
     *,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
-    count_rankings: Callable[..., Awaitable[int]],
-    get_rankings: Callable[..., Awaitable[list]],
-    db_signature: Callable[[], str],
 ) -> dict:
-    cache_key = query_cache_key(query, db_signature=db_signature())
+    cache_key = query_cache_key(query, db_signature=db.DB_PATH)
     cached = _smart_summary_cache.get(cache_key)
     if cached and cached["expires"] > time.monotonic():
         return dict(cached["data"])
@@ -170,8 +166,8 @@ async def resolve_summary(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    count = await count_rankings(**filters)
-    cover_rows = await get_rankings(
+    count = await db.count_rankings(**filters)
+    cover_rows = await db.get_rankings(
         limit=1,
         offset=0,
         sort=query.get("sort", "elo"),
@@ -194,8 +190,6 @@ async def _resolve_image_ids(
     query: dict,
     *,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
-    count_rankings: Callable[..., Awaitable[int]],
-    get_rankings: Callable[..., Awaitable[list]],
     chunk_size: int = 5000,
     materialize_limit: int | None = None,
 ) -> list[int]:
@@ -203,13 +197,13 @@ async def _resolve_image_ids(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    total = await count_rankings(**filters)
+    total = await db.count_rankings(**filters)
     if materialize_limit is not None and int(total) > materialize_limit:
         raise SmartCollectionMaterializeTooLarge(int(total), materialize_limit)
     image_ids: list[int] = []
     offset = 0
     while offset < total:
-        rows = await get_rankings(
+        rows = await db.get_rankings(
             limit=chunk_size,
             offset=offset,
             sort=query.get("sort", "elo"),
@@ -226,16 +220,12 @@ async def resolve_image_ids(
     query: dict,
     *,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
-    count_rankings: Callable[..., Awaitable[int]],
-    get_rankings: Callable[..., Awaitable[list]],
     chunk_size: int = 5000,
 ) -> list[int]:
     """Resolve a live smart-collection scope without a membership cap."""
     return await _resolve_image_ids(
         query,
         resolve_library_constraints=resolve_library_constraints,
-        count_rankings=count_rankings,
-        get_rankings=get_rankings,
         chunk_size=chunk_size,
     )
 
@@ -244,16 +234,12 @@ async def resolve_materialized_image_ids(
     query: dict,
     *,
     resolve_library_constraints: Callable[..., Awaitable[dict]],
-    count_rankings: Callable[..., Awaitable[int]],
-    get_rankings: Callable[..., Awaitable[list]],
     chunk_size: int = 5000,
 ) -> list[int]:
     """Resolve membership for the explicit smart-to-static operation."""
     return await _resolve_image_ids(
         query,
         resolve_library_constraints=resolve_library_constraints,
-        count_rankings=count_rankings,
-        get_rankings=get_rankings,
         chunk_size=chunk_size,
         materialize_limit=MAX_MATERIALIZE_IMAGE_IDS,
     )
