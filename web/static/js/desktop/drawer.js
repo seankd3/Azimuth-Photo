@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { esc, formatCount as fmt } from '../lib.js';
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
     disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
@@ -112,7 +112,6 @@ const SETTING_DEFS = {
     require_device_token: { type: 'checkbox' },
 };
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const compactNumberFormatter = new Intl.NumberFormat('en-US', {
     notation: 'compact',
     maximumFractionDigits: 1,

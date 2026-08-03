@@ -22,7 +22,7 @@ import {
     rememberSources, applyExcludeSources,
 } from './quiet_sources.js';
 import { icon } from '../icons.js';
-import { esc, slugifyName } from '../lib.js';
+import { esc, formatCount as fmt, slugifyName } from '../lib.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
 } from './suggestions.js';
@@ -49,7 +49,6 @@ let savedViews = [];
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const DELIVER_TAB_STORAGE_KEY = 'pa_d_deliver_tab';
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const narrowPanel = () => window.matchMedia('(max-width: 880px)').matches;
 const emptyState = (glyph, copy, action = '') => (
     `<div class="chrome-empty"><span class="chrome-empty-glyph">${icon(glyph)}</span><span>${esc(copy)}</span>${action}</div>`

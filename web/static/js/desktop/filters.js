@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { esc, formatCount as fmt } from '../lib.js';
 import { getDateHistogram, getFilterOptions, getFolders, getTags } from './api.js';
 import { byId, folderValues, on, scope, scopeParams, setScope } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -33,7 +33,6 @@ let options = {
     undated: 0,
 };
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const OPTIONS_MAX_AGE_MS = 60000;
 const SEARCHABLE_SECTION_MIN = 10;

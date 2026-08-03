@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { esc, formatCount as fmt } from '../lib.js';
 import { createCollection, getCollectionSuggestions, thumbUrl } from './api.js';
 import { setActiveLens, scopeParams } from './state.js';
 import { showToast } from './toast.js';
@@ -21,7 +21,6 @@ function notifyChanged() {
     window.dispatchEvent(new CustomEvent('collection-suggestions:changed'));
 }
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 export const suggestionFingerprint = (s) => (
     s.fingerprint || `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`

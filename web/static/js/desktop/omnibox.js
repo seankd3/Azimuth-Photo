@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { esc, formatCount as fmt } from '../lib.js';
 import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, previewThumbUrl, thumbUrl,
 } from './api.js';
@@ -100,7 +100,6 @@ let liveSeq = 0;
 let live = { q: '', loading: false, data: null, error: false };
 let tokenSelected = false;
 
-const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 function fuzzy(haystack, needle) {
     const hay = String(haystack || '').toLowerCase();
