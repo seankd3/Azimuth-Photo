@@ -113,7 +113,7 @@ async function loadStarProjection(img) {
     }
 }
 
-function bytes(value) {
+function bytesOrBlank(value) {  // blank for unknown size, whole KB — deliberately not lib.bytes
     const n = Number(value) || 0;
     if (!n) return '';
     if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
@@ -175,7 +175,7 @@ function updateInfoOverlay() {
     const full = [
         cameraLabel(img),
         img.lens,
-        [dimLabel(img), bytes(img.file_size)].filter(Boolean).join(' · '),
+        [dimLabel(img), bytesOrBlank(img.file_size)].filter(Boolean).join(' · '),
     ].filter(Boolean);
     host.innerHTML = `<b>${esc(name)}</b>`
         + basic.map((line) => `<span>${esc(line)}</span>`).join('')

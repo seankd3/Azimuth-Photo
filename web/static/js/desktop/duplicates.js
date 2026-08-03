@@ -10,7 +10,7 @@ import {
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
-import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
+import { bytes as bytesLabel, escapeHtml as esc, formatCount as fmt } from '../lib.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';
@@ -111,18 +111,6 @@ function pixels(image) {
     return (Number(image?.width) || 0) * (Number(image?.height) || 0);
 }
 
-function bytesLabel(value) {
-    const n = Number(value) || 0;
-    if (!n) return '—';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = n;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-        size /= 1024;
-        unit += 1;
-    }
-    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
-}
 
 function dimensionsLabel(image) {
     const width = Number(image?.width) || 0;

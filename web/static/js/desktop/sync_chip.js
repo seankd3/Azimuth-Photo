@@ -1,3 +1,4 @@
+import { bytes as formatBytes } from '../lib.js';
 "use strict";
 
 import { fetchOptionsWithTimeout } from '../api.js';
@@ -14,18 +15,6 @@ let controlInFlight = 0;
 let statusGeneration = 0;
 let pollOnly = false;
 
-function formatBytes(bytes) {
-    const value = Math.max(0, Number(bytes) || 0);
-    if (value < 1024) return `${value} B`;
-    const units = ['KB', 'MB', 'GB', 'TB'];
-    let amount = value / 1024;
-    let index = 0;
-    while (amount >= 1024 && index < units.length - 1) {
-        amount /= 1024;
-        index += 1;
-    }
-    return `${amount >= 10 ? amount.toFixed(0) : amount.toFixed(1)} ${units[index]}`;
-}
 
 function formatRate(bytesPerSecond) {
     const rate = Number(bytesPerSecond) || 0;

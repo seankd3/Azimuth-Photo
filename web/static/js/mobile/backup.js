@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { bytes as formatBytes, esc } from '../lib.js';
 // Phone-facing backup glass box. It reports only the existing sync worker's
 // truth plus browser storage; hub mode is an explicit ready state, not a fake
 // upload queue.
@@ -20,16 +20,6 @@ let status = null;
 let storage = null;
 
 
-function formatBytes(value) {
-    let amount = Math.max(0, Number(value || 0));
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let unit = 0;
-    while (amount >= 1024 && unit < units.length - 1) {
-        amount /= 1024;
-        unit += 1;
-    }
-    return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
-}
 
 function formatRate(value) {
     const speed = Number(value || 0);

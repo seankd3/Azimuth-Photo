@@ -4,7 +4,7 @@ import {
 import { getImageCaption, getImageExif, saveImageCaption } from './api.js';
 import { closeRightDrawer, openRightDrawer, rightDrawerOpen } from './panel.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
+import { bytes, escapeHtml as esc, formatCount as fmt } from '../lib.js';
 
 const exifCache = new Map();
 const exifPromises = new Map();
@@ -20,18 +20,6 @@ let captionEditId = null;
 let captionToken = 0;
 let detailTimer = 0;
 
-function bytes(value) {
-    const n = Number(value) || 0;
-    if (!n) return '—';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = n;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-        size /= 1024;
-        unit += 1;
-    }
-    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
-}
 
 function camera(img) {
     return [img.camera_make, img.camera_model].filter(Boolean).join(' ') || '—';

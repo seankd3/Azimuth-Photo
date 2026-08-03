@@ -26,3 +26,14 @@ export function photoAspect(image) {
     const ratio = Number(image?.aspect_ratio) || (Number(image?.width) && Number(image?.height) ? Number(image.width) / Number(image.height) : 1.5);
     return Math.max(.45, Math.min(3.8, ratio));
 }
+
+export function bytes(value) {
+    let amount = Math.max(0, Number(value) || 0);
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let unit = 0;
+    while (amount >= 1024 && unit < units.length - 1) {
+        amount /= 1024;
+        unit += 1;
+    }
+    return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
+}

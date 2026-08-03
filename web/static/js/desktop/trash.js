@@ -10,7 +10,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc, formatCount as fmt, photoAspect as aspect } from '../lib.js';
+import { bytes as bytesLabel, escapeHtml as esc, formatCount as fmt, photoAspect as aspect } from '../lib.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';
@@ -50,18 +50,6 @@ async function withBusyAction(key, button, action) {
     }
 }
 
-export function bytesLabel(value) {
-    const n = Number(value) || 0;
-    if (!n) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = n;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-        size /= 1024;
-        unit += 1;
-    }
-    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
-}
 
 export function confirmTypedCount({
     title,
@@ -490,3 +478,5 @@ export function initTrash() {
     ensureView();
     on('trash:open', openTrash);
 }
+
+export { bytesLabel };

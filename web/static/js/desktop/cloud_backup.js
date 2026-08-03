@@ -3,7 +3,7 @@ import {
     getCloudBackupStatus, saveCloudBackupConfig, startCloudBackup, stopCloudBackup,
 } from './api.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc } from '../lib.js';
+import { bytes, escapeHtml as esc } from '../lib.js';
 
 const CACHE_MS = 15000;
 let status = null;
@@ -31,16 +31,6 @@ function shortDate(value) {
     });
 }
 
-function bytes(value) {
-    let size = Number(value) || 0;
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-        size /= 1024;
-        unit += 1;
-    }
-    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
-}
 
 function config() {
     return draft || (status && status.config) || {

@@ -1,4 +1,4 @@
-import { esc, formatCount as fmt } from '../lib.js';
+import { bytes, esc, formatCount as fmt } from '../lib.js';
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
     disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
@@ -118,18 +118,6 @@ const compactNumberFormatter = new Intl.NumberFormat('en-US', {
 });
 const fmtCompact = (n) => compactNumberFormatter.format(Number(n || 0)).toLowerCase();
 
-function bytes(value) {
-    const n = Number(value) || 0;
-    if (!n) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let size = n;
-    let unit = 0;
-    while (size >= 1024 && unit < units.length - 1) {
-        size /= 1024;
-        unit += 1;
-    }
-    return `${size >= 10 || unit === 0 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
-}
 
 function pct(value) {
     return Math.max(0, Math.min(100, Number(value) || 0));

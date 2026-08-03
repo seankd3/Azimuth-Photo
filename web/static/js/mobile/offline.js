@@ -1,3 +1,4 @@
+import { bytes as formatBytes } from '../lib.js';
 // Explicit phone availability for viewer previews. The service worker owns
 // thumbnail delivery; this module pins all viewer sizes into the dedicated
 // pinned cache (served first by sw.js, exempt from version rotation and
@@ -173,16 +174,6 @@ export async function toggleOfflineAvailability(image) {
     }
 }
 
-function formatBytes(value) {
-    let amount = Number(value || 0);
-    const units = ['B', 'KB', 'MB', 'GB'];
-    let unit = 0;
-    while (amount >= 1024 && unit < units.length - 1) {
-        amount /= 1024;
-        unit += 1;
-    }
-    return `${amount >= 10 || unit === 0 ? amount.toFixed(0) : amount.toFixed(1)} ${units[unit]}`;
-}
 
 export function openOfflineStatusSheet() {
     const summary = offlineSummary();
