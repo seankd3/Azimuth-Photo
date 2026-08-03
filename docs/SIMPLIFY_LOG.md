@@ -17,11 +17,38 @@ and what is known to be broken. Newest first.
 
 ## Known red
 
-- `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
-  — passes alone, fails in a batch with `database is locked`. Lock contention,
-  not logic.
-- The suite is order-dependent. `test_support.py` monkeypatches ~20 module
-  globals and 42 files import it with `*`. Files pass alone that fail in a run.
+Full suite: **1,256 passed, 8 failed, 6 skipped** in 7m43s. Every remaining
+failure fails identically on `main`, checked by extracting `main` with
+`git archive` and running it there:
+
+- `test_restore_drill.py` (4), `test_ml_device.py` (2), `test_import_staging.py`
+  (2), `test_search_stability.py` (1), `test_row_version_scope.py` (1),
+  `test_ai_failure_resilience.py` (1).
+- `test_fresh_boot.py` and `test_catalog.py` fail *less* here than on `main`.
+
+The suite is order-dependent: `test_support.py` monkeypatches ~20 module globals
+and 42 files import it with `*`. Files pass alone that fail in a run.
+
+## Routes this branch removed — 34, and one was wrong
+
+Removed on the rule "no caller in any client tree". That rule has a miss rate:
+`POST /api/import/taxonomy/reclassify-personal` has no caller because it is
+driven by hand, and MASTER_PLAN carries two open 07-31 directives describing
+exactly its job. Restored.
+
+The other 33 stand, but two features lost their whole API surface and that is a
+product call, not a cleanup one:
+
+- **`/api/geo/*` — all four gone.** No geotagging endpoints remain, though
+  `latitude`, `longitude` and `location_source` are still mirrored columns.
+- **`/api/people/faces/{id}/assign` and `/ignore` — gone.** Person-level label,
+  merge and ignore survive; per-face correction does not. `db.assign_face` and
+  `db.ignore_face` are still there with no door onto them.
+
+Also gone: pano merge (3), HDR detect/status (2), quality scan/status,
+`/api/compare/next` (two other compare routes remain), Lightroom preset import,
+`/api/publishes`, `/s/gallery/*` (5, with `features/publishing`), and
+`/api/ui/settings`.
 
 ## What was consolidated
 
