@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from core.numbers import unique_image_ids
 import stat
 import time
 from pathlib import Path
@@ -28,19 +29,6 @@ def invalidate_pending_hub_trash_refs(db_path: str) -> None:
     _pending_hub_trash_refs_versions[db_path] = _pending_hub_trash_refs_versions.get(db_path, 0) + 1
 
 
-def _clean_ids(values) -> list[int]:
-    ids: list[int] = []
-    seen: set[int] = set()
-    for value in values or []:
-        try:
-            image_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if image_id <= 0 or image_id in seen:
-            continue
-        seen.add(image_id)
-        ids.append(image_id)
-    return ids
 
 
 def _error(image_id: int, reason: str) -> Error:
@@ -320,7 +308,7 @@ def _failed_family_ids(plans, failure_ids):
 
 
 async def trash_images(db_path: str, image_ids: list[int]) -> dict:
-    ids = _clean_ids(image_ids)
+    ids = unique_image_ids(image_ids)
     if not ids:
         return {"trashed": [], "errors": [], "freed_estimate_bytes": 0}
     trashed: list[int] = []
@@ -459,7 +447,7 @@ async def __to_thread_move_to_trash(
 
 
 async def restore_images(db_path: str, image_ids: list[int]) -> dict:
-    ids = _clean_ids(image_ids)
+    ids = unique_image_ids(image_ids)
     restored: list[int] = []
     errors: list[Error] = []
     warnings: list[Error] = []
@@ -708,7 +696,7 @@ async def _trash_rows(
         if image_ids is None:
             cursor = await conn.execute(base_query + age_clause, age_params)
             return [dict(row) for row in await cursor.fetchall()]
-        ids = _clean_ids(image_ids)
+        ids = unique_image_ids(image_ids)
         rows: list[dict] = []
         for chunk in catalog_repository._chunked(ids):
             placeholders = ",".join("?" for _ in chunk)
@@ -802,7 +790,7 @@ async def hub_mirror_trash_refs(db_path: str) -> dict:
             "WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 1"
         )
         rows = await cursor.fetchall()
-        hub_image_ids = _clean_ids(row["hub_image_id"] for row in rows)
+        hub_image_ids = unique_image_ids(row["hub_image_id"] for row in rows)
         return {
             "count": len(rows),
             "image_ids": [int(row["id"]) for row in rows],
@@ -824,7 +812,7 @@ async def local_trash_ids(db_path: str) -> list[int]:
 
 
 async def mark_hub_trash_pending(db_path: str, image_ids: list[int]) -> None:
-    ids = _clean_ids(image_ids)
+    ids = unique_image_ids(image_ids)
     if not ids:
         return
     conn = await data_connection.open_async(db_path)
@@ -858,7 +846,7 @@ async def pending_hub_trash_refs(db_path: str) -> dict:
         result = (
             len(rows),
             tuple(int(row["id"]) for row in rows),
-            tuple(_clean_ids(row["hub_image_id"] for row in rows)),
+            tuple(unique_image_ids(row["hub_image_id"] for row in rows)),
         )
     finally:
         await data_connection.close_async(conn, db_path=db_path)

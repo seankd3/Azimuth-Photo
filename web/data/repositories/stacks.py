@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from core.numbers import unique_image_ids
 import posixpath
 import time
 from collections.abc import Iterable
@@ -36,19 +37,6 @@ def _normalize_kind(kind: str) -> str:
     return value
 
 
-def _unique_ids(values) -> list[int]:
-    ids: list[int] = []
-    seen: set[int] = set()
-    for value in values or []:
-        try:
-            image_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if image_id <= 0 or image_id in seen:
-            continue
-        seen.add(image_id)
-        ids.append(image_id)
-    return ids
 
 
 def _normalize_member_rows(member_rows, representative_image_id: int | None = None) -> list[dict]:
@@ -402,7 +390,7 @@ async def set_representative(db_path: str, stack_id: int, image_id: int) -> dict
 
 
 async def representative_stack_counts(db_path: str, image_ids) -> dict[int, dict]:
-    ids = _unique_ids(image_ids)
+    ids = unique_image_ids(image_ids)
     if not ids:
         return {}
     result: dict[int, dict] = {}
@@ -639,7 +627,7 @@ def upsert_auto_stacks_sync(db_path: str, kind: str, groups) -> dict:
             placeholders = ",".join("?" for _ in ids)
             conn.execute(f"DELETE FROM stack_members WHERE stack_id IN ({placeholders})", ids)
         conn.execute("DELETE FROM stacks WHERE auto = 1 AND kind = ?", (kind,))
-        manual_ids = _sync_fetch_manual_ids(conn, _unique_ids(all_ids))
+        manual_ids = _sync_fetch_manual_ids(conn, unique_image_ids(all_ids))
         for member_ids, representative_id, rows in normalized_groups:
             available = [image_id for image_id in member_ids if image_id not in manual_ids]
             if len(available) < 2:

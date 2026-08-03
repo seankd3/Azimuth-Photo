@@ -67,3 +67,20 @@ def increment_cached_int(mapping: dict, key: str, delta: int, *, cap: int | None
     if cap is not None:
         value = min(value, cap)
     mapping[key] = value
+
+
+def unique_image_ids(values) -> list[int]:
+    """Positive integer ids, in order, without repeats."""
+
+    ids: list[int] = []
+    seen: set[int] = set()
+    for value in values or []:
+        try:
+            image_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if image_id <= 0 or image_id in seen:
+            continue
+        seen.add(image_id)
+        ids.append(image_id)
+    return ids

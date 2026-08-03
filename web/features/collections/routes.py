@@ -345,16 +345,6 @@ async def api_remove_collection_images_post(collection_id: int, payload: Collect
 
 @router.delete("/api/user-collections/{collection_id}/images")
 async def api_remove_collection_images(collection_id: int, payload: CollectionImagesBody):
-    # Kept for compatibility; proxies that strip DELETE bodies should use the
-    # POST /images/remove route instead.
-    if not payload.image_ids:
-        return JSONResponse({"error": "image_ids is required"}, status_code=400)
-    conflict = await _smart_collection_conflict(collection_id)
-    if conflict is not None:
-        return conflict
-    collection = await db.remove_collection_images(collection_id, payload.image_ids)
-    if collection is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    await _append_collection_memberships(collection_id, payload.image_ids, member=False)
-    _invalidate_suggestions_cache()
-    return {"ok": True, "collection": collection}
+    # Kept for compatibility; both clients call POST /images/remove, and proxies
+    # that strip DELETE bodies must.
+    return await api_remove_collection_images_post(collection_id, payload)
