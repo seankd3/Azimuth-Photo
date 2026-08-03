@@ -165,6 +165,6 @@ Choose the install path that fits your library in [Install Azimuth Photo](docs/I
 
 One repo, many faces — hub server, desktop web UI (`/d`), mobile PWA (`/m`),
 laptop satellite mode, native Windows shell (`desktop/`), Android app
-(`android/`), public site (`site/`), and Field Log (`tools/field-log/`). The
+(`android/`).
 complete map of code, machine roles, data directories, and storage tiers is in
 [docs/TOPOLOGY.md](docs/TOPOLOGY.md).

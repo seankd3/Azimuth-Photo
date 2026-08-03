@@ -52,4 +52,3 @@ Feature specifications capture behavior that is expensive to rediscover:
 - [Stacks](STACKS_V2.md)
 
 The public development narrative and preserved experiments are maintained under
-`tools/field-log/`.

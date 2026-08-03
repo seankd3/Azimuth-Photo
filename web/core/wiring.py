@@ -22,32 +22,10 @@ from features.trash import routes as trash_routes
 
 def configure_database_backed_providers() -> None:
     import db
-    import embedding_worker
-    import caption_worker
-    import face_worker
     import thumbnails
     from core import cache_events
     from features.catalog import metadata as catalog_metadata
 
-    embedding_worker.configure(
-        get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
-        count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
-        get_unembedded_images=lambda **kwargs: db.get_unembedded_images(**kwargs),
-        store_embeddings_batch=lambda rows, **kwargs: db.store_embeddings_batch(rows, **kwargs),
-        poison_embedding_image=lambda **kwargs: db.poison_embedding_image(**kwargs),
-        get_embedding_count=lambda: db.get_embedding_count(),
-    )
-    caption_worker.configure(
-        count_images_needing_captions=lambda **kwargs: db.count_images_needing_captions(**kwargs),
-        get_images_needing_captions=lambda **kwargs: db.get_images_needing_captions(**kwargs),
-        store_caption_result=lambda **kwargs: db.store_caption_result(**kwargs),
-    )
-    face_worker.configure(
-        count_images_needing_faces=lambda **kwargs: db.count_images_needing_faces(**kwargs),
-        get_images_needing_faces=lambda **kwargs: db.get_images_needing_faces(**kwargs),
-        store_face_scan_result=lambda **kwargs: db.store_face_scan_result(**kwargs),
-        cluster_unassigned_faces=lambda **kwargs: db.cluster_unassigned_faces(**kwargs),
-    )
     thumbnails.configure_data_providers(
         get_db=lambda: db.get_db(),
         batch_set_orientations=lambda updates: db.batch_set_orientations(updates),

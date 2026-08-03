@@ -13,7 +13,6 @@ azimuth-photo/
 ├── android/          Native Android client
 ├── clients/          External integrations
 ├── site/             Public website
-├── tools/field-log/  Product-history source and capture tooling
 ├── scripts/          Build, check, run, and deployment commands
 ├── deploy/           Configurable Linux service templates
 └── docs/             Product and operating documentation

@@ -8,6 +8,7 @@ detection, and auto-collections.
 from __future__ import annotations
 
 import asyncio
+import db
 import importlib.util
 import logging
 import time
@@ -136,36 +137,6 @@ _poison_embedding_image: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
-def configure(
-    *,
-    get_catalog_image_counts: AsyncDictProvider | None = None,
-    count_embeddings_for_model: AsyncIntProvider | None = None,
-    get_unembedded_images: AsyncListProvider | None = None,
-    store_embeddings_batch: AsyncNoneProvider | None = None,
-    poison_embedding_image: AsyncNoneProvider | None = None,
-    get_embedding_count: AsyncIntProvider | None = None,
-) -> None:
-    global _get_catalog_image_counts
-    global _count_embeddings_for_model, _get_unembedded_images
-    global _store_embeddings_batch, _poison_embedding_image, _get_embedding_count
-    if get_catalog_image_counts is not None:
-        _get_catalog_image_counts = get_catalog_image_counts
-    if count_embeddings_for_model is not None:
-        _count_embeddings_for_model = count_embeddings_for_model
-    if get_unembedded_images is not None:
-        _get_unembedded_images = get_unembedded_images
-    if store_embeddings_batch is not None:
-        _store_embeddings_batch = store_embeddings_batch
-    if poison_embedding_image is not None:
-        _poison_embedding_image = poison_embedding_image
-    if get_embedding_count is not None:
-        _get_embedding_count = get_embedding_count
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"embedding_worker is missing configured dependency: {name}")
-    return provider
 
 
 def _target_embed_batch_size(config: dict | None = None) -> int:
@@ -1088,12 +1059,9 @@ async def _log_stored_embedding_batch(batch_size: int, embedding_config: dict | 
 
     _embedding_count_log_batches = 0
     if embedding_config:
-        embedded_count = await _configured(
-            _count_embeddings_for_model,
-            "count_embeddings_for_model",
-        )(embedding_config)
+        embedded_count = await db.count_embeddings_for_model(embedding_config)
     else:
-        embedded_count = await _configured(_get_embedding_count, "get_embedding_count")()
+        embedded_count = await db.get_embedding_count()
     log.info(f"Embedded {batch_size} images (total: {embedded_count})")
 
 
@@ -1207,10 +1175,7 @@ async def _process_embedding_candidates(
                 circuit_open = _embedding_oom_circuit.record_failure()
                 for row in chunk_rows:
                     image_id = int(row["id"])
-                    poisoned = await _configured(
-                        _poison_embedding_image,
-                        "poison_embedding_image",
-                    )(
+                    poisoned = await db.poison_embedding_image(
                         image_id=image_id,
                         embedding_config=embedding_config,
                         error=failure,
@@ -1251,7 +1216,7 @@ async def _process_embedding_candidates(
 
         store_started = time.perf_counter()
         if batch:
-            await _configured(_store_embeddings_batch, "store_embeddings_batch")(
+            await db.store_embeddings_batch(
                 batch,
                 embedding_config=embedding_config,
             )
@@ -1428,7 +1393,7 @@ async def _run_embedding_worker_loop():
             cache_size = "sm" if int(config.get("embed_model_dim", 0) or 0) > 2048 else "md"
             cursor_after_id = _candidate_cursor_after_id(_model_key_for_config(config))
             query_started = time.perf_counter()
-            candidates = await _configured(_get_unembedded_images, "get_unembedded_images")(
+            candidates = await db.get_unembedded_images(
                 limit=candidate_limit,
                 md_cache_root=thumbnails.SSD_CACHE_DIR,
                 cache_size=cache_size,

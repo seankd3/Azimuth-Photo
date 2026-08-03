@@ -8,6 +8,7 @@ ranking layer after People filters are applied.
 from __future__ import annotations
 
 import asyncio
+import db
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from importlib.util import find_spec
@@ -93,29 +94,6 @@ _store_face_scan_result: AsyncDictProvider | None = None
 _cluster_unassigned_faces: AsyncDictProvider | None = None
 
 
-def configure(
-    *,
-    count_images_needing_faces: AsyncIntProvider | None = None,
-    get_images_needing_faces: AsyncListProvider | None = None,
-    store_face_scan_result: AsyncDictProvider | None = None,
-    cluster_unassigned_faces: AsyncDictProvider | None = None,
-) -> None:
-    global _count_images_needing_faces, _get_images_needing_faces
-    global _store_face_scan_result, _cluster_unassigned_faces
-    if count_images_needing_faces is not None:
-        _count_images_needing_faces = count_images_needing_faces
-    if get_images_needing_faces is not None:
-        _get_images_needing_faces = get_images_needing_faces
-    if store_face_scan_result is not None:
-        _store_face_scan_result = store_face_scan_result
-    if cluster_unassigned_faces is not None:
-        _cluster_unassigned_faces = cluster_unassigned_faces
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"face_worker is missing configured dependency: {name}")
-    return provider
 
 
 def _set_status(**updates: Any) -> None:
@@ -372,10 +350,7 @@ async def _run_face_worker_loop() -> None:
                 await asyncio.sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
                 continue
 
-            pending = await _configured(
-                _count_images_needing_faces,
-                "count_images_needing_faces",
-            )(
+            pending = await db.count_images_needing_faces(
                 model_id=model_id,
                 cache_root=str(config.get("ssd_cache_dir") or ""),
             )
@@ -404,10 +379,7 @@ async def _run_face_worker_loop() -> None:
                 batch_limit = int(decision.thumbnail_batch_size)
             if _scan_now:
                 batch_limit = max(batch_limit, 8)
-            rows = await _configured(
-                _get_images_needing_faces,
-                "get_images_needing_faces",
-            )(
+            rows = await db.get_images_needing_faces(
                 model_id=model_id,
                 cache_root=str(config.get("ssd_cache_dir") or ""),
                 limit=max(1, min(batch_limit, 16)),
@@ -444,10 +416,7 @@ async def _run_face_worker_loop() -> None:
                     cache_path = str(row.get("cache_path") or "")
                     try:
                         faces = await loop.run_in_executor(None, _detect_faces, cache_path, config)
-                        await _configured(
-                            _store_face_scan_result,
-                            "store_face_scan_result",
-                        )(
+                        await db.store_face_scan_result(
                             image_id=image_id,
                             model_id=model_id,
                             cache_path=cache_path,
@@ -457,10 +426,7 @@ async def _run_face_worker_loop() -> None:
                         scanned += 1
                         detected += len(faces)
                     except Exception as exc:
-                        await _configured(
-                            _store_face_scan_result,
-                            "store_face_scan_result",
-                        )(
+                        await db.store_face_scan_result(
                             image_id=image_id,
                             model_id=model_id,
                             cache_path=cache_path,
@@ -472,10 +438,7 @@ async def _run_face_worker_loop() -> None:
                     if decision.embedding_pause_seconds > 0:
                         await asyncio.sleep(float(decision.embedding_pause_seconds))
 
-            cluster = await _configured(
-                _cluster_unassigned_faces,
-                "cluster_unassigned_faces",
-            )(
+            cluster = await db.cluster_unassigned_faces(
                 model_id=model_id,
                 similarity_threshold=float(config.get("face_similarity_threshold") or 0.52),
                 merge_threshold=float(config.get("face_merge_suggestion_threshold") or 0.62),
@@ -484,10 +447,7 @@ async def _run_face_worker_loop() -> None:
             current = get_worker_status()
             remaining = max(0, pending - scanned)
             try:
-                remaining = await _configured(
-                    _count_images_needing_faces,
-                    "count_images_needing_faces",
-                )(
+                remaining = await db.count_images_needing_faces(
                     model_id=model_id,
                     cache_root=str(config.get("ssd_cache_dir") or ""),
                 )

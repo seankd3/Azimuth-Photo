@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import db
 import json
 import logging
 import re
@@ -100,25 +101,6 @@ _get_images_needing_captions: AsyncListProvider | None = None
 _store_caption_result: AsyncNoneProvider | None = None
 
 
-def configure(
-    *,
-    count_images_needing_captions: AsyncIntProvider | None = None,
-    get_images_needing_captions: AsyncListProvider | None = None,
-    store_caption_result: AsyncNoneProvider | None = None,
-) -> None:
-    global _count_images_needing_captions, _get_images_needing_captions, _store_caption_result
-    if count_images_needing_captions is not None:
-        _count_images_needing_captions = count_images_needing_captions
-    if get_images_needing_captions is not None:
-        _get_images_needing_captions = get_images_needing_captions
-    if store_caption_result is not None:
-        _store_caption_result = store_caption_result
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"caption_worker is missing configured dependency: {name}")
-    return provider
 
 
 def _set_status(**updates: Any) -> None:
@@ -529,10 +511,7 @@ async def _run_caption_worker_loop() -> None:
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
-            pending = await _configured(
-                _count_images_needing_captions,
-                "count_images_needing_captions",
-            )(
+            pending = await db.count_images_needing_captions(
                 caption_config=caption_config,
                 cache_root=str(app_config.get("ssd_cache_dir") or ""),
                 include_understanding_backfill=True,
@@ -551,10 +530,7 @@ async def _run_caption_worker_loop() -> None:
                 continue
 
             batch_size = max(1, min(int(caption_config.get("batch_size") or 1), batch_size, 4))
-            rows = await _configured(
-                _get_images_needing_captions,
-                "get_images_needing_captions",
-            )(
+            rows = await db.get_images_needing_captions(
                 caption_config=caption_config,
                 cache_root=str(app_config.get("ssd_cache_dir") or ""),
                 cache_size="md",
@@ -616,7 +592,7 @@ async def _run_caption_worker_loop() -> None:
                             cache_path,
                             caption_config,
                         )
-                        await _configured(_store_caption_result, "store_caption_result")(
+                        await db.store_caption_result(
                             image_id=image_id,
                             caption_config=caption_config,
                             caption=parsed["caption"],
@@ -641,7 +617,7 @@ async def _run_caption_worker_loop() -> None:
                                 pause_after_error = _oom_circuit.record_failure()
                         else:
                             _oom_circuit.reset()
-                        await _configured(_store_caption_result, "store_caption_result")(
+                        await db.store_caption_result(
                             image_id=image_id,
                             caption_config=caption_config,
                             caption="",

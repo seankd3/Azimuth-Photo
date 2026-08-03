@@ -2,6 +2,7 @@ from test_support import *  # noqa: F401,F403
 
 import asyncio
 import caption_worker
+import db
 import contextlib
 import threading
 import unittest.mock
@@ -157,10 +158,8 @@ class CaptionTests(BackendTestCase):
             "prompt_version": "test-v1",
             "batch_size": 1,
         }
-        caption_worker.configure(
-            count_images_needing_captions=count_pending,
-            get_images_needing_captions=next_image,
-        )
+        db.count_images_needing_captions = count_pending
+        db.get_images_needing_captions = next_image
         caption_worker._caption_manual_pause = False
         try:
             with (
@@ -260,11 +259,9 @@ class CaptionTests(BackendTestCase):
             "prompt_version": "test-v1",
             "batch_size": 1,
         }
-        caption_worker.configure(
-            count_images_needing_captions=count_pending,
-            get_images_needing_captions=next_image,
-            store_caption_result=store_result,
-        )
+        db.count_images_needing_captions = count_pending
+        db.get_images_needing_captions = next_image
+        db.store_caption_result = store_result
         caption_worker._caption_manual_pause = False
         for owner in (work_coordination.manual_owner(),):
             if owner:
@@ -429,11 +426,9 @@ class CaptionTests(BackendTestCase):
             "prompt_version": "test-v1",
             "batch_size": 1,
         }
-        caption_worker.configure(
-            count_images_needing_captions=count_pending,
-            get_images_needing_captions=next_image,
-            store_caption_result=store_error,
-        )
+        db.count_images_needing_captions = count_pending
+        db.get_images_needing_captions = next_image
+        db.store_caption_result = store_error
         caption_worker._caption_manual_pause = False
         caption_worker._caption_manual_pause_message = ""
         caption_worker._oom_circuit.reset()

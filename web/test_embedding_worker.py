@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sqlite3
+import db
 import sys
 import threading
 import time
@@ -336,14 +337,12 @@ class EmbeddingWorkerTests(unittest.IsolatedAsyncioTestCase):
             self.cached_model_keys.append(model_key)
 
         embedding_worker._preload_images = fake_preload
-        embedding_worker.configure(
-            get_catalog_image_counts=fake_empty_dict,
-            count_embeddings_for_model=fake_count,
-            get_unembedded_images=fake_empty_list,
-            store_embeddings_batch=fake_store,
-            poison_embedding_image=fake_poison,
-            get_embedding_count=fake_count,
-        )
+        db.get_catalog_image_counts = fake_empty_dict
+        db.count_embeddings_for_model = fake_count
+        db.get_unembedded_images = fake_empty_list
+        db.store_embeddings_batch = fake_store
+        db.poison_embedding_image = fake_poison
+        db.get_embedding_count = fake_count
         embedding_worker.embed_cache.add_vectors = fake_add_vectors
         embedding_worker.settings.get_settings = lambda: {"embed_batch_size": 8}
         embedding_worker.settings.active_embedding_config = lambda: {
