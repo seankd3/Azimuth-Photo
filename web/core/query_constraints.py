@@ -10,7 +10,6 @@ from features.search.fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fu
 from features.search.planning import plan_search
 
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -33,17 +32,6 @@ def configure(**dependencies) -> None:
         for key, value in dependencies.items()
         if value is not None
     })
-
-
-def _dependency(name: str):
-    value = _CONFIG.get(name)
-    if value is None:
-        raise RuntimeError(f"core.query_constraints is missing configured dependency: {name}")
-    return value
-
-
-def _optional_dependency(name: str):
-    return _CONFIG.get(name)
 
 
 def sync_configured_ttls() -> None:

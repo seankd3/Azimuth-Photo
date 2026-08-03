@@ -1001,6 +1001,40 @@ async def ranking_rows_by_ids(db_path: str, image_ids: list[int]) -> list[dict]:
         await connection.close_async(conn, db_path=db_path)
 
 
+async def _stale_while_revalidate(cache, refreshing, key, ttl_seconds, produce, *, force_refresh=False, store_if=None):
+    """Serve a cached facet; refresh a stale one behind the request.
+
+    Three facets had their own copy of this, and each restated its twenty-two
+    filter arguments four times over — signature, cache key, a self-recursive
+    refresh call, and the delegate call.
+    """
+
+    entry = cache.get(key) if key is not None else None
+    if entry and not force_refresh:
+        if entry["expires"] > _time.time():
+            return entry["data"]
+        if key not in refreshing:
+            refreshing.add(key)
+
+            async def _refresh():
+                try:
+                    fresh = await produce()
+                    if key is not None and (store_if is None or store_if(fresh)):
+                        cache[key] = {"data": fresh, "expires": _time.time() + ttl_seconds}
+                except Exception:
+                    log.exception("facet background refresh failed")
+                finally:
+                    refreshing.discard(key)
+
+            track_background_task(_refresh())
+        return entry["data"]
+
+    data = await produce()
+    if key is not None and (store_if is None or store_if(data)):
+        cache[key] = {"data": data, "expires": _time.time() + ttl_seconds}
+    return data
+
+
 async def rankings_cached(
     db_path: str,
     *,
@@ -1728,75 +1762,42 @@ async def date_histogram_cached(
         cache_root=cache_root,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         exclude_sources=exclude_sources,)
-    now = _time.time()
-    cached = _date_histogram_cache.get(cache_key) if cache_key is not None else None
-    if cached and not force_refresh:
-        if cached["expires"] > now:
-            return cached["data"]
-        if cache_key not in _date_histogram_refreshing:
-            _date_histogram_refreshing.add(cache_key)
+    async def _produce():
+        catalog_counts = await get_catalog_image_counts()
+        histogram = await date_histogram(
+            db_path,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            caption_model_key=caption_model_key,
+            id_filter=id_filter,
+            collection_id=collection_id,
+            text_query=text_query,
+            visible_thumb_size=visible_thumb_size,
+            cache_root=cache_root,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=exclude_sources,
+        )
+        _produce.active = int(catalog_counts.get("active_images") or 0)
+        return histogram
 
-            async def _refresh_date_histogram():
-                try:
-                    await date_histogram_cached(
-                        db_path,
-                        get_catalog_image_counts=get_catalog_image_counts,
-                        orientation=orientation,
-                        compared=compared,
-                        min_stars=min_stars,
-                        folder=folder,
-                        flag=flag,
-                        date_taken=date_taken,
-                        file_type=file_type,
-                        camera=camera,
-                        lens=lens,
-                        tag=tag,
-                        caption_model_key=caption_model_key,
-                        id_filter=id_filter,
-                        collection_id=collection_id,
-                        text_query=text_query,
-                        visible_thumb_size=visible_thumb_size,
-                        cache_root=cache_root,
-                        force_refresh=True,
-                        ttl_seconds=ttl_seconds,
-                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                        exclude_sources=exclude_sources,
-                    )
-                except Exception:
-                    log.exception("date histogram background refresh failed")
-                finally:
-                    _date_histogram_refreshing.discard(cache_key)
-
-            track_background_task(_refresh_date_histogram())
-        return cached["data"]
-
-    catalog_counts = await get_catalog_image_counts()
-    histogram = await date_histogram(
-        db_path,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        tag=tag,
-        caption_model_key=caption_model_key,
-        id_filter=id_filter,
-        collection_id=collection_id,
-        text_query=text_query,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        exclude_sources=exclude_sources,)
-    if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
-        _date_histogram_cache[cache_key] = {
-            "data": histogram,
-            "expires": _time.time() + ttl_seconds,
-        }
-    return histogram
+    _produce.active = 0
+    return await _stale_while_revalidate(
+        _date_histogram_cache,
+        _date_histogram_refreshing,
+        cache_key,
+        ttl_seconds,
+        _produce,
+        force_refresh=force_refresh,
+        store_if=lambda _data: _produce.active > 0,
+    )
 
 
 _UNFILTERED_SCOPE_COUNTS_SQL = (
@@ -2120,74 +2121,42 @@ async def date_groups_cached(
         text_query=text_query,
         exclude_collapsed_stack_members=exclude_collapsed_stack_members,
         exclude_sources=exclude_sources,)
-    now = _time.time()
-    cached = _date_groups_cache.get(cache_key) if cache_key is not None else None
-    if cached and not force_refresh:
-        if cached["expires"] > now:
-            return cached["data"]
-        if cache_key not in _date_groups_refreshing:
-            _date_groups_refreshing.add(cache_key)
+    async def _produce():
+        catalog_counts = await get_catalog_image_counts()
+        groups = await date_groups(
+            db_path,
+            catalog_counts=catalog_counts,
+            orientation=orientation,
+            compared=compared,
+            min_stars=min_stars,
+            folder=folder,
+            flag=flag,
+            date_taken=date_taken,
+            file_type=file_type,
+            camera=camera,
+            lens=lens,
+            tag=tag,
+            caption_model_key=caption_model_key,
+            visible_thumb_size=visible_thumb_size,
+            cache_root=cache_root,
+            id_filter=id_filter,
+            text_query=text_query,
+            exclude_collapsed_stack_members=exclude_collapsed_stack_members,
+            exclude_sources=exclude_sources,
+        )
+        _produce.active = int(catalog_counts.get("active_images") or 0)
+        return groups
 
-            async def _refresh_date_groups():
-                try:
-                    await date_groups_cached(
-                        db_path,
-                        get_catalog_image_counts=get_catalog_image_counts,
-                        orientation=orientation,
-                        compared=compared,
-                        min_stars=min_stars,
-                        folder=folder,
-                        flag=flag,
-                        date_taken=date_taken,
-                        file_type=file_type,
-                        camera=camera,
-                        lens=lens,
-                        tag=tag,
-                        caption_model_key=caption_model_key,
-                        visible_thumb_size=visible_thumb_size,
-                        cache_root=cache_root,
-                        id_filter=id_filter,
-                        text_query=text_query,
-                        force_refresh=True,
-                        ttl_seconds=ttl_seconds,
-                        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-                        exclude_sources=exclude_sources,
-                    )
-                except Exception:
-                    log.exception("date groups background refresh failed")
-                finally:
-                    _date_groups_refreshing.discard(cache_key)
-
-            track_background_task(_refresh_date_groups())
-        return cached["data"]
-
-    catalog_counts = await get_catalog_image_counts()
-    groups = await date_groups(
-        db_path,
-        catalog_counts=catalog_counts,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        tag=tag,
-        caption_model_key=caption_model_key,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        id_filter=id_filter,
-        text_query=text_query,
-        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        exclude_sources=exclude_sources,)
-    if cache_key is not None and int(catalog_counts.get("active_images") or 0) > 0:
-        _date_groups_cache[cache_key] = {
-            "data": groups,
-            "expires": _time.time() + ttl_seconds,
-        }
-    return groups
+    _produce.active = 0
+    return await _stale_while_revalidate(
+        _date_groups_cache,
+        _date_groups_refreshing,
+        cache_key,
+        ttl_seconds,
+        _produce,
+        force_refresh=force_refresh,
+        store_if=lambda _data: _produce.active > 0,
+    )
 
 
 def empty_map_markers(*, total_count: int = 0, visible_count: int = 0) -> dict:
