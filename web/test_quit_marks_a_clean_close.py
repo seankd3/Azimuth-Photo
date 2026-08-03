@@ -11,6 +11,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from unittest import mock
 
 from features.system import backups, quit_routes
 
@@ -35,7 +36,12 @@ class PrepareQuitTests(unittest.TestCase):
         conn.executemany("INSERT INTO t(payload) VALUES (?)", [("x" * 400,) for _ in range(4000)])
         conn.commit()
         conn.close()
-        quit_routes.configure(db_path_provider=lambda: self.path)
+        # quit_routes asks catalog_path() directly now; there is no configure().
+        self._catalog_patch = mock.patch.object(
+            quit_routes, "catalog_path", lambda: self.path
+        )
+        self._catalog_patch.start()
+        self.addCleanup(self._catalog_patch.stop)
         self.addCleanup(self._cleanup)
 
     def _cleanup(self):
@@ -71,12 +77,6 @@ class PrepareQuitTests(unittest.TestCase):
         response = self._prepare(host="192.168.1.50")
         self.assertEqual(response.status_code, 403)
         self.assertFalse(backups.consume_clean_shutdown(self.path))
-
-    def test_an_unconfigured_server_says_so_rather_than_pretending(self):
-        quit_routes.configure(db_path_provider=None)
-        quit_routes._db_path_provider = None
-        response = self._prepare()
-        self.assertEqual(response.status_code, 503)
 
     def test_quitting_twice_is_not_an_error(self):
         self._prepare()

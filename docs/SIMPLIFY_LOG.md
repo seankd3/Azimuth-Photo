@@ -17,8 +17,6 @@ and what is known to be broken. Newest first.
 
 ## Known red
 
-- `test_stacks.py::test_collapsed_rankings_apply_search_id_filter_and_stack_exclusion`
-  — pre-existing, verified failing on `main`.
 - `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
   — passes alone, fails in a batch with `database is locked`. Lock contention,
   not logic.
@@ -74,6 +72,12 @@ code: matched function names inside longer names, matched parameter names, ate
 one was caught by ruff or a test on the next command, which is the only reason
 this reads as an anecdote. `_satellite.` matching `satellite.` first and leaving
 `_role.` happened *again* during the role work, after this lesson was written.
+
+**"Pre-existing" needs proof, not plausibility.** I recorded
+`test_stacks.py::test_collapsed_rankings_apply_search_id_filter_and_stack_exclusion`
+as pre-existing on the strength of it failing at the previous commit. It failed
+at the previous commit *and* was mine — from a de-injection rename several
+commits earlier. Run it against `main`, or say nothing.
 
 **A test outlives the behaviour it was written for.** `test_mirror_reports_
 skipped_unhashed_rows` asserted that the mirror drops hub photos without a
@@ -132,6 +136,9 @@ returned an empty list when nobody had wired them. Neither said anything.
 - `python -m harness --check` stays green. A commit that changes a golden says
   why in the message.
 - `./scripts/smoke` exit code is the result — never read through `tail`.
+- Two AST sweeps catch what renames leave behind: stale `patch.object(mod, "x")`
+  targets, and `mod._private` attributes that no longer exist. The second found
+  the stacks and quit failures that reading could not.
 - `pytest --collect-only` after any deletion. It imports all 162 test modules in
   under three seconds and catches references the deleted code left behind —
   including ones inside strings, which no import checker sees.

@@ -550,7 +550,7 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         cache_events.invalidate_stats_cache()
         library_service._rankings_response_cache.clear()
 
-        old_resolver = library_service._resolve_library_constraints
+        old_resolver = library_service._configured_resolve_library_constraints
 
         async def search_subset(_q, *, people="", deep=False):
             return {
@@ -566,11 +566,11 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
                 "people_active": False,
             }
 
-        library_service._resolve_library_constraints = search_subset
+        library_service._configured_resolve_library_constraints = search_subset
         try:
             collapsed = await library_routes.api_rankings(limit=10, q="stack-search", stacks="collapsed")
         finally:
-            library_service._resolve_library_constraints = old_resolver
+            library_service._configured_resolve_library_constraints = old_resolver
 
         self.assertEqual([image["id"] for image in collapsed["images"]], [representative])
         self.assertEqual(collapsed["total_kept"], 1)
