@@ -456,25 +456,10 @@ def configure_query_constraints(
     *,
     text_search_resolution_cache_ttl_seconds,
 ) -> None:
-    import db
-    import settings
     from core import query_constraints
 
     query_constraints.configure(
-        extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
-        metadata_search_image_ids=lambda query: db.metadata_search_image_ids(query),
-        metadata_search_ranked_image_ids=lambda query: db.metadata_search_ranked_image_ids(query),
-        caption_search_ranked_image_ids=lambda query: db.caption_search_ranked_image_ids(query),
-        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
-        caption_count_for_signature=lambda: db.caption_count_for_signature(),
-        active_embedding_config=settings.active_embedding_config,
-        fast_search_embedding_config=settings.fast_search_embedding_config,
-        get_settings=settings.get_settings,
-        parse_people_ids=db.parse_people_ids,
-        get_people_image_id_filter=lambda people_ids: db.get_people_image_id_filter(people_ids),
         text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
-        get_search_query_embedding=db.get_search_query_embedding,
-        store_search_query_embedding=db.store_search_query_embedding,
     )
 
 

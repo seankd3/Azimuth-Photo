@@ -1,4 +1,6 @@
 import asyncio
+import db
+import settings
 import inspect
 import importlib.util
 import logging
@@ -133,7 +135,7 @@ async def apply_configured_metadata_search_ids(result: dict, normalized_query: s
     await apply_metadata_search_ids(
         result,
         normalized_query,
-        metadata_search_image_ids=_dependency("metadata_search_image_ids"),
+        metadata_search_image_ids=db.metadata_search_image_ids,
     )
 
 
@@ -520,21 +522,21 @@ async def resolve_configured_text_search(
         start_model_load=start_model_load or start_search_model_load,
         apply_metadata_ids=apply_metadata_ids or apply_configured_metadata_search_ids,
         get_search_query_embedding=(
-            _optional_dependency("get_search_query_embedding")
+            db.get_search_query_embedding
         ),
         store_search_query_embedding=(
-            _optional_dependency("store_search_query_embedding")
+            db.store_search_query_embedding
         ),
-        metadata_ranked_image_ids=_optional_dependency("metadata_search_ranked_image_ids"),
-        caption_ranked_image_ids=_optional_dependency("caption_search_ranked_image_ids"),
-        get_active_images_by_ids=_optional_dependency("get_active_images_by_ids"),
-        caption_count_for_signature=_optional_dependency("caption_count_for_signature"),
-        extension_search_terms=_dependency("extension_search_terms"),
+        metadata_ranked_image_ids=db.metadata_search_ranked_image_ids,
+        caption_ranked_image_ids=db.caption_search_ranked_image_ids,
+        get_active_images_by_ids=db.get_active_images_by_ids,
+        caption_count_for_signature=db.caption_count_for_signature,
+        extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
         active_embedding_config=(
-            _optional_dependency("active_embedding_config")
-            or _dependency("fast_search_embedding_config")
+            settings.active_embedding_config
+            or settings.fast_search_embedding_config
         ),
-        get_settings=_dependency("get_settings"),
+        get_settings=settings.get_settings,
     )
 
 
@@ -594,6 +596,6 @@ async def resolve_configured_library_constraints(
         people=people,
         deep=deep,
         resolve_text_search=resolve_text_search or resolve_configured_text_search,
-        parse_people_ids=_dependency("parse_people_ids"),
-        get_people_image_id_filter=_dependency("get_people_image_id_filter"),
+        parse_people_ids=db.parse_people_ids,
+        get_people_image_id_filter=db.get_people_image_id_filter,
     )

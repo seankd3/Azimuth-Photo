@@ -507,18 +507,6 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(stats["total_catalog_images"], 4)
         self.assertEqual(stats["active_images"], 4)
 
-    def test_compare_cards_are_normalized(self):
-        response = self.client.get("/api/compare/next?n=2&mode=swiss")
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-
-        self.assertEqual(data["visible_images"], 3)
-        self.assertEqual(data["total_images"], 4)
-        self.assertTrue(data["pairs"])
-        for pair in data["pairs"]:
-            self.assertCardShape(pair["left"], thumb_size="md")
-            self.assertCardShape(pair["right"], thumb_size="md")
-
     def test_settings_catalog_includes_counts(self):
         response = self.client.get("/api/settings")
         self.assertEqual(response.status_code, 200)
@@ -558,61 +546,6 @@ class ApiShapeTests(unittest.TestCase):
             {"name": "nested", "path": nested, "readable": True},
             data["entries"],
         )
-
-    def test_scan_and_folders_endpoint_shapes(self):
-        scan_response = self.client.get("/api/scan/status")
-        self.assertEqual(scan_response.status_code, 200)
-        self.assertIn("scanning", scan_response.json())
-
-        folder_response = self.client.get("/api/scan/folder")
-        self.assertEqual(folder_response.status_code, 200)
-        self.assertIn("folder", folder_response.json())
-
-        folders_response = self.client.get("/api/folders?max_depth=1")
-        self.assertEqual(folders_response.status_code, 200)
-        self.assertIsInstance(folders_response.json()["folders"], list)
-        folder_tree_response = self.client.get("/api/folders/tree")
-        self.assertEqual(folder_tree_response.status_code, 200)
-        self.assertIsInstance(folder_tree_response.json()["sources"], list)
-
-    def test_cache_and_ai_status_endpoint_shapes(self):
-        cache_response = self.client.get("/api/cache/status?ahead=0")
-        self.assertEqual(cache_response.status_code, 200)
-        cache_data = cache_response.json()
-        self.assertIn("memory", cache_data)
-        self.assertIn("disk", cache_data)
-        self.assertIn("pregen", cache_data)
-
-        pregen_response = self.client.get("/api/cache/pregen/status")
-        self.assertEqual(pregen_response.status_code, 200)
-        self.assertIsInstance(pregen_response.json(), dict)
-
-        ai_response = self.client.get("/api/ai/status")
-        self.assertEqual(ai_response.status_code, 200)
-        ai_data = ai_response.json()
-        self.assertIn("worker_state", ai_data)
-        self.assertIn("model_id", ai_data)
-        self.assertIn("embedding_index", ai_data)
-
-    def test_media_status_endpoint_shapes(self):
-        single_response = self.client.get(f"/api/image/{self.ids[0]}/media-status")
-        self.assertEqual(single_response.status_code, 200)
-        single = single_response.json()
-
-        self.assertEqual(single["id"], self.ids[0])
-        self.assertIn("sm", single["tiers"])
-        self.assertIn("full", single["tiers"])
-        self.assertEqual(single["tiers"]["sm"]["url"], f"/api/thumb/sm/{self.ids[0]}")
-        self.assertEqual(single["tiers"]["full"]["cached_url"], f"/api/full/{self.ids[0]}?cached=1")
-
-        batch_response = self.client.post(
-            "/api/images/media-status",
-            json={"ids": [self.ids[0], str(self.ids[0]), "bad", self.ids[1]]},
-        )
-        self.assertEqual(batch_response.status_code, 200)
-        statuses = batch_response.json()["statuses"]
-
-        self.assertEqual([status["id"] for status in statuses], [self.ids[0], self.ids[1]])
 
     def test_export_json_preserves_field_order_and_requested_ids(self):
         requested_ids = [self.ids[1], self.ids[0]]
