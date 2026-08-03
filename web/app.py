@@ -37,16 +37,7 @@ async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
             "code": "api_rev_mismatch",
         },
     )
-wiring.configure_develop_routes()
 wiring.configure_develop_import_routes()
-wiring.configure_develop_preset_routes()
-wiring.configure_develop_ai_mask_routes()
-wiring.configure_develop_hdr_routes()
-wiring.configure_develop_pano_routes()
-wiring.configure_develop_xmp_write_routes()
-wiring.configure_system_backup_routes()
-wiring.configure_cloud_backup_routes()
-wiring.configure_system_health_routes()
 # PATCH: quality lane — register technical quality scorer routes
 import db as _db
 gallery_routes.configure(thumbnail_response=media_routes.thumbnail_response)

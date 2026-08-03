@@ -167,11 +167,6 @@ def configure_catalog_routes() -> None:
     )
 
 
-def configure_develop_routes() -> None:
-    pass
-
-
-
 def configure_develop_import_routes() -> None:
     import thumbnails
 
@@ -180,46 +175,6 @@ def configure_develop_import_routes() -> None:
             images, "sm", limit=len(images)
         ),
     )
-
-
-def configure_develop_preset_routes() -> None:
-    pass
-
-
-
-def configure_develop_ai_mask_routes() -> None:
-    pass
-
-
-
-def configure_develop_hdr_routes() -> None:
-    pass
-
-
-
-def configure_develop_pano_routes() -> None:
-    pass
-
-
-
-def configure_develop_xmp_write_routes() -> None:
-    pass
-
-
-
-def configure_system_backup_routes() -> None:
-    pass
-
-
-
-def configure_cloud_backup_routes() -> None:
-    pass
-
-
-
-def configure_system_health_routes() -> None:
-    pass
-
 
 
 def configure_library_routes() -> None:

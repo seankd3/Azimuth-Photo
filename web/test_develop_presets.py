@@ -36,7 +36,6 @@ SAMPLE_XMP = b"""<?xml version="1.0" encoding="UTF-8"?>
 
 
 def _ensure_router_mounted() -> None:
-    wiring.configure_develop_routes()
     if not getattr(app_module, "_presets_router_mounted", False):
         app_module.app.include_router(preset_routes.router)
         app_module._presets_router_mounted = True

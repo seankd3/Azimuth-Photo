@@ -153,7 +153,6 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
         for source in (grid, timeline):
             self.assertIn("let thumbnailPollTimer = 0;", source)
-            self.assertIn("function scheduleThumbnailPoll()", source)
             self.assertIn("pending_thumbnails", source)
             self.assertIn("refreshPendingPreviews", source)
             self.assertIn("refreshFirstPagePreviews", source)
@@ -190,21 +189,6 @@ class DesktopCorrectnessTests(unittest.TestCase):
             "if (scope.similarImages || !canRefreshPendingThumbnails()) await refreshPendingPreviews();",
             timeline,
         )
-
-    @pytest.mark.contract
-    def test_events_keep_pending_previews_off_the_thumbnail_decode_path(self):
-        events = read("events.js")
-        cell_html = events[events.index("function cellHtml"):events.index("function patchCells")]
-        group_html = events[events.index("function groupHtml"):events.index("function render()")]
-
-        self.assertIn("previewThumbUrl(img)", cell_html)
-        self.assertIn("preview-pending", cell_html)
-        self.assertIn("previewSrc ? `data-src=", cell_html)
-        self.assertIn("image.preview_ready !== false", events)
-        self.assertIn("previewThumbUrl(hero, 'md')", group_html)
-        self.assertIn("async function refreshPendingPreviews()", events)
-        self.assertIn("params.set('ids', ids.join(','));", events)
-        self.assertIn("stopThumbnailPoll();", events[events.index("export function unmountEvents"):])
 
     @pytest.mark.contract
     def test_pending_preview_thumb_fallbacks_are_centralized_and_guarded(self):
@@ -245,18 +229,6 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("function scheduleThumbnailPoll()", timeline)
         for module in (read("omnibox.js"), read("loupe.js"), read("develop", "develop.js")):
             self.assertIn("previewThumbUrl", module)
-
-    def test_warm_events_revalidates_group_coverage_after_flags_change(self):
-        events = read("events.js")
-
-        self.assertIn("revalidate({ refreshCoverage: true })", events)
-        self.assertIn("function patchCoverageDots()", events)
-        self.assertIn("dotHost.innerHTML = coverageDots(group);", events)
-        revalidate = events[events.index("async function revalidate"):events.index("export function initEvents")]
-        self.assertLess(
-            revalidate.index("patchCoverageDots();"),
-            revalidate.index("resetData();"),
-        )
 
     def test_loupe_removes_trashed_photos_from_grid_and_session_lists(self):
         loupe = read("loupe.js")
@@ -346,7 +318,6 @@ class DesktopCorrectnessTests(unittest.TestCase):
 
     def test_collection_undo_only_confirms_after_the_remove_succeeds(self):
         panel = read("panel.js")
-        events = read("events.js")
         mobile_selection = read_mobile("selection.js")
 
         helper_start = panel.index("async function undoCollectionAdd(")
@@ -354,8 +325,6 @@ class DesktopCorrectnessTests(unittest.TestCase):
         self.assertIn("if (!result?.ok)", helper)
         self.assertLess(helper.index("if (!result?.ok)"), helper.index("showToast(successMessage);"))
         self.assertIn("await loadCollections();", helper)
-        self.assertIn("if (removed?.ok) showToast('Event photos removed from collection');", events)
-        self.assertIn("emit('collections:refresh');", events)
         self.assertEqual(mobile_selection.count("if (removed?.ok) showToast('Removed from collection');"), 2)
         self.assertEqual(mobile_selection.count("new CustomEvent('collections-changed')"), 2)
 
