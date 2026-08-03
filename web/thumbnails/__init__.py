@@ -88,6 +88,22 @@ def _previews_start_paused() -> bool:
 
 
 _previews_paused = _previews_start_paused()
+
+
+def regate_previews_for_role() -> bool:
+    """Re-seed the pause state after the node's role changes.
+
+    Pairing turns a standalone install into a satellite while the process is
+    running, and this module's pause state was decided at import. Without this
+    a freshly paired laptop keeps pregenerating previews for photos that now
+    live on the hub. attach_hub() calls it.
+    """
+
+    global _previews_paused
+    _previews_paused = _previews_start_paused()
+    return _previews_paused
+
+
 _pregen_scan_offsets = {tier: 0 for tier in THUMB_TIERS}
 _pregen_bulk_cursor = {"date_taken": pregen.NEWEST, "id": 0}
 _pregen_full_cursor = {"date_taken": pregen.NEWEST, "id": 0}

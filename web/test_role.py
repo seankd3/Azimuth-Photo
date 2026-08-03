@@ -13,7 +13,7 @@ MODES = ["", "hub", "satellite", "standalone"]
 HUBS = ["", "http://hub.local:8000"]
 
 
-class RoleTests(unittest.TestCase):
+class _RoleEnv(unittest.TestCase):
     def setUp(self):
         self._env = os.environ.get("AZIMUTH_MODE"), os.environ.get("AZIMUTH_HUB_URL")
         self._stored = satellite._stored_hub_url
@@ -34,6 +34,8 @@ class RoleTests(unittest.TestCase):
             os.environ.pop("AZIMUTH_HUB_URL", None)
         satellite._stored_hub_url = stored_hub
 
+
+class RoleTests(_RoleEnv):
     def test_every_combination_resolves_to_exactly_one_role(self):
         for mode, env_hub, stored_hub in itertools.product(MODES, HUBS, HUBS):
             with self.subTest(mode=mode or "(unset)", env=env_hub, stored=stored_hub):
@@ -81,6 +83,26 @@ class RoleTests(unittest.TestCase):
                 self.assertEqual(
                     role.defers_bulk_compute(), role.role() == role.SATELLITE
                 )
+
+
+class PregenRegateTests(_RoleEnv):
+    """Preview generation must follow the role, not the role at import time."""
+
+    def test_pairing_pauses_local_preview_generation(self):
+        import thumbnails
+
+        self._configure("standalone", "", "")
+        self.assertFalse(thumbnails.regate_previews_for_role())
+
+        # What attach_hub() does: store the hub, then re-gate.
+        self._configure("standalone", "", "http://hub.local:8000")
+        self.assertTrue(
+            thumbnails.regate_previews_for_role(),
+            "a paired laptop kept decoding originals that now live on the hub",
+        )
+
+        self._configure("standalone", "", "")
+        self.assertFalse(thumbnails.regate_previews_for_role())
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from collections.abc import Iterable
@@ -16,6 +17,8 @@ from features.sync.executor import run_sync_work
 from features.sync.validation import validate_content_hash
 
 from archive import role
+
+log = logging.getLogger(__name__)
 
 
 SYNC_STATE_DDL = """
@@ -115,6 +118,13 @@ async def attach_hub(url: str, token: str = "", hub_id: str = "") -> dict:
     app_settings.save_settings(config)
     _stored_hub_url = clean
     _stored_device_token = config["device_token"]
+    # This machine is a satellite as of this line. The hub makes its previews now.
+    try:
+        import thumbnails
+
+        thumbnails.regate_previews_for_role()
+    except Exception:
+        log.exception("could not re-gate preview generation after pairing")
     started = False
     if _sync_starter is not None:
         started = bool(await _sync_starter())
