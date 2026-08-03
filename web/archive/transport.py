@@ -12,7 +12,6 @@ caller to unwrap an exception to read a status code they had asked for.
 
 from __future__ import annotations
 
-import asyncio
 import urllib.error
 import urllib.request
 from typing import NamedTuple
@@ -138,17 +137,3 @@ def open_stream(
         )
     except (urllib.error.URLError, TimeoutError, OSError):
         return None
-
-
-async def reachable(hub_url: str, *, timeout: float = CONTRACT) -> bool:
-    """Is the hub answering at all? Never raises."""
-
-    try:
-        return (
-            await asyncio.wait_for(
-                request_async("GET", f"{hub_url.rstrip('/')}/api/health", timeout=timeout),
-                timeout=timeout + 1,
-            )
-        ).ok
-    except Exception:
-        return False
