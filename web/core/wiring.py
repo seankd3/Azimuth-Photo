@@ -315,29 +315,16 @@ def _smart_collection_image_ids_resolver(resolve_library_constraints):
 def configure_library_service(
     *,
     resolve_library_constraints,
-    cache_root,
-    clamp_int,
-    normalize_search_query,
     schedule_thumbnail_prefetch,
     schedule_result_thumbnail_memory_warm,
     rankings_response_cache_ttl_seconds,
 ) -> None:
-    import db
     from features.library import service as library_service
-    from features.library import taste as taste_service
 
-    taste_service.configure(
-        db_signature=lambda: db.DB_PATH,
-    )
     library_service.configure(
         resolve_library_constraints=resolve_library_constraints,
-        cache_root=cache_root,
-        clamp_int=clamp_int,
-        normalize_search_query=normalize_search_query,
         schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
         schedule_result_thumbnail_memory_warm=schedule_result_thumbnail_memory_warm,
-        extension_search_terms=lambda: db.IMAGE_EXTENSION_SEARCH_TERMS,
-        db_signature=lambda: db.DB_PATH,
         resolve_smart_collection_image_ids=_smart_collection_image_ids_resolver(resolve_library_constraints),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
     )
@@ -397,7 +384,6 @@ def configure_compare_service(
     *,
     invalidate_rankings_cache,
     invalidate_interaction_response_cache,
-    cache_root,
     resolve_library_constraints,
     schedule_thumbnail_prefetch,
     schedule_cached_thumbnail_memory_warm,
@@ -408,7 +394,6 @@ def configure_compare_service(
     compare_service.configure(
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        cache_root=cache_root,
         resolve_library_constraints=resolve_library_constraints,
         schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
         schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,

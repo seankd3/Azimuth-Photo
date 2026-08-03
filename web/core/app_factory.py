@@ -42,7 +42,6 @@ INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 @dataclass(frozen=True)
 class AppRuntimeServices:
-    cache_root: Callable[[], str]
     invalidate_pairing_cache: Callable[..., None]
     invalidate_rankings_cache: Callable[[], None]
     invalidate_image_flag_caches: Callable[[], None]
@@ -210,17 +209,12 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
 
 def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     import db
-    import thumbnails
     from core import cache_events, query_constraints, wiring
-    from core import requests as request_helpers
     from features.cache import status as cache_status_service
     from features.compare import service as compare_service
     from features.library import service as library_service
     from features.media import warm as media_warm
     from features.settings import status as settings_status
-
-    def cache_root() -> str:
-        return thumbnails.SSD_CACHE_DIR
 
     def invalidate_pairing_cache(*, matchups: bool = False) -> None:
         cache_events.invalidate_pairing_cache(matchups=matchups)
@@ -279,7 +273,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     wiring.configure_compare_service(
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        cache_root=cache_root,
         resolve_library_constraints=resolve_library_constraints,
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
         schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
@@ -294,9 +287,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     )
     wiring.configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
-        cache_root=cache_root,
-        clamp_int=request_helpers.clamp_int,
-        normalize_search_query=query_constraints.normalize_search_query,
         schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
         schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
         rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
@@ -337,7 +327,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     )
 
     return AppRuntimeServices(
-        cache_root=cache_root,
         invalidate_pairing_cache=invalidate_pairing_cache,
         invalidate_rankings_cache=invalidate_rankings_cache,
         invalidate_image_flag_caches=invalidate_image_flag_caches,

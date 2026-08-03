@@ -1,10 +1,11 @@
 """Library rankings response assembly and cache helpers."""
 
 import db
+import thumbnails
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable, Collection
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from fastapi.responses import Response
@@ -12,6 +13,8 @@ from fastapi.responses import Response
 import helpers as app_helpers
 import settings
 from core import user_activity
+from core import query_constraints
+from core import requests as request_helpers
 from core import responses as response_helpers
 from data.repositories import rankings as ranking_repository
 from features.library import preview_priority
@@ -32,14 +35,9 @@ MAX_RANKINGS_LIMIT = 5000
 ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
 _resolve_library_constraints: Callable[..., object] | None = None
-_cache_root: Callable[[], str] | None = None
-_clamp_int: Callable[[object, int, int, int], int] | None = None
-_normalize_search_query: Callable[[str], str] | None = None
 _schedule_thumbnail_prefetch: Callable[..., None] | None = None
 _schedule_result_thumbnail_memory_warm: Callable[..., None] | None = None
 _rankings_response_cache_ttl_seconds_provider: Callable[[], float] | None = None
-_extension_search_terms: Callable[[], Collection[str]] | None = None
-_db_signature: Callable[[], str] | None = None
 _get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 _get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
 _resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
@@ -48,29 +46,18 @@ _resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]]
 def configure(
     *,
     resolve_library_constraints: Callable[..., object],
-    cache_root: Callable[[], str],
-    clamp_int: Callable[[object, int, int, int], int],
-    normalize_search_query: Callable[[str], str],
     schedule_thumbnail_prefetch: Callable[..., None],
     schedule_result_thumbnail_memory_warm: Callable[..., None],
-    extension_search_terms: Callable[[], Collection[str]],
-    db_signature: Callable[[], str],
     resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]],
     rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
 ) -> None:
-    global _resolve_library_constraints, _cache_root, _clamp_int, _normalize_search_query
+    global _resolve_library_constraints
     global _schedule_thumbnail_prefetch, _schedule_result_thumbnail_memory_warm
     global _rankings_response_cache_ttl_seconds_provider
-    global _extension_search_terms, _db_signature
     global _resolve_smart_collection_image_ids
     _resolve_library_constraints = resolve_library_constraints
-    _cache_root = cache_root
-    _clamp_int = clamp_int
-    _normalize_search_query = normalize_search_query
     _schedule_thumbnail_prefetch = schedule_thumbnail_prefetch
     _schedule_result_thumbnail_memory_warm = schedule_result_thumbnail_memory_warm
-    _extension_search_terms = extension_search_terms
-    _db_signature = db_signature
     _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
     _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
 
@@ -104,9 +91,7 @@ def invalidate_rankings_response_cache(*, order_caches: bool = True) -> None:
 
 
 def _configured_cache_root() -> str:
-    if _cache_root is None:
-        raise RuntimeError("Library service is not configured")
-    return _cache_root()
+    return thumbnails.SSD_CACHE_DIR
 
 
 def _configured(provider):
@@ -116,13 +101,11 @@ def _configured(provider):
 
 
 def _configured_db_signature() -> str:
-    return _configured(_db_signature)()
+    return db.DB_PATH
 
 
 def _configured_clamp_int(value, default: int, minimum: int, maximum: int) -> int:
-    if _clamp_int is None:
-        raise RuntimeError("Library service is not configured")
-    return _clamp_int(value, default, minimum, maximum)
+    return request_helpers.clamp_int(value, default, minimum, maximum)
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
@@ -132,9 +115,7 @@ async def _configured_resolve_library_constraints(q: str, *, people: str = "", d
 
 
 def _configured_normalize_search_query(query: str) -> str:
-    if _normalize_search_query is None:
-        raise RuntimeError("Library service is not configured")
-    return _normalize_search_query(query)
+    return query_constraints.normalize_search_query(query)
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
@@ -349,7 +330,7 @@ async def _blended_order_page(
     page_ids = cached["ids"][offset:offset + limit]
     if not page_ids:
         return []
-    rows = await _configured(db.get_rankings)(
+    rows = await db.get_rankings(
         limit=len(page_ids),
         offset=0,
         sort="elo",
@@ -479,7 +460,7 @@ async def _taste_order_page(
     if db.get_ranking_rows_by_ids is not None and len(page_ids) <= 900:
         rows = await db.get_ranking_rows_by_ids(list(page_ids))
     else:
-        rows = await _configured(db.get_rankings)(
+        rows = await db.get_rankings(
             limit=len(page_ids),
             offset=0,
             sort="elo",
@@ -541,7 +522,7 @@ async def _ranking_id_elo_rows(**kwargs) -> list[tuple[int, float]]:
         rows = await db.get_ranking_id_elo(**kwargs)
     else:
         # Test/fallback path: derive from full rankings rows.
-        fetched = await _configured(db.get_rankings)(
+        fetched = await db.get_rankings(
             limit=int(total or 10_000_000),
             offset=0,
             sort="elo",
@@ -655,7 +636,7 @@ async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> l
 async def _attach_preview_state(cards: list[dict]) -> list[dict]:
     if not cards:
         return cards
-    cached_ids = await _configured(db.get_cached_image_ids)(
+    cached_ids = await db.get_cached_image_ids(
         [int(card["id"]) for card in cards],
         "sm",
         _configured_cache_root(),
@@ -675,7 +656,7 @@ async def _preview_ready_count(image_ids) -> int:
     ids = [int(image_id) for image_id in image_ids if int(image_id) > 0]
     if not ids:
         return 0
-    cached_ids = await _configured(db.get_cached_image_ids)(
+    cached_ids = await db.get_cached_image_ids(
         ids,
         "sm",
         _configured_cache_root(),
@@ -773,7 +754,7 @@ async def date_groups_payload(
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
-    groups = await _configured(db.get_date_groups)(
+    groups = await db.get_date_groups(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -817,7 +798,7 @@ async def map_markers_payload(
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
     visible_thumb_size = _visible_thumb_size_for_scope(import_batch)
-    payload = await _configured(db.get_map_markers)(
+    payload = await db.get_map_markers(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -838,7 +819,7 @@ async def map_markers_payload(
     if not satellite.is_satellite_mode() or not payload.get("markers"):
         return payload
     markers = [dict(marker) for marker in payload["markers"]]
-    cached_ids = await _configured(db.get_cached_image_ids)(
+    cached_ids = await db.get_cached_image_ids(
         [int(marker["id"]) for marker in markers],
         "sm",
         _configured_cache_root(),
@@ -875,7 +856,7 @@ async def date_histogram_payload(
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
-    return await _configured(db.date_histogram)(
+    return await db.date_histogram(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -917,7 +898,7 @@ async def scope_counts_payload(
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     exclude_collapsed_stack_members = _exclude_collapsed_stack_members(stacks)
-    return await _configured(db.scope_counts)(
+    return await db.scope_counts(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -957,7 +938,7 @@ async def filter_options_payload(
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search.get("id_filter"), import_batch)
     search_ids, collection_id = await _resolve_collection_scope(search_ids, collection_id)
-    return await _configured(db.get_filter_options)(
+    return await db.get_filter_options(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -978,7 +959,7 @@ async def filter_options_payload(
 
 
 async def stats_payload() -> dict:
-    return await _configured(db.get_stats)()
+    return await db.get_stats()
 
 
 
@@ -1006,7 +987,7 @@ async def _hidden_in_quiet_sources_count(
     excluded = tuple(int(source_id) for source_id in (exclude_sources or ()) if int(source_id) > 0)
     if not excluded or not search_active:
         return 0
-    full_total = await _configured(db.count_rankings)(
+    full_total = await db.count_rankings(
         orientation=orientation,
         compared=compared,
         min_stars=min_stars,
@@ -1024,7 +1005,7 @@ async def _hidden_in_quiet_sources_count(
     )
     quiet_total = visible_total
     if quiet_total is None:
-        quiet_total = await _configured(db.count_rankings)(
+        quiet_total = await db.count_rankings(
             orientation=orientation,
             compared=compared,
             min_stars=min_stars,
@@ -1068,7 +1049,7 @@ async def api_rankings_impl(
     visible_thumb_size = _preview_thumb_size_for_scope()
     if search_mode == "metadata" and text_query and not search_ids and not file_type:
         extension_query = text_query.lower().lstrip(".")
-        if extension_query in _configured(_extension_search_terms)():
+        if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
             file_type = extension_query
             text_query = ""
         elif search_ids is not None:
@@ -1215,14 +1196,14 @@ async def api_rankings_impl(
         )
         if unfiltered_taste:
             counts_task = asyncio.create_task(
-                _configured(db.get_visible_pairing_pool_counts)("sm", _configured_cache_root())
+                db.get_visible_pairing_pool_counts("sm", _configured_cache_root())
             )
             total_task = None
             visible_task = None
         else:
             counts_task = None
             total_task = asyncio.create_task(
-                _configured(db.count_rankings)(
+                db.count_rankings(
                     orientation=orientation, compared=compared, min_stars=min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
@@ -1231,7 +1212,7 @@ async def api_rankings_impl(
                     exclude_sources=exclude_sources,)
             )
             visible_task = asyncio.create_task(
-                _configured(db.count_rankings)(
+                db.count_rankings(
                     orientation=orientation, compared=compared, min_stars=min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
@@ -1365,7 +1346,7 @@ async def api_rankings_impl(
 
     if sort == "similarity" and search_scores:
         total_task = asyncio.create_task(
-            _configured(db.count_rankings)(
+            db.count_rankings(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens, tag=tag, id_filter=search_ids, collection_id=collection_id,
@@ -1373,7 +1354,7 @@ async def api_rankings_impl(
                 exclude_collapsed_stack_members=exclude_collapsed_stack_members,
                 exclude_sources=exclude_sources,)
         )
-        visible_images = await _configured(db.count_rankings)(
+        visible_images = await db.count_rankings(
             orientation=orientation, compared=compared, min_stars=min_stars,
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
             camera=camera, lens=lens, tag=tag,
@@ -1385,7 +1366,7 @@ async def api_rankings_impl(
         exclude_sources=exclude_sources,
     )
         total_images = await total_task
-        images = await _configured(db.get_rankings)(
+        images = await db.get_rankings(
             limit=total_images, offset=0, sort="elo",
             orientation=orientation, compared=compared, min_stars=min_stars,
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
@@ -1489,7 +1470,7 @@ async def api_rankings_impl(
     )
     if unfiltered_rankings and cached_blended_order is None:
         counts_task = asyncio.create_task(
-            _configured(db.get_visible_pairing_pool_counts)("sm", _configured_cache_root())
+            db.get_visible_pairing_pool_counts("sm", _configured_cache_root())
         )
     elif not unfiltered_rankings and cached_blended_order is None:
         defer_empty_first_page_counts = bool(text_query) and offset == 0 and not blend_context.get("active")
@@ -1497,7 +1478,7 @@ async def api_rankings_impl(
         visible_task = None
         if not defer_empty_first_page_counts:
             total_task = asyncio.create_task(
-                _configured(db.count_rankings)(
+                db.count_rankings(
                     orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
@@ -1508,7 +1489,7 @@ async def api_rankings_impl(
                     exclude_sources=exclude_sources,)
             )
             visible_task = asyncio.create_task(
-                _configured(db.count_rankings)(
+                db.count_rankings(
                     orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                     folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                     camera=camera, lens=lens, tag=tag,
@@ -1552,7 +1533,7 @@ async def api_rankings_impl(
         else:
             if total_task is None:
                 total_task = asyncio.create_task(
-                    _configured(db.count_rankings)(
+                    db.count_rankings(
                         orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                         camera=camera, lens=lens, tag=tag,
@@ -1563,7 +1544,7 @@ async def api_rankings_impl(
                 )
             if visible_task is None:
                 visible_task = asyncio.create_task(
-                    _configured(db.count_rankings)(
+                    db.count_rankings(
                         orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                         folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                         camera=camera, lens=lens, tag=tag,
@@ -1578,7 +1559,7 @@ async def api_rankings_impl(
 
         all_rows = []
         if total_images > 0:
-            all_rows = await _configured(db.get_rankings)(
+            all_rows = await db.get_rankings(
                 limit=total_images, offset=0, sort=db_sort,
                 orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
@@ -1604,7 +1585,7 @@ async def api_rankings_impl(
         )
         images = blended_rows[offset:offset + limit]
     else:
-        images = await _configured(db.get_rankings)(
+        images = await db.get_rankings(
             limit=limit, offset=offset, sort=db_sort,
             orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
@@ -1630,7 +1611,7 @@ async def api_rankings_impl(
             else:
                 if total_task is None:
                     total_task = asyncio.create_task(
-                        _configured(db.count_rankings)(
+                        db.count_rankings(
                             orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                             camera=camera, lens=lens, tag=tag,
@@ -1642,7 +1623,7 @@ async def api_rankings_impl(
                     )
                 if visible_task is None:
                     visible_task = asyncio.create_task(
-                        _configured(db.count_rankings)(
+                        db.count_rankings(
                             orientation=orientation, compared=compared, min_stars=ranking_filter_min_stars,
                             folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                             camera=camera, lens=lens, tag=tag,

@@ -1,6 +1,7 @@
 """Compare and mosaic cache/state helpers."""
 
 import asyncio
+import thumbnails
 import db
 import hashlib
 import os
@@ -48,7 +49,6 @@ _DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
 _invalidate_rankings_cache: Callable[[], None] | None = None
 _invalidate_interaction_response_cache: Callable[[], None] | None = None
-_cache_root: Callable[[], str] | None = None
 _resolve_library_constraints: Callable[..., object] | None = None
 _schedule_thumbnail_prefetch: Callable[..., None] | None = None
 _schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None
@@ -59,19 +59,17 @@ def configure(
     *,
     invalidate_rankings_cache: Callable[[], None],
     invalidate_interaction_response_cache: Callable[[], None],
-    cache_root: Callable[[], str],
     resolve_library_constraints: Callable[..., object] | None = None,
     schedule_thumbnail_prefetch: Callable[..., None] | None = None,
     schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None,
     resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
 ) -> None:
-    global _invalidate_rankings_cache, _invalidate_interaction_response_cache, _cache_root
+    global _invalidate_rankings_cache, _invalidate_interaction_response_cache
     global _resolve_library_constraints, _schedule_thumbnail_prefetch
     global _schedule_cached_thumbnail_memory_warm
     global _resolve_smart_collection_image_ids
     _invalidate_rankings_cache = invalidate_rankings_cache
     _invalidate_interaction_response_cache = invalidate_interaction_response_cache
-    _cache_root = cache_root
     if resolve_library_constraints is not None:
         _resolve_library_constraints = resolve_library_constraints
     if schedule_thumbnail_prefetch is not None:
@@ -93,9 +91,7 @@ def _configured_db_signature() -> str:
 
 
 def _configured_cache_root() -> str:
-    if _cache_root is None:
-        raise RuntimeError("Compare service is not configured")
-    return _cache_root()
+    return thumbnails.SSD_CACHE_DIR
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
