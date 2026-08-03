@@ -37,6 +37,7 @@ log = logging.getLogger(__name__)
 _GIB = 1024**3
 PAUSE_REASON = "memory pressure"
 PAUSE_MESSAGE = "Paused: memory pressure"
+STARTUP_REASON = "starting up"
 
 # Headroom under cgroup MemoryHigh / MemoryMax when deriving defaults.
 _HIGH_HEADROOM_BYTES = 2 * _GIB
@@ -658,7 +659,11 @@ def apply_to_decision(decision: Any, *, rss_bytes: int | None = None) -> Any:
             2.0,
         )
     if "reason" in fields:
-        updates["reason"] = PAUSE_REASON
+        # The settle after launch is not memory pressure, and saying it is
+        # sent someone hunting a leak on a machine with 44GB free.
+        updates["reason"] = (
+            STARTUP_REASON if pressure.signal == "startup_calm" else PAUSE_REASON
+        )
     if "intensity" in fields:
         updates["intensity"] = 0.0
     if "mode" in fields:

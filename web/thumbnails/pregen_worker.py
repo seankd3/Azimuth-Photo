@@ -919,13 +919,10 @@ async def run_prefetch_worker_loop(
                 decision = background_decision()
                 generate_batch = generate_batch_for_decision(decision)
                 if decision.pause:
-                    if decision.reason == "memory pressure":
-                        set_pregen_state("paused", "Paused: memory pressure")
+                    if decision.reason == memory_pressure.PAUSE_REASON:
+                        set_pregen_state("paused", memory_pressure.PAUSE_MESSAGE)
                     else:
-                        set_pregen_state(
-                            "waiting",
-                            f"Background work paused: {decision.reason}.",
-                        )
+                        set_pregen_state("waiting", f"Waiting: {decision.reason}.")
                     no_progress_scan_passes = 0
                     await sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
                     continue
