@@ -37,3 +37,10 @@ export function bytes(value) {
     }
     return `${amount >= 10 || unit === 0 ? Math.round(amount) : amount.toFixed(1)} ${units[unit]}`;
 }
+
+// The same eight extensions as photo/kind.py's RAW_FORMATS. Two desktop modules
+// had kept byte-identical copies of this set; a ninth format would have had to
+// be remembered in three places.
+export const RAW_EXTENSIONS = Object.freeze(
+    new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']),
+);

@@ -1,4 +1,4 @@
-import { esc } from '../lib.js';
+import { RAW_EXTENSIONS, esc } from '../lib.js';
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
@@ -44,7 +44,6 @@ let previousStripIndex = -1;
 let navDirection = 1;
 const exifCache = new Map();
 const INFO_MODES = ['off', 'basic', 'full'];
-const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 let versionStack = null;
 
 

@@ -10,7 +10,7 @@ import {
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
-import { bytes as bytesLabel, escapeHtml as esc, formatCount as fmt } from '../lib.js';
+import { RAW_EXTENSIONS, bytes as bytesLabel, escapeHtml as esc, formatCount as fmt } from '../lib.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';
@@ -53,7 +53,6 @@ let identicalPollMisses = 0;
 
 const POLL_MAX_MISSES = 5;
 
-const RAW_EXTS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 
 function flagGlyph(flag) {
     if (flag === 'picked') return icon('star');
@@ -93,7 +92,7 @@ function normalizedExt(image) {
 
 function fileType(image) {
     const ext = normalizedExt(image);
-    if (RAW_EXTS.has(ext)) return 'RAW';
+    if (RAW_EXTENSIONS.has(ext)) return 'RAW';
     if (ext === 'jpg' || ext === 'jpeg') return 'JPG';
     if (ext === 'tif' || ext === 'tiff') return 'TIFF';
     return ext ? ext.toUpperCase() : '—';
