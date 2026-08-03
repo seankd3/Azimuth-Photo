@@ -136,9 +136,11 @@ returned an empty list when nobody had wired them. Neither said anything.
 - `python -m harness --check` stays green. A commit that changes a golden says
   why in the message.
 - `./scripts/smoke` exit code is the result — never read through `tail`.
-- Two AST sweeps catch what renames leave behind: stale `patch.object(mod, "x")`
-  targets, and `mod._private` attributes that no longer exist. The second found
-  the stacks and quit failures that reading could not.
+- `web/scripts_stale_refs.py` after any rename. It reads the tests without
+  running them and asks the real modules whether each name is still there —
+  both `patch.object(mod, "x")` targets and plain `mod._private` access. It
+  found four failures on this branch that reading did not, and its exit code is
+  the count, so it can gate a commit.
 - `pytest --collect-only` after any deletion. It imports all 162 test modules in
   under three seconds and catches references the deleted code left behind —
   including ones inside strings, which no import checker sees.

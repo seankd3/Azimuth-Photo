@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from archive import transport
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -195,26 +196,16 @@ class PairConnectTests(unittest.TestCase):
             started.append(True)
             return True
 
-        class StubHubResponse:
-            status = 200
-
-            def read(self):
-                return b'{"device_token":"device-token","hub_id":"hub-123"}'
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return False
-
-        def stub_hub(request, timeout):
-            observed["url"] = request.full_url
-            observed["payload"] = request.data.decode("utf-8")
+        def stub_hub(method, url, *, body=None, headers=None, timeout=None):
+            observed["url"] = url
+            observed["payload"] = body.decode("utf-8")
             observed["timeout"] = timeout
-            return StubHubResponse()
+            return transport.Reply(
+                200, {}, b'{"device_token":"device-token","hub_id":"hub-123"}'
+            )
 
         satellite.register_sync_starter(start_sync)
-        with mock.patch.object(pair_routes, "urlopen", side_effect=stub_hub):
+        with mock.patch.object(pair_routes.transport, "request", side_effect=stub_hub):
             response = self.client.post(
                 "/api/pair/connect",
                 json={
@@ -230,7 +221,7 @@ class PairConnectTests(unittest.TestCase):
         self.assertTrue(response.json()["has_hub"])
         self.assertEqual(started, [True])
         self.assertEqual(observed["url"], "http://hub.local:8000/api/pair")
-        self.assertEqual(observed["timeout"], 5)
+        self.assertEqual(observed["timeout"], transport.INTERACTIVE)
         self.assertIn('"code": "ABCD1234"', observed["payload"])
         self.assertEqual(settings.get_settings()["hub_url"], "http://hub.local:8000")
         self.assertEqual(settings.get_settings()["device_token"], "device-token")
@@ -239,8 +230,8 @@ class PairConnectTests(unittest.TestCase):
         connect_started = threading.Event()
         connect_result = {}
 
-        def black_hole(_request, timeout):
-            self.assertEqual(timeout, 5)
+        def black_hole(method, url, *, body=None, headers=None, timeout=None):
+            self.assertEqual(timeout, transport.INTERACTIVE)
             connect_started.set()
             time.sleep(1.25)
             raise pair_routes.URLError("timed out")
@@ -251,7 +242,7 @@ class PairConnectTests(unittest.TestCase):
                 json={"hub_url": "http://black-hole.invalid", "code": "ABCD1234"},
             )
 
-        with mock.patch.object(pair_routes, "urlopen", side_effect=black_hole):
+        with mock.patch.object(pair_routes.transport, "request", side_effect=black_hole):
             thread = threading.Thread(target=connect)
             thread.start()
             self.assertTrue(connect_started.wait(timeout=1))
