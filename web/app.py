@@ -13,10 +13,8 @@ from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
 from features.library import geo_routes, keyword_routes, saved_views, watched_routes
-from features.publishing import routes as gallery_routes
 from features.publish import routes as publish_routes
 from features.develop import export_presets
-from features.media import routes as media_routes
 from features.quality import routes as quality_routes
 from features.backup import routes as cloud_backup_routes
 from features.system import backup_routes, health_routes, quit_routes, version_routes
@@ -40,7 +38,6 @@ async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
 wiring.configure_develop_import_routes()
 # PATCH: quality lane — register technical quality scorer routes
 import db as _db
-gallery_routes.configure(thumbnail_response=media_routes.thumbnail_response)
 app.include_router(hdr_routes.router)
 app.include_router(pano_routes.router)
 app.include_router(ai_mask_routes.router)
@@ -52,7 +49,6 @@ app.include_router(xmp_write_routes.router)
 app.include_router(saved_views.router)
 app.include_router(geo_routes.router)
 app.include_router(keyword_routes.router)
-app.include_router(gallery_routes.router)
 app.include_router(backup_routes.router)
 app.include_router(cloud_backup_routes.router)
 app.include_router(health_routes.router)

@@ -16,7 +16,6 @@ from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
 from features.settings import routes as settings_routes
 from features.develop import importer as develop_importer
-from features.publishing.routes import _attachment_name
 from features.captions.routes import CaptionBody
 from features.stacks.routes import CreateStackBody
 from features.share import auth as share_auth
@@ -101,13 +100,6 @@ def test_media_state_rejects_existing_symlink_catalog_row(tmp_path: Path):
     }
 
     assert asyncio.run(media_routes._source_state(image)) == "unsafe"
-
-
-def test_public_download_filename_cannot_inject_response_headers():
-    name = _attachment_name(7, 'portrait\r\nX-Injected: yes".jpg', suffix=".jpg")
-
-    assert name == "portrait__X-Injected_ yes_.jpg"
-    assert "\r" not in name and "\n" not in name and '"' not in name
 
 
 def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_path: Path):

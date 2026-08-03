@@ -95,17 +95,6 @@
     "params": [],
     "required_params": []
   },
-  "DELETE /api/user-collections/{collection_id}/galleries/{gallery_id}": {
-    "has_body": false,
-    "params": [
-      "collection_id",
-      "gallery_id"
-    ],
-    "required_params": [
-      "collection_id",
-      "gallery_id"
-    ]
-  },
   "DELETE /api/user-collections/{collection_id}/images": {
     "has_body": true,
     "params": [
@@ -1139,15 +1128,6 @@
       "collection_id"
     ]
   },
-  "GET /api/user-collections/{collection_id}/galleries": {
-    "has_body": false,
-    "params": [
-      "collection_id"
-    ],
-    "required_params": [
-      "collection_id"
-    ]
-  },
   "GET /api/user-collections/{collection_id}/publish": {
     "has_body": false,
     "params": [
@@ -1194,50 +1174,6 @@
     "has_body": false,
     "params": [],
     "required_params": []
-  },
-  "GET /s/gallery/{token}": {
-    "has_body": false,
-    "params": [
-      "token"
-    ],
-    "required_params": [
-      "token"
-    ]
-  },
-  "GET /s/gallery/{token}/download-all": {
-    "has_body": false,
-    "params": [
-      "token"
-    ],
-    "required_params": [
-      "token"
-    ]
-  },
-  "GET /s/gallery/{token}/download/{size}/{image_id}": {
-    "has_body": false,
-    "params": [
-      "image_id",
-      "size",
-      "token"
-    ],
-    "required_params": [
-      "image_id",
-      "size",
-      "token"
-    ]
-  },
-  "GET /s/gallery/{token}/thumb/{size}/{image_id}": {
-    "has_body": false,
-    "params": [
-      "image_id",
-      "size",
-      "token"
-    ],
-    "required_params": [
-      "image_id",
-      "size",
-      "token"
-    ]
   },
   "GET /s/{token}": {
     "has_body": false,
@@ -1339,17 +1275,6 @@
     ],
     "required_params": [
       "view_id"
-    ]
-  },
-  "PATCH /api/user-collections/{collection_id}/galleries/{gallery_id}": {
-    "has_body": true,
-    "params": [
-      "collection_id",
-      "gallery_id"
-    ],
-    "required_params": [
-      "collection_id",
-      "gallery_id"
     ]
   },
   "PATCH /api/watched-folders/{folder_id}": {
@@ -2150,15 +2075,6 @@
       "collection_id"
     ]
   },
-  "POST /api/user-collections/{collection_id}/galleries": {
-    "has_body": true,
-    "params": [
-      "collection_id"
-    ],
-    "required_params": [
-      "collection_id"
-    ]
-  },
   "POST /api/user-collections/{collection_id}/images": {
     "has_body": true,
     "params": [
@@ -2234,15 +2150,6 @@
     ],
     "required_params": [
       "folder_id"
-    ]
-  },
-  "POST /s/gallery/{token}/unlock": {
-    "has_body": false,
-    "params": [
-      "token"
-    ],
-    "required_params": [
-      "token"
     ]
   },
   "POST /s/{token}/favorite": {
