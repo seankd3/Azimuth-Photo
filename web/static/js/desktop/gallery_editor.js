@@ -1,7 +1,7 @@
 /** Client-gallery fields and API adapter for the unified Deliver popover. */
 
 import { fetchJson } from './api.js';
-import { esc } from './dom.js';
+import { esc } from '../lib.js';
 
 export async function listGalleryDeliveries(collectionId) {
     return fetchJson(`/api/user-collections/${collectionId}/galleries`);
