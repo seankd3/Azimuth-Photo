@@ -40,11 +40,7 @@ async function json(url, options) {
 
 function mirrorTooltip(status) {
     const mirror = status.mirror || {};
-    const skipped = Number(mirror.skipped_unhashed) || 0;
     const applied = Number(mirror.rows_applied) || 0;
-    if (skipped > 0) {
-        return `${skipped} hub photo${skipped === 1 ? '' : 's'} skipped — missing content hash (mirror looks empty until hub finishes hashing)`;
-    }
     if (applied > 0) {
         return `Mirror applied ${applied} photo${applied === 1 ? '' : 's'}`;
     }
@@ -115,7 +111,6 @@ function patch(status) {
         ? `${pendingOps} change${pendingOps === 1 ? '' : 's'} pending`
         : `${depth} photo${depth === 1 ? '' : 's'}`;
     const errors = (status.recent_errors || []).slice(0, 3);
-    const skipped = Number(status.mirror?.skipped_unhashed) || 0;
     const pendingHubTrash = Number(status.pending_hub_trash) || 0;
     const button = root.querySelector('.sync-chip-button');
     const hubHealth = status.hub_health || 'ok';
@@ -162,8 +157,7 @@ function patch(status) {
     patchText('[data-sync-library]', `Library: ${libraryTotal} photos · thumbs ${thumbPercent}%`);
     const mirror = root.querySelector('[data-sync-mirror]');
     if (mirror) {
-        patchText('[data-sync-mirror]', `Mirror skipped ${skipped} unhashed hub photo${skipped === 1 ? '' : 's'}`);
-        mirror.hidden = skipped === 0;
+        mirror.hidden = true;
     }
     patchErrors(errors);
     patchText('[data-sync-action="toggle"]', action);

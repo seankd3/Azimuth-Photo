@@ -117,7 +117,6 @@ class MirrorPuller:
         self._status: dict[str, Any] = {
             "cursor": 0,
             "rows_applied": 0,
-            "skipped_unhashed": 0,
             "skipped_conflicts": 0,
             "last_refresh_at": None,
             "last_error": "",
@@ -130,7 +129,6 @@ class MirrorPuller:
         """Pull export pages until the mirror has caught up to the hub."""
         result = await self._refresh_page()
         total_applied = int(result.get("rows_applied") or 0)
-        total_skipped = int(result.get("skipped_unhashed") or 0)
         total_conflicts = int(result.get("skipped_conflicts") or 0)
         for _round in range(400):
             cursor_before = int(result.get("cursor") or 0)
@@ -138,13 +136,11 @@ class MirrorPuller:
                 break
             result = await self._refresh_page()
             total_applied += int(result.get("rows_applied") or 0)
-            total_skipped += int(result.get("skipped_unhashed") or 0)
             total_conflicts += int(result.get("skipped_conflicts") or 0)
             if int(result.get("cursor") or 0) <= cursor_before:
                 break
         self._status.update(
             rows_applied=total_applied,
-            skipped_unhashed=total_skipped,
             skipped_conflicts=total_conflicts,
         )
         return self.status()
@@ -168,7 +164,6 @@ class MirrorPuller:
             raise RuntimeError("hub returned an invalid catalog export") from error
 
         applied = 0
-        skipped_unhashed = 0
         skipped_conflicts = 0
         new_cursor = cursor
         conn = await connection.open_async(self.db_path)
@@ -183,9 +178,6 @@ class MirrorPuller:
                     new_cursor = max(new_cursor, int(row["cursor"] or 0))
                     continue
                 if row.get("hub_image_id") is None:
-                    continue
-                if not row.get("content_hash"):
-                    skipped_unhashed += 1
                     continue
                 try:
                     skipped_conflicts += await self._apply_row(conn, source_id, row, available_columns)
@@ -220,7 +212,6 @@ class MirrorPuller:
         self._status.update(
             cursor=new_cursor,
             rows_applied=applied,
-            skipped_unhashed=skipped_unhashed,
             skipped_conflicts=skipped_conflicts,
             last_refresh_at=time.time(),
             last_error="",
@@ -257,8 +248,14 @@ class MirrorPuller:
     async def _apply_row(self, conn, source_id: int, remote: dict[str, Any], available_columns: set[str]) -> int:
         """Apply one hub row; returns 1 when the hub's path could not be taken."""
 
-        content_hash = str(remote["content_hash"])
+        content_hash = str(remote.get("content_hash") or "")
         hub_image_id = int(remote["hub_image_id"])
+        # `hub_image_id` is the identity. The hash is only how a photo already
+        # imported locally is recognised as the same one, so a hub photo
+        # without a hash still mirrors — it simply cannot adopt a local copy.
+        # The `? <> ''` guard matters: without it an absent hash would match
+        # every other unhashed row and hand this photo the wrong one.
+        #
         # Matching by content hash finds copies too, and a copy that already
         # belongs to a different hub photo is not this one — taking its identity
         # would either break the unique index or silently move a hub photo onto
@@ -266,10 +263,10 @@ class MirrorPuller:
         # this identity, can be the match.
         existing = await (await conn.execute(
             "SELECT id, hub_remote, filepath FROM images "
-            "WHERE (content_hash = ? OR hub_image_id = ?) "
+            "WHERE (hub_image_id = ? OR (? <> '' AND content_hash = ?)) "
             "AND (hub_image_id IS NULL OR hub_image_id = ?) "
             "ORDER BY hub_remote ASC, id ASC LIMIT 1",
-            (content_hash, hub_image_id, hub_image_id),
+            (hub_image_id, content_hash, content_hash, hub_image_id),
         )).fetchone()
         # The same photo can be two rows: a local import matched by hash and a
         # mirror row already holding this hub identity. Stamping the identity
