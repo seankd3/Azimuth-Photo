@@ -12,10 +12,6 @@ from features.share import routes as share_routes
 from features.settings import routes as settings_routes
 
 
-def configure_people_routes() -> None:
-    people_routes.reset_for_tests()
-
-
 def configure_status_media_search_providers() -> None:
     import db
     import thumbnails

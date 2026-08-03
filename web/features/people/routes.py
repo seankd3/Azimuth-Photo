@@ -21,10 +21,6 @@ router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 
 
-def reset_for_tests() -> None:
-    """Forget the cached people counts, so one test's totals are not another's."""
-
-    invalidate_people_status_cache()
 
 
 _people_status_counts_cache: dict[str, object] = {"counts": None, "expires": 0.0}
