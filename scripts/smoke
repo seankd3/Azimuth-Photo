@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Restart the app on a scratch home and probe the routes the UI actually calls.
+#
+# The point is the kill. `pkill -f "port 8011"` silently fails on Windows, the
+# new process then fails to bind, and every probe answers from the old build —
+# so a broken change looks green. This waits for the port to be free and says
+# so if it is not.
+set -uo pipefail
+
+PORT="${AZIMUTH_SMOKE_PORT:-8011}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PY="$ROOT/web/.venv/Scripts/python.exe"
+[[ -x "$PY" ]] || PY="$ROOT/web/.venv/bin/python"
+
+powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort $PORT -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique |
+    ForEach-Object { Stop-Process -Id \$_ -Force }" >/dev/null 2>&1
+
+for _ in $(seq 20); do
+    curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/api/health" || break
+    sleep 0.5
+done
+if curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/api/health"; then
+    echo "port $PORT is still held — refusing to probe a stale build"
+    exit 1
+fi
+
+cd "$ROOT/web"
+AZIMUTH_HOME="${TEMP:-/tmp}/azimuth-smoke" AZIMUTH_MODE=standalone AZIMUTH_ACCESS=local \
+    "$PY" -m uvicorn app:app --host 127.0.0.1 --port "$PORT" >"${TEMP:-/tmp}/azimuth-smoke.log" 2>&1 &
+
+for _ in $(seq 40); do
+    curl -s -o /dev/null --max-time 1 "http://127.0.0.1:$PORT/api/health" && break
+    sleep 0.5
+done
+
+fail=0
+while read -r route; do
+    [[ -z "$route" ]] && continue
+    code=$(curl -s -o /dev/null --max-time 8 -w "%{http_code}" "http://127.0.0.1:$PORT/$route")
+    printf '%-40s %s\n' "$route" "$code"
+    [[ "$code" == "200" ]] || fail=1
+done <<'ROUTES'
+api/health
+api/settings
+api/catalog
+api/stats
+api/search?q=x
+api/rankings?limit=3
+api/rankings?limit=3&sort=taste
+api/ai/status
+api/cache/status
+api/people/status
+api/shares
+api/user-collections
+api/export?scope=all&limit=1
+api/trash
+api/stacks
+api/date-groups
+ROUTES
+
+exit "$fail"
