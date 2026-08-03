@@ -30,6 +30,14 @@ and what is known to be broken. Newest first.
   failing on `main` with the identical assertion**, by extracting `main` with
   `git archive` and running it there. Not from this branch. The transport work
   briefly turned it into a hang, which is fixed; see below.
+
+  Diagnosed as far as: the worker declines to upload because the contract probe
+  reads the fake hub as a peer too old to talk to (`api_rev: None`,
+  `hub_health: needs_update`). The fake mounts `hub_routes` alone, so
+  `/api/version` 404s. Adding that route is necessary but not sufficient —
+  something else in the handshake still refuses. Worth finishing, because a
+  standalone install that pairs to a hub and uploads nothing is the same shape
+  as a real product failure, even if this instance is the fixture.
 - `test_develop_discovery.py` — two cases about explicit develop roots.
   Pre-existing, verified at the previous commit.
 - The suite is order-dependent. `test_support.py` monkeypatches ~20 module
