@@ -11,7 +11,7 @@ three different questions, two of which had borrowed the wrong name:
   them badly. :data:`DEVELOP_FITTED`, :func:`develop_is_fitted`.
 * **Did a camera make it, or could a phone have?** — a provenance question that
   import uses to decide where a file is filed. Phones shoot DNG, so DNG cannot
-  settle it and stays marker-driven. :data:`CAMERA_ONLY`, :func:`is_camera_only`.
+  settle it and stays marker-driven. :data:`CAMERA_ONLY`.
 
 A name is not a format. This archive holds 1,306 files named ``.CR2`` that are
 really full-resolution JPEGs: they open fine in a viewer, LibRaw refuses them as
@@ -73,11 +73,3 @@ def develop_is_fitted(path: str | os.PathLike[str]) -> bool:
     """Whether Develop has fitted colour for this format."""
 
     return extension(path) in DEVELOP_FITTED
-
-
-def is_camera_only(path: str | os.PathLike[str]) -> bool:
-    """Whether this format rules out a phone as the source."""
-
-    return extension(path) in CAMERA_ONLY
-
-
