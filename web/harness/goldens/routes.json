@@ -604,6 +604,11 @@
     "params": [],
     "required_params": []
   },
+  "GET /api/import/taxonomy": {
+    "has_body": false,
+    "params": [],
+    "required_params": []
+  },
   "GET /api/imports": {
     "has_body": false,
     "params": [
@@ -1523,6 +1528,11 @@
     ]
   },
   "POST /api/import/scan": {
+    "has_body": true,
+    "params": [],
+    "required_params": []
+  },
+  "POST /api/import/taxonomy/reclassify-personal": {
     "has_body": true,
     "params": [],
     "required_params": []

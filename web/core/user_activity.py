@@ -41,7 +41,6 @@ NON_BROWSE_PATHS = frozenset(
         "/api/sync/status",
         "/api/system/backup/restore-status",
         "/api/system/integrity/status",
-        "/api/ui/settings",
     }
 )
 

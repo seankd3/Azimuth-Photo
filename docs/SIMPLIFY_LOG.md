@@ -64,6 +64,44 @@ real parameters or apply live settings.
 **One place for JS utilities** (`static/js/lib.js`). 21 copies of `esc`, 9 of
 `bytes`, 6 of `fmt`.
 
+## Plan claims that did not survive measurement
+
+The refactor plan was built from an audit that is good at locating code and
+unreliable at concluding. Checked and refuted:
+
+- **"Six competing palettes; `--text-2`, `--text-3` and `--danger` have drifted
+  between desktop.css and mobile.css."** They are mobile-only tokens, so they
+  cannot have drifted between the two. Of the 9 tokens genuinely shared, 7 are
+  identical and the other 2 differ only in whitespace inside `rgba()` and
+  `cubic-bezier()`. The files are largely disjoint because the surfaces are —
+  safe-area insets, tab bars and keyboard offsets have no desktop meaning.
+- **"One API client: desktop/api.js and mobile/api.js share 37 duplicated
+  wrappers."** The count is right and the conclusion is not: both already import
+  `fetchJson` from a shared `../api.js`. The wrappers differ in whether they
+  route through desktop's failure reporting, which is how each surface shows an
+  error to a person. That is a design decision, not duplication.
+- **"Four sharing packages should be merged."** Refuted earlier and withdrawn;
+  they are four distinct surfaces, and merging would have invalidated every
+  client gallery URL already sent.
+- **The dead-code census.** Four of five "dead" modules had a caller.
+
+The claims that did hold were worth the check: `developOpen()` really was
+defined three times, and one of the three was a flag nothing ever set.
+
+## Measured, not yet done
+
+**panel.js is two files.** 103 top-level functions in 1,738 lines, and the split
+is already visible in the names: the left panel (collections, saved views) and
+the deliver overlay (8 `deliver*`, 5 `publish*`, 3 `share*`, plus its own shell,
+tabs and draft storage). The second has nothing to do with a left panel.
+
+**drawer.js is four or five.** 130 functions in 2,186 lines across settings
+inputs, the system surface, sources, the Lightroom catalogue scan, cloud backup
+and model install — each with its own render/bind/poll trio.
+
+Both are mechanical moves that need a browser pass per surface afterwards, not a
+test run. Left for a session that can finish and screenshot them.
+
 ## Lessons, paid for
 
 **Automated sweeps for finding, hands for editing.** Seven regex sweeps corrupted

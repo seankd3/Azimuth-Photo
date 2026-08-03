@@ -26,7 +26,9 @@ from features.sync import pair_routes, pairing  # noqa: E402
 OWNER_KEY = "correct-horse-battery-staple"
 REMOTE = ("10.0.0.9", 4711)  # a LAN peer: never loopback-exempt
 LOOPBACK = ("127.0.0.1", 4711)
-PROTECTED_API = "/api/ui/settings"  # cheap protected GET (settings only, no DB)
+PROTECTED_API = "/api/settings"  # cheap protected GET; not in PUBLIC_PATHS.
+# /api/ui/settings used to stand here. It was removed as a route no client
+# called, and these tests are about the auth gate, not about that endpoint.
 
 # The spec: the full public surface, spelled out. The sweep below asserts the
 # middleware enforces exactly this and nothing more.

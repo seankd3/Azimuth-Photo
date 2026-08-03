@@ -697,22 +697,15 @@ class CatalogRecoveryTests(unittest.TestCase):
 
             @server.on_event("startup")
             async def startup():
-                await background.run_startup(
-                    smoke_mode_enabled=lambda: False,
-                    warm_templates=lambda: None,
-                    thumbnails=mock.Mock(), settings=mock.Mock(), face_worker=mock.Mock(), caption_worker=mock.Mock(),
-                    track_background_task=unused, init_db=init_db,
-                    get_filter_options=unused, get_date_groups=unused, get_catalog_image_counts=unused,
-                    get_stats=unused, get_ai_status_counts=unused, get_visible_orientation_pairing_pool_counts=unused,
-                    get_catalog_summary=unused, cache_root=unused, build_ai_status=unused, build_cache_status=unused,
-                    api_rankings=unused, api_folders=unused, api_map_markers=unused, api_date_groups=unused,
-                    api_settings=unused, mosaic_next=unused, compare_next=unused,
-                    default_visible_pairing_candidates=unused, warm_filtered_visible_ranked_candidates=unused,
-                    get_visible_past_matchups=unused, classify_orientations_background=unused,
-                    scan_metadata_background=unused, swiss_pair_window=1, filtered_swiss_pair_window=1,
-                    filtered_mosaic_window=1, mosaic_explore_window=1, mosaic_diverse_window=1,
-                    interaction_cache_warmup_delay_seconds=0,
-                )
+                # run_startup takes two parameters now; the other 30-odd were
+                # providers it already imports. It reaches db.init_db itself, and
+                # this test is about that call not happening on a corrupt
+                # catalog, so the stub goes on the db module it imports.
+                with mock.patch("db.init_db", init_db):
+                    await background.run_startup(
+                        warm_templates=lambda: None,
+                        track_background_task=unused,
+                    )
 
             try:
                 with TestClient(server) as client:

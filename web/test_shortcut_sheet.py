@@ -14,11 +14,13 @@ DESKTOP_TEMPLATE = WEB_ROOT / "templates/desktop.html"
 
 
 def load_shortcuts():
+    # Import the file where it lives. Reading it into a data: URL used to work
+    # and stopped the moment the sheet imported escapeHtml from ../lib.js —
+    # a data: URL has no directory, so no relative specifier can resolve.
     script = """
-const fs = require('fs');
+const url = require('url');
 (async () => {
-  const source = fs.readFileSync(process.argv[1], 'utf8');
-  const module = await import('data:text/javascript,' + encodeURIComponent(source));
+  const module = await import(url.pathToFileURL(process.argv[1]).href);
   process.stdout.write(JSON.stringify(module.SHORTCUTS));
 })();
 """

@@ -24,12 +24,15 @@ INSTALLED = {"available": True, "message": "People recognition dependencies are 
 
 class SatelliteWorkerHonestyTests(unittest.TestCase):
     def setUp(self):
-        # The payload refuses to run unconfigured; wire the two providers it
-        # insists on so the test exercises the reporting branch, not the setup.
-        caption_routes.configure(
-            get_caption_status_counts=mock.AsyncMock(return_value={}),
-            invalidate_settings_response_cache=mock.Mock(),
-        )
+        # Caption routes call db and settings_status directly now, the same way
+        # the people routes below do, so there is nothing to wire — only to stub.
+        for target, name, replacement in (
+            (caption_routes.db, "get_caption_status_counts", mock.AsyncMock(return_value={})),
+            (caption_routes.settings_status, "invalidate_settings_response_cache", mock.Mock()),
+        ):
+            patcher = mock.patch.object(target, name, replacement)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # People routes call db directly now, so the test says so directly.
         for name, result in (
             ("get_people_review", {"counts": {}}),
@@ -45,15 +48,14 @@ class SatelliteWorkerHonestyTests(unittest.TestCase):
             patcher = mock.patch.object(db, name, mock.AsyncMock(return_value=result))
             patcher.start()
             self.addCleanup(patcher.stop)
-        people_routes.reset_for_tests()
 
     def _people(self, *, deferred: bool, capability=INSTALLED) -> dict:
-        with mock.patch.object(people_routes.satellite, "defers_bulk_compute", return_value=deferred), \
+        with mock.patch.object(people_routes.role, "defers_bulk_compute", return_value=deferred), \
              mock.patch.object(people_routes.capabilities, "capability_status", return_value=capability):
             return asyncio.run(people_routes.people_status_payload())
 
     def _captions(self, *, deferred: bool, capability=INSTALLED) -> dict:
-        with mock.patch.object(caption_routes.satellite, "defers_bulk_compute", return_value=deferred), \
+        with mock.patch.object(caption_routes.role, "defers_bulk_compute", return_value=deferred), \
              mock.patch.object(caption_routes.capabilities, "capability_status", return_value=capability):
             return asyncio.run(caption_routes.caption_status_payload())
 
