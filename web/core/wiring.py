@@ -401,23 +401,8 @@ def configure_compare_service(
     resolve_library_constraints,
     schedule_thumbnail_prefetch,
     schedule_cached_thumbnail_memory_warm,
-    db_signature=None,
-    get_active_images_for_pairing=None,
-    get_past_matchups=None,
-    get_visible_past_matchups=None,
-    get_past_matchups_for_image_ids=None,
-    get_active_images_by_ids=None,
-    get_visible_images_for_pairing=None,
-    get_visible_orientation_pairing_pool_counts=None,
-    count_rankings=None,
-    get_rankings=None,
-    get_visible_pairing_pool_counts=None,
-    get_top_images=None,
-    get_collection_image_ids=None,
     resolve_smart_collection_image_ids=None,
-    get_import_batch_image_ids=None,
 ) -> None:
-    import db
     from features.compare import service as compare_service
 
     compare_service.configure(
@@ -427,35 +412,8 @@ def configure_compare_service(
         resolve_library_constraints=resolve_library_constraints,
         schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
         schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,
-        db_signature=db_signature or (lambda: db.DB_PATH),
-        get_active_images_for_pairing=get_active_images_for_pairing or (lambda: db.get_active_images_for_pairing()),
-        get_past_matchups=get_past_matchups or (lambda: db.get_past_matchups()),
-        get_visible_past_matchups=get_visible_past_matchups
-        or (lambda size, cache_root: db.get_visible_past_matchups(size, cache_root)),
-        get_past_matchups_for_image_ids=get_past_matchups_for_image_ids
-        or (lambda image_ids: db.get_past_matchups_for_image_ids(image_ids)),
-        get_active_images_by_ids=get_active_images_by_ids or (lambda image_ids: db.get_active_images_by_ids(image_ids)),
-        get_visible_images_for_pairing=get_visible_images_for_pairing
-        or (lambda size, cache_root, **kwargs: db.get_visible_images_for_pairing(size, cache_root, **kwargs)),
-        get_visible_orientation_pairing_pool_counts=get_visible_orientation_pairing_pool_counts
-        or (
-            lambda size, cache_root, orientation: db.get_visible_orientation_pairing_pool_counts(
-                size,
-                cache_root,
-                orientation,
-            )
-        ),
-        count_rankings=count_rankings or (lambda **kwargs: db.count_rankings(**kwargs)),
-        get_rankings=get_rankings or (lambda **kwargs: db.get_rankings(**kwargs)),
-        get_visible_pairing_pool_counts=get_visible_pairing_pool_counts
-        or (lambda size, cache_root: db.get_visible_pairing_pool_counts(size, cache_root)),
-        get_top_images=get_top_images or (lambda **kwargs: db.get_top_images(**kwargs)),
-        get_collection_image_ids=get_collection_image_ids
-        or (lambda collection_id: db.collection_image_ids(collection_id)),
         resolve_smart_collection_image_ids=resolve_smart_collection_image_ids
         or _smart_collection_image_ids_resolver(resolve_library_constraints),
-        get_import_batch_image_ids=get_import_batch_image_ids
-        or (lambda batch_id: db.get_import_batch_image_ids(batch_id)),
     )
 
 

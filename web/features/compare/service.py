@@ -1,6 +1,7 @@
 """Compare and mosaic cache/state helpers."""
 
 import asyncio
+import db
 import hashlib
 import os
 import time
@@ -51,21 +52,7 @@ _cache_root: Callable[[], str] | None = None
 _resolve_library_constraints: Callable[..., object] | None = None
 _schedule_thumbnail_prefetch: Callable[..., None] | None = None
 _schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None
-_db_signature: Callable[[], str] | None = None
-_get_active_images_for_pairing: Callable[[], Awaitable[list]] | None = None
-_get_past_matchups: Callable[[], Awaitable[set]] | None = None
-_get_visible_past_matchups: Callable[..., Awaitable[set]] | None = None
-_get_past_matchups_for_image_ids: Callable[[list[int]], Awaitable[set]] | None = None
-_get_active_images_by_ids: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
-_get_visible_images_for_pairing: Callable[..., Awaitable[list]] | None = None
-_get_visible_orientation_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
-_count_rankings: Callable[..., Awaitable[int]] | None = None
-_get_rankings: Callable[..., Awaitable[list]] | None = None
-_get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None
-_get_top_images: Callable[..., Awaitable[list]] | None = None
-_get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None
 _resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
-_get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
 def configure(
@@ -76,31 +63,12 @@ def configure(
     resolve_library_constraints: Callable[..., object] | None = None,
     schedule_thumbnail_prefetch: Callable[..., None] | None = None,
     schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None,
-    db_signature: Callable[[], str] | None = None,
-    get_active_images_for_pairing: Callable[[], Awaitable[list]] | None = None,
-    get_past_matchups: Callable[[], Awaitable[set]] | None = None,
-    get_visible_past_matchups: Callable[..., Awaitable[set]] | None = None,
-    get_past_matchups_for_image_ids: Callable[[list[int]], Awaitable[set]] | None = None,
-    get_active_images_by_ids: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None,
-    get_visible_images_for_pairing: Callable[..., Awaitable[list]] | None = None,
-    get_visible_orientation_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
-    count_rankings: Callable[..., Awaitable[int]] | None = None,
-    get_rankings: Callable[..., Awaitable[list]] | None = None,
-    get_visible_pairing_pool_counts: Callable[..., Awaitable[dict]] | None = None,
-    get_top_images: Callable[..., Awaitable[list]] | None = None,
-    get_collection_image_ids: Callable[..., Awaitable[list[int] | None]] | None = None,
     resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
-    get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
 ) -> None:
     global _invalidate_rankings_cache, _invalidate_interaction_response_cache, _cache_root
     global _resolve_library_constraints, _schedule_thumbnail_prefetch
     global _schedule_cached_thumbnail_memory_warm
-    global _db_signature, _get_active_images_for_pairing, _get_past_matchups
-    global _get_visible_past_matchups, _get_past_matchups_for_image_ids
-    global _get_active_images_by_ids, _get_visible_images_for_pairing
-    global _get_visible_orientation_pairing_pool_counts, _count_rankings
-    global _get_rankings, _get_visible_pairing_pool_counts, _get_top_images
-    global _get_collection_image_ids, _resolve_smart_collection_image_ids, _get_import_batch_image_ids
+    global _resolve_smart_collection_image_ids
     _invalidate_rankings_cache = invalidate_rankings_cache
     _invalidate_interaction_response_cache = invalidate_interaction_response_cache
     _cache_root = cache_root
@@ -110,36 +78,8 @@ def configure(
         _schedule_thumbnail_prefetch = schedule_thumbnail_prefetch
     if schedule_cached_thumbnail_memory_warm is not None:
         _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
-    if db_signature is not None:
-        _db_signature = db_signature
-    if get_active_images_for_pairing is not None:
-        _get_active_images_for_pairing = get_active_images_for_pairing
-    if get_past_matchups is not None:
-        _get_past_matchups = get_past_matchups
-    if get_visible_past_matchups is not None:
-        _get_visible_past_matchups = get_visible_past_matchups
-    if get_past_matchups_for_image_ids is not None:
-        _get_past_matchups_for_image_ids = get_past_matchups_for_image_ids
-    if get_active_images_by_ids is not None:
-        _get_active_images_by_ids = get_active_images_by_ids
-    if get_visible_images_for_pairing is not None:
-        _get_visible_images_for_pairing = get_visible_images_for_pairing
-    if get_visible_orientation_pairing_pool_counts is not None:
-        _get_visible_orientation_pairing_pool_counts = get_visible_orientation_pairing_pool_counts
-    if count_rankings is not None:
-        _count_rankings = count_rankings
-    if get_rankings is not None:
-        _get_rankings = get_rankings
-    if get_visible_pairing_pool_counts is not None:
-        _get_visible_pairing_pool_counts = get_visible_pairing_pool_counts
-    if get_top_images is not None:
-        _get_top_images = get_top_images
-    if get_collection_image_ids is not None:
-        _get_collection_image_ids = get_collection_image_ids
     if resolve_smart_collection_image_ids is not None:
         _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
-    if get_import_batch_image_ids is not None:
-        _get_import_batch_image_ids = get_import_batch_image_ids
 
 
 def _configured(provider):
@@ -149,7 +89,7 @@ def _configured(provider):
 
 
 def _configured_db_signature() -> str:
-    return _configured(_db_signature)()
+    return (lambda: db.DB_PATH)()
 
 
 def _configured_cache_root() -> str:
@@ -178,11 +118,11 @@ async def _scoped_search(
     if collection_id and collection_id > 0:
         collection_ids = await _configured(_resolve_smart_collection_image_ids)(int(collection_id))
         if collection_ids is None:
-            collection_ids = await _configured(_get_collection_image_ids)(int(collection_id))
+            collection_ids = await db.collection_image_ids(int(collection_id))
         collection_scope = {int(image_id) for image_id in collection_ids or []}
         scoped_ids = collection_scope if scoped_ids is None else scoped_ids.intersection(collection_scope)
     if import_batch and import_batch > 0:
-        batch_ids = await _configured(_get_import_batch_image_ids)(int(import_batch))
+        batch_ids = await db.get_import_batch_image_ids(int(import_batch))
         batch_scope = {int(image_id) for image_id in batch_ids or []}
         scoped_ids = batch_scope if scoped_ids is None else scoped_ids.intersection(batch_scope)
     if scoped_ids is None:
@@ -242,7 +182,7 @@ def invalidate_pairing_cache(*, matchups: bool = False) -> None:
 async def get_past_matchups():
     if _matchups_cache["valid"] and _matchups_cache["data"] is not None:
         return _matchups_cache["data"]
-    matchups = await _configured(_get_past_matchups)()
+    matchups = await db.get_past_matchups()
     _matchups_cache["data"] = matchups
     _matchups_cache["valid"] = True
     return matchups
@@ -254,7 +194,7 @@ async def get_visible_past_matchups(size: str):
     cached = _visible_matchups_cache.get(cache_key)
     if cached is not None:
         return cached["data"]
-    matchups = await _configured(_get_visible_past_matchups)(size, cache_root)
+    matchups = await db.get_visible_past_matchups(size, cache_root)
     _visible_matchups_cache[cache_key] = {"data": matchups}
     return matchups
 
@@ -274,7 +214,7 @@ async def get_past_matchups_for_candidate_ids(size: str, image_ids: list[int]):
     cached = _visible_matchups_cache.get(cache_key)
     if cached is not None:
         return cached["data"]
-    matchups = await _configured(_get_past_matchups_for_image_ids)(list(unique_ids))
+    matchups = await db.get_past_matchups_for_image_ids(list(unique_ids))
     _visible_matchups_cache[cache_key] = {"data": matchups}
     return matchups
 
@@ -420,7 +360,7 @@ async def hydrate_active_rows(rows: list[dict]) -> list[dict]:
         return rows
     except (KeyError, IndexError, TypeError):
         pass
-    by_id = await _configured(_get_active_images_by_ids)([row["id"] for row in rows])
+    by_id = await db.get_active_images_by_ids([row["id"] for row in rows])
     return [by_id.get(row["id"], row) for row in rows]
 
 
@@ -460,7 +400,7 @@ async def default_visible_pairing_candidates(
 
             async def _refresh_visible_pairing_candidates():
                 try:
-                    refreshed = await _configured(_get_visible_images_for_pairing)(
+                    refreshed = await db.get_visible_images_for_pairing(
                         size,
                         cache_root,
                         include_card_metadata=include_card_metadata,
@@ -478,7 +418,7 @@ async def default_visible_pairing_candidates(
 
             asyncio.create_task(_refresh_visible_pairing_candidates())
     else:
-        rows = await _configured(_get_visible_images_for_pairing)(
+        rows = await db.get_visible_images_for_pairing(
             size,
             cache_root,
             include_card_metadata=include_card_metadata,
@@ -626,11 +566,11 @@ async def load_filtered_visible_ranked_candidates(
     )
     if orientation_only:
         counts_task = asyncio.create_task(
-            _configured(_get_visible_orientation_pairing_pool_counts)(size, cache_root, orientation)
+            db.get_visible_orientation_pairing_pool_counts(size, cache_root, orientation)
         )
     else:
         filtered_total_task = asyncio.create_task(
-            _configured(_count_rankings)(
+            db.count_rankings(
                 orientation=orientation,
                 compared=compared,
                 min_stars=min_stars,
@@ -644,7 +584,7 @@ async def load_filtered_visible_ranked_candidates(
                 exclude_sources=exclude_sources,)
         )
         visible_count_task = asyncio.create_task(
-            _configured(_count_rankings)(
+            db.count_rankings(
                 orientation=orientation,
                 compared=compared,
                 min_stars=min_stars,
@@ -659,7 +599,7 @@ async def load_filtered_visible_ranked_candidates(
                 cache_root=cache_root,
                 exclude_sources=exclude_sources,)
         )
-    rows = await _configured(_get_rankings)(
+    rows = await db.get_rankings(
         limit=normalized_limit,
         offset=0,
         sort=sort,
@@ -715,7 +655,7 @@ async def search_visible_ranked_candidates(
     exact_counts = bool(force_exact_counts) or not (text_query and id_filter is None)
     if exact_counts:
         total_task = asyncio.create_task(
-            _configured(_count_rankings)(
+            db.count_rankings(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens,
@@ -725,7 +665,7 @@ async def search_visible_ranked_candidates(
                 exclude_sources=exclude_sources,)
         )
         visible_task = asyncio.create_task(
-            _configured(_count_rankings)(
+            db.count_rankings(
                 orientation=orientation, compared=compared, min_stars=min_stars,
                 folder=folder, flag=flag, date_taken=date_taken, file_type=file_type,
                 camera=camera, lens=lens,
@@ -739,7 +679,7 @@ async def search_visible_ranked_candidates(
     else:
         total_task = None
         visible_task = None
-    rows = await _configured(_get_rankings)(
+    rows = await db.get_rankings(
         limit=fetch_limit,
         offset=0,
         sort=sort,
@@ -883,9 +823,9 @@ async def add_explore_uncompared_stats(
         "text_query": search.get("text_query") or "",
     }
     cache_root = _configured_cache_root()
-    total_task = asyncio.create_task(_configured(_count_rankings)(**count_kwargs))
+    total_task = asyncio.create_task(db.count_rankings(**count_kwargs))
     visible_task = asyncio.create_task(
-        _configured(_count_rankings)(
+        db.count_rankings(
             **count_kwargs,
             visible_thumb_size=size,
             cache_root=cache_root,
@@ -1583,7 +1523,7 @@ async def mosaic_next_impl(
     if default_pool_only and strategy != "top":
         candidate_source = f"default_{strategy}_reservoir"
         counts_task = asyncio.create_task(
-            _configured(_get_visible_pairing_pool_counts)(pool_tier, _configured_cache_root())
+            db.get_visible_pairing_pool_counts(pool_tier, _configured_cache_root())
         )
         if strategy == "explore":
             candidate_source = "default_explore_least_compared"
@@ -1684,7 +1624,7 @@ async def mosaic_next_impl(
         candidate_source = "full_candidate_scan"
         stats = None
         if strategy == "top":
-            images = await _configured(_get_top_images)(limit=50)
+            images = await db.get_top_images(limit=50)
         else:
             images = await get_pairing_images(pool_tier)
         candidates = app_helpers.filter_compare_mosaic_candidates(
