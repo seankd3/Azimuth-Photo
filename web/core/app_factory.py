@@ -40,16 +40,6 @@ INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 
 @dataclass(frozen=True)
-class AppRuntimeServices:
-    invalidate_pairing_cache: Callable[..., None]
-    invalidate_rankings_cache: Callable[[], None]
-    invalidate_vector_derived_caches: Callable[[], None]
-    invalidate_interaction_response_cache: Callable[[], None]
-    resolve_text_search: Callable[..., Awaitable[dict]]
-    resolve_library_constraints: Callable[..., Awaitable[dict]]
-
-
-@dataclass(frozen=True)
 class AppLifecycleHandlers:
     startup: Callable[[], Awaitable[None]]
     shutdown: Callable[[], Awaitable[None]]
@@ -63,7 +53,6 @@ class AppShell:
     background_task_tracker: background_runtime.BackgroundTaskTracker = field(
         default_factory=background_runtime.BackgroundTaskTracker,
     )
-    runtime_services: AppRuntimeServices | None = None
     lifecycle: AppLifecycleHandlers | None = None
     idle_activity_middleware: Callable | None = None
 
@@ -204,49 +193,6 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
     return AppLifecycleHandlers(startup=startup, shutdown=shutdown)
 
 
-def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
-    from core import cache_events, query_constraints
-
-    def invalidate_pairing_cache(*, matchups: bool = False) -> None:
-        cache_events.invalidate_pairing_cache(matchups=matchups)
-
-    def invalidate_rankings_cache() -> None:
-        cache_events.invalidate_rankings_cache()
-
-    def invalidate_vector_derived_caches() -> None:
-        cache_events.invalidate_vector_derived_caches()
-
-    def invalidate_interaction_response_cache() -> None:
-        cache_events.invalidate_interaction_response_cache()
-
-    async def resolve_text_search(q: str, *, deep: bool = False) -> dict:
-        return await query_constraints.resolve_configured_text_search(
-            q,
-            deep=deep,
-            encode_text=query_constraints.encode_text_with_config,
-            start_model_load=query_constraints.start_search_model_load,
-            apply_metadata_ids=query_constraints.apply_configured_metadata_search_ids,
-        )
-
-    async def resolve_library_constraints(q: str = "", *, people: str = "", deep: bool = False) -> dict:
-        return await query_constraints.resolve_configured_library_constraints(
-            q=q,
-            people=people,
-            deep=deep,
-            resolve_text_search=resolve_text_search,
-        )
-
-
-    return AppRuntimeServices(
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_vector_derived_caches=invalidate_vector_derived_caches,
-        invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        resolve_text_search=resolve_text_search,
-        resolve_library_constraints=resolve_library_constraints,
-    )
-
-
 def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
     lifecycle = register_app_lifecycle(shell)
     object.__setattr__(shell, "lifecycle", lifecycle)
@@ -286,7 +232,6 @@ def create_app_shell(
     app.state.azimuth_shell = shell
     from core import wiring
     wiring.configure_cache_events()
-    object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     import thumbnails
 
     share_routes.configure(
