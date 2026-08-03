@@ -34,7 +34,6 @@ _LOCAL_KEYS = (
 )
 
 
-
 def _truth(value: object, default: bool = False) -> bool:
     if value is None:
         return default
@@ -53,10 +52,6 @@ def localToSlider(local: Mapping[str, object], key: str) -> float:
     if key == "LocalTemperature":
         return value * C.LOCAL_WB_MIRED_SCALE
     return value * C.LOCAL_SLIDER_SCALE
-
-
-local_to_slider = localToSlider
-
 
 
 def _grid(
@@ -482,7 +477,6 @@ def _luma(rgb: np.ndarray) -> np.ndarray:
     return (rgb[..., 0] * C.LUMA_RED + rgb[..., 1] * C.LUMA_GREEN + rgb[..., 2] * C.LUMA_BLUE).astype(np.float32)
 
 
-
 def _soft_clamp(value: np.ndarray) -> np.ndarray:
     above = value > 1.0
     return np.where(value < 0.0, 0.0, np.where(above, 1.0 + (value - 1.0) / (1.0 + C.SOFT_CLAMP_FACTOR * (value - 1.0)), value)).astype(np.float32)
@@ -556,9 +550,6 @@ def applyLocalCorrection(
     srgb += (residual_large * C.CLARITY_FACTOR * clarity * midtones * strength)[..., None]
     srgb += (residual_small * C.TEXTURE_FACTOR * texture * strength)[..., None]
     return np.clip(srgb, 0.0, 1.0).astype(np.float32)
-
-
-apply_local_correction = applyLocalCorrection
 
 
 def apply_local_corrections(

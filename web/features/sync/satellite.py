@@ -9,7 +9,6 @@ from collections.abc import Iterable
 
 from data import connection
 from features.sync.hashing import (
-    HASH_PREFIX_BYTES,
     compute_content_hash,
     compute_full_hash,
     compute_hash_pair,
@@ -18,7 +17,6 @@ from features.sync.executor import run_sync_work
 from features.sync.validation import validate_content_hash
 
 
-HASH_BYTES = HASH_PREFIX_BYTES
 SYNC_STATE_DDL = """
 CREATE TABLE IF NOT EXISTS sync_state (
     content_hash TEXT PRIMARY KEY,
@@ -477,4 +475,3 @@ def run_sync_pass(*, hub_url: str | None = None, dry_run: bool = False) -> dict:
     return worker.status()
 
 
-run_sync_once = run_sync_pass

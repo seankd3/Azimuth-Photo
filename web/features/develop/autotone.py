@@ -15,14 +15,6 @@ import numpy as np
 from . import ops_constants as C
 
 
-_KEYS = (
-    "Exposure2012",
-    "Contrast2012",
-    "Highlights2012",
-    "Shadows2012",
-    "Whites2012",
-    "Blacks2012",
-)
 _MEDIAN_TARGET = 0.18
 _EXPOSURE_MIN = -3.0
 _EXPOSURE_MAX = 3.0

@@ -738,7 +738,6 @@ async def _apply_normalized_entries(
 
 # Compatibility name for callers that describe the persistence side of the
 # operation. Hub pushes and satellite pulls both use ``apply_entries``.
-ingest_entries = apply_entries
 
 
 async def append_entry(

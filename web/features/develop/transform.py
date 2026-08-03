@@ -30,13 +30,6 @@ HORIZON_THETA_STEPS = getattr(C, "HORIZON_THETA_STEPS", 81)
 HORIZON_EDGE_PERCENTILE = getattr(C, "HORIZON_EDGE_PERCENTILE", 92.0)
 HORIZON_MAX_POINTS = getattr(C, "HORIZON_MAX_POINTS", 12000)
 
-TRANSFORM_KEYS = (
-    "PerspectiveVertical", "PerspectiveHorizontal", "PerspectiveRotate",
-    "PerspectiveScale", "PerspectiveAspect", "PerspectiveX", "PerspectiveY",
-    "PerspectiveUpright",
-)
-
-
 
 def transform_settings(settings: Mapping[str, object] | None) -> dict[str, float | str]:
     """Return bounded Adobe-native transform settings with usable defaults."""

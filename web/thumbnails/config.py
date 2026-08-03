@@ -41,8 +41,6 @@ ON_DEMAND_HEAVY_DECODE_LIMIT = int(
 )
 # Process-pool size for GIL-bound RAW demosaic (0 = in-process). Default
 # min(ncores-1, 6); implementation details live in thumbnails.demosaic_pool.
-DEMOSAIC_PROCESSES_ENV = "AZIMUTH_DEMOSAIC_PROCESSES"
-DEMOSAIC_IPC_ENV = "AZIMUTH_DEMOSAIC_IPC"
 THUMBNAIL_RETRY_SECONDS = 6 * 60 * 60
 # Thumb URLs are /api/thumb/{size}/{id} (not content-hashed), so immutable is unsafe.
 # Long max-age + ETag: browsers skip the network for a week, then revalidate cheaply.

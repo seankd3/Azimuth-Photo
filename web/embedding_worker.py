@@ -131,10 +131,6 @@ AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
 AsyncNoneProvider = Callable[..., Awaitable[None]]
 _get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
-_get_unembedded_images: AsyncListProvider | None = None
-_store_embeddings_batch: AsyncNoneProvider | None = None
-_poison_embedding_image: AsyncNoneProvider | None = None
-_get_embedding_count: AsyncIntProvider | None = None
 
 
 def _target_embed_batch_size(config: dict | None = None) -> int:

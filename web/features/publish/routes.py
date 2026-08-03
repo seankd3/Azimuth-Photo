@@ -37,16 +37,10 @@ log = logging.getLogger(__name__)
 
 GetCollection = Callable[..., Awaitable[dict | None]]
 GetImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
-CollectionImageIds = Callable[[int], Awaitable[list[int] | None]]
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
-GetPublish = Callable[[int], Awaitable[dict | None]]
 ListPublishes = Callable[[], Awaitable[list[dict]]]
-UpsertPublish = Callable[..., Awaitable[dict]]
-DeletePublish = Callable[[int], Awaitable[bool]]
-SlugAvailable = Callable[..., Awaitable[bool]]
 TrackBackgroundTask = Callable[[Awaitable], object]
 DbPath = Callable[[], str]
-CreatePublishedNodeShare = Callable[..., Awaitable[dict | None]]
 
 _templates: Jinja2Templates | None = None
 _resolve_smart_image_ids: ResolveSmartImageIds | None = None

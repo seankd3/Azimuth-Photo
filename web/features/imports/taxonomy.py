@@ -113,12 +113,6 @@ def existing_root(library_root: Path | str, canonical: str, legacy: str) -> Path
 
 RAW_CAMERA_EXTENSIONS = kind.RAW_FORMATS
 
-PHONE_STILL_EXTENSIONS = frozenset({
-    ".heic",
-    ".heif",
-    ".jpg",
-    ".jpeg",
-})
 
 FILM_SCAN_EXTENSIONS = frozenset({
     ".tif",
@@ -140,7 +134,6 @@ _WEAK_PHONE_PATH_MARKERS = (
     "/dcim/camera",
     "/camera/",
 )
-_PHONE_PATH_MARKERS = _STRONG_PHONE_PATH_MARKERS + _WEAK_PHONE_PATH_MARKERS
 
 UNAMBIGUOUS_RAW_EXTENSIONS = kind.CAMERA_ONLY
 
@@ -259,10 +252,6 @@ EXPORT_SOFTWARE = (
 CATEGORY_BY_KIND = {
     "camera_card": "raw", "unknown": "raw", "phone": "personal",
     "film_scan": "film", "export": "export", "video": "video",
-}
-DEST_BY_CATEGORY = {
-    "raw": DEST_DIGITAL, "personal": DEST_SNAPSHOTS, "film": DEST_FILM,
-    "export": DEST_EDITS, "video": DEST_VIDEO,
 }
 KIND_BY_CATEGORY = {
     "raw": "camera_card", "personal": "phone", "film": "film_scan",

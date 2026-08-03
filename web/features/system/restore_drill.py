@@ -27,9 +27,6 @@ from features.system import backups
 log = logging.getLogger(__name__)
 
 DEFAULT_SPOT_ROWS = 5
-DEFAULT_NTFY_URL = "http://127.0.0.1:8091/azimuth-alerts"
-DEFAULT_LOG_PATH = Path("/var/tmp/azimuth-restore-drill.log")
-DEFAULT_STATE_PATH = Path("/var/tmp/azimuth-restore-drill.state")
 LIVE_DB_NAME = "azimuth.db"
 LOG_KEEP_LINES = 5000
 

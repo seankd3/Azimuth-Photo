@@ -341,9 +341,6 @@ async def public_gallery_download(token: str, size: str, image_id: int, request:
     )
 
 
-_zip_gallery = zip_gallery
-
-
 @router.get("/s/gallery/{token}/download-all")
 async def public_gallery_download_all(token: str, request: Request):
     gallery = await _public_gallery(token, request)

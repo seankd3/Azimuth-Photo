@@ -22,7 +22,6 @@ from .lens import distortion_auto_crop_scale
 from .looks import compose_curve_luts, effective_settings, look_amount, look_curve
 
 
-
 def _slider(settings: Mapping[str, object], key: str) -> float:
     return np.clip(_number(settings, key), -100.0, 100.0) / 100.0
 
@@ -30,8 +29,6 @@ def _slider(settings: Mapping[str, object], key: str) -> float:
 def _bool(settings: Mapping[str, object], key: str) -> bool:
     value = settings.get(key)
     return value is True or value == 1 or str(value).strip().lower() == "true"
-
-
 
 
 def linear_to_srgb(linear: np.ndarray) -> np.ndarray:
@@ -1244,4 +1241,3 @@ def apply_pipeline(
 
 
 # Intentional explicit alias for route/render callers.
-render_pipeline = apply_pipeline

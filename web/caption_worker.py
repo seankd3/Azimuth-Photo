@@ -96,11 +96,6 @@ AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
 AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
 AsyncNoneProvider = Callable[..., Awaitable[None]]
-_count_images_needing_captions: AsyncIntProvider | None = None
-_get_images_needing_captions: AsyncListProvider | None = None
-_store_caption_result: AsyncNoneProvider | None = None
-
-
 
 
 def _set_status(**updates: Any) -> None:

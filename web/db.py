@@ -995,7 +995,6 @@ IMAGE_EXTENSION_SEARCH_TERMS = ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS
 
 
 _ranking_filter_parts = ranking_repository.ranking_filter_parts
-_ranking_image_source = ranking_repository.ranking_image_source
 
 
 async def get_cached_image_ids(
@@ -1144,10 +1143,6 @@ async def get_ranking_rows_by_ids(image_ids: list[int]) -> list[dict]:
     """Fetch ranking rows for a small id page (IN-clause, then caption annotate)."""
     rows = await ranking_repository.ranking_rows_by_ids(DB_PATH, image_ids)
     return await _annotate_caption_presence(rows)
-
-
-_ranking_count_cache_key = ranking_repository.ranking_count_cache_key
-_facet_cache_key = ranking_repository.facet_cache_key
 
 
 async def rank_quality(orientation: str = "", compared: str = "", min_stars: int = 0,

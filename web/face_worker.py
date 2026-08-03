@@ -25,7 +25,6 @@ FACE_MODEL_LICENSE_TEXT = (
     "InsightFace model packs are non-commercial research models by default. "
     "Use face_model_dir with a licensed compatible model for other use."
 )
-DEPENDENCY_PACKAGES = ("insightface", "onnxruntime", "opencv-python-headless")
 WORKER_SLEEP_SECONDS = 20
 
 
@@ -88,12 +87,6 @@ _face_manual_pause_message = "People is stopped until you start it from Backgrou
 AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
 AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
-_count_images_needing_faces: AsyncIntProvider | None = None
-_get_images_needing_faces: AsyncListProvider | None = None
-_store_face_scan_result: AsyncDictProvider | None = None
-_cluster_unassigned_faces: AsyncDictProvider | None = None
-
-
 
 
 def _set_status(**updates: Any) -> None:

@@ -56,7 +56,6 @@ _memory_store = MemoryThumbnailStore(THUMB_TIERS)
 # In-memory thumbnail LRU: (size, image_id) -> (source_signature, jpeg_bytes)
 _memory_cache = _memory_store.cache
 _memory_cache_bytes = 0
-_memory_tier_bytes = _memory_store.tier_bytes
 _cache_lock = threading.Lock()
 _meta_lock = threading.Lock()
 
@@ -221,14 +220,8 @@ SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
 MEMORY_CACHE_PROFILES = thumbnail_config.MEMORY_CACHE_PROFILES
 
 
-_normalize_ratios = thumbnail_config.normalize_ratios
-
-
 def _active_memory_ratios() -> dict[str, float]:
     return thumbnail_config.active_memory_ratios(CACHE_PROFILE)
-
-
-_allocate_by_ratios = thumbnail_config.allocate_by_ratios
 
 
 def estimated_tier_bytes(size: str) -> int:
@@ -250,9 +243,6 @@ def _cache_archive_estimates() -> dict:
 
 def cache_archive_estimates() -> dict:
     return _cache_archive_estimates()
-
-
-_allocate_weighted_capped = thumbnail_config.allocate_weighted_capped
 
 
 def _allocate_disk_budget(total_bytes: int) -> dict[str, int]:
@@ -1447,9 +1437,6 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         record_pregen_batch=_record_pregen_batch,
         activity_burst_items=PREGENERATE_ACTIVITY_BURST_ITEMS,
     )
-
-
-_copy_disk_stats = thumbnail_status.copy_disk_stats
 
 
 def cache_stats() -> dict:

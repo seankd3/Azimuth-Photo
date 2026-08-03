@@ -276,4 +276,3 @@ _build_settings_response = build_settings_response
 _invalidate_settings_response_cache = invalidate_settings_response_cache
 _expire_settings_response_cache = expire_settings_response_cache
 _copy_settings_response = copy_settings_response
-_set_settings_response_refreshing = set_settings_response_refreshing

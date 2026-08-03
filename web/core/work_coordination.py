@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager, contextmanager, suppress
 
 
 USER_VISIBLE = "user_visible"
-MANUAL_BULK = "manual_bulk"
 AMBIENT_WARMING = "ambient_warming"
 OWNER_LEASE_SECONDS = 15 * 60
 LEASE_HEARTBEAT_SECONDS = OWNER_LEASE_SECONDS / 3

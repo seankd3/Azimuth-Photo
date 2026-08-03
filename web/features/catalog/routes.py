@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 import time as _time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -39,15 +39,6 @@ class RevealBody(BaseModel):
 InvalidatePairing = Callable[..., None]
 InvalidateCacheStatus = Callable[[], None]
 DbPathProvider = Callable[[], str]
-RecentActiveImagesProvider = Callable[..., Awaitable[list]]
-AddOrRestoreSourceProvider = Callable[[str], Awaitable]
-GetScanFolderProvider = Callable[[], Awaitable[str | None]]
-GetCatalogSummaryProvider = Callable[[], Awaitable[dict]]
-GetSourceProvider = Callable[[int], Awaitable]
-RemoveSourceKeepDataProvider = Callable[[int], Awaitable[None]]
-GetSourceImageIdsProvider = Callable[[int], Awaitable[list[int]]]
-PurgeSourceCatalogDataProvider = Callable[[int], Awaitable[dict]]
-GetCatalogImageCountsProvider = Callable[[], Awaitable[dict]]
 _invalidate_pairing_cache: InvalidatePairing | None = None
 _invalidate_cache_status_cache: InvalidateCacheStatus | None = None
 _folders_cache: dict[int | None, dict] = {}

@@ -15,7 +15,6 @@ import db
 from collections.abc import Awaitable, Callable
 import logging
 import sqlite3
-from typing import Any
 
 import embed_cache
 
@@ -27,8 +26,6 @@ _prediction_cache_key = None
 _prediction_cache_counts = None
 ActiveEmbeddingModelKey = Callable[[], str]
 GetActiveImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
-GetDb = Callable[[], Awaitable[Any]]
-InvalidateRatingStatsCache = Callable[[], None]
 
 # Tuning parameters
 SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate
