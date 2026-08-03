@@ -35,8 +35,11 @@ from starlette.background import BackgroundTask
 
 from core.runtime_paths import resolve_runtime_paths
 
+from pixels import decode as pixel_decode
+
 from . import ops_constants as C, rawproc
 from .film import load_stock
+from .highlights_recon import reconstruct_highlights
 from .pipeline import apply_pipeline, gaussian_blur, luma
 from .transform import apply_transform
 
@@ -85,19 +88,17 @@ def decode_full_resolution(path: str | Path) -> np.ndarray:
             raise RenderError(f"Image export decode failed: {exc}") from exc
         return np.asarray(decoded, dtype=np.float32) / np.float32(65535.0)
 
-    import rawpy
-
     try:
-        with rawpy.imread(str(path)) as raw:
-            decoded = raw.postprocess(
-                use_camera_wb=True,
-                output_bps=16,
-                no_auto_bright=True,
-                gamma=(1, 1),
-                output_color=rawpy.ColorSpace.sRGB,
-                highlight_mode=rawpy.HighlightMode.Blend,
-                half_size=False,
-            )
+        # The same decode the editor's base uses, at full scale. Export used to
+        # run its own copy that omitted adjust_maximum_thr, user_sat, the
+        # white-balance restoration and highlight recovery, so the file on disk
+        # did not match the canvas it was approved on.
+        decoded = pixel_decode.decode_linear(
+            path,
+            half_size=False,
+            reconstruct=reconstruct_highlights,
+            clip_levels_for=rawproc.derive_libraw_clip_levels,
+        ).rgb
     except Exception as exc:
         from features.develop import lossydng
 
