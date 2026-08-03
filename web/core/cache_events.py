@@ -1,7 +1,6 @@
 import logging
 
 from core.numbers import increment_cached_int  # noqa: F401  (re-exported)
-from collections.abc import Callable
 import time as _time
 
 from data.repositories import cache_entries as cache_entry_repository
@@ -16,12 +15,6 @@ from data.repositories import stats as stats_repository
 logger = logging.getLogger(__name__)
 
 
-_compare_service = None
-_library_service = None
-_query_constraints = None
-_invalidate_ai_status_response_cache: Callable[[], None] | None = None
-_duplicates_cache: dict | None = None
-_elo_propagation = None
 embedding_batch_listeners = []
 
 
@@ -42,61 +35,28 @@ def notify_embedding_batch_stored(model_key: str, image_ids: list[int]) -> None:
             )
 
 
-def configure(
-    *,
-    compare_service,
-    library_service,
-    query_constraints,
-    invalidate_ai_status_response_cache: Callable[[], None],
-    duplicates_cache: dict,
-    elo_propagation,
-) -> None:
-    global _compare_service, _library_service, _query_constraints
-    global _invalidate_ai_status_response_cache, _duplicates_cache
-    global _elo_propagation
-    _compare_service = compare_service
-    _library_service = library_service
-    _query_constraints = query_constraints
-    _invalidate_ai_status_response_cache = invalidate_ai_status_response_cache
-    _duplicates_cache = duplicates_cache
-    _elo_propagation = elo_propagation
-
-
-def _configured():
-    if (
-        _compare_service is None
-        or _library_service is None
-        or _query_constraints is None
-        or _invalidate_ai_status_response_cache is None
-        or _duplicates_cache is None
-        or _elo_propagation is None
-    ):
-        raise RuntimeError("Cache event coordinator is not configured")
-    return (
-        _compare_service,
-        _library_service,
-        _query_constraints,
-        _invalidate_ai_status_response_cache,
-        _duplicates_cache,
-        _elo_propagation,
-    )
 
 
 def invalidate_pairing_cache(*, matchups: bool = False) -> int:
-    compare_service, *_ = _configured()
+    from features.compare import service as compare_service
+
     compare_service.invalidate_pairing_cache(matchups=matchups)
     return compare_service._visible_pairing_candidates_generation
 
 
 def invalidate_rankings_cache() -> None:
-    _, library_service, query_constraints, *_ = _configured()
+    from core import query_constraints
+    from features.library import service as library_service
+
     library_service.invalidate_rankings_response_cache()
     query_constraints.clear_text_search_caches()
     _invalidate_smart_collection_cache()
 
 
 def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True) -> None:
-    *_, duplicates_cache, elo_propagation = _configured()
+    import elo_propagation
+    from features.search.service import _duplicates_cache as duplicates_cache
+
     duplicates_cache.update({"key": None, "data": None})
     elo_propagation.invalidate_prediction_cache()
     if not invalidate_embedding_matrix:
@@ -109,14 +69,16 @@ def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True
 
 
 def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
-    _, _, _, invalidate_ai_status_response_cache, _, _ = _configured()
+    from features.ai.routes import invalidate_ai_status_response_cache
+
     invalidate_rankings_cache()
     invalidate_ai_status_response_cache()
     invalidate_vector_derived_caches(invalidate_embedding_matrix=False)
 
 
 def invalidate_interaction_response_cache() -> None:
-    compare_service, *_ = _configured()
+    from features.compare import service as compare_service
+
     compare_service.invalidate_interaction_response_cache()
 
 
@@ -269,7 +231,8 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
         # Preview readiness on cards changed — drop response payloads only.
         # Taste/Elo ordered-id caches do not depend on thumbnail rows; clearing
         # them here made every taste request rebuild (18–30s) during pregen.
-        _, library_service, *_ = _configured()
+        from features.library import service as library_service
+
         library_service.invalidate_rankings_response_cache(order_caches=False)
 
 
@@ -306,3 +269,11 @@ def invalidate_image_flag_caches() -> None:
     invalidate_rankings_cache()
     db._invalidate_ranking_count_cache()
     db._invalidate_filter_options_cache()
+
+
+def register_with_db() -> None:
+    """Hook the embedding-batch listener up. Called once, as the app starts."""
+
+    import db
+
+    db.register_embedding_batch_listener(embedding_batch_stored)

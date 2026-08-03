@@ -8,6 +8,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
 from core import background as background_runtime
+from core import cache_events
 from core.browser_origin import BrowserOriginGuardMiddleware
 from core.owner_auth import OwnerAuthMiddleware
 from core.static_assets import StaticAssetContext, warm_templates
@@ -230,8 +231,7 @@ def create_app_shell(
         static_assets=static_assets,
     )
     app.state.azimuth_shell = shell
-    from core import wiring
-    wiring.configure_cache_events()
+    cache_events.register_with_db()
     import thumbnails
 
     share_routes.configure(
