@@ -9,7 +9,6 @@ from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.publish import routes as publish_routes
 from features.share import routes as share_routes
-from features.settings import routes as settings_routes
 
 
 def configure_status_media_search_providers() -> None:
@@ -191,56 +190,6 @@ def configure_library_service(
         schedule_result_thumbnail_memory_warm=schedule_result_thumbnail_memory_warm,
         resolve_smart_collection_image_ids=_smart_collection_image_ids_resolver(resolve_library_constraints),
         rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
-    )
-
-
-def configure_settings_routes(
-    *,
-    settings_response_cache,
-    settings_response_cache_ttl_seconds,
-    build_settings_response,
-    copy_settings_response,
-    track_background_task,
-    get_refreshing,
-    set_refreshing,
-    build_cache_status,
-    build_ai_status,
-    people_status_payload,
-    invalidate_image_flag_caches,
-    invalidate_pairing_cache,
-    invalidate_cache_status_cache,
-    invalidate_ai_status_response_cache,
-    invalidate_settings_response_cache,
-    invalidate_rankings_cache,
-    invalidate_vector_derived_caches,
-    get_stats=None,
-    refresh_source_online_states=None,
-) -> None:
-    import db
-
-    settings_routes.configure(
-        settings_response_cache=settings_response_cache,
-        settings_response_cache_ttl_seconds=settings_response_cache_ttl_seconds,
-        build_settings_response=build_settings_response,
-        copy_settings_response=copy_settings_response,
-        track_background_task=track_background_task,
-        get_refreshing=get_refreshing,
-        set_refreshing=set_refreshing,
-        get_stats=get_stats or (lambda: db.get_stats()),
-        refresh_source_online_states=(
-            refresh_source_online_states
-            or (lambda: db.refresh_source_online_states())
-        ),
-        build_cache_status=build_cache_status,
-        build_ai_status=build_ai_status,
-        people_status_payload=people_status_payload,
-        invalidate_image_flag_caches=invalidate_image_flag_caches,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        invalidate_cache_status_cache=invalidate_cache_status_cache,
-        invalidate_ai_status_response_cache=invalidate_ai_status_response_cache,
-        invalidate_settings_response_cache=invalidate_settings_response_cache,
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_vector_derived_caches=invalidate_vector_derived_caches,
     )
 
 

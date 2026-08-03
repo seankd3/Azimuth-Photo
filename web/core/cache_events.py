@@ -296,3 +296,13 @@ def invalidate_active_source_ids_cache() -> None:
 
 def invalidate_past_matchups_cache() -> None:
     rating_repository.invalidate_past_matchups_cache()
+
+
+def invalidate_image_flag_caches() -> None:
+    """Everything a flag change makes stale."""
+
+    import db  # deferred: db imports this module
+
+    invalidate_rankings_cache()
+    db._invalidate_ranking_count_cache()
+    db._invalidate_filter_options_cache()

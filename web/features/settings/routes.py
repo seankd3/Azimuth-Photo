@@ -20,6 +20,13 @@ from features.sync import oplog
 
 logger = logging.getLogger(__name__)
 
+import db
+from core import background, cache_events
+from features.ai import routes as ai_routes
+from features.cache import status as cache_status_service
+from features.people import routes as people_routes
+
+
 router = APIRouter()
 MAX_BATCH_IMAGE_IDS = 10_000
 ACTIVITY_STATUS_INITIAL_WAIT_SECONDS = 0.15
@@ -38,124 +45,27 @@ DbPathProvider = Callable[[], str]
 Invalidator = Callable[[], None]
 InvalidatePairing = Callable[..., None]
 
-_settings_response_cache: dict | None = None
-_settings_response_cache_ttl_seconds: Callable[[], float] | None = None
-_build_settings_response: BuildResponse | None = None
-_copy_settings_response: CopyResponse | None = None
-_track_background_task: TrackTask | None = None
-_get_refreshing: GetRefreshing | None = None
-_set_refreshing: SetRefreshing | None = None
-_get_stats: BuildResponse | None = None
-_refresh_source_online_states: AsyncBoolBuilder | None = None
-_build_cache_status: AsyncDictBuilder | None = None
-_build_ai_status: AsyncDictBuilder | None = None
-_people_status_payload: BuildResponse | None = None
-_invalidate_image_flag_caches: Invalidator | None = None
-_invalidate_pairing_cache: InvalidatePairing | None = None
-_invalidate_cache_status_cache: Invalidator | None = None
-_invalidate_ai_status_response_cache: Invalidator | None = None
-_invalidate_settings_response_cache: Invalidator | None = None
-_invalidate_rankings_cache: Invalidator | None = None
-_invalidate_vector_derived_caches: Invalidator | None = None
 
-
-def configure(
-    *,
-    settings_response_cache: dict,
-    settings_response_cache_ttl_seconds: Callable[[], float],
-    build_settings_response: BuildResponse,
-    copy_settings_response: CopyResponse,
-    track_background_task: TrackTask,
-    get_refreshing: GetRefreshing,
-    set_refreshing: SetRefreshing,
-    get_stats: BuildResponse,
-    refresh_source_online_states: AsyncBoolBuilder,
-    build_cache_status: AsyncDictBuilder,
-    build_ai_status: AsyncDictBuilder,
-    people_status_payload: BuildResponse,
-    invalidate_image_flag_caches: Invalidator,
-    invalidate_pairing_cache: InvalidatePairing,
-    invalidate_cache_status_cache: Invalidator,
-    invalidate_ai_status_response_cache: Invalidator,
-    invalidate_settings_response_cache: Invalidator,
-    invalidate_rankings_cache: Invalidator,
-    invalidate_vector_derived_caches: Invalidator,
-) -> None:
-    global _settings_response_cache, _settings_response_cache_ttl_seconds
-    global _build_settings_response, _copy_settings_response, _track_background_task
-    global _get_refreshing, _set_refreshing, _get_stats, _refresh_source_online_states
-    global _build_cache_status, _build_ai_status, _people_status_payload
-    global _invalidate_image_flag_caches, _invalidate_pairing_cache, _invalidate_cache_status_cache
-    global _invalidate_ai_status_response_cache, _invalidate_settings_response_cache
-    global _invalidate_rankings_cache, _invalidate_vector_derived_caches
-    _settings_response_cache = settings_response_cache
-    _settings_response_cache_ttl_seconds = settings_response_cache_ttl_seconds
-    _build_settings_response = build_settings_response
-    _copy_settings_response = copy_settings_response
-    _track_background_task = track_background_task
-    _get_refreshing = get_refreshing
-    _set_refreshing = set_refreshing
-    _get_stats = get_stats
-    _refresh_source_online_states = refresh_source_online_states
-    _build_cache_status = build_cache_status
-    _build_ai_status = build_ai_status
-    _people_status_payload = people_status_payload
-    _invalidate_image_flag_caches = invalidate_image_flag_caches
-    _invalidate_pairing_cache = invalidate_pairing_cache
-    _invalidate_cache_status_cache = invalidate_cache_status_cache
-    _invalidate_ai_status_response_cache = invalidate_ai_status_response_cache
-    _invalidate_settings_response_cache = invalidate_settings_response_cache
-    _invalidate_rankings_cache = invalidate_rankings_cache
-    _invalidate_vector_derived_caches = invalidate_vector_derived_caches
-
-
-def _configured():
-    values = (
-        _settings_response_cache,
-        _settings_response_cache_ttl_seconds,
-        _build_settings_response,
-        _copy_settings_response,
-        _track_background_task,
-        _get_refreshing,
-        _set_refreshing,
-        catalog_path,
-        _get_stats,
-        _refresh_source_online_states,
-        _build_cache_status,
-        _build_ai_status,
-        _people_status_payload,
-        _invalidate_image_flag_caches,
-        _invalidate_pairing_cache,
-        _invalidate_cache_status_cache,
-        _invalidate_ai_status_response_cache,
-        _invalidate_settings_response_cache,
-        _invalidate_rankings_cache,
-        _invalidate_vector_derived_caches,
-    )
-    if any(value is None for value in values):
-        raise RuntimeError("Settings routes are not configured")
 
 
 
 async def _catalog_summary_payload() -> dict:
-    _configured()
     return await catalog_repository.catalog_summary_cached(
         catalog_path(),
-        get_stats=_get_stats,
-        refresh_source_online_states=_refresh_source_online_states,
+        get_stats=db.get_stats,
+        refresh_source_online_states=db.refresh_source_online_states,
     )
 
 
 @router.get("/api/settings")
 async def api_settings():
-    _configured()
     return await settings_status.cached_settings_response(
-        track_background_task=_track_background_task,
-        build_response=_build_settings_response,
-        copy_response=_copy_settings_response,
-        cache_ttl_seconds=_settings_response_cache_ttl_seconds,
-        get_refreshing=_get_refreshing,
-        set_refreshing=_set_refreshing,
+        track_background_task=background.track_background_task,
+        build_response=settings_status.build_settings_response,
+        copy_response=settings_status.copy_settings_response,
+        cache_ttl_seconds=(lambda: settings_status._settings_response_cache_ttl_seconds),
+        get_refreshing=settings_status.get_settings_response_refreshing,
+        set_refreshing=settings_status.set_settings_response_refreshing,
     )
 
 
@@ -164,21 +74,19 @@ async def api_background_work_status():
     """One bounded snapshot for the desktop and mobile activity widgets."""
 
     from features.captions import routes as caption_routes
-
-    _configured()
     ai_status, cache_status, people_status, captions = await asyncio.gather(
         settings_status._bounded_status(
-            _build_ai_status(),
+            ai_routes.build_ai_status(),
             settings_status._stale_ai_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
         settings_status._bounded_status(
-            _build_cache_status(ahead=0),
+            cache_status_service.build_cache_status(ahead=0),
             settings_status._stale_cache_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
         settings_status._bounded_status(
-            _people_status_payload(),
+            people_routes.people_status_payload(),
             settings_status._stale_people_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
@@ -201,7 +109,6 @@ async def api_background_work_status():
 
 @router.post("/api/image/{image_id}/flag")
 async def api_set_image_flag(image_id: int, request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
@@ -215,8 +122,8 @@ async def api_set_image_flag(image_id: int, request: Request):
 
     await image_repository.set_image_flag(catalog_path(), image_id, flag)
     await oplog.append_flags(catalog_path(), [image_id], flag)
-    _invalidate_image_flag_caches()
-    _invalidate_pairing_cache()
+    cache_events.invalidate_image_flag_caches()
+    cache_events.invalidate_pairing_cache()
     return {"ok": True, "id": image_id, "flag": flag}
 
 
@@ -224,7 +131,6 @@ async def api_set_image_flag(image_id: int, request: Request):
 async def api_get_image_rating(image_id: int):
     """Read-only star projection. Stars are computed from Elo — there is no
     manual star write anywhere; Refine is the only way to change a star."""
-    _configured()
     image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
@@ -259,7 +165,6 @@ async def api_get_image_rating(image_id: int):
 
 @router.post("/api/images/flag")
 async def api_batch_set_flag(request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
@@ -293,14 +198,13 @@ async def api_batch_set_flag(request: Request):
     count = await image_repository.batch_set_image_flags(catalog_path(), normalized_ids, flag)
     await oplog.append_flags(catalog_path(), normalized_ids, flag)
     if count:
-        _invalidate_image_flag_caches()
-    _invalidate_pairing_cache()
+        cache_events.invalidate_image_flag_caches()
+    cache_events.invalidate_pairing_cache()
     return {"ok": True, "count": count, "flag": flag}
 
 
 @router.post("/api/settings")
 async def api_save_settings(request: Request):
-    _configured()
     body, error = await json_object(request)
     if error:
         return error
@@ -362,21 +266,21 @@ async def api_save_settings(request: Request):
                 "Failed to purge retired embedding data after model change",
                 exc_info=True,
             )
-        _invalidate_vector_derived_caches()
+        cache_events.invalidate_vector_derived_caches()
     if search_runtime_changed:
-        _invalidate_rankings_cache()
+        cache_events.invalidate_rankings_cache()
     if people_runtime_changed:
         face_worker.request_scan_now()
-    _invalidate_cache_status_cache()
-    _invalidate_ai_status_response_cache()
-    _invalidate_settings_response_cache()
+    cache_status_service.invalidate_cache_status_cache()
+    ai_routes.invalidate_ai_status_response_cache()
+    settings_status.invalidate_settings_response_cache()
     return {
         "ok": True,
         "settings": settings.public_settings(saved),
-        "cache_stats": await _build_cache_status(ahead=0, force=True),
+        "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
-        "ai_status": await _build_ai_status(),
-        "people_status": await _people_status_payload(),
+        "ai_status": await ai_routes.build_ai_status(),
+        "people_status": await people_routes.people_status_payload(),
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }
@@ -384,7 +288,6 @@ async def api_save_settings(request: Request):
 
 @router.post("/api/settings/reset")
 async def api_reset_settings():
-    _configured()
     current = settings.get_settings()
     saved = settings.reset_settings()
     thumbnails.configure(saved)
@@ -407,18 +310,18 @@ async def api_reset_settings():
                 "Failed to purge retired embedding data after settings reset",
                 exc_info=True,
             )
-    _invalidate_rankings_cache()
-    _invalidate_cache_status_cache()
-    _invalidate_ai_status_response_cache()
-    _invalidate_settings_response_cache()
+    cache_events.invalidate_rankings_cache()
+    cache_status_service.invalidate_cache_status_cache()
+    ai_routes.invalidate_ai_status_response_cache()
+    settings_status.invalidate_settings_response_cache()
     face_worker.request_scan_now()
     return {
         "ok": True,
         "settings": settings.public_settings(saved),
-        "cache_stats": await _build_cache_status(ahead=0, force=True),
+        "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
-        "ai_status": await _build_ai_status(),
-        "people_status": await _people_status_payload(),
+        "ai_status": await ai_routes.build_ai_status(),
+        "people_status": await people_routes.people_status_payload(),
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }

@@ -44,7 +44,6 @@ INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 class AppRuntimeServices:
     invalidate_pairing_cache: Callable[..., None]
     invalidate_rankings_cache: Callable[[], None]
-    invalidate_image_flag_caches: Callable[[], None]
     invalidate_vector_derived_caches: Callable[[], None]
     invalidate_interaction_response_cache: Callable[[], None]
     schedule_pairing_propagation: Callable[[Awaitable[Any]], None]
@@ -208,24 +207,16 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
 
 
 def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
-    import db
     from core import cache_events, query_constraints, wiring
-    from features.cache import status as cache_status_service
     from features.compare import service as compare_service
     from features.library import service as library_service
     from features.media import warm as media_warm
-    from features.settings import status as settings_status
 
     def invalidate_pairing_cache(*, matchups: bool = False) -> None:
         cache_events.invalidate_pairing_cache(matchups=matchups)
 
     def invalidate_rankings_cache() -> None:
         cache_events.invalidate_rankings_cache()
-
-    def invalidate_image_flag_caches() -> None:
-        cache_events.invalidate_rankings_cache()
-        db._invalidate_ranking_count_cache()
-        db._invalidate_filter_options_cache()
 
     def invalidate_vector_derived_caches() -> None:
         cache_events.invalidate_vector_derived_caches()
@@ -304,30 +295,10 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
     )
-    wiring.configure_settings_routes(
-        settings_response_cache=settings_status._settings_response_cache,
-        settings_response_cache_ttl_seconds=lambda: settings_status._settings_response_cache_ttl_seconds,
-        build_settings_response=lambda: settings_status.build_settings_response(),
-        copy_settings_response=settings_status.copy_settings_response,
-        track_background_task=shell.track_background_task,
-        get_refreshing=settings_status.get_settings_response_refreshing,
-        set_refreshing=settings_status.set_settings_response_refreshing,
-        build_cache_status=cache_status_service.build_cache_status,
-        build_ai_status=ai_routes.build_ai_status,
-        people_status_payload=lambda: people_routes.people_status_payload(),
-        invalidate_image_flag_caches=invalidate_image_flag_caches,
-        invalidate_pairing_cache=invalidate_pairing_cache,
-        invalidate_cache_status_cache=cache_status_service.invalidate_cache_status_cache,
-        invalidate_ai_status_response_cache=ai_routes.invalidate_ai_status_response_cache,
-        invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_vector_derived_caches=invalidate_vector_derived_caches,
-    )
 
     return AppRuntimeServices(
         invalidate_pairing_cache=invalidate_pairing_cache,
         invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_image_flag_caches=invalidate_image_flag_caches,
         invalidate_vector_derived_caches=invalidate_vector_derived_caches,
         invalidate_interaction_response_cache=invalidate_interaction_response_cache,
         schedule_pairing_propagation=schedule_pairing_propagation,
