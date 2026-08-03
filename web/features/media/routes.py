@@ -18,14 +18,12 @@ from features.sync.prefetch import ThumbPrefetcher
 import thumbnails
 
 
+import db
 router = APIRouter()
 CachedImageIds = Callable[[list[int], str], Awaitable[set[int]]]
 ScheduleMemoryWarm = Callable[..., None]
 DbPathProvider = Callable[[], str]
 MarkImageMissing = Callable[[int], Awaitable[bool]]
-_cached_image_ids: CachedImageIds | None = None
-_schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm | None = None
-_mark_image_missing: MarkImageMissing | None = None
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 # Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a
@@ -41,17 +39,6 @@ _SLOW_THUMB_LOG_MS = float(os.environ.get("AZIMUTH_SLOW_THUMB_MS", "1000"))
 _remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 _local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
-
-def configure(
-    *,
-    cached_image_ids: CachedImageIds,
-    schedule_cached_thumbnail_memory_warm: ScheduleMemoryWarm,
-    mark_image_missing: MarkImageMissing,
-) -> None:
-    global _cached_image_ids, _schedule_cached_thumbnail_memory_warm, _mark_image_missing
-    _cached_image_ids = cached_image_ids
-    _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
-    _mark_image_missing = mark_image_missing
 
 
 
@@ -189,12 +176,11 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     image_id = int(image["id"])
     if state in {"missing", "corrupt"}:
         changed = False
-        if _mark_image_missing is not None:
-            try:
-                changed = await _mark_image_missing(image_id)
-            except Exception as exc:
-                if not data_connection.is_sqlite_locked_error(exc):
-                    raise
+        try:
+            changed = await db.mark_image_missing(image_id)
+        except Exception as exc:
+            if not data_connection.is_sqlite_locked_error(exc):
+                raise
         if changed:
             log.warning(
                 "worker=media_request image_id=%s marked unavailable reason=%s path=%r",
@@ -485,7 +471,7 @@ async def _thumbnail_response_inner(
         stand_in = _local_stand_in_response(size, image_id)
         return stand_in if stand_in is not None else _pending_thumb_response()
     if not data:
-        changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+        changed = await db.mark_image_missing(image_id)
         if changed:
             log.warning(
                 "worker=media_request image_id=%s marked unavailable reason=decode_failed path=%r",
@@ -573,7 +559,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         if data is None:
             return _pending_thumb_response()
         if not data:
-            changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+            changed = await db.mark_image_missing(image_id)
             if changed:
                 log.warning(
                     "worker=media_request image_id=%s marked unavailable reason=decode_failed path=%r",
@@ -602,7 +588,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         background_tasks.add_task(thumbnails.schedule_full_image_cache, image["filepath"], image_id)
 
     if not path or not await asyncio.to_thread(os.path.exists, path):
-        changed = await _mark_image_missing(image_id) if _mark_image_missing is not None else False
+        changed = await db.mark_image_missing(image_id)
         if changed:
             log.warning(
                 "worker=media_request image_id=%s marked unavailable reason=missing path=%r",

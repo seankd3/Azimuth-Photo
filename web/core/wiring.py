@@ -23,22 +23,12 @@ def configure_status_media_search_providers() -> None:
     import db
     import thumbnails
     from features.cache import status as cache_status_service
-    from features.media import warm as media_warm
-    from features.search import service as search_service
     from features.settings import status as settings_status
 
     cache_status_service.configure(
         cache_root=lambda: thumbnails.SSD_CACHE_DIR,
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         expire_settings_response_cache=settings_status.expire_settings_response_cache,
-    )
-    search_service.configure(
-        cache_root=lambda: thumbnails.SSD_CACHE_DIR,
-    )
-    media_routes.configure(
-        cached_image_ids=media_warm.cached_image_ids,
-        schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
-        mark_image_missing=lambda image_id: db.mark_image_missing(image_id),
     )
     settings_status.configure(
         build_cache_status=cache_status_service.build_cache_status,

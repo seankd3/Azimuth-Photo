@@ -2,7 +2,7 @@
 
 from core.catalog_path import catalog_path
 import heapq
-from collections.abc import Callable
+import thumbnails
 
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import images as image_repository
@@ -10,18 +10,11 @@ from data.repositories import images as image_repository
 
 _duplicates_cache = {"key": None, "data": None}
 
-_cache_root: Callable[[], str] | None = None
 
-
-def configure(*, cache_root: Callable[[], str]) -> None:
-    global _cache_root
-    _cache_root = cache_root
 
 
 def _configured_cache_root() -> str:
-    if _cache_root is None:
-        raise RuntimeError("Search service is not configured")
-    return _cache_root()
+    return thumbnails.SSD_CACHE_DIR
 
 
 
