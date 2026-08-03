@@ -4,14 +4,12 @@ from __future__ import annotations
 
 from core.catalog_path import catalog_path
 
-import asyncio
 import os
 import platform as py_platform
 import socket
 import time
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import URLError
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -19,6 +17,7 @@ from pydantic import BaseModel, Field
 import settings
 from features.sync import mdns, pairing, satellite
 from archive import role
+from archive import transport
 
 
 router = APIRouter(tags=["pairing"])
@@ -82,16 +81,6 @@ def _default_device_name() -> str:
         return socket.gethostname() or "Device"
     except OSError:
         return "Device"
-
-
-def _redeem_pair_request(req: UrlRequest) -> tuple[int, bytes]:
-    """Complete the blocking urllib exchange entirely outside the event loop."""
-
-    try:
-        with urlopen(req, timeout=5) as response:  # noqa: S310 - user-supplied hub URL
-            return response.status, response.read()
-    except HTTPError as exc:
-        return exc.code, exc.read()
 
 
 @router.post("/api/devices/link")
@@ -181,18 +170,14 @@ async def api_pair_connect(body: ConnectRequest):
     }
     import json
 
-    req = UrlRequest(
-        f"{hub}/api/pair",
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            **satellite.hub_request_headers(),
-        },
-        method="POST",
-    )
     try:
-        status, raw = await asyncio.to_thread(_redeem_pair_request, req)
+        status, _headers, raw = await transport.request_async(
+            "POST",
+            f"{hub}/api/pair",
+            body=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            timeout=transport.INTERACTIVE,
+        )
     except URLError as exc:
         raise HTTPException(status_code=400, detail=f"could not reach hub: {exc.reason}") from exc
     if not 200 <= status < 300:

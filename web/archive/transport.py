@@ -1,0 +1,113 @@
+"""One way to talk to the hub.
+
+Six copies of the same ten lines had drifted into eight different timeouts.
+Nothing about a request to the hub varies except how long the caller can afford
+to wait, so that is the only knob, and it is named rather than a number typed at
+the call site.
+
+An HTTP error is a reply, not an exception. A 404 from the hub means "I do not
+have that", which is information the caller wants; raising on it forced every
+caller to unwrap an exception to read a status code they had asked for.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import urllib.error
+import urllib.request
+from typing import NamedTuple
+
+#: Reachability and version checks. Short enough that a hub which is asleep
+#: cannot stall a page render.
+CONTRACT = 3.0
+
+#: A person is waiting for this. The laptop must stay responsive, so a hub that
+#: has gone away costs a visible pause, not a hang.
+INTERACTIVE = 10.0
+
+#: Moving originals or preview packs. Slow by nature, never on a render path.
+BULK = 300.0
+
+
+class Reply(NamedTuple):
+    status: int
+    headers: dict[str, str]
+    body: bytes
+
+    @property
+    def ok(self) -> bool:
+        return 200 <= self.status < 300
+
+
+def _outbound(method: str, url: str, body: bytes | None, headers: dict | None):
+    # Imported here: features/ may import archive/, never the reverse.
+    from features.sync import satellite
+
+    merged = dict(headers or {})
+    merged.update(satellite.hub_request_headers())
+    return urllib.request.Request(url, data=body, headers=merged, method=method)
+
+
+def request(
+    method: str,
+    url: str,
+    *,
+    body: bytes | None = None,
+    headers: dict | None = None,
+    timeout: float = INTERACTIVE,
+) -> Reply:
+    """Blocking hub request. Callers on a request path want request_async."""
+
+    outbound = _outbound(method, url, body, headers)
+    try:
+        with urllib.request.urlopen(outbound, timeout=timeout) as response:  # noqa: S310 - configured hub URL.
+            return Reply(
+                int(response.status),
+                {key.lower(): value for key, value in response.headers.items()},
+                response.read(),
+            )
+    except urllib.error.HTTPError as error:
+        return Reply(
+            int(error.code),
+            {key.lower(): value for key, value in (error.headers or {}).items()},
+            error.read(),
+        )
+
+
+async def request_async(
+    method: str,
+    url: str,
+    *,
+    body: bytes | None = None,
+    headers: dict | None = None,
+    timeout: float = INTERACTIVE,
+    runner=None,
+) -> Reply:
+    """The same request, off the event loop.
+
+    `runner` exists because sync work runs on a bounded pool that the rest of
+    the app shares; the default keeps hub traffic inside it.
+    """
+
+    def work() -> Reply:
+        return request(method, url, body=body, headers=headers, timeout=timeout)
+
+    if runner is not None:
+        return await runner(work)
+    from features.sync.executor import run_sync_work
+
+    return await run_sync_work(work)
+
+
+async def reachable(hub_url: str, *, timeout: float = CONTRACT) -> bool:
+    """Is the hub answering at all? Never raises."""
+
+    try:
+        return (
+            await asyncio.wait_for(
+                request_async("GET", f"{hub_url.rstrip('/')}/api/health", timeout=timeout),
+                timeout=timeout + 1,
+            )
+        ).ok
+    except Exception:
+        return False

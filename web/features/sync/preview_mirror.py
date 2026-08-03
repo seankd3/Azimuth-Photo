@@ -17,6 +17,7 @@ from typing import Any
 
 from data import connection
 from features.sync import satellite
+from archive import transport
 
 
 log = logging.getLogger(__name__)
@@ -381,7 +382,7 @@ async def fetch_and_store(
         return None
     version = preview_version_for_image(image)
     if request is None:
-        from features.sync.executor import hub_request as request  # type: ignore[assignment]
+        request = transport.request_async
 
     status_code, _headers, data = await request(
         "GET",
@@ -523,12 +524,7 @@ class PreviewMirrorFiller:
             for image_id, size, version, hub_id in targets[: self.burst_limit]:
                 if self.refuse_if_busy():
                     break
-                if self._request is None:
-                    from features.sync.executor import hub_request
-
-                    request = hub_request
-                else:
-                    request = self._request
+                request = self._request or transport.request_async
                 code, _headers, body = await request(
                     "GET",
                     f"{self.hub}/api/thumb/{size}/{hub_id}",

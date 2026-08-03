@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import urllib.error
@@ -35,6 +34,9 @@ class HubContract:
 _contracts: dict[str, HubContract] = {}
 
 
+from archive import transport
+
+
 def request_headers() -> dict[str, str]:
     """Headers every satellite-originated hub request must carry."""
 
@@ -42,16 +44,9 @@ def request_headers() -> dict[str, str]:
 
 
 async def _request_version(method: str, url: str, *, body=None, headers=None) -> tuple[int, dict, bytes]:
-    def request() -> tuple[int, dict, bytes]:
-        outbound_headers = {**request_headers(), **dict(headers or {})}
-        req = urllib.request.Request(url, data=body, headers=outbound_headers, method=method)
-        try:
-            with urllib.request.urlopen(req, timeout=3) as response:  # noqa: S310 - configured tailnet hub.
-                return int(response.status), dict(response.headers), response.read()
-        except urllib.error.HTTPError as error:
-            return int(error.code), dict(error.headers or {}), error.read()
-
-    return await asyncio.to_thread(request)
+    return await transport.request_async(
+        method, url, body=body, headers=headers, timeout=transport.CONTRACT
+    )
 
 
 def _legacy_contract(*, checked_at: float) -> HubContract:

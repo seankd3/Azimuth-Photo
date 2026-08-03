@@ -25,14 +25,14 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 from typing import Any
-from urllib.error import HTTPError, URLError
+from urllib.error import URLError
 from urllib.parse import quote
-from urllib.request import Request, urlopen
 
 
 from data import connection as data_connection
 from features.sync import satellite
 from archive import role
+from archive import transport
 
 
 _HASH_LENGTH = 32  # BLAKE2b-128, hex encoded.
@@ -80,19 +80,21 @@ def _content_hash_for_image(image_id: int, db_path: str) -> str | None:
 
 
 def _request(url: str, *, timeout: float) -> tuple[bytes, str, dict[str, str]]:
-    headers = {"Accept": "multipart/mixed, application/gzip, application/json"}
-    headers.update(satellite.hub_request_headers())
-    request = Request(url, headers=headers)
     try:
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - hub URL is user configuration.
-            headers = {key.lower(): value for key, value in response.headers.items()}
-            return response.read(), response.headers.get_content_type(), headers
-    except HTTPError as exc:
-        if exc.code == 404:
-            raise BaseReadthroughError("Hub has no cached Develop base for this photo") from exc
-        raise BaseReadthroughError(f"Hub rejected the Develop base request ({exc.code})") from exc
+        reply = transport.request(
+            "GET",
+            url,
+            headers={"Accept": "multipart/mixed, application/gzip, application/json"},
+            timeout=timeout,
+        )
     except (URLError, TimeoutError, OSError) as exc:
         raise BaseReadthroughError("Could not reach the hub for this Develop base") from exc
+    if reply.status == 404:
+        raise BaseReadthroughError("Hub has no cached Develop base for this photo")
+    if not reply.ok:
+        raise BaseReadthroughError(f"Hub rejected the Develop base request ({reply.status})")
+    content_type = reply.headers.get("content-type", "").split(";")[0].strip()
+    return reply.body, content_type, reply.headers
 
 
 def _json_metadata(value: bytes | str) -> dict[str, Any]:

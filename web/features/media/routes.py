@@ -13,12 +13,12 @@ from core.source_files import inspect_source_file
 from data import connection as data_connection
 from data.repositories import images as image_repository
 from features.sync import preview_mirror, satellite
-from features.sync.executor import hub_request
 from features.sync.prefetch import ThumbPrefetcher
 import thumbnails
 
 
 import db
+from archive import transport
 router = APIRouter()
 DbPathProvider = Callable[[], str]
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
@@ -252,7 +252,7 @@ async def _prefetch_remote_media(image: dict, tier: str) -> None:
         return
     remote_id = int(image["hub_image_id"])
     try:
-        status_code, _headers, data = await hub_request(
+        status_code, _headers, data = await transport.request_async(
             "GET",
             hub + _remote_media_endpoint(remote_id, tier),
         )

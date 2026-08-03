@@ -6,8 +6,6 @@ import asyncio
 import json
 import os
 import time
-import urllib.error
-import urllib.request
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -22,6 +20,8 @@ from data import connection
 from features.sync import oplog, satellite
 from features.sync.executor import run_sync_work
 from features.sync.hashing import compute_full_hash
+
+from archive import transport
 
 
 HAVE_BATCH_SIZE = 1000
@@ -91,17 +91,12 @@ async def confirm_hub_hashes(content_hashes: list[str]) -> set[str]:
         body = json.dumps({"content_hashes": content_hashes}, separators=(",", ":")).encode()
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         headers.update(satellite.hub_request_headers())
-        outgoing = urllib.request.Request(
-            f"{hub}/api/sync/have", data=body, headers=headers, method="POST"
+        reply = transport.request(
+            "POST", f"{hub}/api/sync/have", body=body, headers=headers, timeout=30
         )
-        try:
-            with urllib.request.urlopen(outgoing, timeout=30) as response:  # noqa: S310 - configured private hub.
-                status = int(response.status)
-                payload = json.loads(response.read() or b"{}")
-        except urllib.error.HTTPError as error:
-            status = int(error.code)
-            payload = {}
-        if not 200 <= status < 300:
+        status = reply.status
+        payload = json.loads(reply.body or b"{}") if reply.ok else {}
+        if not reply.ok:
             raise RuntimeError(f"Hub confirmation failed ({status})")
         present = payload.get("present") if isinstance(payload, dict) else None
         if not isinstance(present, list):
@@ -128,20 +123,16 @@ async def confirm_hub_full_hashes(proofs: dict[str, str]) -> set[str]:
         ).encode()
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
         headers.update(satellite.hub_request_headers())
-        outgoing = urllib.request.Request(
+        reply = transport.request(
+            "POST",
             f"{hub}/api/sync/have/full",
-            data=body,
+            body=body,
             headers=headers,
-            method="POST",
+            timeout=transport.BULK,
         )
-        try:
-            with urllib.request.urlopen(outgoing, timeout=300) as response:  # noqa: S310 - configured private hub.
-                status = int(response.status)
-                payload = json.loads(response.read() or b"{}")
-        except urllib.error.HTTPError as error:
-            status = int(error.code)
-            payload = {}
-        if not 200 <= status < 300:
+        status = reply.status
+        payload = json.loads(reply.body or b"{}") if reply.ok else {}
+        if not reply.ok:
             raise RuntimeError(f"Hub full-file verification failed ({status})")
         present = payload.get("present") if isinstance(payload, dict) else None
         if not isinstance(present, list):

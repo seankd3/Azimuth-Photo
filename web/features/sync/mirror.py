@@ -18,8 +18,8 @@ from data import connection
 from data.repositories import catalog as catalog_repository
 from features.sync import elo_stars, family_clock, satellite
 from features.sync.develop_merge import preserve_local_rating
-from features.sync.executor import hub_request
 from features.trash import service as trash_service
+from archive import transport
 
 
 log = logging.getLogger(__name__)
@@ -106,7 +106,7 @@ class MirrorPuller:
     def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or functools.partial(hub_request, timeout=20)
+        self._request = request or functools.partial(transport.request_async, timeout=20)
         # An export page still takes minutes on a busy hub over the tailnet;
         # the interactive 20s default abandons it. Only widen the timeout when
         # the transport actually accepts one — injected test fakes may not.

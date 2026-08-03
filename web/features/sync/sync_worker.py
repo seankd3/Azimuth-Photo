@@ -16,9 +16,9 @@ from features.sync.embedding_sync import EmbeddingPuller
 from features.sync.mirror import MirrorPuller
 from features.sync.prefetch import ThumbPrefetcher
 from features.sync import client_update, contract, oplog, preview_mirror, satellite
-from features.sync.executor import hub_request
 from features.trash import remote as trash_remote
 from features.trash import service as trash_service
+from archive import transport
 
 
 log = logging.getLogger(__name__)
@@ -79,7 +79,7 @@ class SyncWorker:
     ):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or hub_request
+        self._hub_request = request or transport.request_async
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
         self._embedding_status: dict = {"rows_applied": 0, "cursor": 0, "last_error": ""}
         self._embeddings_checked_at = 0.0
@@ -544,17 +544,6 @@ class SyncWorker:
         if not 200 <= status_code < 300:
             raise RuntimeError(f"sync {method} {path} failed ({status_code}): {response.decode(errors='replace')[:300]}")
         return json.loads(response or b"{}")
-
-    async def _hub_request(self, method: str, url: str, *, body: bytes | None = None, headers: dict | None = None, **kwargs):
-        """Attach the revision header to every request made by this satellite.
-
-        Extra keyword arguments (a bulk fetch's long timeout) pass through to
-        the transport; swallowing them here silently reinstated the 20s
-        interactive timeout on the catalog export and broke every refresh.
-        """
-
-        outbound_headers = {**dict(headers or {}), **contract.request_headers()}
-        return await self._request(method, url, body=body, headers=outbound_headers, **kwargs)
 
     async def refresh_hub_contract(self, *, force: bool = False) -> None:
         """Refresh once at startup, then use the ten-minute shared cache."""

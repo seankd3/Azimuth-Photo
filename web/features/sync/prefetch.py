@@ -19,8 +19,9 @@ from urllib.parse import urlencode
 from core import user_activity
 from data import connection
 from features.sync import satellite
-from features.sync.executor import hub_request, run_sync_work
+from features.sync.executor import run_sync_work
 from archive import role
+from archive import transport
 
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
@@ -133,7 +134,7 @@ class ThumbPrefetcher:
     def __init__(self, *, db_path: str, hub: str | None = None, request: RequestFn | None = None, store: StoreFn | None = None, cache_root: str | None = None, budget_bytes: int | None = None):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._request = request or functools.partial(hub_request, timeout=10)
+        self._request = request or functools.partial(transport.request_async, timeout=transport.INTERACTIVE)
         self._store = store or _store_with_thumbnail_cache
         self.cache_root = cache_root
         self._budget_override = budget_bytes is not None
