@@ -31,19 +31,23 @@ fixed. Every remaining failure was checked against `main` by extracting it with
 `test_ai_failure_resilience` (1). `test_fresh_boot` fails **less** here than on
 `main` — 2 against 3.
 
-**Two catalog-source routes take three seconds each.** Chasing why
+**A slow test, three hypotheses, two of them wrong.**
 `test_catalog::test_add_source_then_keep_remove_preserves_rows_and_originals`
-sits at 9s against the ten-second cap: setup is 0.09s, the test body is 7.75s,
-and inside it `POST /api/catalog/sources` is 3.03s and
-`POST /api/catalog/sources/{id}/remove` is 2.97s — with scanning off and one
-image in the catalog. Nothing in the test is trimmable; the routes are the cost.
-Worth a look under "Speed is the bar", though source management is not an
-interactive path.
+sits at 9s against the ten-second cap. What is measured:
 
-I had recorded "the harness costs about 4 seconds per test" here before
-measuring it. It costs 0.09s. The figure came from earlier in the session and I
-repeated it instead of checking — the same mistake as calling failures
-pre-existing without running them against `main`.
+- `BackendTestCase` setup is **0.09s**, not the ~4s I had written here before
+  measuring it.
+- The test body is **7.75s of 8.03s**; its two requests are 3.03s and 2.97s.
+- The route's own work — `_is_first_run_import`, `add_or_restore_source`,
+  `get_catalog_summary`, `_catalog_changed` — totals **0.07s**. So it is not the
+  route, and "two catalog routes take three seconds each" was wrong.
+- `test_catalog._request` does `with TestClient(app)` per call, running the
+  app's whole startup and shutdown each time. In isolation that is 1.31s the
+  first time and 0.12s after.
+
+That leaves ~3s per request in the test unexplained: it is not the route, and it
+is not what a bare TestClient cycle costs outside `BackendTestCase`. Written
+down at the point the evidence stops rather than given a third cause.
 
 ## What the branch removed, and the three things it should not have
 
