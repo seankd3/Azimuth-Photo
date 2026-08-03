@@ -1,0 +1,211 @@
+{
+  "bayer.dng": {
+    "develop_base": {
+      "dtype": "uint16",
+      "mean": 0.592,
+      "meta_keys": [
+        "as_shot",
+        "base_kind",
+        "camera_make",
+        "camera_model",
+        "dtype",
+        "focus_distance",
+        "height",
+        "linear",
+        "source_meta_version",
+        "width"
+      ],
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.029,
+      "p50": 0.672,
+      "p95": 1.0,
+      "shape": [
+        54,
+        80,
+        3
+      ],
+      "std": 0.386
+    },
+    "embedded": {
+      "absent": true
+    },
+    "export": {
+      "dtype": "float32",
+      "mean": 0.438,
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.012,
+      "p50": 0.414,
+      "p95": 0.937,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "std": 0.314
+    },
+    "thumbnail": {
+      "dtype": "uint8",
+      "mean": 0.732,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.106,
+      "p50": 0.882,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.323
+    }
+  },
+  "liar.ARW": {
+    "develop_base": {
+      "failed": "RawDecodeError"
+    },
+    "embedded": {
+      "absent": true
+    },
+    "export": {
+      "failed": "RenderError"
+    },
+    "thumbnail": {
+      "failed": "LibRawFileUnsupportedError"
+    }
+  },
+  "liar.CR2": {
+    "develop_base": {
+      "failed": "RawDecodeError"
+    },
+    "embedded": {
+      "absent": true
+    },
+    "export": {
+      "failed": "RenderError"
+    },
+    "thumbnail": {
+      "failed": "LibRawFileUnsupportedError"
+    }
+  },
+  "plain.jpg": {
+    "develop_base": {
+      "dtype": "uint16",
+      "mean": 0.242,
+      "meta_keys": [
+        "as_shot",
+        "base_kind",
+        "dtype",
+        "height",
+        "linear",
+        "source_meta_version",
+        "width"
+      ],
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.036,
+      "p50": 0.147,
+      "p95": 0.905,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.257
+    },
+    "embedded": {
+      "absent": true
+    },
+    "export": {
+      "dtype": "float32",
+      "mean": 0.242,
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.036,
+      "p50": 0.147,
+      "p95": 0.905,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.257
+    },
+    "thumbnail": {
+      "failed": "LibRawFileUnsupportedError"
+    }
+  },
+  "upper.DNG": {
+    "develop_base": {
+      "dtype": "uint16",
+      "mean": 0.593,
+      "meta_keys": [
+        "as_shot",
+        "base_kind",
+        "camera_make",
+        "camera_model",
+        "dtype",
+        "focus_distance",
+        "height",
+        "linear",
+        "source_meta_version",
+        "width"
+      ],
+      "p0": 0.007,
+      "p100": 1.0,
+      "p5": 0.029,
+      "p50": 0.67,
+      "p95": 1.0,
+      "shape": [
+        54,
+        80,
+        3
+      ],
+      "std": 0.386
+    },
+    "embedded": {
+      "absent": true
+    },
+    "export": {
+      "dtype": "float32",
+      "mean": 0.435,
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.012,
+      "p50": 0.409,
+      "p95": 0.937,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "std": 0.314
+    },
+    "thumbnail": {
+      "dtype": "uint8",
+      "mean": 0.729,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.102,
+      "p50": 0.875,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.324
+    }
+  }
+}

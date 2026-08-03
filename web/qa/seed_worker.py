@@ -8,9 +8,8 @@ import shutil
 import time
 from pathlib import Path
 
-import numpy as np
-from PIL import Image, ImageDraw
-from tifffile import imwrite
+from harness.corpus import write_bayer_dng as _dng
+from harness.corpus import write_jpeg as _jpeg
 
 from qa.config import (
     ACTIVE_IMAGE_COUNT,
@@ -37,52 +36,6 @@ EXACT_DUPLICATE_STACK_ID = 2
 EXACT_DUPLICATE_IDS = (30, 31)
 LOCATED_IMAGE_IDS = (101, 102, 103, 104, 105, 106)
 PEOPLE_IDS = {"named": 1, "merge_source": 2, "merge_target": 3, "hide": 4}
-
-
-def _jpeg(path: Path, index: int, *, size: tuple[int, int] = (160, 106)) -> None:
-    """Write a small valid image with enough texture to exercise Develop."""
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    base = ((index * 41) % 210 + 20, (index * 73) % 210 + 20, (index * 97) % 210 + 20)
-    image = Image.new("RGB", size, base)
-    draw = ImageDraw.Draw(image)
-    for step in range(0, size[0], 16):
-        shade = ((base[0] + step) % 255, (base[1] + step * 2) % 255, (base[2] + step * 3) % 255)
-        draw.rectangle((step, 0, min(step + 7, size[0]), size[1]), fill=shade)
-    draw.ellipse((36, 20, 124, 88), outline=(245, 245, 245), width=4)
-    image.save(path, "JPEG", quality=88)
-
-
-def _dng(path: Path, index: int, *, size: tuple[int, int] = (160, 108)) -> None:
-    """Write a tiny standards-readable Bayer DNG for real RAW QA."""
-
-    width, height = size
-    y, x = np.mgrid[:height, :width]
-    mosaic = ((x / width * 0.7 + y / height * 0.3) * 12_000 + 512).astype(np.uint16)
-    mosaic += (((x // 8 + y // 8 + index) % 2) * 1_800).astype(np.uint16)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    imwrite(
-        path,
-        mosaic,
-        photometric=32803,
-        metadata=None,
-        extratags=[
-            (50706, "B", 4, (1, 4, 0, 0), False),
-            (50707, "B", 4, (1, 3, 0, 0), False),
-            (50708, "s", 0, "Azimuth QA Camera", False),
-            (33421, "H", 2, (2, 2), False),
-            (33422, "B", 4, (0, 1, 1, 2), False),
-            (50713, "H", 2, (1, 1), False),
-            (50714, "I", 1, 512, False),
-            (50717, "I", 1, 16_383, False),
-            (50718, "2I", 2, ((1, 1), (1, 1)), False),
-            (50719, "I", 2, (0, 0), False),
-            (50720, "I", 2, (width, height), False),
-            (50721, "2i", 9, tuple((value, 10_000) for value in (10_000, 0, 0, 0, 10_000, 0, 0, 0, 10_000)), False),
-            (50728, "2I", 3, ((1, 2), (1, 1), (2, 3)), False),
-            (50778, "H", 1, 21, False),
-        ],
-    )
 
 
 def _month_for(index: int) -> tuple[int, int]:

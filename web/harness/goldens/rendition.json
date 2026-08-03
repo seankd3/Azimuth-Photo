@@ -1,0 +1,72 @@
+{
+  "bayer.dng": {
+    "cache_version": "v3",
+    "catalog_scheme": "catalog",
+    "key_and_pixels_disagree": false,
+    "key_says_raw": true,
+    "pixels_say_raw": true,
+    "schemes_agree_per_tier": {
+      "full": false,
+      "lg": false,
+      "md": false,
+      "sm": false
+    },
+    "stat_scheme": "size|mtime_ns|path"
+  },
+  "liar.ARW": {
+    "cache_version": "v3",
+    "catalog_scheme": "catalog",
+    "key_and_pixels_disagree": true,
+    "key_says_raw": true,
+    "pixels_say_raw": false,
+    "schemes_agree_per_tier": {
+      "full": false,
+      "lg": false,
+      "md": false,
+      "sm": false
+    },
+    "stat_scheme": "size|mtime_ns|path"
+  },
+  "liar.CR2": {
+    "cache_version": "v3",
+    "catalog_scheme": "catalog",
+    "key_and_pixels_disagree": true,
+    "key_says_raw": true,
+    "pixels_say_raw": false,
+    "schemes_agree_per_tier": {
+      "full": false,
+      "lg": false,
+      "md": false,
+      "sm": false
+    },
+    "stat_scheme": "size|mtime_ns|path"
+  },
+  "plain.jpg": {
+    "cache_version": "v3",
+    "catalog_scheme": "catalog",
+    "key_and_pixels_disagree": false,
+    "key_says_raw": false,
+    "pixels_say_raw": false,
+    "schemes_agree_per_tier": {
+      "full": false,
+      "lg": false,
+      "md": false,
+      "sm": false
+    },
+    "stat_scheme": "size|mtime_ns|path"
+  },
+  "upper.DNG": {
+    "cache_version": "v3",
+    "catalog_scheme": "catalog",
+    "key_and_pixels_disagree": false,
+    "key_says_raw": true,
+    "pixels_say_raw": true,
+    "schemes_agree_per_tier": {
+      "full": false,
+      "lg": false,
+      "md": false,
+      "sm": false
+    },
+    "stat_scheme": "size|mtime_ns|path"
+  }
+}
