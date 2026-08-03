@@ -288,6 +288,27 @@ async def api_reject_people_merge(suggestion_id: int):
 
 
 
+@router.post("/api/people/faces/{face_id}/assign")
+async def api_assign_face(face_id: int, request: Request):
+    body, error = await json_object(request)
+    if error:
+        return error
+    person_id = positive_int(body.get("person_id"))
+    result = await db.assign_face(face_id, person_id=person_id, name=body.get("name") or "")
+    if not result.get("ok"):
+        return JSONResponse({"error": result.get("error") or "Could not assign face"}, status_code=400)
+    return result
+
+
+@router.post("/api/people/faces/{face_id}/ignore")
+async def api_ignore_face(face_id: int):
+    result = await db.ignore_face(face_id)
+    if not isinstance(result, dict) or not result.get("ok"):
+        error = result.get("error") if isinstance(result, dict) else ""
+        return JSONResponse({"error": error or "Could not ignore face"}, status_code=400)
+    return result
+
+
 @router.post("/api/people/{person_id}/ignore")
 async def api_ignore_person(person_id: int):
     result = await db.ignore_person(person_id)

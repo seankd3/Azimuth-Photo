@@ -1592,6 +1592,24 @@
     "params": [],
     "required_params": []
   },
+  "POST /api/people/faces/{face_id}/assign": {
+    "has_body": false,
+    "params": [
+      "face_id"
+    ],
+    "required_params": [
+      "face_id"
+    ]
+  },
+  "POST /api/people/faces/{face_id}/ignore": {
+    "has_body": false,
+    "params": [
+      "face_id"
+    ],
+    "required_params": [
+      "face_id"
+    ]
+  },
   "POST /api/people/merge": {
     "has_body": false,
     "params": [],
