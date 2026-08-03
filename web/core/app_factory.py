@@ -382,7 +382,6 @@ def create_app_shell(
     wiring.configure_cache_events()
     wiring.configure_catalog_routes()
     wiring.configure_library_routes()
-    wiring.configure_search_routes()
     wiring.configure_collection_routes()
     wiring.configure_stack_routes()
     wiring.configure_trash_routes()

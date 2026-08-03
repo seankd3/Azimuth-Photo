@@ -12,7 +12,6 @@ from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.publish import routes as publish_routes
-from features.search import routes as search_routes
 from features.share import routes as share_routes
 from features.shared import routes as shared_routes
 from features.stacks import routes as stack_routes
@@ -120,34 +119,6 @@ def configure_library_routes() -> None:
     )
     library_service.configure_stacks(
         get_stack_representative_counts=lambda image_ids: db.stack_representative_counts(image_ids),
-    )
-
-
-def configure_search_routes() -> None:
-    import db
-    from core import cache_events, query_constraints
-    from core import requests as request_helpers
-    from core import responses as response_helpers
-    from features.catalog import metadata as catalog_metadata
-    from features.media import warm as media_warm
-    from features.search import service as search_service
-
-    search_routes.configure(
-        api_rankings=lambda **kwargs: library_routes.api_rankings(**kwargs),
-        visible_embedding_page=search_service.visible_embedding_page,
-        cached_image_ids=media_warm.cached_image_ids,
-        metadata_update_tuple=catalog_metadata.metadata_update_tuple,
-        invalidate_pairing_cache=lambda **kwargs: cache_events.invalidate_pairing_cache(**kwargs),
-        normalize_search_query=query_constraints.normalize_search_query,
-        clamp_int=request_helpers.clamp_int,
-        visibility_counts=response_helpers.visibility_counts,
-        active_embedding_model_key=lambda: db.active_embedding_model_key(),
-        db_signature=lambda: db.DB_PATH,
-        get_active_source_id_set=lambda: db.get_active_source_id_set(),
-        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
-        get_image_by_id=lambda image_id: db.get_image_by_id(image_id),
-        batch_update_metadata=lambda updates: db.batch_update_metadata(updates),
-        duplicates_cache=search_service._duplicates_cache,
     )
 
 
