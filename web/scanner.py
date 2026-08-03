@@ -1,7 +1,7 @@
 import os
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable
+import db
 
 from core.source_files import inspect_source_file
 from data.repositories.catalog import StorageUnavailableDuringScan, SuspiciousEmptyScan
@@ -10,12 +10,6 @@ from image_headers import HEADER_GEOMETRY_EXTENSIONS, read_header_dimensions
 SUPPORTED_EXTENSIONS = HEADER_GEOMETRY_EXTENSIONS - {".bmp", ".gif"}
 SCAN_HEADER_BUDGET_SECONDS = 0.005
 
-MarkSourceScanStarted = Callable[[int], Awaitable[None]]
-InsertImagesBatch = Callable[..., Awaitable[None]]
-MarkSourceScanFinished = Callable[..., Awaitable[None]]
-_mark_source_scan_started: MarkSourceScanStarted | None = None
-_insert_images_batch: InsertImagesBatch | None = None
-_mark_source_scan_finished: MarkSourceScanFinished | None = None
 log = logging.getLogger(__name__)
 
 # Global scan state
@@ -31,27 +25,6 @@ scan_state = {
     "recoverable": False,
     "action": "",
 }
-
-
-def configure(
-    *,
-    mark_source_scan_started: MarkSourceScanStarted | None = None,
-    insert_images_batch: InsertImagesBatch | None = None,
-    mark_source_scan_finished: MarkSourceScanFinished | None = None,
-) -> None:
-    global _mark_source_scan_started, _insert_images_batch, _mark_source_scan_finished
-    if mark_source_scan_started is not None:
-        _mark_source_scan_started = mark_source_scan_started
-    if insert_images_batch is not None:
-        _insert_images_batch = insert_images_batch
-    if mark_source_scan_finished is not None:
-        _mark_source_scan_finished = mark_source_scan_finished
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"scanner is missing configured dependency: {name}")
-    return provider
 
 
 # Unambiguous derivative/app-data directories that must never enter the library.
@@ -170,7 +143,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
 
     try:
         if source_id is not None:
-            await _configured(_mark_source_scan_started, "mark_source_scan_started")(source_id)
+            await db.mark_source_scan_started(source_id)
 
         for row in walk_images(folder, excluded_directory_paths=excluded_directory_paths):
             batch.append(row)
@@ -178,7 +151,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
             scan_state["total_found"] += 1
 
             if len(batch) >= batch_size:
-                await _configured(_insert_images_batch, "insert_images_batch")(batch, source_id=source_id)
+                await db.insert_images_batch(batch, source_id=source_id)
                 scan_state["total_inserted"] += len(batch)
                 if on_batch:
                     await on_batch(scan_state["total_inserted"])
@@ -187,13 +160,13 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
                 await asyncio.sleep(0)
 
         if batch:
-            await _configured(_insert_images_batch, "insert_images_batch")(batch, source_id=source_id)
+            await db.insert_images_batch(batch, source_id=source_id)
             scan_state["total_inserted"] += len(batch)
             if on_batch:
                 await on_batch(scan_state["total_inserted"])
 
         if source_id is not None:
-            await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(
+            await db.mark_source_scan_finished(
                 source_id,
                 seen_filepaths=seen_filepaths,
                 excluded_directory_paths=excluded_directory_paths,
@@ -225,7 +198,7 @@ async def scan_folder(folder: str, source_id: int | None = None, on_batch=None):
     except Exception as exc:
         if source_id is not None and not os.path.isdir(folder):
             try:
-                await _configured(_mark_source_scan_finished, "mark_source_scan_finished")(source_id)
+                await db.mark_source_scan_finished(source_id)
             except Exception:
                 pass
         scan_state["error"] = _interrupted_message()

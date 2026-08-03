@@ -24,9 +24,7 @@ def configure_database_backed_providers() -> None:
     import db
     import embedding_worker
     import caption_worker
-    import elo_propagation
     import face_worker
-    import scanner
     import thumbnails
     from core import cache_events
     from features.catalog import metadata as catalog_metadata
@@ -43,12 +41,6 @@ def configure_database_backed_providers() -> None:
         count_images_needing_captions=lambda **kwargs: db.count_images_needing_captions(**kwargs),
         get_images_needing_captions=lambda **kwargs: db.get_images_needing_captions(**kwargs),
         store_caption_result=lambda **kwargs: db.store_caption_result(**kwargs),
-    )
-    elo_propagation.configure(
-        active_embedding_model_key=lambda: db.active_embedding_model_key(),
-        get_active_images_by_ids=lambda image_ids: db.get_active_images_by_ids(image_ids),
-        get_db=lambda: db.get_db(),
-        invalidate_rating_stats_cache=lambda: db.invalidate_rating_stats_cache(),
     )
     face_worker.configure(
         count_images_needing_faces=lambda **kwargs: db.count_images_needing_faces(**kwargs),
@@ -73,11 +65,6 @@ def configure_database_backed_providers() -> None:
     catalog_metadata.configure(
         invalidate_filter_options_cache=db._invalidate_filter_options_cache,
         invalidate_rankings_cache=cache_events.invalidate_rankings_cache,
-    )
-    scanner.configure(
-        mark_source_scan_started=lambda source_id: db.mark_source_scan_started(source_id),
-        insert_images_batch=lambda rows, **kwargs: db.insert_images_batch(rows, **kwargs),
-        mark_source_scan_finished=lambda source_id, **kwargs: db.mark_source_scan_finished(source_id, **kwargs),
     )
 
 
