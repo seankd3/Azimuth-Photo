@@ -315,10 +315,6 @@ function renderPendingThumbnailEmptyState() {
     loadPausedPreviewHint(flow.querySelector('.empty-state p'));
 }
 
-function pendingPreviewCount(images) {
-    return countPendingPreviews(images); // Shared predicate: image?.preview_ready === false.
-}
-
 function sharpenPreview(image) {
     const id = Number(image?.id);
     if (!id || !image.preview_ready) return;
@@ -748,7 +744,7 @@ async function loadPage({ direction = 'after', start = null, jump = false } = {}
     document.getElementById('grid-end').hidden = !done || next.length === 0;
     if (next.length === 0 && done) renderEmptyState();
     else {
-        updateThumbnailPoll(data.source === 'similar' ? pendingPreviewCount(next) : pendingCount(data));
+        updateThumbnailPoll(data.source === 'similar' ? countPendingPreviews(next) : pendingCount(data));
         const quietNote = quietSearchNoteHtml(data.hidden_in_quiet_sources ?? viewState.hiddenInQuietSources);
         const existingQuiet = document.getElementById('quiet-search-note');
         if (quietNote) {

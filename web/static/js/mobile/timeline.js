@@ -696,10 +696,6 @@ function renderEndMarker() {
     endEl.hidden = zoomIdx === 2 || !endReached || images.length === 0;
 }
 
-function pendingPreviewCount(images) {
-    return countPendingPreviews(images); // Shared predicate: image?.preview_ready === false.
-}
-
 function sharpenPreview(image) {
     const id = Number(image?.id);
     if (!id || !image.preview_ready) return false;
@@ -808,7 +804,7 @@ export async function reload() {
         histogram = { months: [], undated: 0, total: images.length };
         monthOffsets = [];
         renderFixedImages(images);
-        updateThumbnailPoll(pendingPreviewCount(images));
+        updateThumbnailPoll(countPendingPreviews(images));
         endReached = true;
         renderEndMarker();
         renderScopeBar();
