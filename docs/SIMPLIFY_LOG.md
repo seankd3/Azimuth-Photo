@@ -247,6 +247,34 @@ and model install — each with its own render/bind/poll trio.
 Both are mechanical moves that need a browser pass per surface afterwards, not a
 test run. Left for a session that can finish and screenshot them.
 
+## Found while walking the UI — needs Sean's call
+
+**A brand-new install reports SYSTEM HEALTH: Bad for up to a day.**
+`features/system/health.py:222` returns `status="bad"` with "No catalog
+snapshots yet" whenever there are no snapshots, and
+`run_daily_backup_scheduler` sleeps until 04:00 local before taking the first
+one. So from the end of setup until 4am the next morning, a healthy install
+shows Bad — and every other check reads ok or warn, so that one verdict decides
+the whole banner.
+
+That matters beyond the first impression: it teaches a new owner that the health
+indicator cries wolf, and this is the indicator that would have shown the 07-19
+incident, where prod genuinely had zero valid backups for weeks.
+
+Two ways out, and this is deliberately not decided here:
+
+1. **Take a snapshot once, shortly after setup completes.** Makes the state
+   true instead of reclassifying it, and a fresh catalog with photos in it
+   arguably should be protected before the first night. Risk: boot-time work on
+   a 142k-photo catalog, against the standing rule about background work on
+   prod.
+2. **Report "no snapshots yet" as `warn` until the first 04:00 window passes**,
+   and `bad` after. Cheap and safe, but leaves a real zero-backup install
+   looking merely warm for a day.
+
+Weakening a safety signal is not a refactor decision, so it is written down
+rather than done.
+
 ## Verified in a browser
 
 Booted on a scratch `AZIMUTH_HOME` — never the real catalog at `C:\Azimuth
