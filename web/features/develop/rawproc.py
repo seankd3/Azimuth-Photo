@@ -668,24 +668,35 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
         if paths.binary.exists() and paths.metadata.exists() and paths.preview.exists():
             for stale in (paths.binary, paths.metadata, paths.preview):
                 stale.unlink(missing_ok=True)
-        if not Path(path).is_file():
-            from features.sync import readthrough
+        original_is_local = Path(path).is_file()
 
-            if readthrough.can_read_through():
-                import db
+    # Fetching the base from the hub is a network round trip, and on a satellite
+    # it is the cold-start path — measured at 7 to 69 seconds. Held inside the
+    # per-image lock, every other request for the same photo queued behind it.
+    if not original_is_local:
+        from features.sync import readthrough
 
-                try:
-                    meta = readthrough.fetch_base_cache_for_image(
-                        image_id,
-                        paths,
-                        db_path=db.DB_PATH,
-                        source_path=str(path),
-                        blocking=True,
-                    )
-                except readthrough.BaseReadthroughError as exc:
-                    raise RawDecodeError(str(exc)) from exc
-                if meta is not None:
-                    return paths, meta
+        if readthrough.can_read_through():
+            import db
+
+            try:
+                meta = readthrough.fetch_base_cache_for_image(
+                    image_id,
+                    paths,
+                    db_path=db.DB_PATH,
+                    source_path=str(path),
+                    blocking=True,
+                )
+            except readthrough.BaseReadthroughError as exc:
+                raise RawDecodeError(str(exc)) from exc
+            if meta is not None:
+                return paths, meta
+
+    with lock:
+        # Another thread may have finished the whole job while we were waiting.
+        cached = cached_base_paths(image_id, path)
+        if cached is not None:
+            return cached, _upgrade_cached_metadata(cached, path)
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
             rgb, meta = decode_base(path)
