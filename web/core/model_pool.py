@@ -224,9 +224,6 @@ class ModelPool:
         with self._lock:
             return list(self._eviction_log)
 
-    def clear_eviction_log(self) -> None:
-        with self._lock:
-            self._eviction_log.clear()
 
     def _used_vram(self) -> int:
         return sum(r.vram_bytes for r in self._residents.values())
@@ -563,15 +560,6 @@ class ModelPool:
                     ttl_seconds,
                 )
             return dropped
-
-    def drop_tracking(self, name: str) -> bool:
-        """Remove residency bookkeeping without calling unload_fn.
-
-        Use when the worker already cleared its globals (e.g. failed load
-        cleanup) so the pool does not double-unload.
-        """
-        with self._lock:
-            return self._drop_locked(name, run_unload=False)
 
 
 _pool: ModelPool | None = None

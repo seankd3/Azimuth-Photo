@@ -446,9 +446,6 @@ class ThumbPrefetcher:
                 stored += 1
         return stored, last_hub_id, skipped
 
-    async def _local_id_for_hub(self, hub_image_id: int) -> int | None:
-        row = await self._local_row_for_hub(hub_image_id)
-        return None if row is None else row[0]
 
     async def _local_row_for_hub(self, hub_image_id: int) -> tuple[int, str] | None:
         from features.sync import preview_mirror

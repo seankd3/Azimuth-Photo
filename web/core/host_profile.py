@@ -171,16 +171,6 @@ class HostProfile:
             return COST_CAPTION_3B_VRAM
         return COST_CAPTION_7B_VRAM
 
-    def model_fits_vram(self, cost_bytes: int, *, free_bytes: int | None = None) -> bool:
-        if cost_bytes <= 0:
-            return True
-        if not self.has_cuda:
-            return False
-        free = free_bytes if free_bytes is not None else self.vram_free_bytes
-        total = self.vram_total_bytes or 0
-        if free is not None and free > 0:
-            return free >= cost_bytes + (256 * _MIB)
-        return total >= cost_bytes + (512 * _MIB)
 
     # ---- bulk concurrency ------------------------------------------------
 

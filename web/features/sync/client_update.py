@@ -84,14 +84,6 @@ class ClientUpdater:
     def previous_pointer(self) -> Path:
         return self.install_root / "previous.txt"
 
-    def mark_rolled_back(self) -> None:
-        self.status.state = STATUS_ROLLED_BACK
-        self.status.message = UI_ROLLED_BACK
-
-    def clear_rolled_back_if_current(self, sha: str) -> None:
-        if self.status.state == STATUS_ROLLED_BACK and self.local_sha == sha:
-            # Stay visible until the next successful converge away from rollback.
-            return
 
     async def consider_hub_version(self, payload: dict[str, Any]) -> None:
         """Handshake step: compare shas; download+prepare on mismatch."""

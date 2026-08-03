@@ -157,12 +157,6 @@ def _image_lock(image_id: int) -> threading.Lock:
         return _image_locks.setdefault(int(image_id), threading.Lock())
 
 
-def _finite_positive(value: Any) -> float | None:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return None
-    return number if math.isfinite(number) and number > 0 else None
 
 
 def derive_libraw_clip_levels(
@@ -179,7 +173,7 @@ def derive_libraw_clip_levels(
     discarded common gain, leaving each boundary proportional to WB/green.
     """
 
-    saturation = _finite_positive(saturation_level)
+    saturation = pixel_decode._finite_positive(saturation_level)
     try:
         whites = list(white_levels or [])
         blacks = list(black_levels or [])
@@ -188,14 +182,14 @@ def derive_libraw_clip_levels(
         return None
     if saturation is None or len(whites) < 3 or len(wb) < 3:
         return None
-    green_gain = _finite_positive(wb[1])
+    green_gain = pixel_decode._finite_positive(wb[1])
     if green_gain is None:
         return None
 
     clips = np.empty(3, dtype=np.float32)
     for channel in range(3):
-        white = _finite_positive(whites[channel])
-        gain = _finite_positive(wb[channel])
+        white = pixel_decode._finite_positive(whites[channel])
+        gain = pixel_decode._finite_positive(wb[channel])
         try:
             black = float(blacks[channel]) if channel < len(blacks) else 0.0
         except (TypeError, ValueError):
@@ -324,17 +318,17 @@ def estimate_as_shot_white_balance_mired(camera_whitebalance: Any, daylight_whit
             "method": "default",
         }
 
-    red = _finite_positive(camera[0])
-    green = _finite_positive(camera[1])
-    blue = _finite_positive(camera[2])
-    day_red = _finite_positive(daylight[0]) if len(daylight) >= 3 else None
-    day_blue = _finite_positive(daylight[2]) if len(daylight) >= 3 else None
+    red = pixel_decode._finite_positive(camera[0])
+    green = pixel_decode._finite_positive(camera[1])
+    blue = pixel_decode._finite_positive(camera[2])
+    day_red = pixel_decode._finite_positive(daylight[0]) if len(daylight) >= 3 else None
+    day_blue = pixel_decode._finite_positive(daylight[2]) if len(daylight) >= 3 else None
     if red is None or green is None or blue is None:
         return {
             "temperature": 5500,
             "tint": 0,
-            "camera_whitebalance": [float(x) for x in camera if _finite_positive(x)],
-            "daylight_whitebalance": [float(x) for x in daylight if _finite_positive(x)],
+            "camera_whitebalance": [float(x) for x in camera if pixel_decode._finite_positive(x)],
+            "daylight_whitebalance": [float(x) for x in daylight if pixel_decode._finite_positive(x)],
             "method": "default",
         }
 
@@ -366,9 +360,9 @@ def estimate_as_shot_white_balance(
     if asn is None and camera_whitebalance is not None:
         camera = list(camera_whitebalance or [])
         if len(camera) >= 3:
-            red = _finite_positive(camera[0])
-            green = _finite_positive(camera[1])
-            blue = _finite_positive(camera[2])
+            red = pixel_decode._finite_positive(camera[0])
+            green = pixel_decode._finite_positive(camera[1])
+            blue = pixel_decode._finite_positive(camera[2])
             if red and green and blue:
                 # Camera multipliers are relative to green; ASN ∝ G / gains.
                 asn = [green / red, 1.0, green / blue]
@@ -494,7 +488,7 @@ def decode_base(path: str | os.PathLike[str]) -> tuple[np.ndarray, dict[str, Any
         color_matrix = lossy_meta.get("color_matrix1")
         color_matrix2 = lossy_meta.get("color_matrix2")
         forward_matrix = lossy_meta.get("forward_matrix")
-        iso = _finite_positive(lossy_meta.get("iso"))
+        iso = pixel_decode._finite_positive(lossy_meta.get("iso"))
     else:
         try:
             decoded = pixel_decode.decode_linear(

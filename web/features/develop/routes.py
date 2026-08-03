@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
-from features.develop import virtual_copies
+from features.develop import presets, virtual_copies
 from features.sync import oplog
 
 
@@ -168,19 +168,13 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _json_settings(raw: str | None) -> dict[str, Any]:
-    try:
-        result = json.loads(raw or "{}")
-    except (TypeError, ValueError):
-        return {}
-    return result if isinstance(result, dict) else {}
 
 
 def _resolved_settings(raw: str | None, metadata: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
     """Add camera NR defaults at the server settings boundary, never on disk."""
     from features.develop.noise_profiles import resolve_file_defaults
 
-    return resolve_file_defaults(_json_settings(raw), metadata, source_path)
+    return resolve_file_defaults(presets._json_settings(raw), metadata, source_path)
 
 
 def _profiled_meta(meta: dict[str, Any] | None, source_path: str | None) -> dict[str, Any]:
@@ -268,7 +262,7 @@ async def _write_synced_settings(
             xmp_path = None
             xmp_mtime = None
         else:
-            prior = _json_settings(existing["settings"])
+            prior = presets._json_settings(existing["settings"])
             merged = dict(incoming) if replace else {**prior, **incoming}
             origin = existing["origin"] or "user"
             xmp_path = existing["xmp_path"]
@@ -371,7 +365,7 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
             (image_id, HISTORY_SNAPSHOT_LIMIT, image_id, HISTORY_EDIT_LIMIT),
         )
         return [
-            {**dict(row), "settings": _json_settings(row["settings"])}
+            {**dict(row), "settings": presets._json_settings(row["settings"])}
             for row in await cursor.fetchall()
         ]
     finally:
@@ -387,7 +381,7 @@ async def _snapshots(image_id: int) -> list[dict[str, Any]]:
             (image_id,),
         )
         return [
-            {**dict(row), "settings": _json_settings(row["settings"])}
+            {**dict(row), "settings": presets._json_settings(row["settings"])}
             for row in await cursor.fetchall()
         ]
     finally:
@@ -496,7 +490,7 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
                 xmp_path = None
                 xmp_mtime = None
             else:
-                prior = _json_settings(existing["settings"])
+                prior = presets._json_settings(existing["settings"])
                 # Merge rather than replace: clients can render only v1 keys while
                 # later phases and imported XMP keys survive every autosave.
                 merged = {**prior, **incoming}
@@ -554,7 +548,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             xmp_path = None
             xmp_mtime = None
         elif current["origin"] == "xmp":
-            snapshot = _json_settings(current["settings"])
+            snapshot = presets._json_settings(current["settings"])
             origin = "xmp"
             xmp_path = current["xmp_path"]
             xmp_mtime = current["xmp_mtime"]
@@ -564,7 +558,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
                 (image_id,),
             )
             baseline = await cursor.fetchone()
-            snapshot = _json_settings(baseline["settings"] if baseline else "{}")
+            snapshot = presets._json_settings(baseline["settings"] if baseline else "{}")
             origin = "xmp" if baseline else "user"
             xmp_path = current["xmp_path"]
             xmp_mtime = current["xmp_mtime"]
@@ -650,7 +644,7 @@ async def api_develop_auto_tone(image_id: int):
         return pending
     cached_meta = rawproc.read_base_metadata(image_id) or {}
     row = await _load_settings(image_id)
-    settings = _json_settings(row["settings"]) if row else {}
+    settings = presets._json_settings(row["settings"]) if row else {}
     asshot = cached_meta.get("as_shot") if isinstance(cached_meta, dict) else {}
 
     def _compute():
@@ -1160,7 +1154,7 @@ async def api_sync_develop(body: DevelopSyncBody):
         return JSONResponse({"error": "target_ids required"}, status_code=400)
 
     source_row = await _load_settings(body.source_id)
-    source_settings = body.source_settings if body.source_settings is not None else (_json_settings(source_row["settings"]) if source_row else {})
+    source_settings = body.source_settings if body.source_settings is not None else (presets._json_settings(source_row["settings"]) if source_row else {})
     slice_ = dict(source_settings) if body.full else extract_sync_slice(source_settings, groups)
     if not slice_:
         return JSONResponse({"error": "Source has no settings in the selected groups"}, status_code=400)
