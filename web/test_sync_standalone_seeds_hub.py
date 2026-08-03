@@ -23,7 +23,7 @@ from fastapi.testclient import TestClient
 from PIL import Image
 
 import db
-from features.sync import device_auth, hashing, hub_routes
+from features.sync import device_auth, hashing, hub_routes, oplog, oplog_routes
 from features.sync.sync_worker import SyncWorker
 
 
@@ -52,6 +52,9 @@ class StandaloneSeedsHubTests(unittest.TestCase):
         )
         app = FastAPI()
         app.include_router(hub_routes.router)
+        # A hub that cannot accept oplog entries is not a hub any more: edits
+        # travel that way now, not through the deleted v1 metadata push.
+        app.include_router(oplog_routes.router)
         self.client_context = TestClient(app)
         self.client = self.client_context.__enter__()
 
@@ -128,7 +131,11 @@ class StandaloneSeedsHubTests(unittest.TestCase):
         os.environ["AZIMUTH_HUB_URL"] = hub_url
 
         async def scenario():
-            db.DB_PATH = self.standalone_db
+            # db.DB_PATH stays on the hub catalog. The hub app runs in this
+            # process and reads it; the worker is told its own path explicitly.
+            # Pointing the global at the satellite made the hub answer the
+            # manifest from the satellite's own rows — "I already have all
+            # three" — so nothing was ever uploaded and the hub stayed empty.
 
             # Empty hub before sync.
             with closing(sqlite3.connect(self.hub_db)) as conn, conn:
@@ -136,20 +143,15 @@ class StandaloneSeedsHubTests(unittest.TestCase):
 
             worker = SyncWorker(db_path=self.standalone_db, hub=hub_url, request=self._request)
 
-            # This process is both roles at once, and db.DB_PATH is global: the
-            # mirror's write transaction on the satellite catalog and the hub
-            # app's own connections contend on the same path and never resolve.
-            # Seeding is what this test is about. The mirror pull has its own
-            # coverage in test_sync_mirror.py, against a hub that is only a hub.
-            #
-            # This was invisible until the transport work: MirrorPuller asks
-            # whether the request accepts a timeout, the injected fake did not,
-            # and the TypeError from passing one anyway was swallowed by
-            # _refresh_mirror. The pull never ran.
-            async def _skip_mirror(*, force: bool = False) -> None:
-                return None
+            await worker.sync_once()
 
-            worker._refresh_mirror = _skip_mirror
+            # Record the flag and the develop edit the way the app does — after
+            # the upload, because before it there is no content hash to key an
+            # entry to — then sync again so they travel. Raw SQL against the
+            # catalog is not an edit; the v1 push that used to carry these
+            # regardless of whether anything changed is gone.
+            await oplog.append_flags(self.standalone_db, [image_ids[0]], "picked")
+            await oplog.append_develop(self.standalone_db, image_ids[0])
             await worker.sync_once()
 
             with closing(sqlite3.connect(self.hub_db)) as conn, conn:
@@ -162,7 +164,10 @@ class StandaloneSeedsHubTests(unittest.TestCase):
             # Originals landed under hub RAWS layout.
             for path in paths:
                 content_hash = hashing.compute_content_hash(path)
-                destination = self.raws / "2026" / "2026-07-12" / path.name
+                # Raws/Digital/<year>/<date>/ is the canonical layout — the
+                # same shape test_import_staging asserts. This expectation
+                # predated the Digital segment.
+                destination = self.raws / "Digital" / "2026" / "2026-07-12" / path.name
                 self.assertTrue(destination.is_file(), destination)
                 self.assertEqual(destination.read_bytes(), path.read_bytes())
                 self.assertIn(content_hash, {row[1] for row in rows})

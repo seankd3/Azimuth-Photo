@@ -26,18 +26,6 @@ and what is known to be broken. Newest first.
 - `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
   — passes alone, fails in a batch with `database is locked`. Lock contention,
   not logic.
-- `test_sync_standalone_seeds_hub.py` — seeds 0 rows instead of 3. **Verified
-  failing on `main` with the identical assertion**, by extracting `main` with
-  `git archive` and running it there. Not from this branch. The transport work
-  briefly turned it into a hang, which is fixed; see below.
-
-  Diagnosed as far as: the worker declines to upload because the contract probe
-  reads the fake hub as a peer too old to talk to (`api_rev: None`,
-  `hub_health: needs_update`). The fake mounts `hub_routes` alone, so
-  `/api/version` 404s. Adding that route is necessary but not sufficient —
-  something else in the handshake still refuses. Worth finishing, because a
-  standalone install that pairs to a hub and uploads nothing is the same shape
-  as a real product failure, even if this instance is the fixture.
 - `test_develop_discovery.py` — two cases about explicit develop roots.
   Pre-existing, verified at the previous commit.
 - The suite is order-dependent. `test_support.py` monkeypatches ~20 module
@@ -92,6 +80,17 @@ code: matched function names inside longer names, matched parameter names, ate
 one was caught by ruff or a test on the next command, which is the only reason
 this reads as an anecdote. `_satellite.` matching `satellite.` first and leaving
 `_role.` happened *again* during the role work, after this lesson was written.
+
+**A fixture that lies passes for years.** `test_sync_standalone_seeds_hub`
+failed on `main` and had three independent faults, each hidden by the one in
+front of it. It set the global `db.DB_PATH` to the *satellite* catalog while an
+in-process hub app read the same global — so the hub answered the manifest from
+the satellite's own rows, said "I already have all three", and uploaded nothing.
+Behind that, a path expectation predating the `Raws/Digital/` segment. Behind
+that, a flag and a develop edit written with raw SQL, which record no oplog
+entry — the v1 push used to carry them regardless of whether anything had
+changed, which is exactly the sloppiness deleting it was meant to end. Green
+now, and it exercises the real seeding path for the first time.
 
 **A test can fail for a reason that is not in the diff.** Three tests looked
 like transport regressions. One was the machine (Steam). One was already failing
