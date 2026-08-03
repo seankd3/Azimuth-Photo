@@ -248,28 +248,6 @@ def caption_model_key(config: dict | None = None) -> str:
     )
 
 
-def embedding_model_config_for_preset(preset_key: str) -> dict:
-    preset = EMBED_MODEL_PRESETS[preset_key]
-    config = {
-        "embed_model_id": preset["model_id"],
-        "embed_model_revision": preset["revision"],
-        "embed_model_dim": preset["dimension"],
-        "embed_model_dir": _default_model_dir(preset["model_id"]),
-    }
-    return {
-        "model_key": embedding_model_key(config),
-        "model_id": config["embed_model_id"],
-        "revision": config["embed_model_revision"],
-        "dimension": int(config["embed_model_dim"]),
-        "model_dir": config["embed_model_dir"],
-        "embed_model_id": config["embed_model_id"],
-        "embed_model_revision": config["embed_model_revision"],
-        "embed_model_dim": int(config["embed_model_dim"]),
-        "embed_model_dir": config["embed_model_dir"],
-        "embed_batch_size": 1 if preset_key == "qwen3-vl-embedding-8b" else DEFAULT_SETTINGS["embed_batch_size"],
-    }
-
-
 def active_embedding_config(config: dict | None = None) -> dict:
     config = config or get_settings()
     return {

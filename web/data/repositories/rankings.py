@@ -227,7 +227,6 @@ def folder_filter_sql(folder) -> tuple[str, list] | None:
     return f"({' OR '.join(parts)})", params
 
 
-
 def normalized_exclude_sources(exclude_sources) -> tuple[int, ...]:
     """Client quiet-source IDs: optional, order-stable, deduped positive ints."""
     if not exclude_sources:
@@ -1443,43 +1442,9 @@ async def count_rankings_cached(
     return value
 
 
-async def rankable_image_id_set(db_path: str) -> frozenset[int]:
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT i.id FROM images i "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            "WHERE s.included = 1 "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL"
-        )
-        return frozenset(int(row["id"]) for row in await cursor.fetchall())
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
 def invalidate_rankable_image_ids_cache() -> None:
     _rankable_image_ids_cache["ids"] = frozenset()
     _rankable_image_ids_cache["expires"] = 0
-
-
-async def rankable_image_id_set_cached(
-    db_path: str,
-    *,
-    active_source_ids: frozenset[int] | None = None,
-    ttl_seconds: float = RANKABLE_IMAGE_IDS_TTL_SECONDS,
-) -> frozenset[int]:
-    now = _time.time()
-    if now < _rankable_image_ids_cache["expires"]:
-        return _rankable_image_ids_cache["ids"]
-    if active_source_ids is not None and not active_source_ids:
-        _rankable_image_ids_cache["ids"] = frozenset()
-        _rankable_image_ids_cache["expires"] = now + ttl_seconds
-        return frozenset()
-
-    frozen = await rankable_image_id_set(db_path)
-    _rankable_image_ids_cache["ids"] = frozen
-    _rankable_image_ids_cache["expires"] = now + ttl_seconds
-    return frozen
 
 
 async def count_rankings_with_id_filter_on_conn(

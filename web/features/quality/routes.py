@@ -43,8 +43,6 @@ _scan_state: dict[str, Any] = {
 }
 
 
-
-
 class ScanBody(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=_MAX_LIMIT)
 
@@ -56,26 +54,6 @@ class AutocullBody(BaseModel):
 
 class AutocullApplyBody(BaseModel):
     stack_ids: list[int] = Field(min_length=1, max_length=500)
-
-
-def _status_payload() -> dict[str, Any]:
-    with _scan_lock:
-        state = dict(_scan_state)
-    return {
-        "running": bool(state["running"]),
-        "scored": int(state["scored"]),
-        "skipped": int(state["skipped"]),
-        "errors": int(state["errors"]),
-        "pending": int(state["pending"]),
-        "total_scored": int(state["total_scored"]),
-        "limit": int(state["limit"] or 0),
-        "last_error": state["last_error"] or "",
-        "started_at": state["started_at"],
-        "finished_at": state["finished_at"],
-        "message": state["message"] or "idle",
-        "eyes_open_note": quality_scorer.EYES_OPEN_V1_NOTE,
-        "throttle_seconds": _THROTTLE_SECONDS,
-    }
 
 
 async def _open_conn():
@@ -347,10 +325,6 @@ async def scan_image_ids(image_ids: list[int]) -> dict[str, int]:
         await asyncio.sleep(_THROTTLE_SECONDS)
     invalidate_autocull_cache()
     return result
-
-
-
-
 
 
 @router.get("/api/quality/{image_id}")

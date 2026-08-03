@@ -112,10 +112,6 @@ def share_cookie_path(token: str) -> str:
     return f"/s/{token}"
 
 
-def gallery_cookie_path(token: str) -> str:
-    return f"/s/gallery/{token}"
-
-
 def set_unlock_cookie(response: Response, token: str, value: str, *, request: Request | None = None) -> None:
     response.set_cookie(
         COOKIE_NAME,

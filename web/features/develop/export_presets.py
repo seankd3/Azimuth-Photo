@@ -43,8 +43,6 @@ class ExportPresetBody(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
-
-
 async def ensure_export_presets(conn) -> None:
     await conn.executescript(EXPORT_PRESETS_DDL)
 
@@ -83,14 +81,6 @@ def normalize_options(options: dict[str, Any] | None) -> dict[str, Any]:
         "color_space": color_space if color_space in VALID_COLOR_SPACES else "srgb",
         "border_px": border_px,
     }
-
-
-def print_ready_options(*, color_space: str = "srgb", border_px: int = 0) -> dict[str, Any]:
-    """The intentionally small, useful print preset: 300dpi TIFF16."""
-    return normalize_options({
-        "format": "tiff16", "quality": 100, "sharpen": "print_standard",
-        "print_ready": True, "color_space": color_space, "border_px": border_px,
-    })
 
 
 def _row_payload(row) -> dict[str, Any]:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
 import time
 from collections.abc import Iterable
@@ -460,18 +459,5 @@ async def mark_images_dirty(image_ids: Iterable[int], *, db_path: str | None = N
 
 async def mark_image_dirty(image_id: int, *, db_path: str | None = None) -> None:
     await mark_images_dirty([image_id], db_path=db_path)
-
-
-def run_sync_pass(*, hub_url: str | None = None, dry_run: bool = False) -> dict:
-    """Run one bounded pass for the field-recovery CLI."""
-
-    if dry_run:
-        return {"mode": "satellite", "hub": (hub_url or os.environ.get("AZIMUTH_HUB_URL", "")).rstrip("/"), "dry_run": True}
-    import db
-    from features.sync.sync_worker import SyncWorker
-
-    worker = SyncWorker(db_path=db.DB_PATH, hub=hub_url)
-    asyncio.run(worker.sync_once())
-    return worker.status()
 
 

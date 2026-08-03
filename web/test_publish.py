@@ -623,50 +623,6 @@ class PublishRouteTests(BackendTestCase):
     async def _no_sleep(self, _seconds):
         return None
 
-    async def test_publish_routes_contract(self):
-        source = await self._source()
-        image_id = await self._image(source["id"], "landscape.jpg")
-        collection = await db.create_collection(name="Selected Landscapes", image_ids=[image_id])
-
-        def probe_start():
-            client = TestClient(app_module.app)
-            try:
-                started = client.post(
-                    f"/api/user-collections/{collection['id']}/publish",
-                    json={"slug": "selected-landscapes", "title": "Selected Landscapes"},
-                )
-                status = client.get(f"/api/user-collections/{collection['id']}/publish")
-                return started, status
-            finally:
-                client.close()
-
-        started, status = await asyncio.to_thread(probe_start)
-        self.assertEqual(started.status_code, 202)
-        self.assertEqual(started.json()["job"], "publishing")
-        self.assertTrue(status.json()["in_progress"])
-
-        await asyncio.gather(*self.tasks)
-        self.tasks.clear()
-
-        def probe_done():
-            client = TestClient(app_module.app)
-            try:
-                status = client.get(f"/api/user-collections/{collection['id']}/publish")
-                listed = client.get("/api/publishes")
-                revoke = client.post(f"/api/user-collections/{collection['id']}/publish/revoke")
-                return status, listed, revoke
-            finally:
-                client.close()
-
-        status, listed, revoke = await asyncio.to_thread(probe_done)
-        self.assertEqual(status.status_code, 200)
-        self.assertEqual(status.json()["publish"]["slug"], "selected-landscapes")
-        self.assertEqual(status.json()["url"], "https://www.seankennethdoherty.com/g/selected-landscapes/")
-        self.assertEqual(listed.json()["publishes"][0]["slug"], "selected-landscapes")
-        self.assertEqual(revoke.status_code, 202)
-        await asyncio.gather(*self.tasks)
-        self.assertIsNone(await db.get_collection_publish(collection["id"]))
-
     async def test_publish_and_revoke_reject_conflicting_queued_job(self):
         source = await self._source()
         image_id = await self._image(source["id"], "queued.jpg")

@@ -47,7 +47,6 @@ _FALLBACK_SOFT_FRACTION = 0.55
 _FALLBACK_HARD_FRACTION = 0.72
 
 
-
 def _read_cgroup_limit(path: Path) -> int | None:
     try:
         raw = path.read_text(encoding="utf-8").strip().lower()
@@ -224,7 +223,6 @@ class MemoryPressure:
         }
 
 
-
 def note_process_start(*, calm_seconds: float | None = None) -> None:
     """Begin automatic startup calm (bulk seated until mono deadline)."""
     global _startup_calm_until_mono
@@ -277,31 +275,6 @@ def read_host_available_bytes() -> int | None:
     return None
 
 
-def set_rss_reader(reader: Callable[[], int] | None) -> None:
-    """Inject an RSS/pressure reader (tests). ``None`` restores live reads.
-
-    Legacy contract: the returned int is treated as the *pressure* figure
-    (combined), with swap reported as 0 — existing tests pass soft/hard
-    thresholds directly.
-    """
-    global _rss_reader, _memory_reader
-    _rss_reader = reader
-    if reader is None:
-        _memory_reader = None
-        return
-
-    def _wrap() -> MemoryReading:
-        value = max(0, int(reader()))
-        return MemoryReading(
-            rss_bytes=value,
-            swap_bytes=0,
-            pressure_bytes=value,
-            source="injected",
-        )
-
-    _memory_reader = _wrap
-
-
 def set_memory_reader(reader: Callable[[], MemoryReading] | None) -> None:
     """Inject a full memory reading (tests). Clears the legacy RSS injector."""
     global _rss_reader, _memory_reader
@@ -334,11 +307,6 @@ def _read_proc_status_kb(keys: tuple[str, ...]) -> dict[str, int]:
     except (OSError, ValueError, IndexError):
         pass
     return found
-
-
-def read_rss_bytes() -> int:
-    """Process RSS in bytes (legacy helper; prefer ``read_memory``)."""
-    return read_memory().rss_bytes
 
 
 def read_memory() -> MemoryReading:

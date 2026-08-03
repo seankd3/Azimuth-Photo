@@ -809,35 +809,6 @@ def stop_sync() -> dict[str, Any]:
     return status_payload()
 
 
-def reset_runner_for_tests() -> None:
-    """Test helper: clear runner state between cases."""
-    global _process, _worker_thread, _stop_requested, _scheduler_started
-    _stop_requested = True
-    _terminate_process(_process)
-    with _runner_lock:
-        _process = None
-        _worker_thread = None
-        _stop_requested = False
-        _runtime.clear()
-        _runtime.update(
-            {
-                "state": "idle",
-                "message": "",
-                "current_tree": None,
-                "bytes_done": 0,
-                "bytes_total": 0,
-                "pct": 0.0,
-                "speed": "",
-                "eta": "",
-                "started_at": None,
-                "finished_at": None,
-                "last_error": None,
-                "manual_override": False,
-            }
-        )
-    _scheduler_started = False
-
-
 async def run_nightly_scheduler(db_path_provider: DbPathProvider, *, hour: int = 2) -> None:
     """Background daemon: when nightly is enabled, sync at local ``hour:00``."""
     import asyncio
