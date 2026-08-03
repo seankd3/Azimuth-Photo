@@ -255,6 +255,11 @@ returned an empty list when nobody had wired them. Neither said anything.
 - `python -m harness --check` stays green. A commit that changes a golden says
   why in the message.
 - `./scripts/smoke` exit code is the result — never read through `tail`.
+- `web/scripts_js_imports.py` after moving any JS file. It walks every relative
+  import in static/js and checks both that the module exists and that the named
+  export does. Nothing else covers this: the Python suite never loads a browser
+  module and ruff cannot see across languages. It caught gallery_editor.js
+  importing ./dom.js after dom.js had become ../lib.js.
 - `web/scripts_stale_refs.py` after any rename. It reads the tests without
   running them and asks the real modules whether each name is still there —
   both `patch.object(mod, "x")` targets and plain `mod._private` access. It
