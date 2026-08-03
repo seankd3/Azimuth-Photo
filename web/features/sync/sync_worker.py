@@ -7,7 +7,6 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
 from typing import Any
 
 import settings
@@ -26,7 +25,6 @@ log = logging.getLogger(__name__)
 # Must stay at or under the hub's ManifestRequest cap (hub_routes.py).
 MANIFEST_BATCH = 2000
 # Must stay at or under the hub's MetadataRequest cap (hub_routes.py).
-METADATA_PUSH_LIMIT = 5000
 CHUNK_BYTES = 32 * 1024 * 1024
 RequestFn = Callable[..., Awaitable[tuple[int, dict, bytes]]]
 _BASE_IDLE_SECONDS = 15.0
@@ -263,7 +261,6 @@ class SyncWorker:
                     pushed = True
             if known:
                 await self._set_uploaded(known, hub_image_ids=known_ids)
-            pushed = await self._push_dirty_metadata() or pushed
         oplog_result = await self._exchange_oplog()
         pushed = bool(oplog_result["pushed"]) or pushed
         await self._refresh_mirror(force=pushed or self._force_mirror_refresh)
@@ -382,32 +379,6 @@ class SyncWorker:
         if target_seconds > elapsed:
             await asyncio.sleep(target_seconds - elapsed)
 
-    async def _push_dirty_metadata(self) -> bool:
-        """Send local flags and ratings up, in helpings the hub will accept.
-
-        The hub caps a metadata post at METADATA_PUSH_LIMIT items. Sending
-        everything owed in one request meant a library with more local photos
-        than that could never push at all — measured on the owner's laptop,
-        10,689 items against a 5,000 cap, rejected 422 on every single cycle, so
-        no flag or rating ever left the machine. Marking each helping as it
-        lands also means an interruption costs one helping, not the lot.
-        """
-
-        rows = await self._dirty_metadata_rows()
-        if not rows:
-            return False
-        pushed_any = False
-        for start in range(0, len(rows), METADATA_PUSH_LIMIT):
-            helping = rows[start:start + METADATA_PUSH_LIMIT]
-            snapshot = time.time()
-            response = await self._json(
-                "POST", "/api/sync/metadata", {"items": [row["item"] for row in helping]}
-            )
-            if response is None:
-                return pushed_any
-            await self._mark_pushed([row["content_hash"] for row in helping], snapshot)
-            pushed_any = True
-        return pushed_any
 
     async def _refresh_mirror(self, *, force: bool) -> None:
         last_refresh = self.mirror.status().get("last_refresh_at") or 0
@@ -474,68 +445,6 @@ class SyncWorker:
             self.prefetch._status["last_error"] = str(error)
             self.preview_mirror._status["last_error"] = str(error)
 
-    async def _dirty_metadata_rows(self) -> list[dict]:
-        conn = await connection.open_async(self.db_path)
-        try:
-            cursor = await conn.execute(
-                """
-                SELECT s.content_hash, s.image_id, s.last_local_change_at, i.flag, d.settings AS develop_settings,
-                       d.updated_at AS develop_updated_at
-                FROM sync_state s
-                JOIN images i ON i.id = s.image_id
-                LEFT JOIN develop_settings d ON d.image_id = i.id
-                WHERE s.last_local_change_at > COALESCE(s.last_pushed_at, 0)
-                """
-            )
-            rows = [dict(row) for row in await cursor.fetchall()]
-            await self._ensure_keyword_schema(conn)
-            for row in rows:
-                item = {"content_hash": row["content_hash"], "flag": row.get("flag")}
-                item["flag_updated_at"] = self._iso_timestamp(row.get("last_local_change_at"))
-                if row.get("develop_settings"):
-                    item["develop_settings"] = json.loads(row["develop_settings"])
-                    item["develop_updated_at"] = row.get("develop_updated_at")
-                keywords = await self._keyword_paths(conn, row["image_id"])
-                if keywords:
-                    item["keywords"] = keywords
-                iptc = await self._iptc(conn, row["image_id"])
-                if iptc:
-                    item["iptc"] = iptc
-                row["item"] = item
-            return rows
-        finally:
-            await connection.close_async(conn, db_path=self.db_path)
-
-    async def _ensure_keyword_schema(self, conn) -> None:
-        from features.library.keywords import KEYWORD_DDL
-        await conn.executescript(KEYWORD_DDL)
-
-    async def _keyword_paths(self, conn, image_id: int) -> list[str]:
-        cursor = await conn.execute(
-            """
-            WITH RECURSIVE tree(id, parent_id, path) AS (
-                SELECT id, parent_id, name FROM keywords WHERE parent_id IS NULL
-                UNION ALL
-                SELECT child.id, child.parent_id, tree.path || ' > ' || child.name
-                FROM keywords child JOIN tree ON child.parent_id = tree.id
-            )
-            SELECT tree.path FROM image_keywords JOIN tree ON tree.id = image_keywords.keyword_id
-            WHERE image_keywords.image_id = ? ORDER BY tree.path COLLATE NOCASE
-            """,
-            (image_id,),
-        )
-        return [str(row["path"]) for row in await cursor.fetchall()]
-
-    async def _iptc(self, conn, image_id: int) -> dict:
-        cursor = await conn.execute(
-            "SELECT title, caption, copyright, creator, updated_at FROM iptc_fields WHERE image_id = ?", (image_id,)
-        )
-        row = await cursor.fetchone()
-        return dict(row) if row else {}
-
-    @staticmethod
-    def _iso_timestamp(value: Any) -> str:
-        return datetime.fromtimestamp(float(value or time.time()), timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     async def _json(self, method: str, path: str, payload: dict | None = None) -> dict:
         body = json.dumps(payload, separators=(",", ":")).encode() if payload is not None else None
@@ -651,20 +560,6 @@ class SyncWorker:
         finally:
             await connection.close_async(conn, db_path=self.db_path)
 
-    async def _mark_pushed(self, content_hashes: list[str], snapshot: float) -> None:
-        if not content_hashes:
-            return
-        conn = await connection.open_async(self.db_path)
-        try:
-            placeholders = ",".join("?" for _ in content_hashes)
-            await conn.execute(
-                f"UPDATE sync_state SET last_pushed_at = ? WHERE content_hash IN ({placeholders}) "
-                "AND last_local_change_at <= ?",
-                (snapshot, *content_hashes, snapshot),
-            )
-            await conn.commit()
-        finally:
-            await connection.close_async(conn, db_path=self.db_path)
 
     def _refresh_queue(self, items: list[dict]) -> None:
         pending = [item for item in items if not int(item.get("uploaded") or 0)]

@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from test_support import BackendTestCase
 from features.library import keywords
+from features.sync import oplog
 from features.sync.sync_worker import SyncWorker
 from features.sync import satellite, satellite_routes
 import app as app_module
@@ -22,7 +23,7 @@ class SatelliteSyncTests(BackendTestCase):
         await super().asyncSetUp()
         self.hub_files: dict[str, bytearray] = {}
         self.hub_image_ids: dict[str, int] = {}
-        self.hub_metadata: list[dict] = []
+        self.hub_entries: list[dict] = []
         self.hub = TestClient(self._hub_app())
 
     async def asyncTearDown(self):
@@ -66,11 +67,15 @@ class SatelliteSyncTests(BackendTestCase):
             assert len(target) <= total
             return {"image_id": self.hub_image_ids[content_hash]}
 
-        @app.post("/api/sync/metadata")
-        async def metadata(request: Request):
-            items = (await request.json()).get("items") or []
-            self.hub_metadata.extend(items)
-            return {"applied": [{"content_hash": item["content_hash"]} for item in items], "skipped": []}
+        @app.post("/api/sync/oplog/push")
+        async def oplog_push(request: Request):
+            entries = (await request.json()).get("entries") or []
+            self.hub_entries.extend(entries)
+            return {"accepted": len(entries)}
+
+        @app.post("/api/sync/oplog/pull")
+        async def oplog_pull():
+            return {"entries": [], "cursor": 0}
 
         return app
 
@@ -105,10 +110,22 @@ class SatelliteSyncTests(BackendTestCase):
         await worker.sync_once()
 
         self.assertEqual({bytes(value) for value in self.hub_files.values()}, set(payloads))
-        self.assertEqual(len(self.hub_metadata), 3)
-        first = next(item for item in self.hub_metadata if item["flag"] == "picked")
-        self.assertEqual(first["develop_settings"], {"Exposure2012": 0.7})
-        self.assertEqual(first["keywords"], ["Field"])
+        # An edit after the upload is recorded as an oplog entry, ready for the
+        # next exchange. Before the upload there is no content hash to key one
+        # to, which is why this happens here.
+        await oplog.append_flags(__import__("db").DB_PATH, [image_ids[0]], "picked")
+
+        # The edit travels as an oplog entry. The v1 dirty-metadata push that
+        # used to carry it is gone.
+        conn = await __import__("db").get_db()
+        try:
+            families = {
+                str(row["family"])
+                for row in await (await conn.execute("SELECT family FROM oplog")).fetchall()
+            }
+        finally:
+            await conn.close()
+        self.assertIn("flag", families)
         self.assertEqual(worker.status()["queue_depth"], 0)
         conn = await __import__("db").get_db()
         try:
@@ -129,11 +146,19 @@ class SatelliteSyncTests(BackendTestCase):
         self.assertTrue(all(row["uploaded_at"] is not None for row in receipts))
         self.assertTrue(all(row["hub_image_id"] is not None for row in receipts))
         uploads = dict(self.hub_files)
-        metadata_count = len(self.hub_metadata)
 
         await worker.sync_once()
+        self.assertEqual(self.hub_files, uploads, "a second sync re-uploaded originals")
+        self.assertEqual(
+            [str(entry.get("family")) for entry in self.hub_entries],
+            ["flag"],
+            "the flag edit did not reach the hub exactly once",
+        )
+
+        entry_count = len(self.hub_entries)
+        await worker.sync_once()
         self.assertEqual(self.hub_files, uploads)
-        self.assertEqual(len(self.hub_metadata), metadata_count)
+        self.assertEqual(len(self.hub_entries), entry_count, "an entry was pushed twice")
 
     async def test_unchanged_original_reuses_persisted_hash_receipt(self):
         source = await self._source("field")
