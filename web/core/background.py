@@ -293,7 +293,6 @@ async def run_startup(
     api_date_groups,
     api_settings,
     mosaic_next,
-    compare_next,
     default_visible_pairing_candidates,
     warm_filtered_visible_ranked_candidates,
     get_visible_past_matchups,
@@ -503,7 +502,6 @@ async def run_startup(
         )
         await mosaic_next(n=12, strategy="explore")
         await mosaic_next(n=12, strategy="diverse")
-        await compare_next(n=5)
 
     track_background_task(_warm_priority_interaction_caches())
 
@@ -711,6 +709,5 @@ async def run_startup(
             mosaic_next(n=12, strategy="diverse"),
             mosaic_next(n=12, strategy="diverse", orientation="landscape"),
             mosaic_next(n=12, strategy="diverse", orientation="portrait"),
-            compare_next(n=5, mode="topn"),
         )
     track_background_task(_warm_interaction_caches())

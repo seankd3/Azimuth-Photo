@@ -78,66 +78,6 @@ async def cache_pregen_stop():
     return {"ok": True, "cache": await cache_status_service.build_cache_status(ahead=0, force=True)}
 
 
-@router.get("/api/cache/pregen/status")
-async def cache_pregen_status():
-    """Ops/board poller — never block on a full cache rebuild.
-
-    Kick a background refresh when the cached snapshot is missing/stale, but
-    always answer immediately from live worker fields (+ cached tier counts when
-    available). A 3s board poller must not contend with bulk meta-lock writers.
-    """
-    stale = cache_status_service.cached_cache_status(0)
-    if stale is None or not isinstance(stale.get("pregen"), dict):
-        # One background warm — never await on the poll path.
-        if not getattr(cache_pregen_status, "_warm_started", False):
-            cache_pregen_status._warm_started = True
-
-            async def _warm():
-                try:
-                    await cache_status_service.build_cache_status(ahead=0)
-                except Exception:
-                    pass
-                finally:
-                    cache_pregen_status._warm_started = False
-
-            asyncio.create_task(_warm())
-        live = dict(getattr(thumbnails, "_pregen_status", {}) or {})
-        return {
-            "enabled": True,
-            "manual_mode": bool(live.get("manual_mode", True)),
-            "manual_pause": bool(live.get("manual_pause", False)),
-            "state": live.get("state") or "unknown",
-            "message": live.get("message") or "Cache status is refreshing.",
-            "active_phase": live.get("active_phase"),
-            "started_at": live.get("started_at"),
-            "last_generated_at": live.get("last_generated_at"),
-            "generated_this_session": int(live.get("generated_this_session") or 0),
-            "last_error": live.get("last_error") or "",
-            "priority_scope": live.get("priority_scope"),
-            "idle_seconds": round(float(thumbnails.get_idle_seconds()), 2),
-            "preview": {"count": 0, "total": 0, "remaining": 0, "progress_pct": 0.0},
-        }
-
-    # Cached full snapshot is present — overlay live worker fields so boards
-    # see generation counters move without waiting on meta-lock stats.
-    pregen = dict(stale["pregen"])
-    live = getattr(thumbnails, "_pregen_status", {}) or {}
-    for key in (
-        "state",
-        "message",
-        "active_phase",
-        "started_at",
-        "last_generated_at",
-        "generated_this_session",
-        "last_error",
-        "priority_scope",
-        "manual_mode",
-        "manual_pause",
-    ):
-        if key in live:
-            pregen[key] = live[key]
-    pregen["idle_seconds"] = round(float(thumbnails.get_idle_seconds()), 2)
-    return pregen
 
 
 @router.post("/api/cache/clear")

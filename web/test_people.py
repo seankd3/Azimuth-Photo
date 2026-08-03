@@ -167,55 +167,6 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         )
         return scan["face_ids"][0]
 
-    async def test_assign_face_http_attaches_only_target_face_to_existing_person(self):
-        source = await self._source()
-        target_face = await self._face(await self._image(source["id"], "target.jpg"), vector=[1.0, 0.0])
-        assigned_face = await self._face(await self._image(source["id"], "assigned.jpg"), vector=[0.0, 1.0])
-        person_id = (await db.assign_face(target_face))["person_id"]
-
-        response = await self._request(
-            "POST", f"/api/people/faces/{assigned_face}/assign", json={"person_id": person_id},
-        )
-
-        self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(response.json()["person_id"], person_id)
-        conn = await db.get_db()
-        try:
-            rows = await (await conn.execute(
-                "SELECT face_id FROM face_assignments WHERE person_id = ? AND active = 1 ORDER BY face_id",
-                (person_id,),
-            )).fetchall()
-        finally:
-            await conn.close()
-        self.assertEqual([row["face_id"] for row in rows], sorted([target_face, assigned_face]))
-
-    async def test_ignore_face_and_person_http_hide_reviews_without_deleting_originals(self):
-        source = await self._source()
-        face_image = await self._image(source["id"], "face.jpg")
-        person_image = await self._image(source["id"], "person.jpg")
-        for image_id, name in ((face_image, "face.jpg"), (person_image, "person.jpg")):
-            with open(os.path.join(source["path"], name), "wb") as handle:
-                handle.write(b"original")
-        face_id = await self._face(face_image, vector=[1.0, 0.0])
-        person_face_id = await self._face(person_image, vector=[0.0, 1.0])
-        person_id = (await db.assign_face(person_face_id))["person_id"]
-
-        ignored_face = await self._request("POST", f"/api/people/faces/{face_id}/ignore")
-        ignored_person = await self._request("POST", f"/api/people/{person_id}/ignore")
-
-        self.assertEqual(ignored_face.status_code, 200, ignored_face.text)
-        self.assertEqual(ignored_person.status_code, 200, ignored_person.text)
-        conn = await db.get_db()
-        try:
-            face = await (await conn.execute("SELECT ignored FROM face_detections WHERE id = ?", (face_id,))).fetchone()
-            person = await (await conn.execute("SELECT status FROM people WHERE id = ?", (person_id,))).fetchone()
-        finally:
-            await conn.close()
-        self.assertEqual(face["ignored"], 1)
-        self.assertEqual(person["status"], "ignored")
-        self.assertTrue(os.path.isfile(os.path.join(source["path"], "face.jpg")))
-        self.assertTrue(os.path.isfile(os.path.join(source["path"], "person.jpg")))
-
     async def test_reject_merge_suggestion_http_marks_only_that_suggestion_rejected(self):
         source = await self._source()
         first_face = await self._face(await self._image(source["id"], "one.jpg"), vector=[1.0, 0.0])

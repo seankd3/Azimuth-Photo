@@ -198,13 +198,6 @@ async def api_rebuild_stacks(body: RebuildBody, background_tasks: BackgroundTask
     return JSONResponse({"accepted": True, "rebuild_status": {**_rebuild_status, "requested_kinds": kinds}}, status_code=202)
 
 
-@router.post("/api/stacks/version/scan", status_code=202)
-async def api_scan_version_stacks(background_tasks: BackgroundTasks):
-    """Incrementally rebuild RAW/export version stacks without an embedding pass."""
-    if _rebuild_status.get("state") == "running":
-        return JSONResponse({"error": "Stack rebuild already running"}, status_code=409)
-    background_tasks.add_task(_run_rebuild_task, ["version"])
-    return {"accepted": True, "rebuild_status": {**_rebuild_status, "requested_kinds": ["version"]}}
 
 
 @router.get("/api/stacks/{stack_id}")

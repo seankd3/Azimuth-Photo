@@ -187,10 +187,6 @@ async def catalog_metadata_stop():
     return {"ok": True, "metadata_status": catalog_metadata.pause_catalog_metadata()}
 
 
-@router.get("/api/scan/folder")
-async def scan_folder():
-    folder = await _configured(db.get_scan_folder)()
-    return {"folder": folder or ""}
 
 
 def folder_picker_start(path: str = "") -> str:

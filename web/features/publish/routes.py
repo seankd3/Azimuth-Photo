@@ -330,11 +330,6 @@ async def api_revoke_collection_publish(collection_id: int):
     return JSONResponse({"job": "revoking", "slug": publish["slug"]}, status_code=202)
 
 
-@router.get("/api/publishes")
-async def api_list_publishes():
-    _configured()
-    publishes = await db.list_collection_publishes()
-    return {"publishes": [_publish_payload(row) for row in publishes], "publishing": _publishing_config_payload()}
 
 
 async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:

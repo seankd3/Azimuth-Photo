@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from core import wiring
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, pano_routes, preset_routes, routes as develop_routes, xmp_write_routes
-from features.library import geo_routes, keyword_routes, saved_views, watched_routes
+from features.library import keyword_routes, saved_views, watched_routes
 from features.publish import routes as publish_routes
 from features.develop import export_presets
 from features.quality import routes as quality_routes
@@ -47,7 +47,6 @@ app.include_router(develop_routes.router)
 app.include_router(import_routes.router)
 app.include_router(xmp_write_routes.router)
 app.include_router(saved_views.router)
-app.include_router(geo_routes.router)
 app.include_router(keyword_routes.router)
 app.include_router(backup_routes.router)
 app.include_router(cloud_backup_routes.router)

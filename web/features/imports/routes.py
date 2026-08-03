@@ -13,9 +13,7 @@ from features.catalog import routes as catalog_routes
 from features.imports import film
 from features.imports import service as import_service
 from features.imports import staging
-from features.imports import taxonomy
 from features.quality import routes as quality_routes
-from features.sync import hub as sync_hub
 
 
 router = APIRouter()
@@ -150,63 +148,8 @@ async def api_import_cancel(job_id: str, _body: CancelRequest | None = None):
     return job.status()
 
 
-@router.get("/api/import/taxonomy")
-async def api_import_taxonomy():
-    """Documented destination table for library imports."""
-    return {
-        "destinations": [
-            {
-                "id": "edits",
-                "folder": taxonomy.DEST_EDITS,
-                "label": "Edits",
-                "rule": "Edited exports from Develop (incl. film-scan edits)",
-            },
-            {
-                "id": "raws",
-                "folder": taxonomy.DEST_DIGITAL,
-                "label": "Raws",
-                "rule": "Digital-camera RAW (CR3/CR2/ARW/NEF/RAF/ORF/RW2/DNG, …), filed on the Digital shelf",
-            },
-            {
-                "id": "film_scans",
-                "folder": taxonomy.DEST_FILM,
-                "label": "Film Scans",
-                "rule": "Scanner / lab film-scan inputs (typically TIFF), filed under Raws",
-            },
-            {
-                "id": "snapshots",
-                "folder": taxonomy.DEST_SNAPSHOTS,
-                "label": "Snapshots",
-                "rule": "Phone / cellphone stills (JPEG/HEIC/HEIF), takeout dumps, and the phone upload queue",
-            },
-        ],
-        "misplaced_personal_under_raws": (
-            await taxonomy.preview_misplaced_personal_photos(
-                db.DB_PATH,
-                sync_hub.default_library_root(),
-            )
-        ),
-    }
 
 
-@router.post("/api/import/taxonomy/reclassify-personal")
-async def api_import_taxonomy_reclassify(body: ReclassifyRequest):
-    """Explicit repair for phone files nested under RAWS/Personal Photos.
-
-    Never runs automatically. confirm=true and dry_run=false required to mutate.
-    """
-    result = await taxonomy.reclassify_misplaced_personal_photos(
-        db.DB_PATH,
-        sync_hub.default_library_root(),
-        confirm=body.confirm,
-        move_files=body.move_files,
-        dry_run=body.dry_run,
-    )
-    if result.get("updated"):
-        catalog_routes.invalidate_folders_cache()
-        cache_events.invalidate_catalog_cache()
-        cache_events.invalidate_rankings_cache()
-    return result
 
 
 def _preset_options(import_root: str, catalog: dict | None = None) -> list[dict]:

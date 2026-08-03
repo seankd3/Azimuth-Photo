@@ -128,7 +128,6 @@ class AppLifecycleDependencies:
     api_date_groups: Callable[..., Awaitable[Any]]
     api_settings: Callable[..., Awaitable[Any]]
     mosaic_next: Callable[..., Awaitable[Any]]
-    compare_next: Callable[..., Awaitable[Any]]
     default_visible_pairing_candidates: Callable[..., Awaitable[Any]]
     warm_filtered_visible_ranked_candidates: Callable[..., Awaitable[Any]]
     get_visible_past_matchups: Callable[..., Awaitable[Any]]
@@ -252,7 +251,6 @@ def register_app_lifecycle(shell: AppShell, dependencies: AppLifecycleDependenci
             api_date_groups=dependencies.api_date_groups,
             api_settings=dependencies.api_settings,
             mosaic_next=dependencies.mosaic_next,
-            compare_next=dependencies.compare_next,
             default_visible_pairing_candidates=dependencies.default_visible_pairing_candidates,
             warm_filtered_visible_ranked_candidates=dependencies.warm_filtered_visible_ranked_candidates,
             get_visible_past_matchups=dependencies.get_visible_past_matchups,
@@ -361,7 +359,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_pairing_propagation=schedule_pairing_propagation,
         invalidate_pairing_cache=invalidate_pairing_cache,
         mosaic_next_handler=lambda **kwargs: compare_service.mosaic_next_impl(**kwargs),
-        compare_next_handler=lambda **kwargs: compare_service.compare_next_impl(**kwargs),
     )
     wiring.configure_library_service(
         resolve_library_constraints=resolve_library_constraints,
@@ -462,7 +459,6 @@ def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
             api_date_groups=library_routes.api_date_groups,
             api_settings=settings_routes.api_settings,
             mosaic_next=compare_routes.mosaic_next,
-            compare_next=compare_routes.compare_next,
             default_visible_pairing_candidates=compare_service.default_visible_pairing_candidates,
             warm_filtered_visible_ranked_candidates=compare_service.warm_filtered_visible_ranked_candidates,
             get_visible_past_matchups=compare_service.get_visible_past_matchups,

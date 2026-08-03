@@ -138,17 +138,7 @@
     "params": [],
     "required_params": []
   },
-  "GET /api/backup/cloud/remotes": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
   "GET /api/backup/cloud/status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "GET /api/cache/pregen/status": {
     "has_body": false,
     "params": [],
     "required_params": []
@@ -215,31 +205,6 @@
     "required_params": [
       "collection_id"
     ]
-  },
-  "GET /api/compare/next": {
-    "has_body": false,
-    "params": [
-      "camera",
-      "collection_id",
-      "compared",
-      "date_taken",
-      "deep",
-      "exclude_sources",
-      "file_type",
-      "flag",
-      "folder",
-      "ids",
-      "import_batch",
-      "lens",
-      "min_stars",
-      "mode",
-      "n",
-      "orientation",
-      "people",
-      "q",
-      "tag"
-    ],
-    "required_params": []
   },
   "GET /api/counts": {
     "has_body": false,
@@ -543,11 +508,6 @@
       "image_id"
     ]
   },
-  "GET /api/geo/status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
   "GET /api/health": {
     "has_body": false,
     "params": [],
@@ -650,11 +610,6 @@
     ]
   },
   "GET /api/import/sources": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "GET /api/import/taxonomy": {
     "has_body": false,
     "params": [],
     "required_params": []
@@ -817,11 +772,6 @@
       "area"
     ]
   },
-  "GET /api/publishes": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
   "GET /api/quality/status": {
     "has_body": false,
     "params": [],
@@ -869,11 +819,6 @@
     "required_params": []
   },
   "GET /api/saved-views": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "GET /api/scan/folder": {
     "has_body": false,
     "params": [],
     "required_params": []
@@ -1105,11 +1050,6 @@
       "limit",
       "offset"
     ],
-    "required_params": []
-  },
-  "GET /api/ui/settings": {
-    "has_body": false,
-    "params": [],
     "required_params": []
   },
   "GET /api/user-collections": {
@@ -1570,21 +1510,6 @@
       "device_id"
     ]
   },
-  "POST /api/geo/backfill/start": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/geo/infer/start": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/geo/timeline/import": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
   "POST /api/image/{image_id}/caption": {
     "has_body": true,
     "params": [
@@ -1608,11 +1533,6 @@
     "params": [],
     "required_params": []
   },
-  "POST /api/images/media-status": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
-  },
   "POST /api/images/restore": {
     "has_body": true,
     "params": [],
@@ -1620,11 +1540,6 @@
   },
   "POST /api/images/trash": {
     "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/images/warm": {
-    "has_body": false,
     "params": [],
     "required_params": []
   },
@@ -1648,11 +1563,6 @@
     ]
   },
   "POST /api/import/scan": {
-    "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/import/taxonomy/reclassify-personal": {
     "has_body": true,
     "params": [],
     "required_params": []
@@ -1712,24 +1622,6 @@
     "params": [],
     "required_params": []
   },
-  "POST /api/people/faces/{face_id}/assign": {
-    "has_body": false,
-    "params": [
-      "face_id"
-    ],
-    "required_params": [
-      "face_id"
-    ]
-  },
-  "POST /api/people/faces/{face_id}/ignore": {
-    "has_body": false,
-    "params": [
-      "face_id"
-    ],
-    "required_params": [
-      "face_id"
-    ]
-  },
   "POST /api/people/merge": {
     "has_body": false,
     "params": [],
@@ -1771,11 +1663,6 @@
     "required_params": [
       "person_id"
     ]
-  },
-  "POST /api/propagation/predict": {
-    "has_body": false,
-    "params": [],
-    "required_params": []
   },
   "POST /api/published/export": {
     "has_body": false,
@@ -1876,11 +1763,6 @@
   },
   "POST /api/stacks/rebuild": {
     "has_body": true,
-    "params": [],
-    "required_params": []
-  },
-  "POST /api/stacks/version/scan": {
-    "has_body": false,
     "params": [],
     "required_params": []
   },

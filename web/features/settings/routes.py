@@ -197,14 +197,6 @@ async def api_background_work_status():
     }
 
 
-@router.get("/api/ui/settings")
-async def api_ui_settings():
-    config = settings.get_settings()
-    return {
-        "settings": {
-            "show_loupe_cache_status": bool(config.get("show_loupe_cache_status", True)),
-        }
-    }
 
 
 @router.post("/api/image/{image_id}/flag")

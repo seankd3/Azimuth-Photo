@@ -34,14 +34,6 @@ async def api_cloud_backup_status() -> dict[str, Any]:
     return cloud.status_payload(db_path=catalog_path())
 
 
-@router.get("/api/backup/cloud/remotes")
-async def api_cloud_backup_remotes() -> dict[str, Any]:
-    availability = cloud.feature_availability()
-    return {
-        "available": availability["available"],
-        "reason": availability["reason"],
-        "remotes": availability["remotes"],
-    }
 
 
 @router.get("/api/backup/cloud/config")

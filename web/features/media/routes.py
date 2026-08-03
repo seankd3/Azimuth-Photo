@@ -2,14 +2,12 @@ from core.catalog_path import catalog_path
 import asyncio
 import logging
 import os
-import sqlite3
 import time
 from collections.abc import Awaitable, Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 
-from core import requests as request_helpers
 from core import hdd_governor
 from core.source_files import inspect_source_file
 from data import connection as data_connection
@@ -679,125 +677,5 @@ async def image_media_status(image_id: int):
     return await asyncio.to_thread(image_media_status_payload, image_id)
 
 
-@router.post("/api/images/media-status")
-async def images_media_status(request: Request):
-    body, error = await request_helpers.json_object(request)
-    if error is not None:
-        return error
-    raw_ids = body.get("ids", [])
-    if not isinstance(raw_ids, list):
-        raw_ids = [raw_ids]
-    ids = []
-    seen = set()
-    for value in raw_ids:
-        try:
-            image_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if image_id <= 0 or image_id in seen:
-            continue
-        seen.add(image_id)
-        ids.append(image_id)
-        if len(ids) >= 96:
-            break
-    statuses = await asyncio.to_thread(
-        lambda: [image_media_status_payload(image_id) for image_id in ids]
-    )
-    return {"statuses": statuses}
 
 
-@router.post("/api/images/warm")
-async def warm_images(request: Request):
-    """Mark current/nearby images as hot and schedule SSD cache warming."""
-    if _cached_image_ids is None or _schedule_cached_thumbnail_memory_warm is None:
-        raise RuntimeError("Media routes are not configured")
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-    if not isinstance(body, dict):
-        body = {}
-    tier_requests = body.get("tiers") or {}
-    requested, all_ids = _normalize_warm_requests(tier_requests)
-
-    if not requested or not all_ids:
-        return {"scheduled": {}, "images": 0}
-
-    try:
-        rows_by_id = await image_repository.get_active_images_by_ids(catalog_path(), list(all_ids))
-    except (sqlite3.OperationalError, OSError) as exc:
-        log.warning("worker=media_warm image_ids=%s lookup skipped: %s", sorted(all_ids), exc)
-        return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
-    except Exception:
-        log.exception("worker=media_warm image_ids=%s lookup failed", sorted(all_ids))
-        return {"scheduled": {tier: 0 for tier in requested}, "images": len(all_ids)}
-
-    scheduled = {}
-    for tier in list(requested.keys()):
-        if tier not in thumbnails.THUMB_TIERS:
-            continue
-        hot_rows = [rows_by_id[image_id] for image_id in requested[tier] if image_id in rows_by_id]
-        if hot_rows:
-            _schedule_cached_thumbnail_memory_warm(
-                hot_rows,
-                tier,
-                limit=len(hot_rows),
-            )
-        cached_ids = await _cached_image_ids(requested[tier], tier)
-        if not cached_ids:
-            continue
-        requested[tier] = [image_id for image_id in requested[tier] if image_id not in cached_ids]
-        if not requested[tier]:
-            scheduled[tier] = 0
-
-    for tier, ids in requested.items():
-        rows = [rows_by_id[image_id] for image_id in ids if image_id in rows_by_id]
-        if not rows:
-            scheduled[tier] = 0
-            continue
-        if tier in thumbnails.THUMB_TIERS:
-            try:
-                scheduled[tier] = await thumbnails.prefetch_images(
-                    rows,
-                    tier,
-                    limit=len(rows),
-                    hot=True,
-                )
-            except (sqlite3.OperationalError, OSError) as exc:
-                log.warning(
-                    "worker=media_warm tier=%s image_ids=%s skipped: %s",
-                    tier,
-                    [int(row["id"]) for row in rows],
-                    exc,
-                )
-                scheduled[tier] = 0
-            except Exception:
-                log.exception(
-                    "worker=media_warm tier=%s image_ids=%s failed",
-                    tier,
-                    [int(row["id"]) for row in rows],
-                )
-                scheduled[tier] = 0
-        elif tier == thumbnails.FULL_TIER:
-            count = 0
-            for row in rows[:12]:
-                ext = os.path.splitext(row["filepath"])[1].lower()
-                if ext not in _browser_image_extensions:
-                    continue
-                try:
-                    await thumbnails.schedule_full_image_cache(row["filepath"], row["id"], hot=True)
-                    count += 1
-                except (sqlite3.OperationalError, OSError) as exc:
-                    log.warning(
-                        "worker=media_warm tier=full image_id=%s skipped: %s",
-                        row["id"],
-                        exc,
-                    )
-                except Exception:
-                    log.exception(
-                        "worker=media_warm tier=full image_id=%s failed",
-                        row["id"],
-                    )
-            scheduled[tier] = count
-
-    return {"scheduled": scheduled, "images": len(all_ids)}

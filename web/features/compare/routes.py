@@ -26,7 +26,6 @@ _add_past_matchups: AddPastMatchups | None = None
 _schedule_pairing_propagation: SchedulePropagation | None = None
 _invalidate_pairing_cache: InvalidatePairing | None = None
 _mosaic_next_handler: NextHandler | None = None
-_compare_next_handler: NextHandler | None = None
 _record_active_mosaic_pick: RecordMosaicPick | None = None
 _record_active_comparison: RecordComparison | None = None
 _undo_last_comparison: UndoComparison | None = None
@@ -54,7 +53,6 @@ def configure(
     record_active_comparison: RecordComparison,
     undo_last_comparison: UndoComparison,
     mosaic_next_handler: NextHandler | None = None,
-    compare_next_handler: NextHandler | None = None,
 ) -> None:
     global _patch_pairing_cache, _add_past_matchups
     global _schedule_pairing_propagation, _invalidate_pairing_cache
@@ -68,7 +66,6 @@ def configure(
     _record_active_comparison = record_active_comparison
     _undo_last_comparison = undo_last_comparison
     _mosaic_next_handler = mosaic_next_handler
-    _compare_next_handler = compare_next_handler
 
 
 def _configured() -> None:
@@ -272,80 +269,8 @@ async def propagation_last():
     }
 
 
-@router.post("/api/propagation/predict")
-async def propagation_predict(request: Request):
-    """Precompute propagation counts for each possible winner in a grid."""
-    import elo_propagation  # deferred: keeps numpy off boot until propagation prediction is requested
-
-    body, error = await json_object(request)
-    if error:
-        return error
-    grid_ids = body.get("grid_ids", [])
-    if not grid_ids:
-        return {"counts": {}}
-    counts = await elo_propagation.predict_propagation(grid_ids)
-    return {"counts": {str(k): v for k, v in counts.items()}}
 
 
-@router.get("/api/compare/next")
-async def compare_next(
-    n: int = 5, mode: str = "swiss",
-    orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
-    flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
-    tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
-    collection_id: int = 0, import_batch: int = 0,
-    exclude_sources: str = "",
-):
-    if _compare_next_handler is None:
-        raise RuntimeError("Compare routes are not configured")
-    scoped_ids, id_error = _parse_scoped_ids(ids)
-    if id_error is not None:
-        return id_error
-    excluded = parse_exclude_sources(exclude_sources)
-    started = time.perf_counter()
-    try:
-        with data_connection.sqlite_timeout(0.25):
-            response = await _compare_next_handler(
-                n=n,
-                mode=mode,
-                orientation=orientation,
-                compared=compared,
-                min_stars=min_stars,
-                folder=folder,
-                flag=flag,
-                date_taken=date_taken,
-                file_type=file_type,
-                camera=camera,
-                lens=lens,
-                tag=tag,
-                q=q,
-                deep=deep,
-                people=people,
-                ids=scoped_ids,
-                collection_id=collection_id,
-                import_batch=import_batch,
-                exclude_sources=excluded,
-            )
-    except Exception as exc:
-        if not data_connection.is_sqlite_locked_error(exc):
-            raise
-        return {
-            "pairs": [],
-            "total_images": 0,
-            "visible_images": 0,
-            "hidden_pending_thumbnails": 0,
-            "total_kept": 0,
-            "stats": {"filtered_pool": 0, "filtered_pool_visible": 0, "filtered_pool_total": 0},
-            "status_stale": True,
-            "counts_stale": True,
-            "candidate_source": "sqlite_busy",
-            "pairing": "strategy",
-            "latency_ms": round((time.perf_counter() - started) * 1000, 1),
-        }
-    if isinstance(response, dict):
-        response.setdefault("status_stale", False)
-        response.setdefault("latency_ms", round((time.perf_counter() - started) * 1000, 1))
-    return response
 
 
 @router.post("/api/compare")

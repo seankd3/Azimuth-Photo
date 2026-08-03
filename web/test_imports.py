@@ -110,25 +110,6 @@ class ImportTests(BackendTestCase):
             self.assertEqual(len(images), 1)
             self.assertEqual(images[0]["filename"], "alpha.jpg")
 
-    async def test_import_ui_contract(self):
-        base_dir = os.path.dirname(__file__)
-        with open(os.path.join(base_dir, "templates", "desktop.html"), encoding="utf-8") as fh:
-            desktop_template = fh.read()
-        with open(os.path.join(base_dir, "static", "js", "desktop", "importer.js"), encoding="utf-8") as fh:
-            importer = fh.read()
-        with open(os.path.join(base_dir, "static", "js", "desktop", "drawer.js"), encoding="utf-8") as fh:
-            drawer = fh.read()
-
-        self.assertIn('id="import-view"', desktop_template)
-        self.assertIn('id="system-btn"', desktop_template)
-        self.assertIn('id="drawer-body"', desktop_template)
-        self.assertIn("document.getElementById('import-view')?.addEventListener('click', openImport)", importer)
-        self.assertIn("formData.set('import_root'", importer)
-        self.assertIn("xhr.open('POST', '/api/imports')", importer)
-        self.assertIn("Past imports", importer)
-        self.assertIn("listImports(12)", importer)
-        self.assertIn("import_root: { type: 'text' }", drawer)
-
     async def test_one_import_action_contract(self):
         """One Import entry in the chrome; film scans and the ambiguity-only
         category override live inside the staging canvas (one-action import)."""

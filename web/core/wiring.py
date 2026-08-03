@@ -469,7 +469,6 @@ def configure_compare_routes(
     record_active_comparison=None,
     undo_last_comparison=None,
     mosaic_next_handler=None,
-    compare_next_handler=None,
 ) -> None:
     import db
     from features.compare import service as compare_service
@@ -492,7 +491,6 @@ def configure_compare_routes(
         ),
         undo_last_comparison=undo_last_comparison or (lambda: db.undo_last_comparison()),
         mosaic_next_handler=mosaic_next_handler,
-        compare_next_handler=compare_next_handler,
     )
 
 
