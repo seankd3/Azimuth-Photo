@@ -289,6 +289,15 @@ and scan path. On the desktop surface:
 - The module graph resolves, so the `lib.js` consolidation, the `state.js`
   deletion and the `RAW_EXTENSIONS` move all hold at runtime.
 
+The System drawer opened and rendered all seven sections, the archive summary,
+the source list and system health — read in full. Reopening it later, after
+about twenty scripted interactions on the same page, stopped working: the
+content stays in the DOM and the click changes nothing. Viewport and an offline
+source were both tested and neither explains it. It is most likely synthetic
+`.click()` leaving the page in a state a real pointer would not, but that is a
+guess, so it is written as one. A session that can drive real input should open
+the drawer twice and settle it.
+
 **No screenshot.** The browser pane will not display in this environment, so the
 page never composites — which is also why image `naturalWidth` stays 0 despite
 the thumbnail fetches returning 200. Everything above was read from the DOM,
