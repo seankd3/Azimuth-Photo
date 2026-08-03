@@ -30,8 +30,6 @@ from typing import Mapping
 import numpy as np
 from PIL import Image
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
 
 from core.runtime_paths import resolve_runtime_paths
 
@@ -76,7 +74,6 @@ class ProofTile:
     height: int
     source_width: int
     source_height: int
-
 
 
 def decode_full_resolution(path: str | Path) -> np.ndarray:
@@ -575,50 +572,6 @@ def _download_name_for(path: Path, fallback: str) -> str:
 def _cleanup_export(path: Path) -> None:
     path.unlink(missing_ok=True)
     path.with_suffix(path.suffix + ".name").unlink(missing_ok=True)
-
-
-async def render_export_response(
-    raw_path: str | Path,
-    settings: Mapping[str, object],
-    *,
-    output_format: str,
-    quality: int = 90,
-    max_px: int | None = None,
-    sharpen: str | None = None,
-    filename_pattern: str | None = None,
-    image_id: int | None = None,
-    asshot_temperature: float | None = None,
-    asshot_tint: float | None = None,
-    color_profile=None,
-) -> FileResponse:
-    """Render then construct the cleanup-safe response used by the develop route."""
-    output_path = await render_export_async(
-        raw_path,
-        settings,
-        output_format=output_format,
-        quality=quality,
-        max_px=max_px,
-        sharpen=sharpen,
-        filename_pattern=filename_pattern,
-        image_id=image_id,
-        asshot_temperature=asshot_temperature,
-        asshot_tint=asshot_tint,
-        color_profile=color_profile,
-    )
-    is_jpeg = output_format.lower() == "jpeg"
-    fallback = format_export_filename(
-        raw_path=raw_path,
-        image_id=image_id,
-        output_format=output_format,
-        pattern=filename_pattern,
-    )
-    filename = _download_name_for(output_path, fallback)
-    return FileResponse(
-        output_path,
-        media_type="image/jpeg" if is_jpeg else "image/tiff",
-        filename=filename,
-        background=BackgroundTask(_cleanup_export, output_path),
-    )
 
 
 def default_render_color_profile(meta: Mapping[str, object] | None) -> dict[str, object]:

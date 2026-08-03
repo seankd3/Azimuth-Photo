@@ -364,15 +364,6 @@ def group_events(rows: list[dict], *, gap_seconds: float = EVENT_GAP_SECONDS,
     return events
 
 
-def _best_camera(rows: list[dict]) -> str:
-    cameras: dict[str, int] = {}
-    for row in rows:
-        camera = (row.get("camera_model") or "").strip()
-        if camera:
-            cameras[camera] = cameras.get(camera, 0) + 1
-    return max(cameras, key=cameras.get) if cameras else ""
-
-
 def _candidate_from_rows(
     *,
     kind: str,

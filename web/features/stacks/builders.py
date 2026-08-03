@@ -98,10 +98,6 @@ def _variant_key(filename: str) -> tuple[str, bool]:
     return text.lower(), stripped_marker
 
 
-def _variant_stem(filename: str) -> str:
-    return _variant_key(filename)[0]
-
-
 def _ends_with_variant_marker(text: str) -> bool:
     lower = (text or "").lower()
     return any(lower.endswith(token.lower()) for token in _VARIANT_MARKER_SUFFIXES)

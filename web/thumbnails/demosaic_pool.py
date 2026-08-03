@@ -71,10 +71,6 @@ def is_enabled() -> bool:
     return configured_demosaic_processes() > 0 and not _shutdown
 
 
-def worker_count() -> int:
-    return _worker_count if _executor is not None else configured_demosaic_processes()
-
-
 def _make_executor(workers: int) -> ProcessPoolExecutor:
     ctx = mp.get_context("spawn")
     return ProcessPoolExecutor(

@@ -41,10 +41,6 @@ def discard_scope(scope: dict) -> None:
         pass
 
 
-def clear_scopes() -> None:
-    _priority_scopes.clear()
-
-
 def scope_label(scope: dict, *, collection_name: str = "") -> str:
     folder = scope.get("folder") or ""
     folders = list(folder) if isinstance(folder, tuple) else [folder] if folder else []

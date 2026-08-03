@@ -58,24 +58,6 @@ def group_paths_by_drive(
     return groups
 
 
-def group_items_by_drive(
-    items: Iterable[T],
-    *,
-    path_of,
-    family: str | None = None,
-) -> dict[str, list[T]]:
-    """Bucket arbitrary items by the drive of ``path_of(item)``."""
-
-    groups: dict[str, list[T]] = {}
-    for item in items:
-        path = path_of(item)
-        if not path:
-            continue
-        key = drive_key(str(path), family=family)
-        groups.setdefault(key, []).append(item)
-    return groups
-
-
 def safe_commonpath(
     paths: Sequence[str],
     *,

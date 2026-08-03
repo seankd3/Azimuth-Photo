@@ -153,10 +153,6 @@ def _cache_access_time(*, hot: bool) -> float:
     return now if hot else now - COLD_CACHE_ACCESS_OFFSET_SECONDS
 
 
-def _cache_marker_path() -> str:
-    return thumbnail_maintenance.cache_marker_path(SSD_CACHE_DIR, CACHE_MARKER)
-
-
 def _write_cache_marker():
     thumbnail_maintenance.write_cache_marker(SSD_CACHE_DIR, CACHE_MARKER)
 
@@ -718,12 +714,6 @@ def _cache_full_image_bytes_sync(
     )
 
 
-def _load_raw_preview(filepath: str, max_target: int):
-    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
-
-    return generation.load_raw_preview(filepath, max_target)
-
-
 def _load_source_image(
     filepath: str, max_target: int, image_id: int | None = None
 ) -> Image.Image:
@@ -769,12 +759,6 @@ def _queue_orientation(image_id: int, img: Image.Image):
         orientation_lock=_orientation_lock,
         orientation_queue=_orientation_queue,
     )
-
-
-def _thumbnail_jpeg_bytes(variant: Image.Image, size: str) -> bytes:
-    from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
-
-    return generation.thumbnail_jpeg_bytes(variant, size, THUMB_QUALITY)
 
 
 def _encode_and_cache_thumbnail(

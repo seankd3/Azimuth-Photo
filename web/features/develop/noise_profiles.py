@@ -131,13 +131,6 @@ def _profiles() -> tuple[dict[str, object], ...]:
     return tuple(result)
 
 
-def clear_noise_profile_cache() -> None:
-    """Clear the generated-data cache for focused tests and data refreshes."""
-    _payload.cache_clear()
-    _aliases.cache_clear()
-    _profiles.cache_clear()
-
-
 def _interpolate(lower: Mapping[str, object], upper: Mapping[str, object], iso: float) -> dict[str, list[float]]:
     lower_iso, upper_iso = float(lower["iso"]), float(upper["iso"])
     if lower_iso == upper_iso:

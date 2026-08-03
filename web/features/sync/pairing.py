@@ -114,17 +114,6 @@ def create_pair_code(*, hub_url: str) -> dict[str, Any]:
     }
 
 
-def peek_pair_code(code: str) -> dict[str, Any] | None:
-    _purge_expired_codes()
-    row = _pending_codes.get(str(code or "").strip().upper())
-    if not row or row.get("used"):
-        return None
-    if float(row["expires_at"]) <= time.time():
-        _pending_codes.pop(row["code"], None)
-        return None
-    return dict(row)
-
-
 def _consume_pair_code(code: str) -> dict[str, Any]:
     _purge_expired_codes()
     normalized = str(code or "").strip().upper()

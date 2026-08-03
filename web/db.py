@@ -138,10 +138,6 @@ def clear_filter_options_cache():
     _sync_filter_options_refreshing_facade()
 
 
-def _invalidate_catalog_cache():
-    cache_events.invalidate_catalog_cache()
-
-
 def _invalidate_ranking_count_cache():
     cache_events.invalidate_ranking_count_cache()
 
@@ -155,16 +151,8 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
     cache_events.note_cached_image_ids_added(cache_root, size, image_ids)
 
 
-def _invalidate_rankable_image_ids_cache():
-    cache_events.invalidate_rankable_image_ids_cache()
-
-
 def _invalidate_embedding_count_cache():
     cache_events.invalidate_embedding_count_cache()
-
-
-def _invalidate_active_source_ids_cache():
-    cache_events.invalidate_active_source_ids_cache()
 
 
 def _invalidate_past_matchups_cache():
@@ -480,15 +468,6 @@ async def get_catalog_summary():
     )
 
 
-async def get_catalog_light_summary():
-    return await catalog_repository.catalog_light_summary_cached(
-        DB_PATH,
-        get_catalog_image_counts=get_catalog_image_counts,
-        refresh_source_online_states=refresh_source_online_states,
-        ttl_seconds=CATALOG_CACHE_TTL_SECONDS,
-    )
-
-
 async def remove_source_keep_data(source_id: int):
     await catalog_repository.remove_source_keep_data(DB_PATH, source_id)
     _invalidate_stats_cache()
@@ -555,10 +534,6 @@ async def get_collection_publish(collection_id: int):
     return await publish_repository.get_publish(DB_PATH, collection_id)
 
 
-async def get_collection_publish_by_slug(slug: str):
-    return await publish_repository.get_publish_by_slug(DB_PATH, slug)
-
-
 async def list_collection_publishes():
     return await publish_repository.list_publishes(DB_PATH)
 
@@ -617,14 +592,6 @@ async def list_active_collection_shares():
 
 async def revoke_collection_share(collection_id: int) -> bool:
     return await share_repository.revoke_share(DB_PATH, collection_id)
-
-
-async def revoke_published_node_share(published_node_id: int) -> bool:
-    return await share_repository.revoke_share(DB_PATH, published_node_id=published_node_id)
-
-
-async def revoke_share_by_id(share_id: int) -> bool:
-    return await share_repository.revoke_share(DB_PATH, share_id=share_id)
 
 
 async def set_collection_share_password(collection_id: int, password_hash: str | None):
@@ -1091,29 +1058,6 @@ async def _cache_entry_count(size: str, cache_root: str) -> int:
     )
 
 
-async def get_rankable_image_id_set() -> frozenset[int]:
-    """Return active ranking image IDs with a short TTL for hot count paths."""
-    return await ranking_repository.rankable_image_id_set_cached(
-        DB_PATH,
-        active_source_ids=await get_active_source_id_set(),
-        ttl_seconds=RANKABLE_IMAGE_IDS_TTL_SECONDS,
-    )
-
-
-async def _count_rankings_with_id_filter(
-    conn,
-    conditions: list[str],
-    params: list,
-    id_values,
-) -> int:
-    return await ranking_repository.count_rankings_with_id_filter_on_conn(
-        conn,
-        conditions,
-        params,
-        id_values,
-    )
-
-
 async def get_rankings(limit: int = 100, offset: int = 0, sort: str = "elo",
                        orientation: str = "", compared: str = "", min_stars: int = 0,
                        folder: str = "", flag: str = "", date_taken: str = "",
@@ -1264,10 +1208,6 @@ async def list_stacks(**kwargs) -> dict:
 
 async def unstack(stack_id: int) -> bool:
     return await stack_repository.unstack(DB_PATH, stack_id)
-
-
-async def set_stack_representative(stack_id: int, image_id: int) -> dict | None:
-    return await stack_repository.set_representative(DB_PATH, stack_id, image_id)
 
 
 async def stack_representative_counts(image_ids) -> dict[int, dict]:

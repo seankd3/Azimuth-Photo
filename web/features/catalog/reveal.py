@@ -69,15 +69,6 @@ def graphical_session_available(platform_name: str | None = None, environ: dict 
     return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))
 
 
-def reveal_label(platform_name: str | None = None) -> str:
-    family = (platform_name or sys.platform or "").lower()
-    if family.startswith("win"):
-        return "Reveal in Explorer"
-    if family == "darwin":
-        return "Reveal in Finder"
-    return "Open in file manager"
-
-
 def _default_runner(argv: Sequence[str]) -> None:
     subprocess.Popen(
         list(argv),

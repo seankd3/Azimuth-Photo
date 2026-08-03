@@ -21,9 +21,6 @@ METADATA_FIELDS = (
 _MISSING = object()
 
 
-
-
-
 def metadata_payload(image: dict) -> dict:
     return {field: _get(image, field) for field in METADATA_FIELDS}
 
@@ -100,18 +97,6 @@ def interaction_pool_stats(total_images: int, visible_images: int) -> dict:
         "filtered_pool_visible": visible,
         "filtered_pool_total": total,
     }
-
-
-def compare_response_rows(response: dict) -> list[dict]:
-    rows = []
-    for pair in response.get("pairs") or ():
-        left = pair.get("left") if isinstance(pair, dict) else None
-        right = pair.get("right") if isinstance(pair, dict) else None
-        if isinstance(left, dict):
-            rows.append(left)
-        if isinstance(right, dict):
-            rows.append(right)
-    return rows
 
 
 def copy_dict_of_dicts(value: dict | None) -> dict:

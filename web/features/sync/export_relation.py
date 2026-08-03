@@ -187,15 +187,3 @@ async def export_of_for_image(db_path: str, image_id: int) -> dict[str, Any] | N
     }
 
 
-async def attach_export_of(db_path: str, payload: dict[str, Any]) -> dict[str, Any]:
-    """Return a shallow copy of ``payload`` with export_of when linked."""
-
-    image_id = int(payload.get("id") or 0)
-    if image_id <= 0:
-        return payload
-    relation = await export_of_for_image(db_path, image_id)
-    if relation is None:
-        return payload
-    enriched = dict(payload)
-    enriched["export_of"] = relation
-    return enriched

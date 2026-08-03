@@ -18,10 +18,6 @@ _ON_DEMAND_LIMIT = max(
 _on_demand_decode_sem: asyncio.Semaphore | None = None
 
 
-def on_demand_decode_limit() -> int:
-    return _ON_DEMAND_LIMIT
-
-
 def _on_demand_semaphore() -> asyncio.Semaphore:
     global _on_demand_decode_sem
     if _on_demand_decode_sem is None:

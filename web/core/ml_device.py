@@ -8,7 +8,6 @@ CUDA is missing — callers get the same CPU path they had before.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 
 ENV_NAME = "AZIMUTH_ML_DEVICE"
@@ -39,13 +38,6 @@ def preferred_device() -> str:
     if override == "cuda":
         return "cuda" if cuda_available() else "cpu"
     return "cuda" if cuda_available() else "cpu"
-
-
-def torch_device() -> Any:
-    """``torch.device`` for the preferred backend (lazy-imports torch)."""
-    import torch
-
-    return torch.device(preferred_device())
 
 
 def sentence_transformers_device() -> str:

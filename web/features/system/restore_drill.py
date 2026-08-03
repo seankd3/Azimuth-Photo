@@ -20,7 +20,6 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 from core.runtime_paths import resolve_runtime_paths
 from features.system import backups
@@ -326,43 +325,3 @@ def _ntfy(url: str, *, title: str, body: str, priority: str | None = None) -> No
         log.warning("restore_drill ntfy failed: %s", exc)
 
 
-def notify_transition(
-    *,
-    ok: bool,
-    detail: str,
-    state_path: Path = DEFAULT_STATE_PATH,
-    ntfy_url: str = DEFAULT_NTFY_URL,
-    log_path: Path = DEFAULT_LOG_PATH,
-) -> None:
-    """Alert ntfy only on ok→bad or bad→ok transitions; always append bounded log."""
-    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
-    prev = _read_state(state_path)
-    if ok:
-        _write_state(state_path, "ok")
-        _append_bounded_log(log_path, f"{now} ok {detail}")
-        if prev == "bad":
-            _ntfy(ntfy_url, title="Azimuth Photo restore drill recovered", body=f"{detail} at {now}")
-    else:
-        _write_state(state_path, "bad")
-        _append_bounded_log(log_path, f"{now} bad {detail}")
-        if prev == "ok":
-            _ntfy(
-                ntfy_url,
-                title="Azimuth Photo restore drill failed",
-                body=f"{detail} at {now}",
-                priority="high",
-            )
-
-
-def run_drill_as_dict(**kwargs: Any) -> dict[str, Any]:
-    """Convenience wrapper returning a JSON-serializable result dict."""
-    result = run_restore_drill(**kwargs)
-    return {
-        "ok": result.ok,
-        "snapshot": result.snapshot,
-        "scratch": result.scratch,
-        "images": result.images,
-        "spot_checked": result.spot_checked,
-        "message": result.message,
-        "error": result.error,
-    }

@@ -88,23 +88,6 @@ def discover_lr_preset_paths(roots: tuple[Path, ...] | None = None) -> list[Path
     return found
 
 
-def discover_lr_preset_summary() -> dict[str, Any]:
-    """Summarize platform Lightroom preset roots without importing."""
-    summary = {"roots": []}
-    for root in (Path(path) for path in lightroom_preset_roots()):
-        entry = {"path": str(root), "exists": root.is_dir(), "xmp_count": 0}
-        if entry["exists"]:
-            entry["xmp_count"] = sum(
-                1
-                for dirpath, _dirnames, filenames in os.walk(root)
-                for filename in filenames
-                if filename.lower().endswith(".xmp")
-            )
-        summary["roots"].append(entry)
-    summary["xmp_found"] = sum(item["xmp_count"] for item in summary["roots"])
-    return summary
-
-
 def _preset_name_for_path(path: Path, root: Path) -> str:
     try:
         relative = path.relative_to(root)

@@ -20,10 +20,6 @@ _holds = 0
 _holds_lock = threading.Lock()
 
 
-def bulk_hdd_concurrency() -> int:
-    return _CONCURRENCY
-
-
 def bulk_hdd_holds() -> int:
     with _holds_lock:
         return _holds

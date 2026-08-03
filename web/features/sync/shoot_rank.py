@@ -136,10 +136,6 @@ _PAYLOAD_TTL_SECONDS = 60.0
 _payload_cache: dict[str, Any] = {"db": None, "at": 0.0, "payload": None, "by_path": {}}
 
 
-def invalidate_payload_cache() -> None:
-    _payload_cache.update(db=None, at=0.0, payload=None, by_path={})
-
-
 async def shoot_rank_payload(db_path: str) -> dict[str, Any]:
     """Ranked-photo shoot context for bridge status / deltas (TTL-cached)."""
 

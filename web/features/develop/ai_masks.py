@@ -9,7 +9,6 @@ model-swappable seam; callers only receive a raster cache key.
 from __future__ import annotations
 
 import hashlib
-import importlib.util
 import os
 import shutil
 import threading
@@ -109,26 +108,6 @@ def ensure_subject_model(*, download: bool = True) -> Path:
             temporary.unlink(missing_ok=True)
             raise _model_missing(f"MODEL_MISSING: could not download pinned u2net.onnx ({exc})") from exc
         return U2NET_MODEL_PATH
-
-
-def subject_model_status() -> dict[str, str | bool]:
-    """Small operational status payload; never reports an unverified model as ready."""
-
-    if importlib.util.find_spec("onnxruntime") is None:
-        return {"ready": False, "status": "MODEL_MISSING", "detail": "onnxruntime is not installed"}
-    if not U2NET_MODEL_PATH.exists():
-        return {"ready": False, "status": "MODEL_MISSING", "detail": "pinned u2net.onnx is not installed"}
-    if _sha256(U2NET_MODEL_PATH) != U2NET_MODEL_SHA256:
-        return {"ready": False, "status": "MODEL_MISSING", "detail": "u2net.onnx checksum does not match pinned release"}
-    from core.ml_device import onnx_providers, preferred_device
-
-    providers = onnx_providers()
-    backend = "CUDA" if providers and providers[0] == "CUDAExecutionProvider" else "CPU"
-    return {
-        "ready": True,
-        "status": "READY",
-        "detail": f"rembg u2net {backend} (prefer={preferred_device()})",
-    }
 
 
 def _mask_cache_key(base_preview: Path, kind: MaskKind) -> str:

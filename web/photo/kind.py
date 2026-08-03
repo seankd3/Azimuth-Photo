@@ -81,7 +81,3 @@ def is_camera_only(path: str | os.PathLike[str]) -> bool:
     return extension(path) in CAMERA_ONLY
 
 
-def is_display(path: str | os.PathLike[str]) -> bool:
-    """Whether this is an already-rendered image rather than sensor data."""
-
-    return extension(path) in DISPLAY_FORMATS

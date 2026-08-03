@@ -527,24 +527,3 @@ def apply_adobe_style(
     return prophoto_to_display_srgb(result)
 
 
-def render_dng_profile(
-    linear_rgb: np.ndarray,
-    profile: Mapping[str, Any],
-    *,
-    cct: float,
-    input_space: str = "linear_srgb",
-    reference_neutral: Sequence[float] | None = None,
-    file_baseline_exposure: float | None = None,
-    user_ops: Callable[[np.ndarray], np.ndarray] | None = None,
-) -> np.ndarray:
-    """Render DNG stages 2-8 with the frozen §30.2 ordering."""
-    profile = normalize_adobe_profile(profile)
-    scene = prepare_scene_linear(
-        linear_rgb,
-        profile,
-        cct=cct,
-        input_space=input_space,
-        reference_neutral=reference_neutral,
-        file_baseline_exposure=file_baseline_exposure,
-    )
-    return apply_adobe_style(scene, profile, cct=cct, user_ops=user_ops)

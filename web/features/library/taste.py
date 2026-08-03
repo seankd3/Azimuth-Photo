@@ -128,15 +128,6 @@ def _unavailable(reason: str, *, comparison_count: int = 0, winner_count: int = 
     }
 
 
-def _normalize(vector: np.ndarray) -> np.ndarray | None:
-    import numpy as np  # deferred: keeps numpy off boot until a taste vector is computed
-
-    norm = float(np.linalg.norm(vector))
-    if not np.isfinite(norm) or norm <= 0:
-        return None
-    return (vector / norm).astype(np.float32)
-
-
 def taste_vector_signature(taste: dict | None) -> tuple:
     import numpy as np  # deferred: keeps numpy off boot until a taste vector is compared
 
@@ -303,12 +294,6 @@ def _row_norms_for(matrix: np.ndarray):
     _row_norms_cache.clear()
     _row_norms_cache[identity] = norms
     return norms
-
-
-def _compute_scaled_scores(image_ids, matrix: np.ndarray, vector) -> dict[int, float]:
-    """Compat wrapper for tests that patch this symbol directly."""
-    _similarities, scores = _compute_similarity_and_scaled_scores(image_ids, matrix, vector)
-    return scores
 
 
 def _compute_similarity_and_scaled_scores(

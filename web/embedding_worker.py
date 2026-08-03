@@ -137,8 +137,6 @@ _poison_embedding_image: AsyncNoneProvider | None = None
 _get_embedding_count: AsyncIntProvider | None = None
 
 
-
-
 def _target_embed_batch_size(config: dict | None = None) -> int:
     config = config or settings.get_settings()
     try:
@@ -800,11 +798,6 @@ def _get_model_load_lock():
     return _model_load_lock
 
 
-def search_model_ready(config: dict | None = None) -> bool:
-    config = config or settings.active_embedding_config()
-    return _model_is_current(*_model_values(config))
-
-
 def _clear_search_model_load_task(task):
     global _search_model_load_task
     if _search_model_load_task is task:
@@ -1009,12 +1002,6 @@ def vec_to_blob(vec: np.ndarray) -> bytes:
     import numpy as np  # deferred: keeps numpy off boot until an embedding is stored
 
     return np.asarray(vec, dtype=np.float32).tobytes()
-
-
-def blob_to_vec(blob: bytes) -> np.ndarray:
-    import numpy as np  # deferred: keeps numpy off boot until an embedding is read
-
-    return np.frombuffer(blob, dtype=np.float32).copy()
 
 
 def _row_image_ref(row) -> tuple[int, str]:

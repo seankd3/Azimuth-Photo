@@ -39,8 +39,6 @@ PROPAGATION_LOCK_RETRIES = 3
 PROPAGATION_LOCK_RETRY_SECONDS = 1.0
 
 
-
-
 def _is_sqlite_locked(exc: BaseException) -> bool:
     text = str(exc).lower()
     return (
@@ -95,17 +93,6 @@ def _nonlinear_weight(similarity: float) -> float:
     """
     t = (similarity - SIMILARITY_THRESHOLD) / (1.0 - SIMILARITY_THRESHOLD)
     return t * t * t  # cubic
-
-
-
-def _find_similar(image_id, image_ids, matrix, id_to_idx, threshold, max_n):
-    """Find the most similar images above threshold. Returns [(id, similarity), ...]."""
-    idx = id_to_idx.get(image_id)
-    if idx is None:
-        return []
-
-    similarities = matrix @ matrix[idx]  # cosine sim (already L2-normalized)
-    return _rank_similar_from_scores(image_id, image_ids, similarities, threshold, max_n)
 
 
 def _rank_similar_from_scores(image_id, image_ids, similarities, threshold, max_n):

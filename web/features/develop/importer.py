@@ -110,11 +110,6 @@ def read_embedded_xmp(raw_path: str) -> bytes | None:
                 return None
 
 
-def parse_xmp_file(xmp_path: str) -> dict[str, Any]:
-    with open(xmp_path, "rb") as handle:
-        return parse_xmp_text(handle.read())
-
-
 def _iter_raw_rows(root: str) -> Iterator[tuple]:
     """Use the scanner's source-boundary-safe RAW enumeration."""
 

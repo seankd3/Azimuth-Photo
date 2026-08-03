@@ -132,34 +132,6 @@ async def workspace_tree(db_path: str) -> dict:
     }
 
 
-async def collection_own_image_ids(
-    db_path: str,
-    collection_id: int,
-    *,
-    resolve_smart_image_ids: ResolveSmartImageIds,
-) -> list[int] | None:
-    conn = await data_connection.open_async(db_path)
-    try:
-        cursor = await conn.execute("SELECT query FROM collections WHERE id = ?", (int(collection_id),))
-        row = await cursor.fetchone()
-        if row is None:
-            return None
-        query = _parse_query(row["query"])
-        if query is None:
-            cursor = await conn.execute(
-                """
-                SELECT image_id FROM collection_images
-                WHERE collection_id = ?
-                ORDER BY position ASC, added_at ASC, image_id ASC
-                """,
-                (int(collection_id),),
-            )
-            return [int(image["image_id"]) for image in await cursor.fetchall()]
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-    return _unique_ids(await resolve_smart_image_ids(query or {}))
-
-
 async def recursive_image_ids(
     db_path: str,
     collection_id: int,

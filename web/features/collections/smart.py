@@ -83,19 +83,6 @@ def query_to_json(query: dict | None) -> str | None:
     return json.dumps(normalize_query(query) or {}, sort_keys=True, separators=(",", ":"))
 
 
-def query_from_json(value: str | None) -> dict | None:
-    if not value:
-        return None
-    try:
-        parsed = json.loads(value)
-    except (TypeError, ValueError):
-        return {}
-    try:
-        return normalize_query(parsed) or {}
-    except SmartCollectionQueryError:
-        return {}
-
-
 def query_cache_key(query: dict, *, db_signature: str) -> tuple:
     return (db_signature, query_to_json(query) or "{}")
 

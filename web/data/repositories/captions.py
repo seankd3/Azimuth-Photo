@@ -304,34 +304,6 @@ async def get_image_caption(db_path: str, *, image_id: int, model_key: str) -> d
         await connection.close_async(conn, db_path=db_path)
 
 
-async def image_caption_presence(db_path: str, *, model_key: str, image_ids) -> dict[int, bool]:
-    ids = []
-    for image_id in dict.fromkeys(image_ids or []):
-        try:
-            normalized = int(image_id)
-        except (TypeError, ValueError):
-            continue
-        if normalized > 0:
-            ids.append(normalized)
-    if not ids:
-        return {}
-    result: dict[int, bool] = {}
-    conn = await connection.open_async(db_path)
-    try:
-        for chunk in _chunked(ids, 900):
-            placeholders = ",".join("?" for _ in chunk)
-            cursor = await conn.execute(
-                "SELECT image_id FROM image_captions "
-                f"WHERE model_key = ? AND image_id IN ({placeholders})",
-                (model_key, *chunk),
-            )
-            for row in await cursor.fetchall():
-                result[int(row["image_id"])] = True
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-    return result
-
-
 async def image_caption_summaries(db_path: str, *, model_key: str, image_ids) -> dict[int, dict]:
     ids = []
     for image_id in dict.fromkeys(image_ids or []):
