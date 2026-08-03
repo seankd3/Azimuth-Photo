@@ -103,14 +103,9 @@ CREATE TABLE IF NOT EXISTS sync_prefetch_state (
 
 
 def _store_with_thumbnail_cache(size: str, image_id: int, signature: str, data: bytes) -> None:
-    if size in {"sm", "md"} and str(signature).startswith("pv:"):
-        from features.sync import preview_mirror
+    from features.sync import preview_mirror
 
-        preview_mirror.put(image_id, size, signature, data, hot=False)
-        return
-    import thumbnails
-
-    thumbnails._write_thumbnail_to_disk(size, image_id, signature, data, hot=False)
+    preview_mirror.store(image_id, size, signature, data, hot=False)
 
 
 @dataclass(order=True)

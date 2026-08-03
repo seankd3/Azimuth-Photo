@@ -236,13 +236,9 @@ def _cache_remote_media(image, tier: str, data: bytes) -> str:
     image_id = int(image["id"])
     if tier in preview_mirror.MIRROR_SIZES:
         signature = preview_mirror.preview_version_for_image(image)
-        preview_mirror.put(image_id, tier, signature, data, hot=True)
-        return signature
-    remote_id = int(image["hub_image_id"])
-    signature = ThumbPrefetcher._signature(remote_id, data)
-    thumbnails._write_thumbnail_to_disk(tier, image_id, signature, data, hot=False)
-    if tier != thumbnails.FULL_TIER:
-        thumbnails._memory_put(tier, image_id, signature, data)
+    else:
+        signature = ThumbPrefetcher._signature(int(image["hub_image_id"]), data)
+    preview_mirror.store(image_id, tier, signature, data, hot=True)
     return signature
 
 

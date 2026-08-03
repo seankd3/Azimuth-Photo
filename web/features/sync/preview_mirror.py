@@ -218,6 +218,28 @@ def delete_entry(image_id: int, size: str) -> None:
         log.debug("preview_mirror delete failed image_id=%s size=%s: %s", image_id, size, exc)
 
 
+def store(image_id: int, tier: str, signature: str, data: bytes, *, hot: bool) -> bool:
+    """Put a preview the hub sent into the one cache, by the one rule.
+
+    A versioned preview at a mirrored size belongs to the mirror, which owns the
+    byte cap; anything else is an ordinary tile. Both callers already decided
+    this, one by asking the tier and one by asking the signature, and the two
+    tests disagreed for a versioned preview at a size the mirror does not carry.
+
+    `hot` means a person is waiting: warm RAM as well. A bulk prefetch does not,
+    because warming five hundred tiles evicts the working set the user is on.
+    """
+
+    import thumbnails
+
+    if tier in MIRROR_SIZES and str(signature).startswith("pv:"):
+        return put(image_id, tier, signature, data, hot=hot)
+    thumbnails._write_thumbnail_to_disk(tier, int(image_id), signature, data, hot=False)
+    if hot and tier != thumbnails.FULL_TIER:
+        thumbnails._memory_put(tier, int(image_id), signature, data)
+    return True
+
+
 def put(image_id: int, size: str, preview_version: str, data: bytes, *, hot: bool = True) -> bool:
     """Write one preview into the shared thumb cache and enforce the mirror cap."""
 
