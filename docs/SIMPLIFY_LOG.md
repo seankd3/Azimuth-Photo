@@ -101,6 +101,12 @@ A hand-run CLI, a CI job, a release gate, a generator and a test all look
 identical to dead code under that rule. Before deleting a product surface, read
 MASTER_PLAN, `.github/workflows/`, and `scripts/azimuth-check`.
 
+The same rule, applied to what this branch *added*, found two dead functions of
+its own: `transport.reachable()` and `photo.kind.is_camera_only()`, both written
+because they looked like they completed a set. Neither had a caller, and neither
+had a hand-run CLI's excuse for not having one. They are gone. A rule worth
+applying to sixteen-year-old code is worth applying to code an hour old.
+
 Peak deletions were 48,429 lines. Putting back what should not have gone cost
 about 15,000 of them — that gap is the measure of the overreach.
 
