@@ -294,12 +294,22 @@ the source list and system health — on a real click, every time. It also
 correctly flipped the source to "offline" when its folder was deleted and back
 when it was restored.
 
-An earlier entry here claimed the drawer "stopped reopening". It never did. The
-probe was `document.getElementById('system-nav')`, an id I had inferred from one
-lucky lookup and which is not reliably present; the drawer was open the whole
-time, as the page text said. Two hypotheses were tested against that phantom —
-viewport, and the source being offline — and both were disproved, which should
-have been the signal that the measurement was wrong rather than the app.
+An earlier entry here claimed the drawer "stopped reopening". It never did, and
+the real cause is worth keeping: **the drawer repaints on its status poll** —
+measured at 6 whole-subtree replacements in 12 idle seconds, the largest
+swapping 141 elements. Any held reference to a node inside it goes stale within
+about two seconds, which is what my `getElementById('system-nav')` probe and the
+accessibility-tree refs were both tripping over. The drawer was open throughout,
+as the page text said.
+
+Two hypotheses were tested against that phantom — viewport, and the source being
+offline — and both were disproved, which should have been the signal that the
+measurement was wrong rather than the app.
+
+The repaint costs nothing visible that could be measured here: text typed into
+the drawer's manual-path field survives ten seconds and several repaints intact.
+Whether focus survives could not be tested — a browser pane that is not
+displayed does not accept focus at all.
 
 **No screenshot.** The browser pane will not display in this environment, so the
 page never composites — which is also why image `naturalWidth` stays 0 despite
