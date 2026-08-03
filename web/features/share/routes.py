@@ -21,6 +21,15 @@ from pydantic import BaseModel, Field
 from features.share import auth
 
 
+from core import query_constraints
+from features.collections import smart as smart_collections
+async def _smart_image_ids(query):
+    return await smart_collections.resolve_image_ids(
+        query,
+        resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
+    )
+
+
 router = APIRouter()
 UNLOCK_FAILURE_LIMIT = 5
 UNLOCK_FAILURE_WINDOW_SECONDS = 15 * 60
@@ -34,7 +43,6 @@ ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
 
 _templates: Jinja2Templates | None = None
 _thumbnail_response: ThumbnailResponse | None = None
-_resolve_smart_image_ids: ResolveSmartImageIds | None = None
 _unlock_failures: dict[str, dict[str, float | int]] = {}
 
 
@@ -56,14 +64,11 @@ def configure(
     *,
     templates: Jinja2Templates,
     thumbnail_response: ThumbnailResponse,
-    resolve_smart_image_ids: ResolveSmartImageIds | None = None,
 ) -> None:
     global _templates
     global _thumbnail_response
-    global _resolve_smart_image_ids
     _templates = templates
     _thumbnail_response = thumbnail_response
-    _resolve_smart_image_ids = resolve_smart_image_ids
 
 
 def _configured() -> None:
@@ -91,9 +96,7 @@ async def _snapshot_image_ids_for_collection(collection_id: int) -> list[int] | 
     collection = await db.get_collection(collection_id, limit=1, offset=0)
     if collection is None or not collection.get("smart"):
         return None
-    if _resolve_smart_image_ids is None:
-        raise RuntimeError("Share routes are not configured")
-    return await _resolve_smart_image_ids(collection["query"] or {})
+    return await _smart_image_ids(collection["query"] or {})
 
 
 def _share_url(request: Request, token: str) -> str:

@@ -38,8 +38,6 @@ _resolve_library_constraints: Callable[..., object] | None = None
 _schedule_thumbnail_prefetch: Callable[..., None] | None = None
 _schedule_result_thumbnail_memory_warm: Callable[..., None] | None = None
 _rankings_response_cache_ttl_seconds_provider: Callable[[], float] | None = None
-_get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
-_get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]] | None = None
 _resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
@@ -62,17 +60,6 @@ def configure(
     _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
 
 
-def configure_import_batches(*, get_import_batch_image_ids: Callable[[int], Awaitable[set[int] | None]]) -> None:
-    global _get_import_batch_image_ids
-    _get_import_batch_image_ids = get_import_batch_image_ids
-
-
-def configure_stacks(
-    *,
-    get_stack_representative_counts: Callable[[list[int]], Awaitable[dict[int, dict]]],
-) -> None:
-    global _get_stack_representative_counts
-    _get_stack_representative_counts = get_stack_representative_counts
 
 
 def invalidate_rankings_response_cache(*, order_caches: bool = True) -> None:
@@ -569,9 +556,7 @@ async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
     batch_id = _normalized_import_batch_id(import_batch)
     if batch_id <= 0:
         return current_ids
-    if _get_import_batch_image_ids is None:
-        raise RuntimeError("Library service is not configured")
-    batch_ids = await _get_import_batch_image_ids(batch_id)
+    batch_ids = await db.get_import_batch_image_ids(batch_id)
     if batch_ids is None:
         return set()
     if current_ids is None:
@@ -620,9 +605,7 @@ def _exclude_collapsed_stack_members(stacks: str = "expanded") -> bool:
 async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> list[dict]:
     if _normalize_stacks_mode(stacks) != "collapsed" or not cards:
         return cards
-    if _get_stack_representative_counts is None:
-        raise RuntimeError("Library service is not configured")
-    mapping = await _get_stack_representative_counts([int(card["id"]) for card in cards])
+    mapping = await db.stack_representative_counts([int(card["id"]) for card in cards])
     if not mapping:
         return cards
     for card in cards:

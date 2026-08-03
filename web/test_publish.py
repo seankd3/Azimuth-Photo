@@ -603,11 +603,18 @@ class PublishRouteTests(BackendTestCase):
         self.thumbs = FakeThumbnails(self.cache)
         publish_routes.configure(
             templates=templates,
-            resolve_smart_image_ids=lambda _query: [],
             thumbnails=self.thumbs,
             deployer=FakeDeployer(),
             track_background_task=lambda coro: self.tasks.append(coro),
         )
+        # the route resolves smart membership itself now
+        self._real_smart_ids = publish_routes._smart_image_ids
+
+        async def _no_smart_ids(_query):
+            return []
+
+        publish_routes._smart_image_ids = _no_smart_ids
+        self.addCleanup(setattr, publish_routes, "_smart_image_ids", self._real_smart_ids)
 
     async def asyncTearDown(self):
         for coro in self.tasks:

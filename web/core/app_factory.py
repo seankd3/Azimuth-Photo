@@ -254,15 +254,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
         rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
     )
-    wiring.configure_share_routes(
-        templates=shell.templates,
-        resolve_library_constraints=resolve_library_constraints,
-    )
-    wiring.configure_publish_routes(
-        templates=shell.templates,
-        resolve_library_constraints=resolve_library_constraints,
-        track_background_task=shell.track_background_task,
-    )
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
     )
@@ -316,9 +307,14 @@ def create_app_shell(
     app.state.azimuth_shell = shell
     from core import wiring
     wiring.configure_cache_events()
-    wiring.configure_share_routes(templates=templates)
-    wiring.configure_publish_routes(templates=templates)
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
+    import thumbnails
+
+    share_routes.configure(
+        templates=templates,
+        thumbnail_response=media_routes.thumbnail_response,
+    )
+    publish_routes.configure(templates=templates, thumbnails=thumbnails)
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)
     auth_routes.configure(templates=templates)

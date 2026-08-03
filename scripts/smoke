@@ -57,6 +57,7 @@ api/export?scope=all&limit=1
 api/trash
 api/stacks
 api/date-groups
+api/published/tree?area=website
 ROUTES
 
 exit "$fail"

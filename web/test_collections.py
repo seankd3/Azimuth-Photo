@@ -488,10 +488,6 @@ class CollectionTests(BackendTestCase):
         share_routes.configure(
             templates=templates,
             thumbnail_response=lambda *_args, **_kwargs: Response(content=b"thumb", media_type="image/jpeg"),
-            resolve_smart_image_ids=lambda query: smart_collections.resolve_image_ids(
-                query,
-                resolve_library_constraints=self._resolve_library_constraints,
-            ),
         )
         created = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(

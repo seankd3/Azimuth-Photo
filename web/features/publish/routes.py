@@ -32,6 +32,15 @@ from features.publish import nodes as published_nodes
 from features.share import auth as share_auth
 
 
+from core import query_constraints
+from features.collections import smart as smart_collections
+async def _smart_image_ids(query):
+    return await smart_collections.resolve_image_ids(
+        query,
+        resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
+    )
+
+
 router = APIRouter()
 log = logging.getLogger(__name__)
 
@@ -43,7 +52,6 @@ TrackBackgroundTask = Callable[[Awaitable], object]
 DbPath = Callable[[], str]
 
 _templates: Jinja2Templates | None = None
-_resolve_smart_image_ids: ResolveSmartImageIds | None = None
 _track_background_task: TrackBackgroundTask | None = None
 _deployer: GalleryDeployer | None = None
 _thumbnails = None
@@ -87,17 +95,14 @@ class PublishedNodeShareBody(BaseModel):
 def configure(
     *,
     templates: Jinja2Templates,
-    resolve_smart_image_ids: ResolveSmartImageIds,
     thumbnails,
     deployer: GalleryDeployer | None = None,
     track_background_task: TrackBackgroundTask | None = None,
 ) -> None:
     global _templates
-    global _resolve_smart_image_ids
     global _track_background_task
     global _deployer, _thumbnails
     _templates = templates
-    _resolve_smart_image_ids = resolve_smart_image_ids
     _track_background_task = track_background_task
     _deployer = deployer or GalleryDeployer()
     _thumbnails = thumbnails
@@ -106,7 +111,6 @@ def configure(
 def _configured() -> None:
     if (
         _templates is None
-        or _resolve_smart_image_ids is None
         or _deployer is None
         or _thumbnails is None
     ):
@@ -139,7 +143,7 @@ async def api_create_published_node(payload: CreatePublishedNodeBody):
             source_collection_id=payload.source_collection_id,
             slug=payload.slug,
             title=payload.title,
-            resolve_smart_image_ids=_resolve_smart_image_ids,
+            resolve_smart_image_ids=_smart_image_ids,
         )
     except published_nodes.PublishedNodeNotFound as exc:
         return JSONResponse({"error": str(exc)}, status_code=404)
@@ -187,7 +191,7 @@ async def api_published_node_diff(node_id: int):
     diff = await published_nodes.node_diff(
         catalog_path(),
         node_id,
-        resolve_smart_image_ids=_resolve_smart_image_ids,
+        resolve_smart_image_ids=_smart_image_ids,
     )
     if diff is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
@@ -206,7 +210,7 @@ async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBo
             add_image_ids=payload.add_image_ids,
             remove_image_ids=payload.remove_image_ids,
             attach_child_collection_ids=payload.attach_child_collection_ids,
-            resolve_smart_image_ids=_resolve_smart_image_ids,
+            resolve_smart_image_ids=_smart_image_ids,
         )
     except published_nodes.PublishedNodeSourceDeleted as exc:
         return JSONResponse({"error": str(exc)}, status_code=410)
@@ -352,7 +356,7 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
                     get_collection=db.get_collection,
                     get_images_by_ids=db.get_active_images_by_ids,
                     collection_image_ids=db.collection_image_ids,
-                    resolve_smart_image_ids=_resolve_smart_image_ids,
+                    resolve_smart_image_ids=_smart_image_ids,
                     thumbnails=_thumbnails,
                 )
             )

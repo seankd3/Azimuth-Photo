@@ -1,10 +1,10 @@
+from features.publish import routes as publish_routes
 from test_support import *  # noqa: F401,F403
 
 from fastapi.testclient import TestClient
 
 from data import connection as data_connection
 from data import schema as data_schema
-from core import wiring
 from features.collections import graph as collection_graph
 from features.publish import nodes as published_nodes
 from features.publish.builder import website_tree_manifest
@@ -13,8 +13,9 @@ from features.publish.builder import website_tree_manifest
 class PublishedNodeTests(BackendTestCase):
     async def asyncSetUp(self):
         await super().asyncSetUp()
-        wiring.configure_publish_routes(
+        publish_routes.configure(
             templates=app_module.app.state.azimuth_shell.templates,
+            thumbnails=thumbnails,
         )
 
     async def _resolve_smart(self, _query):
