@@ -2,6 +2,7 @@ import asyncio
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(__file__))
 import helpers  # noqa: E402
@@ -165,19 +166,15 @@ class ImageHelperTests(unittest.TestCase):
         )
         self.assertEqual([img["id"] for img in filtered], [2])
 
-    def test_db_backed_helpers_use_configured_providers(self):
-        old_cached = helpers._cached_image_ids_provider
+    def test_cached_image_ids_normalizes_ids_before_asking_the_catalog(self):
         calls = []
 
         async def fake_cached_image_ids(image_ids, size, cache_root):
             calls.append(("cached", tuple(image_ids), size, cache_root))
             return {2, 3}
 
-        try:
-            helpers.configure(cached_image_ids=fake_cached_image_ids)
+        with mock.patch.object(helpers.db, "get_cached_image_ids", fake_cached_image_ids):
             cached = asyncio.run(helpers.cached_image_ids([1, "2", "bad", 2, 3], "sm", "/tmp/cache"))
-        finally:
-            helpers._cached_image_ids_provider = old_cached
 
         self.assertEqual(cached, {2, 3})
         self.assertIn(("cached", (1, 2, 3), "sm", "/tmp/cache"), calls)

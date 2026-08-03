@@ -1,31 +1,12 @@
 from core.numbers import field as _get, integer as _as_int, number as _as_float
-from collections.abc import Awaitable, Callable
 
 from core.responses import (
     METADATA_FIELDS as METADATA_FIELDS,
     image_card as image_card,
     metadata_payload as metadata_payload,
 )
+import db
 from data.repositories import rankings as ranking_repository
-
-
-CachedImageIdsProvider = Callable[[list[int], str, str], Awaitable[set[int]]]
-_cached_image_ids_provider: CachedImageIdsProvider | None = None
-
-
-def configure(
-    *,
-    cached_image_ids: CachedImageIdsProvider | None = None,
-) -> None:
-    global _cached_image_ids_provider
-    if cached_image_ids is not None:
-        _cached_image_ids_provider = cached_image_ids
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"helpers is missing configured dependency: {name}")
-    return provider
 
 
 
@@ -143,7 +124,7 @@ def _unique_int_ids(values) -> list[int]:
 
 async def cached_image_ids(image_ids, size: str, cache_root: str) -> set[int]:
     ids = _unique_int_ids(image_ids)
-    return await _configured(_cached_image_ids_provider, "cached_image_ids")(ids, size, cache_root)
+    return await db.get_cached_image_ids(ids, size, cache_root)
 
 
 async def filter_visible_candidates(candidates: list[dict], size: str, cache_root: str) -> list[dict]:

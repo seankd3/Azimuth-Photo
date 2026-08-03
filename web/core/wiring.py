@@ -22,20 +22,15 @@ from features.trash import routes as trash_routes
 
 def configure_database_backed_providers() -> None:
     import db
-    import embed_cache
     import embedding_worker
     import caption_worker
     import elo_propagation
     import face_worker
-    import helpers as app_helpers
     import scanner
     import thumbnails
     from core import cache_events
     from features.catalog import metadata as catalog_metadata
 
-    embed_cache.configure(
-        active_embedding_model_key=lambda: db.active_embedding_model_key(),
-    )
     embedding_worker.configure(
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
@@ -74,9 +69,6 @@ def configure_database_backed_providers() -> None:
             size,
             image_ids,
         ),
-    )
-    app_helpers.configure(
-        cached_image_ids=lambda image_ids, size, cache_root: db.get_cached_image_ids(image_ids, size, cache_root),
     )
     catalog_metadata.configure(
         invalidate_filter_options_cache=db._invalidate_filter_options_cache,

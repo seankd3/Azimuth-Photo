@@ -41,28 +41,13 @@ _cache = {
 }
 _caches = {}
 _rebuild_lock = asyncio.Lock()
-ActiveEmbeddingModelKey = Callable[[], str]
 DbPath = Callable[[], str]
-_active_embedding_model_key: ActiveEmbeddingModelKey | None = None
-
-
-def configure(
-    *,
-    active_embedding_model_key: ActiveEmbeddingModelKey | None = None,
-) -> None:
-    global _active_embedding_model_key
-    if active_embedding_model_key is not None:
-        _active_embedding_model_key = active_embedding_model_key
-
-
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"embed_cache is missing configured dependency: {name}")
-    return provider
 
 
 def _target_model_key(model_key: str | None = None) -> str:
-    return model_key or _configured(_active_embedding_model_key, "active_embedding_model_key")()
+    import db
+
+    return model_key or db.active_embedding_model_key()
 
 
 def _empty_cache(model_key: str | None = None):

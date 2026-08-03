@@ -19,7 +19,6 @@ os.environ.setdefault("AZIMUTH_SKIP_LR_PRESET_IMPORT", "1")
 import app as app_module  # noqa: E402
 import db  # noqa: E402
 from features.develop import preset_routes, presets as presets_mod  # noqa: E402
-from core import wiring  # noqa: E402
 
 
 SAMPLE_XMP = b"""<?xml version="1.0" encoding="UTF-8"?>
