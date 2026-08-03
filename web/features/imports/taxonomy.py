@@ -36,6 +36,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Literal
 
+from photo import kind
+
 
 SourceKind = Literal[
     "phone",
@@ -109,16 +111,7 @@ def existing_root(library_root: Path | str, canonical: str, legacy: str) -> Path
     return canonical_dir
 
 
-RAW_CAMERA_EXTENSIONS = frozenset({
-    ".arw",
-    ".cr2",
-    ".cr3",
-    ".dng",
-    ".nef",
-    ".orf",
-    ".raf",
-    ".rw2",
-})
+RAW_CAMERA_EXTENSIONS = kind.RAW_FORMATS
 
 PHONE_STILL_EXTENSIONS = frozenset({
     ".heic",
@@ -149,9 +142,7 @@ _WEAK_PHONE_PATH_MARKERS = (
 )
 _PHONE_PATH_MARKERS = _STRONG_PHONE_PATH_MARKERS + _WEAK_PHONE_PATH_MARKERS
 
-# Camera-RAW formats that are never produced by phones. .dng is deliberately
-# excluded: Pixel and other phones shoot DNG, so its routing stays marker-driven.
-UNAMBIGUOUS_RAW_EXTENSIONS = frozenset(RAW_CAMERA_EXTENSIONS - {".dng"})
+UNAMBIGUOUS_RAW_EXTENSIONS = kind.CAMERA_ONLY
 
 _FILM_PATH_MARKERS = (
     "film scans",

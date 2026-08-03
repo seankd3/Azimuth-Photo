@@ -46,7 +46,7 @@
       "stacks.builders": true,
       "thumbnails.config": true
     },
-    "develop.is_raw_path": true,
+    "develop.is_raw_path": false,
     "ext": ".cr2",
     "verdicts_disagree": true
   },

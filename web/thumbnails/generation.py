@@ -5,6 +5,7 @@ import time
 from PIL import Image, ImageOps
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
+from photo import kind
 from thumbnails.raw_ops import (
     _raw_open_target,
     apply_raw_orientation,
@@ -101,15 +102,6 @@ def partition_raw_thumbnail_tiers(
 VIDEO_THUMB_EXTENSIONS = frozenset({".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv"})
 
 
-# A name is not a format. This archive holds 1,306 files named .CR2 that are
-# really full-resolution JPEGs: they open fine in the viewer, LibRaw refuses
-# them as "not a raw file", and every RAW branch below used to be chosen by
-# extension alone — so those photos could never get a thumbnail. Decide once,
-# by the first bytes. When the original is already in RAM this costs nothing;
-# otherwise it is a 3-byte read of a file that is about to be read in full.
-_JPEG_MAGIC = b"\xff\xd8\xff"
-
-
 def is_raw_original(
     filepath: str,
     ext: str,
@@ -117,19 +109,16 @@ def is_raw_original(
     *,
     source_data: bytes | None = None,
 ) -> bool:
-    """Whether RAW decoding applies — by content, not by file name."""
+    """Whether RAW decoding applies — by content, not by file name.
+
+    The rule itself lives in :mod:`photo.kind` now. This keeps the caller's
+    shape, including the passed-in extension set, which callers use to narrow
+    the question further than the format alone.
+    """
 
     if not raw_extensions or ext not in raw_extensions:
         return False
-    if source_data is not None:
-        head = source_data[:3]
-    else:
-        try:
-            with open(filepath, "rb") as handle:
-                head = handle.read(3)
-        except OSError:
-            head = b""  # unreadable: let the RAW path report the real error
-    return not head.startswith(_JPEG_MAGIC)
+    return kind.is_raw(filepath, data=source_data)
 
 
 def _open_by_content(filepath: str, max_target: int) -> Image.Image:

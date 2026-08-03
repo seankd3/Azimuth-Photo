@@ -37,13 +37,15 @@ from .highlights_recon import reconstruct_highlights
 log = logging.getLogger(__name__)
 from .lens import normalized_source_metadata, read_exif, resolve_lens_correction
 
+from photo import kind
 
-RAW_EXTENSIONS = {".dng", ".cr2", ".cr3"}
-# Cataloged multi-vendor raws (scanned, thumbnailed, XMP write-back) whose
-# Develop color pipeline is not fitted yet — entry refuses honestly instead of
-# rendering badly. Widen RAW_EXTENSIONS per vendor once acceptance covers it.
-UNFITTED_RAW_EXTENSIONS = {".arw", ".nef", ".orf", ".raf", ".rw2"}
-DISPLAY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".tif", ".tiff", ".webp"}
+
+# Formats Develop has fitted colour for. The rest are catalogued, thumbnailed
+# and XMP-written, but Develop refuses them honestly rather than rendering
+# them badly.
+RAW_EXTENSIONS = kind.DEVELOP_FITTED
+UNFITTED_RAW_EXTENSIONS = kind.RAW_FORMATS - kind.DEVELOP_FITTED
+DISPLAY_EXTENSIONS = kind.DISPLAY_FORMATS
 OPTIONAL_DISPLAY_EXTENSIONS = {".heic"}
 BASE_CACHE_ROOT = Path(resolve_runtime_paths().develop_cache_dir)
 # v3 remains the compatible display-image cache. Raw bases use the separately
@@ -78,14 +80,25 @@ _recent_decodes: OrderedDict[int, tuple[np.ndarray, dict[str, Any]]] = OrderedDi
 
 
 def is_raw_path(path: str | os.PathLike[str]) -> bool:
-    return Path(path).suffix.lower() in RAW_EXTENSIONS
+    """Whether Develop should take its RAW path for this file.
+
+    Two conditions, and both matter. The format must be one Develop has fitted
+    colour for, and the bytes must actually be RAW — a file named .CR2 that
+    holds a JPEG is a display image whatever its name says.
+    """
+
+    return kind.develop_is_fitted(path) and kind.is_raw(path)
 
 
 def is_display_path(path: str | os.PathLike[str]) -> bool:
     suffix = Path(path).suffix.lower()
     if suffix in DISPLAY_EXTENSIONS:
         return True
-    return suffix in OPTIONAL_DISPLAY_EXTENSIONS and suffix in Image.registered_extensions()
+    if suffix in OPTIONAL_DISPLAY_EXTENSIONS and suffix in Image.registered_extensions():
+        return True
+    # A RAW name over JPEG bytes. LibRaw refuses these, so the display decoder
+    # is the one that can actually open them.
+    return suffix in kind.RAW_FORMATS and not kind.is_raw(path)
 
 
 def is_hdr_merge_path(path: str | os.PathLike[str]) -> bool:

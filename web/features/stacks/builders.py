@@ -16,10 +16,12 @@ from data import connection as data_connection
 from data.repositories import stacks as stack_repository
 from features.search.similarity import scan_duplicate_pairs
 
+from photo.kind import RAW_FORMATS
+
 
 logger = logging.getLogger(__name__)
 STACK_KINDS = ("burst", "variant", "crosssource", "version")
-RAW_EXTS = {"arw", "cr2", "cr3", "dng", "nef", "orf", "raf", "rw2"}
+RAW_EXTS = {suffix.lstrip(".") for suffix in RAW_FORMATS}
 TIFF_EXTS = {"tif", "tiff"}
 JPG_EXTS = {"jpg", "jpeg"}
 SOCIAL_HINTS = ("facebook photos", "google photos")

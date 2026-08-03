@@ -68,13 +68,46 @@
   },
   "liar.ARW": {
     "develop_base": {
-      "failed": "RawDecodeError"
+      "dtype": "uint16",
+      "mean": 0.38,
+      "meta_keys": [
+        "as_shot",
+        "base_kind",
+        "dtype",
+        "height",
+        "linear",
+        "source_meta_version",
+        "width"
+      ],
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.007,
+      "p50": 0.423,
+      "p95": 0.871,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.296
     },
     "embedded": {
       "absent": true
     },
     "export": {
-      "failed": "RenderError"
+      "dtype": "float32",
+      "mean": 0.38,
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.007,
+      "p50": 0.423,
+      "p95": 0.871,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.296
     },
     "thumbnail": {
       "failed": "LibRawFileUnsupportedError"
@@ -82,13 +115,46 @@
   },
   "liar.CR2": {
     "develop_base": {
-      "failed": "RawDecodeError"
+      "dtype": "uint16",
+      "mean": 0.38,
+      "meta_keys": [
+        "as_shot",
+        "base_kind",
+        "dtype",
+        "height",
+        "linear",
+        "source_meta_version",
+        "width"
+      ],
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.012,
+      "p50": 0.423,
+      "p95": 0.922,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.277
     },
     "embedded": {
       "absent": true
     },
     "export": {
-      "failed": "RenderError"
+      "dtype": "float32",
+      "mean": 0.38,
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.012,
+      "p50": 0.423,
+      "p95": 0.922,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "std": 0.277
     },
     "thumbnail": {
       "failed": "LibRawFileUnsupportedError"

@@ -37,11 +37,14 @@ from data import connection as data_connection
 
 from features.develop import rawproc
 
+from photo import kind
+
 
 EXIFTOOL = "/usr/bin/vendor_perl/exiftool"
 HDR_CACHE_DIR = Path(resolve_runtime_paths().develop_cache_dir) / "hdr"
 HDR_SOURCE_NAME = "HDR Merges"
-RAW_EXTENSIONS = frozenset({".dng", ".cr2", ".cr3"})
+# HDR merges through Develop, so it is bounded by fitted colour, not by format.
+RAW_EXTENSIONS = kind.DEVELOP_FITTED
 _EXIF_FIELDS = (
     "ExposureTime", "ShutterSpeedValue", "FNumber", "ApertureValue", "ISO",
     "ExposureBiasValue", "DateTimeOriginal", "SubSecDateTimeOriginal", "CreateDate",

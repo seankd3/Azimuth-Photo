@@ -4,6 +4,8 @@ import os
 
 from core.runtime_paths import resolve_runtime_paths
 
+from photo import kind
+
 THUMB_TIERS = ("sm", "md", "lg")
 FULL_TIER = "full"
 ALL_TIERS = THUMB_TIERS + (FULL_TIER,)
@@ -52,16 +54,7 @@ HOT_LG_RESERVE_MAX_BYTES = 64 * 1024 * 1024 * 1024
 COLD_CACHE_ACCESS_OFFSET_SECONDS = 45 * 24 * 60 * 60
 JPEG_EXTENSIONS = {".jpg", ".jpeg"}
 BROWSER_ORIGINAL_EXTENSIONS = {".avif", ".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
-RAW_EXTENSIONS = {
-    ".arw",
-    ".cr2",
-    ".cr3",
-    ".dng",
-    ".nef",
-    ".orf",
-    ".raf",
-    ".rw2",
-}
+RAW_EXTENSIONS = set(kind.RAW_FORMATS)
 # RAW types whose embedded JPEG is reliably large enough for lg (3840) so the
 # bulk decode budget can charge the cheap embedded path. .dng embeds are often
 # ~1024px — enough for sm (and the generation path uses them for covered tiers)

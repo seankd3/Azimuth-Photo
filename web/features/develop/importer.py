@@ -20,11 +20,13 @@ from data.repositories import catalog as catalog_repository
 from features.develop.discovery import default_raw_import_root
 from features.develop.xmp_write import parse_xmp_text
 
+from photo import kind
+
 
 DEFAULT_RAWS_ROOT = default_raw_import_root()
 # Matches xmp_write._RAW_EXTENSIONS: any raw we write sidecars for must also
 # have its Lightroom sidecars imported back.
-RAW_EXTENSIONS = frozenset({".arw", ".cr2", ".cr3", ".dng", ".nef", ".orf", ".raf", ".rw2"})
+RAW_EXTENSIONS = kind.RAW_FORMATS
 _LOG = logging.getLogger(__name__)
 
 _status_lock = threading.Lock()
