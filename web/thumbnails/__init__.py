@@ -70,7 +70,27 @@ _orientation_queue: dict[int, tuple[str, float]] = {}
 _orientation_lock = threading.Lock()
 
 _prefetching = False
-_previews_paused = False
+
+
+def _previews_start_paused() -> bool:
+    """Previews run unless a hub is already making them for this machine.
+
+    A standalone or hub install holds the originals and should fill its own
+    grid without being asked. A hub-backed satellite does not: it receives
+    previews through sync, and generating them here means decoding photos whose
+    files live on the other machine — measured at 97% CPU with the grid timing
+    out behind it.
+    """
+
+    try:
+        from features.sync import satellite
+
+        return satellite.defers_bulk_compute()
+    except Exception:
+        return False
+
+
+_previews_paused = _previews_start_paused()
 _pregen_scan_offsets = {tier: 0 for tier in THUMB_TIERS}
 _pregen_bulk_cursor = {"date_taken": pregen.NEWEST, "id": 0}
 _pregen_full_cursor = {"date_taken": pregen.NEWEST, "id": 0}
