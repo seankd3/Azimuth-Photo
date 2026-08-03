@@ -9,6 +9,7 @@ if TYPE_CHECKING:
     import numpy as np
 
 import asyncio
+import db
 from collections.abc import Callable
 import hashlib
 import time
@@ -32,7 +33,6 @@ TASTE_SOURCE_VERIFY_TTL_SECONDS = 5.0
 DbPath = Callable[[], str]
 DbSignature = Callable[[], str]
 
-_db_signature: DbSignature | None = None
 _cache: dict[str, object] = {
     "key": None,
     "payload": None,
@@ -45,14 +45,6 @@ _prediction_cache: dict[str, object] = {
 }
 _row_norms_cache: dict[int, object] = {}
 _cache_generation = 0
-
-
-def configure(*, db_signature: DbSignature) -> None:
-    global _db_signature
-    _db_signature = db_signature
-    from core import cache_events
-
-    cache_events.register_embedding_batch_listener(_embedding_batch_stored)
 
 
 def invalidate_taste_cache() -> None:
@@ -72,10 +64,6 @@ def _embedding_batch_stored(model_key: str, _image_ids: list[int]) -> None:
         invalidate_taste_cache()
 
 
-def _configured(provider, name: str):
-    if provider is None:
-        raise RuntimeError(f"Library taste service is missing configured dependency: {name}")
-    return provider
 
 
 def _active_model_key() -> str:
@@ -342,7 +330,7 @@ async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()
     db_path = catalog_path()
-    db_signature = _configured(_db_signature, "db_signature")()
+    db_signature = db.DB_PATH
     now = time.monotonic()
     cached_payload = _cache.get("payload")
     cached_source_key = cached_payload.get("_cache_key") if isinstance(cached_payload, dict) else None
@@ -472,3 +460,8 @@ async def taste_vector() -> dict:
 
 async def _to_thread(func: Callable, *args):
     return await asyncio.to_thread(func, *args)
+
+
+from core import cache_events  # noqa: E402  # bottom import: needs _embedding_batch_stored defined
+
+cache_events.register_embedding_batch_listener(_embedding_batch_stored)

@@ -6,29 +6,14 @@ from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
 from features.media import routes as media_routes
-from features.people import routes as people_routes
 from features.publish import routes as publish_routes
 from features.share import routes as share_routes
 
 
 def configure_status_media_search_providers() -> None:
     import db
-    import thumbnails
-    from features.cache import status as cache_status_service
     from features.settings import status as settings_status
 
-    cache_status_service.configure(
-        cache_root=lambda: thumbnails.SSD_CACHE_DIR,
-        get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
-        expire_settings_response_cache=settings_status.expire_settings_response_cache,
-    )
-    settings_status.configure(
-        build_cache_status=cache_status_service.build_cache_status,
-        build_ai_status=ai_routes.build_ai_status,
-        people_status_payload=lambda: people_routes.people_status_payload(),
-        get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
-        refresh_source_online_states=lambda: db.refresh_source_online_states(),
-    )
     caption_routes.configure(
         get_caption_status_counts=lambda **kwargs: db.get_caption_status_counts(**kwargs),
         get_image_caption=lambda **kwargs: db.get_image_caption(**kwargs),

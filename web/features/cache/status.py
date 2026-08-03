@@ -7,10 +7,12 @@ import shutil
 import time
 from collections.abc import Awaitable, Callable
 
+import db
 import thumbnails
 from core import requests as request_helpers
 from core import responses as response_helpers
 from data.repositories import stats as stats_repository
+from features.settings import status as settings_status
 
 
 AsyncDictBuilder = Callable[[], Awaitable[dict]]
@@ -18,9 +20,6 @@ CacheRootProvider = Callable[[], str]
 DbPathProvider = Callable[[], str]
 ExpireSettingsResponseCache = Callable[[], None]
 
-_cache_root_provider: CacheRootProvider | None = None
-_get_catalog_image_counts: AsyncDictBuilder | None = None
-_expire_settings_response_cache: ExpireSettingsResponseCache | None = None
 
 _cache_status_cache: dict[tuple[int], dict] = {}
 _cache_status_refreshing: set[tuple[int]] = set()
@@ -30,35 +29,18 @@ _browser_original_count_cache = {"value": None, "bytes": 0, "expires": 0.0}
 _browser_original_count_cache_ttl_seconds = 30.0
 
 
-def configure(
-    *,
-    cache_root: CacheRootProvider,
-    get_catalog_image_counts: AsyncDictBuilder,
-    expire_settings_response_cache: ExpireSettingsResponseCache,
-) -> None:
-    global _cache_root_provider, _get_catalog_image_counts
-    global _expire_settings_response_cache
-    _cache_root_provider = cache_root
-    _get_catalog_image_counts = get_catalog_image_counts
-    _expire_settings_response_cache = expire_settings_response_cache
-
 
 def _cache_root() -> str:
-    if _cache_root_provider is None:
-        raise RuntimeError("Cache status is not configured")
-    return _cache_root_provider()
+    return thumbnails.SSD_CACHE_DIR
 
 
 
 async def _catalog_image_counts() -> dict:
-    if _get_catalog_image_counts is None:
-        raise RuntimeError("Cache status is not configured")
-    return await _get_catalog_image_counts()
+    return await db.get_catalog_image_counts()
 
 
 def _expire_settings_cache() -> None:
-    if _expire_settings_response_cache is not None:
-        _expire_settings_response_cache()
+    settings_status.expire_settings_response_cache()
 
 
 def invalidate_cache_status_cache() -> None:

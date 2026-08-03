@@ -10,6 +10,10 @@ import settings
 from core.background import track_background_task as track_route_background_task
 from core import responses as response_helpers
 from data.repositories import catalog as catalog_repository
+import db
+from features.ai import routes as ai_routes
+from features.cache import status as cache_status_service
+from features.people import routes as people_routes
 from features.catalog import metadata as catalog_metadata
 from features.sync import satellite
 
@@ -23,11 +27,6 @@ GetRefreshing = Callable[[], bool]
 SetRefreshing = Callable[[bool], None]
 TrackTask = Callable[[Awaitable], object]
 
-_build_cache_status: AsyncDictBuilder | None = None
-_build_ai_status: AsyncDictBuilder | None = None
-_people_status_payload: BuildSettingsResponse | None = None
-_get_catalog_image_counts: BuildSettingsResponse | None = None
-_refresh_source_online_states: AsyncBoolBuilder | None = None
 
 _settings_response_cache: dict[str, dict | float | None] = {"data": None, "expires": 0}
 _settings_response_refreshing = False
@@ -35,62 +34,13 @@ _settings_response_cache_ttl_seconds = 10.0
 _status_component_timeout_seconds = 1.2
 
 
-def configure(
-    *,
-    build_cache_status: AsyncDictBuilder,
-    build_ai_status: AsyncDictBuilder,
-    people_status_payload: BuildSettingsResponse,
-    get_catalog_image_counts: BuildSettingsResponse,
-    refresh_source_online_states: AsyncBoolBuilder,
-) -> None:
-    global _build_cache_status, _build_ai_status, _people_status_payload
-    global _get_catalog_image_counts, _refresh_source_online_states
-    _build_cache_status = build_cache_status
-    _build_ai_status = build_ai_status
-    _people_status_payload = people_status_payload
-    _get_catalog_image_counts = get_catalog_image_counts
-    _refresh_source_online_states = refresh_source_online_states
-
-
-def _configured() -> tuple[
-    AsyncDictBuilder,
-    AsyncDictBuilder,
-    BuildSettingsResponse,
-    DbPathProvider,
-    BuildSettingsResponse,
-    AsyncBoolBuilder,
-]:
-    if (
-        _build_cache_status is None
-        or _build_ai_status is None
-        or _people_status_payload is None
-        or _get_catalog_image_counts is None
-        or _refresh_source_online_states is None
-    ):
-        raise RuntimeError("Settings status is not configured")
-    return (
-        _build_cache_status,
-        _build_ai_status,
-        _people_status_payload,
-        catalog_path,
-        _get_catalog_image_counts,
-        _refresh_source_online_states,
-    )
 
 
 async def catalog_light_summary_payload() -> dict:
-    (
-        _,
-        _,
-        _,
-        db_path,
-        get_catalog_image_counts,
-        refresh_source_online_states,
-    ) = _configured()
     return await catalog_repository.catalog_light_summary_cached(
-        db_path(),
-        get_catalog_image_counts=get_catalog_image_counts,
-        refresh_source_online_states=refresh_source_online_states,
+        catalog_path(),
+        get_catalog_image_counts=db.get_catalog_image_counts,
+        refresh_source_online_states=db.refresh_source_online_states,
     )
 
 
@@ -164,14 +114,13 @@ async def _bounded_status(coro, stale_builder, timeout_seconds: float = _status_
 
 
 async def build_settings_response() -> dict:
-    build_cache_status, build_ai_status, people_status_payload, *_ = _configured()
     model_status = ai_models.get_model_status()
     cache_status_task = asyncio.create_task(_bounded_status(
-        build_cache_status(ahead=0),
+        cache_status_service.build_cache_status(ahead=0),
         _stale_cache_status,
     ))
     ai_status_task = asyncio.create_task(_bounded_status(
-        build_ai_status(model_status=model_status),
+        ai_routes.build_ai_status(model_status=model_status),
         _stale_ai_status,
     ))
     catalog_task = asyncio.create_task(_bounded_status(
@@ -179,7 +128,7 @@ async def build_settings_response() -> dict:
         _stale_catalog_status,
     ))
     people_status_task = asyncio.create_task(_bounded_status(
-        people_status_payload(),
+        people_routes.people_status_payload(),
         _stale_people_status,
     ))
     cache_status, ai_status, catalog, people_status = await asyncio.gather(
