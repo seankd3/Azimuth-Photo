@@ -21,17 +21,23 @@ clients, the v1 metadata push, and routes with neither a caller nor an intent.
 
 ## Known red
 
-Full suite: **1,256 passed, 8 failed, 6 skipped** in 7m43s. Every remaining
-failure fails identically on `main`, checked by extracting `main` with
-`git archive` and running it there:
+Full suite: **1,580 passed, 18 failed, 8 skipped** in 10m29s, then one more
+fixed. Every remaining failure was checked against `main` by extracting it with
+`git archive` and running it there — all fail identically:
 
-- `test_restore_drill.py` (4), `test_ml_device.py` (2), `test_import_staging.py`
-  (2), `test_search_stability.py` (1), `test_row_version_scope.py` (1),
-  `test_ai_failure_resilience.py` (1).
-- `test_fresh_boot.py` and `test_catalog.py` fail *less* here than on `main`.
+`test_restore_drill` (4), `test_ml_device` (2), `test_import_staging` (2),
+`test_catalog` (1), `test_settings_status` (1), `test_search_stability` (1),
+`test_row_version_scope` (1), `test_hddgov` (1, a Linux ionice path),
+`test_ai_failure_resilience` (1). `test_fresh_boot` fails **less** here than on
+`main` — 2 against 3.
 
-The suite is order-dependent: `test_support.py` monkeypatches ~20 module globals
-and 42 files import it with `*`. Files pass alone that fail in a run.
+**The harness costs about 4 seconds before a test starts.** With a 10-second
+cap, any test doing real route work sits close to the line:
+`test_catalog::test_add_source_then_keep_remove_preserves_rows_and_originals`
+takes 9.06s alone and flakes under load. It is small — one file, four requests —
+so there is nothing in it to trim. The cost is `test_support.py`, which 42 files
+import with `*` and which monkeypatches ~20 module globals. That is also why the
+suite is order-dependent. Fixing it would buy both the cap and determinism.
 
 ## What the branch removed, and the three things it should not have
 
