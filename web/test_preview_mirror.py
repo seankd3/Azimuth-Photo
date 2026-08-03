@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
+import tempfile
+from data import connection
+
 import os
 import time
 import unittest
@@ -215,3 +220,96 @@ class PreviewMirrorTests(BackendTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheFillerReachesTheWholeLibraryTests(unittest.IsolatedAsyncioTestCase):
+    """The background fill must not stop at the photos it has already done.
+
+    It used to select the newest 8,000 photos and then filter those for missing
+    previews. Once the newest 8,000 were done it found nothing — every burst,
+    forever — while the rest of the library stayed blank. The owner's laptop sat
+    at 87,139 of 142,121 previews and did not move for hours; the status said
+    "idle, filled 0" the whole time, which is exactly what a finished job looks
+    like.
+    """
+
+    def _setupAsyncioRunner(self):
+        self._asyncioRunner = asyncio.Runner(debug=False)
+
+    async def asyncSetUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tempdir.cleanup)
+        self.db_path = os.path.join(self.tempdir.name, "sat.db")
+        db.DB_PATH = self.db_path
+        await db.init_db()
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(
+                "INSERT INTO catalog_sources (id, path, display_name, included, online) "
+                "VALUES (1, 'hub://', 'Hub', 1, 1)"
+            )
+            for index in range(120):
+                conn.execute(
+                    "INSERT INTO images (id, source_id, filename, filepath, status, "
+                    "hub_image_id, hub_remote, content_hash, date_taken, missing_at) "
+                    "VALUES (?, 1, ?, ?, 'kept', ?, 1, ?, ?, NULL)",
+                    (
+                        index + 1,
+                        f"{index}.jpg",
+                        f"hub://{index}.jpg",
+                        9000 + index,
+                        f"hash{index:06d}0000",
+                        # Newest first by id.
+                        f"2026-01-{(index % 28) + 1:02d} 12:00:00",
+                    ),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+    async def asyncTearDown(self):
+        await connection.close_shared_readers()
+
+    async def test_a_burst_finds_work_beyond_the_first_page(self):
+        """Walking on is the whole point: page two must not repeat page one."""
+
+        first, cursor = await preview_mirror.next_mirror_targets(
+            self.db_path, limit=8, after=preview_mirror.NEWEST
+        )
+        second, _cursor = await preview_mirror.next_mirror_targets(
+            self.db_path, limit=8, after=cursor
+        )
+
+        self.assertTrue(first, "the first burst found nothing to fill")
+        self.assertTrue(second, "the fill stopped after one page")
+        self.assertFalse(
+            {image_id for image_id, *_ in first} & {image_id for image_id, *_ in second},
+            "the second burst handed back photos the first already took",
+        )
+
+    async def test_it_walks_newest_first(self):
+        targets, _cursor = await preview_mirror.next_mirror_targets(
+            self.db_path, limit=4, after=preview_mirror.NEWEST
+        )
+        conn = sqlite3.connect(self.db_path)
+        try:
+            newest = conn.execute(
+                "SELECT id FROM images ORDER BY date_taken DESC, id DESC LIMIT 1"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(targets[0][0], newest)
+
+    async def test_it_walks_the_whole_library_not_a_fixed_window(self):
+        """Page until it runs dry; every photo must be reachable."""
+
+        seen, cursor = set(), preview_mirror.NEWEST
+        for _burst in range(200):
+            targets, cursor = await preview_mirror.next_mirror_targets(
+                self.db_path, limit=8, after=cursor
+            )
+            if not targets:
+                break
+            seen.update(image_id for image_id, *_ in targets)
+
+        self.assertEqual(len(seen), 120, "the fill never reached the older photos")

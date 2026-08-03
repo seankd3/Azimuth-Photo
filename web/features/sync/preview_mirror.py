@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sqlite3
 import threading
 import time
 from collections.abc import Awaitable, Callable
@@ -28,8 +27,12 @@ DEFAULT_MIRROR_MAX_BYTES = 40 * 1024**3
 DEFAULT_IDLE_GATE_SECONDS = 10.0
 DEFAULT_BURST_LIMIT = 48
 DEFAULT_BURST_SLEEP_SECONDS = 1.0
-DEFAULT_RECENT_LIMIT = 8000
 DEFAULT_STARRED_ELO_FLOOR = 1400.0
+# Sorts above every real date: "older than here" starts at the newest photo.
+NEWEST = ("9999", 0)
+# Photos looked at per burst to find `limit` still needing a preview. Most are
+# already done, so the scan reads further than it fills.
+_SCAN_PAGE = 40
 
 RequestFn = Callable[..., Awaitable[tuple[int, dict[str, str], bytes]]]
 
@@ -392,107 +395,64 @@ async def fetch_and_store(
     return version, data
 
 
-def candidate_query_sql(*, recent_limit: int, elo_floor: float) -> str:
-    """SQL selecting hub-remote ids for background fill (recent ∪ starred/high-Elo)."""
 
-    return f"""
-    SELECT id FROM (
-        SELECT id FROM images
-        WHERE hub_remote = 1 AND status IN ('kept', 'maybe')
-        ORDER BY date_taken DESC NULLS LAST, id DESC
-        LIMIT {int(recent_limit)}
-    )
-    UNION
-    SELECT id FROM images
-    WHERE hub_remote = 1 AND status IN ('kept', 'maybe')
-      AND (
-        flag = 'picked'
-        OR COALESCE(elo, 0) >= {float(elo_floor)}
-      )
+
+async def next_mirror_targets(
+    db_path: str,
+    *,
+    limit: int,
+    after: tuple[str, int] = NEWEST,
+    sizes: tuple[str, ...] = MIRROR_SIZES,
+) -> tuple[list[tuple[int, str, str, int]], tuple[str, int]]:
+    """The next photos still missing a mirrored preview, newest first.
+
+    This used to be two passes: list the newest 8,000 ids, then filter them for
+    ones still needing a preview. Once those 8,000 were done the filter returned
+    nothing, every time, while the rest of the library stayed blank — the
+    owner's laptop sat at 87,139 of 142,121 and did not move. A window that only
+    ever looks where the work is already finished is not a window.
+
+    Asking for "the next ones that need a preview" needs no window at all. The
+    disk budget is the real limit and it is checked when writing.
     """
 
-
-async def list_fill_candidates(
-    db_path: str,
-    *,
-    recent_limit: int = DEFAULT_RECENT_LIMIT,
-    elo_floor: float = DEFAULT_STARRED_ELO_FLOOR,
-) -> list[int]:
-    conn = await connection.open_async(db_path)
-    try:
-        try:
-            rows = await (
-                await conn.execute(
-                    candidate_query_sql(recent_limit=recent_limit, elo_floor=elo_floor)
-                )
-            ).fetchall()
-        except sqlite3.OperationalError:
-            # Older SQLite without NULLS LAST — fall back.
-            rows = await (
-                await conn.execute(
-                    """
-                    SELECT id FROM (
-                        SELECT id FROM images
-                        WHERE hub_remote = 1 AND status IN ('kept', 'maybe')
-                        ORDER BY date_taken DESC, id DESC
-                        LIMIT ?
-                    )
-                    UNION
-                    SELECT id FROM images
-                    WHERE hub_remote = 1 AND status IN ('kept', 'maybe')
-                      AND (
-                        flag = 'picked'
-                        OR COALESCE(elo, 0) >= ?
-                      )
-                    """,
-                    (int(recent_limit), float(elo_floor)),
-                )
-            ).fetchall()
-        return [int(row["id"]) for row in rows]
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def missing_mirror_targets(
-    db_path: str,
-    image_ids: list[int],
-    *,
-    sizes: tuple[str, ...] = MIRROR_SIZES,
-) -> list[tuple[int, str, str, int]]:
-    """Return ``(local_id, size, preview_version, hub_image_id)`` still needed."""
-
-    if not image_ids:
-        return []
     import thumbnails
 
     conn = await connection.open_async(db_path)
     needed: list[tuple[int, str, str, int]] = []
+    cursor = after
     try:
-        placeholders = ",".join("?" for _ in image_ids)
+        # Ordered to match idx_images_missing_date_taken_id so this reads the
+        # index rather than sorting the library, and cursored so each burst
+        # carries on from the last instead of re-reading the newest page.
         rows = await (
             await conn.execute(
-                f"SELECT id, hub_image_id, content_hash, flag, elo FROM images "
-                f"WHERE id IN ({placeholders}) AND hub_remote = 1",
-                tuple(image_ids),
+                "SELECT id, hub_image_id, content_hash, flag, elo, "
+                "COALESCE(date_taken, '') AS taken FROM images "
+                "WHERE missing_at IS NULL AND hub_remote = 1 "
+                "AND status IN ('kept', 'maybe') AND hub_image_id IS NOT NULL "
+                "AND (COALESCE(date_taken, '') < ? "
+                "     OR (COALESCE(date_taken, '') = ? AND id < ?)) "
+                "ORDER BY COALESCE(date_taken, '') DESC, id DESC "
+                "LIMIT ?",
+                (after[0], after[0], after[1], max(1, int(limit)) * _SCAN_PAGE),
             )
         ).fetchall()
-        by_id = {int(row["id"]): row for row in rows}
-        for image_id in image_ids:
-            row = by_id.get(int(image_id))
-            if row is None:
-                continue
-            version = preview_version_for_image(row)
+        for row in rows:
+            cursor = (str(row["taken"]), int(row["id"]))
             hub_id = int(row["hub_image_id"] or 0)
             if hub_id <= 0:
                 continue
+            version = preview_version_for_image(row)
             for size in sizes:
-                if thumbnails.fast_disk_has(size, int(image_id), version):
+                if thumbnails.fast_disk_has(size, int(row["id"]), version):
                     continue
-                # Stale different version counts as missing (lazy delete on serve).
-                needed.append((int(image_id), size, version, hub_id))
+                needed.append((int(row["id"]), size, version, hub_id))
+            if len(needed) >= limit:
+                break
     finally:
         await connection.close_async(conn, db_path=db_path)
-    return needed
+    return needed, cursor
 
 
 class PreviewMirrorFiller:
@@ -507,7 +467,6 @@ class PreviewMirrorFiller:
         idle_seconds: float = DEFAULT_IDLE_GATE_SECONDS,
         burst_limit: int = DEFAULT_BURST_LIMIT,
         burst_sleep_seconds: float = DEFAULT_BURST_SLEEP_SECONDS,
-        recent_limit: int = DEFAULT_RECENT_LIMIT,
         elo_floor: float = DEFAULT_STARRED_ELO_FLOOR,
     ):
         self.db_path = db_path
@@ -516,8 +475,8 @@ class PreviewMirrorFiller:
         self.idle_seconds = float(idle_seconds)
         self.burst_limit = max(1, int(burst_limit))
         self.burst_sleep_seconds = max(0.0, float(burst_sleep_seconds))
-        self.recent_limit = max(1, int(recent_limit))
         self.elo_floor = float(elo_floor)
+        self._cursor: tuple[str, int] = NEWEST
         self._status: dict[str, Any] = {
             "state": "idle",
             "filled": 0,
@@ -556,12 +515,10 @@ class PreviewMirrorFiller:
 
         self._status["state"] = "burst"
         try:
-            candidates = await list_fill_candidates(
-                self.db_path,
-                recent_limit=self.recent_limit,
-                elo_floor=self.elo_floor,
+            targets, cursor = await next_mirror_targets(
+                self.db_path, limit=self.burst_limit, after=self._cursor
             )
-            targets = await missing_mirror_targets(self.db_path, candidates)
+            self._cursor = NEWEST if not targets else cursor
             filled = 0
             for image_id, size, version, hub_id in targets[: self.burst_limit]:
                 if self.refuse_if_busy():

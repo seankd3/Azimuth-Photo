@@ -2530,7 +2530,6 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         priority = self._make_image("z-Film Scans/priority.jpg")
         self._add_catalog_original(1, backlog)
         self._add_catalog_original(2, priority)
-        cursor_before = dict(thumbnails._pregen_bulk_cursor)
 
         library_service._record_preview_priority_scope(
             {"hidden_pending_thumbnails": 1},
