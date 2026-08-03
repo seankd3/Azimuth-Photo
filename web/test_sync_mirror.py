@@ -275,44 +275,46 @@ class MirrorAcceptanceTests(BackendTestCase):
             await conn.close()
         self.assertEqual(int(count["c"]), 200)
 
-    async def test_mirror_reports_skipped_unhashed_rows(self):
+    async def test_a_hub_photo_without_a_hash_still_mirrors(self):
+        """3a113eb1: dropping unhashed rows hid 97,471 photos from the laptop.
+
+        hub_image_id is the identity. A hash is only how a photo already
+        imported locally is recognised as the same one, so a hub photo without
+        one mirrors fine — it simply cannot adopt a local copy.
+        """
         self.rows = [
             {
-                "hub_image_id": 1,
-                "content_hash": "a" * 32,
-                "filename": "hashed.jpg",
-                "filepath": "/hub/hashed.jpg",
+                "hub_image_id": index,
+                "content_hash": content_hash,
+                "filename": f"{name}.jpg",
+                "filepath": f"/hub/{name}.jpg",
                 "file_ext": ".jpg",
                 "status": "kept",
-            },
-            {
-                "hub_image_id": 2,
-                "content_hash": "",
-                "filename": "missing-hash.jpg",
-                "filepath": "/hub/missing-hash.jpg",
-                "file_ext": ".jpg",
-                "status": "kept",
-            },
-            {
-                "hub_image_id": 3,
-                "content_hash": None,
-                "filename": "null-hash.jpg",
-                "filepath": "/hub/null-hash.jpg",
-                "file_ext": ".jpg",
-                "status": "kept",
-            },
+            }
+            for index, (name, content_hash) in enumerate(
+                [("hashed", "a" * 32), ("missing-hash", ""), ("null-hash", None)], start=1
+            )
         ]
-        mirror = MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request)
-        result = await mirror.refresh()
-        self.assertEqual(result["rows_applied"], 1)
-        self.assertEqual(result["skipped_unhashed"], 2)
-        self.assertEqual(mirror.status()["skipped_unhashed"], 2)
+        result = await MirrorPuller(
+            db_path=db.DB_PATH, hub="http://hub", request=self._request
+        ).refresh()
+
+        self.assertEqual(result["rows_applied"], 3)
         conn = await db.get_db()
         try:
-            count = await (await conn.execute("SELECT COUNT(*) AS c FROM images")).fetchone()
-            self.assertEqual(int(count["c"]), 1)
+            rows = await (
+                await conn.execute(
+                    "SELECT hub_image_id, filename FROM images ORDER BY hub_image_id"
+                )
+            ).fetchall()
         finally:
             await conn.close()
+        # Three rows, not two: an absent hash must not match another absent
+        # hash, or the second unhashed photo adopts the first.
+        self.assertEqual(
+            [(int(row["hub_image_id"]), str(row["filename"])) for row in rows],
+            [(1, "hashed.jpg"), (2, "missing-hash.jpg"), (3, "null-hash.jpg")],
+        )
 
 
 class MirrorDevelopGuardTests(BackendTestCase):

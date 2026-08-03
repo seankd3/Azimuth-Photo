@@ -17,10 +17,6 @@ and what is known to be broken. Newest first.
 
 ## Known red
 
-- `test_sync_mirror.py::test_mirror_reports_skipped_unhashed_rows` — asserts
-  `rows_applied == 1`, gets 3. Verified failing at the commit before the
-  transport work, so it is not from that. Not yet traced to a commit on this
-  branch or confirmed against `main`.
 - `test_stacks.py::test_collapsed_rankings_apply_search_id_filter_and_stack_exclusion`
   — pre-existing, verified failing on `main`.
 - `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
@@ -80,6 +76,13 @@ code: matched function names inside longer names, matched parameter names, ate
 one was caught by ruff or a test on the next command, which is the only reason
 this reads as an anecdote. `_satellite.` matching `satellite.` first and leaving
 `_role.` happened *again* during the role work, after this lesson was written.
+
+**A test outlives the behaviour it was written for.** `test_mirror_reports_
+skipped_unhashed_rows` asserted that the mirror drops hub photos without a
+content hash. Commit 3a113eb1 removed that on purpose — it was hiding 97,471
+photos from the laptop — and deleted the counter with it. The test stayed,
+failing on `main`, asserting a bug. It now covers what replaced it, including
+the `? <> ''` guard that keeps two unhashed photos from adopting each other.
 
 **A fixture that lies passes for years.** `test_sync_standalone_seeds_hub`
 failed on `main` and had three independent faults, each hidden by the one in
