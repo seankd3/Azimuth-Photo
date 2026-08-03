@@ -202,8 +202,36 @@ def _insert_row_with_inferred_date(row, source_root: str | None = None):
     )
 
 
+async def already_registered_directory(conn, path: str):
+    """The source already holding this directory, whatever it is spelled like.
+
+    Two paths are the same folder or they are not, and only the filesystem
+    knows: `/Photos/Raws` and `/Photos/RAWS` are one directory on a
+    case-insensitive volume and two on any other, and a symlink or a bind mount
+    can hide the same thing again. `os.path.samefile` asks that question
+    directly instead of guessing from the string.
+    """
+
+    if not os.path.isdir(path):
+        return None
+    rows = await (await conn.execute("SELECT * FROM catalog_sources")).fetchall()
+    for row in rows:
+        try:
+            if os.path.samefile(path, str(row["path"] or "")):
+                return row
+        except OSError:
+            continue  # a source whose folder is not mounted is not this one
+    return None
+
+
 async def ensure_catalog_source_on_conn(conn, path: str, *, included: bool = True, last_scan_at=None):
     normalized = normalize_source_path(path)
+    # One folder is one source. Matching on the path string alone let the same
+    # directory register twice under different capitalisation, and the library
+    # then scanned it twice and held every photo in it under two ids.
+    held = await already_registered_directory(conn, normalized)
+    if held is not None:
+        normalized = str(held["path"] or normalized)
     display_name = source_display_name(normalized)
     online = 1 if os.path.isdir(normalized) else 0
     now = _time.time()

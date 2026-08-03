@@ -199,16 +199,14 @@ class CacheStatusTests(BackendTestCase):
     async def test_search_and_people_start_previews_dependency(self):
         if not _capabilities.capability_status("search")["available"]:
             self.skipTest("AI search capability unavailable — matches AI-optional installs")
-        old_manual_mode = thumbnails._pregen_manual_mode
-        old_manual_pause = thumbnails._pregen_manual_pause
+        old_paused = thumbnails._previews_paused
         try:
             thumbnails.stop_pregeneration()
             embedding_worker.pause_embedding_worker()
             face_worker.pause_face_worker()
 
             await ai_routes.api_resume_embeddings()
-            self.assertTrue(thumbnails._pregen_manual_mode)
-            self.assertFalse(thumbnails._pregen_manual_pause)
+            self.assertFalse(thumbnails._previews_paused)
             self.assertFalse(embedding_worker.get_worker_status()["manual_pause"])
 
             thumbnails.stop_pregeneration()
@@ -220,18 +218,15 @@ class CacheStatusTests(BackendTestCase):
                 return_value={"available": True},
             ):
                 await people_routes.api_people_scan_resume()
-            self.assertTrue(thumbnails._pregen_manual_mode)
-            self.assertFalse(thumbnails._pregen_manual_pause)
+            self.assertFalse(thumbnails._previews_paused)
             self.assertFalse(face_worker.manual_pause_active())
         finally:
-            thumbnails._pregen_manual_mode = old_manual_mode
-            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._previews_paused = old_paused
             embedding_worker.pause_embedding_worker()
             face_worker.pause_face_worker()
 
     async def test_stopping_previews_stops_dependent_search_and_people(self):
-        old_manual_mode = thumbnails._pregen_manual_mode
-        old_manual_pause = thumbnails._pregen_manual_pause
+        old_paused = thumbnails._previews_paused
         try:
             thumbnails.start_pregeneration()
             embedding_worker.resume_embedding_worker()
@@ -239,12 +234,11 @@ class CacheStatusTests(BackendTestCase):
 
             await cache_routes.cache_pregen_stop()
 
-            self.assertTrue(thumbnails._pregen_manual_pause)
+            self.assertTrue(thumbnails._previews_paused)
             self.assertTrue(embedding_worker.get_worker_status()["manual_pause"])
             self.assertTrue(face_worker.manual_pause_active())
         finally:
-            thumbnails._pregen_manual_mode = old_manual_mode
-            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._previews_paused = old_paused
             embedding_worker.pause_embedding_worker()
             face_worker.pause_face_worker()
 

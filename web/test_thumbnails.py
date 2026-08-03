@@ -542,8 +542,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
         }
         old_status = thumbnails._pregen_status
         old_enabled = thumbnails.PREGENERATE_ON_IDLE
-        old_manual_mode = thumbnails._pregen_manual_mode
-        old_manual_pause = thumbnails._pregen_manual_pause
+        old_paused = thumbnails._previews_paused
         old_current_time = thumbnails._current_time
         try:
             direct_status = dict(base_status)
@@ -560,8 +559,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
 
             thumbnails._pregen_status = dict(base_status)
             thumbnails.PREGENERATE_ON_IDLE = False
-            thumbnails._pregen_manual_mode = True
-            thumbnails._pregen_manual_pause = False
+            thumbnails._previews_paused = False
             thumbnails._current_time = lambda: 55.5
 
             thumbnails._set_pregen_state("running", "warming", "bulk")
@@ -580,8 +578,8 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
                 now_provider=lambda: 99.0,
             )
             thumbnails.PREGENERATE_ON_IDLE = True
-            thumbnails._pregen_manual_mode = False
-            thumbnails._pregen_manual_pause = True
+            thumbnails._previews_paused = True
+            thumbnails._previews_paused = True
             thumbnails._current_time = lambda: 99.0
 
             thumbnails._set_pregen_state("paused", "paused", error="manual")
@@ -591,8 +589,7 @@ class ThumbnailPregenFacadeTests(unittest.TestCase):
         finally:
             thumbnails._pregen_status = old_status
             thumbnails.PREGENERATE_ON_IDLE = old_enabled
-            thumbnails._pregen_manual_mode = old_manual_mode
-            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._previews_paused = old_paused
             thumbnails._current_time = old_current_time
 
     def test_decision_helpers_remain_facaded_from_pregen_module(self):
@@ -1298,8 +1295,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         }
         self.old_persistent_conn = thumbnail_cache_entries._persistent_conn
         self.old_prefetching = thumbnails._prefetching
-        self.old_pregen_manual_mode = thumbnails._pregen_manual_mode
-        self.old_pregen_manual_pause = thumbnails._pregen_manual_pause
+        self.old_previews_paused = thumbnails._previews_paused
         self.old_last_user_activity = thumbnails.get_idle_seconds()
         self.old_disk_stats_cache = dict(thumbnails._disk_stats_cache)
 
@@ -1355,8 +1351,8 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         thumbnails._source_stat_cache.clear()
         thumbnails._thumbnail_retry_after.clear()
         thumbnails._prefetching = True
-        thumbnails._pregen_manual_mode = True
-        thumbnails._pregen_manual_pause = False
+        thumbnails._previews_paused = False
+        thumbnails._previews_paused = False
         thumbnails.note_user_activity(thumbnails.time.monotonic() - 30.0)
         thumbnails._reset_pregen_bulk_cursor()
         thumbnails._reset_pregen_full_cursor()
@@ -1384,8 +1380,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
             setattr(thumbnails.data_providers, name, value)
         thumbnails.MEMORY_CACHE_BYTES = self.old_memory_bytes
         thumbnails._prefetching = self.old_prefetching
-        thumbnails._pregen_manual_mode = self.old_pregen_manual_mode
-        thumbnails._pregen_manual_pause = self.old_pregen_manual_pause
+        thumbnails._previews_paused = self.old_previews_paused
         thumbnails.note_user_activity(thumbnails.time.monotonic() - self.old_last_user_activity)
         thumbnails._clear_memory_cache()
         thumbnails._clear_disk_index()
@@ -2813,8 +2808,8 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         old_background_decision = thumbnails._pregen_background_decision
         try:
             thumbnails._prefetching = True
-            thumbnails._pregen_manual_pause = False
-            thumbnails._pregen_manual_mode = True
+            thumbnails._previews_paused = False
+            thumbnails._previews_paused = False
             thumbnails._disk_allocations.update({
                 "sm": 64 * 1024 * 1024,
                 "md": 0,
@@ -2899,8 +2894,8 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         try:
             thumbnails.PREGENERATE_NO_PROGRESS_SCAN_LIMIT = 3
             thumbnails._prefetching = True
-            thumbnails._pregen_manual_pause = False
-            thumbnails._pregen_manual_mode = True
+            thumbnails._previews_paused = False
+            thumbnails._previews_paused = False
             thumbnails._disk_allocations.update({
                 "sm": 64 * 1024 * 1024,
                 "md": 0,

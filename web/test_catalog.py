@@ -244,8 +244,7 @@ class CatalogSourceRouteTests(BackendTestCase):
         old_cache_dir = thumbnails.SSD_CACHE_DIR
         old_cache_bytes = thumbnails.SSD_CACHE_BYTES
         old_allocations = dict(thumbnails._disk_allocations)
-        old_manual_mode = thumbnails._pregen_manual_mode
-        old_manual_pause = thumbnails._pregen_manual_pause
+        old_paused = thumbnails._previews_paused
         old_last_activity = thumbnails.get_idle_seconds()
         worker = None
         try:
@@ -253,8 +252,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             thumbnails.SSD_CACHE_DIR = cache_dir
             thumbnails.SSD_CACHE_BYTES = 1024 * 1024 * 1024
             thumbnails._disk_allocations = {tier: 0 for tier in thumbnails.ALL_TIERS}
-            thumbnails._pregen_manual_mode = False
-            thumbnails._pregen_manual_pause = True
+            thumbnails._previews_paused = True
             thumbnails.note_user_activity(time.monotonic() - 30)
             thumbnails._ensure_disk_cache_dirs()
             catalog_metadata.pause_catalog_metadata()
@@ -266,7 +264,7 @@ class CatalogSourceRouteTests(BackendTestCase):
                     break
                 await asyncio.sleep(0.02)
             self.assertTrue(scanner.scan_state["done"], scanner.scan_state)
-            self.assertFalse(thumbnails._pregen_manual_pause)
+            self.assertFalse(thumbnails._previews_paused)
             self.assertTrue(catalog_metadata.catalog_metadata_status()["active"])
 
             images = await db.get_recent_active_images(limit=1)
@@ -298,8 +296,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             thumbnails.SSD_CACHE_DIR = old_cache_dir
             thumbnails.SSD_CACHE_BYTES = old_cache_bytes
             thumbnails._disk_allocations = old_allocations
-            thumbnails._pregen_manual_mode = old_manual_mode
-            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._previews_paused = old_paused
             thumbnails.note_user_activity(time.monotonic() - old_last_activity)
 
     async def test_existing_library_scan_preserves_paused_workers(self):
@@ -311,8 +308,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             "JPEG",
         )
         settings.save_settings({"setup_completed": False})
-        old_manual_mode = thumbnails._pregen_manual_mode
-        old_manual_pause = thumbnails._pregen_manual_pause
+        old_paused = thumbnails._previews_paused
         old_metadata_active = catalog_metadata.catalog_metadata_status()["active"]
         try:
             thumbnails.stop_pregeneration()
@@ -325,11 +321,10 @@ class CatalogSourceRouteTests(BackendTestCase):
                     break
                 await asyncio.sleep(0.02)
 
-            self.assertTrue(thumbnails._pregen_manual_pause)
+            self.assertTrue(thumbnails._previews_paused)
             self.assertFalse(catalog_metadata.catalog_metadata_status()["active"])
         finally:
-            thumbnails._pregen_manual_mode = old_manual_mode
-            thumbnails._pregen_manual_pause = old_manual_pause
+            thumbnails._previews_paused = old_paused
             if old_metadata_active:
                 catalog_metadata.resume_catalog_metadata()
             else:

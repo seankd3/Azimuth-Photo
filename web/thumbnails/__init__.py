@@ -70,8 +70,7 @@ _orientation_queue: dict[int, tuple[str, float]] = {}
 _orientation_lock = threading.Lock()
 
 _prefetching = False
-_pregen_manual_mode = False
-_pregen_manual_pause = True
+_previews_paused = False
 _pregen_scan_offsets = {tier: 0 for tier in THUMB_TIERS}
 _pregen_bulk_cursor = {"date_taken": pregen.NEWEST, "id": 0}
 _pregen_full_cursor = {"date_taken": pregen.NEWEST, "id": 0}
@@ -1170,8 +1169,8 @@ def _set_pregen_state(state: str, message: str = "", phase: str | None = None, e
         phase=phase,
         error=error,
         enabled=PREGENERATE_ON_IDLE,
-        manual_mode=_pregen_manual_mode,
-        manual_pause=_pregen_manual_pause,
+        manual_mode=not _previews_paused,
+        manual_pause=_previews_paused,
         now_provider=_current_time,
     )
 
@@ -1397,7 +1396,7 @@ async def _run_pregen_bulk_batch(generate_batch: int | None = None) -> int:
         full_tier=FULL_TIER,
         disk_allocations=_disk_allocations,
         is_prefetching=lambda: _prefetching,
-        is_manual_paused=lambda: _pregen_manual_pause,
+        is_manual_paused=lambda: _previews_paused,
         should_pause_for_priority=_pregen_should_pause_for_priority,
         flush_write_queue=_flush_write_queue,
         cache_metadata_backoff_active=_cache_metadata_backoff_active,
@@ -1428,7 +1427,7 @@ async def _run_full_warm_batch(generate_batch: int | None = None) -> int:
         full_tier=FULL_TIER,
         disk_allocations=_disk_allocations,
         is_prefetching=lambda: _prefetching,
-        is_manual_paused=lambda: _pregen_manual_pause,
+        is_manual_paused=lambda: _previews_paused,
         should_pause_for_priority=_pregen_should_pause_for_priority,
         flush_write_queue=_flush_write_queue,
         cache_metadata_backoff_active=_cache_metadata_backoff_active,
@@ -1587,7 +1586,7 @@ def configure(config: dict):
     global _memory_cache_bytes
     global BROWSER_CACHE_MAX_AGE, BROWSER_CACHE_STALE_WHILE_REVALIDATE
     global _executor_workers, _prefetch_workers_count, _executor, _prefetch_executor
-    global _disk_allocations, _last_thumb_config_signature, _pregen_manual_pause, _thumb_config_changed_at
+    global _disk_allocations, _last_thumb_config_signature, _thumb_config_changed_at
     global _replace_stale_thumbnails
 
     _flush_write_queue()
@@ -1636,13 +1635,6 @@ def configure(config: dict):
     _disk_allocations = _allocate_disk_budget(SSD_CACHE_BYTES)
     _invalidate_disk_stats_cache()
 
-    if not _pregen_manual_mode:
-        _pregen_manual_pause = True
-        _set_pregen_state(
-            "paused",
-            "Previews is stopped until you start it from Background Work.",
-        )
-
     with _cache_lock:
         _enforce_memory_budget_locked()
 
@@ -1666,11 +1658,10 @@ def configure(config: dict):
 
 
 def start_pregeneration() -> dict:
-    global _pregen_manual_mode, _pregen_manual_pause
+    global _previews_paused
     from core import bulk_scheduler
 
-    _pregen_manual_mode = True
-    _pregen_manual_pause = False
+    _previews_paused = False
     bulk_scheduler.set_pregen_desired(True)
     # Drop any wedged demosaic threads left from a prior wave so the fresh
     # start can schedule immediately (stop alone cannot cancel OS threads).
@@ -1683,11 +1674,10 @@ def start_pregeneration() -> dict:
 
 
 def stop_pregeneration() -> dict:
-    global _pregen_manual_mode, _pregen_manual_pause
+    global _previews_paused
     from core import bulk_scheduler
 
-    _pregen_manual_mode = False
-    _pregen_manual_pause = True
+    _previews_paused = True
     bulk_scheduler.set_pregen_desired(False)
     _reset_prefetch_executor()
     _set_pregen_state("paused", "Pre-generation paused by user.")
@@ -1744,8 +1734,8 @@ async def run_prefetch_worker():
     _prefetching = True
     await pregen_worker.run_prefetch_worker_loop(
         is_prefetching=lambda: _prefetching,
-        is_manual_paused=lambda: _pregen_manual_pause,
-        is_manual_mode=lambda: _pregen_manual_mode,
+        is_manual_paused=lambda: _previews_paused,
+        is_manual_mode=lambda: not _previews_paused,
         pregen_on_idle=lambda: PREGENERATE_ON_IDLE,
         cache_target_total=lambda: _cache_target_total(),
         current_monotonic=time.monotonic,
