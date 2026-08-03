@@ -31,23 +31,26 @@ fixed. Every remaining failure was checked against `main` by extracting it with
 `test_ai_failure_resilience` (1). `test_fresh_boot` fails **less** here than on
 `main` — 2 against 3.
 
-**A slow test, three hypotheses, two of them wrong.**
+**A slow test, four hypotheses, and no anomaly.**
 `test_catalog::test_add_source_then_keep_remove_preserves_rows_and_originals`
-sits at 9s against the ten-second cap. What is measured:
+read 9.06s against the ten-second cap. Chasing it:
 
-- `BackendTestCase` setup is **0.09s**, not the ~4s I had written here before
-  measuring it.
-- The test body is **7.75s of 8.03s**; its two requests are 3.03s and 2.97s.
-- The route's own work — `_is_first_run_import`, `add_or_restore_source`,
-  `get_catalog_summary`, `_catalog_changed` — totals **0.07s**. So it is not the
-  route, and "two catalog routes take three seconds each" was wrong.
-- `test_catalog._request` does `with TestClient(app)` per call, running the
-  app's whole startup and shutdown each time. In isolation that is 1.31s the
-  first time and 0.12s after.
+1. *The harness is slow* — no: `BackendTestCase` setup is 0.09s, not the ~4s I
+   had written here without measuring.
+2. *The routes are slow* — no: the four steps behind `POST /api/catalog/sources`
+   total 0.07s.
+3. *The per-request TestClient lifecycle* — real (`_request` rebuilds the app for
+   every call) but only 1.31s cold, 0.12s after.
+4. *A one-second git timeout firing three times* — a profile showed
+   `WaitForSingleObject` at 1.004s per call against a `timeout=1`, which looked
+   conclusive. Caching the commit changed nothing: 5.5s with, 5.75s without,
+   measured back to back. The cache was reverted; `StaticAssetContext` is built
+   once per app anyway.
 
-That leaves ~3s per request in the test unexplained: it is not the route, and it
-is not what a bare TestClient cycle costs outside `BackendTestCase`. Written
-down at the point the evidence stops rather than given a third cause.
+On a quiet machine the test runs **~5.5s**, comfortably inside the cap. The 9.06s
+and 7.75s readings were machine load, as were the "1.004s" waits — the profiler's
+own overhead. There was nothing to find. The cost of not checking that first was
+four hypotheses and two published claims that had to be withdrawn.
 
 ## What the branch removed, and the three things it should not have
 
