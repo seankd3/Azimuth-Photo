@@ -421,6 +421,7 @@ export function openDeliverOverlay(collectionId, name = 'Collection', opener = n
         share: null,
         publish: null,
         galleryData: null,
+        galleryEditor: null,
         picksLoad: null,
         draft: restoredDraft.draft,
         restoredDraft: restoredDraft.restored,
@@ -428,6 +429,11 @@ export function openDeliverOverlay(collectionId, name = 'Collection', opener = n
     const session = deliverSession;
     session.loads = createDeliverLoads({
         private: () => getCollectionShare(collectionId),
+        gallery: async () => {
+            const editor = await import('./gallery_editor.js');
+            const data = await editor.loadGalleryDelivery(collectionId, getCollection);
+            return { editor, data };
+        },
         website: () => getCollectionPublish(collectionId),
     }, (tab, state) => handleDeliverLoadChange(session, token, tab, state));
     renderDeliverLoadState(session, token, session.loads.state(session.activeTab));

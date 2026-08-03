@@ -163,3 +163,11 @@ async def api_delete_export_preset(preset_id: int):
         return {"deleted": True, "id": preset_id}
     finally:
         await connection.close_async(conn, db_path=catalog_path())
+
+
+def print_ready_options(*, color_space: str = "srgb", border_px: int = 0) -> dict[str, Any]:
+    """The intentionally small, useful print preset: 300dpi TIFF16."""
+    return normalize_options({
+        "format": "tiff16", "quality": 100, "sharpen": "print_standard",
+        "print_ready": True, "color_space": color_space, "border_px": border_px,
+    })

@@ -294,3 +294,24 @@ def fetch_base_cache_for_image(
         source_path=source_path,
         timeout=timeout,
     )
+
+
+def open_hub_original(hub_image_id: int, *, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    """Open an authenticated streaming response for one hub-owned original."""
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0:
+        return None
+    return _open_hub_stream(
+        f"/api/sync/original/{remote_id}",
+        accept="application/octet-stream",
+        timeout=timeout,
+    )
+
+
+def _open_hub_stream(endpoint: str, *, accept: str, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    if not can_read_through():
+        return None
+    return transport.open_stream(
+        f"{hub_url()}{endpoint}", headers={"Accept": accept}, timeout=timeout
+    )

@@ -118,6 +118,28 @@ async def request_async(
     return await run_sync_work(work)
 
 
+def open_stream(
+    url: str,
+    *,
+    headers: dict | None = None,
+    timeout: float = BULK,
+):
+    """Open a hub response without reading it.
+
+    `request` reads the whole body, which is right for JSON and wrong for a
+    50 MB original. The caller owns the returned file-like object and must
+    close it. Returns None if the hub cannot be reached — a streamed original
+    has a fallback, so this is a miss rather than an error.
+    """
+
+    try:
+        return urllib.request.urlopen(  # noqa: S310 - configured hub URL.
+            _outbound("GET", url, None, headers), timeout=timeout
+        )
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return None
+
+
 async def reachable(hub_url: str, *, timeout: float = CONTRACT) -> bool:
     """Is the hub answering at all? Never raises."""
 

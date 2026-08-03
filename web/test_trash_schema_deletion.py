@@ -9,6 +9,7 @@ from test_support import *  # noqa: F401,F403
 from data import connection as data_connection
 from data.repositories import image_deletion
 from features.library import keywords
+from features.publishing import galleries
 from features.quality import autocull
 from features.sync import hub
 from features.trash import service as trash_service
@@ -18,6 +19,7 @@ class TrashSchemaDeletionTests(BackendTestCase):
     async def _install_additive_feature_schema(self, conn) -> None:
         await autocull.ensure_autocull_tables(conn)
         await keywords.ensure_schema(conn)
+        await galleries.ensure_tables(conn)
         await conn.executescript(hub.SYNC_DDL)
         await conn.commit()
 
@@ -63,6 +65,13 @@ class TrashSchemaDeletionTests(BackendTestCase):
             (first_survivor,),
         )
         collection_id = int(collection.lastrowid)
+        gallery = await conn.execute(
+            "INSERT INTO client_galleries "
+            "(collection_id, token, title, cover_image_id, created_at, updated_at) "
+            "VALUES (?, 'fk-support-gallery', 'FK support', ?, 1, 1)",
+            (collection_id, first_survivor),
+        )
+        gallery_id = int(gallery.lastrowid)
         stack = await conn.execute(
             "INSERT INTO stacks(kind, representative_image_id, auto, created_at, updated_at) "
             "VALUES ('manual', ?, 0, 1, 1)",
@@ -101,6 +110,7 @@ class TrashSchemaDeletionTests(BackendTestCase):
         return {
             ("images", "id"): first_survivor,
             ("collections", "id"): collection_id,
+            ("client_galleries", "id"): gallery_id,
             ("stacks", "id"): stack_id,
             ("autocull_history", "id"): history_id,
             ("embedding_models", "model_key"): "fk-support-model",
