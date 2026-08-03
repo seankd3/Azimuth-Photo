@@ -16,13 +16,10 @@ from features.settings import status as settings_status
 router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
-AsyncIntBuilder = Callable[..., Awaitable[int]]
 InvalidateStatus = Callable[[], None]
 _ai_status_response_cache: dict[str, dict | tuple | float | None] = {"data": None, "key": None, "expires": 0}
 _ai_status_response_cache_ttl_seconds = 5.0
 _ai_status_response_refreshing = False
-
-
 
 
 def invalidate_ai_status_response_cache() -> None:

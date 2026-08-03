@@ -17,16 +17,6 @@ from features.system import backups
 
 log = logging.getLogger(__name__)
 
-DEFAULT_SPOT_ROWS = 5
-LIVE_DB_NAME = "azimuth.db"
-LOG_KEEP_LINES = 5000
-
-SPOT_IMAGE_SQL = """
-SELECT id, filename, filepath, elo, date_taken
-FROM images
-WHERE id = ?
-"""
-
 
 class RestoreDrillError(RuntimeError):
     """Restore drill failed (corrupt snapshot, verify failure, etc.)."""

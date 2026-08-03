@@ -3,7 +3,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -20,10 +20,7 @@ import thumbnails
 
 import db
 router = APIRouter()
-CachedImageIds = Callable[[list[int], str], Awaitable[set[int]]]
-ScheduleMemoryWarm = Callable[..., None]
 DbPathProvider = Callable[[], str]
-MarkImageMissing = Callable[[int], Awaitable[bool]]
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 # Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a
@@ -38,8 +35,6 @@ _ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS = float(
 _SLOW_THUMB_LOG_MS = float(os.environ.get("AZIMUTH_SLOW_THUMB_MS", "1000"))
 _remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 _local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}
-
-
 
 
 def _cache_headers(signature: str) -> dict:
@@ -661,7 +656,5 @@ def _normalize_warm_requests(tier_requests) -> tuple[dict[str, list[int]], set[i
 @router.get("/api/image/{image_id}/media-status")
 async def image_media_status(image_id: int):
     return await asyncio.to_thread(image_media_status_payload, image_id)
-
-
 
 

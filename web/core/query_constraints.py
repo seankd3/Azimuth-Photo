@@ -22,8 +22,6 @@ _FAST_ENCODE_BUDGET_SECONDS = 0.35
 _COMMITTED_COLD_START_BUDGET_SECONDS = 2.0
 _inflight_query_encodes: set = set()
 _inflight_model_loads: set = set()
-_CONFIG: dict[str, object] = {}
-
 
 
 def clear_text_search_caches() -> None:

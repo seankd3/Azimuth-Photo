@@ -26,13 +26,10 @@ async def _smart_image_ids(query):
 
 
 router = APIRouter()
-ResolveSmartDetail = Callable[..., Awaitable[dict]]
-ResolveSmartSummary = Callable[[dict], Awaitable[dict]]
 ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
 
 MAX_IMAGE_IDS_PER_REQUEST = 10000
 MAX_COLLECTION_NAME_LENGTH = 160
-
 
 
 class CreateCollectionBody(BaseModel):
@@ -63,8 +60,6 @@ class UpdateCollectionBody(BaseModel):
     name: str | None = None
     query: dict[str, Any] | None = None
     materialize: bool = False
-
-
 
 
 def _clean_collection_name(name: str) -> str | None:

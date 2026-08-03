@@ -31,7 +31,6 @@ RANK_BASIS_MEASURED_MIN = 0.8
 TASTE_SOURCE_VERIFY_TTL_SECONDS = 5.0
 
 DbPath = Callable[[], str]
-DbSignature = Callable[[], str]
 
 _cache: dict[str, object] = {
     "key": None,
@@ -62,8 +61,6 @@ def invalidate_taste_cache() -> None:
 def _embedding_batch_stored(model_key: str, _image_ids: list[int]) -> None:
     if str(model_key or "") == _active_model_key():
         invalidate_taste_cache()
-
-
 
 
 def _active_model_key() -> str:

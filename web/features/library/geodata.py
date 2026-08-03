@@ -12,7 +12,6 @@ from core.dates import parse_taken_timestamp as _parse_taken_timestamp
 
 GPS_IFD = 0x8825
 GPS_LAT_REF, GPS_LAT, GPS_LON_REF, GPS_LON = 1, 2, 3, 4
-LOCATION_PRIORITY = {"inferred": 1, "timeline": 2, "xmp": 3, "exif": 4}
 BACKFILL_BATCH_SIZE = 500
 BACKFILL_THROTTLE_SECONDS = 0.05
 

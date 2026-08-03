@@ -34,8 +34,6 @@ ACTIVITY_STATUS_INITIAL_WAIT_SECONDS = 0.15
 
 def _batch_image_ids_too_large(image_ids) -> bool:
     return isinstance(image_ids, list) and len(image_ids) > MAX_BATCH_IMAGE_IDS
-BuildResponse = Callable[[], Awaitable[dict]]
-CopyResponse = Callable[[dict], dict]
 TrackTask = Callable[[Awaitable], object]
 GetRefreshing = Callable[[], bool]
 SetRefreshing = Callable[[bool], None]
@@ -44,9 +42,6 @@ AsyncBoolBuilder = Callable[[], Awaitable[bool]]
 DbPathProvider = Callable[[], str]
 Invalidator = Callable[[], None]
 InvalidatePairing = Callable[..., None]
-
-
-
 
 
 async def _catalog_summary_payload() -> dict:
@@ -103,8 +98,6 @@ async def api_background_work_status():
         "captions": captions,
         "metadata": catalog_metadata.catalog_metadata_status(),
     }
-
-
 
 
 @router.post("/api/image/{image_id}/flag")

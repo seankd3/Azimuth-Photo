@@ -34,8 +34,6 @@ _settings_response_cache_ttl_seconds = 10.0
 _status_component_timeout_seconds = 1.2
 
 
-
-
 async def catalog_light_summary_payload() -> dict:
     return await catalog_repository.catalog_light_summary_cached(
         catalog_path(),
@@ -221,7 +219,4 @@ async def cached_settings_response(
     return response
 
 
-_build_settings_response = build_settings_response
 _invalidate_settings_response_cache = invalidate_settings_response_cache
-_expire_settings_response_cache = expire_settings_response_cache
-_copy_settings_response = copy_settings_response

@@ -994,9 +994,6 @@ VISIBLE_CACHE_FIRST_SORTS = ranking_repository.VISIBLE_CACHE_FIRST_SORTS
 IMAGE_EXTENSION_SEARCH_TERMS = ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS
 
 
-_ranking_filter_parts = ranking_repository.ranking_filter_parts
-
-
 async def get_cached_image_ids(
     image_ids: list[int],
     size: str,

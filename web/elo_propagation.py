@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import db
-from collections.abc import Awaitable, Callable
 import logging
 import sqlite3
 
@@ -24,8 +23,6 @@ log = logging.getLogger("elo_propagation")
 last_propagation_count = 0
 _prediction_cache_key = None
 _prediction_cache_counts = None
-ActiveEmbeddingModelKey = Callable[[], str]
-GetActiveImagesByIds = Callable[[list[int]], Awaitable[dict[int, dict]]]
 
 # Tuning parameters
 SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate

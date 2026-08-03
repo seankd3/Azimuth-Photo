@@ -16,9 +16,7 @@ from features.settings import status as settings_status
 
 
 AsyncDictBuilder = Callable[[], Awaitable[dict]]
-CacheRootProvider = Callable[[], str]
 DbPathProvider = Callable[[], str]
-ExpireSettingsResponseCache = Callable[[], None]
 
 
 _cache_status_cache: dict[tuple[int], dict] = {}
@@ -29,10 +27,8 @@ _browser_original_count_cache = {"value": None, "bytes": 0, "expires": 0.0}
 _browser_original_count_cache_ttl_seconds = 30.0
 
 
-
 def _cache_root() -> str:
     return thumbnails.SSD_CACHE_DIR
-
 
 
 async def _catalog_image_counts() -> dict:

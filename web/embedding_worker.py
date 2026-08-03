@@ -129,7 +129,6 @@ AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
 AsyncIntProvider = Callable[..., Awaitable[int]]
 AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
 AsyncNoneProvider = Callable[..., Awaitable[None]]
-_get_catalog_image_counts: AsyncDictProvider | None = None
 _count_embeddings_for_model: AsyncIntProvider | None = None
 
 

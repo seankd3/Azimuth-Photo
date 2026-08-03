@@ -23,7 +23,6 @@ router = APIRouter()
 log = logging.getLogger(__name__)
 
 _THROTTLE_SECONDS = 0.05
-_DEFAULT_LIMIT = 50
 _MAX_LIMIT = 500
 
 _scan_lock = threading.Lock()

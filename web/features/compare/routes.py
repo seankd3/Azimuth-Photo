@@ -1,7 +1,7 @@
 import asyncio
 import uuid
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -18,14 +18,7 @@ from features.compare import service as compare_service
 router = APIRouter()
 MAX_SCOPED_IMAGE_IDS = 2000
 MAX_SCOPED_IDS_LENGTH = 20000
-PatchPairingCache = Callable[[list[tuple[int, float, int]]], None]
-AddPastMatchups = Callable[[list[tuple[int, int]]], None]
-SchedulePropagation = Callable[[object], None]
 InvalidatePairing = Callable[..., None]
-NextHandler = Callable[..., object]
-RecordMosaicPick = Callable[[int, list[int], str], Awaitable[dict]]
-RecordComparison = Callable[..., Awaitable[dict | None]]
-UndoComparison = Callable[[], Awaitable[dict | None]]
 USER_WRITE_TIMEOUT_SECONDS = 5.0
 _user_write_lock: asyncio.Lock | None = None
 _user_write_lock_loop: asyncio.AbstractEventLoop | None = None
@@ -38,7 +31,6 @@ def _user_write_lock_for_loop() -> asyncio.Lock:
         _user_write_lock = asyncio.Lock()
         _user_write_lock_loop = loop
     return _user_write_lock
-
 
 
 def _apply_propagated_pairing_updates(*, elo_deltas=None) -> None:
@@ -244,10 +236,6 @@ async def propagation_last():
         "count": elo_propagation.last_propagation_count,
         "queue": propagation_queue.status(),
     }
-
-
-
-
 
 
 @router.post("/api/compare")

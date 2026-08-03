@@ -17,10 +17,6 @@ router = APIRouter()
 ListShares = Callable[[], Awaitable[list[dict]]]
 ListPublishes = Callable[[], Awaitable[list[dict]]]
 
-_list_shares: ListShares | None = None
-_list_publishes: ListPublishes | None = None
-
-
 
 @router.get("/api/shares")
 async def api_list_shared_surfaces(request: Request):

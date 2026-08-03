@@ -21,7 +21,6 @@ from features.settings import status as settings_status
 router = APIRouter()
 log = logging.getLogger(__name__)
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
-AsyncMaybeDictBuilder = Callable[..., Awaitable[dict | None]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
 InvalidateStatus = Callable[[], None]
 
@@ -38,13 +37,6 @@ _CAPTION_COUNTS_INITIAL_WAIT_SECONDS = 0.05
 class CaptionBody(BaseModel):
     caption: str | None = Field(default=None, max_length=100_000)
     tags: list[str] | None = Field(default=None, max_length=500)
-
-
-
-def invalidate_caption_status_cache() -> None:
-    global _caption_counts_refreshing
-    _caption_counts_cache.update({"data": None, "key": None, "expires": 0.0})
-    _caption_counts_refreshing = False
 
 
 def _minimal_caption_counts(worker: dict) -> dict:

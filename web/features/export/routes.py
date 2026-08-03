@@ -7,7 +7,7 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -27,10 +27,7 @@ import db
 from core import query_constraints
 from features.library import service as library_service
 router = APIRouter()
-ResolveLibraryConstraints = Callable[..., Awaitable[dict]]
-ResolveCollectionScope = Callable[[set[int] | None, int], Awaitable[tuple[set[int] | None, int]]]
 DbPathProvider = Callable[[], str]
-GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
 
 EXPORT_FIELD_NAMES = (
     "rank",
@@ -62,8 +59,6 @@ _zip_export_semaphore = asyncio.Semaphore(2)
 
 class InsufficientExportStorage(Exception):
     pass
-
-
 
 
 async def _get_export_images(
