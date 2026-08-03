@@ -177,6 +177,14 @@ defined three times, and one of the three was a flag nothing ever set.
 
 ## Measured, not yet done
 
+**Two app-assembly sites, still two.** `web/app.py` (196 lines) and
+`core/app_factory.py` (269) both register routers and both run configure calls,
+and the order between them is load-bearing but untyped. The injection layer they
+threaded is gone — 47 `configure()` entry points down to 17, `core/wiring.py`
+deleted — so the merge is now mostly mechanical. It is a boot sequence, so it
+wants a session with room to restart the app and walk every surface, not the
+tail of one.
+
 **panel.js is two files.** 103 top-level functions in 1,738 lines, and the split
 is already visible in the names: the left panel (collections, saved views) and
 the deliver overlay (8 `deliver*`, 5 `publish*`, 3 `share*`, plus its own shell,
