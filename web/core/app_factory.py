@@ -345,7 +345,6 @@ def create_app_shell(
     )
     app.state.azimuth_shell = shell
     from core import wiring
-    wiring.configure_status_media_search_providers()
     wiring.configure_cache_events()
     wiring.configure_collection_routes()
     wiring.configure_share_routes(templates=templates)

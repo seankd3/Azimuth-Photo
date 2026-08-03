@@ -1,26 +1,12 @@
 """Dependency wiring that keeps the app shell out of feature/provider details."""
 
 from features.ai import routes as ai_routes
-from features.captions import routes as caption_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
 from features.media import routes as media_routes
 from features.publish import routes as publish_routes
 from features.share import routes as share_routes
-
-
-def configure_status_media_search_providers() -> None:
-    import db
-    from features.settings import status as settings_status
-
-    caption_routes.configure(
-        get_caption_status_counts=lambda **kwargs: db.get_caption_status_counts(**kwargs),
-        get_image_caption=lambda **kwargs: db.get_image_caption(**kwargs),
-        owner_update_caption=lambda **kwargs: db.owner_update_caption(**kwargs),
-        get_tags=lambda **kwargs: db.get_tags(**kwargs),
-        invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
-    )
 
 
 def configure_cache_events() -> None:
