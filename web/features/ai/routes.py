@@ -6,45 +6,23 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 import ai_models
+import db
 import settings
 from core import capabilities
 from core import responses as response_helpers
 
 
+from features.settings import status as settings_status
 router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
 AsyncIntBuilder = Callable[..., Awaitable[int]]
 InvalidateStatus = Callable[[], None]
-_invalidate_settings_response_cache: InvalidateStatus | None = None
-_get_ai_status_counts: AsyncDictBuilder | None = None
-_count_embeddings_for_model: AsyncIntBuilder | None = None
 _ai_status_response_cache: dict[str, dict | tuple | float | None] = {"data": None, "key": None, "expires": 0}
 _ai_status_response_cache_ttl_seconds = 5.0
 _ai_status_response_refreshing = False
 
 
-def configure(
-    *,
-    invalidate_settings_response_cache: InvalidateStatus,
-    get_ai_status_counts: AsyncDictBuilder,
-    count_embeddings_for_model: AsyncIntBuilder,
-) -> None:
-    global _invalidate_settings_response_cache, _get_ai_status_counts
-    global _count_embeddings_for_model
-    _invalidate_settings_response_cache = invalidate_settings_response_cache
-    _get_ai_status_counts = get_ai_status_counts
-    _count_embeddings_for_model = count_embeddings_for_model
-
-
-def _configured() -> InvalidateStatus:
-    if (
-        _invalidate_settings_response_cache is None
-        or _get_ai_status_counts is None
-        or _count_embeddings_for_model is None
-    ):
-        raise RuntimeError("AI routes are not configured")
-    return _invalidate_settings_response_cache
 
 
 def invalidate_ai_status_response_cache() -> None:
@@ -145,9 +123,7 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
             if float(_ai_status_response_cache.get("expires") or 0) <= time.monotonic():
                 _refresh_ai_status_response_cache(model_status)
             return _copy_ai_status_response(cached)
-
-    _configured()
-    counts = await _get_ai_status_counts()
+    counts = await db.get_ai_status_counts()
     embedded = counts["embedded"]
     total_images = counts["total_images"]
     remaining = max(total_images - embedded, 0)
@@ -299,7 +275,6 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
 
 @router.post("/api/ai/embeddings/pause")
 async def api_pause_embeddings():
-    invalidate_settings_response_cache = _configured()
     capability = capabilities.capability_status("search")
     if not capability["available"]:
         return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
@@ -309,13 +284,12 @@ async def api_pause_embeddings():
         return JSONResponse({"error": "Embeddings not available"}, status_code=503)
     embedding_worker.pause_embedding_worker()
     invalidate_ai_status_response_cache()
-    invalidate_settings_response_cache()
+    settings_status.invalidate_settings_response_cache()
     return {"ok": True, "ai_status": await build_ai_status(force=True)}
 
 
 @router.post("/api/ai/embeddings/resume")
 async def api_resume_embeddings():
-    invalidate_settings_response_cache = _configured()
     capability = capabilities.capability_status("search")
     if not capability["available"]:
         return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
@@ -343,14 +317,13 @@ async def api_resume_embeddings():
     await db.clear_embedding_poison_ledger(settings.active_embedding_config())
     embedding_worker.resume_embedding_worker()
     invalidate_ai_status_response_cache()
-    invalidate_settings_response_cache()
+    settings_status.invalidate_settings_response_cache()
     return {"ok": True, "ai_status": await build_ai_status(force=True)}
 
 
 @router.post("/api/ai/model/install")
 async def api_install_ai_model(role: str = "fast"):
     del role
-    _configured()
     capability = capabilities.capability_status("search")
     if not capability["available"]:
         return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
@@ -398,5 +371,4 @@ async def api_install_ai_model(role: str = "fast"):
 @router.get("/api/ai/status")
 async def ai_status():
     """Embedding worker and taste model status for the bottom bar."""
-    _configured()
     return await build_ai_status()

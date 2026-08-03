@@ -1,7 +1,6 @@
 """Dependency wiring that keeps the app shell out of feature/provider details."""
 
 from features.ai import routes as ai_routes
-from features.cache import routes as cache_routes
 from features.captions import routes as caption_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
@@ -36,14 +35,6 @@ def configure_status_media_search_providers() -> None:
         people_status_payload=lambda: people_routes.people_status_payload(),
         get_catalog_image_counts=lambda: db.get_catalog_image_counts(),
         refresh_source_online_states=lambda: db.refresh_source_online_states(),
-    )
-    cache_routes.configure(
-        build_ai_status=ai_routes.build_ai_status,
-    )
-    ai_routes.configure(
-        invalidate_settings_response_cache=settings_status.invalidate_settings_response_cache,
-        get_ai_status_counts=lambda: db.get_ai_status_counts(),
-        count_embeddings_for_model=lambda config, **kwargs: db.count_embeddings_for_model(config, **kwargs),
     )
     caption_routes.configure(
         get_caption_status_counts=lambda **kwargs: db.get_caption_status_counts(**kwargs),
