@@ -228,6 +228,25 @@ and model install — each with its own render/bind/poll trio.
 Both are mechanical moves that need a browser pass per surface afterwards, not a
 test run. Left for a session that can finish and screenshot them.
 
+## Verified in a browser
+
+Booted on a scratch `AZIMUTH_HOME` — never the real catalog at `C:\Azimuth
+Photo` — seeded with four generated JPEGs through the actual first-run wizard
+and scan path. On the desktop surface:
+
+- Zero console errors on load, and none after mounting all seven lenses.
+- Every network request 200, including `/api/map/markers` — live confirmation
+  that removing the geo *tagging* routes left the Map view intact, which had
+  only been judged from reading until then.
+- Develop lazy-loads 30+ modules, all 200, and renders every panel.
+- The module graph resolves, so the `lib.js` consolidation, the `state.js`
+  deletion and the `RAW_EXTENSIONS` move all hold at runtime.
+
+**No screenshot.** The browser pane will not display in this environment, so the
+page never composites — which is also why image `naturalWidth` stays 0 despite
+the thumbnail fetches returning 200. Everything above was read from the DOM,
+computed styles and the network log. That is weaker than looking at it.
+
 ## Lessons, paid for
 
 **Automated sweeps for finding, hands for editing.** Seven regex sweeps corrupted
