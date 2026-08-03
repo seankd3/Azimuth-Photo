@@ -23,14 +23,14 @@ import thumbnails
 import settings
 
 
+import db
+from features.library import service as library_service
 router = APIRouter()
 ResolveLibraryConstraints = Callable[..., Awaitable[dict]]
 ResolveCollectionScope = Callable[[set[int] | None, int], Awaitable[tuple[set[int] | None, int]]]
 DbPathProvider = Callable[[], str]
 GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
 _resolve_library_constraints: ResolveLibraryConstraints | None = None
-_resolve_collection_scope: ResolveCollectionScope | None = None
-_get_import_batch_image_ids: GetImportBatchImageIds | None = None
 
 EXPORT_FIELD_NAMES = (
     "rank",
@@ -67,13 +67,9 @@ class InsufficientExportStorage(Exception):
 def configure(
     *,
     resolve_library_constraints: ResolveLibraryConstraints,
-    resolve_collection_scope: ResolveCollectionScope,
-    get_import_batch_image_ids: GetImportBatchImageIds | None = None,
 ) -> None:
-    global _resolve_library_constraints, _resolve_collection_scope, _get_import_batch_image_ids
+    global _resolve_library_constraints
     _resolve_library_constraints = resolve_library_constraints
-    _resolve_collection_scope = resolve_collection_scope
-    _get_import_batch_image_ids = get_import_batch_image_ids
 
 
 
@@ -110,18 +106,14 @@ async def _get_export_images(
     search = await _resolve_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:
-        if _get_import_batch_image_ids is None:
-            raise RuntimeError("Export routes are not configured")
-        batch_ids = await _get_import_batch_image_ids(import_batch)
+        batch_ids = await db.get_import_batch_image_ids(import_batch)
         if batch_ids is None:
             id_filter = set()
         elif id_filter is None:
             id_filter = set(batch_ids)
         else:
             id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
-    if _resolve_collection_scope is None:
-        raise RuntimeError("Export routes are not configured")
-    id_filter, collection_id = await _resolve_collection_scope(id_filter, collection_id)
+    id_filter, collection_id = await library_service._resolve_collection_scope(id_filter, collection_id)
     db_sort = "elo" if sort == "similarity" else sort
     ranking_args = dict(
         sort=db_sort,

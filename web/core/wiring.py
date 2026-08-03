@@ -5,7 +5,6 @@ from features.captions import routes as caption_routes
 from features.collections import routes as collection_routes
 from features.compare import routes as compare_routes
 from features.export import routes as export_routes
-from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.publish import routes as publish_routes
@@ -62,21 +61,6 @@ def configure_cache_events() -> None:
         elo_propagation=elo_propagation,
     )
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
-
-
-def configure_library_routes() -> None:
-    import db
-    from features.library import service as library_service
-
-    library_routes.configure(
-        rankings_handler=lambda **kwargs: library_service.api_rankings_impl(**kwargs),
-    )
-    library_service.configure_import_batches(
-        get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
-    )
-    library_service.configure_stacks(
-        get_stack_representative_counts=lambda image_ids: db.stack_representative_counts(image_ids),
-    )
 
 
 def configure_collection_routes(*, resolve_library_constraints=None) -> None:
@@ -345,12 +329,8 @@ def configure_query_constraints(
 def configure_export_routes(
     *,
     resolve_library_constraints,
-    get_import_batch_image_ids=None,
 ) -> None:
-    from features.library import service as library_service
 
     export_routes.configure(
         resolve_library_constraints=resolve_library_constraints,
-        resolve_collection_scope=library_service._resolve_collection_scope,
-        get_import_batch_image_ids=get_import_batch_image_ids,
     )

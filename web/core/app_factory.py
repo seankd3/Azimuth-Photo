@@ -304,7 +304,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
     wiring.configure_shared_routes()
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
-        get_import_batch_image_ids=lambda batch_id: db.get_import_batch_image_ids(batch_id),
     )
     wiring.configure_settings_routes(
         settings_response_cache=settings_status._settings_response_cache,
@@ -380,7 +379,6 @@ def create_app_shell(
     wiring.configure_people_routes()
     wiring.configure_status_media_search_providers()
     wiring.configure_cache_events()
-    wiring.configure_library_routes()
     wiring.configure_collection_routes()
     wiring.configure_share_routes(templates=templates)
     wiring.configure_publish_routes(templates=templates)

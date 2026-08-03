@@ -1,4 +1,3 @@
-from collections.abc import Awaitable, Callable
 import time
 
 from fastapi import APIRouter, Request
@@ -7,19 +6,9 @@ from core.requests import parse_exclude_sources, repeated_query_values
 from data import connection as data_connection
 
 
+from features.library import service as library_service
+
 router = APIRouter()
-RankingsHandler = Callable[..., Awaitable[dict]]
-_rankings_handler: RankingsHandler | None = None
-
-
-def configure(
-    *,
-    rankings_handler: RankingsHandler,
-) -> None:
-    global _rankings_handler
-    _rankings_handler = rankings_handler
-
-
 @router.get("/api/storage/overview")
 async def api_storage_overview():
     from features.library import storage  # deferred: keeps quality-scoring numpy off boot until storage is requested
@@ -37,14 +26,12 @@ async def api_rankings(
     exclude_sources: str = "",
     request: Request = None,
 ):
-    if _rankings_handler is None:
-        raise RuntimeError("Library routes are not configured")
     folder_scope = repeated_query_values(request, "folder", folder)
     excluded = parse_exclude_sources(exclude_sources)
     started = time.perf_counter()
     try:
         with data_connection.sqlite_timeout(0.25):
-            response = await _rankings_handler(
+            response = await library_service.api_rankings_impl(
                 limit=limit,
                 offset=offset,
                 sort=sort,
