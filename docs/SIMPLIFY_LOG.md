@@ -31,13 +31,19 @@ fixed. Every remaining failure was checked against `main` by extracting it with
 `test_ai_failure_resilience` (1). `test_fresh_boot` fails **less** here than on
 `main` — 2 against 3.
 
-**The harness costs about 4 seconds before a test starts.** With a 10-second
-cap, any test doing real route work sits close to the line:
+**Two catalog-source routes take three seconds each.** Chasing why
 `test_catalog::test_add_source_then_keep_remove_preserves_rows_and_originals`
-takes 9.06s alone and flakes under load. It is small — one file, four requests —
-so there is nothing in it to trim. The cost is `test_support.py`, which 42 files
-import with `*` and which monkeypatches ~20 module globals. That is also why the
-suite is order-dependent. Fixing it would buy both the cap and determinism.
+sits at 9s against the ten-second cap: setup is 0.09s, the test body is 7.75s,
+and inside it `POST /api/catalog/sources` is 3.03s and
+`POST /api/catalog/sources/{id}/remove` is 2.97s — with scanning off and one
+image in the catalog. Nothing in the test is trimmable; the routes are the cost.
+Worth a look under "Speed is the bar", though source management is not an
+interactive path.
+
+I had recorded "the harness costs about 4 seconds per test" here before
+measuring it. It costs 0.09s. The figure came from earlier in the session and I
+repeated it instead of checking — the same mistake as calling failures
+pre-existing without running them against `main`.
 
 ## What the branch removed, and the three things it should not have
 
