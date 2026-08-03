@@ -21,15 +21,26 @@ clients, the v1 metadata push, and routes with neither a caller nor an intent.
 
 ## Known red
 
-Full suite: **1,580 passed, 18 failed, 8 skipped** in 10m29s, then one more
-fixed. Every remaining failure was checked against `main` by extracting it with
-`git archive` and running it there — all fail identically:
+Full suite: **1,580 passed, 18 failed, 8 skipped** in 10m29s. Every failure was
+checked against `main` by extracting it with `git archive` and running it there.
+The eighteen, and what each is:
 
-`test_restore_drill` (4), `test_ml_device` (2), `test_import_staging` (2),
-`test_catalog` (1), `test_settings_status` (1), `test_search_stability` (1),
-`test_row_version_scope` (1), `test_hddgov` (1, a Linux ionice path),
-`test_ai_failure_resilience` (1). `test_fresh_boot` fails **less** here than on
-`main` — 2 against 3.
+| Failures | File | Against `main` |
+|---|---|---|
+| 4 | `test_restore_drill` | identical |
+| 2 | `test_ml_device` | identical |
+| 2 | `test_import_staging` | identical |
+| 2 | `test_fresh_boot` | **better here** — `main` fails 3 |
+| 2 | `test_catalog` | 1 identical; the 2nd only appears in a full run |
+| 1 | `test_settings_status` | identical |
+| 1 | `test_search_stability` | identical |
+| 1 | `test_row_version_scope` | identical |
+| 1 | `test_hddgov` | identical (a Linux `ionice` path) |
+| 1 | `test_ai_failure_resilience` | identical |
+| 1 | `test_optional_ai` | **the only one that was ours — fixed since** |
+
+So seventeen stand and one was fixed: a TTL cache in `caption_status_payload`
+that made two files depend on their order.
 
 **A slow test, four hypotheses, and no anomaly.**
 `test_catalog::test_add_source_then_keep_remove_preserves_rows_and_originals`
