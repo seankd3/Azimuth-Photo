@@ -1,11 +1,12 @@
 """Library rankings response assembly and cache helpers."""
 
 import db
+from features.media import warm as media_warm
+from features.collections import smart as smart_collections
 import thumbnails
 import asyncio
 import json
 import time
-from collections.abc import Awaitable, Callable
 from datetime import datetime
 
 from fastapi.responses import Response
@@ -34,30 +35,8 @@ _taste_id_elo_cache_max_entries = 8
 MAX_RANKINGS_LIMIT = 5000
 ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
-_resolve_library_constraints: Callable[..., object] | None = None
-_schedule_thumbnail_prefetch: Callable[..., None] | None = None
-_schedule_result_thumbnail_memory_warm: Callable[..., None] | None = None
-_rankings_response_cache_ttl_seconds_provider: Callable[[], float] | None = None
-_resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
-def configure(
-    *,
-    resolve_library_constraints: Callable[..., object],
-    schedule_thumbnail_prefetch: Callable[..., None],
-    schedule_result_thumbnail_memory_warm: Callable[..., None],
-    resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]],
-    rankings_response_cache_ttl_seconds: Callable[[], float] | None = None,
-) -> None:
-    global _resolve_library_constraints
-    global _schedule_thumbnail_prefetch, _schedule_result_thumbnail_memory_warm
-    global _rankings_response_cache_ttl_seconds_provider
-    global _resolve_smart_collection_image_ids
-    _resolve_library_constraints = resolve_library_constraints
-    _schedule_thumbnail_prefetch = schedule_thumbnail_prefetch
-    _schedule_result_thumbnail_memory_warm = schedule_result_thumbnail_memory_warm
-    _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
-    _rankings_response_cache_ttl_seconds_provider = rankings_response_cache_ttl_seconds
 
 
 
@@ -96,9 +75,9 @@ def _configured_clamp_int(value, default: int, minimum: int, maximum: int) -> in
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
-    if _resolve_library_constraints is None:
+    if query_constraints.resolve_configured_library_constraints is None:
         raise RuntimeError("Library service is not configured")
-    return await _resolve_library_constraints(q, people=people, deep=deep)
+    return await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
 
 
 def _configured_normalize_search_query(query: str) -> str:
@@ -106,18 +85,16 @@ def _configured_normalize_search_query(query: str) -> str:
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
-    if _schedule_thumbnail_prefetch is not None:
-        _schedule_thumbnail_prefetch(rows, size, limit=limit)
+    if media_warm.schedule_thumbnail_prefetch is not None:
+        media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
 
 
 def _configured_schedule_result_thumbnail_memory_warm(rows) -> None:
-    if _schedule_result_thumbnail_memory_warm is not None:
-        _schedule_result_thumbnail_memory_warm(rows)
+    if media_warm.schedule_result_thumbnail_memory_warm is not None:
+        media_warm.schedule_result_thumbnail_memory_warm(rows)
 
 
 def _configured_rankings_response_cache_ttl_seconds() -> float:
-    if _rankings_response_cache_ttl_seconds_provider is not None:
-        return float(_rankings_response_cache_ttl_seconds_provider())
     return float(_rankings_response_cache_ttl_seconds)
 
 
@@ -588,7 +565,7 @@ async def _resolve_collection_scope(current_ids, collection_id: int) -> tuple[se
     collection_id = int(collection_id or 0)
     if collection_id <= 0:
         return current_ids, 0
-    smart_ids = await _configured(_resolve_smart_collection_image_ids)(collection_id)
+    smart_ids = await smart_collections.resolve_collection_image_ids(collection_id)
     if smart_ids is None:
         return current_ids, collection_id
     return _combine_id_scopes(current_ids, smart_ids), 0

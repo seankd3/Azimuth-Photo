@@ -3,10 +3,12 @@
 import asyncio
 import thumbnails
 import db
+from core import cache_events
+from features.media import warm as media_warm
+from features.collections import smart as smart_collections
 import hashlib
 import os
 import time
-from collections.abc import Awaitable, Callable
 
 import elo_propagation
 import helpers as app_helpers
@@ -47,37 +49,8 @@ _MOSAIC_DIVERSE_WINDOW = 1536
 _MOSAIC_SAMPLE_WINDOW = 960
 _DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
-_invalidate_rankings_cache: Callable[[], None] | None = None
-_invalidate_interaction_response_cache: Callable[[], None] | None = None
-_resolve_library_constraints: Callable[..., object] | None = None
-_schedule_thumbnail_prefetch: Callable[..., None] | None = None
-_schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None
-_resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None
 
 
-def configure(
-    *,
-    invalidate_rankings_cache: Callable[[], None],
-    invalidate_interaction_response_cache: Callable[[], None],
-    resolve_library_constraints: Callable[..., object] | None = None,
-    schedule_thumbnail_prefetch: Callable[..., None] | None = None,
-    schedule_cached_thumbnail_memory_warm: Callable[..., None] | None = None,
-    resolve_smart_collection_image_ids: Callable[[int], Awaitable[set[int] | None]] | None = None,
-) -> None:
-    global _invalidate_rankings_cache, _invalidate_interaction_response_cache
-    global _resolve_library_constraints, _schedule_thumbnail_prefetch
-    global _schedule_cached_thumbnail_memory_warm
-    global _resolve_smart_collection_image_ids
-    _invalidate_rankings_cache = invalidate_rankings_cache
-    _invalidate_interaction_response_cache = invalidate_interaction_response_cache
-    if resolve_library_constraints is not None:
-        _resolve_library_constraints = resolve_library_constraints
-    if schedule_thumbnail_prefetch is not None:
-        _schedule_thumbnail_prefetch = schedule_thumbnail_prefetch
-    if schedule_cached_thumbnail_memory_warm is not None:
-        _schedule_cached_thumbnail_memory_warm = schedule_cached_thumbnail_memory_warm
-    if resolve_smart_collection_image_ids is not None:
-        _resolve_smart_collection_image_ids = resolve_smart_collection_image_ids
 
 
 def _configured(provider):
@@ -95,9 +68,9 @@ def _configured_cache_root() -> str:
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
-    if _resolve_library_constraints is None:
+    if query_constraints.resolve_configured_library_constraints is None:
         raise RuntimeError("Compare service is not configured")
-    return await _resolve_library_constraints(q, people=people, deep=deep)
+    return await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
 
 
 async def _scoped_search(
@@ -112,7 +85,7 @@ async def _scoped_search(
         else {int(image_id) for image_id in ids if int(image_id) > 0}
     )
     if collection_id and collection_id > 0:
-        collection_ids = await _configured(_resolve_smart_collection_image_ids)(int(collection_id))
+        collection_ids = await smart_collections.resolve_collection_image_ids(int(collection_id))
         if collection_ids is None:
             collection_ids = await db.collection_image_ids(int(collection_id))
         collection_scope = {int(image_id) for image_id in collection_ids or []}
@@ -133,19 +106,19 @@ async def _scoped_search(
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
-    if _schedule_thumbnail_prefetch is not None:
-        _schedule_thumbnail_prefetch(rows, size, limit=limit)
+    if media_warm.schedule_thumbnail_prefetch is not None:
+        media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
 
 
 def _configured_schedule_cached_thumbnail_memory_warm(rows, size: str, *, limit: int) -> None:
-    if _schedule_cached_thumbnail_memory_warm is not None:
-        _schedule_cached_thumbnail_memory_warm(rows, size, limit=limit)
+    if media_warm.schedule_cached_thumbnail_memory_warm is not None:
+        media_warm.schedule_cached_thumbnail_memory_warm(rows, size, limit=limit)
 
 
 def _invalidate_rankings() -> None:
     taste_service.invalidate_taste_cache()
-    if _invalidate_rankings_cache is not None:
-        _invalidate_rankings_cache()
+    if cache_events.invalidate_rankings_cache is not None:
+        cache_events.invalidate_rankings_cache()
 
 
 def invalidate_interaction_response_cache() -> None:

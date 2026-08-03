@@ -1,7 +1,6 @@
 """Dependency wiring that keeps the app shell out of feature/provider details."""
 
 from features.ai import routes as ai_routes
-from features.export import routes as export_routes
 
 
 def configure_cache_events() -> None:
@@ -23,79 +22,3 @@ def configure_cache_events() -> None:
     db.register_embedding_batch_listener(cache_events.embedding_batch_stored)
 
 
-def _smart_collection_image_ids_resolver(resolve_library_constraints):
-    import db
-    from features.collections import smart as smart_collections
-
-    async def resolve(collection_id: int) -> set[int] | None:
-        collection = await db.get_collection(collection_id, limit=1)
-        if not collection or not collection.get("smart"):
-            return None
-        image_ids = await smart_collections.resolve_image_ids(
-            collection.get("query") or {},
-            resolve_library_constraints=resolve_library_constraints,
-        )
-        return set(image_ids)
-
-    return resolve
-
-
-def configure_library_service(
-    *,
-    resolve_library_constraints,
-    schedule_thumbnail_prefetch,
-    schedule_result_thumbnail_memory_warm,
-    rankings_response_cache_ttl_seconds,
-) -> None:
-    from features.library import service as library_service
-
-    library_service.configure(
-        resolve_library_constraints=resolve_library_constraints,
-        schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
-        schedule_result_thumbnail_memory_warm=schedule_result_thumbnail_memory_warm,
-        resolve_smart_collection_image_ids=_smart_collection_image_ids_resolver(resolve_library_constraints),
-        rankings_response_cache_ttl_seconds=rankings_response_cache_ttl_seconds,
-    )
-
-
-def configure_compare_service(
-    *,
-    invalidate_rankings_cache,
-    invalidate_interaction_response_cache,
-    resolve_library_constraints,
-    schedule_thumbnail_prefetch,
-    schedule_cached_thumbnail_memory_warm,
-    resolve_smart_collection_image_ids=None,
-) -> None:
-    from features.compare import service as compare_service
-
-    compare_service.configure(
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        resolve_library_constraints=resolve_library_constraints,
-        schedule_thumbnail_prefetch=schedule_thumbnail_prefetch,
-        schedule_cached_thumbnail_memory_warm=schedule_cached_thumbnail_memory_warm,
-        resolve_smart_collection_image_ids=resolve_smart_collection_image_ids
-        or _smart_collection_image_ids_resolver(resolve_library_constraints),
-    )
-
-
-def configure_query_constraints(
-    *,
-    text_search_resolution_cache_ttl_seconds,
-) -> None:
-    from core import query_constraints
-
-    query_constraints.configure(
-        text_search_resolution_cache_ttl_seconds=text_search_resolution_cache_ttl_seconds,
-    )
-
-
-def configure_export_routes(
-    *,
-    resolve_library_constraints,
-) -> None:
-
-    export_routes.configure(
-        resolve_library_constraints=resolve_library_constraints,
-    )

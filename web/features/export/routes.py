@@ -24,13 +24,13 @@ import settings
 
 
 import db
+from core import query_constraints
 from features.library import service as library_service
 router = APIRouter()
 ResolveLibraryConstraints = Callable[..., Awaitable[dict]]
 ResolveCollectionScope = Callable[[set[int] | None, int], Awaitable[tuple[set[int] | None, int]]]
 DbPathProvider = Callable[[], str]
 GetImportBatchImageIds = Callable[[int], Awaitable[set[int] | None]]
-_resolve_library_constraints: ResolveLibraryConstraints | None = None
 
 EXPORT_FIELD_NAMES = (
     "rank",
@@ -64,13 +64,6 @@ class InsufficientExportStorage(Exception):
     pass
 
 
-def configure(
-    *,
-    resolve_library_constraints: ResolveLibraryConstraints,
-) -> None:
-    global _resolve_library_constraints
-    _resolve_library_constraints = resolve_library_constraints
-
 
 
 async def _get_export_images(
@@ -101,9 +94,9 @@ async def _get_export_images(
         images_dict = await image_repository.get_images_by_ids(db_path, id_list)
         return [images_dict[i] for i in id_list if i in images_dict]
 
-    if _resolve_library_constraints is None:
+    if query_constraints.resolve_configured_library_constraints is None:
         raise RuntimeError("Export routes are not configured")
-    search = await _resolve_library_constraints(q, people=people, deep=deep)
+    search = await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:
         batch_ids = await db.get_import_batch_image_ids(import_batch)

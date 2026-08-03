@@ -243,3 +243,18 @@ async def resolve_materialized_image_ids(
         chunk_size=chunk_size,
         materialize_limit=MAX_MATERIALIZE_IMAGE_IDS,
     )
+
+
+async def resolve_collection_image_ids(collection_id: int) -> set[int] | None:
+    """Membership of a smart collection, or None if it is a static one."""
+
+    from core import query_constraints
+
+    collection = await db.get_collection(collection_id, limit=1)
+    if not collection or not collection.get("smart"):
+        return None
+    image_ids = await resolve_image_ids(
+        collection.get("query") or {},
+        resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
+    )
+    return set(image_ids)

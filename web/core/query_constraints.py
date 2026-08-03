@@ -25,24 +25,6 @@ _inflight_model_loads: set = set()
 _CONFIG: dict[str, object] = {}
 
 
-def configure(**dependencies) -> None:
-    """Register app-specific dependencies for configured query resolution."""
-    _CONFIG.update({
-        key: value
-        for key, value in dependencies.items()
-        if value is not None
-    })
-
-
-def sync_configured_ttls() -> None:
-    global _text_search_resolution_cache_ttl_seconds
-
-    text_ttl = _CONFIG.get("text_search_resolution_cache_ttl_seconds")
-    if callable(text_ttl):
-        _text_search_resolution_cache_ttl_seconds = float(text_ttl())
-    elif text_ttl is not None:
-        _text_search_resolution_cache_ttl_seconds = float(text_ttl)
-
 
 def clear_text_search_caches() -> None:
     _text_search_resolution_cache.clear()
@@ -501,7 +483,6 @@ async def resolve_configured_text_search(
     start_model_load=None,
     apply_metadata_ids=None,
 ) -> dict:
-    sync_configured_ttls()
     return await resolve_text_search(
         q,
         deep=deep,

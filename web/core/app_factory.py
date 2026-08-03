@@ -205,9 +205,7 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
 
 
 def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
-    from core import cache_events, query_constraints, wiring
-    from features.library import service as library_service
-    from features.media import warm as media_warm
+    from core import cache_events, query_constraints
 
     def invalidate_pairing_cache(*, matchups: bool = False) -> None:
         cache_events.invalidate_pairing_cache(matchups=matchups)
@@ -238,25 +236,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
             resolve_text_search=resolve_text_search,
         )
 
-    wiring.configure_compare_service(
-        invalidate_rankings_cache=invalidate_rankings_cache,
-        invalidate_interaction_response_cache=invalidate_interaction_response_cache,
-        resolve_library_constraints=resolve_library_constraints,
-        schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
-        schedule_cached_thumbnail_memory_warm=media_warm.schedule_cached_thumbnail_memory_warm,
-    )
-    wiring.configure_query_constraints(
-        text_search_resolution_cache_ttl_seconds=lambda: query_constraints._text_search_resolution_cache_ttl_seconds,
-    )
-    wiring.configure_library_service(
-        resolve_library_constraints=resolve_library_constraints,
-        schedule_thumbnail_prefetch=media_warm.schedule_thumbnail_prefetch,
-        schedule_result_thumbnail_memory_warm=media_warm.schedule_result_thumbnail_memory_warm,
-        rankings_response_cache_ttl_seconds=lambda: library_service._rankings_response_cache_ttl_seconds,
-    )
-    wiring.configure_export_routes(
-        resolve_library_constraints=resolve_library_constraints,
-    )
 
     return AppRuntimeServices(
         invalidate_pairing_cache=invalidate_pairing_cache,
