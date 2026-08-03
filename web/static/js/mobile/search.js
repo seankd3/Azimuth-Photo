@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Search tab: query → timeline scope, people carousel (real
 // /api/people + people= scope param), category chips backed by the
 // raw|jpg|tif file_type group aliases and flag scopes.
@@ -19,9 +20,6 @@ let tagOptions = null;
 let loadError = false;
 let loadingDetails = false;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmtInt = (n) => (n == null ? '' : Number(n).toLocaleString('en-US'));
 
 // /api/people groups faces into sections; the mobile carousel is one concise

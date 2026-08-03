@@ -1,3 +1,4 @@
+import { escapeHtml } from '../../lib.js';
 /**
  * Develop Presets panel — left slim browser with folders, hover live-preview,
  * click-to-apply, save-current, rename/delete.
@@ -14,13 +15,6 @@ function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));
 }
 
-function escapeHtml(text) {
-    return String(text ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-}
 
 function groupByFolder(presets) {
     const groups = new Map();

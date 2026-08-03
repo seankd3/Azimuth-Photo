@@ -16,7 +16,7 @@ import { showToast } from './toast.js';
 import { keepCoverRejectRest } from './stack_cull.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc, photoAspect as aspect } from './dom.js';
+import { escapeHtml as esc, photoAspect as aspect } from '../lib.js';
 import { starsMarkup } from './elo_stars_display.js';
 import { openSystemSettings } from './drawer.js';
 import { createPendingPreviewPoll, pendingCount, pendingPreviewCount as countPendingPreviews } from '../previews.js';

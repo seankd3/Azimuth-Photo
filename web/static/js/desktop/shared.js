@@ -27,7 +27,7 @@ import {
 import { motionMs } from './motion.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
-import { esc, slugifyName } from './dom.js';
+import { esc, slugifyName } from '../lib.js';
 
 const SHARED_CHANGED_EVENT = 'shares/publishes-changed';
 const EMPTY_TREE = { nodes: [], links: [], root_ids: [] };

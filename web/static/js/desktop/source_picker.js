@@ -1,6 +1,6 @@
 import { browseCatalogFolders } from './api.js';
 import { icon } from '../icons.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc } from '../lib.js';
 
 const state = {
     open: false,

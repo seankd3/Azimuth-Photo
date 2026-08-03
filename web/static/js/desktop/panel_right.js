@@ -4,7 +4,7 @@ import {
 import { getImageCaption, getImageExif, saveImageCaption } from './api.js';
 import { closeRightDrawer, openRightDrawer, rightDrawerOpen } from './panel.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
 
 const exifCache = new Map();
 const exifPromises = new Map();

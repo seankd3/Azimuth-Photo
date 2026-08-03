@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, previewThumbUrl, thumbUrl,
 } from './api.js';
@@ -99,9 +100,6 @@ let liveSeq = 0;
 let live = { q: '', loading: false, data: null, error: false };
 let tokenSelected = false;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 function fuzzy(haystack, needle) {

@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import { getFolderTree, revealFolder, rescanCatalogSource } from './api.js';
 import { exportScope, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, navigateToScope, on, scope, scopeParams } from './state.js';
@@ -24,9 +25,6 @@ let refreshGeneration = 0;
 let filterTimer = 0;
 let lastSelectedFolderPath = '';
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const leafName = (path) => String(path || '').split('/').filter(Boolean).pop() || path || 'Folder';
 

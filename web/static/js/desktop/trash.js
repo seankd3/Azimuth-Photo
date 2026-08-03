@@ -10,7 +10,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { emptyStateHtml } from './empty_state.js';
 import { gridLoadingHtml } from './loading_state.js';
-import { escapeHtml as esc, formatCount as fmt, photoAspect as aspect } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt, photoAspect as aspect } from '../lib.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';

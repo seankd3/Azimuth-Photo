@@ -3,7 +3,7 @@ import {
     getCloudBackupStatus, saveCloudBackupConfig, startCloudBackup, stopCloudBackup,
 } from './api.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc } from '../lib.js';
 
 const CACHE_MS = 15000;
 let status = null;

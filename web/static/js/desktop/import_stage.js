@@ -11,7 +11,7 @@ import { emit, on, scope, setScope } from './state.js';
 import { switchLens } from './lenses.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
 
 const CATEGORY_TREES = { raw: 'Raws', personal: 'Snapshots', film: 'Raws/Film Scans', export: 'Edits', video: 'Video' };
 const CATEGORY_SHORT = { raw: 'RAW', personal: 'personal', film: 'film', export: 'exports', video: 'video' };

@@ -1,15 +1,9 @@
+import { escapeHtml } from '../../lib.js';
 /**
  * Develop's left-rail snapshots and history.  The host owns rendering and
  * persistence; this module only presents saved states and delegates restores.
  */
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-}
 
 function clone(value) {
     return JSON.parse(JSON.stringify(value || {}));

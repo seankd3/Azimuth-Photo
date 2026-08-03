@@ -1,5 +1,5 @@
 import { icon } from '../icons.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc } from '../lib.js';
 
 export function emptyStateHtml({ title, detail, actions = [], iconName = 'image' } = {}) {
     const buttons = actions.map(({ label, action = '', primary = false }) => (

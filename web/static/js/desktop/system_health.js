@@ -1,6 +1,6 @@
 /** System Health settings panel — live aggregation from /api/health/details. */
 import { getHealthDetails } from './api.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc } from '../lib.js';
 
 const POLL_MS = 30000;
 let payload = null;

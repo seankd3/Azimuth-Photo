@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import { createCollection, getCollectionSuggestions, thumbUrl } from './api.js';
 import { setActiveLens, scopeParams } from './state.js';
 import { showToast } from './toast.js';
@@ -20,9 +21,6 @@ function notifyChanged() {
     window.dispatchEvent(new CustomEvent('collection-suggestions:changed'));
 }
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 
 export const suggestionFingerprint = (s) => (

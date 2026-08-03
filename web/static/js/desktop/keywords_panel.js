@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import { byId, on, selection, viewState } from './state.js';
 import { requestJson } from './api.js';
 import { showToast } from './toast.js';
@@ -7,9 +8,6 @@ const loadingRows = (label, count = 3) => `<div aria-label="${label}" aria-busy=
     { length: count },
     () => '<div class="chrome-skel nav-row skel"></div>',
 ).join('')}</div>`;
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
 
 let keywords = [];
 let armedKeyword = null;

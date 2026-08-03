@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Library tab: real collections (create/add/browse), Picked/Rejected
 // rows with real counts from /api/counts, and source status from
 // /api/catalog. Collection rows show the real sorted % computed from
@@ -42,9 +43,6 @@ let workLoading = false;
 let activeSuggestionIndex = 0;
 const sortedPctCache = new Map();
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmtInt = (n) => (n == null ? '…' : Number(n).toLocaleString('en-US'));
 const suggestionFingerprint = (s) => s.fingerprint || `${s.kind || ''}|${s.cover_image_id || ''}|${s.count || 0}`;
 const folderName = (path) => String(path || '').split('/').filter(Boolean).pop() || path || 'Folder';

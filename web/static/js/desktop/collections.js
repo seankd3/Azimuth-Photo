@@ -7,7 +7,7 @@ import {
 } from './suggestions.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
-import { esc } from './dom.js';
+import { esc } from '../lib.js';
 
 const fmt = (value) => Number(value || 0).toLocaleString('en-US');
 let mounted = false;

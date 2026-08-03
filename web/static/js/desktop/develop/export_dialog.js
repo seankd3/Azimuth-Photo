@@ -10,7 +10,7 @@
 
 import { fetchOptionsWithTimeout } from '../../api.js';
 import { pollJob } from '../jobs.js';
-import { esc as escapeHtml } from '../dom.js';
+import { esc as escapeHtml } from '../../lib.js';
 
 const READ_TIMEOUT_MS = 10_000;
 const MUTATION_TIMEOUT_MS = 20_000;

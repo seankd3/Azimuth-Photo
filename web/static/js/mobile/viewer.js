@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // GP-class photo viewer on a pure-black canvas.
 // Gesture grammar (from the One prototype):
 //   2 fingers  → live pinch zoom + pan (midpoint-anchored)
@@ -40,9 +41,6 @@ let panMomentum = null;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const LARGE_IMAGE_TIMEOUT_MS = 8000;
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function current() {
     return list[index] || null;

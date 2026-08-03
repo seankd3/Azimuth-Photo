@@ -22,7 +22,7 @@ import {
     rememberSources, applyExcludeSources,
 } from './quiet_sources.js';
 import { icon } from '../icons.js';
-import { esc, slugifyName } from './dom.js';
+import { esc, slugifyName } from '../lib.js';
 import {
     initSuggestions, loadSuggestionsOnce, openSuggestionsReview, suggestionsAreLoading, visibleSuggestions,
 } from './suggestions.js';

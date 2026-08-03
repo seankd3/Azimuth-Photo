@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Phone-facing backup glass box. It reports only the existing sync worker's
 // truth plus browser storage; hub mode is an explicit ready state, not a fake
 // upload queue.
@@ -18,9 +19,6 @@ let back = null;
 let status = null;
 let storage = null;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[character]));
 
 function formatBytes(value) {
     let amount = Math.max(0, Number(value || 0));

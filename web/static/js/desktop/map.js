@@ -2,7 +2,7 @@ import { getMapMarkers } from './api.js';
 import { emit, navigateToScope, on, scope, scopeParams, setImages, setRankingsMeta } from './state.js';
 import { icon } from '../icons.js';
 import { LAND_PATHS } from './world_land.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
 
 let mounted = false;
 let initialized = false;

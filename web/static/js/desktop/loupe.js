@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import {
     byId, emit, on, rememberImages, setActiveLens, viewState,
 } from './state.js';
@@ -46,9 +47,6 @@ const INFO_MODES = ['off', 'basic', 'full'];
 const RAW_EXTENSIONS = new Set(['arw', 'cr2', 'cr3', 'dng', 'nef', 'orf', 'raf', 'rw2']);
 let versionStack = null;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&#34;', "'": '&#39;',
-}[c]));
 
 function images() {
     return sessionImages || viewState.images;

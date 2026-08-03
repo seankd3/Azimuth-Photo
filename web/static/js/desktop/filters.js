@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import { getDateHistogram, getFilterOptions, getFolders, getTags } from './api.js';
 import { byId, folderValues, on, scope, scopeParams, setScope } from './state.js';
 import { releaseFocus, trapFocus } from './focusTrap.js';
@@ -32,9 +33,6 @@ let options = {
     undated: 0,
 };
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const OPTIONS_MAX_AGE_MS = 60000;

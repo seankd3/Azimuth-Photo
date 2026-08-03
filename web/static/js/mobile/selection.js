@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Selection bar + bottom sheet. Batch actions are real writes:
 // flags via /api/images/flag, collections via /api/user-collections,
 // export via /api/export?ids=.
@@ -14,9 +15,6 @@ import {
 } from './history.js';
 import { icon } from '../icons.js';
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const ZIP_EXPORT_MAX = 2000;
 
 /* ---------- bottom sheet ---------- */

@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
     disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
@@ -111,9 +112,6 @@ const SETTING_DEFS = {
     require_device_token: { type: 'checkbox' },
 };
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const fmt = (n) => Number(n || 0).toLocaleString('en-US');
 const compactNumberFormatter = new Intl.NumberFormat('en-US', {
     notation: 'compact',

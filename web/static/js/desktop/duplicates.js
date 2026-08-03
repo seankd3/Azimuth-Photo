@@ -10,7 +10,7 @@ import {
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { keepCoverRejectRest } from './stack_cull.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
 import {
     imageMutationOutcome, mutationFailureReason, mutationPartialSuffix,
 } from './trash_outcome.js';

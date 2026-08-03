@@ -7,7 +7,7 @@ import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel } from '../people_labels.js';
 import { getRankings } from './api.js';
-import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from '../lib.js';
 import { effectiveExcludeSources, quietSourceIds } from './quiet_sources.js';
 
 let thumbInputTimer = 0;

@@ -4,7 +4,7 @@
 
 import { getDateGroups, getDateHistogram, getRankings, previewThumbUrl } from './api.js';
 import { on, scopeParams, setActiveLens, setScope } from './state.js';
-import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt, MONTH_NAMES } from '../lib.js';
 
 const MONTH_SAMPLE_LIMIT = 5000;
 

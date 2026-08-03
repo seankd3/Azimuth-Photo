@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 import { getRankings, postJson, thumbUrl, writeFlags } from './api.js';
 import { folderValues, on, scope, scopeParams } from './state.js';
 import { showToast } from './toast.js';
@@ -16,9 +17,6 @@ function emptyState() {
     };
 }
 
-const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[char]));
 
 function host() { return document.getElementById('cull-brief'); }
 function banner() { return document.getElementById('cull-brief-banner'); }

@@ -3,7 +3,7 @@ import {
     getIntegrityStatus, prepareCatalogRestore, startIntegrityScan,
 } from './api.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc, formatCount } from './dom.js';
+import { escapeHtml as esc, formatCount } from '../lib.js';
 
 const CACHE_MS = 30000;
 let backups = null;

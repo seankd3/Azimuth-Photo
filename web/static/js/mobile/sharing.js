@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Mobile sharing owner: private collection links, one-photo links, and the
 // Shared lens. All writes reuse the existing collection/share APIs.
 
@@ -22,9 +23,6 @@ import { icon } from '../icons.js';
 
 const PHOTO_SHARE_PREFIX = 'Azimuth single-photo share:';
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[character]));
 const fmtInt = (value) => Number(value || 0).toLocaleString('en-US');
 
 function formatDate(value) {

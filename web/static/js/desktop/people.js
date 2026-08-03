@@ -6,7 +6,7 @@ import { releaseFocus, trapFocus } from './focusTrap.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { personLabel as cleanPersonLabel, isUnnamedPersonLabel } from '../people_labels.js';
-import { escapeHtml as esc, formatCount as fmt } from './dom.js';
+import { escapeHtml as esc, formatCount as fmt } from '../lib.js';
 
 let mounted = false;
 let initialized = false;

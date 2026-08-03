@@ -1,4 +1,4 @@
-import { MONTH_NAMES } from './dom.js';
+import { MONTH_NAMES } from '../lib.js';
 import { applyExcludeSources, clearQuietReveal, quietRevealActive } from './quiet_sources.js';
 
 // What the library opens on. Newest first: the photos you just took are the

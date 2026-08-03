@@ -1,3 +1,4 @@
+import { escapeHtml } from '../../lib.js';
 const STOCK_VIBES = Object.freeze({
     'cinestill-800t': 'Tungsten night color with signature red halation.',
     'portra-400': 'Flexible warm color, gentle contrast, and natural skin.',
@@ -9,9 +10,6 @@ const STOCK_VIBES = Object.freeze({
     'ilford-hp5-plus': 'Open black-and-white midtones with organic grain.',
 });
 
-const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[character]));
 
 export class FilmStockPicker {
     constructor(host, onChange) {

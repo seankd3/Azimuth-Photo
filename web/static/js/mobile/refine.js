@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Refine tab: duel (n=2) and survey (n=4) over the current scope.
 // Picks are REAL: POST /api/mosaic/pick with the exact payload the
 // desktop mosaic uses ({winner_id, loser_ids}); undo is a real
@@ -23,9 +24,6 @@ let busy = false;
 let generationCounter = 0;
 let qualityTimer = null;
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 const need = () => (mode === 'duel' ? 2 : 4);
 

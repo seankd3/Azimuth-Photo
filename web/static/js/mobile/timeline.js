@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 // Photos tab: Google-Photos-grade day-grouped timeline.
 // Real data: /api/rankings?sort=date_taken pages the photos and
 // /api/date-histogram drives the scrubber, month view, and month
@@ -100,9 +101,6 @@ async function loadTasteStatus() {
     tasteAvailable = Boolean(data?.taste_available);
 }
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 const fmtInt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-US'));
 

@@ -5,7 +5,7 @@ import {
     compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl,
 } from './api.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc } from './dom.js';
+import { escapeHtml as esc } from '../lib.js';
 
 const MODE_KEY = 'pa_d_refine_mode';
 const SIZE_KEY = 'pa_d_refine_size';

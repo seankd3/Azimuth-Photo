@@ -1,3 +1,4 @@
+import { esc } from '../lib.js';
 /** Compact Manage library popover — add/remove sources from the Folders header. */
 
 import { getCatalog, removeCatalogSource } from './api.js';
@@ -11,9 +12,6 @@ let popover = null;
 let popoverReturn = null;
 let onChanged = async () => {};
 
-const esc = (value) => String(value == null ? '' : value).replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-}[c]));
 
 function normalizePath(path) {
     return String(path || '').replace(/\\/g, '/').replace(/\/+$/, '');
