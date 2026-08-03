@@ -58,6 +58,27 @@ The remaining 28 stand, each checked against both callers and open rows:
 - pano merge, HDR detect/status, quality scan/status, Lightroom preset import,
   `/api/publishes`, `/api/ui/settings`.
 
+### And 285 tests that should not have gone
+
+`test_thumbnails.py` (74 tests, 3 mock references), `test_library.py` (109),
+`test_compare.py` (67), `test_search.py` (38), `test_settings_status.py` (35)
+and `test_hddgov.py` (7) were deleted while every module they cover stayed. The
+mandate was to delete tests that "assert implementation details, mock internals,
+or duplicate coverage" — these are the opposite: `test_thumbnails` has three
+mock references across 3,170 lines and covers the preview pipeline.
+
+Restored. 285 pass. 41 individual tests were then pruned, correctly this time:
+each one failed by reaching a private internal that no longer exists
+(`db._facet_cache_key`, `compare.service._resolve_*`), which is exactly the
+implementation-detail coverage the mandate names. Two failures remain and both
+fail on `main`.
+
+Most of the reconciliation was one rename repeated: `data_providers` lost its
+underscore prefixes, `configure_data_providers` went with the injection layer,
+`preview_priority.clear_scopes` and `hdd_governor.reset_for_tests` were swept as
+dead when they are test infrastructure. 48 of `test_thumbnails`'s 49 failures
+were a single missing name.
+
 **The lesson: "nothing calls it" is evidence about clients, not about intent.**
 A route driven by hand, by a script, or by a directive not yet built has no
 caller and is not dead. Check MASTER_PLAN before deleting a product surface.

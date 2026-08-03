@@ -27,6 +27,16 @@ def bulk_hdd_holds() -> int:
 
 
 
+def reset_for_tests(limit: int | None = None) -> None:
+    """Rebuild the gate after monkeypatching concurrency in tests."""
+    global _CONCURRENCY, _thread_sem, _holds
+    if limit is not None:
+        _CONCURRENCY = max(1, int(limit))
+    _thread_sem = threading.Semaphore(_CONCURRENCY)
+    with _holds_lock:
+        _holds = 0
+
+
 def _acquire() -> None:
     global _holds
     _thread_sem.acquire()
