@@ -301,7 +301,6 @@ def configure_app_runtime_services(shell: AppShell) -> AppRuntimeServices:
         resolve_library_constraints=resolve_library_constraints,
         track_background_task=shell.track_background_task,
     )
-    wiring.configure_shared_routes()
     wiring.configure_export_routes(
         resolve_library_constraints=resolve_library_constraints,
     )
@@ -382,7 +381,6 @@ def create_app_shell(
     wiring.configure_collection_routes()
     wiring.configure_share_routes(templates=templates)
     wiring.configure_publish_routes(templates=templates)
-    wiring.configure_shared_routes()
     object.__setattr__(shell, "runtime_services", configure_app_runtime_services(shell))
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)

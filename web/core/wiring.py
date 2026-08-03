@@ -9,7 +9,6 @@ from features.media import routes as media_routes
 from features.people import routes as people_routes
 from features.publish import routes as publish_routes
 from features.share import routes as share_routes
-from features.shared import routes as shared_routes
 from features.settings import routes as settings_routes
 
 
@@ -159,15 +158,6 @@ def configure_publish_routes(*, templates, resolve_library_constraints=None, tra
         resolve_smart_image_ids=resolve_smart_image_ids,
         thumbnails=thumbnails,
         track_background_task=track_background_task,
-    )
-
-
-def configure_shared_routes() -> None:
-    import db
-
-    shared_routes.configure(
-        list_shares=lambda: db.list_active_collection_shares(),
-        list_publishes=lambda: db.list_collection_publishes(),
     )
 
 

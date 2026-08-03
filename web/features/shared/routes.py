@@ -9,6 +9,9 @@ from fastapi import APIRouter, Request
 import settings
 
 
+import db
+
+
 router = APIRouter()
 
 ListShares = Callable[[], Awaitable[list[dict]]]
@@ -18,22 +21,11 @@ _list_shares: ListShares | None = None
 _list_publishes: ListPublishes | None = None
 
 
-def configure(*, list_shares: ListShares, list_publishes: ListPublishes) -> None:
-    global _list_shares, _list_publishes
-    _list_shares = list_shares
-    _list_publishes = list_publishes
-
-
-def _configured() -> None:
-    if _list_shares is None or _list_publishes is None:
-        raise RuntimeError("Shared routes are not configured")
-
 
 @router.get("/api/shares")
 async def api_list_shared_surfaces(request: Request):
-    _configured()
-    shares = await _list_shares()
-    publishes = await _list_publishes()
+    shares = await db.list_active_collection_shares()
+    publishes = await db.list_collection_publishes()
     by_owner: dict[tuple[str, int], dict] = {}
 
     for share in shares:
