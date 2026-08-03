@@ -495,8 +495,12 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({image["folder"] for image in detail["members"]}, {"Facebook Photos"})
 
     async def test_full_library_collapsed_rankings_do_not_materialize_id_filter(self):
+        # Twelve rows, not 1,200. The property — a collapsed full-library query
+        # never materialises an id filter — does not depend on catalogue size,
+        # and 1,200 sat below both the 5,000 and 12,000 thresholds anyway, so
+        # the large number exercised neither of them.
         source = await self._source("catalog")
-        image_ids = await self._bulk_cached_images(source, 1200)
+        image_ids = await self._bulk_cached_images(source, 12)
         representative, first_hidden, second_hidden = image_ids[:3]
         await stack_repository.create_stack(
             db.DB_PATH,
@@ -512,16 +516,16 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
         cache_events.invalidate_stats_cache()
         library_service._rankings_response_cache.clear()
 
-        expanded = await library_routes.api_rankings(limit=1500, stacks="expanded")
-        collapsed = await library_routes.api_rankings(limit=1500, stacks="collapsed")
+        expanded = await library_routes.api_rankings(limit=100, stacks="expanded")
+        collapsed = await library_routes.api_rankings(limit=100, stacks="collapsed")
         collapsed_ids = {image["id"] for image in collapsed["images"]}
         counts = await library_routes.api_counts(stacks="collapsed")
         date_groups = await library_routes.api_date_groups(stacks="collapsed")
         histogram = await library_routes.api_date_histogram(stacks="collapsed")
 
-        self.assertEqual(expanded["total_kept"], 1200)
-        self.assertEqual(collapsed["total_kept"], 1198)
-        self.assertEqual(len(collapsed["images"]), 1198)
+        self.assertEqual(expanded["total_kept"], 12)
+        self.assertEqual(collapsed["total_kept"], 10)
+        self.assertEqual(len(collapsed["images"]), 10)
         self.assertIn(representative, collapsed_ids)
         self.assertNotIn(first_hidden, collapsed_ids)
         self.assertNotIn(second_hidden, collapsed_ids)
