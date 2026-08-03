@@ -338,6 +338,9 @@ returned an empty list when nobody had wired them. Neither said anything.
 - `python -m harness --check` stays green. A commit that changes a golden says
   why in the message.
 - `./scripts/smoke` exit code is the result — never read through `tail`.
+- `./scripts/azimuth-check --quick` runs both sweeps below, so neither depends
+  on anyone remembering them. Verified to exit 1 by deleting an import and
+  watching it fail.
 - `web/scripts_js_imports.py` after moving any JS file. It walks every relative
   import in static/js and checks both that the module exists and that the named
   export does. Nothing else covers this: the Python suite never loads a browser

@@ -139,7 +139,21 @@ run_quick_checks() {
         "$NODE_BIN" --check "$ROOT/$js_file"
     done < <(cd "$ROOT" && rg --files web/static -g '*.js')
 
+    run_reference_checks
     run_node_checks
+}
+
+# Renames and deletions leave references behind that nothing else sees: a
+# patched attribute that no longer exists, a JS import of a file that moved, a
+# name used but never imported. Each of those passes lint and fails only when
+# the test runs or the page opens. Both sweeps read the source without running
+# it and exit with the number of problems.
+run_reference_checks() {
+    local checker
+    for checker in scripts_stale_refs.py scripts_js_imports.py; do
+        [[ -f "$ROOT/web/$checker" ]] || continue
+        (cd "$ROOT/web" && "$PYTHON" "$checker")
+    done
 }
 
 run_node_checks() {
