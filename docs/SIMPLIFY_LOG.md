@@ -29,26 +29,38 @@ failure fails identically on `main`, checked by extracting `main` with
 The suite is order-dependent: `test_support.py` monkeypatches ~20 module globals
 and 42 files import it with `*`. Files pass alone that fail in a run.
 
-## Routes this branch removed — 34, and one was wrong
+## What the branch removed, and the three things it should not have
 
-Removed on the rule "no caller in any client tree". That rule has a miss rate:
-`POST /api/import/taxonomy/reclassify-personal` has no caller because it is
-driven by hand, and MASTER_PLAN carries two open 07-31 directives describing
-exactly its job. Restored.
+Removal ran on one rule — "no caller in any client tree" — and that rule has a
+miss rate. Auditing against MASTER_PLAN's open rows instead of against callers
+found three deletions to undo:
 
-The other 33 stand, but two features lost their whole API surface and that is a
-product call, not a cleanup one:
+1. **`POST /api/import/taxonomy/reclassify-personal`.** No caller because it is
+   driven by hand. Two open 07-31 rows describe its exact job: Sean renames the
+   roots himself, and the agent-side job is to "repair catalog paths that still
+   point at the old ones."
+2. **`POST /api/people/faces/{id}/assign` and `/ignore`.** Open 07-31 row: "ML
+   is local-first… Faces and semantic search run on the machine the user is
+   sitting at." Person-level label, merge and ignore survived; per-face
+   correction did not, leaving `db.assign_face` maintained with no door onto it.
+3. **`features/publishing`.** The 08-03 row authorises consolidating the four
+   sharing packages *and names what must survive*: layout, theme, cover image,
+   download size, per-image sized download. Cutting the package dropped three of
+   the five. Restored, along with three helpers a cascade sweep took once they
+   looked dead.
 
-- **`/api/geo/*` — all four gone.** No geotagging endpoints remain, though
-  `latitude`, `longitude` and `location_source` are still mirrored columns.
-- **`/api/people/faces/{id}/assign` and `/ignore` — gone.** Person-level label,
-  merge and ignore survive; per-face correction does not. `db.assign_face` and
-  `db.ignore_face` are still there with no door onto them.
+The remaining 28 stand, each checked against both callers and open rows:
 
-Also gone: pano merge (3), HDR detect/status (2), quality scan/status,
-`/api/compare/next` (two other compare routes remain), Lightroom preset import,
-`/api/publishes`, `/s/gallery/*` (5, with `features/publishing`), and
-`/api/ui/settings`.
+- `/api/compare/next` — superseded by the mosaic flow; `POST /api/compare`,
+  `/api/compare/undo`, `/api/mosaic/next` and `/api/mosaic/pick` all remain.
+- `/api/geo/*` — backfill, infer and timeline import are tagging tools with no
+  caller. The Map view reads `api_map_markers`, untouched.
+- pano merge, HDR detect/status, quality scan/status, Lightroom preset import,
+  `/api/publishes`, `/api/ui/settings`.
+
+**The lesson: "nothing calls it" is evidence about clients, not about intent.**
+A route driven by hand, by a script, or by a directive not yet built has no
+caller and is not dead. Check MASTER_PLAN before deleting a product surface.
 
 ## What was consolidated
 
