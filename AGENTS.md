@@ -47,7 +47,8 @@ overlay, stop and reconcile the discrepancy before coding.
 
 ## Code ownership
 
-Use [`docs/CODEBASE_MAP.md`](docs/CODEBASE_MAP.md) for the detailed route map.
+Routes are their own map: `web/harness/goldens/routes.json` is recorded from the
+running app, so it cannot drift the way a hand-written list did.
 
 - `web/features/<surface>/` owns backend behavior and routes.
 - `web/data/repositories/` owns SQL and persistent queries.
@@ -140,7 +141,6 @@ Each durable fact has one owner:
 - `MASTER_PLAN.md` — what the user asked for, verbatim, and whether it is done.
 - `docs/TOPOLOGY.md` — portable runtime roles and storage architecture.
 - `docs/development.md` — setup, edit map, and verification commands.
-- `docs/CODEBASE_MAP.md` — module and route ownership.
 - `docs/README.md` — documentation index.
 - Feature specifications — expensive-to-rediscover product behavior.
 

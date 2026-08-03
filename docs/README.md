@@ -23,11 +23,10 @@ in Git history and the Field Log rather than in the active documentation set.
 - [Install](INSTALL.md) — supported installation paths.
 - [Getting started](getting-started.md) — first library and first run.
 - [Development](development.md) — code map, local setup, and verification.
-- [Codebase map](CODEBASE_MAP.md) — route and module ownership.
 - [Releasing](RELEASING.md) — version and artifact release procedure.
 - [Recovery](recovery.md) — catalog backups and restore.
-- [Windows QA](WINDOWS_QA.md) — XPS/Windows verification.
-- [QA harness](QA_HARNESS.md) — isolated desktop end-to-end verification.
+- [Windows QA](archive/WINDOWS_QA.md) — XPS/Windows verification.
+- [QA harness](archive/QA_HARNESS.md) — isolated desktop end-to-end verification.
 - [Tailscale HTTPS](FIELD_HTTPS.md) — secure phone/PWA access.
 
 ## Core behavior
@@ -44,7 +43,7 @@ Feature specifications capture behavior that is expensive to rediscover:
 
 - [Authentication](AUTH_SPEC.md)
 - [Import](IMPORT_SPEC.md) and [card import](CARD_IMPORT_SPEC.md)
-- [Hub/satellite sync](FIELD_SPEC.md) and [v2 addendum](FIELD_SPEC_V2.md)
+- [Hub/satellite sync](FIELD_SPEC_V2.md)
 - [Distribution](DISTRIBUTION_SPEC.md)
 - [Develop](DEVELOP_SPEC.md)
 - [Client updates](CLIENT_AUTOUPDATE_SPEC.md)
