@@ -79,9 +79,30 @@ underscore prefixes, `configure_data_providers` went with the injection layer,
 dead when they are test infrastructure. 48 of `test_thumbnails`'s 49 failures
 were a single missing name.
 
+### Everything the caller rule got wrong
+
+One rule drove the carve — "nothing references it" — and it could not tell dead
+code from code nothing happens to call. Eight restorations, found by checking
+intent instead:
+
+| Restored | Why the rule missed it |
+|---|---|
+| `reclassify-personal` route | Driven by hand; open 07-31 taxonomy directive |
+| `relocate_catalog.py` | Same directive, same shape: a hand-run CLI has no caller |
+| Per-face assign/ignore | Open 07-31 row: faces are local-first product |
+| `features/publishing` | 08-03 row names layout/theme/cover as must-survive |
+| `web/perf` + budgets + `history.jsonl` | Open "Speed is the bar" release gate |
+| `scripts/bench.py`, `qa/fixture` | CI's perf-gate job; plan said keep the fixture layer |
+| `azimuth-browser-smoke` | Called by `scripts/azimuth-check` itself |
+| 285 tests, 3 generators, 11 docs | Cover live modules / feed live data / linked from AGENTS.md |
+
 **The lesson: "nothing calls it" is evidence about clients, not about intent.**
-A route driven by hand, by a script, or by a directive not yet built has no
-caller and is not dead. Check MASTER_PLAN before deleting a product surface.
+A hand-run CLI, a CI job, a release gate, a generator and a test all look
+identical to dead code under that rule. Before deleting a product surface, read
+MASTER_PLAN, `.github/workflows/`, and `scripts/azimuth-check`.
+
+Peak deletions were 48,429 lines. Putting back what should not have gone cost
+about 15,000 of them — that gap is the measure of the overreach.
 
 ## What was consolidated
 
