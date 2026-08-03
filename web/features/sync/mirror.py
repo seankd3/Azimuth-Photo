@@ -262,7 +262,7 @@ class MirrorPuller:
         # the wrong row. Only an unclaimed row, or the row that already holds
         # this identity, can be the match.
         existing = await (await conn.execute(
-            "SELECT id, hub_remote, filepath FROM images "
+            "SELECT id, hub_remote, filepath, status FROM images "
             "WHERE (hub_image_id = ? OR (? <> '' AND content_hash = ?)) "
             "AND (hub_image_id IS NULL OR hub_image_id = ?) "
             "ORDER BY hub_remote ASC, id ASC LIMIT 1",
@@ -276,7 +276,7 @@ class MirrorPuller:
         # row that already holds the identity keeps it; the local duplicate
         # stays untouched and leaves with its retired source.
         holder = await (await conn.execute(
-            "SELECT id, hub_remote, filepath FROM images WHERE hub_image_id = ?",
+            "SELECT id, hub_remote, filepath, status FROM images WHERE hub_image_id = ?",
             (hub_image_id,),
         )).fetchone()
         if holder is not None:
@@ -304,6 +304,13 @@ class MirrorPuller:
                 values["hub_remote"] = 0
             else:
                 path_conflicts = await self._apply_hub_filepath(conn, values, remote, existing)
+            if str(existing["status"] or "") == "trashed":
+                # The user trashed this photo here. The hub has not heard yet —
+                # that travels as a status oplog entry — and until it does, its
+                # copy of the row still says kept. Letting it win is what made
+                # deleting on the laptop never stick.
+                values.pop("status", None)
+                values.pop("trashed_at", None)
             values["hub_image_id"] = hub_image_id
             assignments = ", ".join(f"{column} = ?" for column in values)
             await conn.execute(f"UPDATE images SET {assignments} WHERE id = ?", (*values.values(), image_id))

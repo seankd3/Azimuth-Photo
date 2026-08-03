@@ -25,7 +25,15 @@ COLLECTION_CONTENT_HASH = "0" * 32
 FAMILIES = frozenset({
     "flag", "rating", "keywords", "iptc", "develop",
     "collection_meta", "collection_membership",
+    # Trashing a photo is an edit like any other. Without this family it was the
+    # only user decision that could not travel, so a satellite's trash was
+    # overwritten by the hub's copy on the next mirror refresh.
+    "status",
 })
+
+#: The only statuses that survive a restart — startup rewrites anything else to
+#: "kept", which is how a day of repairs once undid itself silently.
+STATUSES = frozenset({"kept", "maybe", "trashed"})
 JsonRequest = Callable[[str, str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
@@ -287,6 +295,17 @@ async def _apply_lww_family(conn, image_id: int, entry: Mapping[str, Any]) -> No
         if value not in {"picked", "unflagged", "rejected"}:
             raise ValueError("invalid flag payload")
         await conn.execute("UPDATE images SET flag = ? WHERE id = ?", (value, image_id))
+    elif family == "status":
+        value = str(payload.get("value") or "")
+        if value not in STATUSES:
+            raise ValueError("invalid status payload")
+        # trashed_at travels with the status: it is what the trash view orders
+        # by, and a row that says "trashed" with no timestamp sorts arbitrarily.
+        trashed_at = payload.get("trashed_at") if value == "trashed" else None
+        await conn.execute(
+            "UPDATE images SET status = ?, trashed_at = ? WHERE id = ?",
+            (value, trashed_at, image_id),
+        )
     elif family == "rating":
         value = payload.get("value")
         columns = {row["name"] for row in await (await conn.execute("PRAGMA table_info(images)")).fetchall()}
@@ -875,6 +894,28 @@ async def append_flags(db_path: str, image_ids: Sequence[int], flag: str) -> lis
         await connection.close_async(conn, db_path=db_path)
     return [
         await append_entry(db_path, content_hash=value, family="flag", payload={"value": flag})
+        for _, value in sorted(hashes.items())
+    ]
+
+
+async def append_status(
+    db_path: str, image_ids: Sequence[int], status: str, *, trashed_at: float | None = None
+) -> list[dict[str, Any]]:
+    """Record that these photos were kept, deferred or trashed here."""
+
+    if status not in STATUSES:
+        raise ValueError(f"invalid status: {status}")
+    await ensure_schema(db_path)
+    conn = await connection.open_async(db_path)
+    try:
+        hashes = await _image_hashes(conn, image_ids)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    payload: dict[str, Any] = {"value": status}
+    if status == "trashed":
+        payload["trashed_at"] = trashed_at if trashed_at is not None else time.time()
+    return [
+        await append_entry(db_path, content_hash=value, family="status", payload=payload)
         for _, value in sorted(hashes.items())
     ]
 

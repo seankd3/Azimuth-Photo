@@ -12,6 +12,7 @@ import helpers as app_helpers
 from data import connection as data_connection
 from data.repositories import catalog as catalog_repository
 from features.stacks import builders as stack_builders
+from features.sync import oplog
 
 
 Error = dict[str, int | str]
@@ -420,6 +421,12 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
     finally:
         await data_connection.close_async(conn, db_path=db_path)
     invalidate_pending_hub_trash_refs(db_path)
+    # Trashing is an edit, and edits converge through the oplog. Without this
+    # a satellite's trash was reverted by the hub's copy of the row on the next
+    # mirror refresh, which is why deleting on the laptop never stuck.
+    if trashed:
+        await oplog.append_status(db_path, trashed, "trashed", trashed_at=now)
+
     return {
         "trashed": trashed,
         "errors": errors,
@@ -527,6 +534,9 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
     finally:
         await data_connection.close_async(conn, db_path=db_path)
     invalidate_pending_hub_trash_refs(db_path)
+    if restored:
+        await oplog.append_status(db_path, restored, "kept")
+
     return {"restored": restored, "errors": errors, "warnings": warnings}
 
 

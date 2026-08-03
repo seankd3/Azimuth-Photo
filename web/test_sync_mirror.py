@@ -433,3 +433,104 @@ def test_relative_path_is_content_not_identity():
 
     assert "relative_path" not in {"hub_image_id", "hub_remote", "filepath"}
     assert "relative_path" in mirror._IMAGE_COLUMNS
+
+
+class LocalTrashSurvivesTheMirrorTests(BackendTestCase):
+    """Deleting on the laptop has to stick.
+
+    The hub's copy of a row still says kept until the satellite's status oplog
+    entry reaches it. The mirror used to copy that back over the local row, so
+    a photo trashed on the laptop reappeared on the next refresh.
+    """
+
+    async def asyncSetUp(self):
+        await super().asyncSetUp()
+        self.row = {
+            "hub_image_id": 1,
+            "content_hash": f"{1:032x}",
+            "filename": "hub-1.jpg",
+            "filepath": "/hub/2026/hub-1.jpg",
+            "file_ext": ".jpg",
+            "file_size": 1001,
+            "date_taken": "2026-07-02",
+            "width": 2400,
+            "height": 1600,
+            "orientation": "landscape",
+            "flag": "unflagged",
+            "elo": 1201,
+            "comparisons": 1,
+            "status": "kept",
+            "keywords": [],
+        }
+        app = FastAPI()
+
+        @app.get("/api/sync/catalog/export")
+        async def export(cursor: int = 0):
+            payload = [self.row] if cursor < 7 else []
+            lines = [*(json.dumps(r) for r in payload), json.dumps({"cursor": 7})]
+            ndjson = chr(10).join(lines) + chr(10)
+            return Response(gzip.compress(ndjson.encode()), media_type="application/gzip")
+
+        self.client = TestClient(app)
+
+    async def asyncTearDown(self):
+        self.client.close()
+        await super().asyncTearDown()
+
+    async def _request(self, method, url, *, body=None, headers=None):
+        response = self.client.request(method, url.removeprefix("http://hub"), content=body, headers=headers)
+        return response.status_code, dict(response.headers), response.content
+
+    async def _refresh(self) -> None:
+        """Re-read the whole export, the way a satellite does after hub edits."""
+        conn = await db.get_db()
+        try:
+            await conn.execute("DELETE FROM sync_mirror_state WHERE key = 'cursor'")
+            await conn.commit()
+        except Exception:
+            pass  # first run: the mirror creates the table itself
+        await MirrorPuller(db_path=db.DB_PATH, hub="http://hub", request=self._request).refresh()
+
+    async def _status(self) -> str:
+        conn = await db.get_db()
+        row = await (await conn.execute("SELECT status FROM images LIMIT 1")).fetchone()
+        return str(row["status"] or "") if row else ""
+
+    async def _trash_locally(self) -> None:
+        conn = await db.get_db()
+        await conn.execute("UPDATE images SET status = 'trashed', trashed_at = 1")
+        await conn.commit()
+
+    async def test_a_refresh_does_not_untrash_what_the_user_trashed_here(self):
+        await self._refresh()
+        self.assertEqual(await self._status(), "kept")
+        await self._trash_locally()
+        # The hub has not heard yet; its row still says kept.
+        await self._refresh()
+        self.assertEqual(await self._status(), "trashed", "the mirror reverted a local trash")
+
+    async def test_the_hub_can_still_retire_a_photo(self):
+        await self._refresh()
+        self.assertEqual(await self._status(), "kept")
+        self.row["status"] = "trashed"
+        self.row["trashed_at"] = 99.0
+        await self._refresh()
+        self.assertEqual(await self._status(), "trashed")
+
+    async def test_trashing_records_a_status_entry_for_the_hub_to_pull(self):
+        from features.trash import service as trash_service
+
+        await self._refresh()
+        conn = await db.get_db()
+        image = await (await conn.execute("SELECT id FROM images LIMIT 1")).fetchone()
+        await trash_service.trash_images(db.DB_PATH, [int(image["id"])])
+
+        conn = await db.get_db()
+        rows = await (
+            await conn.execute(
+                "SELECT payload FROM oplog WHERE family = 'status'"
+            )
+        ).fetchall()
+        self.assertEqual(len(rows), 1, "trashing wrote no status entry")
+        self.assertEqual(json.loads(rows[0]["payload"])["value"], "trashed")
+
