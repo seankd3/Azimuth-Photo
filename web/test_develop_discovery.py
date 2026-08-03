@@ -122,9 +122,9 @@ class DevelopDiscoveryTests(unittest.TestCase):
             environment.pop("AZIMUTH_DEVELOP_CACHE_DIR", None)
             environment["AZIMUTH_HOME"] = str(Path(tmp) / "app")
             script = (
-                "from features.develop import ai_masks, hdr, pano, rawproc; "
+                "from features.develop import ai_masks, hdr, rawproc; "
                 "print(ai_masks.DEVELOP_CACHE_ROOT); print(hdr.HDR_CACHE_DIR); "
-                "print(pano.PANO_CACHE_DIR); print(rawproc.BASE_CACHE_ROOT)"
+                "print(rawproc.BASE_CACHE_ROOT)"
             )
             result = subprocess.run(
                 [sys.executable, "-c", script],
@@ -137,7 +137,7 @@ class DevelopDiscoveryTests(unittest.TestCase):
             root = Path(tmp) / "app" / "cache" / "develop"
         self.assertEqual(
             result.stdout.splitlines(),
-            [str(root), str(root / "hdr"), str(root / "pano"), str(root)],
+            [str(root), str(root / "hdr"), str(root)],
         )
 
     def test_direct_cache_modules_preserve_explicit_develop_root(self):
@@ -147,9 +147,9 @@ class DevelopDiscoveryTests(unittest.TestCase):
             root = Path(tmp) / "configured-develop"
             environment["AZIMUTH_DEVELOP_CACHE_DIR"] = str(root)
             script = (
-                "from features.develop import ai_masks, hdr, pano, rawproc; "
+                "from features.develop import ai_masks, hdr, rawproc; "
                 "print(ai_masks.DEVELOP_CACHE_ROOT); print(hdr.HDR_CACHE_DIR); "
-                "print(pano.PANO_CACHE_DIR); print(rawproc.BASE_CACHE_ROOT)"
+                "print(rawproc.BASE_CACHE_ROOT)"
             )
             result = subprocess.run(
                 [sys.executable, "-c", script],
@@ -161,7 +161,7 @@ class DevelopDiscoveryTests(unittest.TestCase):
             )
         self.assertEqual(
             result.stdout.splitlines(),
-            [str(root), str(root / "hdr"), str(root / "pano"), str(root)],
+            [str(root), str(root / "hdr"), str(root)],
         )
 
 
