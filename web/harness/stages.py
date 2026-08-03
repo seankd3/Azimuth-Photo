@@ -200,9 +200,74 @@ def rendition() -> dict:
     return recorded
 
 
+# --------------------------------------------------------------------------
+# Preview — what the library actually shows. load_source_image is the one
+# function the grid, the loupe and pregeneration all reach, and it chooses
+# between the embedded JPEG and a demosaic per tier. The tier at which that
+# choice flips is the thing a decoder consolidation must not move by accident.
+# --------------------------------------------------------------------------
+
+def preview() -> dict:
+    from thumbnails.config import JPEG_EXTENSIONS, RAW_EXTENSIONS, SIZES
+    from thumbnails.generation import load_raw_preview, load_source_image
+
+    recorded = {}
+    for path in corpus.build():
+        per_tier = {}
+        for tier, target in sorted(SIZES.items(), key=lambda item: item[1]):
+            entry: dict = {}
+            try:
+                image = load_source_image(
+                    str(path),
+                    target,
+                    jpeg_extensions=set(JPEG_EXTENSIONS),
+                    raw_extensions=set(RAW_EXTENSIONS),
+                )
+                entry = facts.image(image)
+                # Which branch produced it: the camera's own JPEG, or ours.
+                entry["from_embedded_preview"] = load_raw_preview(str(path), target) is not None
+            except Exception as exc:
+                entry = facts.failure(exc)
+            per_tier[tier] = entry
+        recorded[_relative(path)] = per_tier
+    return recorded
+
+
+# --------------------------------------------------------------------------
+# Routes — the app's public surface. Two files register routers today and the
+# order between them is load-bearing but untyped, so this is what says a
+# deletion or a re-wiring dropped an endpoint. Importing the app at all is also
+# the cheapest proof that the module graph still resolves.
+# --------------------------------------------------------------------------
+
+METHODS = ("get", "post", "put", "patch", "delete")
+
+
+def routes() -> dict:
+    import app as app_module
+
+    spec = app_module.app.openapi()
+    recorded = {}
+    for path, operations in spec["paths"].items():
+        for method, operation in sorted(operations.items()):
+            if method not in METHODS:
+                continue
+            parameters = operation.get("parameters") or []
+            recorded[f"{method.upper()} {path}"] = {
+                "params": sorted(str(item.get("name")) for item in parameters),
+                "required_params": sorted(
+                    str(item.get("name")) for item in parameters if item.get("required")
+                ),
+                "has_body": "requestBody" in operation,
+            }
+    return recorded
+
+
 STAGES = {
     "identity": identity,
     "kind": kind,
     "decode": decode,
     "rendition": rendition,
+    "preview": preview,
+    "routes": routes,
 }

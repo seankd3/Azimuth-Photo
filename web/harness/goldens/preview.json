@@ -1,0 +1,327 @@
+{
+  "bayer.dng": {
+    "lg": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.732,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.106,
+      "p50": 0.882,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.323
+    },
+    "md": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.732,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.106,
+      "p50": 0.882,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.323
+    },
+    "sm": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.732,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.106,
+      "p50": 0.882,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.323
+    }
+  },
+  "liar.ARW": {
+    "lg": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.574,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.078,
+      "p50": 0.682,
+      "p95": 0.941,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.275
+    },
+    "md": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.574,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.078,
+      "p50": 0.682,
+      "p95": 0.941,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.275
+    },
+    "sm": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.574,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.078,
+      "p50": 0.682,
+      "p95": 0.941,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.275
+    }
+  },
+  "liar.CR2": {
+    "lg": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.586,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.11,
+      "p50": 0.682,
+      "p95": 0.965,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.254
+    },
+    "md": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.586,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.11,
+      "p50": 0.682,
+      "p95": 0.965,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.254
+    },
+    "sm": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.586,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.11,
+      "p50": 0.682,
+      "p95": 0.965,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.254
+    }
+  },
+  "plain.jpg": {
+    "lg": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.464,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.208,
+      "p50": 0.42,
+      "p95": 0.957,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.226
+    },
+    "md": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.464,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.208,
+      "p50": 0.42,
+      "p95": 0.957,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.226
+    },
+    "sm": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.464,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.208,
+      "p50": 0.42,
+      "p95": 0.957,
+      "shape": [
+        106,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        106
+      ],
+      "std": 0.226
+    }
+  },
+  "upper.DNG": {
+    "lg": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.729,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.102,
+      "p50": 0.875,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.324
+    },
+    "md": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.729,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.102,
+      "p50": 0.875,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.324
+    },
+    "sm": {
+      "dtype": "uint8",
+      "from_embedded_preview": false,
+      "mean": 0.729,
+      "mode": "RGB",
+      "p0": 0.0,
+      "p100": 1.0,
+      "p5": 0.102,
+      "p50": 0.875,
+      "p95": 1.0,
+      "shape": [
+        108,
+        160,
+        3
+      ],
+      "size": [
+        160,
+        108
+      ],
+      "std": 0.324
+    }
+  }
+}
