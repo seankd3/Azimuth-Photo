@@ -26,6 +26,12 @@ and what is known to be broken. Newest first.
 - `test_trash.py::test_satellite_scoped_empty_queues_hub_without_capability`
   — passes alone, fails in a batch with `database is locked`. Lock contention,
   not logic.
+- `test_sync_standalone_seeds_hub.py` — seeds 0 rows instead of 3. **Verified
+  failing on `main` with the identical assertion**, by extracting `main` with
+  `git archive` and running it there. Not from this branch. The transport work
+  briefly turned it into a hang, which is fixed; see below.
+- `test_develop_discovery.py` — two cases about explicit develop roots.
+  Pre-existing, verified at the previous commit.
 - The suite is order-dependent. `test_support.py` monkeypatches ~20 module
   globals and 42 files import it with `*`. Files pass alone that fail in a run.
 
@@ -78,6 +84,18 @@ code: matched function names inside longer names, matched parameter names, ate
 one was caught by ruff or a test on the next command, which is the only reason
 this reads as an anecdote. `_satellite.` matching `satellite.` first and leaving
 `_role.` happened *again* during the role work, after this lesson was written.
+
+**A test can fail for a reason that is not in the diff.** Three tests looked
+like transport regressions. One was the machine (Steam). One was already failing
+on `main` — proved by `git archive main | tar -x` into a scratch directory and
+running it there, which needs no worktree and no checkout. Establish the
+baseline before believing the diff caused it; two of the three investigations
+above started from the wrong assumption.
+
+**`git stash` is not safe here.** The repo carries an old `lane/sync-cursor`
+stash. With a clean tree, `git stash` saves nothing and the matching `git stash
+pop` restores *that* stash instead, conflicting in files it has never seen. It
+happened twice. Check `git stash list` first, or extract with `git archive`.
 
 **Measure back to back or not at all.** A test read 20s and was deleted for
 breaking the ten-second rule. Then an untouched test went from 17.8s to 60.6s —

@@ -81,9 +81,13 @@ class StandaloneSeedsHubTests(unittest.TestCase):
         Image.new("RGB", (8, 6), color).save(path, format="JPEG")
         return path
 
-    async def _request(self, method: str, url: str, *, body=None, headers=None):
+    async def _request(self, method: str, url: str, *, body=None, headers=None, **_kwargs):
         parsed = urlsplit(url)
-        response = self.client.request(
+        # TestClient is synchronous and drives the hub app on a portal thread.
+        # Called straight from this event loop it deadlocks against itself, so
+        # it goes to a thread — which is what the real transport does too.
+        response = await asyncio.to_thread(
+            self.client.request,
             method,
             parsed.path + (f"?{parsed.query}" if parsed.query else ""),
             content=body,
@@ -131,6 +135,21 @@ class StandaloneSeedsHubTests(unittest.TestCase):
                 self.assertEqual(conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 0)
 
             worker = SyncWorker(db_path=self.standalone_db, hub=hub_url, request=self._request)
+
+            # This process is both roles at once, and db.DB_PATH is global: the
+            # mirror's write transaction on the satellite catalog and the hub
+            # app's own connections contend on the same path and never resolve.
+            # Seeding is what this test is about. The mirror pull has its own
+            # coverage in test_sync_mirror.py, against a hub that is only a hub.
+            #
+            # This was invisible until the transport work: MirrorPuller asks
+            # whether the request accepts a timeout, the injected fake did not,
+            # and the TypeError from passing one anyway was swallowed by
+            # _refresh_mirror. The pull never ran.
+            async def _skip_mirror(*, force: bool = False) -> None:
+                return None
+
+            worker._refresh_mirror = _skip_mirror
             await worker.sync_once()
 
             with closing(sqlite3.connect(self.hub_db)) as conn, conn:

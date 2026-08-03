@@ -77,7 +77,17 @@ class SyncWorker:
     ):
         self.db_path = db_path
         self.hub = (hub or satellite.hub_url()).rstrip("/")
-        self._hub_request = request or transport.request_async
+        # transport merges the revision header for us; an injected request
+        # bypasses transport, so it gets the same treatment here rather than
+        # talking to the hub as an unidentified client.
+        if request is None:
+            self._hub_request = transport.request_async
+        else:
+            async def _identified(method, url, *, body=None, headers=None, **kwargs):
+                outbound = {**dict(headers or {}), **contract.request_headers()}
+                return await request(method, url, body=body, headers=outbound, **kwargs)
+
+            self._hub_request = _identified
         self.mirror = MirrorPuller(db_path=db_path, hub=self.hub, request=self._hub_request)
         self._embedding_status: dict = {"rows_applied": 0, "cursor": 0, "last_error": ""}
         self._embeddings_checked_at = 0.0
