@@ -95,8 +95,6 @@ async def mosaic_next(
     collection_id: int = 0, import_batch: int = 0,
     exclude_sources: str = "",
 ):
-    if compare_service.mosaic_next_impl is None:
-        raise RuntimeError("Compare routes are not configured")
     scoped_ids, id_error = _parse_scoped_ids(ids)
     if id_error is not None:
         return id_error

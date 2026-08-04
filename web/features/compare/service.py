@@ -53,12 +53,6 @@ _DIRECT_UNCOMPARED_FILTER = "direct_uncompared"
 
 
 
-def _configured(provider):
-    if provider is None:
-        raise RuntimeError("Compare service is not configured")
-    return provider
-
-
 def _configured_db_signature() -> str:
     return (lambda: db.DB_PATH)()
 
@@ -68,8 +62,6 @@ def _configured_cache_root() -> str:
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
-    if query_constraints.resolve_configured_library_constraints is None:
-        raise RuntimeError("Compare service is not configured")
     return await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
 
 
@@ -106,19 +98,16 @@ async def _scoped_search(
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
-    if media_warm.schedule_thumbnail_prefetch is not None:
-        media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
+    media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
 
 
 def _configured_schedule_cached_thumbnail_memory_warm(rows, size: str, *, limit: int) -> None:
-    if media_warm.schedule_cached_thumbnail_memory_warm is not None:
-        media_warm.schedule_cached_thumbnail_memory_warm(rows, size, limit=limit)
+    media_warm.schedule_cached_thumbnail_memory_warm(rows, size, limit=limit)
 
 
 def _invalidate_rankings() -> None:
     taste_service.invalidate_taste_cache()
-    if cache_events.invalidate_rankings_cache is not None:
-        cache_events.invalidate_rankings_cache()
+    cache_events.invalidate_rankings_cache()
 
 
 def invalidate_interaction_response_cache() -> None:

@@ -87,8 +87,6 @@ async def _get_export_images(
         images_dict = await image_repository.get_images_by_ids(db_path, id_list)
         return [images_dict[i] for i in id_list if i in images_dict]
 
-    if query_constraints.resolve_configured_library_constraints is None:
-        raise RuntimeError("Export routes are not configured")
     search = await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:

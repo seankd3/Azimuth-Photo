@@ -57,11 +57,6 @@ class IdenticalCleanupBody(BaseModel):
 
 
 
-def _invalidate() -> None:
-    if _invalidate_after_stack_change is not None:
-        _invalidate_after_stack_change()
-
-
 def _clean_kinds(kinds) -> list[str]:
     if not kinds:
         return list(builders.STACK_KINDS)
@@ -90,7 +85,7 @@ async def _run_rebuild_task(kinds: list[str]) -> None:
             "result": result,
             "error": "",
         })
-        _invalidate()
+        _invalidate_after_stack_change()
     except Exception:
         log.exception("worker=stack_rebuild kinds=%s failed", ",".join(kinds))
         _rebuild_status.update({
@@ -165,7 +160,7 @@ async def api_cleanup_identical_stacks(body: IdenticalCleanupBody):
     result["skipped_groups"] = skipped_groups
     result["requested"] = len(image_ids)
     if result.get("trashed"):
-        _invalidate()
+        _invalidate_after_stack_change()
     identical.finish_cleanup(body.token)
     return result
 
@@ -240,7 +235,7 @@ async def api_create_stack(body: CreateStackBody):
             {"error": "Stack image ids were not found", "image_ids": exc.image_ids},
             status_code=400,
         )
-    _invalidate()
+    _invalidate_after_stack_change()
     return stack
 
 
@@ -253,7 +248,7 @@ async def api_set_stack_representative(stack_id: int, body: RepresentativeBody):
     )
     if stack is None:
         return JSONResponse({"error": "Image is not a member of this stack"}, status_code=404)
-    _invalidate()
+    _invalidate_after_stack_change()
     return stack
 
 
@@ -262,5 +257,5 @@ async def api_unstack(stack_id: int):
     deleted = await stack_repository.unstack(catalog_path(), stack_id)
     if not deleted:
         return JSONResponse({"error": "Stack not found"}, status_code=404)
-    _invalidate()
+    _invalidate_after_stack_change()
     return {"ok": True}

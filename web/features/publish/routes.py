@@ -117,15 +117,9 @@ def _configured() -> None:
         raise RuntimeError("Publish routes are not configured")
 
 
-def _nodes_configured() -> None:
-    _configured()
-    if db.create_published_node_share is None:
-        raise RuntimeError("Published node routes are not configured")
-
-
 @router.get("/api/published/tree")
 async def api_published_tree(area: str):
-    _nodes_configured()
+    _configured()
     try:
         return await published_nodes.published_tree(catalog_path(), area)
     except published_nodes.PublishedNodeConflict as exc:
@@ -134,7 +128,7 @@ async def api_published_tree(area: str):
 
 @router.post("/api/published/nodes")
 async def api_create_published_node(payload: CreatePublishedNodeBody):
-    _nodes_configured()
+    _configured()
     try:
         node = await published_nodes.create_snapshot_tree(
             catalog_path(),
@@ -160,7 +154,7 @@ async def api_create_published_node(payload: CreatePublishedNodeBody):
 
 @router.patch("/api/published/nodes/{node_id}")
 async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody):
-    _nodes_configured()
+    _configured()
     fields = {
         name: getattr(payload, name)
         for name in _model_fields_set(payload)
@@ -179,7 +173,7 @@ async def api_patch_published_node(node_id: int, payload: PatchPublishedNodeBody
 
 @router.delete("/api/published/nodes/{node_id}")
 async def api_delete_published_node(node_id: int):
-    _nodes_configured()
+    _configured()
     if not await published_nodes.delete_node(catalog_path(), node_id):
         return JSONResponse({"error": "Published node not found"}, status_code=404)
     return {"ok": True}
@@ -187,7 +181,7 @@ async def api_delete_published_node(node_id: int):
 
 @router.get("/api/published/nodes/{node_id}/diff")
 async def api_published_node_diff(node_id: int):
-    _nodes_configured()
+    _configured()
     diff = await published_nodes.node_diff(
         catalog_path(),
         node_id,
@@ -202,7 +196,7 @@ async def api_published_node_diff(node_id: int):
 
 @router.post("/api/published/nodes/{node_id}/update")
 async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBody):
-    _nodes_configured()
+    _configured()
     try:
         node = await published_nodes.update_node(
             catalog_path(),
@@ -223,7 +217,7 @@ async def api_update_published_node(node_id: int, payload: UpdatePublishedNodeBo
 
 @router.post("/api/published/nodes/{node_id}/share")
 async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody):
-    _nodes_configured()
+    _configured()
     node = await published_nodes.get_node(catalog_path(), node_id)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
@@ -244,7 +238,7 @@ async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody
 
 @router.delete("/api/published/nodes/{node_id}/share")
 async def api_revoke_published_node_share(node_id: int):
-    _nodes_configured()
+    _configured()
     node = await published_nodes.get_node(catalog_path(), node_id)
     if node is None:
         return JSONResponse({"error": "Published node not found"}, status_code=404)
@@ -259,7 +253,7 @@ async def api_revoke_published_node_share(node_id: int):
 
 @router.post("/api/published/export")
 async def api_export_published_area(area: str):
-    _nodes_configured()
+    _configured()
     if area != "website":
         return JSONResponse({"error": "area must be website"}, status_code=400)
     publish_dir = str(settings.get_settings().get("publish_dir") or "").strip()

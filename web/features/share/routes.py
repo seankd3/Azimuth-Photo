@@ -72,27 +72,11 @@ def configure(
 
 
 def _configured() -> None:
-    if (
-        _templates is None
-        or db.create_or_rotate_share is None
-        or db.get_collection_share is None
-        or db.revoke_collection_share is None
-        or db.set_collection_share_password is None
-        or db.record_share_view is None
-        or db.resolve_share_token is None
-        or db.share_token_allows_image is None
-        or db.set_share_favorite is None
-        or db.list_share_favorites is None
-        or db.favorites_for_collection is None
-        or db.favorite_visitors_for_collection is None
-        or _thumbnail_response is None
-    ):
+    if _templates is None or _thumbnail_response is None:
         raise RuntimeError("Share routes are not configured")
 
 
 async def _snapshot_image_ids_for_collection(collection_id: int) -> list[int] | None:
-    if db.get_collection is None:
-        return None
     collection = await db.get_collection(collection_id, limit=1, offset=0)
     if collection is None or not collection.get("smart"):
         return None
