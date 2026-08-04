@@ -268,6 +268,24 @@ below**, and imported nothing from `features/` themselves. They are now
 `data/schema.py`'s three `ensure_*` calls and the lazy fan-out in
 `core/background.py` and `core/cache_events.py`.
 
+The three `ensure_*` calls are a small, specified job, left undone here only
+because it touches catalog creation and a mistake there lands on the real
+archive at cutover:
+
+- `ensure_develop_presets` and `ensure_image_quality` are one line each —
+  `await conn.executescript(DDL)`. Move `DEVELOP_PRESETS_DDL` and
+  `IMAGE_QUALITY_DDL` into `schema.py`'s `SCHEMA`, delete both functions, delete
+  their callers. Those callers — six inside `features/develop/presets.py`, plus
+  `preset_routes`, `quality/routes` and `quality/autocull` — are defensive
+  "create the table before I touch it" calls, and they are redundant:
+  `schema.py` runs the whole DDL on every catalog it opens, new or existing.
+- `ensure_virtual_copies` is 24 lines and its only non-test caller is
+  `schema.py` itself, so it can move wholesale.
+
+Verification is available and cheap: `python -m harness --check` builds a
+catalog from nothing, and `./scripts/smoke` boots the app on a fresh
+`AZIMUTH_HOME`. Both would catch a missing table immediately.
+
 Only state coupling was measured here, not the call graph, so this is a reason
 not to prioritise splitting them — not proof they would split cleanly.
 
