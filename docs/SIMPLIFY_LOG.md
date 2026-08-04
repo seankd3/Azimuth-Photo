@@ -232,10 +232,17 @@ modules. Module variables touched by five or more functions:
 | `data/repositories/catalog.py` | 1,343 | 58 | **0** |
 
 Compare `drawer.js`: 17 of 50. These files are long lists of largely independent
-functions, not state machines — which is why the injection layer hurt so much
-more than their size does. Jumping to a definition in a 2,454-line flat module
-costs one search; jumping through a `lambda: db.x()` cost a detour through
-`wiring.py` every time, and that is gone.
+functions, not state machines. Length is not what made this codebase hard to
+move around in.
+
+Two things were, and only one is fixed. Jump-to-definition no longer lands on a
+`lambda: db.x()` — `wiring.py` is deleted and 47 `configure()` entry points are
+down to 17. But **484 function-local imports remain**, against 552 on `main`.
+`core/background.py` alone has 44 of them against 7 at module scope, because
+`core/` importing `features/` at module scope would cycle. That is the plan's
+fourth root cause, it is Wave C, and this branch has not done it: a reader
+following a call into `run_startup` still has to read the body to learn what it
+touches.
 
 Only state coupling was measured here, not the call graph, so this is a reason
 not to prioritise splitting them — not proof they would split cleanly.
