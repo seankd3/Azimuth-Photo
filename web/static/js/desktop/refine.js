@@ -714,23 +714,33 @@ async function applyRefinePick(winnerId) {
     updateSelectedCell();
     fillReplacements();
 
-    const saveResult = await savePromise;
-    if (!saveResult.ok) {
-        const historyIndex = history.indexOf(entry);
-        if (historyIndex >= 0) history.splice(historyIndex, 1);
-        renderUndoState();
-        picks = Math.max(0, picks - 1);
-        if (open && seq === actionSeq) {
-            restoreSnapshot(snapshot);
-            showToast('Couldn’t save pick · mosaic restored');
-        } else {
-            renderStats();
-            showToast('Couldn’t save pick');
+    // The pick is done as far as the person is concerned. Do NOT await the save
+    // here: pickRefine chains this function onto pickActionQueue to keep local
+    // state ordered, so awaiting the POST made pick N+1's outline, tile swap and
+    // counter wait for pick N's round trip — worst exactly when someone is
+    // ranking fast, and always on a satellite where the POST is a network hop.
+    //
+    // Letting it settle on its own is safe because the failure path already
+    // guards on `seq === actionSeq`: a save that fails after later picks have
+    // landed reports without rewinding the board underneath them.
+    savePromise.then((saveResult) => {
+        if (!saveResult.ok) {
+            const historyIndex = history.indexOf(entry);
+            if (historyIndex >= 0) history.splice(historyIndex, 1);
+            renderUndoState();
+            picks = Math.max(0, picks - 1);
+            if (open && seq === actionSeq) {
+                restoreSnapshot(snapshot);
+                showToast('Couldn’t save pick · mosaic restored');
+            } else {
+                renderStats();
+                showToast('Couldn’t save pick');
+            }
+            return;
         }
-        return;
-    }
-    refreshPropagation();
-    if (picks % 10 === 0) refreshQuality();
+        refreshPropagation();
+        if (picks % 10 === 0) refreshQuality();
+    });
 }
 
 export function pickRefine(winnerId) {
