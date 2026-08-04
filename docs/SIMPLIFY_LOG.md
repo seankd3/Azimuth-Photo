@@ -286,10 +286,26 @@ calls back into panel eleven times across nine functions, for
 `configuredGalleryUrl`, `withBusyButton`, `tabCreatedAt`, `collectionById`,
 `loadCollections`, `clientPickIds`, `selectClientPicks` and `applyClientPicks`.
 
-A straight two-way split therefore leaves a circular import. ES modules tolerate
-it, but the honest shape is three files: the eight helpers deliver borrows are
-collection and button utilities that belong to neither half. Extract those
-first, then the seam is clean in both directions.
+A straight two-way split therefore leaves a circular import. Looking at what
+deliver actually borrows splits those eight in half again:
+
+- **Four are pure** — `configuredGalleryUrl`, `withBusyButton`, `tabCreatedAt`,
+  `clientPickIds`, 25 lines between them, no module state and no calls. They
+  move with the split, into `lib.js` or alongside it.
+- **Four are not.** `collectionById` and `loadCollections` read and write the
+  collections state, which is panel's; deliver wanting collection data is a real
+  dependency, not an accident. `selectClientPicks` already calls
+  `closeDeliverOverlay`, and `applyClientPicks` calls `rememberCollectionImages`
+   — client picks look like deliver's concern living in panel's file, and should
+  probably travel to `deliver.js` rather than be shared.
+
+So the end state is two files plus a few helpers, with deliver importing
+collection accessors from panel one way and panel importing only
+`openDeliverOverlay`/`closeDeliverOverlay` back.
+
+Moving the four pure helpers *first*, as a separate commit, was considered and
+rejected: all four are used only inside `panel.js` today, so lifting them now
+would be building a shared module for a split that has not happened.
 
 **drawer.js is four or five.** 130 functions in 2,186 lines across settings
 inputs, the system surface, sources, the Lightroom catalogue scan, cloud backup
