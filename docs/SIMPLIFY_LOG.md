@@ -244,6 +244,18 @@ fourth root cause, it is Wave C, and this branch has not done it: a reader
 following a call into `run_startup` still has to read the body to learn what it
 touches.
 
+**They cannot simply be hoisted, and that was tested rather than assumed.** A
+static pass over the import graph said all 299 were safe — which was nonsense,
+because the graph is acyclic *because* those imports are local. Hoisting all 44
+in `core/background.py` and importing the app failed on the first try:
+`data/repositories/filter_options.py` imports `core.background
+.track_background_task` at module scope, so the moment `core.background` reaches
+a feature at module scope, the cycle closes. Reverted.
+
+So the local imports are load-bearing, and the only way to remove them is the
+inversion the plan describes: move what `core/` and `data/` reach for down out
+of `features/`, then hoist. Not a mechanical change.
+
 Only state coupling was measured here, not the call graph, so this is a reason
 not to prioritise splitting them — not proof they would split cleanly.
 
