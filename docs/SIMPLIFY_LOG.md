@@ -4,6 +4,63 @@ Branch `simplify`, off `main`. One cutover when it is done; prod is untouched
 until then. This is a retrospective, not a plan: what was cut, what was learned,
 and what is known to be broken. Newest first.
 
+## One derivation system (08-04, in progress)
+
+Thumbnails, Develop bases, embeddings, captions and face vectors are the same
+operation under five names, and the tree implements it six times: `readthrough`,
+`preview_mirror`, `prefetch`, the on-miss task in `media/routes`,
+`embedding_sync`, and the ZIP path in `publishing/downloads`. Five separate
+cursor tables, three AI workers that are ~52% the same 1,328 lines, and of the
+four derived AI products exactly one (embeddings) reaches the laptop at all.
+
+The design is one content-addressed key `(content_hash, kind, recipe)` over one
+table, and its law is Sean's: **a derivation is enrichment, never a
+precondition.** Once nothing blocks on one, who computes stops being
+architecture and becomes a single default-off boolean.
+
+**Not the oplog, and that is worth writing down.** It looks like the natural
+carrier — append-only, content-hash keyed, already replicated. It is wrong for
+this: `pull_entries` runs `SELECT … FROM oplog ORDER BY seq` with no LIMIT or
+WHERE and filters in Python (`oplog.py:998-1010`), so every pull is O(total
+rows); there is no `DELETE FROM oplog` anywhere in the tree; and LWW per
+`(content_hash, family)` allows one live value per identity. Wants are ~900k
+high-churn rows that are meaningless once satisfied. The mechanic to generalise
+is `mirror_export.py:114-160` instead — snapshot `MAX(row_version)`, page on a
+version boundary so a version's rows never split. It is the one transport here
+that was built correctly.
+
+**Done: every photo gets an identity on purpose.** The content hash is what
+every derived artifact will be keyed on, and nothing in the scan path wrote one
+— `thumbnails/harvest.py` set it as a side effect of making a thumbnail, and the
+only deliberate filler was a route with no caller, oldest-first behind an
+`id > mark` cursor. `photo/identity.py` replaces it: newest first, cursor-free,
+every role. Empty-string hashes are normalised to NULL at startup, so "no
+identity" has one spelling instead of the two that a dozen queries carry
+`IS NOT NULL AND trim(…) != ''` to dodge.
+
+*Measured, because the comment claimed it before it was true:* naming
+`idx_images_needs_identity` in the query is load-bearing. Left to the planner on
+150k rows with 4,546 owed an identity, SQLite picks
+`idx_images_missing_date_source` plus a temp B-tree for the sort — 25.1 ms
+against 1.7 ms — until someone runs `ANALYZE`, and nothing in this app ever
+does. The first draft of that comment asserted the index would be used; the
+`EXPLAIN QUERY PLAN` said otherwise. **Write the plan check before the comment,
+not after.**
+
+**Verified open, not yet fixed: an edit never refreshes its preview.**
+`purge_image_cache` has exactly one caller (`features/catalog/routes.py:467`),
+and the Develop save path is not it — `features/develop/routes.py:275-293`
+writes `develop_settings`, appends history, appends an oplog entry, and touches
+no preview. So an edited photo shows its unedited camera JPEG indefinitely. The
+fix is not another invalidator call: it is the recipe belonging to the key, so
+an edit changes the key. The signature chain funnels through two functions
+(`thumbnails/__init__.py:335` and `:352`), which is where a `recipe` term goes;
+unedited photos keep an empty recipe, so nothing already cached is invalidated.
+
+**Known cost of this step:** +58 net production lines. H1 and H2 add the
+foundation and cannot pay for themselves; the deletions are H3–H5, and the wave
+is scored net at the end. Two named exceptions, not a waived rule.
+
 ## Where it stands
 
 | | main | now |
