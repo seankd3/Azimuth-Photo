@@ -7,6 +7,36 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## Thirteen unused JS exports, and why they were not deleted (08-04)
+
+Of 826 exported names under `static/js/`, **13 appear nowhere else** — not in
+another module, not in a template, not in Python, Kotlin or Rust. The count is
+solid; the conclusion "therefore delete" is not, and checking three of them is
+why:
+
+- **`openSystemLens`** is not dead code, it is an unwired entry point. The System
+  lens itself is live — `lenses.js:13` imports `mountSystemLens`, and `'system'`
+  appears throughout the chrome logic. What nothing calls is the deep-link
+  variant taking a `section` argument. Deleting it removes an intended API, not
+  weight.
+- **`disposeThumbRenderer`** destroys a shared WebGL renderer. Nothing calls it
+  because `thumbShared` is a deliberate singleton, created lazily and reused for
+  the app's lifetime. Deleting it removes the only way to free that context, on a
+  codebase whose notes already record a WebGL context-limit hazard. An uncalled
+  `dispose` is a question, not debris.
+- **`EXPORT_SHARPEN_OPTIONS` / `EXPORT_SYNC_GROUPS`** are option tables. An
+  options list with no consumer is usually a half-wired feature.
+
+The rest: `resetSettings`, `getImportOptions`, `listImports` (api.js wrappers for
+routes that exist), `softProofTransform`, `renderSyntheticPixels`, `armKeyword`,
+`keywordPainterState`, `stepZoom`, `peekQueue`.
+
+**The rule this reinforces:** an export with no importer tells you about wiring,
+not about intent — the same lesson that made the earlier dead-code census ~80%
+wrong. Each of these needs a product decision (wire it or drop both halves), and
+that is not a sweep. Left in place, listed here so the next pass starts from the
+analysis instead of the count.
+
 ## Duplicates: verified live (08-04)
 
 The 229-line cut landed with "NOT yet visually verified" in its commit message.
