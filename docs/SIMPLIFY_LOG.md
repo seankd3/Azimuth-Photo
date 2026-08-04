@@ -267,10 +267,29 @@ deleted — so the merge is now mostly mechanical. It is a boot sequence, so it
 wants a session with room to restart the app and walk every surface, not the
 tail of one.
 
-**panel.js is two files.** 103 top-level functions in 1,738 lines, and the split
-is already visible in the names: the left panel (collections, saved views) and
-the deliver overlay (8 `deliver*`, 5 `publish*`, 3 `share*`, plus its own shell,
-tabs and draft storage). The second has nothing to do with a left panel.
+**panel.js is two files, and the seam is measured.** 103 top-level functions in
+1,738 lines:
+
+- **52 deliver functions, 741 lines** — the overlay, its tabs, draft storage,
+  publish polling, share rows.
+- **51 panel functions, 947 lines** — collections, saved views, the left panel.
+- **Nine module-level variables belong to deliver alone**: `DELIVER_TABS`,
+  `DELIVER_LOAD_LABELS`, `DELIVER_TAB_STORAGE_KEY`, `SHARED_CHANGED_EVENT`,
+  `deliverOverlay`, `deliverOverlayReturn`, `deliverOverlayToken`,
+  `deliverPoll`, `deliverSession`.
+- **Zero module state is touched by both halves.**
+
+The catch, and the reason this was measured rather than done: the call graph
+crosses both ways. Panel calls into deliver twice (`openDeliverOverlay` from
+`openCollectionMenu`, `closeDeliverOverlay` from `selectClientPicks`). Deliver
+calls back into panel eleven times across nine functions, for
+`configuredGalleryUrl`, `withBusyButton`, `tabCreatedAt`, `collectionById`,
+`loadCollections`, `clientPickIds`, `selectClientPicks` and `applyClientPicks`.
+
+A straight two-way split therefore leaves a circular import. ES modules tolerate
+it, but the honest shape is three files: the eight helpers deliver borrows are
+collection and button utilities that belong to neither half. Extract those
+first, then the seam is clean in both directions.
 
 **drawer.js is four or five.** 130 functions in 2,186 lines across settings
 inputs, the system surface, sources, the Lightroom catalogue scan, cloud backup
