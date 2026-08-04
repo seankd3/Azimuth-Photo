@@ -54,23 +54,9 @@ function updateBanner() {
     }
 }
 
-function focusPoint(member) {
-    const box = member?.subject_box || member?.focus_box;
-    if (!box || typeof box !== 'object') return { x: 0.5, y: 0.5 };
-    const x = Number(box.x ?? box.left);
-    const y = Number(box.y ?? box.top);
-    const width = Number(box.w ?? box.width);
-    const height = Number(box.h ?? box.height);
-    if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || x + width > 1 || y + height > 1) {
-        return { x: 0.5, y: 0.5 };
-    }
-    return { x: x + width / 2, y: y + height / 2 };
-}
-
 function memberPreview(member) {
-    const focus = focusPoint(member);
     return `
-        <figure class="cull-brief-member ${member.suggested_pick ? 'suggested' : ''}" data-cull-preview data-focus-x="${focus.x}" data-focus-y="${focus.y}">
+        <figure class="cull-brief-member ${member.suggested_pick ? 'suggested' : ''}" data-cull-preview>
             <img src="${esc(thumbUrl('lg', member.id))}" alt="${esc(member.filename)}" decoding="async">
             <figcaption><b>${esc(member.filename)}</b><span>${Math.round(member.quality_score)} quality${member.taste_score != null ? ` · ${Math.round(member.taste_score)} taste` : ''}</span></figcaption>
             ${member.suggested_pick ? '<i>Suggested pick</i>' : ''}
@@ -238,16 +224,14 @@ function togglePreviewZoom(preview) {
         image.removeAttribute('style');
         return;
     }
-    const focusX = Math.min(1, Math.max(0, Number(preview.dataset.focusX) || 0.5));
-    const focusY = Math.min(1, Math.max(0, Number(preview.dataset.focusY) || 0.5));
     const position = () => {
         const frame = preview.getBoundingClientRect();
         const width = image.naturalWidth || frame.width;
         const height = image.naturalHeight || frame.height;
         image.style.width = `${width}px`;
         image.style.height = `${height}px`;
-        image.style.left = `${frame.width / 2 - width * focusX}px`;
-        image.style.top = `${frame.height / 2 - height * focusY}px`;
+        image.style.left = `${frame.width / 2 - width / 2}px`;
+        image.style.top = `${frame.height / 2 - height / 2}px`;
     };
     if (image.complete) position(); else image.addEventListener('load', position, { once: true });
 }
