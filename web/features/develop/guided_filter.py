@@ -112,6 +112,12 @@ def eigf_guided_filter(
 ) -> np.ndarray:
     """Exposure-independent guided filter (darktable eigf.h linearization).
 
+    Not selected by anything today. It came out of the darktable study, which
+    ranked guided filtering as worth adopting, and it keeps its test — but the
+    `mode='eigf'` switch that used to reach it was never flipped by any caller,
+    so the switch is gone and this is a reference implementation until a caller
+    asks for it by name.
+
     Uses normalized variance ``var / (avg·I)`` and skips the final coeff blur so
     bright edges do not halo when the guide spans many stops.
     """
@@ -165,11 +171,10 @@ def soft_mask(
     *,
     guide: np.ndarray | None = None,
     epsilon: float = C.GUIDED_EPSILON_DEFAULT,
-    mode: str = "classic",
 ) -> np.ndarray:
     """Edge-aware softener that wraps the old gaussian blur path.
 
-    With a guide, runs guided / EIGF refine. Without a guide, falls back to the
+    With a guide, runs the guided filter. Without one, falls back to the
     separable gaussian used historically for mask softening (sigma ≈ radius/2).
     """
 
@@ -180,8 +185,6 @@ def soft_mask(
     radius_i = max(0, int(math.ceil(float(radius))))
     if radius_i <= 0:
         return field.copy()
-    if mode == "eigf":
-        return eigf_guided_filter(guide, field, radius_i, epsilon)
     return guided_filter(guide, field, radius_i, epsilon)
 
 
@@ -192,7 +195,6 @@ def refine_mask(
     feather: float = C.GUIDED_DEFAULT_FEATHER,
     radius: int | None = None,
     epsilon: float | None = None,
-    mode: str = "classic",
 ) -> np.ndarray:
     """Stick a combined correction mask to guide edges using Feather mapping."""
 
@@ -205,4 +207,4 @@ def refine_mask(
         epsilon = mapped_epsilon if epsilon is None else epsilon
     if float(feather) <= C.LOCAL_RANGE_EPSILON and radius is not None and int(radius) <= 0:
         return field.copy()
-    return soft_mask(field, int(radius), guide=guide_f, epsilon=float(epsilon), mode=mode)
+    return soft_mask(field, int(radius), guide=guide_f, epsilon=float(epsilon))
