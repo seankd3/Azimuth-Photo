@@ -887,7 +887,7 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 #duplicates-head { min-height: var(--lens-head-h); display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2) var(--s3); padding: 0 var(--s4); border-bottom: 1px solid var(--line); }
 #duplicates-head > div:first-child { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--s2); }
 #duplicates-count { color: var(--text-2); font-size: var(--fs-ui); }
-#stacks-review-tools, #duplicates-adhoc-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
+#stacks-review-tools { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--s2); min-width: 0; }
 #stacks-kind-chips { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 7px var(--s4); overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--surface-chrome); }
 #stacks-kind-chips::-webkit-scrollbar { display: none; }
 .seg-compact { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--bg); }
@@ -905,18 +905,11 @@ html[data-badges-index="0"] .cell .c-idx { display: none; }
 .dupe-threshold { display: flex; align-items: center; gap: var(--s2); color: var(--text-2); font-size: 12px; white-space: nowrap; }
 .dupe-threshold output { min-width: 34px; color: var(--text); font-variant-numeric: tabular-nums; }
 .dupe-row { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--panel); overflow: hidden; margin-bottom: var(--s3); }
-.dupe-row:has(.dupe-more[open]) { overflow: visible; z-index: 5; position: relative; }
 .dupe-row.kb-focus { border-color: var(--accent-lin); }
 .dupe-row-head { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--line-soft); }
 .dupe-row-head b { font-size: 13px; }
 .dupe-row-head span { margin-left: var(--s2); color: var(--text-3); font-size: 12px; }
 .dupe-row-actions { display: flex; align-items: center; gap: var(--s2); flex: none; }
-.dupe-more { position: relative; }
-.dupe-more summary { list-style: none; }
-.dupe-more summary::-webkit-details-marker { display: none; }
-.dupe-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 40; min-width: 160px; padding: 5px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-popover); box-shadow: 0 16px 48px rgba(0,0,0,.55); }
-.dupe-menu button { width: 100%; padding: 7px 9px; border-radius: var(--r-ctl); color: var(--text); text-align: left; font-size: var(--fs-ui); }
-.dupe-menu button:hover { background: var(--card); }
 .dupe-photos { display: flex; gap: var(--s3); overflow-x: auto; overflow-y: hidden; padding: var(--s3); }
 .dupe-photo { width: clamp(220px, calc(var(--dupe-ar) * var(--stack-thumb-h)), 720px); flex: 0 0 auto; min-width: 0; }
 .dupe-thumb { position: relative; width: 100%; height: var(--stack-thumb-h); display: grid; place-items: center; overflow: hidden; border-radius: var(--r-ctl); background: #000; outline: 1px solid rgba(255,255,255,.08); }
@@ -1576,7 +1569,7 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
     #refine-stats { width: 100%; justify-content: space-between; padding: 4px 2px 0; border-top: 1px solid var(--line-soft); }
     #duplicates-head, #trash-head, #suggestions-head { padding-inline: var(--s3); }
     #duplicates-head > div:first-child, #trash-head > div:first-child, #suggestions-head > div:first-child { flex-basis: 150px; }
-    #stacks-review-tools .btn, #duplicates-adhoc-tools .btn, #trash-head .btn { min-height: 28px; padding-inline: var(--s2); }
+    #stacks-review-tools .btn, #trash-head .btn { min-height: 28px; padding-inline: var(--s2); }
     .shared-row { grid-template-columns: 76px minmax(0, 1fr); }
 }
 @media (max-width: 880px) {
