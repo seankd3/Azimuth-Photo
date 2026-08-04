@@ -8,9 +8,9 @@ and what is known to be broken. Newest first.
 
 | | main | now |
 |---|---|---|
-| Non-test Python | 104,185 | 92,569 |
-| Test Python | 53,541 | 43,410 |
-| Static JS | 38,619 | 37,739 |
+| Non-test Python | 104,185 | 92,667 |
+| Test Python | 53,541 | 43,402 |
+| Static JS | 38,619 | 37,744 |
 | API routes | 305 | 282 |
 
 About 22,600 lines out of 196,000 — 12%. The number was 48,000 before the audit
@@ -18,6 +18,43 @@ put back what should not have gone, and the honest figure is the one that
 survives checking. What left for good: the injection layer, the Playwright
 scenario suite, 424 assertions on literal source text, six duplicate hub
 clients, the v1 metadata push, and routes with neither a caller nor an intent.
+
+## Deployed and measured on the real archive (08-03)
+
+`simplify` runs on omarchy at `192177e3`, against the live 153,891-row catalog.
+A `.backup` snapshot was taken first (`azimuth.db.pre-simplify-20260803-203743`,
+3.65 GB, `quick_check ok`); rollback is `main@327602ab`. No dependency and no
+schema changes cross the branch, so nothing migrated.
+
+**Counts are identical to the pre-deploy baseline** — 147,334 active, 153,891
+catalog, 11 picked, 19 rejected, 2,592,316 comparisons. That is the check that
+matters for the visibility-rule work: any change to what counts as "in the
+library" moves those numbers.
+
+Warm timings on 147k photos:
+
+| Route | Warm |
+|---|---|
+| `rankings?sort=taste` | 1.5 ms |
+| `rankings?sort=elo` | 1.5 ms |
+| `rankings?stacks=collapsed` | 1.4 ms |
+| `stats` | 1.6 ms |
+| `stacks` | 274 ms |
+| `search?q=sunset` | 801 ms |
+
+First call after a restart is 4–29 s while the caches populate, matching the
+known cold-start behaviour rather than adding to it. Sixteen routes, all 200.
+
+**Two things the deploy found that the scratch catalog could not.** The OOM
+killer took the service during startup when 20 requests arrived while it was
+still doing boot work — 8.7 GB peak, 6 GB swap on a 16 GB box. And
+`/api/quality/status` now 422s, because that route was one of the 28 removed and
+the path falls through to `/api/quality/{image_id}`; deliberate, and listed
+above, but it reads as a break from outside.
+
+The Windows desktop installer builds from this branch: 108 MB NSIS bundle, and
+the bundled engine boots clean with no import errors — the check that `archive`,
+`photo` and `pixels` reach the PyInstaller bundle at all.
 
 ## Known red
 
