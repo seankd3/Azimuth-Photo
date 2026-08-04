@@ -187,13 +187,8 @@ async def get_unembedded_images(
     limit: int,
     md_cache_root: str = "",
     cache_size: str = "md",
-    after_id: int = 0,
 ):
     model_key = embedding_config["model_key"]
-    after_id = max(0, int(after_id or 0))
-    # Retained for callers that still pass it; the newest-first ordering above
-    # makes it unnecessary for ordinary scanning.
-    after_id_filter = "AND i.id > ? " if after_id else ""
     conn = await connection.open_async(db_path)
     try:
         await ensure_embedding_model_tables(
@@ -214,7 +209,6 @@ async def get_unembedded_images(
                 "WHERE s.included = 1 "
                 "AND i.status IN ('kept', 'maybe') "
                 "AND i.missing_at IS NULL "
-                f"{after_id_filter}"
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM embeddings_by_model e "
                 "  WHERE e.model_key = ? AND e.image_id = i.id"
@@ -233,7 +227,6 @@ async def get_unembedded_images(
                 (
                     md_cache_root,
                     cache_size,
-                    *((after_id,) if after_id else ()),
                     model_key,
                     model_key,
                     limit,
@@ -246,7 +239,6 @@ async def get_unembedded_images(
                 "WHERE s.included = 1 "
                 "AND i.status IN ('kept', 'maybe') "
                 "AND i.missing_at IS NULL "
-                f"{after_id_filter}"
                 "AND NOT EXISTS ("
                 "  SELECT 1 FROM embeddings_by_model e "
                 "  WHERE e.model_key = ? AND e.image_id = i.id"
@@ -263,7 +255,6 @@ async def get_unembedded_images(
                 "ORDER BY i.date_taken DESC, i.id DESC "
                 "LIMIT ?",
                 (
-                    *((after_id,) if after_id else ()),
                     model_key,
                     model_key,
                     limit,

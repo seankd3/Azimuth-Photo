@@ -113,7 +113,6 @@ def _initial_manual_pause() -> bool:
 
 _embedding_manual_pause = _initial_manual_pause()
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
-_unembedded_candidate_cursor = {"model_key": "", "after_id": 0}
 _embedding_count_log_batches = 0
 _batch_control = {
     "active_batch_size": INITIAL_EMBED_BATCH_SIZE,
@@ -994,28 +993,6 @@ def _row_image_ref(row) -> tuple[int, str]:
     return int(row["id"]), row["filepath"]
 
 
-def _candidate_cursor_after_id(model_key: str) -> int:
-    if _unembedded_candidate_cursor.get("model_key") != model_key:
-        _unembedded_candidate_cursor["model_key"] = model_key
-        _unembedded_candidate_cursor["after_id"] = 0
-    return int(_unembedded_candidate_cursor.get("after_id") or 0)
-
-
-def _advance_candidate_cursor(rows) -> None:
-    """No cursor. The candidate query advances by itself.
-
-    It walked ids forward to avoid rescanning, which also meant the oldest
-    photos were embedded first — the opposite of what anyone wants, since the
-    photos you just imported are the ones you will search for. The query now
-    orders newest first, and an embedded photo leaves the candidate set through
-    its NOT EXISTS clause, so progress needs no bookmark. Keeping one would be
-    worse than useless: `id > max` under a DESC scan skips every photo older
-    than the batch just taken, which is all of them.
-    """
-
-    _unembedded_candidate_cursor["after_id"] = 0
-
-
 def _schedule_preload(loop, rows):
     image_refs = [_row_image_ref(row) for row in rows]
     return loop.run_in_executor(_preload_executor, _timed_preload_images, image_refs)
@@ -1372,15 +1349,12 @@ async def _run_embedding_worker_loop():
                 governed_batch_size + len(_embed_retry_after),
             )
             cache_size = "sm" if int(config.get("embed_model_dim", 0) or 0) > 2048 else "md"
-            cursor_after_id = _candidate_cursor_after_id(_model_key_for_config(config))
             query_started = time.perf_counter()
             candidates = await db.get_unembedded_images(
                 limit=candidate_limit,
                 md_cache_root=thumbnails.SSD_CACHE_DIR,
                 cache_size=cache_size,
-                after_id=cursor_after_id,
             )
-            _advance_candidate_cursor(candidates)
             query_seconds = time.perf_counter() - query_started
             unembedded, cooled_down, next_retry_at = _select_ready_candidates(candidates)
             _worker_status.update({
