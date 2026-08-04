@@ -752,7 +752,13 @@ async def rankings(
         and int(catalog_counts.get("removed_images") or 0) == 0
     )
     all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-    order = RANKING_SORTS.get(sort, "elo DESC")
+    # The route layer rejects a sort no client should send (core/requests.py
+    # RankingSort). Anything unknown reaching here came from our own code, so it
+    # is a bug, not bad input -- and the old `.get(sort, "elo DESC")` turned that
+    # bug into a grid quietly ordered by Elo. Fail where it can be seen.
+    if sort not in RANKING_SORTS:
+        raise KeyError(f"unknown ranking sort: {sort!r}")
+    order = RANKING_SORTS[sort]
     conditions, params = ranking_filter_parts(
         orientation=orientation,
         compared=compared,
