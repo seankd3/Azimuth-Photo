@@ -685,7 +685,7 @@ async def get_visible_images_for_pairing(
     order: str = "elo",
     elo_pivot: float | None = None,
 ):
-    return await rating_repository.get_visible_images_for_pairing(
+    return await rating_repository.visible_images_for_pairing(
         DB_PATH,
         size,
         cache_root,
@@ -697,7 +697,7 @@ async def get_visible_images_for_pairing(
 
 
 async def get_visible_pairing_pool_counts(size: str, cache_root: str) -> dict:
-    return await rating_repository.get_visible_pairing_pool_counts(
+    return await rating_repository.visible_pairing_pool_counts_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
         size=size,
@@ -711,7 +711,7 @@ async def get_visible_orientation_pairing_pool_counts(
     cache_root: str,
     orientation: str,
 ) -> dict:
-    return await rating_repository.get_visible_orientation_pairing_pool_counts(
+    return await rating_repository.visible_orientation_pairing_pool_counts_cached(
         DB_PATH,
         get_catalog_image_counts=get_catalog_image_counts,
         count_rankings=count_rankings,

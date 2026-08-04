@@ -409,27 +409,6 @@ async def visible_images_for_pairing(
         await connection.close_async(conn, db_path=db_path)
 
 
-async def get_visible_images_for_pairing(
-    db_path: str,
-    size: str,
-    cache_root: str,
-    *,
-    include_card_metadata: bool = True,
-    limit: int | None = None,
-    order: str = "elo",
-    elo_pivot: float | None = None,
-):
-    """Return visible active pairing rows for one thumbnail tier, sorted by Elo."""
-    return await visible_images_for_pairing(
-        db_path,
-        size,
-        cache_root,
-        include_card_metadata=include_card_metadata,
-        limit=limit,
-        order=order,
-        elo_pivot=elo_pivot,
-    )
-
 
 async def visible_pairing_pool_counts(
     db_path: str,
@@ -496,23 +475,6 @@ async def visible_pairing_pool_counts_cached(
     }
     return dict(result)
 
-
-async def get_visible_pairing_pool_counts(
-    db_path: str,
-    *,
-    get_catalog_image_counts,
-    size: str,
-    cache_root: str,
-    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-) -> dict:
-    """Return active and visible counts for the default Compare/Mosaic pool."""
-    return await visible_pairing_pool_counts_cached(
-        db_path,
-        get_catalog_image_counts=get_catalog_image_counts,
-        size=size,
-        cache_root=cache_root,
-        ttl_seconds=ttl_seconds,
-    )
 
 
 async def visible_orientation_pairing_pool_counts(
@@ -608,27 +570,6 @@ async def visible_orientation_pairing_pool_counts_cached(
     }
     return dict(result)
 
-
-async def get_visible_orientation_pairing_pool_counts(
-    db_path: str,
-    *,
-    get_catalog_image_counts,
-    count_rankings,
-    size: str,
-    cache_root: str,
-    orientation: str,
-    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-) -> dict:
-    """Return active and visible counts for a simple orientation-filtered pool."""
-    return await visible_orientation_pairing_pool_counts_cached(
-        db_path,
-        get_catalog_image_counts=get_catalog_image_counts,
-        count_rankings=count_rankings,
-        size=size,
-        cache_root=cache_root,
-        orientation=orientation,
-        ttl_seconds=ttl_seconds,
-    )
 
 
 def load_past_matchups(db_path: str) -> tuple[tuple[int, int | None], set[tuple[int, int]]]:
