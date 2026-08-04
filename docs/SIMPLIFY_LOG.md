@@ -7,6 +7,41 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## The blind spot in hunting frozen switches (08-04)
+
+Two automated passes hunted "a parameter that has one value at every call site,
+and the code only the other value would reach". It found four real ones worth
+about 350 lines. It also produced three false positives that share one shape, and
+the shape is worth naming because the technique cannot see it:
+
+**A switch frozen on purpose is indistinguishable from a switch frozen by
+accident.** The difference is never in the call sites. It is in a comment, a
+dated directive, or a spec section — exactly the places a call-site census does
+not look.
+
+- `_pregen_should_pause_for_priority()` returns `False` at every site and is
+  checked at fourteen places in `pregen_worker.py`. It is not a disabled
+  safeguard: the two lines above the `return` cite an owner directive of
+  2026-07-20 — the hub's bulk backfill never throttles for activity, because
+  interactivity is protected by the satellite's local cache and by on-demand
+  requests that bypass the bulk gate. `test_thumbnails.py:2892-2959` monkeypatches
+  it to `True`, so the yielding path is tested and can be switched back on.
+- `dng_pipeline` `input_space="camera"` is unreachable, and
+  `camera_rgb_to_prophoto` implements a **numbered stage of the frozen
+  DEVELOP_SPEC** (§30.2). Two of the three functions called dead have a passing
+  test asserting dual-illuminant interpolation.
+- `sigmoid_view`'s solver "runs on every HDR render" — measured, 35 us against a
+  125 ms to 7.75 s transform. Its surviving test catches only 6 of 8 injected
+  corruptions of the constants it supposedly replaces.
+
+**And a hazard the same pass surfaced about itself.** The `input_space` switch
+froze 22 hours before it was reported, in commit `faf02083` ("Delete 43 functions
+nothing calls"), which removed `render_dng_profile` — the entry point that
+forwarded `input_space=`. The reviewer's phrase: *the prior pass manufactured this
+pass's evidence*. Deletion passes ratchet. Each one makes the next one's census
+look more damning, and nothing in the method notices. Check `git log -S` on the
+switch before believing it was always frozen.
+
 ## Thirteen unused JS exports, and why they were not deleted (08-04)
 
 Of 826 exported names under `static/js/`, **13 appear nowhere else** — not in
