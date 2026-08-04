@@ -1,4 +1,8 @@
-"""Hub-side manifest, upload, metadata, base, and hash-backfill behavior."""
+"""Hub-side manifest, upload, metadata, and base behavior.
+
+Giving a photo an identity is not one of them any more: it is a property of
+every catalog, so it lives in `photo/identity.py` and runs on every role.
+"""
 
 from __future__ import annotations
 
@@ -35,8 +39,6 @@ from core import hdd_governor
 
 
 MAX_CHUNK_BYTES = 32 * 1024 * 1024
-BACKFILL_BATCH_SIZE = 100
-BACKFILL_THROTTLE_SECONDS = 0.05
 _UPLOAD_LOCKS: dict[str, asyncio.Lock] = {}
 # Destination locks serialize placement for a library path so two different
 # content hashes that compute the same placed_relpath cannot both treat the
@@ -1063,60 +1065,3 @@ async def multipart_base_stream(paths: rawproc.BasePaths) -> AsyncIterator[bytes
     ).encode()
     yield paths.metadata.read_bytes()
     yield f"\r\n--{boundary}--\r\n".encode()
-
-
-async def hash_backfill_batch(
-    db_path: str,
-    *,
-    after_id: int = 0,
-    limit: int = BACKFILL_BATCH_SIZE,
-) -> tuple[int, dict[str, int]]:
-    await ensure_sync_schema(db_path)
-    conn = await connection.open_async(db_path)
-    try:
-        rows = await (await conn.execute(
-            "SELECT id, filepath FROM images WHERE id > ? AND content_hash IS NULL ORDER BY id LIMIT ?",
-            (after_id, limit),
-        )).fetchall()
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-    updates: list[tuple[str, int]] = []
-    missing = 0
-    for row in rows:
-        try:
-            def _hash_one(path: str = row["filepath"]) -> str:
-                with hdd_governor.bulk_hdd_slot_sync():
-                    return compute_content_hash(path)
-
-            digest = await asyncio.to_thread(_hash_one)
-        except OSError:
-            missing += 1
-            continue
-        updates.append((digest, int(row["id"])))
-    if updates:
-        conn = await connection.open_async(db_path)
-        try:
-            await conn.executemany(
-                "UPDATE images SET content_hash = ? WHERE id = ? AND content_hash IS NULL", updates
-            )
-            await conn.commit()
-        finally:
-            await connection.close_async(conn, db_path=db_path)
-    cursor = int(rows[-1]["id"]) if rows else after_id
-    return cursor, {"hashed": len(updates), "missing": missing}
-
-
-async def run_hash_backfill(db_path: str, status: dict[str, Any]) -> None:
-    status.update(state="running", started_at=time.time(), cursor=0, counts={"hashed": 0, "missing": 0}, error="")
-    try:
-        while True:
-            cursor, changes = await hash_backfill_batch(db_path, after_id=int(status["cursor"]))
-            if cursor == status["cursor"]:
-                break
-            status["cursor"] = cursor
-            for field, count in changes.items():
-                status["counts"][field] += count
-            await asyncio.sleep(BACKFILL_THROTTLE_SECONDS)
-        status.update(state="complete", finished_at=time.time())
-    except Exception as exc:
-        status.update(state="error", error=str(exc), finished_at=time.time())

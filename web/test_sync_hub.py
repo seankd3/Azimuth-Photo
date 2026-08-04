@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import sqlite3
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -566,26 +565,6 @@ class SyncHubTests(unittest.TestCase):
             conn.close()
         self.assertEqual(json.loads(row[0]), {"_lr_rating": 5})
         self.assertEqual(row[1], "")
-
-    def test_hash_backfill_batch_and_endpoint(self):
-        path = self.root / "legacy.jpg"
-        path.write_bytes(self.image_bytes("source.jpg", (4, 5, 6)))
-        conn = sqlite3.connect(self.db_path)
-        try:
-            conn.execute("INSERT INTO images(filename, filepath) VALUES (?, ?)", (path.name, str(path)))
-            conn.commit()
-        finally:
-            conn.close()
-        cursor, counts = asyncio.run(hub.hash_backfill_batch(self.db_path))
-        self.assertGreater(cursor, 0)
-        self.assertEqual(counts, {"hashed": 1, "missing": 0})
-        response = self.client.post("/api/sync/hash-backfill")
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["started"])
-        deadline = time.monotonic() + 2
-        while hub_routes._backfill_status["state"] not in {"complete", "error"} and time.monotonic() < deadline:
-            time.sleep(0.01)
-        self.assertEqual(hub_routes._backfill_status["state"], "complete")
 
     def test_field_spec_three_file_round_trip_is_noop_on_second_manifest(self):
         records = []

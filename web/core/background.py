@@ -4,8 +4,10 @@ import os
 import time
 
 from core import capabilities
+from core.catalog_path import catalog_path
 from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
 from archive import role
+from photo import identity as photo_identity
 
 
 log = logging.getLogger(__name__)
@@ -593,6 +595,15 @@ async def run_startup(
     track_background_task(_start_background_daemon(_hold_develop_cache_to_budget, delay=45.0))
 
     track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
+    # Runs on every role. A satellite's scan already hashes what it imports, so
+    # there the candidate set is empty and this costs one index probe every five
+    # minutes; on a hub or a standalone install it is the only thing that gives
+    # an older photo an identity on purpose rather than by side effect.
+    track_background_task(
+        _start_background_daemon(
+            lambda: photo_identity.run_identity_backfill(catalog_path), delay=15.0
+        )
+    )
     track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
     track_background_task(_sweep_phantom_cache_entries())
     track_background_task(_start_background_daemon(classify_orientations_background))

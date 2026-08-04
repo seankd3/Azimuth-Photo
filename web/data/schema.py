@@ -241,6 +241,14 @@ CREATE INDEX IF NOT EXISTS idx_images_active_content_hash_size
 ON images(content_hash, file_size)
 WHERE status IN ('kept', 'maybe') AND missing_at IS NULL AND vc_of IS NULL
 AND content_hash IS NOT NULL AND trim(content_hash) != '';
+-- The photos still owed an identity, newest first. The predicate is exactly the
+-- one `photo/identity.py` asks for, and that query names this index explicitly.
+-- Because the index only holds work that is not done, it empties itself as the
+-- backfill finishes: measured on 150k rows, the "am I caught up" probe that runs
+-- forever afterwards costs 0.4 ms.
+CREATE INDEX IF NOT EXISTS idx_images_needs_identity
+ON images(date_taken DESC, id DESC)
+WHERE content_hash IS NULL AND status IN ('kept', 'maybe') AND missing_at IS NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id
 ON images(hub_image_id) WHERE hub_image_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_images_hub_remote
@@ -2200,6 +2208,20 @@ async def normalize_legacy_image_state(conn) -> bool:
         "UPDATE images SET flag = 'unflagged' WHERE flag IS NULL OR flag = ''"
     )
     if cursor.rowcount:
+        changed = True
+
+    # "No identity" gets exactly one spelling. Empty-string content hashes exist
+    # in older catalogs, and every query that cares has had to write
+    # `content_hash IS NOT NULL AND trim(content_hash) != ''` to dodge them --
+    # two conditions for one question, in a dozen places. NULL is the spelling
+    # the column declares, the partial indexes assume, and the backfill looks
+    # for; an empty string is the same fact written so nothing finds it.
+    cursor = await conn.execute(
+        "UPDATE images SET content_hash = NULL "
+        "WHERE content_hash IS NOT NULL AND trim(content_hash) = ''"
+    )
+    if cursor.rowcount:
+        log.info("normalize=content_hash rows=%s reason=empty_string_is_not_an_identity", cursor.rowcount)
         changed = True
 
     # Status used to control membership in older versions. Sources now own

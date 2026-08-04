@@ -1856,13 +1856,6 @@
       "job_id"
     ]
   },
-  "POST /api/sync/hash-backfill": {
-    "has_body": false,
-    "params": [
-      "X-Device-Token"
-    ],
-    "required_params": []
-  },
   "POST /api/sync/have": {
     "has_body": true,
     "params": [

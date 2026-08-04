@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.background import track_background_task
 from core.requests import RequestBodyTooLarge, read_body_limited
 from core.source_files import source_file_is_safe
 from data.repositories import images as image_repository
@@ -24,8 +23,6 @@ from features.system import client_bundle
 router = APIRouter(tags=["sync"], dependencies=[Depends(device_auth.enforce_device_token)])
 _intake_root: Callable[[], Path] = hub.default_intake_root
 _raws_root: Callable[[], Path] | None = None
-_backfill_status: dict[str, Any] = {"state": "idle", "counts": {}, "error": ""}
-_backfill_task: asyncio.Task | None = None
 
 
 class ManifestItem(BaseModel):
@@ -257,17 +254,6 @@ async def api_sync_thumb_pack(
         media_type="application/x-tar",
         headers={"Cache-Control": "no-store"},
     )
-
-
-@router.post("/api/sync/hash-backfill")
-async def api_sync_hash_backfill():
-    global _backfill_task
-    if _backfill_task and not _backfill_task.done():
-        return {"ok": True, "started": False, "backfill": dict(_backfill_status)}
-    _backfill_status.clear()
-    _backfill_status.update(state="queued", counts={}, error="")
-    _backfill_task = track_background_task(hub.run_hash_backfill(catalog_path(), _backfill_status))
-    return {"ok": True, "started": True, "backfill": dict(_backfill_status)}
 
 
 @router.get("/api/client/bundle")
