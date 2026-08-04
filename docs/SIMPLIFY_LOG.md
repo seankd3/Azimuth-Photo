@@ -291,6 +291,20 @@ not to prioritise splitting them — not proof they would split cleanly.
 
 ## Looked for, and not there
 
+**The invalidation fan-out is real but not duplicated.** The plan counted 80
+`invalidate_*` functions and said one trash action fires ten of them. Both hold:
+83 such functions exist, and `features/trash/routes.py::_invalidate_after_trash`
+names nine invalidators in a row. But searching for other functions that restate
+four or more of the same seven found **exactly one — that one**. The knowledge
+is stated once, in a named helper, which is as contained as it gets without
+D9's actual fix: caches keyed off the rendition key so the manual invalidators
+stop existing. That depends on D3 and D6, neither of which this branch did.
+
+`core/cache_events.py` already has two functions shaped the right way —
+`invalidate_people_dependent_caches` and `invalidate_vector_derived_caches` name
+a cause and fan out. Thirty of its thirty-two name an effect. That is the shape
+to fix, and it is not fixable one call site at a time.
+
 After the `[hidden]` find, the obvious question was whether `desktop.css`
 restates other rules the same way. It does not. Thirty-six single-declaration
 `display: none` rules remain and their selectors are genuinely distinct —
