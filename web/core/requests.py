@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Query, Request
 from fastapi.responses import JSONResponse
 
 
@@ -8,7 +8,7 @@ class RequestBodyTooLarge(ValueError):
     pass
 
 
-def _folder_scope(request: Request) -> str | list[str]:
+def _folder_scope(request: Request, folder: str = Query("")) -> str | list[str]:
     """Every folder the sidebar selected, not just the last one.
 
     The tree sends one `folder=` per selected node. A route declaring
@@ -19,6 +19,11 @@ def _folder_scope(request: Request) -> str | list[str]:
 
     A dependency rather than a line each route must remember to write. Six
     routes remembered; two did not.
+
+    The `folder` parameter is declared here, unused, so that FastAPI keeps
+    documenting it in the OpenAPI schema — a pure `Depends` reads the query
+    string but disappears from the published surface, and the harness caught it
+    vanishing from nine routes at once.
     """
 
     values = [value for value in request.query_params.getlist("folder") if value]
