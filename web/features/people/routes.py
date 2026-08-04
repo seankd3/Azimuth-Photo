@@ -69,10 +69,6 @@ def _schedule_people_counts_refresh() -> asyncio.Task | None:
 
 
 async def _fast_people_counts(worker: dict) -> tuple[dict, bool]:
-    if db.get_people_status_counts is None:
-        review = await db.get_people_review(limit=12)
-        return dict(review.get("counts", {}) if isinstance(review, dict) else {}), False
-
     cached = _people_status_counts_cache.get("counts")
     fresh = float(_people_status_counts_cache.get("expires") or 0.0) > time.monotonic()
     if fresh and isinstance(cached, dict):

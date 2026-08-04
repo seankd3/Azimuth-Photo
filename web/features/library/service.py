@@ -60,12 +60,6 @@ def _configured_cache_root() -> str:
     return thumbnails.SSD_CACHE_DIR
 
 
-def _configured(provider):
-    if provider is None:
-        raise RuntimeError("Library service is not configured")
-    return provider
-
-
 def _configured_db_signature() -> str:
     return db.DB_PATH
 
@@ -75,8 +69,6 @@ def _configured_clamp_int(value, default: int, minimum: int, maximum: int) -> in
 
 
 async def _configured_resolve_library_constraints(q: str, *, people: str = "", deep: bool = False) -> dict:
-    if query_constraints.resolve_configured_library_constraints is None:
-        raise RuntimeError("Library service is not configured")
     return await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
 
 
@@ -85,13 +77,11 @@ def _configured_normalize_search_query(query: str) -> str:
 
 
 def _configured_schedule_thumbnail_prefetch(rows, size: str, *, limit: int) -> None:
-    if media_warm.schedule_thumbnail_prefetch is not None:
-        media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
+    media_warm.schedule_thumbnail_prefetch(rows, size, limit=limit)
 
 
 def _configured_schedule_result_thumbnail_memory_warm(rows) -> None:
-    if media_warm.schedule_result_thumbnail_memory_warm is not None:
-        media_warm.schedule_result_thumbnail_memory_warm(rows)
+    media_warm.schedule_result_thumbnail_memory_warm(rows)
 
 
 def _configured_rankings_response_cache_ttl_seconds() -> float:
@@ -421,7 +411,7 @@ async def _taste_order_page(
     page_ids = cached["ids"][offset:offset + limit]
     if not page_ids:
         return []
-    if db.get_ranking_rows_by_ids is not None and len(page_ids) <= 900:
+    if len(page_ids) <= 900:
         rows = await db.get_ranking_rows_by_ids(list(page_ids))
     else:
         rows = await db.get_rankings(
@@ -457,7 +447,6 @@ async def _taste_order_page(
 
 
 async def _ranking_id_elo_rows(**kwargs) -> list[tuple[int, float]]:
-    total = kwargs.pop("_total", None)
     cache_key = (
         _configured_db_signature(),
         "taste_id_elo",
@@ -482,17 +471,7 @@ async def _ranking_id_elo_rows(**kwargs) -> list[tuple[int, float]]:
     cached = _taste_id_elo_cache.get(cache_key)
     if cached is not None:
         return cached
-    if db.get_ranking_id_elo is not None:
-        rows = await db.get_ranking_id_elo(**kwargs)
-    else:
-        # Test/fallback path: derive from full rankings rows.
-        fetched = await db.get_rankings(
-            limit=int(total or 10_000_000),
-            offset=0,
-            sort="elo",
-            **kwargs,
-        )
-        rows = [(int(row["id"]), float(row.get("elo") or 1200.0)) for row in fetched]
+    rows = await db.get_ranking_id_elo(**kwargs)
     _taste_id_elo_cache[cache_key] = rows
     while len(_taste_id_elo_cache) > _taste_id_elo_cache_max_entries:
         _taste_id_elo_cache.pop(next(iter(_taste_id_elo_cache)))
@@ -1461,7 +1440,7 @@ async def api_rankings_impl(
                     exclude_sources=exclude_sources,)
             )
     quality_task = None
-    if offset == 0 and db.rank_quality is not None and not requested_collection_id:
+    if offset == 0 and not requested_collection_id:
         quality_task = asyncio.create_task(
             db.rank_quality(
                 orientation=orientation, compared=compared, min_stars=min_stars,

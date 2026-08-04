@@ -44,13 +44,6 @@ _folder_tree_cache_ttl_seconds = 60.0
 _folder_tree_max_depth = 6
 
 
-
-def _configured(provider):
-    if provider is None:
-        raise RuntimeError("Catalog routes are not configured")
-    return provider
-
-
 def _invalidate_embedding_cache() -> None:
     try:
         import embed_cache
@@ -73,13 +66,9 @@ def clear_folders_cache() -> None:
 
 
 def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> None:
-    if cache_events.invalidate_pairing_cache is None:
-        raise RuntimeError("Catalog routes are not configured")
     cache_events.invalidate_pairing_cache(matchups=matchups)
     invalidate_folders_cache()
     if cache_status:
-        if cache_status_service.invalidate_cache_status_cache is None:
-            raise RuntimeError("Catalog routes are not configured")
         cache_status_service.invalidate_cache_status_cache()
     _invalidate_embedding_cache()
 
@@ -87,7 +76,7 @@ def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> No
 async def scan_prefetch_on_batch(count):
     # Start prefetching thumbnails for early images.
     if count <= 200:
-        images = await _configured(db.get_recent_active_images)(limit=50)
+        images = await db.get_recent_active_images(limit=50)
         config = settings.get_settings()
         await thumbnails.prefetch_images(
             [dict(r) for r in images],
@@ -99,7 +88,7 @@ async def scan_prefetch_on_batch(count):
 async def _is_first_run_import() -> bool:
     if settings.get_settings().get("setup_completed"):
         return False
-    catalog = await _configured(db.get_catalog_summary)()
+    catalog = await db.get_catalog_summary()
     return not catalog.get("sources") and int(catalog.get("stats", {}).get("total_images") or 0) == 0
 
 
@@ -144,7 +133,7 @@ async def start_scan(request: Request):
 
     try:
         first_run = await _is_first_run_import()
-        source = await _configured(db.add_or_restore_source)(folder)
+        source = await db.add_or_restore_source(folder)
     except Exception:
         scanner.release_scan_claim()
         raise
@@ -398,7 +387,7 @@ def _browse_dir(current: str) -> dict:
 
 @router.get("/api/catalog")
 async def api_catalog_summary():
-    return await _configured(db.get_catalog_summary)()
+    return await db.get_catalog_summary()
 
 
 @router.post("/api/catalog/sources")
@@ -415,7 +404,7 @@ async def api_add_catalog_source(request: Request):
 
     try:
         first_run = await _is_first_run_import()
-        source = await _configured(db.add_or_restore_source)(folder)
+        source = await db.add_or_restore_source(folder)
     except Exception:
         if scan:
             scanner.release_scan_claim()
@@ -427,13 +416,13 @@ async def api_add_catalog_source(request: Request):
         "ok": True,
         "source": dict(source),
         "scan_started": bool(scan),
-        "catalog": await _configured(db.get_catalog_summary)(),
+        "catalog": await db.get_catalog_summary(),
     }
 
 
 @router.post("/api/catalog/sources/{source_id}/rescan")
 async def api_rescan_catalog_source(source_id: int):
-    source = await _configured(db.get_source)(source_id)
+    source = await db.get_source(source_id)
     if not source:
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if not os.path.isdir(source["path"]):
@@ -448,7 +437,7 @@ async def api_rescan_catalog_source(source_id: int):
         return JSONResponse({"error": "Scan already in progress"}, status_code=409)
 
     try:
-        restored = await _configured(db.add_or_restore_source)(source["path"])
+        restored = await db.add_or_restore_source(source["path"])
     except Exception:
         scanner.release_scan_claim()
         raise
@@ -463,31 +452,29 @@ async def api_remove_catalog_source(source_id: int, request: Request):
     if error:
         return error
     mode = body.get("mode", "keep")
-    source = await _configured(db.get_source)(source_id)
+    source = await db.get_source(source_id)
     if not source:
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if scanner.scan_state["scanning"] and scanner.scan_state.get("source_id") == source_id:
         return JSONResponse({"error": "Cannot remove a source while it is scanning"}, status_code=409)
 
     if mode == "keep":
-        await _configured(db.remove_source_keep_data)(source_id)
+        await db.remove_source_keep_data(source_id)
         action = {"kept_data": True, "images_deleted": 0, "comparisons_deleted": 0}
         _invalidate_embedding_cache()
     elif mode in ("delete", "purge"):
-        image_ids = await _configured(db.get_source_image_ids)(source_id)
+        image_ids = await db.get_source_image_ids(source_id)
         cache_result = thumbnails.purge_image_cache(image_ids)
-        purge_result = await _configured(db.purge_source_catalog_data)(source_id)
+        purge_result = await db.purge_source_catalog_data(source_id)
         action = {"kept_data": False, **purge_result, "cache": cache_result}
         _invalidate_embedding_cache()
     else:
         return JSONResponse({"error": "Invalid removal mode"}, status_code=400)
 
-    if cache_events.invalidate_pairing_cache is None or cache_status_service.invalidate_cache_status_cache is None:
-        raise RuntimeError("Catalog routes are not configured")
     cache_events.invalidate_pairing_cache(matchups=True)
     invalidate_folders_cache()
     cache_status_service.invalidate_cache_status_cache()
-    return {"ok": True, "source_id": source_id, **action, "catalog": await _configured(db.get_catalog_summary)()}
+    return {"ok": True, "source_id": source_id, **action, "catalog": await db.get_catalog_summary()}
 
 
 def add_folder_counts(
@@ -884,7 +871,7 @@ async def api_folders(max_depth: int | None = None):
 
             track_background_task(_refresh_folders())
         return cached["data"]
-    counts = await _configured(db.get_catalog_image_counts)()
+    counts = await db.get_catalog_image_counts()
     if int(counts.get("active_images") or 0) <= 0:
         result = {"folders": []}
         _folders_cache[normalized_max_depth] = {
@@ -907,7 +894,7 @@ async def api_folders_tree():
     if cached and _time.time() < _folder_tree_cache["expires"]:
         return cached
 
-    counts = await _configured(db.get_catalog_image_counts)()
+    counts = await db.get_catalog_image_counts()
     if int(counts.get("active_images") or 0) <= 0:
         result = {"sources": []}
     else:

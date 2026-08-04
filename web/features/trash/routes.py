@@ -45,16 +45,11 @@ class EmptyTrashBody(BaseModel):
 
 
 
-def _invalidate_after_write() -> None:
-    if _invalidate_after_trash is not None:
-        _invalidate_after_trash()
-
-
 @router.post("/api/images/trash")
 async def api_trash_images(payload: ImageIdsBody):
     result = await trash_service.trash_images(catalog_path(), payload.ids)
     if result["trashed"]:
-        _invalidate_after_write()
+        _invalidate_after_trash()
     return result
 
 
@@ -62,7 +57,7 @@ async def api_trash_images(payload: ImageIdsBody):
 async def api_restore_images(payload: ImageIdsBody):
     result = await trash_service.restore_images(catalog_path(), payload.ids)
     if result["restored"]:
-        _invalidate_after_write()
+        _invalidate_after_trash()
     return result
 
 
@@ -83,7 +78,7 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
     if not (role.works_in_someone_elses_archive() and not forwarded):
         result = await trash_service.empty_trash(catalog_path(), image_ids=target_ids)
         if result["deleted_count"]:
-            _invalidate_after_write()
+            _invalidate_after_trash()
         return result
 
     # Satellite owners must never be held hostage by an unavailable hub. Local
@@ -104,5 +99,5 @@ async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = No
     pending = await trash_service.pending_hub_trash_refs(catalog_path())
     local_result["hub_pending"] = int(pending["count"])
     if local_result["deleted_count"] or mirror_refs["count"]:
-        _invalidate_after_write()
+        _invalidate_after_trash()
     return local_result
