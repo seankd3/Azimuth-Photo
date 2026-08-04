@@ -1,8 +1,11 @@
 # Simplify — running log
 
-Branch `simplify`, off `main`. One cutover when it is done; prod is untouched
-until then. This is a retrospective, not a plan: what was cut, what was learned,
-and what is known to be broken. Newest first.
+**Merged to `main` 2026-08-04** — 149 commits, a clean fast-forward, and the
+branch is gone. Work continues on `main`; the shrink is not finished, it just
+stopped needing a branch. Prod on omarchy follows `main` from here.
+
+This is a retrospective, not a plan: what was cut, what was learned, and what is
+known to be broken. Newest first.
 
 ## One derivation system (08-04, in progress)
 
