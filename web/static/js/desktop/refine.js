@@ -12,14 +12,21 @@ const SIZE_KEY = 'pa_d_refine_size';
 const STRATEGY_KEY = 'pa_d_refine_strategy';
 const MAX_SCOPED_IDS = 2000;
 const STALE_ROUNDS = 10;
-const REPLACEMENT_TARGET = 24;
-const REPLACEMENT_FETCH_MIN = 12;
-const REPLACEMENT_LOW_WATER = 8;
+// Buffer depth is measured in PICKS, not photos. One pick consumes a whole
+// wave, so flat counts starved the larger grids: a 4x3 eats twelve per pick, so
+// a target of 24 was two picks deep and a low-water mark of 8 sat below a
+// single pick's worth — rapid ranking outran the buffer and every pick then
+// waited on the network. Ranking has to feel instant or it does not get done.
+const PICKS_BUFFERED = 5;
+const PICKS_BEFORE_REFILL = 3;
 const REPLACEMENT_PROBE_CONCURRENCY = 4;
 const REPLACEMENT_PRELOAD_TIMEOUT_MS = 120;
 const RECENT_EXCLUDE_LIMIT = 48;
 const HISTORY_LIMIT = 20;
-const WINNER_HOLD_MS = 400;
+// The winner outline confirms what you picked; it should last exactly as long
+// as the transition that draws it (--dur-fast) and not a moment more. At 400ms
+// it read as the app thinking.
+const WINNER_HOLD_MS = 120;
 
 const STRATEGY_TIPS = {
     diverse: 'Diverse — spreads picks across visually different photos',
@@ -64,6 +71,10 @@ function readChoice(key, choices, fallback) {
 
 function need() {
     return mode === 'duel' ? 2 : GRID_SIZES[gridSize].count;
+}
+
+function replacementTarget() {
+    return need() * PICKS_BUFFERED;
 }
 
 function stageClassName() {
@@ -411,17 +422,17 @@ async function addReadyReplacement(img, token) {
     if (!probe.ok && !probe.timedOut) return false;
     const currentIds = new Set(currentSet.map((entry) => entry.id));
     if (currentIds.has(img.id) || replacements.some((entry) => entry.id === img.id)) return false;
-    if (replacements.length >= REPLACEMENT_TARGET) return false;
+    if (replacements.length >= replacementTarget()) return false;
     replacements.push({ ...img, cache_probe_deferred: Boolean(probe.timedOut) });
     return true;
 }
 
 async function fillReplacements() {
-    if (!open || filling || replacements.length >= REPLACEMENT_TARGET) return false;
+    if (!open || filling || replacements.length >= replacementTarget()) return false;
     filling = true;
     const token = generation;
     try {
-        const needed = Math.max(REPLACEMENT_FETCH_MIN, REPLACEMENT_TARGET - replacements.length);
+        const needed = Math.max(need() * PICKS_BEFORE_REFILL, replacementTarget() - replacements.length);
         let candidates = await fetchImages(
             needed,
             currentExcludeIds({ includeRecent: true }),
@@ -440,7 +451,7 @@ async function fillReplacements() {
             return !duplicate;
         });
         for (let start = 0; start < candidates.length; start += REPLACEMENT_PROBE_CONCURRENCY) {
-            if (token !== generation || replacements.length >= REPLACEMENT_TARGET) break;
+            if (token !== generation || replacements.length >= replacementTarget()) break;
             const chunk = candidates.slice(start, start + REPLACEMENT_PROBE_CONCURRENCY);
             await Promise.all(chunk.map((img) => addReadyReplacement(img, token)));
         }
@@ -457,7 +468,7 @@ async function fillReplacements() {
 }
 
 function maybeFillReplacements() {
-    if (replacements.length < REPLACEMENT_LOW_WATER) fillReplacements();
+    if (replacements.length < need() * PICKS_BEFORE_REFILL) fillReplacements();
 }
 
 function takeReplacement() {
