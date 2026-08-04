@@ -1475,8 +1475,6 @@ body:has(#view-loupe.active):has(#sel-pill.on) #toast { transform: translateX(-5
 .archive-home code { color: var(--text-3); }
 .archive-home .mini-btn { flex: none; }
 .archive-unavailable { color: var(--text-3); }
-.server-update-banner { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); margin-top: var(--s3); }
-.server-update-banner .mini-btn { flex: none; }
 .setting-hint { color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
 .setting-section-description { margin: 0 0 var(--s3); color: var(--text-3); font-size: var(--fs-caption); line-height: 1.45; }
 .publish-return { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--s3); align-items: center; padding: 9px 10px; border: 1px solid rgba(225,190,120,.35); border-radius: var(--r-ctl); background: rgba(225,190,120,.08); }
