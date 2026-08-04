@@ -275,6 +275,30 @@ Two ways out, and this is deliberately not decided here:
 Weakening a safety signal is not a refactor decision, so it is written down
 rather than done.
 
+## A preview that never went ready — and was not a bug
+
+The grid polls `/api/rankings` every three seconds while any card reports
+`preview_ready: false`, and on the long-lived scratch server one image reported
+false for over half an hour. Its `sm` thumbnail served 200 with 2,330 bytes the
+whole time: `preview_ready` is `EXISTS(cache_entries …)`, so the file was there
+and the row was not. That reads exactly like a recording regression, and this
+branch had gutted `thumbnails/data_providers.py`, which owns the recording call.
+
+It is not one. Run fresh on both sides — new `AZIMUTH_HOME`, same four photos —
+`main` and this branch behave identically: all four images reach
+`preview_ready: true` in about two and a half minutes, with four `cache_entries`
+rows each.
+
+What actually happened is that I deleted the source folder mid-session while
+pregen was still working, which took the source offline, and the image it had
+not reached yet was never retried after the folder came back. Self-inflicted,
+and read as a code regression because the symptom was real and the cause was
+three hours upstream in my own shell history.
+
+One thing in it is worth keeping: a pregen pass interrupted by a source going
+offline does not appear to resume for the images it missed, and the client will
+poll every three seconds for as long as that lasts.
+
 ## Verified in a browser
 
 Booted on a scratch `AZIMUTH_HOME` — never the real catalog at `C:\Azimuth
