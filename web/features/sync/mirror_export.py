@@ -22,7 +22,7 @@ CATALOG_FIELDS = frozenset({
     "longitude", "location_source", "flag", "elo", "comparisons", "quality_score",
     "quality_sharpness", "quality_subject_sharpness", "quality_exposure_clip",
     "quality_motion_blur", "quality_eyes_open", "stack_id", "stack_kind",
-    "stack_is_representative", "kind", "is_representative", "collection_ids", "keywords", "develop_settings",
+    "stack_is_representative", "kind", "is_representative", "keywords", "develop_settings",
     "develop_updated_at", "develop_origin", "rating", "rating_winner_key", "status", "filepath",
     "missing_at", "relative_path", "row_version",
 })
@@ -54,14 +54,6 @@ def parse_cursor(value: int | str | None) -> int:
     return cursor
 
 
-async def _collection_ids(conn, image_id: int) -> list[int]:
-    rows = await (await conn.execute(
-        "SELECT collection_id FROM collection_images WHERE image_id = ? ORDER BY collection_id",
-        (image_id,),
-    )).fetchall()
-    return [int(row["collection_id"]) for row in rows]
-
-
 async def _keyword_paths(image_id: int) -> list[str]:
     # Keep the catalog's canonical hierarchical-path rules in one place.
     assigned = await keywords.image_keywords(image_id, include_ancestors=False)
@@ -71,11 +63,10 @@ async def _keyword_paths(image_id: int) -> list[str]:
 async def build_row_payload(conn, row: Any) -> dict[str, Any]:
     """Serialize one hub image using the frozen mirror row contract."""
 
-    generated_fields = {"collection_ids", "keywords", "rating", "rating_winner_key"}
+    generated_fields = {"keywords", "rating", "rating_winner_key"}
     payload = {field: row[field] for field in CATALOG_FIELDS - generated_fields}
     payload["stack_is_representative"] = bool(payload["stack_is_representative"])
     payload["is_representative"] = bool(payload["is_representative"])
-    payload["collection_ids"] = await _collection_ids(conn, int(payload["hub_image_id"]))
     payload["keywords"] = await _keyword_paths(int(payload["hub_image_id"]))
     payload["rating"] = row["rating"]
     payload["rating_winner_key"] = (

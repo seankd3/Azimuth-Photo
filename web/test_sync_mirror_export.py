@@ -103,7 +103,9 @@ class SyncMirrorExportTests(unittest.TestCase):
         self.assertEqual(set(mirror_export.CATALOG_FIELDS), set(payload))
         self.assertEqual(payload["hub_image_id"], image_id)
         self.assertEqual(payload["keywords"], ["Travel > Coast"])
-        self.assertEqual(payload["collection_ids"], [1])
+        # No collection_ids: the satellite never read them, and building them cost
+        # one subquery per row on 5,000-row pages.
+        self.assertNotIn("collection_ids", payload)
         self.assertEqual(payload["stack_kind"], "burst")
         self.assertTrue(payload["stack_is_representative"])
         self.assertEqual(payload["develop_settings"], {"Exposure2012": 1.25})
