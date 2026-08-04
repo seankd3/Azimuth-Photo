@@ -302,7 +302,18 @@ an answer — pregen's candidate query is a live filter on `s.online = 1` and
 `NOT EXISTS(cache_entries …)`, so a returning source should become eligible
 again on its own, and no cursor stands in the way. Still open.
 
-It did turn up dead state on the way: `_pregen_scan_offsets` was created,
+It turned up a vein of dead state on the way. `_pregen_scan_offsets` was the
+first, and looking for others of its shape — module-level names assigned and
+never read — found the rest: an injection slot in `embedding_worker` that
+nothing ever filled, a private alias of a public function in
+`features/settings/status.py`, and behind them 29 `Callable[...]` type aliases
+whose only job was annotating parameters de-injection had already deleted.
+`DbPathProvider` alone was declared in 18 modules and used in none.
+
+They all survived the earlier dead-code sweep because they look alive: a name, a
+type, a parameter slot, a test. Grep finds them; "is it referenced" does not.
+
+The first of them: `_pregen_scan_offsets` was created,
 threaded through `sync_thumb_config_metadata`'s signature, and zeroed on every
 config change — and read by nothing, incremented by nothing. A paging cursor
 whose paging is gone. Removed, along with the test asserting it got zeroed.

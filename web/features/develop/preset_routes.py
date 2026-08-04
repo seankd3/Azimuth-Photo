@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.catalog_path import catalog_path
 
 import os
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
@@ -17,7 +16,6 @@ from features.develop import presets as presets_mod
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 _lr_import_attempted = False
 
 

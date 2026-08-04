@@ -13,9 +13,8 @@ import importlib.util
 import logging
 import time
 from collections import deque
-from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
@@ -125,11 +124,6 @@ _batch_control = {
     "growth_paused_until": None,
 }
 
-AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
-AsyncIntProvider = Callable[..., Awaitable[int]]
-AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
-AsyncNoneProvider = Callable[..., Awaitable[None]]
-_count_embeddings_for_model: AsyncIntProvider | None = None
 
 
 def _target_embed_batch_size(config: dict | None = None) -> int:

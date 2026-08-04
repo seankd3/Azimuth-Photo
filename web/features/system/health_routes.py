@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
@@ -14,7 +13,6 @@ from features.system import health
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 _health_cache: dict[str, Any] | None = None
 _health_cache_at = 0.0
 _health_refresh_task: asyncio.Task | None = None

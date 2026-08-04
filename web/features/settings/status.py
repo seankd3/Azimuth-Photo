@@ -22,7 +22,6 @@ AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncBoolBuilder = Callable[[], Awaitable[bool]]
 BuildSettingsResponse = Callable[[], Awaitable[dict]]
 CopySettingsResponse = Callable[[dict], dict]
-DbPathProvider = Callable[[], str]
 GetRefreshing = Callable[[], bool]
 SetRefreshing = Callable[[bool], None]
 TrackTask = Callable[[Awaitable], object]
@@ -217,6 +216,3 @@ async def cached_settings_response(
     _settings_response_cache["data"] = copy_response(response)
     _settings_response_cache["expires"] = time.monotonic() + cache_ttl_seconds()
     return response
-
-
-_invalidate_settings_response_cache = invalidate_settings_response_cache

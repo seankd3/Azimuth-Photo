@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.catalog_path import catalog_path
 
 import asyncio
-from collections.abc import Callable
 from typing import Literal
 
 from fastapi import APIRouter
@@ -16,7 +15,6 @@ from features.develop import xmp_write
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 
 class XmpWriteBody(BaseModel):

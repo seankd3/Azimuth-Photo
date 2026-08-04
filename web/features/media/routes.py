@@ -3,7 +3,6 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
@@ -20,7 +19,6 @@ import thumbnails
 import db
 from archive import transport
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 # Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a

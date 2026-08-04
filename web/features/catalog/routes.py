@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import sys
 import time as _time
-from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -37,7 +36,6 @@ class RevealBody(BaseModel):
     source_id: int | None = Field(default=None, ge=1)
 
 
-DbPathProvider = Callable[[], str]
 _folders_cache: dict[int | None, dict] = {}
 _folders_refreshing: set[int | None] = set()
 _folders_cache_ttl_seconds = 300.0

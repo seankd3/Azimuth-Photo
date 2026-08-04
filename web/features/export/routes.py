@@ -7,7 +7,6 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from collections.abc import Callable
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -27,7 +26,6 @@ import db
 from core import query_constraints
 from features.library import service as library_service
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 EXPORT_FIELD_NAMES = (
     "rank",

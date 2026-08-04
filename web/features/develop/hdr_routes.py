@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from core.catalog_path import catalog_path
 
-from collections.abc import Callable
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -13,7 +12,6 @@ from pydantic import BaseModel, Field
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 
 class HdrDetectBody(BaseModel):

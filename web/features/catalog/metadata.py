@@ -41,7 +41,6 @@ async def _run_catalog_work(func, /, *args, **kwargs):
     return await loop.run_in_executor(_get_catalog_executor(), lambda: func(*args, **kwargs))
 
 
-DbPathProvider = Callable[[], str]
 Invalidator = Callable[[], None]
 
 _invalidate_filter_options_cache: Invalidator | None = None

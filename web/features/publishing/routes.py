@@ -35,7 +35,6 @@ from features.sync import readthrough
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 ThumbnailResponse = Callable[..., Awaitable[Response]]
 _thumbnail_response: ThumbnailResponse | None = None
 # Bounded, because /s/gallery/{token}/unlock is public and unauthenticated:

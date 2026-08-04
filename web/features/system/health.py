@@ -14,7 +14,7 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from core import memory_pressure
 from core.runtime_paths import resolve_runtime_paths
@@ -33,7 +33,6 @@ DISK_WARN_FREE_PCT = 5.0
 DISK_OK_FREE_BYTES = 5 * 1024**3
 DISK_WARN_FREE_BYTES = 1 * 1024**3
 
-DbPathProvider = Callable[[], str]
 
 
 

@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -92,10 +91,6 @@ _status = {
     "source_media_read": "app_owned_cached_previews_only",
 }
 
-AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
-AsyncIntProvider = Callable[..., Awaitable[int]]
-AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
-AsyncNoneProvider = Callable[..., Awaitable[None]]
 
 
 def _set_status(**updates: Any) -> None:

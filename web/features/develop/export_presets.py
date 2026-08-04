@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.catalog_path import catalog_path
 
 import json
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
@@ -16,7 +15,6 @@ from data import connection
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 EXPORT_PRESETS_DDL = """
 CREATE TABLE IF NOT EXISTS develop_export_presets (

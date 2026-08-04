@@ -6,7 +6,6 @@ from core.catalog_path import catalog_path
 
 import asyncio
 import os
-from collections.abc import Callable
 from typing import Literal
 
 from fastapi import APIRouter
@@ -17,7 +16,6 @@ from data.repositories import images as image_repository
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 
 class AiMaskRequest(BaseModel):

@@ -39,7 +39,6 @@ GetRefreshing = Callable[[], bool]
 SetRefreshing = Callable[[bool], None]
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncBoolBuilder = Callable[[], Awaitable[bool]]
-DbPathProvider = Callable[[], str]
 Invalidator = Callable[[], None]
 InvalidatePairing = Callable[..., None]
 

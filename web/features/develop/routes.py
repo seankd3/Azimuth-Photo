@@ -8,7 +8,6 @@ import asyncio
 import json
 import os
 import time
-from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +26,6 @@ from features.sync import oplog
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 _pregen_tasks: set[asyncio.Task] = set()
 _batch_tasks: set[asyncio.Task] = set()
 _base_generation_tasks: dict[int, asyncio.Task] = {}

@@ -5,7 +5,6 @@ from __future__ import annotations
 from core.catalog_path import catalog_path
 
 import asyncio
-from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter
@@ -16,7 +15,6 @@ from features.system import backups
 
 
 router = APIRouter()
-DbPathProvider = Callable[[], str]
 
 
 class RestoreBody(BaseModel):

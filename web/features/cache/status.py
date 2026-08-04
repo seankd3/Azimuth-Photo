@@ -16,7 +16,6 @@ from features.settings import status as settings_status
 
 
 AsyncDictBuilder = Callable[[], Awaitable[dict]]
-DbPathProvider = Callable[[], str]
 
 
 _cache_status_cache: dict[tuple[int], dict] = {}

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import db
-from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass
 from importlib.util import find_spec
 import os
@@ -84,9 +83,6 @@ def _initial_manual_pause() -> bool:
 
 _face_manual_pause = _initial_manual_pause()
 _face_manual_pause_message = "People is stopped until you start it from Background Work."
-AsyncDictProvider = Callable[..., Awaitable[dict[str, Any]]]
-AsyncIntProvider = Callable[..., Awaitable[int]]
-AsyncListProvider = Callable[..., Awaitable[list[dict[str, Any]]]]
 
 
 def _set_status(**updates: Any) -> None:
