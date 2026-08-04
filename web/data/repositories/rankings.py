@@ -2,7 +2,7 @@
 
 import re
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import time as _time
 
@@ -487,6 +487,11 @@ def ranking_filter_parts(
         start, end = date_range
         conditions.append("i.date_taken >= ? AND i.date_taken < ?")
         params.extend([start, end])
+    elif date_taken:
+        # A scope we cannot read must match nothing. Adding no condition made an
+        # unreadable date widen the query to the entire library, which is the
+        # opposite of what the person asked for and looks like a working filter.
+        conditions.append("0")
 
     if file_type:
         normalized_type = file_type.lower().lstrip(".")
@@ -567,25 +572,41 @@ def ranking_filter_parts(
     return conditions, params
 
 
+#: Every date scope the UI can produce is a prefix of the stored
+#: "YYYY-MM-DD HH:MM:SS": a year from the filter panel, a month from the
+#: scrubber, a day from the Timeline. One rule, three precisions.
+_DATE_PRECISIONS = ("%Y", "%Y-%m", "%Y-%m-%d")
+
+
 def date_taken_filter_range(date_taken: str) -> tuple[str, str] | None:
+    """The half-open range a date prefix covers, or None if it is not a date.
+
+    A >= / < range rather than a prefix match, so the date_taken index still
+    applies. The day form was missing, which mattered more than it looks:
+    clicking a day in the Timeline sends "YYYY-MM-DD", this returned None, and
+    the caller then added no date condition at all — so the grid showed the
+    whole library while the chip read the date the user had clicked.
+    """
+
     value = (date_taken or "").strip()
-    if value.isdigit() and len(value) == 4:
-        year = int(value)
-        return f"{year:04d}-01-01 00:00:00", f"{year + 1:04d}-01-01 00:00:00"
-    try:
-        parsed = datetime.strptime(value, "%Y-%m")
-    except ValueError:
-        return None
-    if parsed.month == 12:
-        next_year = parsed.year + 1
-        next_month = 1
-    else:
-        next_year = parsed.year
-        next_month = parsed.month + 1
-    return (
-        f"{parsed.year:04d}-{parsed.month:02d}-01 00:00:00",
-        f"{next_year:04d}-{next_month:02d}-01 00:00:00",
-    )
+    for precision in _DATE_PRECISIONS:
+        try:
+            start = datetime.strptime(value, precision)
+        except ValueError:
+            continue
+        if precision == "%Y":
+            end = start.replace(year=start.year + 1)
+        elif precision == "%Y-%m":
+            end = (
+                start.replace(year=start.year + 1, month=1)
+                if start.month == 12
+                else start.replace(month=start.month + 1)
+            )
+        else:
+            end = start + timedelta(days=1)
+        stamp = "%Y-%m-%d %H:%M:%S"
+        return start.strftime(stamp), end.strftime(stamp)
+    return None
 
 
 def ranking_index_for_query(

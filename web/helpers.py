@@ -48,7 +48,11 @@ def filter_by_metadata(
             images = [img for img in images if not img.get("date_taken")]
         else:
             date_range = ranking_repository.date_taken_filter_range(date_taken)
-            if date_range is not None:
+            if date_range is None:
+                # A scope we cannot read matches nothing. Skipping the filter
+                # returned everything, which reads as a working filter.
+                images = []
+            else:
                 start, end = date_range
                 images = [
                     img for img in images

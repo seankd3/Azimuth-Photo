@@ -69,5 +69,56 @@ class RoutesDeclareTheScopeTests(unittest.TestCase):
         )
 
 
+
+class DateScopeTests(unittest.TestCase):
+    """A date scope the server cannot read must match nothing, not everything.
+
+    The Timeline sends a day ("2024-05-01") when a day row is clicked. The range
+    builder understood only years and months, returned None, and the caller then
+    added no date condition at all — so the grid showed the whole library while
+    the context chip read the date that had been clicked. Nothing in the UI
+    contradicted it, because every library route shares the filter builder.
+    """
+
+    def test_every_precision_the_ui_can_send_is_understood(self):
+        from data.repositories.rankings import date_taken_filter_range
+
+        self.assertEqual(
+            date_taken_filter_range("2024"),
+            ("2024-01-01 00:00:00", "2025-01-01 00:00:00"),
+        )
+        self.assertEqual(
+            date_taken_filter_range("2024-05"),
+            ("2024-05-01 00:00:00", "2024-06-01 00:00:00"),
+        )
+        self.assertEqual(
+            date_taken_filter_range("2024-05-01"),
+            ("2024-05-01 00:00:00", "2024-05-02 00:00:00"),
+        )
+        # Rollovers the three-branch version had to special-case one at a time.
+        self.assertEqual(
+            date_taken_filter_range("2024-12-31"),
+            ("2024-12-31 00:00:00", "2025-01-01 00:00:00"),
+        )
+        self.assertEqual(
+            date_taken_filter_range("2024-02-29"),
+            ("2024-02-29 00:00:00", "2024-03-01 00:00:00"),
+        )
+
+    def test_an_unreadable_scope_is_not_a_date(self):
+        from data.repositories.rankings import date_taken_filter_range
+
+        for value in ("garbage", "2024-05-01T00:00:00", "2024-13", ""):
+            self.assertIsNone(date_taken_filter_range(value), value)
+
+    def test_an_unreadable_scope_matches_nothing_rather_than_everything(self):
+        import helpers
+
+        images = [{"date_taken": "2024-05-01 10:00:00"}, {"date_taken": "2022-02-02 10:00:00"}]
+        self.assertEqual(helpers.filter_by_metadata(images, date_taken="garbage"), [])
+        self.assertEqual(len(helpers.filter_by_metadata(images, date_taken="2024-05-01")), 1)
+        self.assertEqual(len(helpers.filter_by_metadata(images, date_taken="")), 2)
+
+
 if __name__ == "__main__":
     unittest.main()

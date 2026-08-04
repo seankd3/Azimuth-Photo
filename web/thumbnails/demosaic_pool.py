@@ -44,8 +44,15 @@ def default_demosaic_processes() -> int:
         total_bytes = int(os.sysconf("SC_PHYS_PAGES")) * int(os.sysconf("SC_PAGE_SIZE"))
     except (AttributeError, OSError, TypeError, ValueError):
         total_bytes = 16 * 1024**3
-    # ~3GB peak per worker; budget half of RAM.
-    memory_workers = max(1, int((total_bytes // 2) // (3 * 1024**3)))
+    # Measured, not estimated. The comment here used to say ~3GB peak per
+    # worker; the hub's journal shows the killed worker at anon-rss 8.7GB, so
+    # the budget was about three times optimistic and a 15GB box was sized for
+    # two workers that together want 17GB. That is how the service came to be
+    # OOM-killed roughly every four minutes, all day.
+    #
+    # Re-derive this from a real peak if the decoder changes; do not guess it.
+    PEAK_BYTES_PER_WORKER = 9 * 1024**3
+    memory_workers = max(1, int((total_bytes // 2) // PEAK_BYTES_PER_WORKER))
     return max(1, min(ncores - 1 if ncores > 1 else 1, memory_workers, 6))
 
 
