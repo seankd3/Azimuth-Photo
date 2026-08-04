@@ -289,6 +289,33 @@ catalog from nothing, and `./scripts/smoke` boots the app on a fresh
 Only state coupling was measured here, not the call graph, so this is a reason
 not to prioritise splitting them — not proof they would split cleanly.
 
+## The visibility rule is not duplicated — it disagrees with itself
+
+D3 in the plan says "one visibility rule, 178 copies across 39 files". The count
+is close: 165 `missing_at IS NULL` fragments, 82 `included = 1`, across 38 files.
+The characterisation is wrong in a way that matters. Profiling which predicates
+each file that queries `images` actually uses:
+
+| files | predicates |
+|---|---|
+| 13 | `missing_at` only |
+| 11 | `missing_at` + `included` |
+| 6 | `missing_at` + `included` + `online` |
+| 2 | `missing_at` + `status='kept'` |
+| 1 | `included` + `online` |
+| 1 | `online` only |
+
+Six profiles, not one rule copied. A photo whose file is present but whose
+source has `included = 0` is visible to thirteen files and invisible to
+seventeen. That is the shape behind "it shows in one surface and not another",
+and it is a correctness problem, not a tidiness one.
+
+**The caveat matters**: this is per-file, so a file counted under `missing_at`
+only may be querying somewhere source inclusion is already guaranteed by a join
+or an upstream filter. It does not prove any single query is wrong. What it does
+show is that no shared definition is being applied, which is exactly what D3
+proposes to build — and it is now the best-evidenced remaining item on the list.
+
 ## Looked for, and not there
 
 **The invalidation fan-out is real but not duplicated.** The plan counted 80
