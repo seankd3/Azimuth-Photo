@@ -298,17 +298,25 @@ each file that queries `images` actually uses:
 
 | files | predicates |
 |---|---|
-| 13 | `missing_at` only |
-| 11 | `missing_at` + `included` |
-| 6 | `missing_at` + `included` + `online` |
-| 2 | `missing_at` + `status='kept'` |
+| 15 | `missing_at` + `status` |
+| 12 | `missing_at` + `included` + `status` |
+| 3 | `missing_at` + `included` + `online` |
+| 3 | `missing_at` + `included` + `status` + `online` |
+| 3 | `missing_at` only |
+| 2 | `status` only |
+| 1 | `missing_at` + `included` |
 | 1 | `included` + `online` |
 | 1 | `online` only |
 
-Six profiles, not one rule copied. A photo whose file is present but whose
-source has `included = 0` is visible to thirteen files and invisible to
-seventeen. That is the shape behind "it shows in one surface and not another",
-and it is a correctness problem, not a tidiness one.
+Nine profiles. The two dominant ones differ by exactly one predicate —
+`included` — so a photo in a source the owner excluded is visible to fifteen
+files and invisible to twelve. That is the shape behind "it shows in one
+surface and not another", and it is a correctness problem, not a tidiness one.
+
+An earlier version of this table was wrong: it tested only `status = 'kept'` and
+missed `status IN ('kept', 'maybe')`, which is the form most of the code
+actually uses, so it reported thirteen files ignoring status when they do not.
+The conclusion survived the correction; the numbers did not.
 
 **The caveat matters**: this is per-file, so a file counted under `missing_at`
 only may be querying somewhere source inclusion is already guaranteed by a join
