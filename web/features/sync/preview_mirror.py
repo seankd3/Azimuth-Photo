@@ -384,38 +384,6 @@ def enforce_byte_cap(*, max_bytes: int | None = None) -> int:
     return reclaimed
 
 
-async def fetch_and_store(
-    image: Any,
-    size: str,
-    *,
-    hub: str | None = None,
-    request: RequestFn | None = None,
-    timeout: float = 10.0,
-) -> tuple[str, bytes] | None:
-    """Single hub fetch: return bytes and write them into the mirror (tee)."""
-
-    if size not in MIRROR_SIZES:
-        return None
-    remote_id = int(image["hub_image_id"] or 0)
-    if remote_id <= 0:
-        return None
-    base = (hub or satellite.hub_url() or "").rstrip("/")
-    if not base:
-        return None
-    version = preview_version_for_image(image)
-    if request is None:
-        request = transport.request_async
-
-    status_code, _headers, data = await request(
-        "GET",
-        f"{base}/api/thumb/{size}/{remote_id}",
-        headers=satellite.hub_request_headers(),
-    )
-    if not 200 <= int(status_code) < 300 or not data:
-        return None
-    image_id = int(image["id"])
-    put(image_id, size, version, data, hot=True)
-    return version, data
 
 
 

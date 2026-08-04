@@ -165,19 +165,10 @@ class PreviewMirrorTests(BackendTestCase):
         preview_mirror._last_request_at = time.monotonic() - 30.0
         self.assertTrue(preview_mirror.is_idle(idle_seconds=10.0))
 
-    async def test_tee_fetches_once_stores_and_serves(self):
-        calls = []
-
-        async def request(method, url, *, body=None, headers=None):
-            calls.append((method, url))
-            return 200, {"Content-Type": "image/jpeg"}, b"remote-md-bytes"
-
-        stored = await preview_mirror.fetch_and_store(
-            self.image, "md", hub="http://hub.test", request=request
-        )
-        self.assertEqual(stored[0], self.version)
-        self.assertEqual(stored[1], b"remote-md-bytes")
-        self.assertEqual(len(calls), 1)
+    async def test_mirrored_bytes_are_stored_and_served(self):
+        # `put` is what every live caller uses; the `fetch_and_store` wrapper this
+        # test used to drive had no caller outside this file.
+        preview_mirror.put(self.image_id, "md", self.version, b"remote-md-bytes", hot=True)
         hit = preview_mirror.read_local(self.image_id, "md", self.version)
         self.assertEqual(hit[1], b"remote-md-bytes")
 
@@ -189,7 +180,7 @@ class PreviewMirrorTests(BackendTestCase):
                 self.assertEqual(handle.read(), b"remote-md-bytes")
         else:
             self.assertEqual(response.body, b"remote-md-bytes")
-        self.assertEqual(len(calls), 1)
+        # The point of the mirror: a hit serves locally and asks the hub nothing.
         enqueue.assert_not_called()
 
     async def test_remote_miss_returns_pending_and_enqueues_background_fill(self):

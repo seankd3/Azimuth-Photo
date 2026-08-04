@@ -309,6 +309,21 @@ def open_hub_original(hub_image_id: int, *, timeout: float = _DEFAULT_TIMEOUT_SE
     )
 
 
+def open_hub_preview(hub_image_id: int, size: str, *, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
+    """Open an authenticated streaming response for one hub-owned preview.
+
+    `publishing/downloads.py` has called this for every non-original size in a
+    gallery ZIP since the read-through split, and it has never existed. The
+    AttributeError falls outside that caller's except clause, so one hub-remote
+    photo at a resized download failed the whole archive with a 422.
+    """
+
+    remote_id = int(hub_image_id or 0)
+    if remote_id <= 0:
+        return None
+    return _open_hub_stream(f"/api/thumb/{size}/{remote_id}", accept="image/jpeg", timeout=timeout)
+
+
 def _open_hub_stream(endpoint: str, *, accept: str, timeout: float = _DEFAULT_TIMEOUT_SECONDS):
     if not can_read_through():
         return None
