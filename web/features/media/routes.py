@@ -611,11 +611,8 @@ def image_media_status_payload(image_id: int) -> dict:
         "url": f"/api/full/{image_id}",
         "cached_url": f"/api/full/{image_id}?cached=1",
     }
-    best_cached = next(
-        (tier for tier in (thumbnails.FULL_TIER, "lg", "md", "sm") if tiers.get(tier, {}).get("cached")),
-        None,
-    )
-    return {"id": image_id, "tiers": tiers, "best_cached": best_cached}
+    best = thumbnails.best_cached_rendition(image_id)
+    return {"id": image_id, "tiers": tiers, "best_cached": best[0] if best else None}
 
 
 def _normalize_warm_requests(tier_requests) -> tuple[dict[str, list[int]], set[int]]:

@@ -572,6 +572,19 @@ def fast_disk_path_entry(
     return thumbnail_cache_entries.fast_disk_path_entry(size, image_id, source_signature)
 
 
+#: Renditions largest first. The one answer to "what have we already got".
+RENDITION_ORDER = (FULL_TIER, "lg", "md", "sm")
+
+
+def best_cached_rendition(image_id: int) -> tuple[str, str] | None:
+    """The largest rendition on disk for this image: ``(tier, path)``, or None."""
+    for tier in RENDITION_ORDER:
+        entry = fast_disk_path_entry(tier, int(image_id))
+        if entry is not None:
+            return tier, entry[1]
+    return None
+
+
 def fast_disk_read_entry(
     size: str,
     image_id: int,

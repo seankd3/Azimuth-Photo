@@ -670,25 +670,19 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
                 stale.unlink(missing_ok=True)
         original_is_local = Path(path).is_file()
 
-    # Fetching the base from the hub is a network round trip, and on a satellite
-    # it is the cold-start path — measured at 7 to 69 seconds. Held inside the
-    # per-image lock, every other request for the same photo queued behind it.
+    # The hub is cold storage, so never wait on it here — fetch_base_cache_for_image's
+    # own docstring says "Develop paint must never wait on the hub", and this was the
+    # caller passing blocking=True. Non-blocking returns the base if it is already
+    # local and otherwise schedules the warm; Develop opens on a proxy meanwhile.
     if not original_is_local:
         from features.sync import readthrough
 
         if readthrough.can_read_through():
             import db
 
-            try:
-                meta = readthrough.fetch_base_cache_for_image(
-                    image_id,
-                    paths,
-                    db_path=db.DB_PATH,
-                    source_path=str(path),
-                    blocking=True,
-                )
-            except readthrough.BaseReadthroughError as exc:
-                raise RawDecodeError(str(exc)) from exc
+            meta = readthrough.fetch_base_cache_for_image(
+                image_id, paths, db_path=db.DB_PATH, source_path=str(path),
+            )
             if meta is not None:
                 return paths, meta
 
@@ -697,12 +691,24 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
         cached = cached_base_paths(image_id, path)
         if cached is not None:
             return cached, _upgrade_cached_metadata(cached, path)
+        # Open on the best rendition we already have when the original is still
+        # on the hub. Recording that proxy as source_path is what sharpens the
+        # edit later: _cached_source_matches rejects this base once the real
+        # original lands, and the next open decodes from it.
+        source = path
+        if not original_is_local:
+            import thumbnails
+
+            best = thumbnails.best_cached_rendition(image_id)
+            if best is None:
+                raise RawDecodeError("Nothing of this photo has reached the laptop yet")
+            source = best[1]
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
-            rgb, meta = decode_base(path)
+            rgb, meta = decode_base(source)
         else:
             rgb, meta = recent
-        meta.setdefault("source_path", str(path))
+        meta.setdefault("source_path", str(source))
         _write_base_cache(paths, rgb, meta)
         _recent_decodes[int(image_id)] = (rgb, meta)
         while len(_recent_decodes) > MEMORY_BASE_LIMIT:
