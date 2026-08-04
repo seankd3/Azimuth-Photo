@@ -474,20 +474,6 @@ def benchmark_pregen(
     import thumbnails
 
     db.DB_PATH = str(db_path)
-    thumbnails.configure_data_providers(
-        get_db=lambda: db.get_db(),
-        batch_set_orientations=lambda updates: db.batch_set_orientations(updates),
-        mark_image_missing_sync=lambda image_id: db.mark_image_missing_sync(image_id),
-        invalidate_cached_image_ids_cache=lambda cache_root=None, size=None: db.invalidate_cached_image_ids_cache(
-            cache_root=cache_root,
-            size=size,
-        ),
-        note_cached_image_ids_added=lambda cache_root, size, image_ids: db.note_cached_image_ids_added(
-            cache_root,
-            size,
-            image_ids,
-        ),
-    )
     config = dict(settings.DEFAULT_SETTINGS)
     config.update(
         {
