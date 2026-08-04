@@ -9,6 +9,23 @@ known to be broken. Newest first.
 
 ## The blind spot in hunting frozen switches (08-04)
 
+**A fourth false positive, with a different cause.** Refine's `strategy="top"`
+was reported as a mode no shipped client can select. True, and irrelevant:
+`features/compare/routes.py:91` takes `strategy: str = "explore"` as a **query
+parameter**, so anyone can send `?strategy=top` over HTTP. It is not a frozen
+switch, it is a public contract with an unpopular value — and `AGENTS.md` says
+to preserve route contracts unless the task is explicitly to change them. "No
+client sends it" is a product question about whether the mode should exist, not
+evidence that the code is unreachable.
+
+Noted in passing, and it is the real defect here: **`strategy` has no allowlist.**
+`service.py` branches on `== "top"` and `!= "top"`, so any unrecognised value
+silently behaves as not-top. That is the same shape as
+`RANKING_SORTS.get(sort, "elo DESC")` — a user-supplied key with a plausible
+default and no rejection. Worth fixing as its own change, in both places at once.
+
+
+
 Two automated passes hunted "a parameter that has one value at every call site,
 and the code only the other value would reach". It found four real ones worth
 about 350 lines. It also produced three false positives that share one shape, and
