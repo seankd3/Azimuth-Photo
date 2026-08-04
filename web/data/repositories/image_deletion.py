@@ -6,6 +6,7 @@ from collections import OrderedDict, defaultdict
 from dataclasses import dataclass
 
 from data.repositories.common import chunked
+from photo.visibility import visible_image_condition
 
 
 @dataclass(frozen=True)
@@ -211,7 +212,7 @@ async def _repair_collection_covers(conn, image_ids: list[int]) -> None:
             "  JOIN images i ON i.id = ci.image_id "
             "  WHERE ci.collection_id = collections.id "
             f"    AND ci.image_id NOT IN ({placeholders}) "
-            "    AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"    AND {visible_image_condition()} "
             "  ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC LIMIT 1"
             f") WHERE cover_image_id IN ({placeholders})",
             (*params, *params),
@@ -236,7 +237,7 @@ async def _repair_stacks(conn, image_ids: list[int]) -> None:
             "SELECT sm.image_id FROM stack_members sm "
             "JOIN images i ON i.id = sm.image_id "
             "WHERE sm.stack_id = ? "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "ORDER BY sm.score DESC, sm.image_id ASC",
             (stack_id,),
         )

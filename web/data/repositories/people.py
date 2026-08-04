@@ -4,6 +4,7 @@ import time as _time
 
 from data import connection
 from data.people_clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
+from photo.visibility import visible_image_condition
 
 
 def parse_people_ids(value) -> tuple[int, ...]:
@@ -269,7 +270,7 @@ async def count_images_needing_faces_on_conn(
         "SELECT COUNT(*) AS count FROM ready "
         "JOIN images i ON i.id = ready.image_id "
         "JOIN catalog_sources s ON s.id = i.source_id "
-        "WHERE s.included = 1 AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+        f"WHERE s.included = 1 AND {visible_image_condition()}",
         [
             cache_root,
             model_id,

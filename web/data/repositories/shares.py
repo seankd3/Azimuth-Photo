@@ -8,6 +8,7 @@ import time
 import sqlite3
 
 from data import connection as data_connection
+from photo.visibility import visible_image_condition
 
 
 def _share_summary(row) -> dict:
@@ -401,7 +402,7 @@ async def resolve_token(db_path: str, token: str) -> dict | None:
             LEFT JOIN published_node_images node_image
                 ON node_image.node_id = s.published_node_id
             LEFT JOIN images i ON i.id = COALESCE(si.image_id, node_image.image_id)
-                AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+                AND {visible_image_condition()}
                 AND EXISTS (
                     SELECT 1 FROM catalog_sources source
                     WHERE source.id = i.source_id AND source.included = 1
@@ -468,7 +469,7 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
                             JOIN catalog_sources source ON source.id = i.source_id
                             WHERE si.share_id = s.id AND si.image_id = ?
                               AND source.included = 1
-                              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+                              AND {visible_image_condition()}
                         )
                     )
                     OR (
@@ -489,7 +490,7 @@ async def token_allows_image(db_path: str, token: str, image_id: int) -> bool:
                             JOIN catalog_sources source ON source.id = i.source_id
                             WHERE membership.image_id = ?
                               AND source.included = 1
-                              AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+                              AND {visible_image_condition()}
                         )
                     )
                 )
@@ -778,7 +779,7 @@ async def _published_subtree_images_on_conn(conn, root_node_id: int) -> list[dic
         JOIN images i ON i.id = membership.image_id
         JOIN catalog_sources source ON source.id = i.source_id AND source.included = 1
         WHERE membership.node_id IN ({placeholders})
-          AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL
+          AND {visible_image_condition()}
         ORDER BY membership.position ASC, membership.added_at ASC, membership.image_id ASC
         """,
         ordered_nodes,
@@ -842,7 +843,7 @@ async def _snapshot_share_images(
         cursor = await conn.execute(
             "SELECT i.id FROM images i JOIN catalog_sources source ON source.id = i.source_id "
             f"WHERE i.id IN ({placeholders}) AND source.included = 1 "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+            f"AND {visible_image_condition()}",
             [image_id for _position, image_id in candidate_ids],
         )
         active_ids = {int(row["id"]) for row in await cursor.fetchall()}

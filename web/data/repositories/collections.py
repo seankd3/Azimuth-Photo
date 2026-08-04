@@ -8,6 +8,7 @@ import uuid
 
 from data import connection as data_connection
 from data.repositories.common import chunked
+from photo.visibility import visible_image_condition
 
 VALID_VISIBILITIES = {"private", "shared", "public", "exported"}
 VALID_STATUSES = {"draft", "active", "archived"}
@@ -344,7 +345,7 @@ async def _insert_members(conn, collection_id: int, image_ids: list[int], *, now
     existing_ids: set[int] = set()
     for ids in chunked(image_ids):
         existing_cursor = await conn.execute(
-            "SELECT id FROM images WHERE status IN ('kept', 'maybe') AND missing_at IS NULL "
+            f"SELECT id FROM images WHERE {visible_image_condition("")} "
             "AND id IN ({})".format(",".join("?" for _ in ids)),
             ids,
         )

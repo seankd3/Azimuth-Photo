@@ -2,6 +2,7 @@
 
 from data import connection
 from data.repositories.common import chunked as _chunked
+from photo.visibility import visible_image_condition
 
 
 def metadata_fts_query(text_query: str) -> str:
@@ -93,7 +94,7 @@ async def metadata_search_ranked_image_ids(
             "FROM images_metadata_fts f "
             "JOIN images i ON i.id = f.rowid "
             f"WHERE i.source_id IN ({source_placeholders}) "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "AND images_metadata_fts MATCH ? "
             "ORDER BY score ASC LIMIT ?",
             (*active_source_ids, metadata_fts_query(query), int(max_results)),

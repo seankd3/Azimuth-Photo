@@ -9,6 +9,7 @@ from pathlib import Path
 import db
 from data import connection
 from features.imports import staging
+from photo.visibility import visible_image_condition
 
 
 OVERVIEW_CACHE_TTL_SECONDS = 60.0
@@ -32,7 +33,7 @@ async def _archive_totals() -> tuple[int, int]:
     try:
         cursor = await conn.execute(
             "SELECT COUNT(*) AS photo_count, COALESCE(SUM(file_size), 0) AS originals_bytes "
-            "FROM images WHERE status IN ('kept', 'maybe') AND missing_at IS NULL"
+            f"FROM images WHERE {visible_image_condition("")}"
         )
         row = await cursor.fetchone()
         return int(row["photo_count"] or 0), int(row["originals_bytes"] or 0)

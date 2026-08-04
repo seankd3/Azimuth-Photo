@@ -20,6 +20,7 @@ from core.dates import parse_taken_timestamp, safe_datetime_fromtimestamp, safe_
 from date_inference import DATE_RE
 from data import connection
 import settings
+from photo.visibility import visible_image_condition
 
 EVENT_GAP_SECONDS = 6 * 3600
 SUGGESTION_MIN_PHOTOS = 8
@@ -728,7 +729,7 @@ async def _caption_theme_stats(conn, model_key: str) -> dict:
         "JOIN images i ON i.id = c.image_id "
         "JOIN catalog_sources s ON s.id = i.source_id "
         "WHERE c.model_key = ? AND s.included = 1 "
-        "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+        f"AND {visible_image_condition()}",
         (model_key,),
     )
     captioned_row = await cursor.fetchone()
@@ -791,7 +792,7 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
             "JOIN images i ON i.id = it.image_id "
             "JOIN catalog_sources s ON s.id = i.source_id "
             "WHERE it.model_key = ? AND s.included = 1 "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "GROUP BY it.tag HAVING count >= ? "
             "ORDER BY count DESC, it.tag ASC LIMIT ?",
             (model_key, threshold, THEME_PAIR_MAX_TAGS),
@@ -808,7 +809,7 @@ async def _theme_suggestions(db_path: str) -> list[dict]:
             "JOIN images i ON i.id = it.image_id "
             "JOIN catalog_sources s ON s.id = i.source_id "
             f"WHERE it.model_key = ? AND it.tag IN ({placeholders}) AND s.included = 1 "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+            f"AND {visible_image_condition()}",
             (model_key, *top_tags),
         )
         members_by_tag: dict[str, list[dict]] = {tag: [] for tag in top_tags}

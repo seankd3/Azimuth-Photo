@@ -6,6 +6,10 @@ import time as _time
 
 from date_inference import infer_image_date
 from data import connection
+from photo.visibility import (
+    active_image_condition as active_image_condition,
+    visible_image_condition as visible_image_condition,
+)
 from data.repositories import image_deletion
 from data.repositories.common import chunked as _chunked
 from core.path_groups import safe_commonpath
@@ -68,46 +72,6 @@ def normalize_source_path(path: str) -> str:
 def source_display_name(path: str) -> str:
     normalized = normalize_source_path(path)
     return os.path.basename(normalized.rstrip(os.sep)) or normalized
-
-
-def active_source_join(image_alias: str = "i", source_alias: str = "s") -> str:
-    return f"JOIN catalog_sources {source_alias} ON {source_alias}.id = {image_alias}.source_id"
-
-
-def active_source_condition(source_alias: str = "s") -> str:
-    return f"{source_alias}.included = 1"
-
-
-def active_image_condition(image_alias: str = "i", source_alias: str = "s") -> str:
-    """The one answer to "is this photo in the library".
-
-    A photo is in the library when its source is included, the owner has not
-    trashed it, and the file is where the catalog says it is. Every query that
-    lists, counts or ranks photos should ask through here rather than spell the
-    rule out again — a rule written in two hundred places is two hundred
-    chances to disagree, and it cannot be repaired or reasoned about.
-
-    Use `visible_image_condition` when the query is already scoped to one
-    source and only needs the photo half of the rule.
-    """
-
-    return (
-        f"{source_alias}.included = 1 "
-        f"AND {visible_image_condition(image_alias)}"
-    )
-
-
-def visible_image_condition(image_alias: str = "i") -> str:
-    """The photo half of the rule, for queries already scoped to a source.
-
-    Pass an empty alias for a single-table query that names columns bare.
-    """
-
-    prefix = f"{image_alias}." if image_alias else ""
-    return (
-        f"{prefix}status IN ('kept', 'maybe') "
-        f"AND {prefix}missing_at IS NULL"
-    )
 
 
 async def active_source_id_set(db_path: str) -> frozenset[int]:
@@ -316,7 +280,7 @@ async def repair_hub_mirror_source_counts_on_conn(conn) -> bool:
         await conn.execute(
             "SELECT "
             "COUNT(*) AS image_count, "
-            "COALESCE(SUM(CASE WHEN status IN ('kept', 'maybe') AND missing_at IS NULL "
+            f"COALESCE(SUM(CASE WHEN {visible_image_condition("")} "
             "THEN 1 ELSE 0 END), 0) AS active_image_count "
             "FROM images WHERE source_id = ?",
             (source_id,),
@@ -761,7 +725,7 @@ _REPAIR_COLLECTION_COVER_SQL = (
     "  SELECT ci.image_id FROM collection_images ci "
     "  JOIN images i ON i.id = ci.image_id "
     "  WHERE ci.collection_id = collections.id "
-    "    AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    f"    AND {visible_image_condition()} "
     "  ORDER BY ci.position ASC, ci.added_at ASC, ci.image_id ASC LIMIT 1"
     ") WHERE cover_image_id = ?"
 )
@@ -831,7 +795,7 @@ def mark_image_missing_sync(db_path: str, image_id: int, missing_at: float | Non
                 conn.execute(
                     "UPDATE catalog_sources SET active_image_count = ("
                     "SELECT COUNT(*) FROM images WHERE source_id = ? "
-                    "AND status IN ('kept', 'maybe') AND missing_at IS NULL"
+                    f"AND {visible_image_condition("")}"
                     ") WHERE id = ?",
                     (int(source["source_id"]), int(source["source_id"])),
                 )
@@ -1331,7 +1295,7 @@ async def get_scan_folder(db_path: str):
             return row["path"]
         cursor = await conn.execute(
             "SELECT filepath FROM images "
-            "WHERE status IN ('kept', 'maybe') AND missing_at IS NULL "
+            f"WHERE {visible_image_condition("")} "
             "ORDER BY RANDOM() LIMIT 50"
         )
         rows = await cursor.fetchall()

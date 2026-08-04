@@ -10,6 +10,7 @@ from core.background import track_background_task
 from data import connection
 from data.repositories.catalog import HUB_MIRROR_SOURCE_PATH
 from data.repositories.common import chunked as _chunked, stage_temp_ids
+from photo.visibility import visible_image_condition
 
 log = logging.getLogger(__name__)
 
@@ -1219,7 +1220,7 @@ async def count_rankings_uncached(
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 "WHERE c.cache_root = ? AND c.size = ? "
                 "AND s.included = 1 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND {visible_image_condition()}",
                 (cache_root, visible_thumb_size),
             )
             return int((await cursor.fetchone())["count"] or 0)
@@ -1814,19 +1815,19 @@ _UNFILTERED_SCOPE_COUNTS_SQL = (
     "  - (SELECT COUNT(*) FROM images i INDEXED BY idx_images_vc_of "
     "     JOIN catalog_sources s ON s.id = i.source_id "
     "     WHERE s.included = 1 "
-    "       AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    f"       AND {visible_image_condition()} "
     "       AND i.vc_of IS NOT NULL) "
     "  AS total, "
     "  (SELECT COUNT(*) FROM images i INDEXED BY idx_images_active_flag_elo "
     "   JOIN catalog_sources s ON s.id = i.source_id "
     "   WHERE s.included = 1 "
-    "     AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    f"     AND {visible_image_condition()} "
     "     AND i.vc_of IS NULL AND i.flag = 'picked') "
     "  AS picked, "
     "  (SELECT COUNT(*) FROM images i INDEXED BY idx_images_active_flag_elo "
     "   JOIN catalog_sources s ON s.id = i.source_id "
     "   WHERE s.included = 1 "
-    "     AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+    f"     AND {visible_image_condition()} "
     "     AND i.vc_of IS NULL AND i.flag = 'rejected') "
     "  AS rejected"
 )

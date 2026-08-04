@@ -9,6 +9,7 @@ from data import connection
 from data.repositories.common import chunked as _chunked
 from data.repositories.metadata_search import metadata_fts_query
 from core.ai_failures import caption_ledger_status
+from photo.visibility import visible_image_condition
 
 
 ERROR_RETRY_AFTER_SECONDS = 24 * 60 * 60
@@ -544,7 +545,7 @@ async def caption_search_ranked_image_ids(
             ") SELECT matches.id, MIN(matches.score) AS score FROM matches "
             "JOIN images i ON i.id = matches.id "
             f"WHERE i.source_id IN ({source_placeholders}) "
-            "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL "
+            f"AND {visible_image_condition()} "
             "GROUP BY matches.id ORDER BY score ASC LIMIT ?",
             (model_key, fts_query, model_key, fts_query, *active_source_ids, int(max_results)),
         )

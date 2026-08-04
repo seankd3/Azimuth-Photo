@@ -106,8 +106,6 @@ def active_caption_model_key() -> str:
 
 normalize_source_path = catalog_repository.normalize_source_path
 source_display_name = catalog_repository.source_display_name
-active_source_join = catalog_repository.active_source_join
-active_source_condition = catalog_repository.active_source_condition
 active_image_condition = catalog_repository.active_image_condition
 
 

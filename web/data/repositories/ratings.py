@@ -6,6 +6,7 @@ import time as _time
 
 from data import connection
 from data.repositories.common import chunked as _chunked
+from photo.visibility import visible_image_condition
 
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
 # Sampler-only orders: the caller wants a bounded window that moves between
@@ -447,7 +448,7 @@ async def visible_pairing_pool_counts(
                 "SELECT COUNT(*) AS count FROM cache_entries c "
                 "JOIN images i ON i.id = c.image_id "
                 "WHERE c.cache_root = ? AND c.size = ? "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND {visible_image_condition()}",
                 (cache_root, size),
             )
         else:
@@ -457,7 +458,7 @@ async def visible_pairing_pool_counts(
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 "WHERE c.cache_root = ? AND c.size = ? "
                 "AND s.included = 1 "
-                "AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND {visible_image_condition()}",
                 (cache_root, size),
             )
         visible_images = min(active_images, int((await cursor.fetchone())["count"] or 0))
@@ -529,7 +530,7 @@ async def visible_orientation_pairing_pool_counts(
         if all_catalog_images_active or all_sources_available:
             active_cursor = await conn.execute(
                 "SELECT COUNT(*) AS count FROM images INDEXED BY idx_images_active_orientation_count "
-                "WHERE orientation = ? AND status IN ('kept', 'maybe') AND missing_at IS NULL",
+                f"WHERE orientation = ? AND {visible_image_condition("")}",
                 (orientation,),
             )
             visible_cursor = await conn.execute(
@@ -537,7 +538,7 @@ async def visible_orientation_pairing_pool_counts(
                 "CROSS JOIN images i "
                 "WHERE c.cache_root = ? AND c.size = ? "
                 "AND i.id = c.image_id "
-                "AND i.orientation = ? AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND i.orientation = ? AND {visible_image_condition()}",
                 (cache_root, size, orientation),
             )
         else:
@@ -545,7 +546,7 @@ async def visible_orientation_pairing_pool_counts(
                 "SELECT COUNT(*) AS count FROM images i "
                 "JOIN catalog_sources s ON s.id = i.source_id "
                 "WHERE s.included = 1 "
-                "AND i.orientation = ? AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND i.orientation = ? AND {visible_image_condition()}",
                 (orientation,),
             )
             visible_cursor = await conn.execute(
@@ -555,7 +556,7 @@ async def visible_orientation_pairing_pool_counts(
                 "WHERE c.cache_root = ? AND c.size = ? "
                 "AND i.id = c.image_id "
                 "AND s.included = 1 "
-                "AND i.orientation = ? AND i.status IN ('kept', 'maybe') AND i.missing_at IS NULL",
+                f"AND i.orientation = ? AND {visible_image_condition()}",
                 (cache_root, size, orientation),
             )
         return {

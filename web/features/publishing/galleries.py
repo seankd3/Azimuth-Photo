@@ -12,6 +12,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from data import connection
+from photo.visibility import visible_image_condition
 
 
 VALID_LAYOUTS = {"grid", "masonry", "slideshow"}
@@ -104,7 +105,7 @@ async def create_gallery(
         active_ids: set[int] = set()
         for image_id in clean_ids:
             cursor = await conn.execute(
-                "SELECT id FROM images WHERE id = ? AND status IN ('kept', 'maybe') AND missing_at IS NULL",
+                f"SELECT id FROM images WHERE id = ? AND {visible_image_condition("")}",
                 (image_id,),
             )
             if await cursor.fetchone():
