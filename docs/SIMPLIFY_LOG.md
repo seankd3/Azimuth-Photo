@@ -217,6 +217,25 @@ unreliable at concluding. Checked and refuted:
 The claims that did hold were worth the check: `developOpen()` really was
 defined three times, and one of the three was a flag nothing ever set.
 
+## Tried and abandoned: the same sweep for JavaScript
+
+`scripts_dead_state.py` works because Python has `ast`. The JavaScript
+equivalent was attempted with a regex heuristic and is not committed, because it
+cannot be trusted: the first pass reported four hits, three of which were read
+inside template literals — `${…}` holds live code, and stripping backticks takes
+the reads with it. Teaching it to keep interpolations made it report eighteen,
+still including one it had already been wrong about.
+
+A tool whose hits are mostly false is worse than no tool: it trains you to skim
+the output, which is how the dead state got there in the first place. If this is
+worth doing it wants a real parser, not a cleverer regex.
+
+One thing did come out of it, verified by hand: `_activityTimer` in `drawer.js`
+is the only interval handle in that file never passed to `clearInterval` —
+`scanTimer`, `installTimer` and `drawerTimer` all are. It is not a leak; it
+drives the always-visible Background activity chip and is meant to run for the
+page's life. The handle is vestigial, and harmless enough to leave alone.
+
 ## Measured, not yet done
 
 **archive/ imports features/, which is backwards.** `pixels/` and `photo/` are
