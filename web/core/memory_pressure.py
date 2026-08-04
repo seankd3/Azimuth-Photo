@@ -178,7 +178,6 @@ _lock = threading.Lock()
 _paused = False
 _host_paused = False
 _startup_calm_until_mono = 0.0
-_rss_reader: Callable[[], int] | None = None
 _memory_reader: Callable[[], "MemoryReading"] | None = None
 _host_available_reader: Callable[[], int | None] | None = None
 
@@ -277,19 +276,17 @@ def read_host_available_bytes() -> int | None:
 
 def set_memory_reader(reader: Callable[[], MemoryReading] | None) -> None:
     """Inject a full memory reading (tests). Clears the legacy RSS injector."""
-    global _rss_reader, _memory_reader
-    _rss_reader = None
+    global _memory_reader
     _memory_reader = reader
 
 
 def reset_for_tests() -> None:
     global _paused, _host_paused, _startup_calm_until_mono
-    global _rss_reader, _memory_reader, _host_available_reader
+    global _memory_reader, _host_available_reader
     with _lock:
         _paused = False
         _host_paused = False
         _startup_calm_until_mono = 0.0
-        _rss_reader = None
         _memory_reader = None
         _host_available_reader = None
 

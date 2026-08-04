@@ -21,8 +21,6 @@ log = logging.getLogger("elo_propagation")
 
 # Last propagation result (read by /api/propagation/last)
 last_propagation_count = 0
-_prediction_cache_key = None
-_prediction_cache_counts = None
 
 # Tuning parameters
 SIMILARITY_THRESHOLD = 0.70   # minimum cosine similarity to propagate
@@ -55,12 +53,6 @@ async def _run_with_lock_retries(label: str, operation):
                 continue
             log.warning("%s propagation error: %s", label, exc)
             return None
-
-
-def invalidate_prediction_cache():
-    global _prediction_cache_key, _prediction_cache_counts
-    _prediction_cache_key = None
-    _prediction_cache_counts = None
 
 
 def compare_embedding_model_key() -> str:

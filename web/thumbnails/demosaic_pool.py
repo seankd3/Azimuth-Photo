@@ -27,7 +27,6 @@ _INTERACTIVE_RESERVED = 1
 
 _lock = threading.Lock()
 _executor: ProcessPoolExecutor | None = None
-_worker_count = 0
 _bulk_slots: threading.Semaphore | None = None
 _shutdown = False
 
@@ -82,7 +81,7 @@ def _make_executor(workers: int) -> ProcessPoolExecutor:
 
 def ensure_pool() -> ProcessPoolExecutor | None:
     """Lazily start the persistent pool. Returns None when disabled."""
-    global _executor, _worker_count, _bulk_slots
+    global _executor, _bulk_slots
     if not is_enabled():
         return None
     with _lock:
@@ -94,7 +93,6 @@ def ensure_pool() -> ProcessPoolExecutor | None:
         if workers <= 0:
             return None
         _executor = _make_executor(workers)
-        _worker_count = workers
         # Bulk may use all but one slot; interactive skips the bulk gate.
         bulk_limit = max(1, workers - _INTERACTIVE_RESERVED) if workers > 1 else workers
         _bulk_slots = threading.Semaphore(bulk_limit)
@@ -109,7 +107,7 @@ def ensure_pool() -> ProcessPoolExecutor | None:
 
 def _reset_pool_locked() -> ProcessPoolExecutor | None:
     """Replace a broken pool. Caller holds ``_lock``."""
-    global _executor, _worker_count, _bulk_slots
+    global _executor, _bulk_slots
     old = _executor
     _executor = None
     if old is not None:
@@ -123,12 +121,10 @@ def _reset_pool_locked() -> ProcessPoolExecutor | None:
         except Exception:
             pass
     if _shutdown or configured_demosaic_processes() <= 0:
-        _worker_count = 0
         _bulk_slots = None
         return None
     workers = configured_demosaic_processes()
     _executor = _make_executor(workers)
-    _worker_count = workers
     bulk_limit = max(1, workers - _INTERACTIVE_RESERVED) if workers > 1 else workers
     _bulk_slots = threading.Semaphore(bulk_limit)
     log.warning("demosaic process pool recreated after worker failure workers=%s", workers)
@@ -137,12 +133,11 @@ def _reset_pool_locked() -> ProcessPoolExecutor | None:
 
 def shutdown_pool(wait: bool = False) -> None:
     """Stop the pool (tests / process exit)."""
-    global _executor, _worker_count, _bulk_slots, _shutdown
+    global _executor, _bulk_slots, _shutdown
     with _lock:
         _shutdown = True
         old = _executor
         _executor = None
-        _worker_count = 0
         _bulk_slots = None
     if old is not None:
         try:

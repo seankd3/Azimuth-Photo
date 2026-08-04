@@ -56,7 +56,6 @@ _prefetch_executor = ThreadPoolExecutor(
 _memory_store = MemoryThumbnailStore(THUMB_TIERS)
 # In-memory thumbnail LRU: (size, image_id) -> (source_signature, jpeg_bytes)
 _memory_cache = _memory_store.cache
-_memory_cache_bytes = 0
 _cache_lock = threading.Lock()
 _meta_lock = threading.Lock()
 
@@ -138,11 +137,6 @@ _disk_stats_cache_ttl_seconds = thumbnail_cache_entries._disk_stats_cache_ttl_se
 _disk_stats_cache_max_stale_seconds = thumbnail_cache_entries._disk_stats_cache_max_stale_seconds
 _disk_path_index = thumbnail_cache_entries._disk_path_index
 _disk_index_lock = thumbnail_cache_entries._disk_index_lock
-
-
-def _sync_memory_cache_bytes() -> None:
-    global _memory_cache_bytes
-    _memory_cache_bytes = _memory_store.cache_bytes
 
 
 def _db_connect() -> sqlite3.Connection:
@@ -432,7 +426,6 @@ def _memory_get_entry_fast(size: str, image_id: int) -> tuple[str, bytes] | None
 def _memory_get(size: str, image_id: int, source_signature: str) -> bytes | None:
     with _cache_lock:
         data = _memory_store.get(size, image_id, source_signature)
-        _sync_memory_cache_bytes()
         return data
 
 
@@ -445,7 +438,6 @@ def _memory_tier_budget(size: str) -> int:
 
 def _enforce_memory_budget_locked():
     _memory_store.enforce_budget(THUMB_TIERS, MEMORY_CACHE_BYTES, _memory_tier_budget)
-    _sync_memory_cache_bytes()
 
 
 def _memory_put(size: str, image_id: int, source_signature: str, data: bytes):
@@ -459,31 +451,26 @@ def _memory_put(size: str, image_id: int, source_signature: str, data: bytes):
             MEMORY_CACHE_BYTES,
             _memory_tier_budget,
         )
-        _sync_memory_cache_bytes()
 
 
 def _clear_memory_cache() -> dict:
     with _cache_lock:
         result = _memory_store.clear(THUMB_TIERS)
-        _sync_memory_cache_bytes()
         return result
 
 
 def _clear_memory_tiers(tiers: tuple[str, ...]):
     with _cache_lock:
         _memory_store.clear_tiers(tiers)
-        _sync_memory_cache_bytes()
 
 
 def _clear_memory_image_ids(image_ids: set[int]):
     with _cache_lock:
         _memory_store.clear_image_ids(image_ids)
-        _sync_memory_cache_bytes()
 
 
 def _memory_stats() -> dict:
     with _cache_lock:
-        _sync_memory_cache_bytes()
         return _memory_store.stats(THUMB_TIERS, MEMORY_CACHE_BYTES, _memory_tier_budget)
 
 
@@ -1586,7 +1573,6 @@ def configure(config: dict):
     global THUMB_QUALITY, SSD_CACHE_DIR, SSD_CACHE_BYTES, MEMORY_CACHE_BYTES
     global CACHE_PROFILE
     global PREGENERATE_ON_IDLE, PREGENERATE_GENERATE_BATCH, PREGENERATE_BATCH_PAUSE_SECONDS
-    global _memory_cache_bytes
     global BROWSER_CACHE_MAX_AGE, BROWSER_CACHE_STALE_WHILE_REVALIDATE
     global _executor_workers, _prefetch_workers_count, _executor, _prefetch_executor
     global _disk_allocations, _last_thumb_config_signature, _thumb_config_changed_at

@@ -71,7 +71,6 @@ _status: dict[str, Any] = {
     "source_files_preserved": True,
     "source_media_read": "app_owned_cached_previews_only",
 }
-_face_app = None
 _face_app_key: tuple[str, str, int] | None = None
 _scan_now = False
 def _initial_manual_pause() -> bool:
@@ -181,8 +180,7 @@ def _missing_face_dependencies() -> list[str]:
 
 def _drop_face_residency() -> None:
     """Clear face globals. Called by ModelPool on unload/evict."""
-    global _face_app, _face_app_key
-    _face_app = None
+    global _face_app_key
     _face_app_key = None
     from core.ml_device import empty_cuda_cache
 
@@ -190,7 +188,7 @@ def _drop_face_residency() -> None:
 
 
 def _load_face_app(config: dict[str, Any], interactive: bool = False):
-    global _face_app, _face_app_key
+    global _face_app_key
     from core.model_pool import COST_PEOPLE_RAM, COST_PEOPLE_VRAM, get_model_pool
     from core.ml_device import insightface_ctx_id, onnx_providers, preferred_device
 
@@ -204,7 +202,7 @@ def _load_face_app(config: dict[str, Any], interactive: bool = False):
         _unload_face_app()
 
     def _load():
-        global _face_app, _face_app_key
+        global _face_app_key
         missing = _missing_face_dependencies()
         if missing:
             raise RuntimeError(
@@ -219,7 +217,6 @@ def _load_face_app(config: dict[str, Any], interactive: bool = False):
         os.makedirs(model_dir, exist_ok=True)
         app = FaceAnalysis(name=model_id, root=model_dir, providers=list(providers))
         app.prepare(ctx_id=ctx_id, det_size=(det_size, det_size))
-        _face_app = app
         _face_app_key = key
         return app
 

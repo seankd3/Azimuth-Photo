@@ -54,11 +54,9 @@ def invalidate_rankings_cache() -> None:
 
 
 def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True) -> None:
-    import elo_propagation
     from features.search.service import _duplicates_cache as duplicates_cache
 
     duplicates_cache.update({"key": None, "data": None})
-    elo_propagation.invalidate_prediction_cache()
     if not invalidate_embedding_matrix:
         return
     try:

@@ -23,7 +23,6 @@ _browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 # Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a
 # named constant so tests/docs can assert the non-blocking contract.
-_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS = 0.0
 # Bound how long an interactive thumb request may wait on a cold decode.
 # Beyond this the decode keeps running in the shared inflight map; the client
 # gets a fast 204 and retries — never a 10s "library isn't responding" toast.

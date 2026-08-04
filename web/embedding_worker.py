@@ -113,7 +113,6 @@ def _initial_manual_pause() -> bool:
 
 _embedding_manual_pause = _initial_manual_pause()
 _embedding_manual_pause_message = "Search is stopped until you start it from Background Work."
-_embedding_pause_reason = ""
 _unembedded_candidate_cursor = {"model_key": "", "after_id": 0}
 _embedding_count_log_batches = 0
 _batch_control = {
@@ -591,14 +590,13 @@ def pause_embedding_worker(
     *,
     persist: bool = True,
 ) -> dict:
-    global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
+    global _embedding_manual_pause, _embedding_manual_pause_message
     if persist:
         app_config = settings.get_settings()
         if bool(app_config.get("embedding_scan_enabled", True)):
             settings.save_settings({**app_config, "embedding_scan_enabled": False})
     _embedding_manual_pause = True
     _embedding_manual_pause_message = message
-    _embedding_pause_reason = _pause_reason_for_message(message)
     work_coordination.release_manual_owner("embeddings")
     _unload_model()
     _set_worker_status("paused", message, ready=False)
@@ -606,14 +604,13 @@ def pause_embedding_worker(
 
 
 def resume_embedding_worker(*, persist: bool = True) -> dict:
-    global _embedding_manual_pause, _embedding_manual_pause_message, _embedding_pause_reason
+    global _embedding_manual_pause, _embedding_manual_pause_message
     if persist:
         app_config = settings.get_settings()
         if not bool(app_config.get("embedding_scan_enabled", True)):
             settings.save_settings({**app_config, "embedding_scan_enabled": True})
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""
-    _embedding_pause_reason = ""
     _embedding_oom_circuit.reset()
     work_coordination.claim_manual_owner("embeddings")
     _clear_model_load_failure()
