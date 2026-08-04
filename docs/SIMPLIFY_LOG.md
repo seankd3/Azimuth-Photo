@@ -7,6 +7,29 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## Duplicates: verified live (08-04)
+
+The 229-line cut landed with "NOT yet visually verified" in its commit message.
+It is now verified, against the real 142k-photo catalog on :8010 — the page
+renders 10,718 identical groups and 538 GB of candidates, all five filter pills
+switch, close and reopen re-renders 51 cards, and the console is silent
+throughout. That exercises `reloadStacks`, `restartStacks`, the stack observer
+and the mount/unmount teardown, which is where the edits were. No screenshot:
+the browser pane was not compositing, so this is DOM and console evidence rather
+than pixels.
+
+One thing that looked like damage and was not: `#stacks-rescan` renders
+`hidden`. It is authored that way in the markup and is byte-identical before and
+after the change.
+
+**Recorded because the tool was wrong first.** A reachability pass matching
+`name(` reported `rescanStacks`, `startIdenticalVerification` and
+`cleanupVerifiedIdenticals` as unreachable. All three are live and registered as
+`addEventListener('click', fn)` — a bare reference, never a call — so the pattern
+that found them "dead" was the pattern that could not see how they are used.
+Matching any reference took the claim from 404 lines to 144. **A dead-code
+detector that only understands calls will delete every event handler you have.**
+
 ## One derivation system (08-04, in progress)
 
 Thumbnails, Develop bases, embeddings, captions and face vectors are the same
