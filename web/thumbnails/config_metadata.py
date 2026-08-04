@@ -25,7 +25,6 @@ def sync_thumb_config_metadata(
     db_connect: Callable,
     clear_memory_tiers: Callable[[tuple[str, ...]], object],
     thumb_tiers: tuple[str, ...],
-    pregen_scan_offsets: dict[str, int],
     reset_pregen_bulk_cursor: Callable[[], object],
     reset_pregen_full_cursor: Callable[[], object],
 ) -> dict:
@@ -56,8 +55,6 @@ def sync_thumb_config_metadata(
         clear_memory_tiers(thumb_tiers)
         changed_at = now
         replace_stale = bool(replace_thumbnail_cache)
-        for tier in thumb_tiers:
-            pregen_scan_offsets[tier] = 0
         reset_pregen_bulk_cursor()
         reset_pregen_full_cursor()
     else:

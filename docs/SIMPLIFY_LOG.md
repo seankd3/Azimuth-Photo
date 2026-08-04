@@ -297,7 +297,15 @@ three hours upstream in my own shell history.
 
 One thing in it is worth keeping: a pregen pass interrupted by a source going
 offline does not appear to resume for the images it missed, and the client will
-poll every three seconds for as long as that lasts.
+poll every three seconds for as long as that lasts. Chasing *why* did not reach
+an answer — pregen's candidate query is a live filter on `s.online = 1` and
+`NOT EXISTS(cache_entries …)`, so a returning source should become eligible
+again on its own, and no cursor stands in the way. Still open.
+
+It did turn up dead state on the way: `_pregen_scan_offsets` was created,
+threaded through `sync_thumb_config_metadata`'s signature, and zeroed on every
+config change — and read by nothing, incremented by nothing. A paging cursor
+whose paging is gone. Removed, along with the test asserting it got zeroed.
 
 ## Verified in a browser
 

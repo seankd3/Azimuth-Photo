@@ -131,7 +131,6 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
                 return opened
 
             events = []
-            offsets = {"sm": 3, "md": 4, "lg": 5}
             signature = thumbnail_config_metadata.thumb_config_signature(
                 "v9",
                 {"sm": 400, "md": 1920, "lg": 3840},
@@ -149,7 +148,6 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
                 db_connect=db_connect,
                 clear_memory_tiers=lambda tiers: events.append(("clear", tiers)),
                 thumb_tiers=("sm", "md", "lg"),
-                pregen_scan_offsets=offsets,
                 reset_pregen_bulk_cursor=lambda: events.append("bulk"),
                 reset_pregen_full_cursor=lambda: events.append("full"),
             )
@@ -158,7 +156,6 @@ class ThumbnailConfigFacadeTests(unittest.TestCase):
             self.assertTrue(result["changed"])
             self.assertEqual(result["changed_at"], 44.0)
             self.assertTrue(result["replace_stale_thumbnails"])
-            self.assertEqual(offsets, {"sm": 0, "md": 0, "lg": 0})
             self.assertEqual(events, [("clear", ("sm", "md", "lg")), "bulk", "full"])
 
             conn = db_connect()

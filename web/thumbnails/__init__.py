@@ -104,7 +104,6 @@ def regate_previews_for_role() -> bool:
     return _previews_paused
 
 
-_pregen_scan_offsets = {tier: 0 for tier in THUMB_TIERS}
 _pregen_bulk_cursor = {"date_taken": pregen.NEWEST, "id": 0}
 _pregen_full_cursor = {"date_taken": pregen.NEWEST, "id": 0}
 _last_thumb_config_signature = ""
@@ -1493,7 +1492,6 @@ def _sync_thumb_config_metadata(new_signature: str, *, replace_thumbnail_cache: 
         db_connect=_db_connect,
         clear_memory_tiers=_clear_memory_tiers,
         thumb_tiers=THUMB_TIERS,
-        pregen_scan_offsets=_pregen_scan_offsets,
         reset_pregen_bulk_cursor=_reset_pregen_bulk_cursor,
         reset_pregen_full_cursor=_reset_pregen_full_cursor,
     )
