@@ -231,7 +231,9 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
         # them here made every taste request rebuild (18–30s) during pregen.
         from features.library import service as library_service
 
-        library_service.invalidate_rankings_response_cache(order_caches=False)
+        library_service.invalidate_rankings_response_cache(
+            order_caches=False, image_ids=added_ids
+        )
 
 
 def invalidate_rankable_image_ids_cache() -> None:

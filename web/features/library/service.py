@@ -41,15 +41,30 @@ ELO_FAMILY_SORTS = {"elo", "elo_asc"}
 
 
 
-def invalidate_rankings_response_cache(*, order_caches: bool = True) -> None:
+def invalidate_rankings_response_cache(*, order_caches: bool = True, image_ids=None) -> None:
     """Clear rankings HTTP/response cache.
 
-    Thumbnail/pregen writes change preview_ready on cards, so they must clear
-    the response cache. They do NOT change taste/Elo order — pass
-    ``order_caches=False`` so the expensive ordered-id caches survive backfill.
-    Ranking-affecting events (flags, picks, embeds, catalog) keep the default.
+    Thumbnail/pregen writes change preview_ready on cards, so they must drop the
+    response payloads holding those cards. They do NOT change taste/Elo order —
+    pass ``order_caches=False`` so the expensive ordered-id caches survive
+    backfill. Ranking-affecting events (flags, picks, embeds, catalog) keep the
+    default.
+
+    Pass ``image_ids`` and only the pages showing those photos are dropped. One
+    photo finishing its preview used to clear every page of every scope: measured
+    on 142k photos, a single sm write turned three unrelated warm pages from 5ms
+    into 690ms, and the pregen worker writes about five a second, so the cache
+    could never be hit while a library had a backlog. The grid's own response
+    schedules the previews for the page it just returned, so it was un-caching
+    itself.
     """
-    _rankings_response_cache.clear()
+    if image_ids:
+        touched = {int(value) for value in image_ids}
+        for key, entry in list(_rankings_response_cache.items()):
+            if entry.get("ids") is None or touched & entry["ids"]:
+                _rankings_response_cache.pop(key, None)
+    else:
+        _rankings_response_cache.clear()
     if order_caches:
         _blended_rankings_order_cache.clear()
         _taste_rankings_order_cache.clear()
@@ -627,6 +642,13 @@ def cache_rankings_response(cache_key, response: dict) -> None:
         "data": copy_rankings_response(response),
         "json": json.dumps(response, separators=(",", ":")).encode("utf-8"),
         "expires": time.monotonic() + _configured_rankings_response_cache_ttl_seconds(),
+        # Which photos this page shows, so a preview finishing drops the pages
+        # showing that photo rather than all 256 of them.
+        "ids": frozenset(
+            int(image["id"])
+            for image in (response.get("images") or ())
+            if image.get("id") is not None
+        ),
     }
     while len(_rankings_response_cache) > _rankings_response_cache_max_entries:
         del _rankings_response_cache[next(iter(_rankings_response_cache))]
