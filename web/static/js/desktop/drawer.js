@@ -2,7 +2,7 @@ import { bytes, esc, formatCount as fmt } from '../lib.js';
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
     disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
-    getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getSyncStatus, getVersion,
+    getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getVersion,
     installAiModel, listDevices,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
@@ -57,7 +57,6 @@ let lrcatPreview = null;
 let lrcatReport = null;
 let lrcatTimer = null;
 
-let syncStatus = null;
 let freeableStatus = null;
 let freeupJob = null;
 let freeupOlderDays = 30;
@@ -736,12 +735,11 @@ function renderConnectServer() {
     const connected = pairStatus && pairStatus.has_hub
         ? `<div class="setting-status" data-setting-status="connection">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
         : '';
-    const updateBanner = syncStatus && (syncStatus.server_update_available || syncStatus.server_incompatible) && !sessionStorage.getItem('azimuth-server-update-dismissed')
-        ? '<div class="setting-status warn server-update-banner" role="status"><span>Your Azimuth Photo server needs an update</span><button class="mini-btn" id="dismiss-server-update" type="button">Dismiss</button></div>'
-        : '';
+    // A hub too old to talk to is said once, by the sync chip: it reads
+    // hub_health from /api/sync/status, turns its arrow into "!" and names what
+    // is paused. This section does not repeat it.
     return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'
         + connected
-        + updateBanner
         + '<div class="drawer-action-row">'
         + '<span>Find a hub on your network, or enter its address.</span>'
         + '<button class="mini-btn" id="discover-hubs-btn" type="button">Scan network</button>'
@@ -1271,7 +1269,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, sync, devices, overview, lrConnect] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, devices, overview, lrConnect] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1282,7 +1280,6 @@ async function refreshDrawer({ initial = false } = {}) {
         getSettings().catch(() => null),
         versionData ? Promise.resolve(versionData) : getVersion().catch(() => null),
         getPairStatus().catch(() => null),
-        getSyncStatus().catch(() => null),
         listDevices().catch(() => null),
         getStorageOverview().catch(() => null),
         getLrConnect().catch(() => null),
@@ -1300,7 +1297,6 @@ async function refreshDrawer({ initial = false } = {}) {
     remoteAccess = remote || remoteAccess;
     versionData = version || versionData;
     pairStatus = pair || pairStatus;
-    syncStatus = sync || syncStatus;
     lrConnectStatus = lrConnect || lrConnectStatus;
     devicesPayload = devices || devicesPayload;
     if (pairStatus?.mode === 'satellite' && pairStatus.has_hub && freeableStatus == null && !freeupActive()) {
@@ -1836,10 +1832,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     bindCloudBackupActions(body);
     bindSystemHealthActions(body);
     bindSettingInputs(body);
-    body.querySelector('#dismiss-server-update')?.addEventListener('click', () => {
-        sessionStorage.setItem('azimuth-server-update-dismissed', '1');
-        renderCurrentSystemSurface();
-    });
     body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
         const result = await createDeviceLink();
         if (result && result.code) {

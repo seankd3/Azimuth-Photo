@@ -66,20 +66,42 @@ private signing key.
 
 ## Rolling upgrades and paired satellites
 
-Every server exposes `GET /api/version` as:
+Every server exposes `GET /api/version`. It answers with the wire contract that
+server speaks, and with the identity the desktop auto-updater reads:
 
 ```json
-{"version":"0.1.0","schema_version":27,"mode":"hub"}
+{
+  "app_version": "1.0.0-rc.1",
+  "api_rev": 2,
+  "capabilities": ["sync.catalog_v2", "thumbs.trash_readthrough", "trash.scoped_empty"],
+  "sha": "<running git sha>",
+  "bundle_sha256": "",
+  "schema_version": 31
+}
 ```
 
-During each satellite sync/mirror pass, the satellite reads that endpoint. A
-hub older than the satellite's `MIN_COMPATIBLE_HUB` version sets
-`server_update_available` in `/api/sync/status`; the satellite’s desktop
-drawer then quietly says, “Your Azimuth Photo server needs an update.” A
-malformed or unavailable version response is marked `server_incompatible` so
-newer sync code does not silently treat an unknown server as compatible.
+`api_rev` in `web/core/version.py` is the compatibility number, not
+`app_version`. Increase it when an existing cross-node request or response
+changes meaning; a release on its own does not change compatibility. The last
+three fields belong to
+[`CLIENT_AUTOUPDATE_SPEC.md`](CLIENT_AUTOUPDATE_SPEC.md).
 
-For a rolling upgrade, update the hub first, wait for it to restart and finish
-its schema migration, then update satellites. If a satellite is upgraded first,
-it continues normal sync where possible and shows the calm update notice until
+A paired satellite probes that endpoint at most once every ten minutes and
+keeps the answer in `web/features/sync/contract.py`. `/api/sync/status` reports
+it as `hub_health`:
+
+| `hub_health` | Cause |
+|---|---|
+| `ok` | The hub's `api_rev` is not below the satellite's. A server with no hub of its own also reports `ok`. |
+| `needs_update` | The hub answered with a lower `api_rev`, or with no `api_rev` at all. A malformed or missing version response reads the same way, so an unknown server is never treated as compatible. |
+| `unreachable` | The probe failed. |
+| `not_connected` | The library holds mirrored hub photos and no hub is attached. |
+
+The desktop sync chip is the surface for these states, and the only one. On
+`needs_update` it shows `!` in place of its arrow and says "Some actions are
+paused until the hub updates."
+
+For a rolling upgrade, update the hub first. Wait until it restarts and
+completes its schema migration, then update the satellites. A satellite that is
+updated first continues to sync where it can, and shows that calm notice until
 the hub catches up.
