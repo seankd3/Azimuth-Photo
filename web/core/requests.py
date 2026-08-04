@@ -1,9 +1,34 @@
-from fastapi import Request
+from typing import Annotated
+
+from fastapi import Depends, Request
 from fastapi.responses import JSONResponse
 
 
 class RequestBodyTooLarge(ValueError):
     pass
+
+
+def _folder_scope(request: Request) -> str | list[str]:
+    """Every folder the sidebar selected, not just the last one.
+
+    The tree sends one `folder=` per selected node. A route declaring
+    `folder: str` gets the last of them and silently scopes to a third of what
+    the person picked — which is how Refine came to say "not enough photos to
+    refine" about a 195-photo selection: it was looking at the last folder
+    alone, and that one held five.
+
+    A dependency rather than a line each route must remember to write. Six
+    routes remembered; two did not.
+    """
+
+    values = [value for value in request.query_params.getlist("folder") if value]
+    if not values:
+        return ""
+    return values[0] if len(values) == 1 else values
+
+
+#: Declare `folder: FolderScope` and the repeated values arrive on their own.
+FolderScope = Annotated[str | list[str], Depends(_folder_scope)]
 
 
 def positive_int(value) -> int | None:

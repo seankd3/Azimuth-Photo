@@ -17,6 +17,7 @@ import helpers as app_helpers
 import photo_metadata
 from features.search.similarity import scan_duplicate_pairs
 from archive import role
+from core.requests import FolderScope
 
 
 router = APIRouter()
@@ -31,7 +32,7 @@ _EXIF_CACHE_MAX = 2000
 async def api_search(
     q: str = "", limit: int = 50, deep: bool = False, people: str = "",
     orientation: str = "", compared: str = "", min_stars: int = 0,
-    folder: str = "", flag: str = "", date_taken: str = "", file_type: str = "",
+    folder: FolderScope = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "",
 ):
     """Search images by text query using embedding similarity."""

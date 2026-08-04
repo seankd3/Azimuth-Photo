@@ -6,7 +6,7 @@ from collections.abc import Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-from core.requests import json_object, parse_exclude_sources, positive_int
+from core.requests import FolderScope, json_object, parse_exclude_sources, positive_int
 from data import connection as data_connection
 
 
@@ -89,7 +89,7 @@ def _parse_scoped_ids(ids: str | None) -> tuple[list[int] | None, JSONResponse |
 @router.get("/api/mosaic/next")
 async def mosaic_next(
     n: int = 12, exclude: str = "", strategy: str = "explore", grid_elo: float = 0,
-    orientation: str = "", compared: str = "", min_stars: int = 0, folder: str = "",
+    orientation: str = "", compared: str = "", min_stars: int = 0, folder: FolderScope = "",
     flag: str = "", date_taken: str = "", file_type: str = "", camera: str = "", lens: str = "",
     tag: str = "", q: str = "", deep: bool = False, people: str = "", ids: str | None = None,
     collection_id: int = 0, import_batch: int = 0,
