@@ -217,6 +217,19 @@ unreliable at concluding. Checked and refuted:
 The claims that did hold were worth the check: `developOpen()` really was
 defined three times, and one of the three was a flag nothing ever set.
 
+## Looked for, and not there
+
+After the `[hidden]` find, the obvious question was whether `desktop.css`
+restates other rules the same way. It does not. Thirty-six single-declaration
+`display: none` rules remain and their selectors are genuinely distinct —
+`[data-tip]::after`, `body.loupe-lights-out #ctxbar`, `.cell.preview-pending
+.c-elo`, scrollbars, details markers. Each is a separate decision about what to
+hide, not the same decision written out repeatedly.
+
+`[hidden]` was special because it is a platform attribute with defined
+semantics that a `display` rule was quietly overriding; there is no second
+instance of that shape. Written down so the analysis is not repeated.
+
 ## Tried and abandoned: the same sweep for JavaScript
 
 `scripts_dead_state.py` works because Python has `ast`. The JavaScript
