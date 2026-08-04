@@ -94,6 +94,16 @@ HIDDEN_IMPORTS = [
     "settings",
     "scanner",
     "thumbnails",
+    # The spine. archive.role and archive.transport are reached lazily from
+    # inside functions to keep features/ from importing archive/ backwards,
+    # which is precisely the shape PyInstaller's static pass cannot see.
+    "archive",
+    "archive.role",
+    "archive.transport",
+    "photo",
+    "photo.kind",
+    "pixels",
+    "pixels.decode",
     "helpers",
     "pairing",
     "photo_metadata",
