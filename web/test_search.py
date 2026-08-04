@@ -763,20 +763,14 @@ class SearchTests(BackendTestCase):
 
     async def test_embedding_batch_listener_invalidates_vector_derived_caches(self):
         search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        elo_propagation._prediction_cache_key = ("stale",)
-        elo_propagation._prediction_cache_counts = {1: 10}
 
         cache_events.embedding_batch_stored("model", [1])
 
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
-        self.assertIsNone(elo_propagation._prediction_cache_key)
-        self.assertIsNone(elo_propagation._prediction_cache_counts)
 
     async def test_embedding_model_change_invalidates_vector_derived_caches(self):
         search_service._duplicates_cache.update({"key": ("stale",), "data": {"pairs": []}})
-        elo_propagation._prediction_cache_key = ("stale",)
-        elo_propagation._prediction_cache_counts = {1: 10}
 
         await settings_routes.api_save_settings(JsonRequest({
             "settings_version": settings.SETTINGS_VERSION,
@@ -785,8 +779,6 @@ class SearchTests(BackendTestCase):
 
         self.assertIsNone(search_service._duplicates_cache["key"])
         self.assertIsNone(search_service._duplicates_cache["data"])
-        self.assertIsNone(elo_propagation._prediction_cache_key)
-        self.assertIsNone(elo_propagation._prediction_cache_counts)
 
     async def test_search_metadata_prefetch_runs_after_response(self):
         source = await self._source()

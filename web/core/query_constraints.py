@@ -6,8 +6,8 @@ import importlib.util
 import logging
 import time
 
-from features.search.fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_candidate_scores
-from features.search.planning import plan_search
+from core.search_fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_candidate_scores
+from core.search_planning import plan_search
 
 
 logger = logging.getLogger(__name__)

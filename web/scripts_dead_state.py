@@ -12,10 +12,16 @@ test asserting the reset happens.
 
     cd web && ./.venv/Scripts/python.exe scripts_dead_state.py
 
+**Test files are not searched**, so a name only a test touches reads as dead
+here. That happened: `_REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS` was removed and
+a test asserting it equalled its own literal value broke. Grep the tests too
+before deleting.
+
 **Advisory, not a gate.** A name reached through `globals()`, `getattr`, or a
-string cannot be seen here, so a hit is a question, not a verdict. Check each
-one before deleting it — `_rss_reader` and friends are read through `global`
-declarations and are not dead.
+string cannot be seen here, so a hit is a question, not a verdict. Check each one
+by hand: `_face_app` in `face_worker` looked like a model cache nothing reused,
+which would have been a performance bug rather than dead code. It was not — the
+model pool owns that lifecycle — but the difference is only visible by reading.
 """
 
 from __future__ import annotations

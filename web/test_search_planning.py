@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import unittest
 
-from features.search.fusion import candidate_evidence, fused_candidate_scores
-from features.search.planning import plan_search
+from core.search_fusion import candidate_evidence, fused_candidate_scores
+from core.search_planning import plan_search
 
 
 class SearchPlanningTests(unittest.TestCase):

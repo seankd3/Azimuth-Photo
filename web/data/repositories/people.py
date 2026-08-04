@@ -3,7 +3,7 @@
 import time as _time
 
 from data import connection
-from features.people.clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
+from data.people_clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
 
 
 def parse_people_ids(value) -> tuple[int, ...]:

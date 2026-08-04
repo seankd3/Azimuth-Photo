@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from features.people.clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
+from data.people_clustering import FaceVector, confident_person_match, group_centroid, group_face_batch
 
 
 def _vector(*values: float) -> np.ndarray:

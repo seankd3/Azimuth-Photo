@@ -256,6 +256,18 @@ So the local imports are load-bearing, and the only way to remove them is the
 inversion the plan describes: move what `core/` and `data/` reach for down out
 of `features/`, then hoist. Not a mechanical change.
 
+**Mapping that inversion made it much smaller than it looks.** 35 feature
+modules are reached from `core/` or `data/`, but **22 of them are
+`core/app_factory.py` registering routers** — assembly, not a violation, and it
+travels with the app-factory merge. Of the rest, three were plainly misplaced:
+`features/search/fusion.py`, `features/search/planning.py` and
+`features/people/clustering.py` each had **exactly one importer, in the layer
+below**, and imported nothing from `features/` themselves. They are now
+`core/search_fusion.py`, `core/search_planning.py` and
+`data/people_clustering.py`. Three top-level inversions gone; what remains is
+`data/schema.py`'s three `ensure_*` calls and the lazy fan-out in
+`core/background.py` and `core/cache_events.py`.
+
 Only state coupling was measured here, not the call graph, so this is a reason
 not to prioritise splitting them — not proof they would split cleanly.
 

@@ -198,7 +198,6 @@ class ReadthroughTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 204)
-        self.assertEqual(media_routes._REMOTE_MEDIA_FOREGROUND_TIMEOUT_SECONDS, 0.0)
         enqueue.assert_called_once()
         self.assertEqual(enqueue.call_args.args[1], "sm")
 
