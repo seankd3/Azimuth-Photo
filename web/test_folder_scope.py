@@ -15,7 +15,7 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from core.requests import FolderScope
+from core.requests import FolderScope, RankingSort
 
 
 class FolderScopeTests(unittest.TestCase):
@@ -68,6 +68,63 @@ class RoutesDeclareTheScopeTests(unittest.TestCase):
             "declare folder: FolderScope instead",
         )
 
+
+
+class RankingSortTests(unittest.TestCase):
+    """A sort the server cannot honour is a 400, not quietly Elo order.
+
+    `RANKING_SORTS.get(sort, "elo DESC")` had no allowlist and nothing upstream
+    rejected anything, so shipping a UI sort option without its registry entry
+    ordered the grid by Elo while the control read "Lens" — no error, no log.
+    """
+
+    def _client(self):
+        app = FastAPI()
+
+        @app.get("/sorted")
+        def sorted_route(sort: RankingSort = "elo"):
+            return {"sort": sort}
+
+        return TestClient(app)
+
+    def test_a_sort_the_registry_knows_is_passed_through(self):
+        client = self._client()
+        for name in ("elo", "date_taken", "filename_desc", "least_compared"):
+            self.assertEqual(client.get(f"/sorted?sort={name}").json()["sort"], name, name)
+
+    def test_a_sort_the_registry_does_not_know_is_rejected(self):
+        client = self._client()
+        for name in ("lens", "elo desc", "'; DROP TABLE images;--", "ELO"):
+            self.assertEqual(client.get(f"/sorted?sort={name}").status_code, 400, name)
+
+    def test_no_sort_still_means_elo(self):
+        client = self._client()
+        self.assertEqual(client.get("/sorted").json()["sort"], "elo")
+        self.assertEqual(client.get("/sorted?sort=").json()["sort"], "elo")
+
+    def test_every_route_taking_a_sort_declares_the_registry(self):
+        """The point of the dependency is that it cannot be forgotten."""
+
+        from features.export import routes as export_routes
+        from features.library import routes as library_routes
+
+        offenders = []
+        for module in (export_routes, library_routes):
+            for name, function in vars(module).items():
+                if not callable(function) or name.startswith("_"):
+                    continue
+                try:
+                    parameter = inspect.signature(function).parameters.get("sort")
+                except (TypeError, ValueError):
+                    continue
+                if parameter is not None and parameter.annotation is str:
+                    offenders.append(f"{module.__name__}.{name}")
+        self.assertEqual(
+            offenders,
+            [],
+            "these routes would accept any sort name and silently order by Elo; "
+            "declare sort: RankingSort instead",
+        )
 
 
 class DateScopeTests(unittest.TestCase):

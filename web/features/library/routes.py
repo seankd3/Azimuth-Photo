@@ -2,7 +2,7 @@ import time
 
 from fastapi import APIRouter, Request
 
-from core.requests import FolderScope, parse_exclude_sources
+from core.requests import FolderScope, RankingSort, parse_exclude_sources
 from data import connection as data_connection
 
 
@@ -18,7 +18,7 @@ async def api_storage_overview():
 
 @router.get("/api/rankings")
 async def api_rankings(
-    limit: int = 100, offset: int = 0, sort: str = "elo",
+    limit: int = 100, offset: int = 0, sort: RankingSort = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: FolderScope = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 
@@ -34,6 +34,31 @@ def _folder_scope(request: Request, folder: str = Query("")) -> str | list[str]:
 
 #: Declare `folder: FolderScope` and the repeated values arrive on their own.
 FolderScope = Annotated[str | list[str], Depends(_folder_scope)]
+
+
+def _ranking_sort(sort: str = Query("elo")) -> str:
+    """A sort the server cannot honour is an error, not quietly Elo order.
+
+    `RANKING_SORTS.get(sort, "elo DESC")` meant a name the registry did not know
+    silently produced Elo order. Ship a UI sort option without its registry
+    entry and the grid is ordered by Elo while the control reads "Lens" —
+    nothing fails, nothing logs, and the only way to notice is to know what the
+    order should have looked like.
+
+    The registry is the allowlist. Rejecting here rather than in the repository
+    keeps it a 400 the caller can read instead of a 500 from inside the SQL.
+    """
+
+    from data.repositories.rankings import RANKING_SORTS
+
+    value = str(sort or "").strip()
+    if value and value not in RANKING_SORTS:
+        raise HTTPException(status_code=400, detail=f"unknown sort: {value}")
+    return value or "elo"
+
+
+#: Declare `sort: RankingSort` and an unknown name never reaches the query.
+RankingSort = Annotated[str, Depends(_ranking_sort)]
 
 
 def positive_int(value) -> int | None:

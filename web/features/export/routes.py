@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from core.path_groups import safe_commonpath
-from core.requests import FolderScope
+from core.requests import FolderScope, RankingSort
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
@@ -316,7 +316,7 @@ def _build_zip_file(images: list[dict], size: str) -> tuple[str, int]:
 
 @router.get("/api/export")
 async def export_rankings(
-    format: str = "json", ids: str = "", limit: int | None = None, sort: str = "elo",
+    format: str = "json", ids: str = "", limit: int | None = None, sort: RankingSort = "elo",
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: FolderScope = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
