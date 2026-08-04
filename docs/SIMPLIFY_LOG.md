@@ -309,20 +309,26 @@ each file that queries `images` actually uses:
 | 1 | `online` only |
 
 Nine profiles. The two dominant ones differ by exactly one predicate —
-`included` — so a photo in a source the owner excluded is visible to fifteen
-files and invisible to twelve. That is the shape behind "it shows in one
-surface and not another", and it is a correctness problem, not a tidiness one.
+`included` — so on paper a photo in a source the owner excluded is visible to
+fifteen files and invisible to twelve.
 
-An earlier version of this table was wrong: it tested only `status = 'kept'` and
-missed `status IN ('kept', 'maybe')`, which is the form most of the code
-actually uses, so it reported thirteen files ignoring status when they do not.
-The conclusion survived the correction; the numbers did not.
+**Tested against the running app, and it did not reproduce.** Hiding a source on
+a live catalogue and asking every surface: rankings 0, counts 0, date-groups
+empty, search 0, stacks 0, trash 0, export empty, map 0, and `stats` correctly
+separating `total_catalog_images: 4` from `active_images: 0`. They agree.
 
-**The caveat matters**: this is per-file, so a file counted under `missing_at`
-only may be querying somewhere source inclusion is already guaranteed by a join
-or an upstream filter. It does not prove any single query is wrong. What it does
-show is that no shared definition is being applied, which is exactly what D3
-proposes to build — and it is now the best-evidenced remaining item on the list.
+One surface briefly disagreed. `/api/filter-options` still offered "2026 (4)"
+and "jpg (4)" immediately after the hide, then returned empty a short time
+later without a restart — a cache TTL window, not a wrong query.
+`_catalog_changed()` invalidates pairing, folders, cache-status and embeddings
+but not filter options, so the sidebar can advertise filters that match nothing
+for a few seconds after a source is hidden. Small, self-correcting, real.
+
+So the static profile shows genuine variation and the behaviour does not follow
+from it: the files testing fewer predicates are evidently constrained by their
+joins, which was the caveat all along. D3 remains worth doing for the reason it
+was always worth doing — one definition beats nine — but not as a correctness
+emergency, and this log said "correctness problem" before testing it.
 
 ## Looked for, and not there
 
