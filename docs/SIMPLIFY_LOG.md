@@ -307,9 +307,22 @@ Moving the four pure helpers *first*, as a separate commit, was considered and
 rejected: all four are used only inside `panel.js` today, so lifting them now
 would be building a shared module for a split that has not happened.
 
-**drawer.js is four or five.** 130 functions in 2,186 lines across settings
-inputs, the system surface, sources, the Lightroom catalogue scan, cloud backup
-and model install — each with its own render/bind/poll trio.
+**drawer.js is not four or five — measured, it is one.** 130 functions, 2,187
+lines, 50 module variables. The plan called it fifteen unrelated domains; the
+state says otherwise. **Seventeen of the fifty variables are touched by five or
+more functions** — `catalog` by 15, `open` by 14, `aiStatus` by 12,
+`cacheStatus` by 11, `systemSurfaceRender` by 10 — and only three variables
+belong to a single function.
+
+Set that against `panel.js`, measured the same way: **zero** module state shared
+between its two halves. That is what a file waiting to be split looks like.
+`drawer.js` is the opposite — one surface whose sections all read the same
+status picture, which is exactly what the System drawer is for. Splitting it
+means threading that state through every piece or duplicating it, and neither
+buys anything.
+
+Keyword classification does not find seams here either: the largest bucket, 38
+functions and 755 lines, matches no domain keyword at all.
 
 Both are mechanical moves that need a browser pass per surface afterwards, not a
 test run. Left for a session that can finish and screenshot them.
