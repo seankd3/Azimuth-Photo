@@ -1002,10 +1002,18 @@ def _candidate_cursor_after_id(model_key: str) -> int:
 
 
 def _advance_candidate_cursor(rows) -> None:
-    if not rows:
-        _unembedded_candidate_cursor["after_id"] = 0
-        return
-    _unembedded_candidate_cursor["after_id"] = max(int(row["id"]) for row in rows)
+    """No cursor. The candidate query advances by itself.
+
+    It walked ids forward to avoid rescanning, which also meant the oldest
+    photos were embedded first — the opposite of what anyone wants, since the
+    photos you just imported are the ones you will search for. The query now
+    orders newest first, and an embedded photo leaves the candidate set through
+    its NOT EXISTS clause, so progress needs no bookmark. Keeping one would be
+    worse than useless: `id > max` under a DESC scan skips every photo older
+    than the batch just taken, which is all of them.
+    """
+
+    _unembedded_candidate_cursor["after_id"] = 0
 
 
 def _schedule_preload(loop, rows):

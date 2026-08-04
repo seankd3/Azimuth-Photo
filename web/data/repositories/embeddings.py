@@ -191,6 +191,8 @@ async def get_unembedded_images(
 ):
     model_key = embedding_config["model_key"]
     after_id = max(0, int(after_id or 0))
+    # Retained for callers that still pass it; the newest-first ordering above
+    # makes it unnecessary for ordinary scanning.
     after_id_filter = "AND i.id > ? " if after_id else ""
     conn = await connection.open_async(db_path)
     try:
@@ -221,7 +223,12 @@ async def get_unembedded_images(
                 "  SELECT 1 FROM embedding_scan_images p "
                 "  WHERE p.model_key = ? AND p.image_id = i.id AND p.status = 'poisoned'"
                 ") "
-                "ORDER BY i.id ASC "
+                # Newest first. The photos you just imported are the ones you will
+                # search for, and the query is self-advancing: an embedded photo
+                # leaves the candidate set through the NOT EXISTS above, so no
+                # cursor is needed to make progress — and a forward cursor under
+                # DESC would skip every photo imported after it.
+                "ORDER BY i.date_taken DESC, i.id DESC "
                 "LIMIT ?",
                 (
                     md_cache_root,
@@ -248,7 +255,12 @@ async def get_unembedded_images(
                 "  SELECT 1 FROM embedding_scan_images p "
                 "  WHERE p.model_key = ? AND p.image_id = i.id AND p.status = 'poisoned'"
                 ") "
-                "ORDER BY i.id ASC "
+                # Newest first. The photos you just imported are the ones you will
+                # search for, and the query is self-advancing: an embedded photo
+                # leaves the candidate set through the NOT EXISTS above, so no
+                # cursor is needed to make progress — and a forward cursor under
+                # DESC would skip every photo imported after it.
+                "ORDER BY i.date_taken DESC, i.id DESC "
                 "LIMIT ?",
                 (
                     *((after_id,) if after_id else ()),
