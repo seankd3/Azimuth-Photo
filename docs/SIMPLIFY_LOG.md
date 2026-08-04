@@ -217,6 +217,29 @@ unreliable at concluding. Checked and refuted:
 The claims that did hold were worth the check: `developOpen()` really was
 defined three times, and one of the three was a flag nothing ever set.
 
+## The big Python files are long, not tangled
+
+Having a cohesion measure, it was worth pointing at the six largest non-test
+modules. Module variables touched by five or more functions:
+
+| Module | lines | functions | shared vars |
+|---|---|---|---|
+| `data/repositories/rankings.py` | 2,454 | 47 | **0** |
+| `features/compare/service.py` | 1,733 | 53 | 1 |
+| `features/library/service.py` | 1,661 | 51 | **0** |
+| `features/collections/suggestions.py` | 1,249 | 48 | 2 |
+| `features/develop/pipeline.py` | 1,243 | 54 | **0** (one module variable in total) |
+| `data/repositories/catalog.py` | 1,343 | 58 | **0** |
+
+Compare `drawer.js`: 17 of 50. These files are long lists of largely independent
+functions, not state machines — which is why the injection layer hurt so much
+more than their size does. Jumping to a definition in a 2,454-line flat module
+costs one search; jumping through a `lambda: db.x()` cost a detour through
+`wiring.py` every time, and that is gone.
+
+Only state coupling was measured here, not the call graph, so this is a reason
+not to prioritise splitting them — not proof they would split cleanly.
+
 ## Looked for, and not there
 
 After the `[hidden]` find, the obvious question was whether `desktop.css`
