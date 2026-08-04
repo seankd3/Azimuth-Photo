@@ -19,6 +19,120 @@ survives checking. What left for good: the injection layer, the Playwright
 scenario suite, 424 assertions on literal source text, six duplicate hub
 clients, the v1 metadata push, and routes with neither a caller nor an intent.
 
+## Four conditions that can never come true (08-03)
+
+Four branches, one commit each, all off `99bdfc1d`, all merging clean onto
+`simplify` at `8625f95d` — checked with `git merge-tree`, not assumed. Net
+**-103 lines**, which is not what they are worth.
+
+| Branch | Commit | Net | What it removes |
+|---|---|---|---|
+| `elegance/ask-the-module` | `d0d34ce9` | -85 | 23 "not configured" guards across ten feature modules |
+| `elegance/bench-pregen-wiring` | `974fea6a` | -14 | a `configure_data_providers` call that stopped the pregen benchmark importing |
+| `elegance/cull-inspect-centres` | `62c89a5b` | -16 | a subject-focus computation whose inputs the payload never carries |
+| `elegance/hub-update-one-surface` | `45f57f6e` | +12 | a rolling-upgrade banner reading two fields no server emits |
+
+All four are the same shape, and it is a better shape than the one the earlier
+sweeps hunted. Not **"nothing calls this"** — the rule that was ~80% wrong and
+cost eight restorations — but **"nothing can make this true."** Intent rescues a
+caller-less CLI; nothing rescues a branch whose predicate is constant. A
+hand-run tool has an excuse for having no caller. A subject box the server never
+sends has no excuse for never arriving.
+
+**The guards were the tail of a thread already open here.** This log records that
+removing the `_configured()` checks surfaced silent failures — smart-collection
+conflicts returning "no conflict", suggestions returning empty. The 23 that
+remained were the other half: after the injection layer went, every one of them
+was an assertion that cannot fail, and two were worse than noise, because a
+guard that never fires makes its `else` unreachable. Two alternate
+implementations sat behind them, maintained and dead. Ten feature modules,
+`catalog`, `library`, `compare`, `publish`, `share`, `stacks`, `trash`, `export`
+and `people` among them; 282 routes before and after, 1,609 tests collected,
+smoke 17×200.
+
+**The pregen benchmark could not import, and this branch broke it.** `web/perf`
+is on the restored list above — put back because the "Speed is the bar" release
+gate depends on it. It was restored and never run: `perf/bench.py` still called
+`thumbnails.configure_data_providers`, which left with `wiring.py`. Proved both
+ways on a copied fixture catalog, back to back: before, `AttributeError: module
+'thumbnails' has no attribute 'configure_data_providers'`, exit 1; after, a real
+table (`embedded_sm_md` 40.5 items/min, `small_preview_lg` 45.8) and — the part
+a green table would not prove — three new `cache_entries` rows and the matching
+files on disk. Restoring a file is not the same as checking it runs. Nothing in
+the suite imports `perf/bench.py`, so nothing said.
+
+**The other two never reached a person.** The cull brief computed a focus point
+from `subject_box`/`focus_box`; the autocull payload carries neither, so
+fourteen lines resolved to centre every time. Measured in a live browser rather
+than argued: a click on a 300×200 figure holding a 900×600 image lands at
+`-300px / -200px`, exactly what `frame/2 - width*0.5` gave. And the "your server
+needs an update" banner read two fields no server has ever emitted, so the
+rolling-upgrade warning could not fire. That one is the only branch that adds
+lines: the vocabulary the banner was guessing at now lives in
+`docs/RELEASING.md`, where `test_versioning.py` already asserts it.
+
+### The refuted one, and what it says about the survey
+
+**"Has this photo earned ranking evidence" is written eight times.** The census
+is right and the fix is wrong, at the site the claim named as its main win.
+
+The eight are real: `helpers.py`, `ratings.py`, two in `rankings.py`, four in
+`stats.py`, same three-part decision, same `1200.0`, same `0.0001`,
+byte-identical modulo the `i.` alias. Rule 1 was honoured — no reference in
+`android/`, `clients/`, `deploy/`, `scripts/`, `.github/` or
+`desktop/src-tauri/`.
+
+The proposed rewrite of the hand-negated eighth to `NOT ({cond})` fails twice,
+independently:
+
+- **It is not sargable.** `i.comparisons = 0` is an equality SQLite can seek on;
+  `NOT (COALESCE(i.comparisons, 0) > 0 OR …)` gives the planner nothing.
+  Measured on 150,000 rows against the real `SCHEMA`, both forms alternated in
+  one process, min of six: at 10% uncompared the count goes 16.65 → 137.66 ms
+  and the page 34.57 → 144.26 ms, and the plan drops from
+  `idx_images_status_comps_elo` to `idx_images_source_missing_id`. Slower in
+  every regime tested. That is exactly what `photo/visibility.py`'s own
+  docstring warns about, and it lands on the Refine working set.
+- **It changes the row set.** `comparisons` is `INTEGER DEFAULT 0` — nullable
+  (`data/schema.py:47`, checked). Under three-valued logic a NULL row is
+  excluded by the AND-chain and included by `NOT(COALESCE(...))`. Verified
+  directly.
+
+The claim's own acceptance test — "diff the emitted SQL character for
+character" — was therefore unsatisfiable by construction, at two of its own
+sites.
+
+**Where the survey is weak is now stated three times in this file, so it is a
+rule.** The palette claim, the API-client claim, the visibility-rule claim and
+now this one all held as counts and failed as conclusions. **A survey's count is
+evidence; its conclusion is a hypothesis.** A text census sees eight identical
+strings and infers one rule. It cannot see the query planner, and it cannot see
+that SQL's `NOT` is not Python's — so it cannot tell a copy from a spelling
+chosen on purpose. Consolidation claims that touch SQL need a plan check and a
+NULL check before they are claims at all.
+
+What survives: seven of the eight consolidate, and the eighth keeps its sargable
+spelling with the comment `photo/visibility.py` already models. "Eight becomes
+one" was never available; seven and a documented exception is. The refutation
+also turned up something real and small on its own — `rated_images` is
+maintained by two routes, recomputed by SQL in `stats.py` and incremented in
+`cache_events.py`, bounded to the 30-second `FULL_STATS_CACHE_TTL_SECONDS`
+window because undo takes the full-invalidate path. Worth knowing, not worth a
+branch.
+
+A refuted finding cost one investigation and prevented an 8× regression on the
+compare surface. That is the cheapest outcome available this round.
+
+### What is next
+
+**Merge the four onto `simplify` and delete the four worktrees.** They are
+verified, they merge clean, and `simplify` is one commit ahead of their shared
+base with no overlap — this merge is the cheapest it will ever be. Verified work
+sitting in a worktree does not reach the cutover, and this branch has a cutover
+coming; four unmerged heads are four things the cutover has to reconcile for no
+gain. The seven-site consolidation is the next piece of work after that, not
+before it.
+
 ## Deployed and measured on the real archive (08-03)
 
 `simplify` runs on omarchy at `192177e3`, against the live 153,891-row catalog.
