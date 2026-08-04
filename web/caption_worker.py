@@ -55,7 +55,7 @@ _loaded_key: tuple[str, str, str, str] | None = None
 def _initial_manual_pause() -> bool:
     try:
         import settings as _settings
-        return not bool(_settings.get_settings().get("caption_scan_enabled"))
+        return not bool(_settings.get_settings()["caption_scan_enabled"])
     except Exception:
         return True
 
@@ -137,7 +137,7 @@ def pause_caption_worker(
     global _caption_manual_pause, _caption_manual_pause_message
     if persist:
         app_config = settings.get_settings()
-        if bool(app_config.get("caption_scan_enabled", True)):
+        if bool(app_config["caption_scan_enabled"]):
             settings.save_settings({**app_config, "caption_scan_enabled": False})
     _caption_manual_pause = True
     _caption_manual_pause_message = message
@@ -149,7 +149,7 @@ def resume_caption_worker(*, persist: bool = True) -> dict[str, Any]:
     global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
     global _load_failure_cooldown_until, _oom_cooldown_until, _oom_cooldown_count
     app_config = settings.get_settings()
-    if persist and not bool(app_config.get("caption_scan_enabled", True)):
+    if persist and not bool(app_config["caption_scan_enabled"]):
         settings.save_settings({**app_config, "caption_scan_enabled": True})
     _caption_manual_pause = False
     _caption_manual_pause_message = ""
@@ -461,7 +461,7 @@ async def _run_caption_worker_loop() -> None:
                 quantization=caption_config["quantization"],
                 prompt_version=caption_config["prompt_version"],
             )
-            if _caption_manual_pause or not bool(app_config.get("caption_scan_enabled", False)):
+            if _caption_manual_pause or not bool(app_config["caption_scan_enabled"]):
                 _enter_paused(
                     _caption_manual_pause_message or "Captions are stopped."
                 )

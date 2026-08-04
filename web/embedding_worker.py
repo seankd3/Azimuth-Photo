@@ -106,7 +106,7 @@ _embed_retry_after: dict[int, float] = {}
 _embedding_oom_circuit = CaptionOomCircuit(threshold=3)
 def _initial_manual_pause() -> bool:
     try:
-        return not bool(settings.get_settings().get("embedding_scan_enabled", True))
+        return not bool(settings.get_settings()["embedding_scan_enabled"])
     except Exception:
         return True
 
@@ -593,7 +593,7 @@ def pause_embedding_worker(
     global _embedding_manual_pause, _embedding_manual_pause_message
     if persist:
         app_config = settings.get_settings()
-        if bool(app_config.get("embedding_scan_enabled", True)):
+        if bool(app_config["embedding_scan_enabled"]):
             settings.save_settings({**app_config, "embedding_scan_enabled": False})
     _embedding_manual_pause = True
     _embedding_manual_pause_message = message
@@ -607,7 +607,7 @@ def resume_embedding_worker(*, persist: bool = True) -> dict:
     global _embedding_manual_pause, _embedding_manual_pause_message
     if persist:
         app_config = settings.get_settings()
-        if not bool(app_config.get("embedding_scan_enabled", True)):
+        if not bool(app_config["embedding_scan_enabled"]):
             settings.save_settings({**app_config, "embedding_scan_enabled": True})
     _embedding_manual_pause = False
     _embedding_manual_pause_message = ""

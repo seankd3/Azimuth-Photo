@@ -122,9 +122,9 @@ async def caption_status_payload() -> dict:
     return {
         "capability": capability,
         "active": capability["available"]
-        and bool(config.get("caption_scan_enabled", False))
+        and bool(config["caption_scan_enabled"])
         and not caption_worker.manual_pause_active(),
-        "automatic": bool(config.get("caption_scan_enabled", True)),
+        "automatic": bool(config["caption_scan_enabled"]),
         "model_id": caption_config["model_id"],
         "model_key": caption_config["model_key"],
         "model_dir": caption_config["model_dir"],

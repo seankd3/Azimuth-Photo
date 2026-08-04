@@ -75,7 +75,7 @@ _face_app_key: tuple[str, str, int] | None = None
 _scan_now = False
 def _initial_manual_pause() -> bool:
     try:
-        return not bool(settings.get_settings().get("people_scan_enabled", True))
+        return not bool(settings.get_settings()["people_scan_enabled"])
     except Exception:
         return True
 
@@ -129,7 +129,7 @@ def pause_face_worker(*, persist: bool = True) -> None:
     global _face_manual_pause, _face_manual_pause_message
     if persist:
         config = settings.get_settings()
-        if bool(config.get("people_scan_enabled", True)):
+        if bool(config["people_scan_enabled"]):
             settings.save_settings({**config, "people_scan_enabled": False})
     _face_manual_pause = True
     _face_manual_pause_message = "People is stopped."
@@ -140,7 +140,7 @@ def resume_face_worker(*, persist: bool = True) -> None:
     global _face_manual_pause, _face_manual_pause_message
     if persist:
         config = settings.get_settings()
-        if not bool(config.get("people_scan_enabled", True)):
+        if not bool(config["people_scan_enabled"]):
             settings.save_settings({**config, "people_scan_enabled": True})
     _face_manual_pause = False
     _face_manual_pause_message = ""
@@ -313,7 +313,7 @@ async def _run_face_worker_loop() -> None:
                 model_dir=str(config.get("face_model_dir") or ""),
                 auto_install=bool(config.get("people_auto_install", True)),
             )
-            if _face_manual_pause or not bool(config.get("people_scan_enabled", True)):
+            if _face_manual_pause or not bool(config["people_scan_enabled"]):
                 _enter_paused(
                     _face_manual_pause_message or "People is stopped."
                 )

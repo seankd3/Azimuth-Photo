@@ -116,9 +116,9 @@ async def people_status_payload(review: dict | None = None) -> dict:
     return {
         "capability": capability,
         "active": capability["available"]
-        and bool(config.get("people_scan_enabled", True))
+        and bool(config["people_scan_enabled"])
         and not face_worker.manual_pause_active(),
-        "automatic": bool(config.get("people_scan_enabled", True)),
+        "automatic": bool(config["people_scan_enabled"]),
         "auto_install": False,
         "auto_install_legacy": bool(config.get("people_auto_install", True)),
         "runtime_install": False,
