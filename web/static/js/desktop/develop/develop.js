@@ -16,6 +16,7 @@ import { DevelopSettingsClipboard, applyPrevious, openCopyDialog, pasteClipboard
 import { DevelopCompareView, SoftProofPopover } from './compare_view.js';
 import { ProofTileController } from './proof_tile.js';
 import { markSettingsChange } from './perf_overlay.js';
+import { toggleFullscreen } from '../../lib/fullscreen.js';
 
 const DIRECT_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'webp']);
 const RAW_DEVELOP_EXTENSIONS = new Set(['dng', 'cr3', 'cr2', 'exr']);
@@ -1279,9 +1280,14 @@ function handleKey(event) {
     } else if (key === ']') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) setDevelopRightCollapsed(!viewState.developRightCollapsed);
-    } else if (key === 'f') {
+    } else if (key === '[') {
+        // The filmstrip gave up F: F is fullscreen in every lens. [ and ] are
+        // now the two panel toggles, which is easier to remember than either.
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) setDevelopFilmstripCollapsed(!viewState.developFilmstripCollapsed);
+    } else if (key === 'f') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        if (!event.repeat) toggleFullscreen();
     } else if (event.shiftKey && key === 'p') {
         event.preventDefault(); event.stopImmediatePropagation();
         if (!event.repeat) {

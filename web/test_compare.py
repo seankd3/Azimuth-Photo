@@ -1339,7 +1339,7 @@ class CompareTests(BackendTestCase):
                     first, second = (image["aspect_ratio"] for image in sample)
                     self.assertLessEqual(
                         max(first, second) / min(first, second),
-                        1.0 + compare_service.DUEL_ASPECT_TOLERANCE,
+                        1.0 + compare_service.ASPECT_TOLERANCE,
                     )
         finally:
             semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE = old_rate
@@ -1410,7 +1410,7 @@ class CompareTests(BackendTestCase):
             first, second = (image["aspect_ratio"] for image in sample)
             self.assertLessEqual(
                 max(first, second) / min(first, second),
-                1.0 + compare_service.DUEL_ASPECT_TOLERANCE,
+                1.0 + compare_service.ASPECT_TOLERANCE,
             )
 
     async def test_refine_mosaic_keeps_strategy_pairing_with_embeddings(self):
@@ -1775,3 +1775,30 @@ class CompareTests(BackendTestCase):
         self.assertGreaterEqual(captured["limit"], len(scoped))
         self.assertEqual(captured["sort"], "least_compared_shuffled")
         self.assertTrue({image["id"] for image in result["images"]} <= {first, second})
+
+
+class MosaicAspectAlignmentTests(unittest.TestCase):
+    """A wave compares photos of the same shape, not only a duel."""
+
+    @staticmethod
+    def _candidate(image_id, aspect):
+        return {"id": image_id, "aspect_ratio": aspect, "elo": 1200.0, "comparisons": 0}
+
+    def test_a_mosaic_wave_is_aspect_aligned_like_a_duel(self):
+        portraits = [self._candidate(i, 0.667) for i in range(1, 9)]
+        landscapes = [self._candidate(i, 1.5) for i in range(20, 24)]
+        # A strategy-drawn wave that mixes shapes: five portraits and a landscape.
+        sample = portraits[:5] + landscapes[:1]
+
+        aligned = compare_service._aspect_align_wave(sample, portraits + landscapes)
+
+        self.assertEqual(len(aligned), len(sample))
+        self.assertEqual(aligned[0]["id"], sample[0]["id"], "the seed keeps its place")
+        shapes = {round(float(img["aspect_ratio"]), 3) for img in aligned}
+        self.assertEqual(shapes, {0.667}, "the landscape was swapped for a portrait")
+
+    def test_a_thin_pool_still_refines_rather_than_starving(self):
+        seed = self._candidate(1, 0.667)
+        odd = self._candidate(2, 1.5)
+        aligned = compare_service._aspect_align_wave([seed, odd], [seed, odd])
+        self.assertEqual([img["id"] for img in aligned], [1, 2])

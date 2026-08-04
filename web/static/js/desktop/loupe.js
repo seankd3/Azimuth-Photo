@@ -9,6 +9,7 @@ import { requestMorePhotos } from './grid.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
 import { starsMarkup } from './elo_stars_display.js';
+import { toggleFullscreen } from '../lib/fullscreen.js';
 
 const ZOOM_STEP = 1.15;
 const MAX_SCALE = 4;
@@ -973,7 +974,11 @@ function bindKeyboard() {
     window.addEventListener('keydown', (event) => {
         if (!open || event.ctrlKey || event.metaKey || event.altKey) return;
         const key = event.key.toLowerCase();
-        if (key === 'v') {
+        if (key === 'f') {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            toggleFullscreen();
+        } else if (key === 'v') {
             event.preventDefault();
             event.stopImmediatePropagation();
             toggleLoupeVersion();

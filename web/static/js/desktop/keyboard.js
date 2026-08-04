@@ -28,6 +28,7 @@ import { closeDuplicates, duplicatesOpen } from './duplicates.js';
 import { closeTrash, handleTrashKey, selectAllTrash, trashOpen, trashSelectedImages } from './trash.js';
 import { showToast, undoLatestToast } from './toast.js';
 import { shortcutSheetOpen } from './shortcut_sheet.js';
+import { toggleFullscreen } from '../lib/fullscreen.js';
 import { foregroundLayerOpen as registeredForegroundLayerOpen } from './layers.js';
 
 // Develop/GL is lazy — cull/grid boot must not parse the develop tree.
@@ -386,7 +387,9 @@ export function initKeyboard() {
         if (filtersOpen()) {
             if (event.key.toLowerCase() === 'f') {
                 event.preventDefault();
-                closeFilters();
+                // Shift+F closes what Shift+F opened; bare F fills the screen.
+                if (event.shiftKey) closeFilters();
+                else toggleFullscreen();
             }
             return;
         }
@@ -484,7 +487,8 @@ export function initKeyboard() {
             toggleBestOf();
         } else if (key === 'f') {
             event.preventDefault();
-            emit('filters:toggle');
+            if (event.shiftKey) emit('filters:toggle');
+            else toggleFullscreen();
         } else if (key === 'g') {
             event.preventDefault();
             switchLens('grid');

@@ -1185,10 +1185,12 @@ def _compete_semantic_tiebreak(
     )[:count]
 
 
-# A duel is unreadable when its two frames differ wildly in shape, so pairing
-# holds partners inside a narrow aspect band and only widens when the pool
-# cannot supply one.
-DUEL_ASPECT_TOLERANCE = 0.15
+# A wave is unreadable when its frames differ wildly in shape, so it holds its
+# members inside a narrow aspect band and only widens when the pool cannot
+# supply one. Written for duels; a mosaic wants it for the same reason and for
+# one more — equal-area cards of mixed aspect cannot fill a uniform grid, so a
+# single landscape among portraits shrinks every card by about a tenth.
+ASPECT_TOLERANCE = 0.15
 
 
 def _candidate_aspect(candidate) -> float | None:
@@ -1205,10 +1207,10 @@ def _candidate_aspect(candidate) -> float | None:
     return aspect if aspect > 0 else None
 
 
-def duel_aspect_pool(seed, candidates: list[dict]) -> list[dict]:
-    """Aspect-compatible duel partners for the seed.
+def aspect_pool(seed, candidates: list[dict]) -> list[dict]:
+    """Aspect-compatible companions for the seed.
 
-    Tolerance band first (ratios within DUEL_ASPECT_TOLERANCE of each other),
+    Tolerance band first (ratios within ASPECT_TOLERANCE of each other),
     then orientation as the coarse gate, then the full pool, so a thin scope
     still duels instead of starving.
     """
@@ -1221,28 +1223,40 @@ def duel_aspect_pool(seed, candidates: list[dict]) -> list[dict]:
         aspect = _candidate_aspect(candidate)
         if aspect is None:
             continue
-        if max(aspect, seed_aspect) / min(aspect, seed_aspect) <= 1.0 + DUEL_ASPECT_TOLERANCE:
+        if max(aspect, seed_aspect) / min(aspect, seed_aspect) <= 1.0 + ASPECT_TOLERANCE:
             banded.append(candidate)
         elif (aspect >= 1.0) == (seed_aspect >= 1.0):
             same_orientation.append(candidate)
     return banded or same_orientation or candidates
 
 
-def _aspect_align_duel(sample: list[dict], candidates: list[dict]) -> list[dict]:
-    """Repair a strategy-drawn duel whose two images mismatch in aspect."""
-    if len(sample) != 2:
+def _aspect_align_wave(sample: list[dict], candidates: list[dict]) -> list[dict]:
+    """Replace wave members that do not share the seed's shape.
+
+    The seed keeps its place and every other member must be compatible with it.
+    A member with no compatible replacement is kept rather than dropped: a thin
+    scope should still refine, just less tidily.
+    """
+    if len(sample) < 2:
         return sample
     import random
 
     seed = sample[0]
-    pool = duel_aspect_pool(seed, candidates)
+    pool = aspect_pool(seed, candidates)
     pool_ids = {_candidate_id(img) for img in pool}
-    if _candidate_id(sample[1]) in pool_ids:
-        return sample
-    replacements = [img for img in pool if _candidate_id(img) != _candidate_id(seed)]
-    if not replacements:
-        return sample
-    return [seed, random.choice(replacements)]
+    chosen = {_candidate_id(img) for img in sample}
+    spare = [
+        img for img in pool
+        if _candidate_id(img) not in chosen
+    ]
+    random.shuffle(spare)
+    aligned = [seed]
+    for member in sample[1:]:
+        if _candidate_id(member) in pool_ids or not spare:
+            aligned.append(member)
+        else:
+            aligned.append(spare.pop())
+    return aligned
 
 
 async def _semantic_context_for(candidates: list[dict]):
@@ -1266,7 +1280,7 @@ async def _semantic_duel_sample(
         return [], "strategy"
     if random.random() < semantic_pairing.SEMANTIC_DUEL_EXPLORATION_RATE:
         sample = await _strategy_sample(candidates, count, strategy=strategy, grid_elo=grid_elo)
-        return _aspect_align_duel(sample, candidates), "strategy"
+        return _aspect_align_wave(sample, candidates), "strategy"
 
     if strategy == "diverse":
         seed_sample = await diverse_sample(candidates, 1)
@@ -1286,7 +1300,7 @@ async def _semantic_duel_sample(
     # The partner search reads one embedding row per candidate, so look at a
     # pre-shuffled window rather than the whole scope. Aspect gating happens
     # here, in pairing, so every partner path below inherits it.
-    partner_pool = duel_aspect_pool(seed, candidates)
+    partner_pool = aspect_pool(seed, candidates)
     if len(partner_pool) > semantic_pairing.SEMANTIC_PARTNER_WINDOW:
         partner_pool = random.sample(partner_pool, semantic_pairing.SEMANTIC_PARTNER_WINDOW)
     if strategy == "diverse":
@@ -1336,8 +1350,7 @@ async def _refine_sample(
             grid_elo=grid_elo,
             context=context,
         )
-    if count == 2:
-        sample = _aspect_align_duel(sample, candidates)
+    sample = _aspect_align_wave(sample, candidates)
     return sample, "strategy"
 
 
