@@ -172,12 +172,27 @@ class BackupUnitTests(unittest.TestCase):
         self.assertGreater(len(pruned), 0)
 
     def test_seconds_until_local_hour(self):
+        from core.dates import seconds_until_local_hour
+
         now = datetime(2026, 7, 10, 3, 0, 0).astimezone()
-        delay = backups.seconds_until_local_hour(4, now=now)
+        delay = seconds_until_local_hour(4, now=now)
         self.assertAlmostEqual(delay, 3600.0, delta=2.0)
         later = datetime(2026, 7, 10, 5, 0, 0).astimezone()
-        delay2 = backups.seconds_until_local_hour(4, now=later)
+        delay2 = seconds_until_local_hour(4, now=later)
         self.assertGreater(delay2, 20 * 3600)
+
+    def test_backup_owed_from_newest_snapshot_age(self):
+        """The scheduler owes a backup by snapshot age, not a 04:00 alarm.
+
+        A laptop asleep at 04:00 never fired the old wall-clock scheduler —
+        nine days without a snapshot with the scheduler armed the whole time.
+        """
+
+        self.assertEqual(backups._newest_snapshot_age_hours(self.db_path), float("inf"))
+        name = f"azimuth-{datetime.now():%Y%m%d-%H%M%S}.db.gz"
+        with gzip.open(self.root / name, "wb") as gz:
+            gz.write(b"sqlite-fake")
+        self.assertLess(backups._newest_snapshot_age_hours(self.db_path), 1.0)
 
     def test_snapshot_survives_concurrent_writes(self):
         """Backup while writers are in flight must still verify and restore."""

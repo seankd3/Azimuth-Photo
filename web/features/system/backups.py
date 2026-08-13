@@ -7,9 +7,6 @@ it writes ``azimuth.restored.db`` beside it and returns human instructions.
 
 from __future__ import annotations
 
-from core.dates import seconds_until_local_hour
-
-
 from core.durable import fsync_directory as _fsync_directory
 
 import asyncio
@@ -27,6 +24,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from core import user_activity
 from core.runtime_paths import resolve_runtime_paths
 from data import connection as data_connection
 
@@ -922,20 +920,45 @@ def restore_backup(db_path: str, name: str) -> dict[str, Any]:
     }
 
 
-async def run_daily_backup_scheduler(db_path_provider, *, hour: int = 4) -> None:
-    """Background daemon: sleep until 04:00 local, snapshot, repeat."""
+BACKUP_DUE_HOURS = 24.0
+BACKUP_RETRY_HOURS = 1.0
+
+
+def _newest_snapshot_age_hours(db_path: str) -> float:
+    items = list_backups(db_path)
+    if not items:
+        return float("inf")
+    try:
+        created = datetime.fromisoformat(str(items[0].get("created_at") or ""))
+    except ValueError:
+        return float("inf")
+    return max(0.0, (datetime.now() - created).total_seconds() / 3600.0)
+
+
+async def run_daily_backup_scheduler(db_path_provider, *, due_hours: float = BACKUP_DUE_HOURS) -> None:
+    """Snapshot when one is owed, at the next quiet moment.
+
+    The previous shape slept until 04:00 local — an always-on hub's alarm
+    clock. A laptop that is asleep at 04:00 never backed up: the owner's
+    satellite went nine days without a snapshot while this scheduler sat
+    armed the whole time. Owed-ness is measured from the newest snapshot on
+    disk instead, so a machine that only runs in the evenings backs up in
+    the evenings, and a fresh install backs up on its first quiet moment.
+    """
     global _scheduler_started
     if _scheduler_started:
         log.info("catalog_backup scheduler already running; skip duplicate start")
         return
     _scheduler_started = True
-    log.info("catalog_backup scheduler armed for daily %02d:00 local", hour)
+    log.info("catalog_backup scheduler armed: snapshot at quiet once %.0fh old", due_hours)
     while True:
-        delay = seconds_until_local_hour(hour)
-        log.info("catalog_backup scheduler sleeping %.0fs until next %02d:00", delay, hour)
-        await asyncio.sleep(delay)
+        db_path = db_path_provider() if callable(db_path_provider) else db_path_provider
+        age_hours = await asyncio.to_thread(_newest_snapshot_age_hours, db_path)
+        if age_hours < due_hours:
+            await asyncio.sleep((due_hours - age_hours) * 3600.0)
+            continue
+        await user_activity.wait_for_quiet()
         try:
-            db_path = db_path_provider() if callable(db_path_provider) else db_path_provider
             result = await asyncio.to_thread(create_snapshot, db_path)
             log.info(
                 "catalog_backup scheduled snapshot ok name=%s bytes=%s",
@@ -947,6 +970,7 @@ async def run_daily_backup_scheduler(db_path_provider, *, hour: int = 4) -> None
             raise
         except Exception:
             log.exception("catalog_backup scheduled snapshot failed")
+            await asyncio.sleep(BACKUP_RETRY_HOURS * 3600.0)
 
 
 def ensure_checksums_table(conn: sqlite3.Connection) -> None:
