@@ -7,7 +7,82 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
-## The blind spot in hunting frozen switches (08-04)
+## Hub-down is a first-class state, measured live (08-13)
+
+The hub went offline, which made the paired laptop the perfect test fixture:
+every place the app quietly leans on the hub surfaced as a hang, a lie, or a
+storm. Launched the real catalog (155,102 rows) on the XPS with the hub dead
+and fixed what the session itself demonstrated.
+
+**The strict sort registry had broken the Taste feature (both surfaces).** The
+08-04 change built the allowlist from `RANKING_SORTS` alone, but `taste` and
+`similarity` are computed by the library service before SQL and were never in
+the registry. The UI's availability probe is `sort=taste&limit=0`; its 400 was
+swallowed by `.catch(() => null)`, so the Taste option showed "Refine a few
+duels to teach it" — permanently, for a fully trained model. The registry
+gained the two computed sorts (`core/requests.py::COMPUTED_SORTS`); export maps
+them to Elo explicitly instead of crashing in the repository, which never sees
+them. The lesson for the silent-fallback crusade: when you tighten a boundary,
+walk every client that talks through it — the probe's error handling made the
+new honesty invisible.
+
+**Then the probe raced the clock anyway.** With the 400 fixed, the option
+*still* showed disabled after a cold boot: the probe ran the full taste build
+inline — count JOINs, the embedding matrix, comparison rows, a logistic fit —
+and cold boots exceeded the client's 10s fetch timeout (two `ERR_ABORTED`
+probes in the network log). A timed-out probe disabled Taste for the whole
+session. Now `taste_availability()` answers from ingredients — two indexed
+counts of compared photos with embeddings on both sides — and the probe
+schedules the real build in the background. Warm state answers exactly;
+2,532 local comparisons, 527 embedded pairs, verdict in milliseconds.
+
+The mechanism under it was better than the symptom: `api_rankings_impl`
+clamped `limit` to a minimum of **1**, so the probes' `limit=0` arrived as 1 —
+which made every `limit <= 0` branch below unreachable dead code (including
+the early return written specifically for the probe) and put the probe
+through the full build plus one rendered card. The test that caught it
+patches `get_matrix` to raise: the probe path must answer available without
+ever touching the matrix. The clamp minimum is now 0 — "counters and status,
+no cards" is a real request.
+
+**The pending-preview poll was a storm that could never converge.** With any
+visible cell `preview_ready: false`, the grid refetched its entire first page
+plus `cache/status` plus a duplicate `sync/status` every 3 seconds — forever,
+because a satellite with its hub offline has nothing that can produce those
+previews. Measured before: the 4-request cycle every 3s. The shared controller
+in `previews.js` now stretches its interval when a beat lands nothing (×2 up to
+60s) and snaps back on movement in either direction — no role predicate, no
+reachability check, just "did anything change?". Measured after, same page,
+44-second window: one rankings refetch instead of fourteen. Both surfaces get
+the fix; the controller's unused `pending` option left with it.
+
+**"Still sharpening" was a lie.** The pending notice had sentences for a paused
+preview engine and for a hub that was never attached — but an attached,
+unreachable hub fell through to the sharpening line while nothing on either
+machine could produce a pixel. Three append-only hint helpers became one keyed
+renderer (which also fixes their latent bug: switching reasons never replaced
+the old sentence), and hub-offline gets its own words: *"These photos live on
+your hub, and it can't be reached right now — they'll load when it returns."*
+Verified rendering in the live DOM.
+
+**The catalog backup scheduler was an always-on hub's alarm clock.** It slept
+until 04:00 local and snapshotted — which on a laptop that is asleep at 04:00
+means never. Newest snapshot on the XPS: nine days old, with the scheduler
+armed the whole time, and `/api/health` honestly reporting `bad` at every
+boot. The scheduler now measures owed-ness from the newest snapshot on disk
+and takes the backup at the next quiet moment (`user_activity.wait_for_quiet`,
+the same primitive the taste build uses). A machine that only runs in the
+evenings backs up in the evenings; a failure retries in an hour instead of
+tomorrow.
+
+**Known and deliberately not chased:** one cold-boot `sort=elo` request hung
+90+ seconds while identical `date_taken` requests flew (response-cache hits).
+It did not reproduce warm; everything idle in two py-spy dumps. The shape says
+cold-disk I/O contention between an uncached ranked query and boot chores, and
+the two biggest chore triggers (the probe's inline build, the 3s poll storm)
+are gone above. If it comes back it will come back smaller. The sync worker's
+own behavior offline is correct: state `recovering`, 300s backoff, honest
+`recent_errors`.
 
 **A fourth false positive, with a different cause.** Refine's `strategy="top"`
 was reported as a mode no shipped client can select. True, and irrelevant:
