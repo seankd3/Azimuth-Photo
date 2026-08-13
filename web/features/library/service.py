@@ -995,7 +995,11 @@ async def api_rankings_impl(
     exclude_sources=(),
     request=None,
 ):
-    limit = _configured_clamp_int(limit, 100, 1, MAX_RANKINGS_LIMIT)
+    # limit=0 is a real request — "counters and status, no cards" — sent by the
+    # taste availability probes. The old minimum of 1 silently rewrote it to one
+    # card, which made every limit<=0 branch below unreachable dead code and put
+    # the probes through the full taste build.
+    limit = _configured_clamp_int(limit, 100, 0, MAX_RANKINGS_LIMIT)
     offset = _configured_clamp_int(offset, 0, 0, 1_000_000)
     search = await _configured_resolve_library_constraints(q, people=people, deep=deep)
     search_ids = await _combined_import_batch_filter(search["id_filter"], import_batch)
@@ -1082,7 +1086,14 @@ async def api_rankings_impl(
             return copy_rankings_response(cached_data)
 
     if sort == "taste":
-        taste = await taste_service.taste_vector()
+        # limit=0 is the menu's availability probe, fired on every page load.
+        # It answers from ingredients so it never waits for the matrix build —
+        # a cold build raced the client timeout and a timed-out probe disabled
+        # the Taste sort for the whole session.
+        probing = int(limit) <= 0
+        taste = await (taste_service.taste_availability() if probing else taste_service.taste_vector())
+        if probing and taste.get("available") and taste.get("vector") is None:
+            _schedule_taste_vector()  # the menu is about to offer it; warm the order
         taste_fields = {
             "taste_available": bool(taste.get("available")),
             "taste_signal_count": int(taste.get("signal_count") or 0),

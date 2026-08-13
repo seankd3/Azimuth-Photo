@@ -789,6 +789,36 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(vector["embedded_winner_count"], 3)
         self.assertEqual(vector["embedded_loser_count"], 3)
 
+    async def test_taste_probe_answers_from_ingredients_without_the_matrix(self):
+        """limit=0 is the menu's availability probe; it must never build.
+
+        The inline build raced the client's 10s timeout on cold boots, and a
+        timed-out probe disabled the Taste sort for the whole session.
+        """
+
+        source = await self._source()
+        winners = [await self._image(source["id"], f"winner-{idx}.jpg", comparisons=1) for idx in range(3)]
+        losers = [await self._image(source["id"], f"loser-{idx}.jpg", comparisons=1) for idx in range(3)]
+        for image_id in winners:
+            await self._embedding(image_id, [1.0, 0.0])
+        for image_id in losers:
+            await self._embedding(image_id, [-1.0, 0.0])
+        await self._comparison_rows(list(zip(winners, losers)) + [(winners[0], losers[0]), (winners[1], losers[1])])
+        taste_service.invalidate_taste_cache()
+
+        with unittest.mock.patch.object(
+            embed_cache, "get_matrix",
+            side_effect=AssertionError("the availability probe must not load the matrix"),
+        ), unittest.mock.patch.object(
+            library_service, "_schedule_taste_vector"
+        ) as schedule:
+            result = await library_routes.api_rankings(limit=0, sort="taste")
+
+        self.assertTrue(result["taste_available"])
+        self.assertEqual(result["taste_signal_count"], 3)
+        self.assertEqual(result["images"], [])
+        schedule.assert_called_once_with()  # the build is delegated, not awaited
+
     async def test_taste_unavailable_returns_empty_without_elo_fallback(self):
         source = await self._source()
         high = await self._image(source["id"], "high.jpg", elo=1800)

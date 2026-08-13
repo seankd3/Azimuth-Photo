@@ -323,6 +323,75 @@ def taste_vector_if_warm() -> dict | None:
     return dict(cached)
 
 
+def _availability_counts_sync(db_path: str, model_key: str) -> tuple[int, int, int]:
+    conn = connection.open_sync(db_path)
+    try:
+        comparisons = int(conn.execute(
+            "SELECT COUNT(*) FROM comparisons"
+        ).fetchone()[0] or 0)
+        winners = int(conn.execute(
+            "SELECT COUNT(DISTINCT c.winner_id) FROM comparisons c "
+            "JOIN embeddings_by_model e ON e.image_id = c.winner_id AND e.model_key = ?",
+            (model_key,),
+        ).fetchone()[0] or 0)
+        losers = int(conn.execute(
+            "SELECT COUNT(DISTINCT c.loser_id) FROM comparisons c "
+            "JOIN embeddings_by_model e ON e.image_id = c.loser_id AND e.model_key = ?",
+            (model_key,),
+        ).fetchone()[0] or 0)
+    finally:
+        connection.close_sync(conn, db_path=db_path)
+    return comparisons, winners, losers
+
+
+async def taste_availability() -> dict:
+    """Whether taste can be built, answered from ingredients — never the matrix.
+
+    The availability probe fires on every page load. Answering it with the full
+    build meant every cold boot raced the client's timeout, and a probe that
+    timed out disabled the Taste sort for the whole session. Compared photos
+    with embeddings on both sides answer the menu's question in two indexed
+    counts; the fit itself can still decline at sort time with its own reason.
+    """
+
+    warm = taste_vector_if_warm()
+    if warm is not None:
+        return warm
+    model_key = _active_model_key()
+    comparison_count, winner_count, loser_count = await _to_thread(
+        _availability_counts_sync, catalog_path(), model_key
+    )
+    if comparison_count < MIN_COMPARISON_ROWS:
+        return _unavailable(
+            f"Taste needs at least {MIN_COMPARISON_ROWS} direct comparisons.",
+            comparison_count=comparison_count,
+            model_key=model_key,
+        )
+    if winner_count < MIN_EMBEDDED_WINNERS or loser_count < MIN_EMBEDDED_LOSERS:
+        return _unavailable(
+            (
+                f"Taste needs embeddings for at least {MIN_EMBEDDED_WINNERS} winners "
+                f"and {MIN_EMBEDDED_LOSERS} losers from direct comparisons."
+            ),
+            comparison_count=comparison_count,
+            winner_count=winner_count,
+            loser_count=loser_count,
+            model_key=model_key,
+        )
+    return {
+        "available": True,
+        "vector": None,  # ingredients verdict; the build happens off-request
+        "model_key": model_key,
+        "comparison_count": comparison_count,
+        "embedded_winner_count": winner_count,
+        "embedded_loser_count": loser_count,
+        "signal_count": min(winner_count, loser_count),
+        "confidence": 0.0,
+        "pairwise_accuracy": 0.0,
+        "fallback_reason": "",
+    }
+
+
 async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()
