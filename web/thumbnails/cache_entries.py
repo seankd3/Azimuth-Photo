@@ -40,6 +40,23 @@ _persistent_conn: sqlite3.Connection | None = None
 _cache_metadata_retry_after = 0.0
 _cache_metadata_lock_failures = 0
 
+# Every write stamps the derivation identity: content_hash comes from the
+# catalog row via a subquery (?3 is the entry's image_id), so no caller has
+# to thread it through. Isolated fixture DBs have no images table; their
+# writes use the unstamped variant chosen once at connect.
+_INSERT_ENTRY_STAMPED = (
+    "INSERT OR REPLACE INTO cache_entries "
+    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at, content_hash, recipe) "
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, "
+    "COALESCE((SELECT content_hash FROM images WHERE id = ?3), ''), '')"
+)
+_INSERT_ENTRY_PLAIN = (
+    "INSERT OR REPLACE INTO cache_entries "
+    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+)
+_insert_entry_sql = _INSERT_ENTRY_PLAIN
+
 _tier_byte_totals: dict[str, int] = {}
 _disk_stats_cache = {"data": None, "expires": 0.0, "stale_until": 0.0}
 _disk_stats_cache_ttl_seconds = 5.0
@@ -130,6 +147,12 @@ def _db_connect() -> sqlite3.Connection:
             "size_bytes INTEGER NOT NULL, "
             "last_accessed REAL NOT NULL, "
             "created_at REAL NOT NULL, "
+            # The derivation identity: which bytes this artifact was derived
+            # from, and under which recipe. content_hash is stamped by the
+            # database on every write; recipe stays '' until the pipeline
+            # that computes expected recipes lands (pixels/rendition.py).
+            "content_hash TEXT NOT NULL DEFAULT '', "
+            "recipe TEXT NOT NULL DEFAULT '', "
             "PRIMARY KEY (cache_root, size, image_id)"
             ")"
         )
@@ -148,9 +171,54 @@ def _db_connect() -> sqlite3.Connection:
             )
         except sqlite3.OperationalError:
             pass
+        for column in ("content_hash TEXT NOT NULL DEFAULT ''", "recipe TEXT NOT NULL DEFAULT ''"):
+            try:
+                conn.execute(f"ALTER TABLE cache_entries ADD COLUMN {column}")
+            except sqlite3.OperationalError:
+                pass
+        # Same bytes in two catalog rows share one derivation; this is the
+        # lookup that lets a writer adopt an existing artifact instead of
+        # deriving it again, and the seam H3's transfer routes query by.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cache_entries_derivation "
+            "ON cache_entries(cache_root, size, content_hash) "
+            "WHERE content_hash != ''"
+        )
         conn.commit()
+        global _insert_entry_sql
+        has_images = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'images'"
+        ).fetchone()
+        _insert_entry_sql = _INSERT_ENTRY_STAMPED if has_images else _INSERT_ENTRY_PLAIN
         _persistent_conn = conn
     return _persistent_conn
+
+
+def stamp_missing_content_hashes() -> None:
+    """Stamp existing rows with the catalog's content hashes.
+
+    New writes stamp themselves; this catches rows written before the column
+    existed and images that were hashed after their tile was cached. It runs
+    from the boot warm task, never from ``_db_connect``: a table-scanning
+    UPDATE inside a lazy connect sat behind startup's catalog writers for the
+    whole busy timeout, which is how adding it there froze app boot.
+    """
+
+    with _p().meta_lock:
+        try:
+            conn = _db_connect()
+            conn.execute(
+                "UPDATE cache_entries SET content_hash = i.content_hash "
+                "FROM images i "
+                "WHERE i.id = cache_entries.image_id "
+                "AND cache_entries.content_hash = '' "
+                "AND i.content_hash IS NOT NULL AND i.content_hash != ''"
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            # No images table (isolated fixture DBs), or the catalog is busy —
+            # unstamped rows stay unstamped until the next boot finds it quiet.
+            pass
 
 
 def _is_touch_entry(entry: tuple) -> bool:
@@ -417,8 +485,10 @@ async def warm_disk_path_index() -> bool:
     """Build the disk path index off the event loop.
 
     The synchronous build reads every cache_entries row for this cache root, so
-    request handlers must never trigger it inline.
+    request handlers must never trigger it inline. The derivation-identity
+    backfill rides the same boot task for the same reason.
     """
+    await asyncio.to_thread(stamp_missing_content_hashes)
     return await asyncio.to_thread(_build_disk_path_index)
 
 
@@ -646,9 +716,7 @@ def _store_disk_entry(
                 _remove_cache_entry_locked(conn, previous)
 
         conn.execute(
-            "INSERT OR REPLACE INTO cache_entries "
-            "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            _insert_entry_sql,
             (
                 cache_root,
                 size,
@@ -744,9 +812,7 @@ def _flush_write_queue() -> bool:
                     _remove_cache_entry_locked(conn, previous)
 
                 conn.execute(
-                    "INSERT OR REPLACE INTO cache_entries "
-                    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    _insert_entry_sql,
                     (cache_root, size, image_id, path, source_signature, int(size_bytes), access_time, now),
                 )
                 if size in _tier_byte_totals:
