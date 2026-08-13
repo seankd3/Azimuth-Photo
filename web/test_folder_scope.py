@@ -97,6 +97,19 @@ class RankingSortTests(unittest.TestCase):
         for name in ("lens", "elo desc", "'; DROP TABLE images;--", "ELO"):
             self.assertEqual(client.get(f"/sorted?sort={name}").status_code, 400, name)
 
+    def test_the_computed_sorts_are_part_of_the_vocabulary(self):
+        """taste and similarity are honoured by the service, not the registry.
+
+        The first strict allowlist was built from RANKING_SORTS alone and
+        rejected them — which silently disabled the Taste sort everywhere,
+        because the UI's availability probe is a `sort=taste&limit=0` request
+        whose 400 was swallowed by its `.catch(() => null)`.
+        """
+
+        client = self._client()
+        for name in ("taste", "similarity"):
+            self.assertEqual(client.get(f"/sorted?sort={name}").json()["sort"], name, name)
+
     def test_no_sort_still_means_elo(self):
         client = self._client()
         self.assertEqual(client.get("/sorted").json()["sort"], "elo")

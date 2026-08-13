@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 from core.path_groups import safe_commonpath
-from core.requests import FolderScope, RankingSort
+from core.requests import COMPUTED_SORTS, FolderScope, RankingSort
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import rankings as ranking_repository
@@ -98,7 +98,10 @@ async def _get_export_images(
         else:
             id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
     id_filter, collection_id = await library_service._resolve_collection_scope(id_filter, collection_id)
-    db_sort = "elo" if sort == "similarity" else sort
+    # The computed orders need the service's search/blend context, which an
+    # export of raw rows does not carry. Elo is taste's own backbone, stated
+    # here rather than left to a silent registry fallback.
+    db_sort = "elo" if sort in COMPUTED_SORTS else sort
     ranking_args = dict(
         sort=db_sort,
         orientation=orientation,

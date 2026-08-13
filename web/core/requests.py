@@ -36,6 +36,12 @@ def _folder_scope(request: Request, folder: str = Query("")) -> str | list[str]:
 FolderScope = Annotated[str | list[str], Depends(_folder_scope)]
 
 
+#: Orders the library service computes before SQL — taste is the learned blend,
+#: similarity is search-score order. The ranking repository never sees either;
+#: callers that skip the service map them to "elo" themselves.
+COMPUTED_SORTS = frozenset({"taste", "similarity"})
+
+
 def _ranking_sort(sort: str = Query("elo")) -> str:
     """A sort the server cannot honour is an error, not quietly Elo order.
 
@@ -52,7 +58,7 @@ def _ranking_sort(sort: str = Query("elo")) -> str:
     from data.repositories.rankings import RANKING_SORTS
 
     value = str(sort or "").strip()
-    if value and value not in RANKING_SORTS:
+    if value and value not in RANKING_SORTS and value not in COMPUTED_SORTS:
         raise HTTPException(status_code=400, detail=f"unknown sort: {value}")
     return value or "elo"
 
