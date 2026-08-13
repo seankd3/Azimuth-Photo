@@ -240,47 +240,48 @@ function cachePregenPaused(status) {
     return Boolean(status?.pregen?.manual_pause);
 }
 
-function appendPausedPreviewHint(target) {
-    if (!target || target.querySelector('.grid-pending-paused')) return;
-    const hint = document.createElement('span');
-    hint.className = 'grid-pending-paused';
-    hint.append('Preview engine is paused — ');
-    const system = document.createElement('button');
-    system.type = 'button';
-    system.className = 'grid-pending-system';
-    system.textContent = 'Resume';
-    system.addEventListener('click', () => openSystemSettings());
-    hint.append(system, '.');
-    target.append(hint);
-}
+const PENDING_HINTS = {
+    hub_offline: ["These photos live on your hub, and it can't be reached right now — they'll load when it returns."],
+    hub_missing: ['These photos live on your hub, and this computer is not connected to it — ', 'Connect', () => openSystemSettings('connectivity')],
+    paused: ['Preview engine is paused — ', 'Resume', () => openSystemSettings()],
+};
 
-function appendDisconnectedHubHint(target) {
-    if (!target || target.querySelector('.grid-pending-paused')) return;
+function renderPendingHint(target, kind) {
+    const current = target.querySelector('.grid-pending-paused');
+    if (current?.dataset.kind === kind) return;
+    current?.remove();
+    if (!kind) return;
+    const [text, label, action] = PENDING_HINTS[kind];
     const hint = document.createElement('span');
     hint.className = 'grid-pending-paused';
-    hint.append('These photos live on your hub, and this computer is not connected to it — ');
-    const connect = document.createElement('button');
-    connect.type = 'button';
-    connect.className = 'grid-pending-system';
-    connect.textContent = 'Connect';
-    connect.addEventListener('click', () => openSystemSettings('connectivity'));
-    hint.append(connect, '.');
+    hint.dataset.kind = kind;
+    hint.append(text);
+    if (label) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'grid-pending-system';
+        button.textContent = label;
+        button.addEventListener('click', action);
+        hint.append(button, '.');
+    }
     target.append(hint);
 }
 
 function loadPausedPreviewHint(target) {
     const request = ++pendingNoticeRequest;
-    // Two different reasons a photo never sharpens, and they need different
-    // sentences. Locally the preview engine can be paused. On a satellite the
-    // photo can live on a hub this computer is not attached to — which used to
-    // say nothing at all, so the library sat there greyed out with no cause and
-    // no way back.
+    // Each reason a photo never sharpens needs its own sentence: the preview
+    // engine can be paused locally, the photo can live on a hub this computer
+    // is not attached to, or the hub it is attached to can be offline. The
+    // last one used to fall through to nothing, so the grid claimed photos
+    // were "sharpening" while nothing on either machine could produce them.
     Promise.all([getCacheStatus().catch(() => null), getSyncStatus().catch(() => null)])
         .then(([cache, sync]) => {
-            if (request !== pendingNoticeRequest || !target.isConnected) return;
-            if (sync?.hub_health === 'not_connected') appendDisconnectedHubHint(target);
-            else if (cachePregenPaused(cache)) appendPausedPreviewHint(target);
-            else target.querySelector('.grid-pending-paused')?.remove();
+            if (request !== pendingNoticeRequest || !target?.isConnected) return;
+            const kind = sync?.hub_health === 'not_connected' ? 'hub_missing'
+                : sync?.hub_health === 'unreachable' ? 'hub_offline'
+                : cachePregenPaused(cache) ? 'paused'
+                : '';
+            renderPendingHint(target, kind);
         })
         .catch(() => {});
 }
