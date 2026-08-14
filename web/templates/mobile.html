@@ -76,11 +76,6 @@
 
     <a id="m-dl" download hidden></a>
 
-    <script type="module">
-        import { scheduleServiceWorkerRegistration } from '/static/js/sw_register.js?v={{ static_version }}';
-        // HTTPS/localhost only; ?pa_sw=0 or localStorage pa_sw=0 disables (see sw_register.js).
-        scheduleServiceWorkerRegistration();
-    </script>
     <script type="module" src="/static/js/mobile/bootstrap.js?v={{ static_version }}"></script>
 </body>
 </html>

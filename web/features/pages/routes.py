@@ -165,7 +165,12 @@ async def setup_complete():
 
 @router.get("/sw.js")
 async def service_worker():
-    """Serve the mobile service worker from the site root so it can claim scope /."""
+    """Serve the self-destructing worker stub from the root scope.
+
+    The offline worker is deleted; this URL survives only so installed
+    clients unregister the poisoned worker and drop its caches (sw.js has
+    the story). Removing the route would strand them on the broken worker.
+    """
     return FileResponse(
         os.path.join(_STATIC_DIR, "sw.js"),
         media_type="application/javascript",

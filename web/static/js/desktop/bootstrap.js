@@ -27,7 +27,6 @@ import { initCullBrief } from './cull_brief.js';
 import { initQuickGuide } from './quick_guide.js';
 import { initSyncChip } from './sync_chip.js';
 import { initLrRankingChip } from './lr_ranking_chip.js';
-import { scheduleServiceWorkerRegistration } from '../sw_register.js';
 
 async function boot() {
     await mountIconSprite();
@@ -59,8 +58,6 @@ async function boot() {
     initQuickGuide();
     initLenses();
     await initPanel();
-    // Thumb Cache API on HTTPS/localhost; no-op on plain HTTP. Disable: ?pa_sw=0
-    scheduleServiceWorkerRegistration();
 }
 
 boot().catch((error) => {

@@ -131,6 +131,35 @@ function mergeSameNamedRoots(list) {
         keep.online = keep.online || fold.online;
         if (!keep.id && fold.id) keep.merged_source_id = fold.id;
     }
+    for (const root of merged) root.folders = mergeSameNamedFolders(root.folders || []);
+    return merged;
+}
+
+/**
+ * Same name, same place — all the way down. A merged root holds both the
+ * archive's tree and the laptop's ("Film Scans" on the drive, "Film Scans"
+ * in Pictures), so same-named folders fold into one node: counts combined,
+ * children folded the same way, every underlying path scoped on click.
+ * The tree the person sees is the library, not a map of which disk holds
+ * which copy.
+ */
+function mergeSameNamedFolders(nodes) {
+    const byName = new Map();
+    const merged = [];
+    for (const node of nodes) {
+        const key = String(node.name || leafName(node.path)).trim().toLowerCase();
+        const kept = byName.get(key);
+        if (!kept) {
+            const copy = { ...node, children: [...(node.children || [])], scope_paths: [node.path] };
+            byName.set(key, copy);
+            merged.push(copy);
+            continue;
+        }
+        kept.total_count = Number(kept.total_count || 0) + Number(node.total_count || 0);
+        kept.children = [...kept.children, ...(node.children || [])];
+        kept.scope_paths = [...new Set([...kept.scope_paths, node.path])];
+    }
+    for (const node of merged) node.children = mergeSameNamedFolders(node.children);
     return merged;
 }
 
@@ -142,9 +171,9 @@ function nodeMatches(node, query) {
 
 function applyFolderScope(path, options = {}) {
     if (!path) return;
-    // A merged root is one place with several underlying paths.
-    const root = roots.find((item) => item.path === path);
-    const paths = root?.scope_paths?.length ? root.scope_paths : [path];
+    // A merged node — root or folder — is one place with several paths.
+    const node = findScopeNode(path);
+    const paths = node?.scope_paths?.length ? node.scope_paths : [path];
     navigateToScope({ folder: paths }, options);
     if (!options.keepOpen) closeDrawer();
 }
@@ -263,7 +292,7 @@ function openFolderMenu(node, anchor) {
             ? `<button data-act="rescan"${node.online === false ? ' disabled aria-disabled="true"' : ''}>${icon('refresh-cw')} Rescan</button>`
             : '')
         + (node.reveal_available !== false ? `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>` : '')
-        + (isFilmRollPath(node.path) ? `<button data-act="rename">${icon('pencil')} Rename roll…</button>` : '')
+        + (isFilmRollPath(node.path) && !(node.scope_paths?.length > 1) ? `<button data-act="rename">${icon('pencil')} Rename roll…</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
