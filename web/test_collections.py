@@ -6,7 +6,6 @@ from core import query_constraints
 import unittest.mock
 from test_support import *  # noqa: F401,F403
 from data.repositories import collections as collection_repository
-from data.repositories import shares as share_repository
 from features.collections import smart as smart_collections
 from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
