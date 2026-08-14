@@ -698,12 +698,51 @@ async def apply_origin_batch(
         _invalidate_pending_entry_count(db_path)
     if any(item["result"] == "applied" for item in results):
         await retry_pending_entries(db_path)
+    await _refresh_develop_previews(db_path, normalized, results)
     return {
         "received": len(normalized),
         "inserted": inserted,
         "skipped_unhashed": sum(item["result"] == "unknown-content-hash" for item in results),
         "entries": results,
     }
+
+
+async def _refresh_develop_previews(db_path: str, entries, results) -> None:
+    """A develop edit applied from another machine owns its thumbnails too.
+
+    The local save route purges its own tiers; an edit arriving through the
+    oplog used to leave every tier showing the pre-edit render forever. The
+    next fetch after this purge re-renders through the develop bridge.
+    """
+
+    hashes = {
+        str(entry.get("content_hash") or "")
+        for entry, item in zip(entries, results, strict=False)
+        if entry.get("family") == "develop" and item.get("result") == "applied"
+    }
+    hashes.discard("")
+    if not hashes:
+        return
+    import thumbnails
+
+    conn = await connection.open_async(db_path)
+    try:
+        image_ids: list[int] = []
+        hash_list = list(hashes)
+        for start in range(0, len(hash_list), 500):
+            chunk = hash_list[start:start + 500]
+            placeholders = ",".join("?" for _ in chunk)
+            rows = await (await conn.execute(
+                f"SELECT id FROM images WHERE content_hash IN ({placeholders})", chunk
+            )).fetchall()
+            image_ids.extend(int(row["id"]) for row in rows)
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+    if image_ids:
+        try:
+            await asyncio.to_thread(thumbnails.purge_image_cache, image_ids)
+        except Exception:
+            log.exception("oplog develop apply could not refresh previews")
 
 
 async def _apply_normalized_entries(
@@ -747,6 +786,7 @@ async def _apply_normalized_entries(
         _invalidate_pending_entry_count(db_path)
     if any(item["result"] == "applied" for item in results):
         await retry_pending_entries(db_path)
+    await _refresh_develop_previews(db_path, normalized, results)
     return {
         "received": len(normalized),
         "inserted": inserted,

@@ -20,11 +20,12 @@ from thumbnails import cache_entries, config, data_providers
 def edit_state(image_id: int) -> tuple[str, dict] | None:
     """(fingerprint, settings) when the photo has real develop edits, else None.
 
-    A settings row whose JSON is empty is not an edit — reset-to-default
-    photos render identically to the unedited pipeline and stay on it. The
-    fingerprint is the row's updated_at, the same value the serve path reads
-    by LEFT JOIN, so a saved edit changes every tier's expected recipe at
-    once.
+    A settings row that changes no pixels is not an edit: reset-to-default
+    rows are empty, and rating sync stores ``_lr_rating`` bookkeeping in the
+    same table — underscore keys never reach the render pipeline, so a
+    rating-only photo stays on the fast embedded-preview path. The
+    fingerprint is the row's updated_at, so a saved edit changes every
+    tier's expected recipe at once.
     """
 
     try:
@@ -45,7 +46,9 @@ def edit_state(image_id: int) -> tuple[str, dict] | None:
         settings = json.loads(row["settings"] or "{}")
     except (TypeError, ValueError):
         return None
-    if not isinstance(settings, dict) or not settings:
+    if not isinstance(settings, dict):
+        return None
+    if not any(not key.startswith("_") for key in settings):
         return None
     return str(row["updated_at"] or ""), settings
 

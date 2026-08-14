@@ -157,6 +157,27 @@ class CacheRouteTests(BackendTestCase):
         self.assertTrue(edited)
         self.assertNotEqual(edited, baseline)
 
+    async def test_a_rating_only_settings_row_is_not_an_edit(self):
+        """Rating sync stores _lr_rating in develop_settings; no pixels change,
+        so the photo must stay on the fast embedded-preview path."""
+
+        from thumbnails import develop_bridge
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "rated.jpg")
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings (image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'sync', 5.0)",
+                (image_id, '{"_lr_rating": 4}'),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+
+        self.assertIsNone(develop_bridge.edit_state(image_id))
+
     async def test_pregen_start_and_stop_flip_cache_worker_state(self):
         started = await self._request("POST", "/api/cache/pregen/start")
         self.assertEqual(started.status_code, 200, started.text)
