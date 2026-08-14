@@ -9,6 +9,7 @@ from collections import deque
 from functools import partial
 
 from core import memory_pressure, work_coordination
+from photo import location
 from thumbnails.config import EMBEDDED_PREVIEW_EXTENSIONS, RAW_EXTENSIONS, SIZES
 from thumbnails.decode_budget import bulk_decode_budget, estimate_decode_bytes
 
@@ -190,6 +191,17 @@ async def run_pregen_bulk_batch(
                 and len(out) >= max(1, int(activity_burst_items))
             ):
                 break
+            # A photo whose bytes live on the archive's own disk joins the
+            # sweep when that disk is attached: decode from the resolved path,
+            # size-verified so a same-named stranger is never derived. Cache
+            # signatures stay keyed to the catalog row, so warm-checks agree
+            # with every other path. An unresolvable row is simply still owed —
+            # the cursor moves on without it, quietly.
+            filepath = str(row["filepath"] or "")
+            if not os.path.isfile(filepath):
+                filepath = location.local_path(filepath, expected_size=row["file_size"])
+                if filepath is None:
+                    continue
             size_signatures, source_size = bulk_candidate_signatures(row, tier_room, tier_budgets)
             full_item = (
                 full_candidate_signature(row, full_room, full_budget)
@@ -213,7 +225,7 @@ async def run_pregen_bulk_batch(
                 need_metadata = False
             candidate = {
                 "id": int(row["id"]),
-                "filepath": row["filepath"],
+                "filepath": filepath,
                 "signatures": size_signatures,
                 "full": full_item,
                 "source_size": source_size,
