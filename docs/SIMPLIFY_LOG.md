@@ -7,6 +7,37 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## The film loop closed end to end, and the facade fell (08-13, evening)
+
+One evening, four landings, all verified live:
+
+**The one gesture.** Film labs deliver rolls as ZIPs in Downloads. The
+pipeline existed (upload → extract → junk-skip → dedupe →
+`Raws/Film Scans/<archive>/`); the missing move was the drop. An OS-file
+drop anywhere on the app now feeds the same flow as the picker — proven with
+a synthetic drop and a real lab-shaped zip, drop-to-grid (`ec80a4a9`). The
+shell already handed drops to the page; in-app drags never carry Files, so
+nothing collides.
+
+**The sweep.** Pregen candidates resolve through `photo/location.py`
+(`9d268ba8`): press Start with the archive disk attached and the ~50k owed
+tiles derive in one orderly newest-first pass — signatures stay keyed to the
+catalog row, unresolvable rows stay owed, and both missing-markers already
+refused hub-remote rows, so a mid-sweep unplug cannot mark healthy photos
+missing.
+
+**The one button** (`09d1fb02`). `process_locally_when_hub_offline`, exactly
+as blessed on 08-04: one boolean, default off, arming the same three AI
+workers a hub arms. The OOM circuit is the sizing rule — no model swap, no
+quality degradation, unfit work stays owed.
+
+**The facade program closed its arc**: `db.py` 1,693 → 1,326 (−367, 93
+forwarders across two workflow reaps), every production caller and every
+test asking its owner — patch targets where production looks names up,
+state aliases pointing at the very dicts production mutates. Both rounds
+Grok-cross-reviewed CLEAN and re-gated by hand; every stray red proven
+pre-existing on clean worktrees before landing anything.
+
 ## The desktop app runs today's code against the real library (08-13)
 
 Sean asked for the .exe on his desktop to be usable for film import + editing
