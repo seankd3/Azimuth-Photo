@@ -1091,6 +1091,33 @@ page never composites — which is also why image `naturalWidth` stays 0 despite
 the thumbnail fetches returning 200. Everything above was read from the DOM,
 computed styles and the network log. That is weaker than looking at it.
 
+## The laptop-and-drive day (08-14)
+
+Sean dropped the hub: *"forget about the hub thats honestly too complicated,
+lets just focus on laptop + the external harddrive."* The laptop's catalog
+became the operative truth, which changed one job completely.
+
+**The Raws outliers were not files.** The plan on record said eleven originals
+needed hub-side moves. Checked against the attached drive itself: every visible
+outlier's file already exists at its canonical path with the recorded size.
+What Sean saw in his folders panel was 17 stale catalog rows — 14 ghost doubles
+of files whose canonical row already exists (three of them 8–16-byte junk
+"jpg"s), 3 lone rows under retired spellings (`RAWS/`, `RAWs/`, top-level
+`Film Scans/`). `scripts/repair_raws_catalog.py` replaces the mover the plan
+had queued: classify, migrate ghost keyword/batch links to the canonical row,
+delete ghosts, fix spellings — dry-run default, fixpoint passes because two
+stale rows can name the same canonical path, and a refuse-list for anything
+unverified. Found on the way: SQLite `LIKE` is case-insensitive, so the first
+census matched 99,891 rows and spun the drive for a minute. `GLOB`, always —
+the source-roots lesson, relearned.
+
+**A roll renames as one unit.** The second half of the film ask ("an easy way
+to rename the roll folder") landed as a context-menu verb on the folder tree:
+the row's label becomes an input; the directory rename and every catalog row
+update commit together, and a database failure renames the directory back.
+`photo/location` resolves the physical directory, so a roll on the archive
+drive renames the same as one on the laptop.
+
 ## Lessons, paid for
 
 **Automated sweeps for finding, hands for editing.** Seven regex sweeps corrupted
