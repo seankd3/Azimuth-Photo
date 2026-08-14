@@ -1,5 +1,5 @@
 import { esc, formatCount as fmt } from '../lib.js';
-import { getFolderTree, revealFolder, rescanCatalogSource } from './api.js';
+import { getFolderTree, renameFilmRoll, revealFolder, rescanCatalogSource } from './api.js';
 import { exportScope, openExportMenu } from './export_menu.js';
 import { emit, folderActive, folderValues, navigateToScope, on, scope, scopeParams } from './state.js';
 import { showToast } from './toast.js';
@@ -263,6 +263,7 @@ function openFolderMenu(node, anchor) {
             ? `<button data-act="rescan"${node.online === false ? ' disabled aria-disabled="true"' : ''}>${icon('refresh-cw')} Rescan</button>`
             : '')
         + (node.reveal_available !== false ? `<button data-act="reveal">${icon('folder-open')} ${esc(fileManagerMenuLabel())}</button>` : '')
+        + (isFilmRollPath(node.path) ? `<button data-act="rename">${icon('pencil')} Rename roll…</button>` : '')
         + `<button data-act="export">${icon('download')} Export view…</button>`
         + '</div>';
     menu.hidden = false;
@@ -281,10 +282,73 @@ function openFolderMenu(node, anchor) {
             if (action === 'quiet') applyQuietToggle(node.id);
             if (action === 'rescan') startSourceRescan(node.id);
             if (action === 'reveal') revealFolderPath(node.path, node.source_id || node.id);
+            if (action === 'rename') startRollRename(node);
             if (action === 'export') exportFolderScope(node, anchor);
         });
     }
     trapFocus(menu, menu.querySelector('button:not([disabled])'));
+}
+
+// A year ("2026") or a day ("2026-08-06") — dated shelving, never a roll.
+// Mirrors film.is_roll_path server-side.
+const DATED_SHELF = /^(?:19|20)\d{2}(?:-\d{2}-\d{2})?$/;
+
+function isFilmRollPath(path) {
+    const parts = String(path || '').split('/').filter(Boolean);
+    const anchor = parts.indexOf('Film Scans');
+    return anchor > 0 && parts[anchor - 1] === 'Raws' && parts.length > anchor + 1
+        && !DATED_SHELF.test(parts[parts.length - 1]);
+}
+
+/** Swap the tree row's label for an input: Enter renames, Escape or blur cancels. */
+function startRollRename(node) {
+    const row = document.querySelector(`[data-folder-path="${CSS.escape(node.path)}"]`);
+    const label = row?.querySelector('.folder-label');
+    if (!label) return;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'folder-rename-input';
+    input.value = node.name || leafName(node.path);
+    input.setAttribute('aria-label', 'Roll name');
+    label.replaceWith(input);
+    input.focus();
+    input.select();
+    let settled = false;
+    const cancel = () => {
+        if (settled) return;
+        settled = true;
+        input.replaceWith(label);
+    };
+    const submit = async () => {
+        if (settled) return;
+        settled = true;
+        const name = input.value.trim();
+        if (!name || name === (node.name || leafName(node.path))) {
+            input.replaceWith(label);
+            return;
+        }
+        input.disabled = true;
+        const result = await renameFilmRoll(node.path, name);
+        if (result?.ok && result?.data?.path) {
+            if (expanded.has(node.path)) setExpanded(result.data.path, true);
+            showToast('Roll renamed');
+            refreshFoldersPanel();
+        } else {
+            input.replaceWith(label);
+            showToast(result?.data?.error || 'Couldn’t rename the roll');
+        }
+    };
+    input.addEventListener('keydown', (event) => {
+        event.stopPropagation();
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            submit();
+        } else if (event.key === 'Escape') {
+            event.preventDefault();
+            cancel();
+        }
+    });
+    input.addEventListener('blur', cancel);
 }
 
 function applyQuietToggle(sourceId) {

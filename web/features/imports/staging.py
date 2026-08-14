@@ -22,6 +22,7 @@ from data.repositories import collections as collection_repository
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
 from features.imports import card
+from features.imports import film
 from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.quality import routes as quality_routes
@@ -363,16 +364,6 @@ def _trim_preview_cache(root: Path) -> None:
             continue
 
 
-def _clean_roll_name(value: str | None) -> str | None:
-    """A folder name the owner typed: one path segment, Windows-legal."""
-
-    text = str(value or "").strip().strip(".")
-    for forbidden in '<>:"/\\|?*':
-        text = text.replace(forbidden, " ")
-    text = " ".join(text.split())
-    return text[:120] or None
-
-
 async def start_commit(
     scan: Scan,
     *,
@@ -415,7 +406,7 @@ async def start_commit(
         selected = [entry for entry in scan.entries if entry["key"] in requested]
     else:
         raise ValueError("keys must be a list or all_checked_default")
-    cleaned_roll = _clean_roll_name(roll_name) if scan.film_source else None
+    cleaned_roll = film.clean_roll_name(roll_name) if scan.film_source else None
     batch_id = await import_repository.create_import_batch(db.DB_PATH, {
         "name": cleaned_roll or scan.label or Path(scan.path).name or "Import",
         "destination_mode": mode,
@@ -486,8 +477,6 @@ async def _reclaim_film_staging(job: ImportJob) -> None:
         return
     if len(job.entries) != len(scan.entries):
         return
-    from features.imports import film
-
     if film.is_staging_path(scan.path):
         await asyncio.to_thread(shutil.rmtree, scan.path, True)
     _scans.pop(scan.id, None)

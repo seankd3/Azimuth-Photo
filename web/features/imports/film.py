@@ -14,6 +14,8 @@ picker copy says "ZIP or TIFF files" honestly.
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import shutil
 import time
 import uuid
@@ -21,9 +23,12 @@ import zipfile
 from datetime import date
 from pathlib import Path, PurePosixPath
 
+import db
 import scanner
 import thumbnails
+from data import connection
 from features.imports import service
+from photo import location
 
 
 ARCHIVE_EXTENSIONS = frozenset({".zip"})
@@ -31,6 +36,112 @@ UNSUPPORTED_ARCHIVE_EXTENSIONS = frozenset({".rar", ".7z"})
 STAGING_DIR_NAME = "import-film"
 STALE_STAGING_SECONDS = 24 * 3600
 RAR_MESSAGE = "RAR archives aren't supported yet — send ZIP or the TIFF files themselves"
+
+
+def clean_roll_name(value: str | None) -> str | None:
+    """A folder name the owner typed: one path segment, Windows-legal."""
+
+    text = str(value or "").strip().strip(".")
+    for forbidden in '<>:"/\\|?*':
+        text = text.replace(forbidden, " ")
+    text = " ".join(text.split())
+    return text[:120] or None
+
+
+# A year ("2026") or a day ("2026-08-06") — the dated shelving between
+# Film Scans/ and the roll folders, never itself a roll.
+_DATED_SHELF = re.compile(r"^(?:19|20)\d{2}(?:-\d{2}-\d{2})?$")
+
+
+def is_roll_path(path: str) -> bool:
+    """True when *path* names a roll folder under Raws/Film Scans/ —
+    the unit ``rename_roll`` operates on, in either the old
+    ``<year>/<roll>`` or the current ``<year>/<day>/<roll>`` layout."""
+
+    parts = [part for part in str(path or "").replace("\\", "/").split("/") if part]
+    try:
+        anchor = parts.index("Film Scans")
+    except ValueError:
+        return False
+    return (
+        anchor >= 1
+        and parts[anchor - 1] == "Raws"
+        and len(parts) > anchor + 1
+        and not _DATED_SHELF.match(parts[-1])
+    )
+
+
+def rename_roll(tree_path: str, new_name: str) -> dict:
+    """Rename a landed roll folder — bytes and catalog rows together.
+
+    *tree_path* is the folder as the tree shows it (the catalog form,
+    forward slashes). The physical directory is found through
+    ``photo.location`` so a roll on the attached archive drive renames the
+    same way as one on the laptop. The directory rename and the row
+    updates succeed or fail as one: any database failure renames the
+    directory back.
+    """
+
+    cleaned = clean_roll_name(new_name)
+    if not cleaned:
+        raise ValueError("Type a folder name")
+    if not is_roll_path(tree_path):
+        raise ValueError("Only film roll folders can be renamed")
+    prefix = str(tree_path or "").replace("\\", "/").rstrip("/")
+    if cleaned == prefix.rsplit("/", 1)[-1]:
+        return {"path": prefix, "name": cleaned}
+
+    conn = connection.open_sync(db.DB_PATH)
+    try:
+        rows = conn.execute(
+            "SELECT id, filepath, file_size FROM images "
+            "WHERE substr(replace(filepath, char(92), '/'), 1, ?) = ?",
+            (len(prefix) + 1, prefix + "/"),
+        ).fetchall()
+        if not rows:
+            raise ValueError("No photos found in this folder")
+        first = rows[0]
+        resolved = location.local_path(first["filepath"], expected_size=first["file_size"])
+        if resolved is None:
+            raise ValueError("The roll's files aren't reachable right now")
+        depth_below_roll = str(first["filepath"]).replace("\\", "/")[len(prefix) + 1:].count("/") + 1
+        physical = Path(resolved)
+        for _ in range(depth_below_roll):
+            physical = physical.parent
+        target = physical.with_name(cleaned)
+        case_change_only = target.name.lower() == physical.name.lower()
+        if target.exists() and not case_change_only:
+            raise ValueError("A folder with that name already exists")
+
+        new_prefix = prefix.rsplit("/", 1)[0] + "/" + cleaned
+        try:
+            os.rename(physical, target)
+        except OSError as exc:
+            raise ValueError("The folder is busy — try again in a moment") from exc
+        try:
+            with conn:
+                for row in rows:
+                    tail = str(row["filepath"]).replace("\\", "/")[len(prefix):]
+                    new_filepath = new_prefix + tail
+                    if "\\" in str(row["filepath"]):
+                        new_filepath = new_filepath.replace("/", "\\")
+                    conn.execute(
+                        "UPDATE images SET filepath = ? WHERE id = ?",
+                        (new_filepath, row["id"]),
+                    )
+                # The import batch named after the roll follows the rename.
+                conn.execute(
+                    "UPDATE import_batches SET name = ? WHERE name = ? AND id IN ("
+                    "  SELECT DISTINCT batch_id FROM import_batch_images WHERE image_id IN ("
+                    f"    {','.join('?' * len(rows))}))",
+                    (cleaned, prefix.rsplit("/", 1)[-1], *[row["id"] for row in rows]),
+                )
+        except Exception:
+            os.rename(target, physical)
+            raise
+    finally:
+        connection.close_sync(conn, db_path=db.DB_PATH)
+    return {"path": new_prefix, "name": cleaned}
 
 
 def staging_root() -> Path:

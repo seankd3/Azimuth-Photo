@@ -121,6 +121,24 @@ async def api_import_film(files: list[UploadFile] = File(...)):
     }
 
 
+class RollRenameRequest(BaseModel):
+    path: str
+    name: str
+
+
+@router.post("/api/import/film/roll/rename")
+async def api_film_roll_rename(body: RollRenameRequest):
+    """Rename a landed film roll — the folder and its catalog rows together."""
+    try:
+        result = await asyncio.to_thread(film.rename_roll, body.path, body.name)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    catalog_routes.invalidate_folders_cache()
+    cache_events.invalidate_catalog_cache()
+    cache_events.invalidate_rankings_cache()
+    return {"ok": True, **result}
+
+
 @router.post("/api/import/commit")
 async def api_import_commit(body: CommitRequest):
     scan = staging.scan_for_id(body.scan_id)

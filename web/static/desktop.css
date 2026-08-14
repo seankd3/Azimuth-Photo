@@ -269,6 +269,7 @@ body.loupe-lights-out #ctxbar { display: none; }
 .folder-row.open > .folder-expander, .folder-source-row.open > .folder-expander { transform: rotate(90deg); }
 .folder-expander:hover { background: rgba(255,255,255,.06); color: var(--text-2); }
 .folder-label { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.folder-rename-input { min-width: 0; flex: 1 1 0; padding: 1px 5px; border: 1px solid var(--accent); border-radius: var(--r-ctl); background: var(--surface-popover); color: var(--text); font: inherit; }
 .folder-count { flex: 0 0 58px; margin-left: auto; color: var(--text-3); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .source-children { margin-bottom: 2px; }
 .folder-pop-menu { position: fixed; z-index: var(--z-popover); min-width: 230px; padding: 5px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-popover); box-shadow: 0 16px 48px rgba(0,0,0,.55); }

@@ -118,6 +118,10 @@ export async function revealFolder(path, sourceId = null) {
     return postJsonWithStatus('/api/reveal', body);
 }
 
+export async function renameFilmRoll(path, name) {
+    return postJsonWithStatus('/api/import/film/roll/rename', { path, name });
+}
+
 export async function getFilterOptions(params = new URLSearchParams()) {
     const query = params.toString();
     return fetchJson(`/api/filter-options${query ? `?${query}` : ''}`, { defaultValue: null });

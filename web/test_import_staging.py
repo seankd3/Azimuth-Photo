@@ -458,6 +458,31 @@ class StagedImportTests(BackendTestCase):
                     )
                 batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
                 self.assertEqual(batch["name"], "Alaska Rolls 1 2")
+                # "(also an easy way to rename the roll folder)" — a landed
+                # roll renames as one unit: folder, rows, and batch name.
+                old_dir = originals / "Raws" / "Film Scans" / day[:4] / day / "Alaska Rolls 1 2"
+                with self.assertRaises(ValueError):
+                    film.rename_roll(old_dir.parent.as_posix(), "Nope")  # a day shelf, not a roll
+                renamed = film.rename_roll(old_dir.as_posix(), "  Denali: Roll 1?  ")
+                new_dir = old_dir.with_name("Denali Roll 1")
+                self.assertEqual(renamed["path"], new_dir.as_posix())
+                self.assertFalse(old_dir.exists())
+                self.assertEqual(
+                    sorted(path.name for path in new_dir.iterdir()),
+                    ["evil.tif", "frame01.tif", "frame02.tif"],
+                )
+                from data import connection
+                conn = await connection.open_async(db.DB_PATH)
+                try:
+                    moved = await conn.execute_fetchall(
+                        "SELECT filepath FROM images WHERE replace(filepath, char(92), '/') LIKE ?",
+                        (new_dir.as_posix() + "/%",),
+                    )
+                finally:
+                    await connection.close_async(conn, db_path=db.DB_PATH)
+                self.assertEqual(len(moved), 3)
+                batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+                self.assertEqual(batch["name"], "Denali Roll 1")
                 # A clean full commit reclaims the transient extraction dir.
                 self.assertFalse(Path(staged["path"]).exists())
                 self.assertIsNone(staging.scan_for_id(scan.id))
