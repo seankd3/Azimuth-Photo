@@ -148,6 +148,17 @@ function installOfflineBanner() {
     sync();
 }
 
+// One-time exorcism — same purge as desktop/bootstrap.js: earlier builds'
+// offline worker served stale 504s and cannot reliably self-update away.
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations()
+        .then((regs) => Promise.all(regs.map((reg) => reg.unregister())))
+        .catch(() => {});
+    window.caches?.keys?.()
+        .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+        .catch(() => {});
+}
+
 async function boot() {
     await mountIconSprite();
     initHistory('photos');

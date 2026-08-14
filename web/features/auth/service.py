@@ -14,7 +14,7 @@ from ipaddress import ip_address
 
 import settings
 from core.browser_origin import _is_trusted_proxy, _last_header_value, _parse_forwarded
-from features.share import auth as share_auth
+from features.auth import passwords as share_auth
 
 COOKIE_NAME = "pa_o"
 SESSION_MAX_AGE_SECONDS = 90 * 24 * 60 * 60

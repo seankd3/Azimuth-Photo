@@ -460,62 +460,6 @@ export async function removeFromCollection(collectionId, imageIds) {
     return postJson(`/api/user-collections/${collectionId}/images/remove`, { image_ids: imageIds });
 }
 
-export async function getCollectionShare(collectionId) {
-    return fetchJson(`/api/user-collections/${collectionId}/share`, { defaultValue: null });
-}
-
-export async function getCollectionShareFavorites(collectionId) {
-    return fetchJson(`/api/user-collections/${collectionId}/share/favorites`, { defaultValue: { favorites: [], count: 0 } });
-}
-
-export async function createCollectionShare(
-    collectionId,
-    {
-        rotate = false,
-        expiresInDays = null,
-        password = undefined,
-        clearPassword = false,
-    } = {},
-) {
-    const payload = {
-        rotate,
-        expires_in_days: expiresInDays,
-    };
-    if (password !== undefined) payload.password = password;
-    if (clearPassword) payload.clear_password = true;
-    return postJson(`/api/user-collections/${collectionId}/share`, {
-        ...payload,
-    });
-}
-
-export async function revokeCollectionShare(collectionId) {
-    return postJson(`/api/user-collections/${collectionId}/share/revoke`);
-}
-
-export async function getCollectionPublish(collectionId) {
-    return fetchJson(`/api/user-collections/${collectionId}/publish`, { defaultValue: null });
-}
-
-export async function publishCollection(collectionId, { slug = '', title = '' } = {}) {
-    return postJsonWithStatus(`/api/user-collections/${collectionId}/publish`, { slug, title });
-}
-
-export async function revokeCollectionPublish(collectionId) {
-    return postJsonWithStatus(`/api/user-collections/${collectionId}/publish/revoke`);
-}
-
-export async function listSharedSurfaces() {
-    return fetchJson('/api/shares', { defaultValue: { items: [] } });
-}
-
-async function publishingMutation(method, url, body = null) {
-    const result = await requestWithStatus(url, jsonRequestOptions(method, body));
-    if (!result.ok) {
-        throw new Error(result.data?.error || result.data?.detail || `Request failed (${result.status})`);
-    }
-    return result.data;
-}
-
 export async function getCollectionTree() {
     return fetchJson('/api/collections/tree', { defaultValue: { nodes: [], links: [], root_ids: [] } });
 }
@@ -524,44 +468,6 @@ export async function getCollectionGraphImages(collectionId) {
     return fetchJson(`/api/collections/${collectionId}/images?recursive=0`, {
         defaultValue: { image_ids: [], images: [] },
     });
-}
-
-export async function getPublishedTree(area) {
-    return fetchJson(`/api/published/tree?area=${encodeURIComponent(area)}`, {
-        defaultValue: { area, nodes: [], links: [], root_ids: [] },
-    });
-}
-
-export async function createPublishedNode(fields) {
-    return publishingMutation('POST', '/api/published/nodes', fields);
-}
-
-export async function patchPublishedNode(nodeId, fields) {
-    return publishingMutation('PATCH', `/api/published/nodes/${nodeId}`, fields);
-}
-
-export async function deletePublishedNode(nodeId) {
-    return publishingMutation('DELETE', `/api/published/nodes/${nodeId}`);
-}
-
-export async function getPublishedNodeDiff(nodeId) {
-    return fetchJson(`/api/published/nodes/${nodeId}/diff`, { defaultValue: null });
-}
-
-export async function updatePublishedNode(nodeId, diff) {
-    return publishingMutation('POST', `/api/published/nodes/${nodeId}/update`, diff);
-}
-
-export async function sharePublishedNode(nodeId, password) {
-    return publishingMutation('POST', `/api/published/nodes/${nodeId}/share`, { password });
-}
-
-export async function revokePublishedNodeShare(nodeId) {
-    return publishingMutation('DELETE', `/api/published/nodes/${nodeId}/share`);
-}
-
-export async function exportPublishedWebsite() {
-    return publishingMutation('POST', '/api/published/export?area=website');
 }
 
 export async function getCollectionSuggestions(params = new URLSearchParams()) {

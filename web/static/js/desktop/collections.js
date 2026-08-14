@@ -1,6 +1,6 @@
 import { createCollection, listCollections, thumbUrl } from './api.js';
 import { emit, navigateToScope, on } from './state.js';
-import { openCollectionActions, openDeliverOverlay } from './panel.js';
+import { openCollectionActions } from './panel.js';
 import {
     createSuggestion, dismissSuggestion, loadSuggestionsOnce, openSuggestionsReview,
     suggestionsAreLoading, visibleSuggestions,
@@ -29,7 +29,6 @@ function collectionCover(collection) {
 function collectionStatus(collection) {
     const badges = [];
     if (collection.smart) badges.push(`<span class="collection-badge live">${icon('sparkles')} Live</span>`);
-    if (collection.published) badges.push(`<span class="collection-badge published">${icon('globe')} Published</span>`);
     return badges.join('');
 }
 
@@ -41,7 +40,6 @@ function collectionCard(collection) {
         + `<span class="collection-card-copy"><strong title="${esc(collection.name)}">${esc(collection.name)}</strong>`
         + `<span>${collectionStatus(collection)}</span></span></button>`
         + '<div class="collection-card-actions">'
-        + `<button class="collection-deliver" type="button" data-tip="Deliver" aria-label="Deliver ${esc(collection.name)}">${icon('send')}</button>`
         + `<button class="collection-card-menu" type="button" data-tip="Manage" aria-label="Manage ${esc(collection.name)}">${icon('ellipsis')}</button>`
         + '</div></article>';
 }
@@ -147,9 +145,6 @@ function bindCollectionCards(root) {
         const collection = collections.find((item) => Number(item.id) === Number(card.dataset.collectionId));
         if (!collection) continue;
         card.querySelector('.collection-card-open')?.addEventListener('click', () => openCollection(collection));
-        card.querySelector('.collection-deliver')?.addEventListener('click', (event) => {
-            openDeliverOverlay(collection.id, collection.name || 'Collection', event.currentTarget);
-        });
         card.querySelector('.collection-card-menu')?.addEventListener('click', (event) => {
             openCollectionActions(collection, event.currentTarget);
         });

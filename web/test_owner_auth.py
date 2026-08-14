@@ -20,7 +20,6 @@ import settings  # noqa: E402
 from core import owner_auth  # noqa: E402
 from features.auth import service as owner_service  # noqa: E402
 from features.pages import routes as page_routes  # noqa: E402
-from features.publish.deployer import PublishConfig, configured_publish_hook  # noqa: E402
 from features.sync import pair_routes, pairing  # noqa: E402
 
 OWNER_KEY = "correct-horse-battery-staple"
@@ -242,15 +241,6 @@ def test_publish_hook_api_write_rejected_and_read_masked(clean_auth):
     assert "server-side" in response.json()["error"]
     assert settings.get_settings()["publish_hook"] == "scripts/deploy.sh"  # unchanged
     assert settings.public_settings()["publish_hook"] == ""  # masked on read
-
-
-def test_publish_hook_env_and_settings_file_still_configure_deployer(clean_auth, monkeypatch):
-    monkeypatch.delenv("AZIMUTH_PUBLISH_HOOK", raising=False)
-    settings.save_settings({**settings.get_settings(), "publish_hook": "scripts/deploy.sh"})
-    assert PublishConfig.from_settings().publish_hook == "scripts/deploy.sh"
-    monkeypatch.setenv("AZIMUTH_PUBLISH_HOOK", "systemctl restart site")
-    assert PublishConfig.from_settings().publish_hook == "systemctl restart site"
-    assert configured_publish_hook() == "systemctl restart site"
 
 
 # --- pairing: mint under auth; redeem single-use, expiring, rate-limited ------

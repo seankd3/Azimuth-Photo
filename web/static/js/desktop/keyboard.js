@@ -400,11 +400,6 @@ export function initKeyboard() {
             openDevelop();
             return;
         }
-        if (event.key.toLowerCase() === 'h' && !foregroundLayerOpen()) {
-            event.preventDefault();
-            switchLens('shared');
-            return;
-        }
         if (refineOpen() && pickByKey(event.key)) {
             event.preventDefault();
             return;

@@ -40,7 +40,6 @@
                     <button data-view="people" role="tab" aria-selected="false" aria-controls="view-people" data-tip="People · O" aria-label="People lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-users"></use></svg></button>
                     <button data-view="map" role="tab" aria-selected="false" aria-controls="view-map" data-tip="Map · M" aria-label="Map lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-map-pin"></use></svg></button>
                     <button data-view="develop" role="tab" aria-selected="false" aria-controls="view-develop" data-tip="Develop · D" aria-label="Develop lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-sliders-horizontal"></use></svg></button>
-                    <button data-view="shared" role="tab" aria-selected="false" aria-controls="view-shared" data-tip="Shared · H" aria-label="Shared lens"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-share-2"></use></svg></button>
                 </div>
                 <button class="icon-btn" id="help-btn" data-tip="Help (?)" aria-label="Help"><svg class="icon" aria-hidden="true"><use href="#i-keyboard"></use></svg></button>
                 <button class="icon-btn" id="system-btn" data-tip="System" aria-label="System"><svg class="icon" aria-hidden="true"><use href="#i-settings-2"></use></svg></button>
@@ -95,7 +94,6 @@
                     <section class="psec" id="sec-tools">
                         <div class="psec-head"><h3>Tools</h3></div>
                         <button class="nav-row" id="export-view"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg></span><span class="nr-label">Export view</span></button>
-                        <button class="nav-row" id="shared-view" data-tip="Shared"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-share-2"></use></svg></span><span class="nr-label">Shared</span></button>
                         <button class="nav-row" id="find-duplicates"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-layers"></use></svg></span><span class="nr-label">Stacks</span></button>
                         <button class="nav-row" id="import-view"><span class="nr-glyph"><svg class="icon" aria-hidden="true"><use href="#i-upload"></use></svg></span><span class="nr-label">Import</span></button>
                         <input id="import-film-file" type="file" accept=".zip,.tif,.tiff" multiple hidden>
@@ -193,29 +191,6 @@
                     <section id="view-duplicates" class="view duplicates-view" aria-label="Stacks"></section>
                     <section id="view-trash" class="view trash-view" aria-label="Trash"></section>
                     <section id="view-system" class="view system-view" aria-label="System settings"></section>
-                    <section id="view-shared" class="view shared-view" aria-label="Shared">
-                        <div id="publishing" class="publishing-layout">
-                            <section class="publishing-pane" data-pub-pane="collections" aria-labelledby="publishing-collections-title">
-                                <header class="publishing-pane-head">
-                                    <div><h2 id="publishing-collections-title">Collections</h2><span id="publishing-collections-count">0</span></div>
-                                </header>
-                                <div class="publishing-scroll" id="publishing-collections"><p class="publishing-empty">Create collections in the Library first.</p></div>
-                            </section>
-                            <section class="publishing-pane" data-pub-pane="website" aria-labelledby="publishing-website-title">
-                                <header class="publishing-pane-head">
-                                    <div><h2 id="publishing-website-title">Website</h2><span id="publishing-website-count">0 photos</span></div>
-                                    <button class="btn" id="publishing-export" type="button" data-tip="Export the Website tree as a static site">Export site</button>
-                                </header>
-                                <div class="publishing-scroll publishing-drop-pane" id="publishing-website"><p class="publishing-empty">Your website is empty — drag a collection here to publish it.</p></div>
-                            </section>
-                            <section class="publishing-pane" data-pub-pane="private" aria-labelledby="publishing-private-title">
-                                <header class="publishing-pane-head">
-                                    <div><h2 id="publishing-private-title">Private links</h2><span id="publishing-private-count">0</span></div>
-                                </header>
-                                <div class="publishing-scroll publishing-drop-pane" id="publishing-private"><p class="publishing-empty">No private links — drag a collection here to share it privately.</p></div>
-                            </section>
-                        </div>
-                    </section>
                     <section id="view-develop" class="view develop-view" role="tabpanel" aria-label="Develop">
                         <div class="develop-layout">
                             <div class="develop-workspace">
@@ -420,7 +395,7 @@
                 <div><h3>Grid</h3><p><kbd>Space</kbd> Toggle focused selection</p><p><kbd>S</kbd> Stack / expand stack</p><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + advance when Auto is on</p><p><kbd>Delete</kbd> Trash selection</p><p><kbd>Ctrl/Cmd</kbd><kbd>A</kbd> Select loaded photos</p><p><kbd>F</kbd> Filter, including Not compared yet</p><p><kbd>J</kbd> Cycle density</p><p>Import history can reopen an import</p></div>
                 <div><h3>Refine</h3><p><kbd>R</kbd> Refine this view</p><p><kbd>1-9</kbd> or <kbd>0</kbd> Pick first 10 in Mosaic</p><p><kbd>←</kbd><kbd>→</kbd> Move in Mosaic · pick in Duel</p><p><kbd>Enter</kbd> Pick focused Mosaic photo</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo pick</p></div>
                 <div><h3>Curate</h3><p><kbd>B</kbd> Best of</p><p><kbd>P</kbd> Pick</p><p><kbd>X</kbd> Reject</p><p><kbd>U</kbd> Clear flag</p><p><kbd>Ctrl</kbd><kbd>Z</kbd> Undo latest toast</p></div>
-                <div><h3>Views</h3><p><kbd>G</kbd> Grid</p><p><kbd>Y</kbd> Events</p><p><kbd>O</kbd> People</p><p><kbd>M</kbd> Map</p><p><kbd>D</kbd> Develop current RAW</p><p><kbd>H</kbd> Shared</p></div>
+                <div><h3>Views</h3><p><kbd>G</kbd> Grid</p><p><kbd>Y</kbd> Events</p><p><kbd>O</kbd> People</p><p><kbd>M</kbd> Map</p><p><kbd>D</kbd> Develop current RAW</p></div>
                 <div><h3>Loupe</h3><p><kbd>P</kbd><kbd>X</kbd><kbd>U</kbd> Flag + next when Auto is on</p><p><kbd>←</kbd><kbd>→</kbd> Previous / next</p><p><kbd>Home</kbd><kbd>End</kbd> First / last loaded</p><p><kbd>Shift</kbd><kbd>↑↓←→</kbd> Pan when zoomed</p><p><kbd>Space</kbd> or <kbd>Z</kbd> Fit / 100%</p><p><kbd>+</kbd><kbd>-</kbd> Zoom · <kbd>0</kbd> Fit</p><p>Click to toggle zoom · drag to pan</p><p><kbd>Delete</kbd> Trash photo</p><p><kbd>[</kbd><kbd>]</kbd> Toggle panels</p><p><kbd>L</kbd> Cycle lights</p><p><kbd>I</kbd> Info overlay</p><p><kbd>Esc</kbd> or <kbd>G</kbd> Close Loupe</p></div>
                 <div><h3>Stacks / People</h3><p><kbd>↑↓</kbd> Stack row</p><p><kbd>←→</kbd> Stack photo</p><p><kbd>P</kbd><kbd>X</kbd> Flag focused stack photo</p><p><kbd>C</kbd> Make focused photo the cover</p><p><kbd>K</kbd> or <kbd>Enter</kbd> Keep cover, trash rest</p><p><kbd>U</kbd> Unstack</p><p><kbd>Y</kbd><kbd>N</kbd> Merge review</p></div>
                 <div><h3>Panels</h3><p><kbd>[</kbd> Toggle left panel</p><p><kbd>]</kbd> Toggle info panel</p><p><kbd>?</kbd> This overlay</p></div>

@@ -6,7 +6,7 @@ import {
 const SECTION_KEY = 'pa_d_system_section';
 const SECTIONS = [
     ['library', 'Library'], ['processing', 'Processing'], ['performance', 'Performance'],
-    ['import', 'Import'], ['publishing', 'Publishing'], ['connectivity', 'Connectivity'], ['preferences', 'Preferences'],
+    ['import', 'Import'], ['connectivity', 'Connectivity'], ['preferences', 'Preferences'],
 ];
 
 let root = null;
@@ -34,14 +34,6 @@ function render() {
     }));
     root.querySelector('[data-system-close]')?.addEventListener('click', () => setActiveLens('grid'));
     bindSystemSurface(root.querySelector('#system-lens-content'));
-    if (activeSection === 'publishing' && sessionStorage.getItem('pa_d_system_focus_publish') === '1') {
-        sessionStorage.removeItem('pa_d_system_focus_publish');
-        const field = root.querySelector('#drawer-setting-publish_dir');
-        requestAnimationFrame(() => {
-            field?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-            field?.focus();
-        });
-    }
 }
 
 export function openSystemLens(section = null) {

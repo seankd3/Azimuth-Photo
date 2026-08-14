@@ -27,16 +27,13 @@ from features.library import routes as library_routes
 from features.media import routes as media_routes
 from features.pages import routes as page_routes
 from features.people import routes as people_routes
-from features.publish import routes as publish_routes
 from features.search import routes as search_routes
-from features.share import routes as share_routes
-from features.shared import routes as shared_routes
 from features.stacks import routes as stack_routes
 from features.settings import routes as settings_routes
 from features.trash import routes as trash_routes
 
 
-DEFAULT_TEMPLATE_WARMUP = ("desktop.html", "mobile.html", "share_gallery.html")
+DEFAULT_TEMPLATE_WARMUP = ("desktop.html", "mobile.html")
 INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 
@@ -234,11 +231,6 @@ def create_app_shell(
     cache_events.register_with_db()
     import thumbnails
 
-    share_routes.configure(
-        templates=templates,
-        thumbnail_response=media_routes.thumbnail_response,
-    )
-    publish_routes.configure(templates=templates, thumbnails=thumbnails)
     page_routes.configure(templates=templates, template_context=shell.template_context)
     app.include_router(page_routes.router)
     auth_routes.configure(templates=templates)
@@ -254,9 +246,6 @@ def create_app_shell(
     app.include_router(collection_routes.router)
     app.include_router(stack_routes.router)
     app.include_router(trash_routes.router)
-    app.include_router(share_routes.router)
-    app.include_router(publish_routes.router)
-    app.include_router(shared_routes.router)
     app.include_router(export_routes.router)
     app.include_router(imports_routes.router)
     app.include_router(search_routes.router)

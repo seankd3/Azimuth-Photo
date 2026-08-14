@@ -9,7 +9,7 @@ import { mountSuggestions, unmountSuggestions } from './suggestions.js';
 import { mountLoupe, unmountLoupe } from './loupe.js';
 import { mountDuplicates, unmountDuplicates } from './duplicates.js';
 import { mountTrash, unmountTrash } from './trash.js';
-import { mountShared, unmountShared } from './shared.js';
+
 import { mountSystemLens, unmountSystemLens } from './system_lens.js';
 import { on, setActiveLens, viewState } from './state.js';
 
@@ -24,7 +24,7 @@ const LENSES = {
     loupe: { mount: mountLoupe, unmount: unmountLoupe },
     duplicates: { mount: mountDuplicates, unmount: unmountDuplicates },
     trash: { mount: mountTrash, unmount: unmountTrash },
-    shared: { mount: mountShared, unmount: unmountShared },
+
     system: { mount: mountSystemLens, unmount: unmountSystemLens },
 };
 
@@ -36,17 +36,16 @@ function syncChrome(lens) {
         button.classList.toggle('active', active);
         button.setAttribute('aria-selected', active ? 'true' : 'false');
     }
-    document.getElementById('shell').classList.toggle('right-hidden', lens === 'collections' || lens === 'timeline' || lens === 'map' || lens === 'suggestions' || lens === 'shared' || lens === 'system');
-    const sortDisabled = lens === 'collections' || lens === 'people' || lens === 'timeline' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'shared' || lens === 'system';
+    document.getElementById('shell').classList.toggle('right-hidden', lens === 'collections' || lens === 'timeline' || lens === 'map' || lens === 'suggestions' || lens === 'system');
+    const sortDisabled = lens === 'collections' || lens === 'people' || lens === 'timeline' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'duplicates' || lens === 'trash' || lens === 'system';
     document.getElementById('sort-select').disabled = sortDisabled;
     document.getElementById('sort-dir').disabled = sortDisabled;
-    document.getElementById('thumb-size').disabled = lens === 'collections' || lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'shared' || lens === 'system';
+    document.getElementById('thumb-size').disabled = lens === 'collections' || lens === 'people' || lens === 'map' || lens === 'refine' || lens === 'suggestions' || lens === 'loupe' || lens === 'trash' || lens === 'system';
     document.getElementById('btn-refine').classList.toggle('active', lens === 'refine');
     document.getElementById('find-duplicates')?.classList.toggle('active', lens === 'duplicates');
     document.querySelector('[data-lib="trash"]')?.classList.toggle('active', lens === 'trash');
-    document.getElementById('shared-view')?.classList.toggle('active', lens === 'shared');
-    document.getElementById('ctx-mid').hidden = lens === 'shared' || lens === 'collections';
-    document.getElementById('ctx-right').hidden = lens === 'shared' || lens === 'collections';
+    document.getElementById('ctx-mid').hidden = lens === 'collections';
+    document.getElementById('ctx-right').hidden = lens === 'collections';
 }
 
 function activate(lens) {

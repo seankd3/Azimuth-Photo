@@ -12,8 +12,6 @@ from fastapi.responses import JSONResponse
 from core.app_factory import create_app
 from features.develop import ai_mask_routes, hdr_routes, import_routes, preset_routes, routes as develop_routes, xmp_write_routes
 from features.library import keyword_routes, saved_views, watched_routes
-from features.publishing import routes as gallery_routes
-from features.publish import routes as publish_routes
 from features.develop import export_presets
 from features.media import routes as media_routes
 from features.quality import routes as quality_routes
@@ -40,7 +38,6 @@ async def api_revision_mismatch(_request: Request, _error: ApiRevisionMismatch):
 import db as _db
 from archive import role
 
-gallery_routes.configure(thumbnail_response=media_routes.thumbnail_response)
 app.include_router(hdr_routes.router)
 app.include_router(ai_mask_routes.router)
 app.include_router(preset_routes.router)
@@ -50,7 +47,6 @@ app.include_router(import_routes.router)
 app.include_router(xmp_write_routes.router)
 app.include_router(saved_views.router)
 app.include_router(keyword_routes.router)
-app.include_router(gallery_routes.router)
 app.include_router(backup_routes.router)
 app.include_router(cloud_backup_routes.router)
 app.include_router(health_routes.router)
@@ -153,11 +149,6 @@ async def _start_hub_mdns():
     )
     port = int(os.environ.get("AZIMUTH_PORT") or 8000)
     await asyncio.to_thread(mdns.start_hub_announce, name=name, port=port, hub_id=hub_id)
-
-
-@app.on_event("startup")
-async def _resume_publish_hook_retries():
-    await publish_routes.resume_pending_hook_retries()
 
 
 @app.on_event("startup")

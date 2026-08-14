@@ -10,7 +10,6 @@ from data.repositories import shares as share_repository
 from features.collections import smart as smart_collections
 from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
-from features.share import routes as share_routes
 
 
 class CollectionTests(BackendTestCase):
@@ -480,41 +479,6 @@ class CollectionTests(BackendTestCase):
         self.assertGreater(catalog_changed[0], initial[0])
         self.assertNotEqual(caption_added[1], catalog_changed[1])
         self.assertNotEqual(caption_replaced[1], caption_added[1])
-
-    async def test_smart_collection_share_snapshots_membership(self):
-        source = await self._source()
-        first = await self._image(source["id"], "share-picked-a.jpg", elo=1400)
-        second = await self._image(source["id"], "share-picked-b.jpg", elo=1300)
-        third = await self._image(source["id"], "share-picked-c.jpg", elo=1500)
-        await db.set_image_flag(first, "picked")
-        await db.set_image_flag(second, "picked")
-        templates = app_module.app.state.azimuth_shell.templates
-        share_routes.configure(
-            templates=templates,
-            thumbnail_response=lambda *_args, **_kwargs: Response(content=b"thumb", media_type="image/jpeg"),
-        )
-        created = await collection_routes.api_create_collection(
-            collection_routes.CreateCollectionBody(
-                name="Share picked",
-                query={"flag": "picked", "sort": "elo"},
-            )
-        )
-        collection_id = created["collection"]["id"]
-
-        share = await share_routes.api_create_share(
-            collection_id,
-            share_routes.ShareBody(),
-            SimpleNamespace(base_url="http://testserver/"),
-        )
-        await db.set_image_flag(third, "picked")
-        smart_detail = await collection_routes.api_collection(collection_id)
-        resolved = await share_repository.resolve_token(db.DB_PATH, share["share"]["token"])
-
-        self.assertEqual([image["id"] for image in smart_detail["collection"]["images"]], [third, first, second])
-        self.assertEqual([image["id"] for image in resolved["images"]], [first, second])
-        self.assertFalse(
-            await share_repository.token_allows_image(db.DB_PATH, share["share"]["token"], third)
-        )
 
     async def test_collection_suggestions_route_returns_suggestions_shape(self):
         source = await self._source()

@@ -68,8 +68,6 @@ let settingsPageData = null;
 let versionData = null;
 let savedSettings = {};
 let openSettingSections = new Set();
-let publishReturn = null;
-let publishingFocusPending = false;
 let thumbnailCachePolicy = 'keep';
 let systemSurfaceRender = null;
 let pendingModelPreset = null;
@@ -106,9 +104,6 @@ const SETTING_DEFS = {
     caption_scan_enabled: { type: 'checkbox' },
     caption_model_preset: { type: 'select' },
     caption_batch_size: { type: 'number', min: 1, max: 4, step: 1 },
-    publish_dir: { type: 'text' },
-    publish_site_base_url: { type: 'text' },
-    share_brand_name: { type: 'text' },
     require_device_token: { type: 'checkbox' },
 };
 
@@ -207,10 +202,6 @@ async function applySetting(field, value, { patch = null, undoPatch = null, cont
     renderActivity();
     if (control && document.activeElement === control) patchSettingSurface(field);
     else renderCurrentSystemSurface();
-    if (field === 'publish_dir' && publishReturn && String(next).trim()) {
-        showToast('Publishing folder saved');
-        returnToPublish();
-    }
     return true;
 }
 
@@ -1061,57 +1052,6 @@ function renderMetadataSettings() {
         + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
 }
 
-function publishingStatusNote() {
-    const folder = String(settingValue('publish_dir') || '').trim();
-    if (!folder) {
-        return '<div class="setting-status warn" data-setting-status="publishing">Publishing is off until a Gallery folder is set. Empty folder disables Publish.</div>';
-    }
-    return `<div class="setting-status" data-setting-status="publishing">Writing galleries to <code>${esc(folder)}</code></div>`;
-}
-
-function publishingStatusLine() {
-    const folder = String(settingValue('publish_dir') || '').trim();
-    return folder
-        ? `Writing galleries to ${folder}`
-        : 'Publishing is off until a Gallery folder is set. Empty folder disables Publish.';
-}
-
-function updateDrawerContext() {
-    const context = document.getElementById('drawer-context');
-    if (!context) return;
-    if (!publishReturn) {
-        context.hidden = true;
-        context.textContent = '';
-        return;
-    }
-    context.hidden = false;
-    context.textContent = `Publishing setup · return to ${publishReturn.name || 'Publish'}`;
-}
-
-function publishReturnBar() {
-    if (!publishReturn) return '';
-    const name = publishReturn.name || 'collection';
-    return '<div class="publish-return" role="status">'
-        + `<span>Set the folder, save, then return to publish <b>${esc(name)}</b>.</span>`
-        + '<button class="btn primary" id="drawer-return-publish" type="button">Return to Publish</button>'
-        + '</div>';
-}
-
-function renderPublishingSettings() {
-    return detailsSection('Publishing', 'Choose where gallery files live and how links present your work.',
-        publishReturnBar()
-        + publishingStatusNote()
-        + settingInput('publish_dir', 'Gallery folder', {
-            hint: 'Required. Public gallery files are written here. Leave empty to disable publishing.',
-        })
-        + settingInput('publish_site_base_url', 'Site base URL', {
-            hint: 'Display-only for in-app links (e.g. https://photos.example.com). Does not serve files.',
-        })
-        + settingInput('share_brand_name', 'Gallery brand name', {
-            hint: 'Shown on private share links and published galleries as the photographer or studio name.',
-        }));
-}
-
 function checkbox(key, label) {
     return `<div class="pref-row"><label for="pref-${key}">${esc(label)}</label><input id="pref-${key}" type="checkbox" data-pref="${key}" ${viewState.prefs[key] ? 'checked' : ''}></div>`;
 }
@@ -1162,7 +1102,6 @@ export function renderSystemSections() {
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
-        publishing: renderPublishingSettings(),
         connectivity: renderDevices() + renderConnectServer() + renderConnectLightroom() + renderFreeUp() + renderRemote(),
         preferences: renderPrefs(),
     };
@@ -1262,12 +1201,6 @@ function patchDrawerStatus(workerGenerations = null) {
 
 function patchSettingSurface(field) {
     patchDrawerStatus();
-    if (field === 'publish_dir') {
-        const body = systemSurfaceRender
-            ? document.getElementById('system-lens-content')
-            : document.getElementById('drawer-body');
-        if (body) patchNodeText(body, '[data-setting-status="publishing"]', publishingStatusLine());
-    }
 }
 
 async function refreshDrawer({ initial = false } = {}) {
@@ -1690,19 +1623,6 @@ async function applyCacheDefaults() {
     });
 }
 
-async function returnToPublish() {
-    const target = publishReturn;
-    publishReturn = null;
-    updateDrawerContext();
-    closeSystemDrawer();
-    if (!target?.collectionId) {
-        showToast('Open Publish from the collection when ready');
-        return;
-    }
-    const { openDeliverOverlay } = await import('./panel.js');
-    openDeliverOverlay(target.collectionId, target.name || 'Collection', null, target.tab);
-}
-
 function aiInstallActive(status = aiStatus || {}) {
     const index = status.embedding_index || {};
     const installStatus = String(index.install_status || status.install_status || '').toLowerCase();
@@ -1935,7 +1855,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     body.querySelector('#lrcat-import-btn')?.addEventListener('click', (event) => withBusyAction('lrcat-import', event.currentTarget, () => startLrcatRun(false)));
     body.querySelector('#drawer-cache-defaults')?.addEventListener('click', applyCacheDefaults);
     body.querySelector('#drawer-install-model')?.addEventListener('click', (event) => withBusyAction('model-install', event.currentTarget, saveAndInstallModel));
-    body.querySelector('#drawer-return-publish')?.addEventListener('click', returnToPublish);
     bindSourcePicker(body, {
         onSubmit: (payload) => submitSourceAdd(payload, { onSuccess: renderCurrentSystemSurface }),
     });
@@ -2079,26 +1998,6 @@ function stopDrawerPolling() {
     if (!(lrcatRun && lrcatRun.running)) stopLrcatPolling();
 }
 
-function resolvePublishReturnTarget() {
-    const overlay = document.getElementById('deliver-overlay');
-    return {
-        collectionId: Number(overlay?.dataset.collectionId) || 0,
-        name: overlay?.dataset.collectionName || 'Collection',
-        tab: overlay?.dataset.activeTab || 'website',
-    };
-}
-
-export function openPublishingSettings({ returnTo = null } = {}) {
-    publishReturn = returnTo;
-    publishingFocusPending = true;
-    openSettingSections.add('Publishing');
-    localStorage.setItem('pa_d_system_section', 'publishing');
-    sessionStorage.setItem('pa_d_system_focus_publish', '1');
-    document.dispatchEvent(new CustomEvent('system:section', { detail: 'publishing' }));
-    if (open) closeSystemDrawer();
-    setActiveLens('system');
-}
-
 export function openSystemSettings(section = 'library') {
     localStorage.setItem('pa_d_system_section', section);
     document.dispatchEvent(new CustomEvent('system:section', { detail: section }));
@@ -2107,10 +2006,7 @@ export function openSystemSettings(section = 'library') {
 }
 
 export function openSystemDrawer() {
-    if (open) {
-        if (publishingFocusPending || publishReturn) renderCurrentSystemSurface();
-        return;
-    }
+    if (open) return;
     const drawer = document.getElementById('drawer');
     const scrim = document.getElementById('drawer-scrim');
     open = true;
@@ -2129,8 +2025,6 @@ export function closeSystemDrawer() {
     const drawer = document.getElementById('drawer');
     const scrim = document.getElementById('drawer-scrim');
     open = false;
-    publishingFocusPending = false;
-    updateDrawerContext();
     scrim.classList.remove('on');
     drawer.classList.remove('on');
     drawer.setAttribute('aria-hidden', 'true');
@@ -2157,15 +2051,6 @@ export function initDrawer() {
             closeSystemDrawer();
         }
     });
-    document.addEventListener('click', (event) => {
-        const button = event.target.closest('[data-deliver-open-settings]');
-        if (!button) return;
-        event.preventDefault();
-        event.stopImmediatePropagation();
-        const returnTo = resolvePublishReturnTarget();
-        document.querySelector('#deliver-overlay #deliver-close')?.click();
-        openPublishingSettings({ returnTo });
-    }, true);
     on('thumbsize', () => {
         const input = document.getElementById('drawer-thumb-size');
         if (input) input.value = String(viewState.thumbSize);

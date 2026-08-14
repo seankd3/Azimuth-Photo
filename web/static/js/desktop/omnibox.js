@@ -10,7 +10,7 @@ import { openLoupe, toggleLoupeLights } from './loupe.js';
 import { scopeTokenFacetKey, scopeTokenHtml } from './contextbar.js';
 import {
     exportCurrentScope, requestDeleteCurrentCollection, requestNewCollection,
-    requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, requestShareCurrentCollection, toggleLeftPanel,
+    requestRenameCurrentCollection, requestSaveCurrentView, requestSaveSmartCollection, toggleLeftPanel,
 } from './panel.js';
 import { switchLens } from './lenses.js';
 import { openSuggestionsReview } from './suggestions.js';
@@ -69,7 +69,6 @@ const COMMANDS = [
     { icon: 'plus', label: 'New collection', run: requestNewCollection },
     { icon: 'bookmark', label: 'Save current view', run: requestSaveCurrentView },
     { icon: 'sparkles', label: 'Save as Smart Collection', meta: () => smartQuerySummary(), when: smartQueryActive, run: requestSaveSmartCollection },
-    { icon: 'share-2', label: 'Share this collection', when: () => Boolean(scope.collectionId), run: requestShareCurrentCollection },
     { icon: 'pencil', label: 'Rename this collection', when: () => Boolean(scope.collectionId), run: requestRenameCurrentCollection },
     { icon: 'trash-2', label: 'Delete this collection', when: () => Boolean(scope.collectionId), run: requestDeleteCurrentCollection },
     { icon: 'layout-grid', label: 'Switch lens: grid', kbd: 'G', run: () => switchLens('grid') },

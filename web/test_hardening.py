@@ -16,11 +16,9 @@ from core.source_files import inspect_source_file, source_file_is_safe
 from features.media import routes as media_routes
 from features.settings import routes as settings_routes
 from features.develop import importer as develop_importer
-from features.publishing.routes import _attachment_name
 from features.captions.routes import CaptionBody
 from features.stacks.routes import CreateStackBody
-from features.share import auth as share_auth
-from features.share import routes as share_routes
+from features.auth import passwords as share_auth
 from features.sync import device_auth, hub, hub_routes
 from features.sync.oplog_routes import OplogEntry, OplogPushRequest
 from thumbnails import generation as thumbnail_generation
@@ -103,13 +101,6 @@ def test_media_state_rejects_existing_symlink_catalog_row(tmp_path: Path):
     assert asyncio.run(media_routes._source_state(image)) == "unsafe"
 
 
-def test_public_download_filename_cannot_inject_response_headers():
-    name = _attachment_name(7, 'portrait\r\nX-Injected: yes".jpg', suffix=".jpg")
-
-    assert name == "portrait__X-Injected_ yes_.jpg"
-    assert "\r" not in name and "\n" not in name and '"' not in name
-
-
 def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(hub, "MAX_CHUNK_BYTES", 4)
     monkeypatch.setattr(device_auth, "require_device_token_enabled", lambda: False)
@@ -162,29 +153,6 @@ def test_share_password_form_has_small_body_limit():
         response = client.post("/unlock", content=b"password=" + b"a" * 2048)
 
     assert response.json() == {"accepted": False}
-
-
-def test_share_unlock_failure_tracker_is_bounded():
-    share_routes._unlock_failures.clear()
-    for index in range(share_routes.MAX_TRACKED_UNLOCK_TOKENS + 20):
-        share_routes._record_unlock_failure(f"token-{index}", now=float(index + 1))
-
-    assert 0 < len(share_routes._unlock_failures) <= share_routes.MAX_TRACKED_UNLOCK_TOKENS
-    share_routes._unlock_failures.clear()
-
-
-def test_capacity_pressure_never_evicts_a_live_share_lockout():
-    share_routes._unlock_failures.clear()
-    for _ in range(share_routes.UNLOCK_FAILURE_LIMIT):
-        share_routes._record_unlock_failure("under-attack", now=1.0)
-    assert share_routes._unlock_retry_after("under-attack", now=2.0) is not None
-
-    for index in range(share_routes.MAX_TRACKED_UNLOCK_TOKENS + 50):
-        share_routes._record_unlock_failure(f"flood-{index}", now=2.0)
-
-    assert share_routes._unlock_retry_after("under-attack", now=3.0) is not None
-    assert len(share_routes._unlock_failures) <= share_routes.MAX_TRACKED_UNLOCK_TOKENS
-    share_routes._unlock_failures.clear()
 
 
 def test_bulk_request_models_reject_unbounded_lists():
@@ -267,18 +235,3 @@ def test_truncated_raw_preview_is_contained(tmp_path: Path):
     broken_raw.write_bytes(b"II*\x00\x08\x00\x00\x00truncated")
 
     assert thumbnail_generation.load_raw_preview(str(broken_raw), 256) is None
-
-
-def test_public_gallery_unlock_tracker_cannot_grow_without_limit():
-    """/s/gallery/{token}/unlock is public: invented tokens must not accumulate."""
-    from features.publishing import routes as gallery_routes
-
-    gallery_routes._unlock_failures.clear()
-    try:
-        for index in range(gallery_routes.MAX_TRACKED_UNLOCK_TOKENS + 200):
-            gallery_routes._record_unlock_failure(f"invented-{index}")
-        assert len(gallery_routes._unlock_failures) <= gallery_routes.MAX_TRACKED_UNLOCK_TOKENS
-        # The most recent failures are the ones still being throttled.
-        assert f"invented-{gallery_routes.MAX_TRACKED_UNLOCK_TOKENS + 199}" in gallery_routes._unlock_failures
-    finally:
-        gallery_routes._unlock_failures.clear()

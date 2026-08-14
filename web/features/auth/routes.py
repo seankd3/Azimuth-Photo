@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from features.auth import service
-from features.share import auth as share_auth
+from features.auth import passwords as share_auth
 
 router = APIRouter(tags=["auth"])
 _templates: Jinja2Templates | None = None
