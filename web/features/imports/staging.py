@@ -317,16 +317,24 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
         os.utime(cached, None)
         return cached.read_bytes()
     cached.parent.mkdir(parents=True, exist_ok=True)
-    image = thumbnails.generation.load_source_image(
-        entry["path"], THUMB_MAX_EDGE, True,
+    # Deferred like every generation caller: Pillow stays off boot, and the
+    # submodule is imported by name rather than hoped-for as a package
+    # attribute someone else materialized. A stale third positional argument
+    # also survived a load_source_image signature change here and 500'd every
+    # canvas preview — nothing tested this route, so it broke silently until
+    # a real lab roll hit the import canvas.
+    from thumbnails import generation
+
+    image = generation.load_source_image(
+        entry["path"], THUMB_MAX_EDGE,
         jpeg_extensions=config.JPEG_EXTENSIONS,
         raw_extensions=config.RAW_EXTENSIONS,
     )
     try:
-        resized = thumbnails.generation.resize_to_long_side(image, THUMB_MAX_EDGE)
+        resized = generation.resize_to_long_side(image, THUMB_MAX_EDGE)
         if resized.mode not in ("RGB", "L"):
             resized = resized.convert("RGB")  # alpha PNG/HEIC cannot encode as JPEG
-        data = thumbnails.generation.thumbnail_jpeg_bytes(resized, "sm", 85)
+        data = generation.thumbnail_jpeg_bytes(resized, "sm", 85)
         resized.close()
     finally:
         image.close()
@@ -526,14 +534,22 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
 
 
 def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
-    """Scan dates are not shoot dates: one archive/batch lands in one folder
-    named from the archive filename, never a date-guessed Raws-style tree."""
+    """Scan dates are not shoot dates: one archive/batch lands in one roll
+    folder named from the archive filename, filed under its year —
+    ``Film Scans/<year>/<roll>/``. The year is the first plausible one in the
+    roll name (labs stamp their delivery date, e.g. ``…_2026-08-06_2203``)
+    and falls back to the year the roll was imported.
+    """
+    import re
+
     library_root = originals_root()
     if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     parts = str(entry.get("rel_path") or "").split("/")
     folder = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
-    return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / folder
+    year_match = re.search(r"(?:19|20)\d{2}", folder)
+    year = year_match.group(0) if year_match else time.strftime("%Y")
+    return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / year / folder
 
 
 def _catalog_source_root_for_destination(destination: str | Path) -> str:

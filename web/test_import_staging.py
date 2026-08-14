@@ -1,6 +1,7 @@
 import asyncio
 import io
 import os
+import time
 import zipfile
 from pathlib import Path
 from unittest.mock import patch
@@ -424,6 +425,11 @@ class StagedImportTests(BackendTestCase):
                 await asyncio.wait_for(staging._tasks[scan.id], timeout=10)
                 self.assertEqual(scan.status, "done")
                 self.assertEqual({entry["category"] for entry in scan.entries}, {"film"})
+                # The canvas preview decode — a stale positional argument once
+                # 500'd every tile here and nothing caught it until a real
+                # lab roll hit the import canvas.
+                preview = staging.thumbnail_bytes(scan, scan.entries[0])
+                self.assertGreater(len(preview), 100)
 
                 with self.assertRaises(ValueError):
                     await staging.start_commit(scan, keys="all_checked_default", mode="add", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
@@ -433,13 +439,16 @@ class StagedImportTests(BackendTestCase):
                 self.assertEqual(job.errors, [])
 
                 landed = sorted(path for path in originals.rglob("*") if path.is_file())
-                # One archive = one folder named from the archive filename — never a date tree.
+                # One archive = one roll folder named from the archive filename,
+                # filed under its year (import year when the name has none) —
+                # never a date-guessed tree.
                 self.assertEqual(
                     sorted(path.name for path in landed),
                     ["evil.tif", "frame01.tif", "frame02.tif"],
                 )
+                year = time.strftime("%Y")
                 for path in landed:
-                    self.assertEqual(path.parent, originals / "Raws" / "Film Scans" / "roll12")
+                    self.assertEqual(path.parent, originals / "Raws" / "Film Scans" / year / "roll12")
                 batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
                 self.assertEqual(batch["name"], "roll12")
                 # A clean full commit reclaims the transient extraction dir.
@@ -469,7 +478,8 @@ class StagedImportTests(BackendTestCase):
                 job = await staging.start_commit(scan, keys="all_checked_default", mode="copy", skip_suspects=True, clear_card=False, keyword_paths=[], collection_id=None)
                 await self._wait(job)
                 self.assertEqual(job.phase, "complete")
-                landed = sorted(path.name for path in (originals / "Raws" / "Film Scans" / staged["label"]).glob("*"))
+                roll_dir = originals / "Raws" / "Film Scans" / time.strftime("%Y") / staged["label"]
+                landed = sorted(path.name for path in roll_dir.glob("*"))
                 self.assertEqual(landed, ["frame-2.tif", "frame.tif"])
         finally:
             if old_root is None:

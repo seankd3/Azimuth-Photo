@@ -368,7 +368,10 @@ function syncDestination() {
         }
         const lines = ['<div class="imps-dest-tree">Raws/Film Scans</div>'];
         for (const [folder, count] of [...folders.entries()].sort()) {
-            lines.push(`<div class="imps-dest-date"><span>${esc(folder)}</span><span class="imps-dest-count">${fmt(count)}</span></div>`);
+            // Mirrors the server rule: rolls file under the year the lab
+            // stamped into the archive name, or this year when it didn't.
+            const year = (folder.match(/(?:19|20)\d{2}/) || [String(new Date().getFullYear())])[0];
+            lines.push(`<div class="imps-dest-date"><span>${esc(year)}/${esc(folder)}</span><span class="imps-dest-count">${fmt(count)}</span></div>`);
         }
         els.destination.innerHTML = lines.join('');
         return;

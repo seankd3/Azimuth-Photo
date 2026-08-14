@@ -81,6 +81,13 @@ async def api_import_scan_status(scan_id: str, offset: int = 0):
     return staging.scan_page(scan, offset)
 
 
+# Lab TIFFs decode whole (draft cannot scale them): 170MB frames at seconds
+# each. Forty canvas tiles arriving at once used to saturate the pool and
+# every tile starved blank; two at a time fills the canvas progressively and
+# each finished preview is cached for instant re-serve.
+_scan_thumb_gate = asyncio.Semaphore(2)
+
+
 @router.get("/api/import/scan/{scan_id}/thumb/{key}")
 async def api_import_scan_thumb(scan_id: str, key: str):
     scan = staging.scan_for_id(scan_id)
@@ -88,7 +95,8 @@ async def api_import_scan_thumb(scan_id: str, key: str):
     if entry is None:
         return JSONResponse({"error": "Import preview not found"}, status_code=404)
     try:
-        data = await asyncio.to_thread(staging.thumbnail_bytes, scan, entry)
+        async with _scan_thumb_gate:
+            data = await asyncio.to_thread(staging.thumbnail_bytes, scan, entry)
     except (OSError, ValueError) as exc:
         return JSONResponse({"error": str(exc) or "Preview could not be decoded"}, status_code=422)
     return Response(data, media_type="image/jpeg")
