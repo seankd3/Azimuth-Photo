@@ -7,6 +7,51 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## H2: the derivation identity, and edits reach their own thumbnails (08-13)
+
+Three commits (`eba9f378`, `0aa2856c`, `d7c03db7`), one sentence: *a derived
+artifact is named by (content_hash, kind, recipe), and an edit changes the
+recipe.*
+
+**Step 1 — the key exists.** `pixels/rendition.py::recipe_for()` is one hash
+of exactly the inputs that change the bytes — code version, tier parameters,
+develop fingerprint. Not the image id; not the file's path or mtime (the
+content hash is the file identity, so a rename never invalidates and an edit
+always will). A test pins the input list. `cache_entries` gained
+`content_hash` + `recipe` and the derivation index; every write stamps
+content_hash via a subquery in the single INSERT statement, so no caller
+threads it. **Learned hard, bisected:** the legacy-row backfill must never
+run inside `_db_connect` — a table-scanning UPDATE inside a lazy connect sat
+behind startup's catalog writers for the whole 30s busy timeout and froze
+boot. It rides the boot warm task instead.
+
+**Step 2 — the tile is the edit.** Thumbnails always decoded the unedited
+source; `purge_image_cache` had one caller, in catalog metadata routes, so a
+saved Develop edit never reached the grid. `thumbnails/develop_bridge.py`
+routes edited photos through Develop's own pipeline — the cached working
+base, `develop_default_render`, `apply_geometry` — one pass at the largest
+tier, downscaled for the rest. Unedited photos never touch it. Saving or
+resetting purges the photo's tiers; proven end to end: generate, save
+Exposure2012=+2.0, regenerate — different bytes through the same entry
+point the media route uses.
+
+**Step 3 — every writer path refreshes.** Fifteen places write
+develop_settings. The two oplog apply paths purge affected photos after
+commit (resolved from content hashes — one-to-many by design). Mirror-applied
+rows deliberately do not purge: they belong to hub-remote photos whose tiles
+are the hub's renders, refreshed on the hub by the same hook. And a
+settings row that changes no pixels is not an edit — rating sync's
+`_lr_rating` bookkeeping stays on the fast path.
+
+**Deferred, named:** the serve-side recipe compare (entry matches when
+`recipe == expected`, legacy '' rows match only unedited photos) waits for
+H3's re-plumb, where `source_signature` retires and the memory tier carries
+the recipe. Until then, eager purge covers every current writer; tiles from
+edits saved *before* this landed refresh on their next regeneration, not
+retroactively. `features/sync/hub.py`'s legacy dirty-metadata develop write
+(E3's deletion target) also does not purge — modern clients travel through
+the oplog.
+
 ## Hub-down is a first-class state, measured live (08-13)
 
 The hub went offline, which made the paired laptop the perfect test fixture:
