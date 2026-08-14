@@ -389,17 +389,36 @@ async def _snapshots(image_id: int) -> list[dict[str, Any]]:
         await connection.close_async(conn, db_path=catalog_path())
 
 
+def _base_source_path(image: dict) -> str:
+    """The path Develop decodes from — the attached archive disk counts.
+
+    Resolving here (not deeper) keeps the base cache's recorded source_path
+    consistent between the probe and the generator, and keeps write paths
+    (XMP sidecars, exports) pointed at the catalog's own path, never at the
+    archive volume.
+    """
+
+    from photo import location
+
+    resolved = location.local_path(
+        str(image["filepath"] or ""),
+        expected_size=image["file_size"] if "file_size" in image.keys() else None,
+    )
+    return resolved or str(image["filepath"] or "")
+
+
 async def _ensure_base(image_id: int, image: dict) -> tuple[rawproc.BasePaths, dict[str, Any]]:
     from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until base generation
 
-    return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, image["filepath"])
+    source = await asyncio.to_thread(_base_source_path, image)
+    return await asyncio.to_thread(rawproc.ensure_base_cache, image_id, source)
 
 
 def _cached_base(image_id: int, image: dict) -> rawproc.BasePaths | None:
     """Cheap cache probe for progressive Develop responses; never decodes RAW."""
     from features.develop import rawproc  # deferred: keeps RAW decoding libraries off boot until a Develop request
 
-    return rawproc.cached_base_paths(image_id, image["filepath"])
+    return rawproc.cached_base_paths(image_id, _base_source_path(image))
 
 
 def _recent_base_failure(image_id: int) -> rawproc.RawDecodeError | None:

@@ -13,6 +13,7 @@ from data import connection as data_connection
 from data.repositories import images as image_repository
 from features.sync import preview_mirror, satellite
 from features.sync.prefetch import ThumbPrefetcher
+from photo import location
 import thumbnails
 
 
@@ -436,7 +437,30 @@ async def _thumbnail_response_inner(
                 return source_error
 
     if source_state == "remote":
-        return await _remote_media_response(image, size)
+        # The archive's own disk may be plugged into this machine. When the
+        # photo's bytes are reachable there, derive the tile locally instead
+        # of asking an absent hub — size-verified, so a same-named stranger
+        # never serves. The tile is stored under the mirror's signature (the
+        # same call the hub-fetch path uses) so warm lookups for this
+        # hub-remote row keep matching; a generation-signed entry would be
+        # dropped as stale on the very next request.
+        resolved = await asyncio.to_thread(
+            location.local_path, image["filepath"], expected_size=image["file_size"]
+        )
+        if resolved is None:
+            return await _remote_media_response(image, size)
+        data = await _await_thumbnail_bounded(resolved, size, image_id)
+        if data is None:
+            stand_in = _local_stand_in_response(size, image_id)
+            return stand_in if stand_in is not None else _pending_thumb_response()
+        if not data:
+            # Unreadable on the attached volume; the hub's copy stays canonical.
+            return await _remote_media_response(image, size)
+        signature = await asyncio.to_thread(_cache_remote_media, image, size, data)
+        headers = _cache_headers(signature)
+        if request_etag == headers["ETag"]:
+            return Response(status_code=304, headers=headers)
+        return Response(content=data, media_type="image/jpeg", headers=headers)
 
     if source_state == "offline":
         return JSONResponse(
@@ -514,7 +538,17 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         return FileResponse(path, headers=headers)
 
     if hinted == "remote":
-        return await _remote_media_response(image, thumbnails.FULL_TIER)
+        # Attached-archive read-through: when the archive's disk is plugged
+        # in, continue as a local photo — the extension dance and headers
+        # below behave exactly as they do for native files.
+        resolved = await asyncio.to_thread(
+            location.local_path, image["filepath"], expected_size=image["file_size"]
+        )
+        if resolved is None:
+            return await _remote_media_response(image, thumbnails.FULL_TIER)
+        image = dict(image)
+        image["filepath"] = resolved
+        image["hub_remote"] = 0
 
     source_state = await _source_state(image)
     source_error = await _source_error_response(image, source_state)
