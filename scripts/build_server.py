@@ -107,7 +107,6 @@ HIDDEN_IMPORTS = [
     "helpers",
     "pairing",
     "photo_metadata",
-    "field_sync",
     "ai_models",
     "embed_cache",
     "elo_propagation",

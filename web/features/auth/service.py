@@ -56,10 +56,7 @@ async def set_owner_key(key: str) -> None:
     settings.save_settings({**current, "owner_key_hash": hashed, "owner_session_epoch": epoch})
     _verified_bearer_cache.clear()
     if first_key:
-        import db
-        from features.sync import pairing
-
-        await pairing.revoke_all_devices(db.DB_PATH)
+        pass
 
 
 async def verify_owner_key(key: str) -> bool:
@@ -181,14 +178,9 @@ async def _bearer_is_owner(headers: dict[str, str]) -> bool:
 
 
 async def _device_token_is_owner(headers: dict[str, str]) -> bool:
-    token = headers.get("x-device-token", "").strip()
-    if not token:
-        return False
-    import db
-    from features.sync import pairing
-
-    device = await pairing.authenticate_device_token(db.DB_PATH, token)
-    return device is not None
+    # Device pairing died with the hub machinery (2026-08-14 gutting order).
+    del headers
+    return False
 
 
 async def scope_is_owner(scope, headers: dict[str, str] | None = None) -> bool:

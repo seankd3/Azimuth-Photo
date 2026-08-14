@@ -631,7 +631,7 @@ def _move_original(src: Path, dest: Path) -> None:
         if exc.errno != errno.EXDEV:
             raise
 
-    from features.sync.hashing import compute_full_hash
+    from photo.identity import compute_full_hash
 
     partial = dest.with_name(f".{dest.name}.moving")
     try:

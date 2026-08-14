@@ -11,15 +11,12 @@ from core import hdd_governor
 from core.source_files import inspect_source_file
 from data import connection as data_connection
 from data.repositories import images as image_repository
-from features.sync import preview_mirror, satellite
-from features.sync.prefetch import ThumbPrefetcher
 from photo import location
 import thumbnails
 from thumbnails import cache_entries, config
 
 
 import db
-from archive import transport
 router = APIRouter()
 _browser_image_extensions = config.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
@@ -32,7 +29,6 @@ _ON_DEMAND_FOREGROUND_TIMEOUT_SECONDS = float(
     os.environ.get("AZIMUTH_ON_DEMAND_FOREGROUND_TIMEOUT", "1.5")
 )
 _SLOW_THUMB_LOG_MS = float(os.environ.get("AZIMUTH_SLOW_THUMB_MS", "1000"))
-_remote_prefetch_tasks: dict[tuple[int, str], asyncio.Task] = {}
 _local_thumb_fill_tasks: dict[tuple[int, str], asyncio.Task] = {}
 
 
@@ -212,85 +208,24 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
     return None
 
 
-def _remote_media_endpoint(remote_id: int, tier: str) -> str:
-    if tier == config.FULL_TIER:
-        return f"/api/full/{remote_id}"
-    return f"/api/thumb/{tier}/{remote_id}"
+def _archive_absent_response(image_id: int, tier: str) -> Response:
+    """An archive photo whose drive is not attached: paint what this device
+    holds, otherwise say plainly that the disk is away."""
 
-
-def _remote_media_pending_response(tier: str) -> Response:
+    stand_in = _local_stand_in_response(tier, image_id)
+    if stand_in is not None:
+        return stand_in
     if tier != config.FULL_TIER:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
     return JSONResponse(
         {
-            "error": "Hub media is still loading",
-            "reason": "hub_media_pending",
+            "error": "Archive drive is not attached",
+            "reason": "source_offline",
+            "detail": "Plug in the archive drive to open this photo.",
         },
-        status_code=503,
-        headers={"Cache-Control": "no-store", "Retry-After": "2"},
+        status_code=404,
+        headers={"Cache-Control": "no-store"},
     )
-
-
-def _cache_remote_media(image, tier: str, data: bytes) -> str:
-    image_id = int(image["id"])
-    if tier in preview_mirror.MIRROR_SIZES:
-        signature = preview_mirror.preview_version_for_image(image)
-    else:
-        signature = ThumbPrefetcher._signature(int(image["hub_image_id"]), data)
-    preview_mirror.store(image_id, tier, signature, data, hot=True)
-    return signature
-
-
-async def _prefetch_remote_media(image: dict, tier: str) -> None:
-    hub = satellite.hub_url().rstrip("/")
-    if not hub:
-        return
-    remote_id = int(image["hub_image_id"])
-    try:
-        status_code, _headers, data = await transport.request_async(
-            "GET",
-            hub + _remote_media_endpoint(remote_id, tier),
-        )
-        if 200 <= status_code < 300 and data:
-            await asyncio.to_thread(_cache_remote_media, image, tier, data)
-    except Exception as exc:
-        log.debug(
-            "worker=hub_media_prefetch image_id=%s tier=%s error=%s",
-            image.get("id"),
-            tier,
-            exc,
-        )
-
-
-def _schedule_remote_media_prefetch(image, tier: str) -> None:
-    image_data = dict(image)
-    key = (int(image_data["id"]), tier)
-    existing = _remote_prefetch_tasks.get(key)
-    if existing is not None and not existing.done():
-        return
-    task = asyncio.create_task(_prefetch_remote_media(image_data, tier))
-    _remote_prefetch_tasks[key] = task
-    task.add_done_callback(lambda _done, task_key=key: _remote_prefetch_tasks.pop(task_key, None))
-
-
-async def _remote_media_response(image, tier: str) -> Response:
-    """Never await the hub on the request path — paint pending, fill behind.
-
-    Local cache hits are served before this runs. On miss, return the same
-    pending/204 the client already understands and enqueue a hub fetch; SWR
-    refresh picks the tile up when it lands. Hub mode never reaches here for
-    local files.
-    """
-
-    hub = satellite.hub_url().rstrip("/")
-    if not hub:
-        return _remote_media_pending_response(tier)
-    _schedule_remote_media_prefetch(image, tier)
-    # Paint whatever this device already holds while the hub copy is on its way.
-    stand_in = _local_stand_in_response(tier, int(image["id"]))
-    if stand_in is not None:
-        return stand_in
-    return _remote_media_pending_response(tier)
 
 
 @router.get("/api/thumb/{size}/{image_id}")
@@ -335,11 +270,9 @@ async def _thumbnail_response_inner(
     if size not in config.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
-    preview_mirror.note_request()
     image = None
     source_state = "available"
     cache_only = cached
-    mirror_version: str | None = None
     if not cached:
         image = await image_repository.get_media_image_by_id(catalog_path(), image_id)
         mark("catalog_row")
@@ -349,8 +282,6 @@ async def _thumbnail_response_inner(
         hinted = _row_source_hint(image)
         if hinted == "remote":
             source_state = "remote"
-            if size in preview_mirror.MIRROR_SIZES:
-                mirror_version = preview_mirror.preview_version_for_image(image)
         elif hinted == "cache_only":
             cache_only = True
             source_state = "cache_only"
@@ -362,43 +293,25 @@ async def _thumbnail_response_inner(
     # Serve from memory/SSD cache before any spindle inspect. Interactive browse
     # under bulk HDD load must not pay an original lstat on every warm thumb.
     request_etag = request.headers.get("if-none-match")
-    required_signature = mirror_version
     entry = thumbnails._memory_get_entry_fast(size, image_id)
-    if entry is not None and required_signature is not None and entry[0] != required_signature:
-        entry = None
     if entry is None:
-        if required_signature is not None:
-            path_hit = preview_mirror.get_local(image_id, size, required_signature, touch=True)
-            mark("mirror_get_local")
-            if path_hit is not None:
-                signature, path = path_hit
-                headers = _cache_headers(signature)
-                if request_etag == headers["ETag"]:
-                    return Response(status_code=304, headers=headers)
-                return FileResponse(path, media_type="image/jpeg", headers=headers)
-        else:
-            path_entry = cache_entries.fast_disk_path_entry(size, image_id)
-            if path_entry is not None:
-                signature, path = path_entry
-                headers = _cache_headers(signature)
-                if request_etag == headers["ETag"]:
-                    return Response(status_code=304, headers=headers)
-                return FileResponse(path, media_type="image/jpeg", headers=headers)
+        path_entry = cache_entries.fast_disk_path_entry(size, image_id)
+        if path_entry is not None:
+            signature, path = path_entry
+            headers = _cache_headers(signature)
+            if request_etag == headers["ETag"]:
+                return Response(status_code=304, headers=headers)
+            return FileResponse(path, media_type="image/jpeg", headers=headers)
         entry = await asyncio.to_thread(
             cache_entries.fast_disk_read_entry,
             size,
             image_id,
-            required_signature,
+            None,
         )
         mark("disk_read")
         if entry is not None:
             signature, data = entry
             thumbnails._memory_put(size, image_id, signature, data)
-        elif required_signature is not None:
-            # Version mismatch left a stale unversioned index hit — drop it.
-            stale = cache_entries.fast_disk_path_entry(size, image_id)
-            if stale is not None and stale[0] != required_signature:
-                preview_mirror.delete_entry(image_id, size)
     if entry is not None:
         signature, data = entry
         headers = _cache_headers(signature)
@@ -438,29 +351,23 @@ async def _thumbnail_response_inner(
                 return source_error
 
     if source_state == "remote":
-        # The archive's own disk may be plugged into this machine. When the
-        # photo's bytes are reachable there, derive the tile locally instead
-        # of asking an absent hub — size-verified, so a same-named stranger
-        # never serves. The tile is stored under the mirror's signature (the
-        # same call the hub-fetch path uses) so warm lookups for this
-        # hub-remote row keep matching; a generation-signed entry would be
-        # dropped as stale on the very next request.
+        # An archive photo: its bytes live on the attached drive, found by
+        # photo/location — size-verified, so a same-named stranger never
+        # serves. Tiles derive locally and cache like any other photo's.
         resolved = await asyncio.to_thread(
             location.local_path, image["filepath"], expected_size=image["file_size"]
         )
         if resolved is None:
-            return await _remote_media_response(image, size)
+            return _archive_absent_response(image_id, size)
         data = await _await_thumbnail_bounded(resolved, size, image_id)
         if data is None:
             stand_in = _local_stand_in_response(size, image_id)
             return stand_in if stand_in is not None else _pending_thumb_response()
         if not data:
-            # Unreadable on the attached volume; the hub's copy stays canonical.
-            return await _remote_media_response(image, size)
-        signature = await asyncio.to_thread(_cache_remote_media, image, size, data)
-        headers = _cache_headers(signature)
-        if request_etag == headers["ETag"]:
-            return Response(status_code=304, headers=headers)
+            return _archive_absent_response(image_id, size)
+        headers = await asyncio.to_thread(
+            thumbnails.response_headers, resolved, size, image_id
+        )
         return Response(content=data, media_type="image/jpeg", headers=headers)
 
     if source_state == "offline":
@@ -546,7 +453,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             location.local_path, image["filepath"], expected_size=image["file_size"]
         )
         if resolved is None:
-            return await _remote_media_response(image, config.FULL_TIER)
+            return _archive_absent_response(image_id, config.FULL_TIER)
         image = dict(image)
         image["filepath"] = resolved
         image["hub_remote"] = 0
@@ -557,7 +464,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         return source_error
 
     if source_state == "remote":
-        return await _remote_media_response(image, config.FULL_TIER)
+        return _archive_absent_response(image_id, config.FULL_TIER)
 
     if source_state == "offline":
         return JSONResponse(

@@ -26,7 +26,7 @@ def _relative(path: Path) -> str:
 # --------------------------------------------------------------------------
 
 def identity() -> dict:
-    from features.sync.hashing import compute_hash_pair
+    from photo.identity import compute_hash_pair
 
     recorded = {}
     for path in corpus.build():

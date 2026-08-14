@@ -433,14 +433,6 @@ def _recent_base_failure(image_id: int) -> rawproc.RawDecodeError | None:
 
 
 def _base_error_response(error: rawproc.RawDecodeError) -> JSONResponse:
-    from features.sync import readthrough  # deferred: keeps numpy and Pillow off boot until a base-generation error is handled
-
-    if isinstance(error.__cause__, readthrough.BaseReadthroughError):
-        return JSONResponse(
-            {"error": str(error), "reason": "hub_unreachable"},
-            status_code=503,
-            headers={"Cache-Control": "no-store", "Retry-After": "5"},
-        )
     return JSONResponse({"error": str(error)}, status_code=422)
 
 

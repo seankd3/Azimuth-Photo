@@ -14,7 +14,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Iterable
 
-from features.sync.hashing import HASH_PREFIX_BYTES, compute_full_hash
+from photo.identity import HASH_PREFIX_BYTES, compute_full_hash
 
 
 VIDEO_EXTENSIONS = {".mp4", ".mov"}

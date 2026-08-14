@@ -174,50 +174,6 @@ export async function removeFromCollection(collectionId, imageIds) {
     return postJson(`/api/user-collections/${collectionId}/images/remove`, { image_ids: imageIds });
 }
 
-export async function getCollectionShare(collectionId) {
-    return fetchJson(`/api/user-collections/${collectionId}/share`, { defaultValue: null });
-}
-
-export async function getCollectionShareFavorites(collectionId) {
-    return fetchJson(`/api/user-collections/${collectionId}/share/favorites`, { defaultValue: { favorites: [], count: 0 } });
-}
-
-export async function createCollectionShare(
-    collectionId,
-    {
-        rotate = false,
-        expiresInDays = null,
-        password = undefined,
-        clearPassword = false,
-    } = {},
-) {
-    const payload = {
-        rotate,
-        expires_in_days: expiresInDays,
-    };
-    if (password !== undefined) payload.password = password;
-    if (clearPassword) payload.clear_password = true;
-    return postJson(`/api/user-collections/${collectionId}/share`, {
-        ...payload,
-    });
-}
-
-export async function revokeCollectionShare(collectionId) {
-    return postJson(`/api/user-collections/${collectionId}/share/revoke`, {});
-}
-
-export async function listSharedSurfaces() {
-    return fetchJson('/api/shares', { defaultValue: null });
-}
-
-export async function getSyncStatus() {
-    return fetchJson('/api/sync/status', { defaultValue: null });
-}
-
-export async function setSyncPaused(paused) {
-    return postJson(`/api/sync/${paused ? 'pause' : 'resume'}`, {});
-}
-
 export async function getPeople(limit = 24) {
     return fetchJson(`/api/people?limit=${limit}`, { defaultValue: null });
 }

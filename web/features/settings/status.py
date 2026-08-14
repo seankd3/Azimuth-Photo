@@ -15,7 +15,6 @@ from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
 from features.people import routes as people_routes
 from features.catalog import metadata as catalog_metadata
-from features.sync import satellite
 
 
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
@@ -142,7 +141,6 @@ async def build_settings_response() -> dict:
         "people_status": people_status,
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": catalog,
-        "sync": satellite.bootstrap_payload(),
         **settings.settings_metadata(),
     }
 

@@ -1,13 +1,13 @@
 import { bytes, esc, formatCount as fmt } from '../lib.js';
 import {
-    addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom, connectToHub, createDeviceLink, discoverHubs,
-    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus, getPairStatus,
-    getFreeable, getFreeUpJob, getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getVersion,
-    installAiModel, listDevices,
+    addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom,
+    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus,
+    getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getVersion,
+    installAiModel,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, revokeDevice, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan, startFreeUpSpace, startLrcatScan, cancelFreeUpJob, getStorageOverview, revealFolder,
+    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
+    stopMetadataScan, startLrcatScan, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -48,7 +48,6 @@ let peopleStatus = null;
 let captionStatus = null;
 let metadataStatus = null;
 let remoteAccess = null;
-let pairStatus = null;
 let lrConnectStatus = null;
 let lrcatCatalogs = null;
 let lrcatPath = '';
@@ -57,13 +56,7 @@ let lrcatPreview = null;
 let lrcatReport = null;
 let lrcatTimer = null;
 
-let freeableStatus = null;
-let freeupJob = null;
-let freeupOlderDays = 30;
-let freeupTimer = null;
-let devicesPayload = null;
 let linkSession = null;
-let discoverPayload = null;
 let settingsPageData = null;
 let versionData = null;
 let savedSettings = {};
@@ -611,143 +604,6 @@ function renderPeekHealth() {
     return `<section class="dr-sec"><h3>Library health</h3><div class="setting-status">${esc(detail)}</div></section>`;
 }
 
-function freeupActive() {
-    return Boolean(freeupJob && ['queued', 'confirming', 'deleting'].includes(freeupJob.phase));
-}
-
-function hubDisplayName() {
-    try {
-        return new URL(pairStatus?.hub_url || '').hostname.split('.')[0] || 'your hub';
-    } catch {
-        return 'your hub';
-    }
-}
-
-function freeupSummary() {
-    if (freeableStatus?.unavailable) return 'Hub unavailable — reconnect to check what is safe to free.';
-    if (!freeableStatus) return 'Checking synced originals…';
-    if (!Number(freeableStatus.files || 0)) return 'No synced originals match this age.';
-    return `${bytes(freeableStatus.bytes)} safe to free — everything already on ${hubDisplayName()}`;
-}
-
-function freeupJobDetail() {
-    if (!freeupJob) return '';
-    if (freeupJob.phase === 'confirming') return 'Confirming originals with the hub…';
-    const done = Number(freeupJob.files_done || 0);
-    const total = Number(freeupJob.files_total || 0);
-    if (freeupJob.phase === 'cancelled') return `Stopped · ${bytes(freeupJob.bytes_freed)} freed`;
-    if (freeupJob.phase === 'failed') return 'Stopped — the remaining originals are untouched';
-    if (freeupJob.phase === 'completed') return `Done · ${bytes(freeupJob.bytes_freed)} freed`;
-    return `${fmt(done)} of ${fmt(total)} files · ${bytes(freeupJob.bytes_freed)} freed`;
-}
-
-function renderFreeUp() {
-    if (!pairStatus || pairStatus.mode !== 'satellite' || !pairStatus.has_hub) return '';
-    const active = freeupActive();
-    const canStart = Number(freeableStatus?.files || 0) > 0;
-    const progressValue = freeupJob
-        ? progress(freeupJob.files_done, freeupJob.files_total)
-        : 0;
-    const jobRow = freeupJob
-        ? '<div class="work-row freeup-progress" data-freeup-job>'
-            + '<div class="wr-body"><div class="wr-top"><span>Local originals</span>'
-            + `<span class="v" data-freeup-job-detail>${esc(freeupJobDetail())}</span></div>`
-            + `<div class="wr-track"><i data-freeup-progress style="width:${progressValue}%"></i></div></div></div>`
-        : '';
-    return '<section class="dr-sec" id="freeup-panel"><h3>Free up space</h3>'
-        + `<div class="freeup-summary" data-freeup-summary>${esc(freeupSummary())}</div>`
-        + '<div class="freeup-controls">'
-        + '<label for="freeup-age"><span>Older than</span><select id="freeup-age"'
-        + `${active ? ' disabled' : ''}>`
-        + `<option value="30"${freeupOlderDays === 30 ? ' selected' : ''}>30 days</option>`
-        + `<option value="90"${freeupOlderDays === 90 ? ' selected' : ''}>90 days</option>`
-        + `<option value="365"${freeupOlderDays === 365 ? ' selected' : ''}>1 year</option>`
-        + `<option value="0"${freeupOlderDays === 0 ? ' selected' : ''}>Everything synced</option>`
-        + '</select></label>'
-        + `<button class="btn primary" id="freeup-btn" type="button"${active || canStart ? '' : ' disabled'}>${active ? 'Cancel' : 'Free up space'}</button>`
-        + '</div>' + jobRow + '</section>';
-}
-
-function formatSeen(value) {
-    if (value == null) return 'Never';
-    const then = Number(value) * (Number(value) > 1e12 ? 1 : 1000);
-    if (!Number.isFinite(then)) return '—';
-    const delta = Math.max(0, Date.now() - then);
-    if (delta < 60_000) return 'Just now';
-    if (delta < 3_600_000) return `${Math.floor(delta / 60_000)}m ago`;
-    if (delta < 86_400_000) return `${Math.floor(delta / 3_600_000)}h ago`;
-    return new Date(then).toLocaleDateString();
-}
-
-function renderDevices() {
-    if (!pairStatus || pairStatus.mode !== 'hub') return '';
-    const devices = (devicesPayload && devicesPayload.devices) || [];
-    const active = devices.filter((device) => !device.revoked);
-    const rows = active.length
-        ? active.map((device) => (
-            `<div class="device-row" data-device-id="${esc(device.id)}">`
-            + `<div><b>${esc(device.name)}</b>`
-            + `<span class="device-meta" data-device-status>${esc(device.platform || 'unknown')} · last seen ${esc(formatSeen(device.last_seen))}</span></div>`
-            + `<button class="mini-btn btn-danger" type="button" data-revoke-device="${esc(device.id)}">Revoke</button>`
-            + `</div>`
-        )).join('')
-        : '<div class="setting-hint">No linked devices yet.</div>';
-    const link = linkSession
-        ? `<div class="pair-link-card">`
-            + `<div class="pair-code" aria-label="Pairing code">${esc(linkSession.code)}</div>`
-            + (linkSession.qr_png_base64
-                ? `<img class="pair-qr" alt="Pairing QR code" src="data:image/png;base64,${esc(linkSession.qr_png_base64)}">`
-                : '')
-            + `<div class="setting-hint">Code expires in 10 minutes. One device can use it once.</div>`
-            + `</div>`
-        : '';
-    return '<section class="dr-sec" id="devices-panel"><h3>Devices</h3>'
-        + '<div class="drawer-action-row">'
-        + '<span>Link a phone or another computer to this library.</span>'
-        + '<button class="btn primary" id="link-device-btn" type="button">Link a device</button>'
-        + '</div>'
-        + link
-        + `<div class="device-list">${rows}</div>`
-        + settingToggle('require_device_token', 'Require device token for sync')
-        + '<div class="setting-hint">Off by default. When on, only paired devices can call sync endpoints.</div>'
-        + '</section>';
-}
-
-function renderConnectServer() {
-    if (!pairStatus || pairStatus.mode === 'hub') return '';
-    const hubs = (discoverPayload && discoverPayload.hubs) || [];
-    const discovered = hubs.length
-        ? hubs.map((hub) => (
-            `<button class="discovered-hub" type="button" data-hub-url="${esc(hub.url)}">`
-            + `<b>${esc(hub.name || 'Azimuth Photo')}</b>`
-            + `<span>${esc(hub.url)}</span>`
-            + '</button>'
-        )).join('')
-        : '<div class="setting-hint">No hubs found on the network yet.</div>';
-    const connected = pairStatus && pairStatus.has_hub
-        ? `<div class="setting-status" data-setting-status="connection">Connected to <code>${esc(pairStatus.hub_url)}</code></div>`
-        : '';
-    // A hub too old to talk to is said once, by the sync chip: it reads
-    // hub_health from /api/sync/status, turns its arrow into "!" and names what
-    // is paused. This section does not repeat it.
-    return '<section class="dr-sec" id="connect-server-panel"><h3>Connect to server</h3>'
-        + connected
-        + '<div class="drawer-action-row">'
-        + '<span>Find a hub on your network, or enter its address.</span>'
-        + '<button class="mini-btn" id="discover-hubs-btn" type="button">Scan network</button>'
-        + '</div>'
-        + `<div class="discovered-hubs">${discovered}</div>`
-        + '<label class="setting-row" for="connect-hub-url"><span><b>Hub URL</b></span>'
-        + `<input class="drawer-input" id="connect-hub-url" type="text" spellcheck="false" autocomplete="off" placeholder="http://nas.local:8000" value="${esc((pairStatus && pairStatus.hub_url) || '')}">`
-        + '</label>'
-        + '<label class="setting-row" for="connect-pair-code"><span><b>Pair code</b></span>'
-        + '<input class="drawer-input" id="connect-pair-code" type="text" spellcheck="false" autocomplete="off" placeholder="8-character code">'
-        + '</label>'
-        + '<div class="setting-actions">'
-        + '<button class="btn primary" id="connect-hub-btn" type="button">Connect</button>'
-        + '</div></section>';
-}
-
 function renderConnectLightroom() {
     // Only when LR Classic is detected — no wizard, just state + one button.
     if (!lrConnectStatus || !lrConnectStatus.show_button) return '';
@@ -941,9 +797,7 @@ function settingToggle(field, label) {
 }
 
 function hubComputeSettingsVisible() {
-    if (remoteAccess && remoteAccess.hub_mode === false) return false;
-    if (pairStatus && pairStatus.mode && pairStatus.mode !== 'hub') return false;
-    return true;
+    return !(remoteAccess && remoteAccess.hub_mode === false);
 }
 
 function renderAiSettings() {
@@ -1102,7 +956,7 @@ export function renderSystemSections() {
         processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
-        connectivity: renderDevices() + renderConnectServer() + renderConnectLightroom() + renderFreeUp() + renderRemote(),
+        connectivity: renderConnectLightroom() + renderRemote(),
         preferences: renderPrefs(),
     };
 }
@@ -1186,17 +1040,6 @@ function patchDrawerStatus(workerGenerations = null) {
         ));
     }
 
-    const devices = new Map(((devicesPayload && devicesPayload.devices) || []).map((device) => [String(device.id), device]));
-    for (const row of body.querySelectorAll('.device-row[data-device-id]')) {
-        const device = devices.get(row.dataset.deviceId);
-        if (!device) continue;
-        patchNodeText(row, '[data-device-status]', `${device.platform || 'unknown'} · last seen ${formatSeen(device.last_seen)}`);
-    }
-    if (pairStatus?.hub_url) patchNodeText(body, '[data-setting-status="connection"] code', pairStatus.hub_url);
-    patchNodeText(body, '[data-freeup-summary]', freeupSummary());
-    patchNodeText(body, '[data-freeup-job-detail]', freeupJobDetail());
-    const freeupProgress = body.querySelector('[data-freeup-progress]');
-    if (freeupProgress) freeupProgress.style.width = `${progress(freeupJob?.files_done, freeupJob?.files_total)}%`;
 }
 
 function patchSettingSurface(field) {
@@ -1205,7 +1048,7 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, pair, devices, overview, lrConnect] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, overview, lrConnect] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
@@ -1215,8 +1058,6 @@ async function refreshDrawer({ initial = false } = {}) {
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
         versionData ? Promise.resolve(versionData) : getVersion().catch(() => null),
-        getPairStatus().catch(() => null),
-        listDevices().catch(() => null),
         getStorageOverview().catch(() => null),
         getLrConnect().catch(() => null),
         refreshLibraryHealth().catch(() => null),
@@ -1232,13 +1073,7 @@ async function refreshDrawer({ initial = false } = {}) {
     metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
     versionData = version || versionData;
-    pairStatus = pair || pairStatus;
     lrConnectStatus = lrConnect || lrConnectStatus;
-    devicesPayload = devices || devicesPayload;
-    if (pairStatus?.mode === 'satellite' && pairStatus.has_hub && freeableStatus == null && !freeupActive()) {
-        const available = await getFreeable(freeupOlderDays).catch(() => null);
-        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
-    }
     storageOverview = overview || storageOverview;
     renderActivity();
     const body = systemSurfaceRender
@@ -1493,44 +1328,6 @@ async function withBusyAction(key, button, action) {
     }
 }
 
-async function refreshFreeable() {
-    freeableStatus = null;
-    renderDrawer();
-    const available = await getFreeable(freeupOlderDays).catch(() => null);
-    freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
-    renderDrawer();
-}
-
-function stopFreeUpPolling() {
-    clearTimeout(freeupTimer);
-    freeupTimer = null;
-}
-
-function pollFreeUpJob(jobId) {
-    stopFreeUpPolling();
-    const tick = async () => {
-        const status = await getFreeUpJob(jobId).catch(() => null);
-        if (!status) {
-            freeupTimer = window.setTimeout(tick, 1200);
-            return;
-        }
-        freeupJob = status;
-        patchDrawerStatus();
-        if (freeupActive()) {
-            freeupTimer = window.setTimeout(tick, 800);
-            return;
-        }
-        stopFreeUpPolling();
-        const available = await getFreeable(freeupOlderDays).catch(() => null);
-        freeableStatus = available || { files: 0, bytes: 0, unavailable: true };
-        renderDrawer();
-        if (status.phase === 'completed') showToast(`${bytes(status.bytes_freed)} freed from this computer`);
-        else if (status.phase === 'cancelled') showToast(`Free up space stopped · ${bytes(status.bytes_freed)} freed`);
-        else showToast('Free up space stopped — remaining originals are untouched');
-    };
-    tick();
-}
-
 function stopLrcatPolling() {
     clearTimeout(lrcatTimer);
     lrcatTimer = null;
@@ -1577,25 +1374,6 @@ async function startLrcatRun(dryRun) {
     lrcatRun = (result.data && result.data.status) || { running: true, dry_run: dryRun };
     renderCurrentSystemSurface();
     pollLrcatScan(dryRun);
-}
-
-async function handleFreeUpAction() {
-    if (freeupActive()) {
-        const status = await cancelFreeUpJob(freeupJob.job_id);
-        if (status) {
-            freeupJob = status;
-            patchDrawerStatus();
-        }
-        return;
-    }
-    const job = await startFreeUpSpace(freeupOlderDays);
-    if (!job?.job_id) {
-        showToast('Couldn’t start Free up space');
-        return;
-    }
-    freeupJob = job;
-    renderDrawer();
-    pollFreeUpJob(job.job_id);
 }
 
 async function applyCacheDefaults() {
@@ -1755,56 +1533,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
     bindCloudBackupActions(body);
     bindSystemHealthActions(body);
     bindSettingInputs(body);
-    body.querySelector('#link-device-btn')?.addEventListener('click', (event) => withBusyAction('link-device', event.currentTarget, async () => {
-        const result = await createDeviceLink();
-        if (result && result.code) {
-            linkSession = result;
-            renderCurrentSystemSurface();
-            showToast('Pairing code ready');
-        } else {
-            showToast('Couldn’t create a pairing code');
-        }
-    }));
-    for (const btn of body.querySelectorAll('[data-revoke-device]')) {
-        btn.addEventListener('click', () => withBusyAction(`revoke-${btn.dataset.revokeDevice}`, btn, async () => {
-            const result = await revokeDevice(Number(btn.dataset.revokeDevice));
-            if (result && result.ok) {
-                devicesPayload = await listDevices().catch(() => devicesPayload);
-                renderCurrentSystemSurface();
-                showToast('Device revoked');
-            } else {
-                showToast('Couldn’t revoke device');
-            }
-        }));
-    }
-    body.querySelector('#discover-hubs-btn')?.addEventListener('click', (event) => withBusyAction('discover-hubs', event.currentTarget, async () => {
-        discoverPayload = await discoverHubs().catch(() => null);
-        renderCurrentSystemSurface();
-        const count = (discoverPayload && discoverPayload.hubs && discoverPayload.hubs.length) || 0;
-        showToast(count ? `Found ${count} hub${count === 1 ? '' : 's'}` : 'No hubs found');
-    }));
-    for (const btn of body.querySelectorAll('[data-hub-url]')) {
-        btn.addEventListener('click', () => {
-            const input = document.getElementById('connect-hub-url');
-            if (input) input.value = btn.dataset.hubUrl || '';
-        });
-    }
-    body.querySelector('#connect-hub-btn')?.addEventListener('click', (event) => withBusyAction('connect-hub', event.currentTarget, async () => {
-        const hubUrl = document.getElementById('connect-hub-url')?.value?.trim() || '';
-        const code = document.getElementById('connect-pair-code')?.value?.trim() || '';
-        if (!hubUrl || !code) {
-            showToast('Enter a hub URL and pair code');
-            return;
-        }
-        const result = await connectToHub({ hubUrl, code });
-        if (result && result.ok) {
-            pairStatus = await getPairStatus().catch(() => pairStatus);
-            renderCurrentSystemSurface();
-            showToast('Connected to hub');
-        } else {
-            showToast((result && (result.error || result.detail)) || 'Couldn’t connect');
-        }
-    }));
     body.querySelector('#lr-connect-btn')?.addEventListener('click', (event) => withBusyAction('lr-connect', event.currentTarget, async () => {
         const result = await connectLightroom();
         lrConnectStatus = (result && result.data) || await getLrConnect().catch(() => lrConnectStatus);
@@ -1929,13 +1657,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
             showToast('Cache cleared. Undo is unavailable.');
         } else showToast('Couldn’t clear cache');
     }));
-    body.querySelector('#freeup-age')?.addEventListener('change', (event) => {
-        freeupOlderDays = Number(event.currentTarget.value || 0);
-        refreshFreeable();
-    });
-    body.querySelector('#freeup-btn')?.addEventListener('click', (event) => withBusyAction(
-        'freeup', event.currentTarget, handleFreeUpAction,
-    ));
     body.querySelector('#copy-remote')?.addEventListener('click', async (event) => {
         if (event.currentTarget.getAttribute('aria-disabled') === 'true') return;
         const url = (remoteAccess && remoteAccess.tailscale && remoteAccess.tailscale.https_url)
@@ -1994,7 +1715,6 @@ function stopDrawerPolling() {
     stopLibraryHealthPolling();
     stopCloudBackupPolling();
     stopSystemHealthPolling();
-    if (!freeupActive()) stopFreeUpPolling();
     if (!(lrcatRun && lrcatRun.running)) stopLrcatPolling();
 }
 

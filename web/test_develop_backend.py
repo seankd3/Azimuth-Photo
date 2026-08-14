@@ -34,7 +34,6 @@ import app as app_module  # noqa: E402
 import db  # noqa: E402
 from features.develop import rawproc, routes as develop_routes  # noqa: E402
 from features.develop import render as develop_render  # noqa: E402
-from features.sync import readthrough  # noqa: E402
 
 
 RAW_ROOT = Path("/mnt/expansion/Photos/RAWS")
@@ -500,17 +499,6 @@ class DevelopBackendTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["meta"], {"canvas_color_profile": {}})
-
-    def test_base_poll_surfaces_recent_hub_failure_as_503(self):
-        cause = readthrough.BaseReadthroughError("Could not reach the hub for this Develop base")
-        failure = rawproc.RawDecodeError(str(cause))
-        failure.__cause__ = cause
-        develop_routes._base_generation_failures[self.raw_id] = (develop_routes.time.monotonic(), failure)
-
-        response = self.client.get(f"/api/develop/{self.raw_id}/base.bin")
-
-        self.assertEqual(response.status_code, 503, response.text)
-        self.assertEqual(response.json()["reason"], "hub_unreachable")
 
     def test_transform_auto_with_cold_base_returns_pending(self):
         with mock.patch.object(develop_routes, "_start_base_generation") as start_generation:

@@ -14,9 +14,6 @@ import { canInstall, promptInstall } from './install.js';
 import { dismissSheetThen, openSheet } from './selection.js';
 import { showToast } from './toast.js';
 import { icon } from '../icons.js';
-import { openCollectionShareSheet, renderSharedView } from './sharing.js';
-import { offlineSummary, openOfflineStatusSheet } from './offline.js';
-import { renderBackupView, stopBackupView } from './backup.js';
 import { INACTIVE_WORKER_STATES, normalizeWorkerState } from '../worker_state.js';
 
 // Matches RANK_QUALITY_MIN_SIGNALS in data/repositories/rankings.py.
@@ -191,9 +188,6 @@ function render() {
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Quick access</h3>'
         + `<button class="m-lib-row" data-q="picked"><span class="g">${icon('heart')}</span><span class="body">Favorites<span class="sub">Favorited photos</span></span><span class="n num">${fmtInt(counts && counts.picked)}</span></button>`
         + `<button class="m-lib-row" data-q="rejected"><span class="g">${icon('x')}</span><span class="body">Rejected</span><span class="n num">${fmtInt(counts && counts.rejected)}</span></button>`
-        + `<button class="m-lib-row" id="ml-offline"><span class="g">${icon('download')}</span><span class="body">Available offline<span class="sub">Saved on this phone</span></span><span class="n num">${fmtInt(offlineSummary().count)}</span></button>`
-        + `<button class="m-lib-row" id="ml-backup"><span class="g">${icon('upload')}</span><span class="body">Backup<span class="sub">Uploads and phone storage</span></span></button>`
-        + `<button class="m-lib-row" id="ml-shared"><span class="g">${icon('share-2')}</span><span class="body">Shared with me</span></button>`
         + `<button class="m-lib-row" data-q="all"><span class="g">${icon('house')}</span><span class="body">All photos</span><span class="n num">${fmtInt(counts && counts.total)}</span></button></div>`;
 
     html += '<div class="ms-sec" style="padding-left:0;padding-right:0"><h3>Sources</h3>';
@@ -237,23 +231,6 @@ function render() {
         });
     }
     root.querySelector('#ml-new').addEventListener('click', newCollectionSheet);
-    root.querySelector('#ml-shared')?.addEventListener('click', () => {
-        showingCollection = true;
-        renderSharedView(root, () => {
-            showingCollection = false;
-            render();
-        });
-    });
-    root.querySelector('#ml-offline')?.addEventListener('click', openOfflineStatusSheet);
-    root.querySelector('#ml-backup')?.addEventListener('click', () => {
-        showingCollection = true;
-        stopWorkPolling();
-        renderBackupView(root, () => {
-            showingCollection = false;
-            render();
-            startWorkPolling();
-        });
-    });
     for (const el of root.querySelectorAll('.m-lib-row[data-q]')) {
         el.addEventListener('click', () => {
             const q = el.dataset.q;
@@ -704,7 +681,6 @@ export function openCollectionActionsSheet(coll) {
         `<h3>${esc(coll.name)}</h3>`
         + '<input class="sheet-input" id="ml-rename-name" type="text" autocomplete="off">'
         + '<button class="sheet-btn" id="ml-rename-save" data-mutating>Save name</button>'
-        + `<button class="sheet-row" id="ml-share"><span class="g">${icon('share-2')}</span>Share link</button>`
         + `<button class="sheet-row" id="ml-delete" data-mutating><span class="g">${icon('trash-2')}</span>Delete collection</button>`
         + '<div class="sheet-confirm" id="ml-delete-confirm" hidden>Delete? <button data-yes="1">Yes</button><button data-no="1">No</button></div>'
     );
@@ -732,7 +708,6 @@ export function openCollectionActionsSheet(coll) {
             }
         });
     });
-    sheet.querySelector('#ml-share')?.addEventListener('click', () => openCollectionShareSheet(coll));
     const deleteButton = sheet.querySelector('#ml-delete');
     const confirm = sheet.querySelector('#ml-delete-confirm');
     deleteButton.addEventListener('click', () => {
@@ -779,7 +754,6 @@ export function initLibrary() {
         if (tab === 'library') startWorkPolling();
         else {
             stopWorkPolling();
-            stopBackupView();
         }
     });
 }

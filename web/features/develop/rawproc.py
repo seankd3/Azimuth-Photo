@@ -679,22 +679,6 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
                 stale.unlink(missing_ok=True)
         original_is_local = Path(path).is_file()
 
-    # The hub is cold storage, so never wait on it here — fetch_base_cache_for_image's
-    # own docstring says "Develop paint must never wait on the hub", and this was the
-    # caller passing blocking=True. Non-blocking returns the base if it is already
-    # local and otherwise schedules the warm; Develop opens on a proxy meanwhile.
-    if not original_is_local:
-        from features.sync import readthrough
-
-        if readthrough.can_read_through():
-            import db
-
-            meta = readthrough.fetch_base_cache_for_image(
-                image_id, paths, db_path=db.DB_PATH, source_path=str(path),
-            )
-            if meta is not None:
-                return paths, meta
-
     with lock:
         # Another thread may have finished the whole job while we were waiting.
         cached = cached_base_paths(image_id, path)

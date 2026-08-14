@@ -19,17 +19,9 @@ from features.develop import importer as develop_importer
 from features.captions.routes import CaptionBody
 from features.stacks.routes import CreateStackBody
 from features.auth import passwords as share_auth
-from features.sync import device_auth, hub, hub_routes
-from features.sync.oplog_routes import OplogEntry, OplogPushRequest
 from thumbnails import generation as thumbnail_generation
 import scanner
 import settings
-
-
-def test_device_token_enforcement_defaults_off_until_pairing_onboarded():
-    # Opt-in for now so existing unpaired satellites keep syncing; the security
-    # property that MATTERS (enforcement when enabled) is covered separately.
-    assert settings.DEFAULT_SETTINGS["require_device_token"] is False
 
 
 def test_scanner_skips_symlinked_media_outside_source(tmp_path: Path):
@@ -101,46 +93,6 @@ def test_media_state_rejects_existing_symlink_catalog_row(tmp_path: Path):
     assert asyncio.run(media_routes._source_state(image)) == "unsafe"
 
 
-def test_hub_upload_rejects_oversized_chunk_before_buffering(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(hub, "MAX_CHUNK_BYTES", 4)
-    monkeypatch.setattr(device_auth, "require_device_token_enabled", lambda: False)
-    db.DB_PATH = str(tmp_path / "unused.db")
-    app = FastAPI()
-    app.include_router(hub_routes.router)
-
-    with TestClient(app) as client:
-        response = client.post(
-            "/api/sync/upload/" + "a" * 32,
-            headers={"X-Offset": "0", "X-Total-Bytes": "5"},
-            content=b"12345",
-        )
-
-    assert response.status_code == 413
-    assert response.json() == {"error": "Upload chunk is too large"}
-
-
-def test_hub_manifest_filename_rejects_cross_platform_path_forms():
-    invalid = (
-        "../escape.jpg",
-        "/tmp/escape.jpg",
-        r"..\escape.jpg",
-        r"C:\escape.jpg",
-        r"\\server\share\escape.jpg",
-        "photo.jpg\0tail",
-        "photo.jpg:stream",
-        "CON.jpg",
-    )
-
-    for filename in invalid:
-        try:
-            hub._normalize_filename(filename)
-        except ValueError:
-            continue
-        raise AssertionError(f"accepted unsafe filename: {filename!r}")
-
-    assert hub._normalize_filename("summer photo-01.CR3") == "summer photo-01.CR3"
-
-
 def test_share_password_form_has_small_body_limit():
     app = FastAPI()
 
@@ -159,19 +111,6 @@ def test_bulk_request_models_reject_unbounded_lists():
     oversized_cases = (
         lambda: CreateStackBody(image_ids=list(range(10_001))),
         lambda: CaptionBody(tags=["tag"] * 501),
-        lambda: OplogPushRequest(
-            entries=[
-                OplogEntry(
-                    origin="device",
-                    origin_seq=index + 1,
-                    content_hash="a" * 32,
-                    family="flag",
-                    payload={},
-                    ts=1.0,
-                )
-                for index in range(5001)
-            ]
-        ),
     )
 
     for build in oversized_cases:

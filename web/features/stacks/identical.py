@@ -18,7 +18,7 @@ from copy import deepcopy
 from pathlib import PurePath
 
 from data import connection as data_connection
-from features.sync.hashing import compute_full_hash
+from photo.identity import compute_full_hash
 
 
 _ACTIVE = "i.status IN ('kept', 'maybe') AND i.missing_at IS NULL AND i.vc_of IS NULL"

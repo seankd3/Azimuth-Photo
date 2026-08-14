@@ -25,7 +25,6 @@ import { mountIconSprite } from '../icons.js';
 import { initPanelSections } from './panel_sections.js';
 import { initCullBrief } from './cull_brief.js';
 import { initQuickGuide } from './quick_guide.js';
-import { initSyncChip } from './sync_chip.js';
 import { initLrRankingChip } from './lr_ranking_chip.js';
 
 // One-time exorcism: earlier builds registered an offline service worker
@@ -65,7 +64,6 @@ async function boot() {
     initPanelSections();
     initDrawer();
     initWatchedFolders();
-    initSyncChip();
     initLrRankingChip();
     initShortcutSheet();
     initKeyboard();

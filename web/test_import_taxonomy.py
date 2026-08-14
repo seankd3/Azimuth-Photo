@@ -18,7 +18,6 @@ from PIL import Image
 from test_support import *  # noqa: F401,F403
 from features.imports import card, staging, taxonomy
 from data import connection
-from features.sync import hub_routes
 
 
 class TaxonomyRoutingTableTests(unittest.TestCase):
@@ -425,76 +424,6 @@ class StagedImportTaxonomyTests(BackendTestCase):
                 os.environ["AZIMUTH_ORIGINALS_DIR"] = old_root
 
 
-class HubPhoneUnderRawsRegressionTests(unittest.TestCase):
-    def setUp(self):
-        self.tempdir = tempfile.TemporaryDirectory()
-        self.root = Path(self.tempdir.name)
-        self.db_path = str(self.root / "hub.db")
-        self.intake = self.root / "_intake"
-        self.raws = self.root / "RAWS"
-        self.old_db_path = db.DB_PATH
-        db.DB_PATH = self.db_path
-        asyncio.run(db.init_db())
-        hub_routes.configure(
-            intake_root=lambda: self.intake,
-            raws_root=lambda: self.raws,
-        )
-        from fastapi import FastAPI
-        api = FastAPI()
-        api.include_router(hub_routes.router)
-        self.client_context = TestClient(api)
-        self.client = self.client_context.__enter__()
-
-    def tearDown(self):
-        self.client_context.__exit__(None, None, None)
-        db.DB_PATH = self.old_db_path
-        self.tempdir.cleanup()
-
-    def _jpeg(self, name: str, color: tuple[int, int, int]) -> bytes:
-        path = self.root / name
-        Image.new("RGB", (4, 3), color).save(path, format="JPEG")
-        payload = path.read_bytes()
-        path.unlink()
-        return payload
-
-    def test_phone_folder_lands_beside_raws_not_inside(self):
-        import hashlib
-        from features.sync import hashing
-
-        payload = self._jpeg("personal.jpg", (11, 22, 33))
-        content_hash = hashlib.blake2b(digest_size=16)
-        content_hash.update(payload[: hashing.HASH_PREFIX_BYTES])
-        content_hash.update(len(payload).to_bytes(8, "little"))
-        digest = content_hash.hexdigest()
-        full = hashlib.blake2b(payload, digest_size=16).hexdigest()
-        response = self.client.post(
-            "/api/sync/manifest",
-            json={"items": [{
-                "content_hash": digest,
-                "full_hash": full,
-                "bytes": len(payload),
-                "filename": "personal.jpg",
-                "date_taken": "2024-06-07",
-                "folder": "Personal Photos",
-            }]},
-        )
-        self.assertEqual(response.status_code, 200, response.text)
-        upload = self.client.post(
-            f"/api/sync/upload/{digest}",
-            headers={"X-Offset": "0", "X-Total-Bytes": str(len(payload))},
-            content=payload,
-        )
-        self.assertEqual(upload.status_code, 200, upload.text)
-        # The legacy "Personal Photos" hint routes to Snapshots and must not
-        # re-create the retired root or nest under the raws tree.
-        good = self.root / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg"
-        nested_bug = self.raws / "Snapshots" / "2024" / "2024-06-07" / "personal.jpg"
-        self.assertTrue(good.is_file(), good)
-        self.assertEqual(good.read_bytes(), payload)
-        self.assertFalse(nested_bug.exists(), "phone shots must not nest under the raws tree")
-        self.assertFalse((self.root / "Personal Photos").exists(), "retired root must not be re-created")
-
-
 class ReclassifyGatedTests(BackendTestCase):
     async def test_reclassify_requires_confirm_and_does_not_auto_move(self):
         root = Path(self.tempdir.name)
@@ -559,7 +488,7 @@ class ReclassifyGatedTests(BackendTestCase):
                     json={"confirm": True, "dry_run": False, "move_files": True},
                 )
 
-        with patch.object(import_routes.sync_hub, "default_library_root", return_value=library):
+        with patch.object(import_routes.taxonomy, "default_library_root", return_value=library):
             response = await asyncio.to_thread(request)
             retry = await asyncio.to_thread(request)
 

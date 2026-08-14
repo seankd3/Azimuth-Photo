@@ -11,7 +11,7 @@ from pathlib import Path
 from unittest import mock
 
 from core import hdd_governor
-from features.sync import hashing
+from photo import identity as hashing
 from thumbnails import harvest
 
 

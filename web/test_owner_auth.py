@@ -20,7 +20,6 @@ import settings  # noqa: E402
 from core import owner_auth  # noqa: E402
 from features.auth import service as owner_service  # noqa: E402
 from features.pages import routes as page_routes  # noqa: E402
-from features.sync import pair_routes, pairing  # noqa: E402
 
 OWNER_KEY = "correct-horse-battery-staple"
 REMOTE = ("10.0.0.9", 4711)  # a LAN peer: never loopback-exempt
@@ -50,13 +49,9 @@ def clean_auth(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", str(tmp_path / "azimuth-test.db"))
     owner_service.clear_unlock_failures()
     owner_service._verified_bearer_cache.clear()
-    pair_routes.reset_redeem_throttle_for_tests()
-    pairing.clear_pending_codes_for_tests()
     yield
     owner_service.clear_unlock_failures()
     owner_service._verified_bearer_cache.clear()
-    pair_routes.reset_redeem_throttle_for_tests()
-    pairing.clear_pending_codes_for_tests()
 
 
 def _set_owner_key(key: str = OWNER_KEY) -> None:
@@ -65,13 +60,6 @@ def _set_owner_key(key: str = OWNER_KEY) -> None:
 
 def _client(client_addr=REMOTE, **kwargs) -> TestClient:
     return TestClient(app_module.app, client=client_addr, follow_redirects=False, **kwargs)
-
-
-def _pair_device(name: str = "Test device") -> str:
-    code = f"TESTCODE{int(time.time() * 1000) % 10}"
-    pairing.inject_pending_code_for_tests(code, expires_at=time.time() + 600)
-    result = asyncio.run(pairing.pair_device(db.DB_PATH, code=code, device_name=name))
-    return result["device_token"]
 
 
 # --- the sweep: default-deny is the spec ------------------------------------
@@ -135,25 +123,6 @@ def test_bearer_owner_key_unlocks_protected_route(clean_auth):
     response = client.get(PROTECTED_API, headers={"Authorization": f"Bearer {OWNER_KEY}"})
     assert response.status_code == 200
     assert client.get(PROTECTED_API, headers={"Authorization": "Bearer wrong-key-entirely"}).status_code == 401
-
-
-def test_paired_device_token_unlocks_protected_route(clean_auth):
-    _set_owner_key()
-    token = _pair_device()
-    client = _client()
-    assert client.get(PROTECTED_API).status_code == 401
-    assert client.get(PROTECTED_API, headers={"X-Device-Token": token}).status_code == 200
-    assert client.get(PROTECTED_API, headers={"X-Device-Token": "bogus"}).status_code == 401
-
-
-def test_first_key_set_revokes_devices_paired_during_setup_window(clean_auth):
-    # Pre-key setup window: a LAN client pairs a device (trusted-first-client).
-    token = _pair_device("Snuck in during setup")
-    client = _client()
-    assert client.get(PROTECTED_API, headers={"X-Device-Token": token}).status_code == 200
-    # The owner then secures the install; the window slams shut on that device.
-    _set_owner_key()
-    assert client.get(PROTECTED_API, headers={"X-Device-Token": token}).status_code == 401
 
 
 def test_loopback_client_is_exempt_but_forwarded_remote_is_not(clean_auth):
@@ -241,36 +210,3 @@ def test_publish_hook_api_write_rejected_and_read_masked(clean_auth):
     assert "server-side" in response.json()["error"]
     assert settings.get_settings()["publish_hook"] == "scripts/deploy.sh"  # unchanged
     assert settings.public_settings()["publish_hook"] == ""  # masked on read
-
-
-# --- pairing: mint under auth; redeem single-use, expiring, rate-limited ------
-
-def test_pairing_mint_and_list_require_owner_auth(clean_auth):
-    _set_owner_key()
-    assert _client().post("/api/devices/link").status_code == 401
-    assert _client().get("/api/devices").status_code == 401
-    minted = _client(LOOPBACK).post("/api/devices/link")
-    assert minted.status_code == 200 and minted.json()["code"]
-
-
-def test_pair_code_is_single_use(clean_auth):
-    pairing.inject_pending_code_for_tests("SINGLEUSE", expires_at=time.time() + 600)
-    client = _client()
-    body = {"code": "SINGLEUSE", "device_name": "Pixel"}
-    assert client.post("/api/pair", json=body).status_code == 200
-    assert client.post("/api/pair", json=body).status_code == 400
-
-
-def test_pair_code_expires(clean_auth):
-    pairing.inject_pending_code_for_tests("STALECODE", expires_at=time.time() - 1)
-    response = _client().post("/api/pair", json={"code": "STALECODE"})
-    assert response.status_code == 400
-
-
-def test_pair_redeem_is_rate_limited(clean_auth):
-    client = _client()
-    for _ in range(pair_routes.REDEEM_FAILURE_LIMIT):
-        assert client.post("/api/pair", json={"code": "WRONGCODE"}).status_code == 400
-    throttled = client.post("/api/pair", json={"code": "WRONGCODE"})
-    assert throttled.status_code == 429
-    assert "Retry-After" in throttled.headers

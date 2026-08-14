@@ -26,7 +26,6 @@ from features.imports import film
 from features.imports import taxonomy
 from features.library import geodata, keywords
 from features.quality import routes as quality_routes
-from features.sync import satellite
 from image_headers import read_header_dimensions
 
 
@@ -708,7 +707,6 @@ async def _register_file(path: str, entry: dict, content_hash: str, *, source_ro
     image_id = await import_repository.set_image_content_hash(db.DB_PATH, path, content_hash)
     if image_id is None:
         raise RuntimeError("Verified import was not registered")
-    await satellite.mark_image_dirty(image_id, db_path=db.DB_PATH)
     return image_id
 
 

@@ -158,3 +158,14 @@ async def get_lr_relation(image_id: int):
     if relation is None:
         return JSONResponse({"export_of": None, "id": image_id}, status_code=200)
     return {"id": image_id, "export_of": relation}
+
+
+@router.get("/api/lr/status")
+async def get_lr_status(exports_since: float = 0.0):
+    """The Lightroom bridge's quiet-status block.
+
+    Carried the ``lr`` key of /api/sync/status until the hub machinery was
+    gutted (2026-08-14); the ranking chip polls here directly now.
+    """
+
+    return {"lr": await lr_status.bridge_status_payload(db.DB_PATH, exports_since=exports_since)}

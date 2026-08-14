@@ -10,7 +10,6 @@ from data import connection as data_connection
 from data.repositories import image_deletion
 from features.library import keywords
 from features.quality import autocull
-from features.sync import hub
 from features.trash import service as trash_service
 
 
@@ -18,7 +17,6 @@ class TrashSchemaDeletionTests(BackendTestCase):
     async def _install_additive_feature_schema(self, conn) -> None:
         await autocull.ensure_autocull_tables(conn)
         await keywords.ensure_schema(conn)
-        await conn.executescript(hub.SYNC_DDL)
         await conn.commit()
 
     async def _image_foreign_keys(self, conn) -> list[dict]:

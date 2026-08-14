@@ -7,7 +7,7 @@ from data.repositories import collections as collection_repository
 from features.collections import routes as collection_routes
 from features.collections import smart as smart_collections
 from features.library import taste as taste_service
-from features.sync import hashing as sync_hashing
+from photo import identity as sync_hashing
 from thumbnails import pregen as thumbnail_pregen
 
 

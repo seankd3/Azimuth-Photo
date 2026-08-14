@@ -13,7 +13,6 @@ from features.catalog import routes as catalog_routes
 from features.imports import film
 from features.imports import taxonomy
 from features.imports import service as import_service
-from features.sync import hub as sync_hub
 from features.imports import staging
 from features.quality import routes as quality_routes
 
@@ -366,7 +365,7 @@ async def api_import_taxonomy():
         "misplaced_personal_under_raws": (
             await taxonomy.preview_misplaced_personal_photos(
                 db.DB_PATH,
-                sync_hub.default_library_root(),
+                taxonomy.default_library_root(),
             )
         ),
     }
@@ -380,7 +379,7 @@ async def api_import_taxonomy_reclassify(body: ReclassifyRequest):
     """
     result = await taxonomy.reclassify_misplaced_personal_photos(
         db.DB_PATH,
-        sync_hub.default_library_root(),
+        taxonomy.default_library_root(),
         confirm=body.confirm,
         move_files=body.move_files,
         dry_run=body.dry_run,

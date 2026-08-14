@@ -1,7 +1,7 @@
 import {
     byId, clearFacet, clearSelection, DEFAULT_SORT, emit, nonSearchFacetCount, on, scope, scopeActive, scopeParams, selection, setBestOfTotal, setImages, setRankingsMeta, setScope, viewState,
 } from './state.js';
-import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, getSyncStatus, previewThumbUrl, thumbUrl, unstack } from './api.js';
+import { createStack, getCacheStatus, getCatalog, getRankings, getScanStatus, getStack, previewThumbUrl, thumbUrl, unstack } from './api.js';
 import { loadScopePage, similarScopeActive } from './scope_data.js';
 import {
     enterSelection, isSelectionMode, toggleSelection,
@@ -269,19 +269,12 @@ function renderPendingHint(target, kind) {
 
 function loadPausedPreviewHint(target) {
     const request = ++pendingNoticeRequest;
-    // Each reason a photo never sharpens needs its own sentence: the preview
-    // engine can be paused locally, the photo can live on a hub this computer
-    // is not attached to, or the hub it is attached to can be offline. The
-    // last one used to fall through to nothing, so the grid claimed photos
-    // were "sharpening" while nothing on either machine could produce them.
-    Promise.all([getCacheStatus().catch(() => null), getSyncStatus().catch(() => null)])
-        .then(([cache, sync]) => {
+    // The one reason a photo never sharpens now: the preview engine is
+    // paused locally. Hub states died with the hub machinery.
+    getCacheStatus().catch(() => null)
+        .then((cache) => {
             if (request !== pendingNoticeRequest || !target?.isConnected) return;
-            const kind = sync?.hub_health === 'not_connected' ? 'hub_missing'
-                : sync?.hub_health === 'unreachable' ? 'hub_offline'
-                : cachePregenPaused(cache) ? 'paused'
-                : '';
-            renderPendingHint(target, kind);
+            renderPendingHint(target, cachePregenPaused(cache) ? 'paused' : '');
         })
         .catch(() => {});
 }

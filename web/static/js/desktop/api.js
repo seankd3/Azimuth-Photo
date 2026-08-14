@@ -335,21 +335,9 @@ export async function getRemoteAccess() {
     return fetchJson('/api/remote-access', { defaultValue: null });
 }
 
-export async function getPairStatus() {
-    return fetchJson('/api/pair/status', { defaultValue: null });
-}
-
-export async function getSyncStatus(params = null) {
-    if (params && typeof params === 'object') {
-        const query = new URLSearchParams();
-        for (const [key, value] of Object.entries(params)) {
-            if (value == null || value === '') continue;
-            query.set(key, String(value));
-        }
-        const suffix = query.toString();
-        return fetchJson(`/api/sync/status${suffix ? `?${suffix}` : ''}`, { defaultValue: null });
-    }
-    return fetchJson('/api/sync/status', { defaultValue: null });
+export async function getLrStatus(exportsSince = undefined) {
+    const suffix = exportsSince ? `?exports_since=${encodeURIComponent(exportsSince)}` : '';
+    return fetchJson(`/api/lr/status${suffix}`, { defaultValue: null });
 }
 
 export async function getLrConnect() {
@@ -378,48 +366,6 @@ export async function getLrcatStatus() {
 
 export async function startLrcatScan(catalogPath, { dryRun = false } = {}) {
     return postJsonWithStatus('/api/develop/lrcat/scan', { catalog_path: catalogPath, dry_run: dryRun });
-}
-
-export async function getFreeable(olderThanDays = 30) {
-    const days = Math.max(0, Number(olderThanDays) || 0);
-    return fetchJson(`/api/sync/freeable?older_than_days=${encodeURIComponent(days)}`, { defaultValue: null });
-}
-
-export async function startFreeUpSpace(olderThanDays = 30) {
-    return postJson('/api/sync/freeup', { older_than_days: Math.max(0, Number(olderThanDays) || 0) });
-}
-
-export async function getFreeUpJob(jobId) {
-    return fetchJson(`/api/sync/freeup/${encodeURIComponent(jobId)}`, { defaultValue: null });
-}
-
-export async function cancelFreeUpJob(jobId) {
-    return postJson(`/api/sync/freeup/${encodeURIComponent(jobId)}/cancel`, {});
-}
-
-export async function listDevices() {
-    return fetchJson('/api/devices', { defaultValue: null });
-}
-
-export async function createDeviceLink() {
-    return postJson('/api/devices/link', {});
-}
-
-export async function revokeDevice(deviceId) {
-    return postJson(`/api/devices/${deviceId}/revoke`, {});
-}
-
-export async function discoverHubs() {
-    return fetchJson('/api/discover', { defaultValue: null });
-}
-
-export async function connectToHub({ hubUrl, code, deviceName = '', platform = 'desktop' } = {}) {
-    return postJson('/api/pair/connect', {
-        hub_url: hubUrl,
-        code,
-        device_name: deviceName,
-        platform,
-    });
 }
 
 export async function applyRemoteAccessServe() {

@@ -34,23 +34,7 @@ const TABS = ['photos', 'search', 'refine', 'library'];
 const scrollMemory = new Map();
 let activeTab = '';
 
-const OWNED_OFFLINE_MODULES = [
-    '/static/js/mobile/backup.js',
-    '/static/js/mobile/offline.js',
-    '/static/js/mobile/sharing.js',
-];
-
 secureContextBanner();
-
-function warmOwnedOfflineModules() {
-    if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
-    const warm = () => {
-        if (!navigator.serviceWorker.controller) return;
-        OWNED_OFFLINE_MODULES.forEach((url) => void fetch(url).catch(() => {}));
-    };
-    navigator.serviceWorker.ready.then(warm).catch(() => {});
-    navigator.serviceWorker.addEventListener('controllerchange', warm);
-}
 
 function setTab(tab) {
     if (!TABS.includes(tab)) return;
@@ -165,7 +149,6 @@ async function boot() {
     onHistoryTab(setTab);
     initToast();
     initWriteQueue();
-    warmOwnedOfflineModules();
     installTabbar();
     installOfflineBanner();
     initSelection();

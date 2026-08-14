@@ -26,14 +26,12 @@ STANDALONE = "standalone"
 
 
 def _hub_url() -> str:
-    # Imported here, not at module scope, because the hub URL and device token
-    # still live in features/sync/satellite.py. archive/ importing features/ is
-    # backwards and the lazy import only hides it: the state belongs here, and
-    # moving it is 47 call sites through the pairing path. Recorded in
-    # docs/SIMPLIFY_LOG.md rather than left looking deliberate.
-    from features.sync import satellite
+    # The hub-client machinery is gone (2026-08-14 gutting order); no URL
+    # means no satellite mode, and the app runs standalone with the archive
+    # drive attached. AZIMUTH_HUB_URL survives as the future re-entry point.
+    import os
 
-    return satellite.hub_url()
+    return os.environ.get("AZIMUTH_HUB_URL", "").strip().rstrip("/")
 
 
 def role() -> str:

@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from core import hdd_governor
-from features.sync.hashing import (
+from photo.identity import (
     HASH_PREFIX_BYTES,
     compute_content_hash_from_prefix,
 )

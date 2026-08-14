@@ -5,7 +5,7 @@
  * Piggybacks the sync status poll — no dedicated loop.
  */
 
-import { getSyncStatus } from './api.js';
+import { getLrStatus } from './api.js';
 import { clearSelection, emit, on, setActiveLens, setScope } from './state.js';
 import { closeLoupe } from './loupe.js';
 
@@ -128,7 +128,7 @@ export function applyLrStatus(status) {
 
 async function refreshFromSync() {
     try {
-        const status = await getSyncStatus({ lr_exports_since: seenSince() || undefined });
+        const status = await getLrStatus(seenSince() || undefined);
         applyLrStatus(status);
     } catch {
         // Silent — bridge stays quiet on transient failures.
@@ -137,7 +137,8 @@ async function refreshFromSync() {
 
 export function initLrRankingChip() {
     ensureSlot();
-    on('sync:status', applyLrStatus);
-    // Bootstrap once; ongoing updates come from sync_chip's poll via sync:status.
     refreshFromSync();
+    // A quiet poll of the bridge's own status route: new Lightroom exports
+    // surface within a minute without any push machinery behind them.
+    setInterval(refreshFromSync, 60_000);
 }

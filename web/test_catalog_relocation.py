@@ -8,7 +8,7 @@ from pathlib import Path
 from test_support import *  # noqa: F401,F403
 from data import connection
 from features.imports import relocation
-from features.sync.hashing import compute_content_hash
+from photo.identity import compute_content_hash
 
 
 class RelativeCandidatesTests(unittest.TestCase):

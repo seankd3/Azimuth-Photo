@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from features.imports import taxonomy
-from features.sync.hashing import compute_content_hash
+from photo.identity import compute_content_hash
 
 REPORT_SAMPLE_LIMIT = 100
 

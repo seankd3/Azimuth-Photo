@@ -523,28 +523,9 @@ def check_activity(db_path: str) -> dict[str, Any]:
     else:
         bits.append("No imports yet")
 
-    try:
-        from features.sync.sync_worker import get_worker
-
-        worker = get_worker()
-        sync_status = worker.status() if worker is not None else {}
-    except Exception:
-        sync_status = {}
-
-    if sync_status:
-        last_sync = _parse_when(sync_status.get("last_sync_at"))
-        errors = list(sync_status.get("recent_errors") or [])
-        if errors:
-            status = _worst([status, "warn"])
-            bits.append(f"Sync issue: {errors[0]}")
-        elif last_sync:
-            bits.append(f"Last sync {_age_phrase(checked_at - last_sync)}")
-        else:
-            bits.append("Sync idle")
-
     return _check(
         id="activity",
-        label="Import / sync activity",
+        label="Import activity",
         status=status,
         detail=" · ".join(bits),
         checked_at=checked_at,

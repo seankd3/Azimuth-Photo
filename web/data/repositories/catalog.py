@@ -355,7 +355,7 @@ async def _content_hash_rematch_id(
     if not candidates:
         return None, False
     try:
-        from features.sync.hashing import compute_content_hash
+        from photo.identity import compute_content_hash
 
         content_hash = await asyncio.to_thread(compute_content_hash, row[1])
     except OSError:

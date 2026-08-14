@@ -14,8 +14,6 @@ import { showToast } from './toast.js';
 import { dismissLayer, dismissLayerThen, pushLayer, registerLayer, syncLayerClosed } from './history.js';
 import { icon } from '../icons.js';
 import { createMomentum } from './viewer_momentum.js';
-import { openPhotoShareSheet } from './sharing.js';
-import { isAvailableOffline, toggleOfflineAvailability } from './offline.js';
 import { cacheCaptionRequest } from './caption_cache.js';
 
 let root = null;
@@ -197,7 +195,6 @@ function showCurrent({ stageReady = false } = {}) {
         cap.textContent = [caption || image.filename, date].filter(Boolean).join('  —  ');
     });
     syncFlagButtons();
-    syncOfflineButton();
     preload(1);
     preload(-1);
     if (needMore && index >= list.length - 5) extendListFromSource();
@@ -217,15 +214,6 @@ function syncFlagButtons() {
         flagBadge.className = `mv-flag ${flag}`;
         flagBadge.textContent = flag === 'picked' ? 'Favorited' : 'Rejected';
     }
-}
-
-function syncOfflineButton() {
-    const image = current();
-    const button = document.getElementById('mv-offline');
-    const available = Boolean(image && isAvailableOffline(image.id));
-    button.classList.toggle('on-offline', available);
-    button.setAttribute('aria-pressed', String(available));
-    button.setAttribute('aria-label', available ? 'Remove offline availability' : 'Make available offline');
 }
 
 function favoriteSwipe() {
@@ -758,22 +746,6 @@ export function initViewer() {
         const image = current();
         if (image) openCollectionSheet([Number(image.id)]);
     });
-    document.getElementById('mv-share').addEventListener('click', () => {
-        const image = current();
-        if (image) openPhotoShareSheet(image);
-    });
-    document.getElementById('mv-offline').addEventListener('click', async () => {
-        const image = current();
-        if (!image) return;
-        const button = document.getElementById('mv-offline');
-        button.disabled = true;
-        try {
-            await toggleOfflineAvailability(image);
-            syncOfflineButton();
-        } finally {
-            button.disabled = false;
-        }
-    });
     document.getElementById('mv-info').addEventListener('click', infoSheet);
 
     window.addEventListener('keydown', (e) => {
@@ -794,6 +766,5 @@ export function initViewer() {
     }
 
     on('flags', syncFlagButtons);
-    on('offline-availability', syncOfflineButton);
     installGestures();
 }
