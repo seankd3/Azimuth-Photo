@@ -131,7 +131,10 @@ async def stage_uploads(uploads) -> dict:
                 batch_dir = _batch_directory(scan_dir, Path(name).stem)
                 try:
                     count = await asyncio.to_thread(_extract_zip, spill, batch_dir)
-                except zipfile.BadZipFile:
+                except (zipfile.BadZipFile, OSError):
+                    # A truncated download raises OSError from deep inside
+                    # zipfile (seek past the corrupt central directory), not
+                    # BadZipFile — same honest answer either way.
                     skipped.append({"name": name, "reason": "not a readable ZIP archive"})
                     continue
                 finally:

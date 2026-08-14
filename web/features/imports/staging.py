@@ -59,6 +59,7 @@ class ImportJob:
     keywords: list[str]
     collection_id: int | None
     batch_id: int
+    roll_name: str | None = None  # film only: the folder the owner named
     phase: str = "queued"
     files_done: int = 0
     bytes_done: int = 0
@@ -362,6 +363,16 @@ def _trim_preview_cache(root: Path) -> None:
             continue
 
 
+def _clean_roll_name(value: str | None) -> str | None:
+    """A folder name the owner typed: one path segment, Windows-legal."""
+
+    text = str(value or "").strip().strip(".")
+    for forbidden in '<>:"/\\|?*':
+        text = text.replace(forbidden, " ")
+    text = " ".join(text.split())
+    return text[:120] or None
+
+
 async def start_commit(
     scan: Scan,
     *,
@@ -372,6 +383,7 @@ async def start_commit(
     keyword_paths: list[str],
     collection_id: int | None,
     category: str | None = None,
+    roll_name: str | None = None,
 ) -> ImportJob:
     if scan.status != "done":
         raise ValueError("Scan is not ready to import")
@@ -403,8 +415,9 @@ async def start_commit(
         selected = [entry for entry in scan.entries if entry["key"] in requested]
     else:
         raise ValueError("keys must be a list or all_checked_default")
+    cleaned_roll = _clean_roll_name(roll_name) if scan.film_source else None
     batch_id = await import_repository.create_import_batch(db.DB_PATH, {
-        "name": scan.label or Path(scan.path).name or "Import",
+        "name": cleaned_roll or scan.label or Path(scan.path).name or "Import",
         "destination_mode": mode,
         "destination_root": str(originals_root()),
         "destination_path": str(originals_root()),
@@ -416,7 +429,7 @@ async def start_commit(
         clear_card=bool((clear_card or mode == "move") and scan.card_source),
         category=category, keywords=[str(path) for path in keyword_paths if str(path).strip()],
         collection_id=collection_id, batch_id=batch_id, move_degraded=move_degraded,
-        library_roots=fence,
+        library_roots=fence, roll_name=cleaned_roll,
     )
     _jobs[job.id] = job
     _tasks[job.id] = asyncio.create_task(_commit_worker(job))
@@ -535,10 +548,11 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
 
 def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
     """Scan dates are not shoot dates: one archive/batch lands in one roll
-    folder named from the archive filename, filed under its year —
-    ``Film Scans/<year>/<roll>/``. The year is the first plausible one in the
-    roll name (labs stamp their delivery date, e.g. ``…_2026-08-06_2203``)
-    and falls back to the year the roll was imported.
+    folder, filed by delivery date — ``Film Scans/<YYYY>/<YYYY-MM-DD>/<roll>/``
+    (the owner's convention, 08-14). The date is the lab's own stamp in the
+    archive name (``…_2026-08-06_2203``) and falls back to the import date;
+    the roll folder is whatever the owner typed at import, or the archive
+    name when they typed nothing.
     """
     import re
 
@@ -546,10 +560,11 @@ def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
     if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     parts = str(entry.get("rel_path") or "").split("/")
-    folder = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
-    year_match = re.search(r"(?:19|20)\d{2}", folder)
-    year = year_match.group(0) if year_match else time.strftime("%Y")
-    return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / year / folder
+    derived = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
+    date_match = re.search(r"(?:19|20)\d{2}-\d{2}-\d{2}", derived)
+    day = date_match.group(0) if date_match else time.strftime("%Y-%m-%d")
+    roll = job.roll_name or derived
+    return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / day[:4] / day / roll
 
 
 def _catalog_source_root_for_destination(destination: str | Path) -> str:

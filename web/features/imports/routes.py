@@ -35,6 +35,7 @@ class CommitRequest(BaseModel):
     category: Literal["raw", "personal", "film", "export"] | None = None
     keywords: list[str] = Field(default_factory=list)
     collection_id: int | None = None
+    roll_name: str | None = None  # film: the folder name the owner typed
 
 
 class CancelRequest(BaseModel):
@@ -135,6 +136,7 @@ async def api_import_commit(body: CommitRequest):
             keyword_paths=body.keywords,
             collection_id=body.collection_id,
             category=body.category,
+            roll_name=body.roll_name,
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

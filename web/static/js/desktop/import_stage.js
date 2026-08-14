@@ -366,14 +366,28 @@ function syncDestination() {
             const folder = parts.length > 1 ? parts[0] : (source.label || 'Film scans');
             folders.set(folder, (folders.get(folder) || 0) + 1);
         }
+        // Preserve what the owner already typed across re-renders.
+        const typedName = document.getElementById('imps-roll-name')?.value ?? '';
         const lines = ['<div class="imps-dest-tree">Raws/Film Scans</div>'];
         for (const [folder, count] of [...folders.entries()].sort()) {
-            // Mirrors the server rule: rolls file under the year the lab
-            // stamped into the archive name, or this year when it didn't.
-            const year = (folder.match(/(?:19|20)\d{2}/) || [String(new Date().getFullYear())])[0];
-            lines.push(`<div class="imps-dest-date"><span>${esc(year)}/${esc(folder)}</span><span class="imps-dest-count">${fmt(count)}</span></div>`);
+            // Mirrors the server rule: Film Scans/<YYYY>/<YYYY-MM-DD>/<roll> —
+            // the date is the lab's stamp in the archive name, else today.
+            const day = (folder.match(/(?:19|20)\d{2}-\d{2}-\d{2}/)
+                || [new Date().toISOString().slice(0, 10)])[0];
+            lines.push(`<div class="imps-dest-date"><span class="imps-roll-path" data-day="${esc(day)}" data-fallback="${esc(folder)}"></span><span class="imps-dest-count">${fmt(count)}</span></div>`);
         }
+        lines.push('<label class="imps-roll-label">Roll name'
+            + `<input id="imps-roll-name" type="text" value="${esc(typedName)}" placeholder="${esc([...folders.keys()][0] || 'Roll name')}" spellcheck="false"></label>`);
         els.destination.innerHTML = lines.join('');
+        const paintRollPaths = () => {
+            const roll = (document.getElementById('imps-roll-name')?.value || '').trim();
+            for (const span of els.destination.querySelectorAll('.imps-roll-path')) {
+                const day = span.dataset.day;
+                span.textContent = `${day.slice(0, 4)}/${day}/${roll || span.dataset.fallback}`;
+            }
+        };
+        paintRollPaths();
+        document.getElementById('imps-roll-name')?.addEventListener('input', paintRollPaths);
         return;
     }
     const staged = checkedEntries();
@@ -528,6 +542,9 @@ async function commit() {
         clear_card: source?.kind === 'card' && mode === 'copy' && clearCard,
         category: categoryOverride || null,
         keywords: els.keywords.value.split(',').map((word) => word.trim()).filter(Boolean),
+        roll_name: source?.kind === 'film'
+            ? (document.getElementById('imps-roll-name')?.value.trim() || null)
+            : null,
     };
     const result = await commitImportScan(body);
     committing = false;

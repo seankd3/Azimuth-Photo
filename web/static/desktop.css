@@ -2310,6 +2310,9 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .imps-dest-date { display: flex; justify-content: space-between; color: var(--text-2); padding-left: var(--s5); font-style: italic; }
 .imps-dest-count { color: var(--text-4); font-style: normal; font-variant-numeric: tabular-nums; }
 .imps-dest-add { color: var(--text-3); font-size: var(--fs-small); line-height: var(--lh-normal, 1.45); }
+.imps-roll-label { display: block; margin-top: var(--s3); color: var(--text-3); font-size: var(--fs-small); }
+.imps-roll-label input { display: block; width: 100%; margin-top: var(--s1); padding: var(--s1) var(--s2); background: var(--well, var(--panel)); color: var(--text-1); border: 1px solid var(--line); border-radius: var(--radius-sm, 6px); font-size: var(--fs-small); }
+.imps-roll-label input:focus { outline: none; border-color: var(--accent); }
 
 /* commit bar */
 .imps-commitbar { grid-area: commit; display: flex; align-items: center; justify-content: flex-end; gap: var(--s4); padding: 0 var(--s4); border-top: 1px solid var(--line); background: var(--panel); }
