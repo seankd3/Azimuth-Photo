@@ -781,5 +781,26 @@ export function initImportStage() {
     });
     on('import:open', openImport);
     on('import:film', pickFilmFiles);
+
+    // Dragging a lab delivery from Downloads onto the app is the one-gesture
+    // import: an OS-file drop with film extensions feeds the same flow as the
+    // picker. In-app drags (grid cells, masks) carry custom types, never
+    // Files, so they pass through untouched. The shell already hands drops to
+    // the page (main.rs disables Tauri's own handler); without preventDefault
+    // the webview would navigate to the dropped file, so every Files-drag is
+    // claimed even when nothing matches.
+    const filmDropExtensions = new Set(['zip', 'tif', 'tiff']);
+    const dragHasFiles = (event) => [...(event.dataTransfer?.types || [])].includes('Files');
+    document.addEventListener('dragover', (event) => {
+        if (dragHasFiles(event)) event.preventDefault();
+    });
+    document.addEventListener('drop', (event) => {
+        if (!dragHasFiles(event)) return;
+        event.preventDefault();
+        const files = [...(event.dataTransfer.files || [])].filter((file) =>
+            filmDropExtensions.has((file.name.split('.').pop() || '').toLowerCase()));
+        if (files.length) startFilmImport(files);
+        else showToast('Drop film scans — ZIP or TIFF');
+    });
     emit('import:ready');
 }
