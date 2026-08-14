@@ -2,6 +2,7 @@ from test_support import *  # noqa: F401,F403
 import asyncio
 import random
 
+from data.repositories import collections as collection_repository
 from features.compare import semantic_pairing
 
 
@@ -631,9 +632,9 @@ class CompareTests(BackendTestCase):
         self.assertEqual(pool_sizes, [semantic_pairing.SEMANTIC_PARTNER_WINDOW])
 
     async def test_orientation_visible_pairing_pool_counts(self):
-        self.assertGreaterEqual(db.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS, 30.0)
+        self.assertGreaterEqual(ratings.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS, 30.0)
         self.assertIs(
-            db._visible_pairing_pool_counts_cache,
+            ratings._visible_pairing_pool_counts_cache,
             ratings._visible_pairing_pool_counts_cache,
         )
         source = await self._source()
@@ -654,7 +655,7 @@ class CompareTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         await self._cache_entry(visible_landscape, "md")
         await self._cache_entry(portrait, "md")
 
@@ -691,7 +692,7 @@ class CompareTests(BackendTestCase):
         self.assertIn((cache_root, "md"), ratings._visible_pairing_pool_counts_cache)
 
         await self._cache_entry(hidden_landscape, "md")
-        db.invalidate_cached_image_ids_cache(cache_root, "md")
+        cache_events.invalidate_cached_image_ids_cache(cache_root, "md")
         self.assertNotIn(
             (cache_root, "md", "orientation", "landscape"),
             ratings._visible_pairing_pool_counts_cache,
@@ -714,7 +715,8 @@ class CompareTests(BackendTestCase):
         await self._cache_entry(visible_fresh, "sm")
         await self._cache_entry(visible_rated, "sm")
 
-        rows = await db.get_visible_images_for_pairing(
+        rows = await ratings.visible_images_for_pairing(
+            db.DB_PATH,
             "sm",
             thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
@@ -758,7 +760,8 @@ class CompareTests(BackendTestCase):
         return source, image_ids
 
     async def _pairing_window(self, order: str, limit: int, **kwargs):
-        rows = await db.get_visible_images_for_pairing(
+        rows = await ratings.visible_images_for_pairing(
+            db.DB_PATH,
             "sm",
             thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
@@ -888,11 +891,11 @@ class CompareTests(BackendTestCase):
         conn = await db.get_db()
         try:
             await conn.execute("UPDATE catalog_sources SET included = 0 WHERE id = ?", (excluded_source["id"],))
-            await db._update_source_counts(conn, excluded_source["id"])
+            await catalog_repository.update_source_counts_on_conn(conn, excluded_source["id"])
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         counts = await db.get_catalog_image_counts()
         active_repository_rows = await ratings.active_images_for_pairing(
@@ -913,7 +916,8 @@ class CompareTests(BackendTestCase):
             include_card_metadata=False,
             order="cache",
         )
-        visible_facade_rows = await db.get_visible_images_for_pairing(
+        visible_facade_rows = await ratings.visible_images_for_pairing(
+            db.DB_PATH,
             "sm",
             thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
@@ -984,14 +988,14 @@ class CompareTests(BackendTestCase):
         self.assertIsNotNone(result)
         first_matchups = await db.get_past_matchups()
         self.assertEqual(first_matchups, {(min(first, second), max(first, second))})
-        self.assertIsNotNone(db._past_matchups_cache["data"])
+        self.assertIsNotNone(ratings._past_matchups_cache["data"])
 
         second_matchups = await db.get_past_matchups()
         self.assertEqual(second_matchups, first_matchups)
         third = await self._image(source["id"], "third.jpg")
         result = await db.record_active_comparison(first, third, "swiss", action_id="matchup-cache-test-2")
         self.assertIsNotNone(result)
-        self.assertIsNone(db._past_matchups_cache["data"])
+        self.assertIsNone(ratings._past_matchups_cache["data"])
 
     async def test_direct_rating_writes_patch_warm_stats_caches(self):
         source = await self._source()
@@ -1001,13 +1005,13 @@ class CompareTests(BackendTestCase):
 
         initial_stats = await db.get_stats()
         initial_ai_counts = await db.get_ai_status_counts()
-        self.assertIs(db._ai_status_counts_cache, stats_repository._ai_status_counts_cache)
+        self.assertIs(stats_repository._ai_status_counts_cache, stats_repository._ai_status_counts_cache)
         self.assertEqual(initial_stats["total_comparisons"], 0)
         self.assertEqual(initial_ai_counts["ranking_signal_count"], 0)
 
         result = await db.record_active_comparison(first, second, "swiss", action_id="stats-cache-test")
         self.assertIsNotNone(result)
-        self.assertIsNotNone(db._stats_cache["data"])
+        self.assertIsNotNone(stats_repository._stats_cache["data"])
         self.assertEqual(stats_repository._ai_status_counts_cache["data"]["ranking_signal_count"], 1)
 
         compared_stats = await db.get_stats()
@@ -1088,7 +1092,9 @@ class CompareTests(BackendTestCase):
         for image_id in (first, second, outside):
             await self._cache_entry(image_id, "sm")
             await self._cache_entry(image_id, "md")
-        collection = await db.create_collection(name="Refine", image_ids=[first, second])
+        collection = await collection_repository.create_collection(
+            db.DB_PATH, name="Refine", image_ids=[first, second]
+        )
 
         result = await compare_routes.mosaic_next(n=2, collection_id=collection["id"])
 
@@ -1129,16 +1135,16 @@ class CompareTests(BackendTestCase):
 
         mosaic_first = await compare_routes.mosaic_next(n=3, strategy="explore")
         self.assertTrue(compare_service._interaction_response_cache)
-        old_get_visible = db.get_visible_images_for_pairing
+        old_get_visible = ratings.visible_images_for_pairing
 
         async def fail_visible_pairing(*_args, **_kwargs):
             raise AssertionError("warm default interaction response should be reused")
 
-        db.get_visible_images_for_pairing = fail_visible_pairing
+        ratings.visible_images_for_pairing = fail_visible_pairing
         try:
             mosaic_second = await compare_routes.mosaic_next(n=3, strategy="explore")
         finally:
-            db.get_visible_images_for_pairing = old_get_visible
+            ratings.visible_images_for_pairing = old_get_visible
 
         self.assertEqual(mosaic_second["images"], mosaic_first["images"])
         mosaic_second["images"][0]["filename"] = "mutated"
@@ -1687,7 +1693,8 @@ class CompareTests(BackendTestCase):
         await self._cache_entry(active, "md")
         await self._cache_entry(offline, "md")
 
-        rows = await db.get_visible_images_for_pairing(
+        rows = await ratings.visible_images_for_pairing(
+            db.DB_PATH,
             "md",
             thumbnails.SSD_CACHE_DIR,
             include_card_metadata=False,
@@ -1712,7 +1719,8 @@ class CompareTests(BackendTestCase):
             1210.0, 1200.0, 1220.0, 1190.0,
         )
 
-        matchups = await db.get_visible_past_matchups(
+        matchups = await ratings.get_visible_past_matchups(
+            db.DB_PATH,
             "md",
             thumbnails.SSD_CACHE_DIR,
         )
@@ -1734,7 +1742,7 @@ class CompareTests(BackendTestCase):
             1210.0, 1200.0, 1220.0, 1190.0,
         )
 
-        matchups = await db.get_past_matchups_for_image_ids([first, second])
+        matchups = await ratings.get_past_matchups_for_image_ids(db.DB_PATH, [first, second])
 
         self.assertEqual(matchups, {(min(first, second), max(first, second))})
 

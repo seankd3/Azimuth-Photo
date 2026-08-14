@@ -1,10 +1,12 @@
 from core.catalog_path import catalog_path
 from core.requests import parse_exclude_sources
 from collections.abc import Awaitable, Callable
+from functools import partial
 from typing import Any
 
 import db
 from data.repositories import collections as collection_repository
+from data.repositories import images as image_repository
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -268,7 +270,7 @@ async def api_collection_graph_images(collection_id: int, recursive: int = 0):
             collection_id,
             recursive=bool(recursive),
             resolve_smart_image_ids=_smart_image_ids,
-            get_images_by_ids=db.get_active_images_by_ids,
+            get_images_by_ids=partial(image_repository.get_active_images_by_ids, catalog_path()),
         )
     except graph.CollectionGraphConflict as exc:
         return JSONResponse({"error": str(exc)}, status_code=409)

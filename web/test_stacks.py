@@ -13,6 +13,7 @@ import db
 import embed_cache
 import thumbnails
 from core import cache_events
+from data.repositories import catalog as catalog_repository
 from data.repositories import stacks as stack_repository
 from features.library import routes as library_routes
 from features.library import service as library_service
@@ -71,7 +72,7 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
                     kwargs.get("missing_at"),
                 ),
             )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
             return int(cursor.lastrowid)
         finally:
@@ -138,7 +139,7 @@ class StackTestCase(unittest.IsolatedAsyncioTestCase):
                     "VALUES (?, ?, ?, ?, ?, 100, ?, ?)",
                     (row[9], row[10], image_id, row[11], row[12], row[13], row[13]),
                 )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
             return ids
         finally:
@@ -606,7 +607,7 @@ class StackRouteTests(unittest.TestCase):
                             "INSERT INTO images (source_id, filename, filepath, status) VALUES (?, ?, ?, 'kept')",
                             (source["id"], filename, os.path.join(source["path"], filename)),
                         )
-                        await db._update_source_counts(conn, int(source["id"]))
+                        await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
                         await conn.commit()
                         return int(cursor.lastrowid)
                     finally:

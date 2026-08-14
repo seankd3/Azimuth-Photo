@@ -2,6 +2,7 @@ from test_support import *  # noqa: F401,F403
 import os
 from unittest import mock
 
+from data.repositories import embeddings as embedding_repository
 from features.catalog import metadata as catalog_metadata
 from features.captions import routes as caption_routes
 
@@ -619,16 +620,16 @@ class SettingsStatusTests(BackendTestCase):
 
 
     async def test_ai_status_counts_reuse_warm_stats_cache(self):
-        db._stats_cache["data"] = {
+        stats_repository._stats_cache["data"] = {
             "active_images": 42,
             "rated_images": 7,
             "direct_comparison_rows": 5,
             "ranking_signal_count": 9,
             "imported_ranking_without_history": 2,
         }
-        db._stats_cache["expires"] = db._time.time() + db.STATS_CACHE_TTL_SECONDS
-        db._ai_status_counts_cache["data"] = None
-        db._ai_status_counts_cache["expires"] = 0
+        stats_repository._stats_cache["expires"] = db._time.time() + stats_repository.FULL_STATS_CACHE_TTL_SECONDS
+        stats_repository._ai_status_counts_cache["data"] = None
+        stats_repository._ai_status_counts_cache["expires"] = 0
         self.assertIs(db._ai_status_counts_cache, stats_repository._ai_status_counts_cache)
 
         counts = await db.get_ai_status_counts()
@@ -640,18 +641,18 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(counts["imported_ranking_without_history"], 2)
 
     async def test_ai_status_counts_reuse_stale_stats_cache_while_refreshing(self):
-        db._stats_cache["data"] = {
+        stats_repository._stats_cache["data"] = {
             "active_images": 42,
             "rated_images": 7,
             "direct_comparison_rows": 5,
             "ranking_signal_count": 9,
             "imported_ranking_without_history": 2,
         }
-        db._stats_cache["expires"] = db._time.time() - 1
-        db._ai_status_counts_cache["data"] = None
-        db._ai_status_counts_cache["expires"] = 0
-        db._embedding_count_cache["value"] = 11
-        db._embedding_count_cache["expires"] = db._time.time() + db.EMBEDDING_COUNT_CACHE_TTL_SECONDS
+        stats_repository._stats_cache["expires"] = db._time.time() - 1
+        stats_repository._ai_status_counts_cache["data"] = None
+        stats_repository._ai_status_counts_cache["expires"] = 0
+        embedding_repository._embedding_count_cache["value"] = 11
+        embedding_repository._embedding_count_cache["expires"] = db._time.time() + embedding_repository.EMBEDDING_COUNT_CACHE_TTL_SECONDS
         stats_repository._stats_inflight_task = None
         db._stats_inflight_task = None
         started = asyncio.Event()
@@ -661,7 +662,7 @@ class SettingsStatusTests(BackendTestCase):
         async def fake_get_stats_uncached():
             started.set()
             await release.wait()
-            return db._stats_cache["data"]
+            return stats_repository._stats_cache["data"]
 
         db._get_stats_uncached = fake_get_stats_uncached
         try:
@@ -683,7 +684,7 @@ class SettingsStatusTests(BackendTestCase):
             stats_repository._stats_inflight_task = None
             db._stats_inflight_task = None
             db._get_stats_uncached = old_get_stats_uncached
-            db.invalidate_stats_cache()
+            cache_events.invalidate_stats_cache()
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from data.repositories import collections as collection_repository
 from data.repositories import stacks as stack_repository
 from features.media import routes as media_routes
 from features.sync import contract
@@ -139,12 +140,12 @@ class TrashTests(BackendTestCase):
                     len(data),
                 ),
             )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
             image_id = int(cursor.lastrowid)
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         return image_id, filepath
 
     async def _cache_entry(self, image_id):
@@ -719,13 +720,14 @@ class TrashTests(BackendTestCase):
         source, _root = await self._source_root()
         cover, _ = await self._file_image(source, "cover.jpg", data=b"cover")
         remaining, _ = await self._file_image(source, "remaining.jpg", data=b"remaining")
-        collection = await db.create_collection(
+        collection = await collection_repository.create_collection(
+            db.DB_PATH,
             name="Trash-safe collection",
             image_ids=[cover, remaining],
         )
 
         await trash_service.trash_images(db.DB_PATH, [cover])
-        detail = await db.get_collection(collection["id"])
+        detail = await collection_repository.get_collection(db.DB_PATH, collection["id"])
 
         self.assertEqual(detail["image_count"], 1)
         self.assertEqual(detail["cover_image_id"], remaining)
@@ -734,11 +736,11 @@ class TrashTests(BackendTestCase):
     async def test_restoring_only_collection_member_restores_cover(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "only.jpg", data=b"only")
-        collection = await db.create_collection(name="Only", image_ids=[image_id])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Only", image_ids=[image_id])
         await trash_service.trash_images(db.DB_PATH, [image_id])
 
         await trash_service.restore_images(db.DB_PATH, [image_id])
-        detail = await db.get_collection(collection["id"])
+        detail = await collection_repository.get_collection(db.DB_PATH, collection["id"])
 
         self.assertEqual(detail["image_count"], 1)
         self.assertEqual(detail["cover_image_id"], image_id)
@@ -783,12 +785,12 @@ class VirtualCopyTrashTests(BackendTestCase):
                     len(data),
                 ),
             )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
             image_id = int(cursor.lastrowid)
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         return image_id, filepath
 
     async def _master_with_copy(self):

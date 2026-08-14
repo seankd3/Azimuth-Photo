@@ -1,5 +1,6 @@
 import unittest.mock
 from test_support import *  # noqa: F401,F403
+from data import schema as data_schema
 
 
 class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
@@ -8,7 +9,7 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as tempdir:
             clean_path = os.path.join(tempdir, "clean-catalog.db")
             db.DB_PATH = clean_path
-            db.invalidate_stats_cache()
+            cache_events.invalidate_stats_cache()
             try:
                 await db.init_db()
                 conn = sqlite3.connect(clean_path)
@@ -25,9 +26,9 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
                     conn.close()
             finally:
                 db.DB_PATH = original_path
-                db.invalidate_stats_cache()
+                cache_events.invalidate_stats_cache()
 
-        self.assertEqual(version, db.SCHEMA_VERSION)
+        self.assertEqual(version, data_schema.SCHEMA_VERSION)
         self.assertEqual(journal_mode, "wal")
         self.assertIn("images", tables)
         self.assertIn("catalog_sources", tables)
@@ -55,7 +56,7 @@ class BackendIntegrationTests(BackendTestCase):
             conn.close()
 
         db.DB_PATH = legacy_path
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         try:
             await db.init_db()
             conn = sqlite3.connect(legacy_path)
@@ -66,7 +67,7 @@ class BackendIntegrationTests(BackendTestCase):
                 conn.close()
         finally:
             db.DB_PATH = original_path
-            db.invalidate_stats_cache()
+            cache_events.invalidate_stats_cache()
 
         self.assertIn("action_id", columns)
         self.assertIn("idx_comparisons_action_id", indexes)

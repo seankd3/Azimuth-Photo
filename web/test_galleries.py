@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
 from test_support import *  # noqa: F401,F403
+from data.repositories import collections as collection_repository
 from features.develop import export_presets
 from features.publishing import galleries
 from features.publishing import routes as gallery_routes
@@ -58,7 +59,9 @@ class GalleryTests(BackendTestCase):
         source = await self._source("gallery")
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
-        collection = await db.create_collection(name="Client selects", image_ids=[first, second])
+        collection = await collection_repository.create_collection(
+            db.DB_PATH, name="Client selects", image_ids=[first, second]
+        )
         return collection, first, second
 
     async def test_snapshot_options_and_active_membership(self):

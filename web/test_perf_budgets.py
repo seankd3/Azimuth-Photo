@@ -15,6 +15,7 @@ import app as app_module
 import db
 import settings
 import thumbnails
+from core import cache_events
 from features.library import service as library_service
 from features.collections import suggestions as collection_suggestions
 from thumbnails import cache_entries as thumbnail_cache_entries
@@ -40,9 +41,9 @@ BUDGET_MS = {
 
 
 def _clear_query_caches() -> None:
-    db.invalidate_stats_cache()
-    db.invalidate_cached_image_ids_cache()
-    db._invalidate_ranking_count_cache()
+    cache_events.invalidate_stats_cache()
+    cache_events.invalidate_cached_image_ids_cache()
+    cache_events.invalidate_ranking_count_cache()
     db.clear_filter_options_cache()
     library_service.invalidate_rankings_response_cache()
     collection_suggestions.invalidate_cache()

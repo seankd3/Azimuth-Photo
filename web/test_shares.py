@@ -12,6 +12,9 @@ from fastapi.testclient import TestClient
 from test_support import *  # noqa: F401,F403
 from data import connection as data_connection
 from data import schema as data_schema
+from data.repositories import collections as collection_repository
+from data.repositories import publishes as publish_repository
+from data.repositories import shares as share_repository
 from features.share import auth as share_auth
 from features.share import routes as share_routes
 
@@ -34,7 +37,7 @@ class ShareTests(BackendTestCase):
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
         third = await self._image(source["id"], "third.jpg")
-        collection = await db.create_collection(name="Shared set", image_ids=[first, second])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Shared set", image_ids=[first, second])
         return collection, first, second, third
 
     async def _collection_with_duplicate_filenames(self):
@@ -42,39 +45,39 @@ class ShareTests(BackendTestCase):
         second_source = await self._source("share-second")
         first = await self._image(first_source["id"], "same-name.jpg")
         second = await self._image(second_source["id"], "same-name.jpg")
-        collection = await db.create_collection(name="Duplicate names", image_ids=[first, second])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Duplicate names", image_ids=[first, second])
         return collection, first, second
 
     async def test_share_create_is_idempotent_and_rotate_replaces_token(self):
         collection, *_ = await self._collection_with_images()
 
-        first = await db.create_or_rotate_share(collection["id"])
-        second = await db.create_or_rotate_share(collection["id"])
-        rotated = await db.create_or_rotate_share(collection["id"], rotate=True)
-        active = await db.get_collection_share(collection["id"])
+        first = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
+        second = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
+        rotated = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], rotate=True)
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertEqual(first["token"], second["token"])
         self.assertNotEqual(first["token"], rotated["token"])
         self.assertEqual(active["token"], rotated["token"])
 
     async def test_share_create_returns_none_for_missing_collection(self):
-        self.assertIsNone(await db.create_or_rotate_share(999999))
+        self.assertIsNone(await share_repository.create_or_rotate_share(db.DB_PATH, 999999))
 
     async def test_existing_share_hides_trashed_snapshot_member(self):
         collection, first, second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
         await db.set_image_status(first, "trashed")
 
-        resolved = await db.resolve_share_token(share["token"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertEqual([image["id"] for image in resolved["images"]], [second])
         self.assertEqual(resolved["image_count"], 1)
-        self.assertFalse(await db.share_token_allows_image(share["token"], first))
-        self.assertTrue(await db.share_token_allows_image(share["token"], second))
+        self.assertFalse(await share_repository.token_allows_image(db.DB_PATH, share["token"], first))
+        self.assertTrue(await share_repository.token_allows_image(db.DB_PATH, share["token"], second))
 
     async def test_tokened_share_media_never_enters_shared_caches(self):
         collection, first, _second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             with TestClient(app_module.app) as client:
@@ -92,10 +95,10 @@ class ShareTests(BackendTestCase):
     async def test_unicode_filename_roundtrips_through_private_share(self):
         source = await self._source("share-unicode")
         image_id = await self._image(source["id"], "été 📸.jpg")
-        collection = await db.create_collection(name="Famille 🎉", image_ids=[image_id])
-        share = await db.create_or_rotate_share(collection["id"])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Famille 🎉", image_ids=[image_id])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        resolved = await db.resolve_share_token(share["token"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertEqual(resolved["name"], "Famille 🎉")
         self.assertEqual(resolved["images"][0]["filename"], "été 📸.jpg")
@@ -109,11 +112,11 @@ class ShareTests(BackendTestCase):
 
     async def test_share_password_can_update_without_rotating(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
         password_hash = share_auth.hash_password("gallery")
 
-        updated = await db.set_collection_share_password(collection["id"], password_hash)
-        cleared = await db.set_collection_share_password(collection["id"], None)
+        updated = await share_repository.set_share_password(db.DB_PATH, collection["id"], password_hash)
+        cleared = await share_repository.set_share_password(db.DB_PATH, collection["id"], None)
 
         self.assertEqual(updated["token"], share["token"])
         self.assertEqual(updated["password_hash"], password_hash)
@@ -122,11 +125,11 @@ class ShareTests(BackendTestCase):
 
     async def test_share_revoke_disables_resolution(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        revoked = await db.revoke_collection_share(collection["id"])
-        active = await db.get_collection_share(collection["id"])
-        resolved = await db.resolve_share_token(share["token"])
+        revoked = await share_repository.revoke_share(db.DB_PATH, collection["id"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertTrue(revoked)
         self.assertIsNone(active)
@@ -134,7 +137,7 @@ class ShareTests(BackendTestCase):
 
     async def test_share_revoke_http_hides_public_token_and_owner_payload(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def revoke_and_probe():
             with TestClient(app_module.app) as client:
@@ -150,10 +153,10 @@ class ShareTests(BackendTestCase):
 
     async def test_resolve_token_rejects_expired_share(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"], expires_at=time.time() - 60)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], expires_at=time.time() - 60)
 
-        resolved = await db.resolve_share_token(share["token"])
-        active = await db.get_collection_share(collection["id"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertIsNone(resolved)
         self.assertEqual(active["token"], share["token"])
@@ -175,38 +178,38 @@ class ShareTests(BackendTestCase):
 
     async def test_token_allows_only_member_images(self):
         collection, first, _second, third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        self.assertTrue(await db.share_token_allows_image(share["token"], first))
-        self.assertFalse(await db.share_token_allows_image(share["token"], third))
+        self.assertTrue(await share_repository.token_allows_image(db.DB_PATH, share["token"], first))
+        self.assertFalse(await share_repository.token_allows_image(db.DB_PATH, share["token"], third))
 
     async def test_share_favorite_set_unset_and_list(self):
         collection, first, second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        self.assertTrue(await db.set_share_favorite(share["id"], first, True, client_name="Client"))
-        self.assertTrue(await db.set_share_favorite(share["id"], second, True))
-        self.assertTrue(await db.set_share_favorite(share["id"], first, False))
-        favorites = await db.list_share_favorites(share["id"])
+        self.assertTrue(await share_repository.set_favorite(db.DB_PATH, share["id"], first, True, client_name="Client"))
+        self.assertTrue(await share_repository.set_favorite(db.DB_PATH, share["id"], second, True))
+        self.assertTrue(await share_repository.set_favorite(db.DB_PATH, share["id"], first, False))
+        favorites = await share_repository.list_favorites(db.DB_PATH, share["id"])
 
         self.assertEqual([row["image_id"] for row in favorites], [second])
         self.assertIsNotNone(favorites[0]["created_at"])
 
     async def test_share_favorite_requires_collection_member(self):
         collection, _first, _second, third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        self.assertFalse(await db.set_share_favorite(share["id"], third, True))
-        self.assertEqual(await db.list_share_favorites(share["id"]), [])
+        self.assertFalse(await share_repository.set_favorite(db.DB_PATH, share["id"], third, True))
+        self.assertEqual(await share_repository.list_favorites(db.DB_PATH, share["id"]), [])
 
     async def test_share_rotate_carries_favorites_forward(self):
         collection, first, second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
-        await db.set_share_favorite(share["id"], first, True)
-        await db.set_share_favorite(share["id"], second, True)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
+        await share_repository.set_favorite(db.DB_PATH, share["id"], first, True)
+        await share_repository.set_favorite(db.DB_PATH, share["id"], second, True)
 
-        rotated = await db.create_or_rotate_share(collection["id"], rotate=True)
-        favorites = await db.favorites_for_collection(collection["id"])
+        rotated = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], rotate=True)
+        favorites = await share_repository.favorites_for_collection(db.DB_PATH, collection["id"])
 
         self.assertNotEqual(share["id"], rotated["id"])
         self.assertEqual([row["image_id"] for row in favorites], [first, second])
@@ -217,7 +220,7 @@ class ShareTests(BackendTestCase):
             "publish_site_base_url": "https://photos.example.test",
         })
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             client = TestClient(app_module.app)
@@ -247,7 +250,7 @@ class ShareTests(BackendTestCase):
 
     async def test_public_share_download_all_returns_zip_with_unique_filenames(self):
         collection, first, second = await self._collection_with_duplicate_filenames()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             with TestClient(app_module.app) as client:
@@ -269,7 +272,8 @@ class ShareTests(BackendTestCase):
 
     async def test_protected_share_download_all_requires_unlock_cookie(self):
         collection, first, second = await self._collection_with_duplicate_filenames()
-        share = await db.create_or_rotate_share(
+        share = await share_repository.create_or_rotate_share(
+            db.DB_PATH,
             collection["id"],
             password_hash=share_auth.hash_password("open-sesame"),
         )
@@ -301,7 +305,7 @@ class ShareTests(BackendTestCase):
 
     async def test_public_favorite_routes_and_owner_count(self):
         collection, first, second, third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             client = TestClient(app_module.app)
@@ -343,7 +347,7 @@ class ShareTests(BackendTestCase):
 
     async def test_share_favorites_are_isolated_per_visitor_and_owner_sees_all_sets(self):
         collection, first, second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             visitor_a = TestClient(app_module.app)
@@ -401,8 +405,8 @@ class ShareTests(BackendTestCase):
 
     async def test_owner_keeps_legacy_share_favorites_visible(self):
         collection, first, _second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
-        await db.set_share_favorite(share["id"], first, True)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
+        await share_repository.set_favorite(db.DB_PATH, share["id"], first, True)
 
         def probe():
             with TestClient(app_module.app) as client:
@@ -448,12 +452,14 @@ class ShareTests(BackendTestCase):
     async def test_shared_surfaces_aggregate_private_and_website_state(self):
         settings.save_settings({"publish_site_base_url": "https://example.test"})
         collection, first, _second, _third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(
+        share = await share_repository.create_or_rotate_share(
+            db.DB_PATH,
             collection["id"],
             password_hash=share_auth.hash_password("gallery"),
         )
-        await db.set_share_favorite(share["id"], first, True, client_name="Client")
-        await db.upsert_collection_publish(
+        await share_repository.set_favorite(db.DB_PATH, share["id"], first, True, client_name="Client")
+        await publish_repository.upsert_publish(
+            db.DB_PATH,
             collection_id=collection["id"],
             slug="shared-set",
             title="Shared Set",
@@ -486,7 +492,8 @@ class ShareTests(BackendTestCase):
 
     async def test_public_favorite_route_rejects_locked_share_without_cookie(self):
         collection, first, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(
+        share = await share_repository.create_or_rotate_share(
+            db.DB_PATH,
             collection["id"],
             password_hash=share_auth.hash_password("open-sesame"),
         )
@@ -505,7 +512,7 @@ class ShareTests(BackendTestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.headers.get("referrer-policy"), "no-referrer")
-        self.assertEqual(await db.list_share_favorites(share["id"]), [])
+        self.assertEqual(await share_repository.list_favorites(db.DB_PATH, share["id"]), [])
 
     async def test_share_rotate_preserves_password_over_http(self):
         collection, *_ = await self._collection_with_images()
@@ -530,7 +537,7 @@ class ShareTests(BackendTestCase):
                 client.close()
 
         created, rotated, old_token, new_token, old_gallery, new_gallery = await asyncio.to_thread(probe)
-        active = await db.get_collection_share(collection["id"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertEqual(created.status_code, 200)
         self.assertTrue(created.json()["share"]["protected"])
@@ -565,7 +572,7 @@ class ShareTests(BackendTestCase):
                 client.close()
 
         created, cleared, gallery = await asyncio.to_thread(probe)
-        active = await db.get_collection_share(collection["id"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertEqual(created.status_code, 200)
         self.assertTrue(created.json()["share"]["protected"])
@@ -581,7 +588,7 @@ class ShareTests(BackendTestCase):
     async def test_protected_share_unlocks_media_and_counts_one_view_per_cookie(self):
         collection, first, *_ = await self._collection_with_images()
         password_hash = share_auth.hash_password("open-sesame")
-        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], password_hash=password_hash)
 
         def probe():
             client = TestClient(app_module.app)
@@ -606,7 +613,7 @@ class ShareTests(BackendTestCase):
                 client.close()
 
         locked, blocked_thumb, wrong, right, gallery, again, thumb = await asyncio.to_thread(probe)
-        active = await db.get_collection_share(collection["id"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertEqual(locked.status_code, 200)
         self.assertIn("Unlock", locked.text)
@@ -629,7 +636,8 @@ class ShareTests(BackendTestCase):
 
     async def test_share_favorites_require_current_unlock_cookie(self):
         collection, first, second, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(
+        share = await share_repository.create_or_rotate_share(
+            db.DB_PATH,
             collection["id"],
             password_hash=share_auth.hash_password("old-password"),
         )
@@ -704,7 +712,7 @@ class ShareTests(BackendTestCase):
 
     async def test_share_view_count_is_per_distinct_session(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             first_client = TestClient(app_module.app)
@@ -719,7 +727,7 @@ class ShareTests(BackendTestCase):
                 second_client.close()
 
         first_load, first_again, second_load = await asyncio.to_thread(probe)
-        active = await db.get_collection_share(collection["id"])
+        active = await share_repository.get_share(db.DB_PATH, collection["id"])
 
         self.assertEqual(first_load.status_code, 200)
         self.assertEqual(first_again.status_code, 200)
@@ -731,7 +739,7 @@ class ShareTests(BackendTestCase):
     async def test_share_unlock_rejects_oversized_password_before_hashing(self):
         collection, *_ = await self._collection_with_images()
         password_hash = share_auth.hash_password("open-sesame")
-        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], password_hash=password_hash)
 
         def probe():
             client = TestClient(app_module.app)
@@ -754,7 +762,7 @@ class ShareTests(BackendTestCase):
     async def test_share_unlock_throttles_repeated_failures_by_token(self):
         collection, *_ = await self._collection_with_images()
         password_hash = share_auth.hash_password("open-sesame")
-        share = await db.create_or_rotate_share(collection["id"], password_hash=password_hash)
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"], password_hash=password_hash)
 
         async def no_sleep(_seconds):
             return None
@@ -834,7 +842,7 @@ class ShareTests(BackendTestCase):
 
     async def test_public_thumb_rejects_non_member_image(self):
         collection, _first, _second, third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             client = TestClient(app_module.app)
@@ -850,7 +858,7 @@ class ShareTests(BackendTestCase):
 
     async def test_public_image_rejects_non_member_without_calling_provider(self):
         collection, _first, _second, third = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
         calls = []
         old_thumbnail_response = share_routes._thumbnail_response
 
@@ -877,7 +885,7 @@ class ShareTests(BackendTestCase):
 
     async def test_http_collection_delete_removes_public_share_and_favorites(self):
         collection, first, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
         def probe():
             client = TestClient(app_module.app)
@@ -893,7 +901,7 @@ class ShareTests(BackendTestCase):
                 client.close()
 
         favorite, deleted, gallery = await asyncio.to_thread(probe)
-        resolved = await db.resolve_share_token(share["token"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertEqual(favorite.status_code, 200)
         self.assertEqual(favorite.json()["favorites"], [first])
@@ -904,10 +912,10 @@ class ShareTests(BackendTestCase):
 
     async def test_delete_collection_removes_shares(self):
         collection, *_ = await self._collection_with_images()
-        share = await db.create_or_rotate_share(collection["id"])
+        share = await share_repository.create_or_rotate_share(db.DB_PATH, collection["id"])
 
-        deleted = await db.delete_collection(collection["id"])
-        resolved = await db.resolve_share_token(share["token"])
+        deleted = await collection_repository.delete_collection(db.DB_PATH, collection["id"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertTrue(deleted)
         self.assertIsNone(resolved)

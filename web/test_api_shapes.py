@@ -18,6 +18,7 @@ import embed_cache  # noqa: E402
 import embedding_worker  # noqa: E402
 import settings  # noqa: E402
 import thumbnails  # noqa: E402
+from core import cache_events  # noqa: E402
 from features.export import routes as export_routes  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
 from features.library import storage as library_storage  # noqa: E402
@@ -93,8 +94,8 @@ class ApiShapeTests(unittest.TestCase):
         settings._settings = None
         thumbnails.SSD_CACHE_DIR = os.path.join(self.tempdir.name, "cache")
         thumbnails._clear_disk_index()
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
         library_storage.invalidate_overview_cache()
         asyncio.run(db.init_db())
@@ -134,8 +135,8 @@ class ApiShapeTests(unittest.TestCase):
             os.environ["AZIMUTH_SMOKE_MODE"] = self.old_smoke_mode
         thumbnails._clear_disk_index()
         db.DB_PATH = self.old_db_path
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
         library_storage.invalidate_overview_cache()
         compare_service._pairing_cache.update({"data": None, "valid": False})
@@ -286,8 +287,8 @@ class ApiShapeTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         return ids
 
     def assertCardShape(self, card, thumb_size="sm", *, contextual=()):
@@ -474,7 +475,7 @@ class ApiShapeTests(unittest.TestCase):
             conn.commit()
         finally:
             conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         with mock.patch.dict(
             os.environ,
             {"AZIMUTH_MODE": "satellite", "AZIMUTH_HUB_URL": "http://stub-hub"},

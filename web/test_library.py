@@ -3,6 +3,7 @@ import embed_cache
 import shutil
 import unittest.mock
 from fastapi.testclient import TestClient
+from data.repositories import collections as collection_repository
 from features.collections import routes as collection_routes
 from features.collections import smart as smart_collections
 from features.library import taste as taste_service
@@ -146,7 +147,7 @@ class LibraryTests(BackendTestCase):
 
         stats = await db.get_stats()
 
-        self.assertGreaterEqual(db.STATS_CACHE_TTL_SECONDS, 30.0)
+        self.assertGreaterEqual(stats_repository.FULL_STATS_CACHE_TTL_SECONDS, 30.0)
         self.assertEqual(stats["direct_comparison_rows"], 0)
         self.assertEqual(stats["rated_images"], 2)
         self.assertEqual(stats["imported_ranking_without_history"], 7)
@@ -155,7 +156,7 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(stats["total_comparisons"], 8)
 
         ai_counts = await db.get_ai_status_counts()
-        self.assertGreaterEqual(db.AI_STATUS_COUNTS_CACHE_TTL_SECONDS, 30.0)
+        self.assertGreaterEqual(stats_repository.AI_STATUS_COUNTS_CACHE_TTL_SECONDS, 30.0)
         self.assertEqual(ai_counts["total_images"], stats["active_images"])
         self.assertEqual(ai_counts["rated_images"], stats["rated_images"])
         self.assertEqual(ai_counts["direct_comparison_rows"], stats["direct_comparison_rows"])
@@ -203,7 +204,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         stats = await db.get_stats()
 
@@ -232,15 +233,15 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         repository_stats = await stats_repository.full_stats(db.DB_PATH)
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         facade_stats = await db._get_stats_uncached()
         cached_stats = await db.get_stats()
 
         self.assertEqual(facade_stats, repository_stats)
-        self.assertIs(db._stats_cache["data"], facade_stats)
+        self.assertIs(stats_repository._stats_cache["data"], facade_stats)
         self.assertIs(cached_stats, facade_stats)
         self.assertEqual(
             list(facade_stats.keys()),
@@ -287,12 +288,12 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         options = await db.get_filter_options()
         self.assertEqual(options["years"][0]["year"], "2024")
         self.assertEqual(options["undated"], 1)
-        self.assertGreaterEqual(db.FILTER_OPTIONS_CACHE_TTL_SECONDS, 300.0)
+        self.assertGreaterEqual(filter_options_repository.FILTER_OPTIONS_CACHE_TTL_SECONDS, 300.0)
 
     async def test_filter_options_respect_folder_scope(self):
         source = await self._source()
@@ -311,7 +312,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         options = await db.get_filter_options(folder=os.path.join(source["path"], "Beach"))
 
@@ -338,17 +339,17 @@ class LibraryTests(BackendTestCase):
                 "UPDATE catalog_sources SET included = 0 WHERE id = ?",
                 (removed_source["id"],),
             )
-            await db._update_source_counts(conn, removed_source["id"])
+            await catalog_repository.update_source_counts_on_conn(conn, removed_source["id"])
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         db.clear_filter_options_cache()
 
         repository_result = await filter_options_repository.filter_options(
             db.DB_PATH,
             catalog_counts=await db.get_catalog_image_counts(),
-            active_source_ids=sorted(await db.get_active_source_id_set()),
+            active_source_ids=sorted(await catalog_repository.active_source_id_set_cached(db.DB_PATH)),
         )
         facade_result = await db.get_filter_options()
 
@@ -357,7 +358,7 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(facade_result["file_types"], [{"ext": "jpg", "count": 1}])
         self.assertEqual(facade_result["cameras"], [{"camera": "Fuji X-T5", "count": 1}])
         self.assertEqual(facade_result["lenses"], [{"lens": "35mm", "count": 1}])
-        self.assertEqual(db._filter_options_cache["data"], facade_result)
+        self.assertEqual(filter_options_repository._filter_options_cache["data"], facade_result)
 
         original_filter_options = filter_options_repository.filter_options
 
@@ -382,7 +383,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         db.clear_filter_options_cache()
 
         primed = await db.get_filter_options()
@@ -435,7 +436,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         db.clear_filter_options_cache()
 
         options = await db.get_filter_options()
@@ -449,8 +450,8 @@ class LibraryTests(BackendTestCase):
         gamma = await self._image(source["id"], "gamma.jpg", elo=1500)
         for image_id in (alpha, beta):
             await self._cache_entry(image_id, "sm")
-        db.invalidate_cached_image_ids_cache()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
         filters = {
             "sort": "filename",
             "visible_thumb_size": "sm",
@@ -514,7 +515,7 @@ class LibraryTests(BackendTestCase):
             await conn.close()
         for image_id in (plain, dotted, png):
             await self._cache_entry(image_id, "md")
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         rows = await db.get_rankings(
             limit=10,
@@ -585,7 +586,7 @@ class LibraryTests(BackendTestCase):
         finally:
             await conn.close()
         await self._cache_entry(ready, "sm")
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         response = await library_routes.api_date_histogram()
 
@@ -655,7 +656,7 @@ class LibraryTests(BackendTestCase):
         finally:
             await conn.close()
 
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         library_service._rankings_response_cache.clear()
         library_service._blended_rankings_order_cache.clear()
         self._set_taste_blend(enabled=True, min_signal=1)
@@ -719,7 +720,7 @@ class LibraryTests(BackendTestCase):
         finally:
             await conn.close()
 
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         library_service._rankings_response_cache.clear()
         with unittest.mock.patch.dict(
             os.environ,
@@ -855,7 +856,7 @@ class LibraryTests(BackendTestCase):
             await conn.close()
         for image_id in (ranked_match, unranked_match, rejected_match, opposite):
             await self._cache_entry(image_id, "sm")
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         cache_events.invalidate_rankings_cache()
 
         all_taste = await library_routes.api_rankings(limit=20, sort="taste")
@@ -924,7 +925,7 @@ class LibraryTests(BackendTestCase):
 
         # Simulate continuous pregen: each sm write used to nuke taste order caches.
         for image_id in winners:
-            db.note_cached_image_ids_added(thumbnails.SSD_CACHE_DIR, "sm", [image_id])
+            cache_events.note_cached_image_ids_added(thumbnails.SSD_CACHE_DIR, "sm", [image_id])
 
         self.assertFalse(library_service._rankings_response_cache)
         self.assertEqual(library_service._taste_rankings_order_cache, order_before)
@@ -992,13 +993,13 @@ class LibraryTests(BackendTestCase):
                 "VALUES (?, ?, 'swiss', 1200, 1200, ?)",
                 [(ids[index % 3], ids[3 + (index % 3)], f"perf-{index}") for index in range(5)],
             )
-            await db._update_source_counts(conn, source["id"])
+            await catalog_repository.update_source_counts_on_conn(conn, source["id"])
             await conn.commit()
         finally:
             await conn.close()
 
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         embed_cache.invalidate()
         taste_service.invalidate_taste_cache()
         cache_events.invalidate_rankings_cache()
@@ -1194,7 +1195,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         await self._cache_entry(visible_high, "md")
         await self._cache_entry(visible_low, "md")
         await self._cache_entry(portrait, "md")
@@ -1228,7 +1229,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         await self._cache_entry(visible_b, "sm")
         await self._cache_entry(visible_c, "sm")
 
@@ -1278,8 +1279,8 @@ class LibraryTests(BackendTestCase):
         self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
         media_warm._thumbnail_memory_warm_inflight.add("sm:1")
 
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         db.clear_filter_options_cache()
         compare_service._pairing_cache.update({"data": None, "valid": False})
         compare_service._matchups_cache.update({"data": None, "valid": False})
@@ -1332,7 +1333,7 @@ class LibraryTests(BackendTestCase):
         )
         self.assertEqual(stale_count, 1)
 
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         refreshed_count = await db.count_rankings(
             visible_thumb_size="sm",
             cache_root=thumbnails.SSD_CACHE_DIR,
@@ -1402,7 +1403,7 @@ class LibraryTests(BackendTestCase):
         stale_count = await db.count_rankings(flag="picked")
         self.assertEqual(stale_count, 0)
 
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         refreshed_count = await db.count_rankings(flag="picked")
         self.assertEqual(refreshed_count, 1)
 
@@ -1425,7 +1426,9 @@ class LibraryTests(BackendTestCase):
         outside = await self._image(source["id"], "outside.jpg", elo=1800)
         await db.set_image_flag(picked, "picked")
         await db.set_image_flag(outside, "picked")
-        collection = await db.create_collection(name="Timeline scope", image_ids=[lower, picked])
+        collection = await collection_repository.create_collection(
+            db.DB_PATH, name="Timeline scope", image_ids=[lower, picked]
+        )
         await self._cache_entry(lower, "sm")
         await self._cache_entry(picked, "sm")
 
@@ -1456,7 +1459,8 @@ class LibraryTests(BackendTestCase):
         await db.set_image_flag(picked, "picked")
         await db.set_image_flag(rejected, "rejected")
         await db.set_image_flag(outside, "picked")
-        collection = await db.create_collection(
+        collection = await collection_repository.create_collection(
+            db.DB_PATH,
             name="Filtered export scope",
             image_ids=[picked, rejected],
         )
@@ -1536,11 +1540,11 @@ class LibraryTests(BackendTestCase):
                     for index in range(image_count)
                 ),
             )
-            await db._update_source_counts(conn, source["id"])
+            await catalog_repository.update_source_counts_on_conn(conn, source["id"])
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         smart = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(
                 name="Broad smart scope",
@@ -1630,7 +1634,9 @@ class LibraryTests(BackendTestCase):
         image_id = await self._image(source["id"], "collection-quality.jpg")
         await db.set_image_flag(image_id, "picked")
         await self._cache_entry(image_id, "sm")
-        static = await db.create_collection(name="Static quality", image_ids=[image_id])
+        static = await collection_repository.create_collection(
+            db.DB_PATH, name="Static quality", image_ids=[image_id]
+        )
         smart = await collection_routes.api_create_collection(
             collection_routes.CreateCollectionBody(
                 name="Smart quality",
@@ -1668,7 +1674,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         for image_id in (january_first, february, march):
             await self._cache_entry(image_id, "sm")
@@ -1761,7 +1767,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         response = await library_routes.api_counts()
 
@@ -1788,11 +1794,11 @@ class LibraryTests(BackendTestCase):
                 "UPDATE images SET vc_of = ?, flag = 'picked' WHERE id = ?",
                 (original, virtual),
             )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         async def full_aggregate() -> dict:
             conn = await db.get_db()
@@ -1827,11 +1833,11 @@ class LibraryTests(BackendTestCase):
                 "UPDATE images SET status = 'trashed', missing_at = NULL WHERE id = ?",
                 (doomed,),
             )
-            await db._update_source_counts(conn, int(source["id"]))
+            await catalog_repository.update_source_counts_on_conn(conn, int(source["id"]))
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         after_trash = await full_aggregate()
         self.assertEqual(after_trash, {"total": 3, "picked": 1, "rejected": 1})
@@ -1873,7 +1879,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         year_rows = await db.get_rankings(limit=10, sort="date_taken", date_taken="2024")
         month_rows = await db.get_rankings(limit=10, sort="date_taken", date_taken="2024-11")
@@ -1897,15 +1903,15 @@ class LibraryTests(BackendTestCase):
             calls += 1
             refresh_started.set()
             await refresh_can_finish.wait()
-            db._stats_cache["data"] = fresh_stats
-            db._stats_cache["expires"] = db._time.time() + db.STATS_CACHE_TTL_SECONDS
+            stats_repository._stats_cache["data"] = fresh_stats
+            stats_repository._stats_cache["expires"] = db._time.time() + stats_repository.FULL_STATS_CACHE_TTL_SECONDS
             return fresh_stats
 
         db._get_stats_uncached = fake_get_stats_uncached
         stats_repository._stats_inflight_task = None
         db._stats_inflight_task = None
-        db._stats_cache["data"] = stale_stats
-        db._stats_cache["expires"] = db._time.time() - 1
+        stats_repository._stats_cache["data"] = stale_stats
+        stats_repository._stats_cache["expires"] = db._time.time() - 1
         try:
             self.assertIs(await db.get_stats(), stale_stats)
             await asyncio.wait_for(refresh_started.wait(), timeout=1)
@@ -1932,7 +1938,7 @@ class LibraryTests(BackendTestCase):
             stats_repository._stats_inflight_task = None
             db._stats_inflight_task = None
             db._get_stats_uncached = old_get_stats_uncached
-            db.invalidate_stats_cache()
+            cache_events.invalidate_stats_cache()
 
 
 
@@ -2866,7 +2872,7 @@ class LibraryTests(BackendTestCase):
         for row in rows:
             await self._cache_entry(row["id"], "sm")
         cache_events.invalidate_rankings_cache()
-        db.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_cached_image_ids_cache()
         counts = await db.scope_counts(folder=[alpha, beta])
         histogram = await db.date_histogram(folder=[alpha, beta])
         groups = await db.get_date_groups(folder=[alpha, beta])
@@ -2957,23 +2963,23 @@ class LibraryTests(BackendTestCase):
 
     async def test_scan_start_invalidates_active_source_cache(self):
         source = await self._source("offline-source", online=False)
-        self.assertEqual(await db.get_active_source_id_set(), frozenset({source["id"]}))
+        self.assertEqual(await catalog_repository.active_source_id_set_cached(db.DB_PATH), frozenset({source["id"]}))
         self.assertEqual(
             await catalog_repository.active_source_id_set_cached(
                 db.DB_PATH,
-                ttl_seconds=db.ACTIVE_SOURCE_IDS_TTL_SECONDS,
+                ttl_seconds=catalog_repository.ACTIVE_SOURCE_IDS_TTL_SECONDS,
             ),
             frozenset({source["id"]}),
         )
 
         await db.mark_source_scan_started(source["id"])
 
-        self.assertIn(source["id"], await db.get_active_source_id_set())
+        self.assertIn(source["id"], await catalog_repository.active_source_id_set_cached(db.DB_PATH))
         self.assertIn(
             source["id"],
             await catalog_repository.active_source_id_set_cached(
                 db.DB_PATH,
-                ttl_seconds=db.ACTIVE_SOURCE_IDS_TTL_SECONDS,
+                ttl_seconds=catalog_repository.ACTIVE_SOURCE_IDS_TTL_SECONDS,
             ),
         )
 
@@ -2991,7 +2997,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
 
         date_groups = await db.get_date_groups(
             visible_thumb_size="sm",
@@ -3005,14 +3011,14 @@ class LibraryTests(BackendTestCase):
         self.assertEqual(markers["markers"], [])
 
         await self._cache_entry(image_id, "sm")
-        db.invalidate_cached_image_ids_cache(thumbnails.SSD_CACHE_DIR, "sm")
+        cache_events.invalidate_cached_image_ids_cache(thumbnails.SSD_CACHE_DIR, "sm")
 
         date_groups = await db.get_date_groups(
             visible_thumb_size="sm",
             cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(date_groups[0]["date"], "2024-01")
-        self.assertGreaterEqual(db.FACET_CACHE_TTL_SECONDS, 30.0)
+        self.assertGreaterEqual(rankings.FACET_CACHE_TTL_SECONDS, 30.0)
         markers = await db.get_map_markers(
             visible_thumb_size="sm",
             cache_root=thumbnails.SSD_CACHE_DIR,
@@ -3032,7 +3038,7 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         await self._cache_entry(visible, "sm")
 
         markers = await db.get_map_markers(
@@ -3101,9 +3107,9 @@ class LibraryTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        db.invalidate_cached_image_ids_cache()
-        db.invalidate_stats_cache()
-        db._ranking_count_cache.clear()
+        cache_events.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_stats_cache()
+        rankings._ranking_count_cache.clear()
 
         filters = {
             "visible_thumb_size": "sm",
@@ -3121,7 +3127,9 @@ class LibraryTests(BackendTestCase):
         )
 
         id_filter = {beta, gamma}
-        cached_visible_ids = set(await db.get_cached_image_id_set("sm", thumbnails.SSD_CACHE_DIR))
+        cached_visible_ids = set(await cache_entry_repository.cached_image_id_set_cached(
+            db.DB_PATH, size="sm", cache_root=thumbnails.SSD_CACHE_DIR
+        ))
         self.assertEqual(
             await rankings.count_rankings_uncached(
                 db.DB_PATH,

@@ -12,6 +12,7 @@ import scanner
 import settings
 import thumbnails
 from data.repositories import catalog as catalog_repository
+from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.catalog import routes as catalog_routes
 from features.library import service as library_service
@@ -267,7 +268,7 @@ class CatalogSourceRouteTests(BackendTestCase):
             self.assertFalse(thumbnails._previews_paused)
             self.assertTrue(catalog_metadata.catalog_metadata_status()["active"])
 
-            images = await db.get_recent_active_images(limit=1)
+            images = await image_repository.get_recent_active_images(db.DB_PATH, limit=1)
             image_id = int(images[0]["id"])
             pending_payload = await library_service.api_rankings_impl(limit=10)
             self.assertEqual(pending_payload["visible_images"], 1, pending_payload)

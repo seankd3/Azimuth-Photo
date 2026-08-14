@@ -13,6 +13,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
+from data.repositories import collections as collection_repository
+from data.repositories import publishes as publish_repository
 from features.publish import builder as publish_builder
 from features.publish import routes as publish_routes
 from features.publish.builder import BundleSummary, build_public_gallery_bundle
@@ -625,7 +627,7 @@ class PublishRouteTests(BackendTestCase):
     async def _published_collection(self, name="Retry gallery"):
         source = await self._source()
         image_id = await self._image(source["id"], f"{name}.jpg")
-        return await db.create_collection(name=name, image_ids=[image_id])
+        return await collection_repository.create_collection(db.DB_PATH, name=name, image_ids=[image_id])
 
     async def _no_sleep(self, _seconds):
         return None
@@ -633,8 +635,9 @@ class PublishRouteTests(BackendTestCase):
     async def test_publish_and_revoke_reject_conflicting_queued_job(self):
         source = await self._source()
         image_id = await self._image(source["id"], "queued.jpg")
-        collection = await db.create_collection(name="Queued gallery", image_ids=[image_id])
-        await db.upsert_collection_publish(
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Queued gallery", image_ids=[image_id])
+        await publish_repository.upsert_publish(
+            db.DB_PATH,
             collection_id=collection["id"],
             slug="queued-gallery",
             title="Queued gallery",
@@ -697,7 +700,7 @@ class PublishRouteTests(BackendTestCase):
         await publish_routes._run_publish_job(collection["id"], "retry-gallery", "Retry gallery")
 
         job = publish_routes._jobs[collection["id"]]
-        row = await db.get_collection_publish(collection["id"])
+        row = await publish_repository.get_publish(db.DB_PATH, collection["id"])
         self.assertEqual(job["state"], "hook_retrying")
         self.assertEqual(job["legacy_state"], "hook_failed")
         self.assertEqual(job["hook_failure_state"], "hook_failed")
@@ -724,7 +727,7 @@ class PublishRouteTests(BackendTestCase):
             await retry
 
         job = publish_routes._jobs[collection["id"]]
-        row = await db.get_collection_publish(collection["id"])
+        row = await publish_repository.get_publish(db.DB_PATH, collection["id"])
         self.assertEqual(deployer.retry_calls, 1)
         self.assertEqual(job["state"], "live")
         self.assertFalse(job["retrying"])
@@ -734,7 +737,8 @@ class PublishRouteTests(BackendTestCase):
 
     async def test_restart_resumes_pending_hook_retry_from_database(self):
         collection = await self._published_collection("Restart retry")
-        await db.upsert_collection_publish(
+        await publish_repository.upsert_publish(
+            db.DB_PATH,
             collection_id=collection["id"],
             slug="restart-retry",
             title="Restart retry",
@@ -761,14 +765,15 @@ class PublishRouteTests(BackendTestCase):
         with unittest.mock.patch.object(publish_routes.asyncio, "sleep", self._no_sleep):
             await retry
 
-        row = await db.get_collection_publish(collection["id"])
+        row = await publish_repository.get_publish(db.DB_PATH, collection["id"])
         self.assertEqual(deployer.retry_calls, 1)
         self.assertEqual(publish_routes._jobs[collection["id"]]["state"], "live")
         self.assertFalse(row["hook_pending"])
 
     async def test_user_revoke_supersedes_queued_publish_hook_retry(self):
         collection = await self._published_collection("Supersede retry")
-        await db.upsert_collection_publish(
+        await publish_repository.upsert_publish(
+            db.DB_PATH,
             collection_id=collection["id"],
             slug="supersede-retry",
             title="Supersede retry",
@@ -785,7 +790,7 @@ class PublishRouteTests(BackendTestCase):
         )
         deployer = HookRetryDeployer()
         publish_routes._deployer = deployer
-        row = await db.get_collection_publish(collection["id"])
+        row = await publish_repository.get_publish(db.DB_PATH, collection["id"])
         publish_routes._queue_hook_retry(row, legacy_state="hook_failed")
 
         response = await publish_routes.api_revoke_collection_publish(collection["id"])
@@ -795,4 +800,4 @@ class PublishRouteTests(BackendTestCase):
             await asyncio.gather(queued_retry, revoke)
 
         self.assertEqual(deployer.retry_calls, 0)
-        self.assertIsNone(await db.get_collection_publish(collection["id"]))
+        self.assertIsNone(await publish_repository.get_publish(db.DB_PATH, collection["id"]))

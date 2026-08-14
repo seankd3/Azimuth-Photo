@@ -203,7 +203,7 @@ class SearchTests(BackendTestCase):
         self.assertNotIn(rejected_match, await db.metadata_search_image_ids("sunset"))
         self.assertIsNone(await db.metadata_search_image_ids("su"))
         self.assertIsNone(await db.metadata_search_image_ids("sunset", max_results=1))
-        active_source_ids = await db.get_active_source_id_set()
+        active_source_ids = await catalog_repository.active_source_id_set_cached(db.DB_PATH)
         self.assertEqual(
             await metadata_search.metadata_search_image_ids(
                 db.DB_PATH,
@@ -874,19 +874,19 @@ class SearchTests(BackendTestCase):
         async def fake_get_matrix(_model_key=None):
             return image_ids, matrix
 
-        old_get_active_images_by_ids = db.get_active_images_by_ids
+        old_get_active_images_by_ids = image_repository.get_active_images_by_ids
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
         search_service._duplicates_cache.update({"key": None, "data": None})
         first_result = await search_routes.api_duplicates(threshold=0.95, limit=10)
 
-        async def fail_get_active_images_by_ids(_ids):
+        async def fail_get_active_images_by_ids(_db_path, _ids):
             raise AssertionError("cached duplicate result should avoid refetching images")
 
-        db.get_active_images_by_ids = fail_get_active_images_by_ids
+        image_repository.get_active_images_by_ids = fail_get_active_images_by_ids
         try:
             second_result = await search_routes.api_duplicates(threshold=0.95, limit=10)
         finally:
-            db.get_active_images_by_ids = old_get_active_images_by_ids
+            image_repository.get_active_images_by_ids = old_get_active_images_by_ids
             search_service._duplicates_cache.update({"key": None, "data": None})
 
         self.assertEqual(first_result, second_result)

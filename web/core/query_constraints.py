@@ -5,9 +5,13 @@ import inspect
 import importlib.util
 import logging
 import time
+from functools import partial
 
+from core.catalog_path import catalog_path
 from core.search_fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_candidate_scores
 from core.search_planning import plan_search
+from data.repositories import embeddings as embedding_repository
+from data.repositories import images as image_repository
 from data.repositories import people as people_repository
 from data.repositories import rankings as ranking_repository
 
@@ -106,6 +110,18 @@ async def apply_configured_metadata_search_ids(result: dict, normalized_query: s
         result,
         normalized_query,
         metadata_search_image_ids=db.metadata_search_image_ids,
+    )
+
+
+async def get_catalog_search_query_embedding(config: dict, query: str) -> bytes | None:
+    return await embedding_repository.get_search_query_embedding(
+        catalog_path(), config=config, query=query
+    )
+
+
+async def store_catalog_search_query_embedding(config: dict, query: str, blob: bytes):
+    return await embedding_repository.store_search_query_embedding(
+        catalog_path(), config=config, query=query, blob=blob
     )
 
 
@@ -490,15 +506,13 @@ async def resolve_configured_text_search(
         encode_text=encode_text or encode_text_with_config,
         start_model_load=start_model_load or start_search_model_load,
         apply_metadata_ids=apply_metadata_ids or apply_configured_metadata_search_ids,
-        get_search_query_embedding=(
-            db.get_search_query_embedding
-        ),
-        store_search_query_embedding=(
-            db.store_search_query_embedding
-        ),
+        get_search_query_embedding=get_catalog_search_query_embedding,
+        store_search_query_embedding=store_catalog_search_query_embedding,
         metadata_ranked_image_ids=db.metadata_search_ranked_image_ids,
         caption_ranked_image_ids=db.caption_search_ranked_image_ids,
-        get_active_images_by_ids=db.get_active_images_by_ids,
+        get_active_images_by_ids=partial(
+            image_repository.get_active_images_by_ids, catalog_path()
+        ),
         caption_count_for_signature=db.caption_count_for_signature,
         extension_search_terms=ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS,
         active_embedding_config=(
@@ -566,5 +580,7 @@ async def resolve_configured_library_constraints(
         deep=deep,
         resolve_text_search=resolve_text_search or resolve_configured_text_search,
         parse_people_ids=people_repository.parse_people_ids,
-        get_people_image_id_filter=db.get_people_image_id_filter,
+        get_people_image_id_filter=partial(
+            people_repository.get_people_image_id_filter, catalog_path()
+        ),
     )

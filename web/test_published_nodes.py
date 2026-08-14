@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 
 from data import connection as data_connection
 from data import schema as data_schema
+from data.repositories import collections as collection_repository
+from data.repositories import shares as share_repository
 from features.collections import graph as collection_graph
 from features.publish import nodes as published_nodes
 from features.publish.builder import website_tree_manifest
@@ -26,9 +28,9 @@ class PublishedNodeTests(BackendTestCase):
         return [int(image["id"]) for image in images or []]
 
     async def test_collection_graph_link_cycle_rejection(self):
-        first = await db.create_collection(name="First")
-        second = await db.create_collection(name="Second")
-        third = await db.create_collection(name="Third")
+        first = await collection_repository.create_collection(db.DB_PATH, name="First")
+        second = await collection_repository.create_collection(db.DB_PATH, name="Second")
+        third = await collection_repository.create_collection(db.DB_PATH, name="Third")
 
         await collection_graph.add_link(db.DB_PATH, first["id"], second["id"], 0)
         await collection_graph.add_link(db.DB_PATH, second["id"], third["id"], 0)
@@ -125,9 +127,9 @@ class PublishedNodeTests(BackendTestCase):
         shared = await self._image(source["id"], "shared.jpg")
         second = await self._image(source["id"], "second.jpg")
         third = await self._image(source["id"], "third.jpg")
-        root = await db.create_collection(name="Root", image_ids=[first, shared])
-        child = await db.create_collection(name="Child", image_ids=[shared, second])
-        sibling = await db.create_collection(name="Sibling", image_ids=[third])
+        root = await collection_repository.create_collection(db.DB_PATH, name="Root", image_ids=[first, shared])
+        child = await collection_repository.create_collection(db.DB_PATH, name="Child", image_ids=[shared, second])
+        sibling = await collection_repository.create_collection(db.DB_PATH, name="Sibling", image_ids=[third])
         await collection_graph.add_link(db.DB_PATH, root["id"], sibling["id"], 20)
         await collection_graph.add_link(db.DB_PATH, root["id"], child["id"], 10)
 
@@ -145,8 +147,8 @@ class PublishedNodeTests(BackendTestCase):
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
         third = await self._image(source["id"], "third.jpg")
-        root = await db.create_collection(name="Root", image_ids=[first])
-        child = await db.create_collection(name="Child", image_ids=[second])
+        root = await collection_repository.create_collection(db.DB_PATH, name="Root", image_ids=[first])
+        child = await collection_repository.create_collection(db.DB_PATH, name="Child", image_ids=[second])
         await collection_graph.add_link(db.DB_PATH, root["id"], child["id"], 0)
 
         node = await published_nodes.create_snapshot_tree(
@@ -161,8 +163,8 @@ class PublishedNodeTests(BackendTestCase):
         destination_tree = await published_nodes.published_tree(db.DB_PATH, "website")
         child_node = next(item for item in destination_tree["nodes"] if item["parent_id"] == node["id"])
 
-        await db.add_collection_images(root["id"], [third])
-        await db.remove_collection_images(root["id"], [first])
+        await collection_repository.add_images(db.DB_PATH, root["id"], [third])
+        await collection_repository.remove_images(db.DB_PATH, root["id"], [first])
 
         self.assertEqual(await self._node_image_ids(node["id"]), [first])
         self.assertEqual(await self._node_image_ids(child_node["id"]), [second])
@@ -178,7 +180,7 @@ class PublishedNodeTests(BackendTestCase):
     async def test_published_snapshot_hides_member_that_is_later_trashed(self):
         source = await self._source("published-trash")
         image_id = await self._image(source["id"], "trashed-after-publish.jpg")
-        collection = await db.create_collection(name="Published", image_ids=[image_id])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Published", image_ids=[image_id])
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="website",
@@ -200,7 +202,7 @@ class PublishedNodeTests(BackendTestCase):
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
         child_image = await self._image(source["id"], "child.jpg")
-        root = await db.create_collection(name="Root", image_ids=[first])
+        root = await collection_repository.create_collection(db.DB_PATH, name="Root", image_ids=[first])
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="website",
@@ -211,9 +213,9 @@ class PublishedNodeTests(BackendTestCase):
             resolve_smart_image_ids=self._resolve_smart,
         )
 
-        await db.add_collection_images(root["id"], [second])
-        await db.remove_collection_images(root["id"], [first])
-        child = await db.create_collection(name="New child", image_ids=[child_image])
+        await collection_repository.add_images(db.DB_PATH, root["id"], [second])
+        await collection_repository.remove_images(db.DB_PATH, root["id"], [first])
+        child = await collection_repository.create_collection(db.DB_PATH, name="New child", image_ids=[child_image])
         await collection_graph.add_link(db.DB_PATH, root["id"], child["id"], 7)
 
         diff = await published_nodes.node_diff(
@@ -248,7 +250,7 @@ class PublishedNodeTests(BackendTestCase):
     async def test_deleted_source_keeps_snapshot_and_returns_gone_diff(self):
         source = await self._source()
         image_id = await self._image(source["id"], "kept.jpg")
-        collection = await db.create_collection(name="Temporary source", image_ids=[image_id])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Temporary source", image_ids=[image_id])
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="website",
@@ -259,7 +261,7 @@ class PublishedNodeTests(BackendTestCase):
             resolve_smart_image_ids=self._resolve_smart,
         )
 
-        await db.delete_collection(collection["id"])
+        await collection_repository.delete_collection(db.DB_PATH, collection["id"])
         diff = await published_nodes.node_diff(
             db.DB_PATH,
             node["id"],
@@ -275,7 +277,7 @@ class PublishedNodeTests(BackendTestCase):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")
         later = await self._image(source["id"], "later.jpg")
-        collection = await db.create_collection(name="Private delivery", image_ids=[first])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Private delivery", image_ids=[first])
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="private",
@@ -285,18 +287,18 @@ class PublishedNodeTests(BackendTestCase):
             title=None,
             resolve_smart_image_ids=self._resolve_smart,
         )
-        share = await db.create_published_node_share(node["id"])
+        share = await share_repository.create_published_node_share(db.DB_PATH, node["id"])
 
-        await db.add_collection_images(collection["id"], [later])
-        resolved = await db.resolve_share_token(share["token"])
+        await collection_repository.add_images(db.DB_PATH, collection["id"], [later])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertEqual(resolved["published_node_id"], node["id"])
         self.assertEqual([image["id"] for image in resolved["images"]], [first])
-        self.assertTrue(await db.share_token_allows_image(share["token"], first))
-        self.assertFalse(await db.share_token_allows_image(share["token"], later))
+        self.assertTrue(await share_repository.token_allows_image(db.DB_PATH, share["token"], first))
+        self.assertFalse(await share_repository.token_allows_image(db.DB_PATH, share["token"], later))
 
     async def test_published_private_link_is_in_shared_aggregation(self):
-        collection = await db.create_collection(name="Client delivery")
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Client delivery")
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="private",
@@ -306,7 +308,7 @@ class PublishedNodeTests(BackendTestCase):
             title=None,
             resolve_smart_image_ids=self._resolve_smart,
         )
-        share = await db.create_published_node_share(node["id"])
+        share = await share_repository.create_published_node_share(db.DB_PATH, node["id"])
 
         def probe():
             with TestClient(app_module.app) as client:
@@ -324,8 +326,8 @@ class PublishedNodeTests(BackendTestCase):
         root_image = await self._image(source["id"], "root.jpg")
         shared_image = await self._image(source["id"], "shared.jpg")
         child_image = await self._image(source["id"], "child.jpg")
-        root = await db.create_collection(name="Delivery", image_ids=[root_image, shared_image])
-        child = await db.create_collection(name="Chapter", image_ids=[shared_image, child_image])
+        root = await collection_repository.create_collection(db.DB_PATH, name="Delivery", image_ids=[root_image, shared_image])
+        child = await collection_repository.create_collection(db.DB_PATH, name="Chapter", image_ids=[shared_image, child_image])
         await collection_graph.add_link(db.DB_PATH, root["id"], child["id"], 0)
 
         def create_delivery():
@@ -342,18 +344,18 @@ class PublishedNodeTests(BackendTestCase):
         tree = await published_nodes.published_tree(db.DB_PATH, "private")
         child_node = next(node for node in tree["nodes"] if node["parent_id"] == root_node["id"])
 
-        resolved = await db.resolve_share_token(share["token"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["token"])
 
         self.assertEqual(
             [image["id"] for image in resolved["images"]],
             [root_image, shared_image, child_image],
         )
-        self.assertTrue(await db.share_token_allows_image(share["token"], child_image))
-        self.assertTrue(await db.set_share_favorite(share["id"], child_image, True))
+        self.assertTrue(await share_repository.token_allows_image(db.DB_PATH, share["token"], child_image))
+        self.assertTrue(await share_repository.set_favorite(db.DB_PATH, share["id"], child_image, True))
         self.assertIsNone(child_node["share_token"])
 
     async def test_published_share_lists_and_revokes_by_node_route(self):
-        collection = await db.create_collection(name="Client delivery")
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Client delivery")
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="private",
@@ -363,9 +365,9 @@ class PublishedNodeTests(BackendTestCase):
             title=None,
             resolve_smart_image_ids=self._resolve_smart,
         )
-        share = await db.create_published_node_share(node["id"])
+        share = await share_repository.create_published_node_share(db.DB_PATH, node["id"])
 
-        listed = await db.list_active_collection_shares()
+        listed = await share_repository.list_active_shares(db.DB_PATH)
         published = next(item for item in listed if item["published_node_id"] == node["id"])
         self.assertEqual(published["collection_name"], "Client delivery")
 
@@ -375,10 +377,10 @@ class PublishedNodeTests(BackendTestCase):
 
         response = await asyncio.to_thread(revoke)
         self.assertEqual(response.status_code, 200)
-        self.assertIsNone(await db.resolve_share_token(share["token"]))
+        self.assertIsNone(await share_repository.resolve_token(db.DB_PATH, share["token"]))
 
     async def test_reshare_preserves_password_and_keeps_one_active_token(self):
-        collection = await db.create_collection(name="Protected delivery")
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Protected delivery")
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="private",
@@ -411,7 +413,7 @@ class PublishedNodeTests(BackendTestCase):
         self.assertEqual(protected.json()["share"]["token"], unchanged.json()["share"]["token"])
         self.assertTrue(unchanged.json()["share"]["protected"])
         self.assertFalse(cleared.json()["share"]["protected"])
-        active = await db.create_published_node_share(node["id"])
+        active = await share_repository.create_published_node_share(db.DB_PATH, node["id"])
         self.assertIsNone(active["password_hash"])
 
         conn = await data_connection.open_async(db.DB_PATH)
@@ -431,7 +433,7 @@ class PublishedNodeTests(BackendTestCase):
     async def test_delete_node_with_client_favorite_cascades_share_state(self):
         source = await self._source()
         image_id = await self._image(source["id"], "favorite.jpg")
-        collection = await db.create_collection(name="Disposable delivery", image_ids=[image_id])
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Disposable delivery", image_ids=[image_id])
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="private",
@@ -441,15 +443,15 @@ class PublishedNodeTests(BackendTestCase):
             title=None,
             resolve_smart_image_ids=self._resolve_smart,
         )
-        share = await db.create_published_node_share(node["id"])
-        self.assertTrue(await db.set_share_favorite(share["id"], image_id, True))
+        share = await share_repository.create_published_node_share(db.DB_PATH, node["id"])
+        self.assertTrue(await share_repository.set_favorite(db.DB_PATH, share["id"], image_id, True))
 
         self.assertTrue(await published_nodes.delete_node(db.DB_PATH, node["id"]))
-        self.assertIsNone(await db.resolve_share_token(share["token"]))
-        self.assertEqual(await db.list_share_favorites(share["id"]), [])
+        self.assertIsNone(await share_repository.resolve_token(db.DB_PATH, share["token"]))
+        self.assertEqual(await share_repository.list_favorites(db.DB_PATH, share["id"]), [])
 
     async def test_website_area_export_route_writes_configured_tree(self):
-        collection = await db.create_collection(name="Portfolio")
+        collection = await collection_repository.create_collection(db.DB_PATH, name="Portfolio")
         await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="website",
@@ -473,8 +475,8 @@ class PublishedNodeTests(BackendTestCase):
         self.assertTrue(os.path.exists(os.path.join(destination, "manifest.json")))
 
     async def test_website_export_prunes_deleted_node_directory(self):
-        first = await db.create_collection(name="First publish")
-        second = await db.create_collection(name="Second publish")
+        first = await collection_repository.create_collection(db.DB_PATH, name="First publish")
+        second = await collection_repository.create_collection(db.DB_PATH, name="Second publish")
         first_node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,
             area="website",
@@ -517,8 +519,8 @@ class PublishedNodeTests(BackendTestCase):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
-        root = await db.create_collection(name="Portfolio", image_ids=[first])
-        child = await db.create_collection(name="Travel", image_ids=[second])
+        root = await collection_repository.create_collection(db.DB_PATH, name="Portfolio", image_ids=[first])
+        child = await collection_repository.create_collection(db.DB_PATH, name="Travel", image_ids=[second])
         await collection_graph.add_link(db.DB_PATH, root["id"], child["id"], 0)
         node = await published_nodes.create_snapshot_tree(
             db.DB_PATH,

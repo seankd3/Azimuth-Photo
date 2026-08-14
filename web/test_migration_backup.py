@@ -143,7 +143,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await data_connection.close_async(conn, db_path=version_zero_db)
 
-        backup.assert_called_once_with(version_zero_db, 0, app_db.SCHEMA_VERSION)
+        backup.assert_called_once_with(version_zero_db, 0, data_schema.SCHEMA_VERSION)
 
     async def test_populated_version_zero_catalog_refuses_failed_backup(self):
         version_zero_db = os.path.join(self.tmp.name, "version-zero-failed.db")

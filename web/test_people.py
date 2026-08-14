@@ -6,6 +6,8 @@ from unittest import mock
 
 import httpx
 
+from data.repositories import filter_options as filter_options_repository
+from data.repositories import people as people_repository
 from features.people import routes as people_routes
 from testing_support import BulkMemoryIsolatedTestCase
 
@@ -253,12 +255,14 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         await self._cache_entry(image_id, "md")
         model_id = "buffalo_l"
 
-        pending = await db.count_images_needing_faces(
+        pending = await people_repository.count_images_needing_faces(
+            db.DB_PATH,
             model_id=model_id,
             cache_root=thumbnails.SSD_CACHE_DIR,
         )
         self.assertEqual(pending, 1)
-        queued = await db.get_images_needing_faces(
+        queued = await people_repository.get_images_needing_faces(
+            db.DB_PATH,
             model_id=model_id,
             cache_root=thumbnails.SSD_CACHE_DIR,
             limit=4,
@@ -275,7 +279,8 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
             faces=[],
             status="scanned",
         )
-        pending = await db.count_images_needing_faces(
+        pending = await people_repository.count_images_needing_faces(
+            db.DB_PATH,
             model_id=model_id,
             cache_root=thumbnails.SSD_CACHE_DIR,
         )
@@ -297,7 +302,7 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         cache_path = os.path.join(self.tempdir.name, "facet-cache-preview.jpg")
 
         await db.get_filter_options()
-        primed_expires = db._filter_options_cache["expires"]
+        primed_expires = filter_options_repository._filter_options_cache["expires"]
         self.assertGreater(primed_expires, time.time())
 
         scan = await db.store_face_scan_result(
@@ -315,14 +320,14 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
         self.assertNotIn("_affected_people", scan)
         # No person memberships changed: a backlog scan must not cool the
         # warmed facet/count caches.
-        self.assertEqual(db._filter_options_cache["expires"], primed_expires)
+        self.assertEqual(filter_options_repository._filter_options_cache["expires"], primed_expires)
 
         await db.assign_face(scan["face_ids"][0])
         # Clear rather than reuse the stale-while-refresh path so the reprime
         # sets a fresh expiry synchronously.
         db.clear_filter_options_cache()
         await db.get_filter_options()
-        self.assertGreater(db._filter_options_cache["expires"], time.time())
+        self.assertGreater(filter_options_repository._filter_options_cache["expires"], time.time())
 
         await db.store_face_scan_result(
             image_id=image_id,
@@ -333,7 +338,7 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
 
         # The rescan dropped an assigned face, so memberships changed and the
         # people facet cache must invalidate.
-        self.assertEqual(db._filter_options_cache["expires"], 0)
+        self.assertEqual(filter_options_repository._filter_options_cache["expires"], 0)
 
     def test_people_scan_decision_is_manual_bulk_work(self):
         decision = face_worker._people_background_decision({})

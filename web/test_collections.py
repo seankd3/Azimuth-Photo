@@ -5,6 +5,8 @@ from unittest.mock import patch
 from core import query_constraints
 import unittest.mock
 from test_support import *  # noqa: F401,F403
+from data.repositories import collections as collection_repository
+from data.repositories import shares as share_repository
 from features.collections import smart as smart_collections
 from features.collections import suggestions as collection_suggestions
 from features.collections import routes as collection_routes
@@ -174,7 +176,9 @@ class CollectionTests(BackendTestCase):
     async def test_collection_http_rename_delete_lifecycle(self):
         source = await self._source()
         image_id = await self._image(source["id"], "member.jpg")
-        collection = await db.create_collection(name="Original", image_ids=[image_id])
+        collection = await collection_repository.create_collection(
+            db.DB_PATH, name="Original", image_ids=[image_id]
+        )
 
         def probe():
             client = TestClient(app_module.app)
@@ -504,11 +508,13 @@ class CollectionTests(BackendTestCase):
         )
         await db.set_image_flag(third, "picked")
         smart_detail = await collection_routes.api_collection(collection_id)
-        resolved = await db.resolve_share_token(share["share"]["token"])
+        resolved = await share_repository.resolve_token(db.DB_PATH, share["share"]["token"])
 
         self.assertEqual([image["id"] for image in smart_detail["collection"]["images"]], [third, first, second])
         self.assertEqual([image["id"] for image in resolved["images"]], [first, second])
-        self.assertFalse(await db.share_token_allows_image(share["share"]["token"], third))
+        self.assertFalse(
+            await share_repository.token_allows_image(db.DB_PATH, share["share"]["token"], third)
+        )
 
     async def test_collection_suggestions_route_returns_suggestions_shape(self):
         source = await self._source()
@@ -651,7 +657,9 @@ class CollectionTests(BackendTestCase):
                 tags=["aurora"],
                 status="done",
             )
-        await db.create_collection(name="Already saved", image_ids=image_ids)
+        await collection_repository.create_collection(
+            db.DB_PATH, name="Already saved", image_ids=image_ids
+        )
 
         response = await collection_suggestions.collection_suggestions(
             db.DB_PATH,

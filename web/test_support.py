@@ -178,9 +178,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             desired_path=os.path.join(self.tempdir.name, "bulk_desired.json")
         )
         self._reset_shared_runtime_state()
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
-        db._invalidate_past_matchups_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_past_matchups_cache()
         db.clear_filter_options_cache()
         await db.init_db()
         compare_service._pairing_cache.update({"data": None, "valid": False})
@@ -231,9 +231,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         settings._settings = self.old_settings_state
         bulk_scheduler.reset_for_tests()
         db.DB_PATH = self.old_db_path
-        db.invalidate_stats_cache()
-        db.invalidate_cached_image_ids_cache()
-        db._invalidate_past_matchups_cache()
+        cache_events.invalidate_stats_cache()
+        cache_events.invalidate_cached_image_ids_cache()
+        cache_events.invalidate_past_matchups_cache()
         db.clear_filter_options_cache()
         compare_service._visible_matchups_cache.clear()
         compare_service._visible_pairing_candidates_cache.clear()
@@ -331,7 +331,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 await conn.commit()
             finally:
                 await conn.close()
-            db.invalidate_stats_cache()
+            cache_events.invalidate_stats_cache()
         return source
 
     async def _image(
@@ -358,12 +358,12 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 "VALUES (?, ?, ?, ?, ?, ?, 'kept', ?)",
                 (source_id, filename, filepath, elo, comparisons, propagated_updates, missing_at),
             )
-            await db._update_source_counts(conn, source_id)
+            await catalog_repository.update_source_counts_on_conn(conn, source_id)
             await conn.commit()
             image_id = cursor.lastrowid
         finally:
             await conn.close()
-        db.invalidate_stats_cache()
+        cache_events.invalidate_stats_cache()
         return image_id
 
     async def _image_row(self, image_id):
