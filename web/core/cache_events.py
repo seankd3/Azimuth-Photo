@@ -267,7 +267,7 @@ def invalidate_image_flag_caches() -> None:
     import db  # deferred: db imports this module
 
     invalidate_rankings_cache()
-    db._invalidate_ranking_count_cache()
+    invalidate_ranking_count_cache()
     db._invalidate_filter_options_cache()
 
 

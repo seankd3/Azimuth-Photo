@@ -16,6 +16,8 @@ import logging
 import sqlite3
 
 import embed_cache
+from core import cache_events
+from data.repositories import images as image_repository
 
 log = logging.getLogger("elo_propagation")
 
@@ -223,7 +225,7 @@ async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, ac
 
     # Collect all neighbor IDs to fetch their current state
     all_neighbor_ids = list({nid for nid, _ in winner_neighbors + loser_neighbors})
-    neighbors = await db.get_active_images_by_ids(all_neighbor_ids)
+    neighbors = await image_repository.get_active_images_by_ids(db.DB_PATH, all_neighbor_ids)
 
     conn = await db.get_db()
     try:
@@ -254,7 +256,7 @@ async def _propagate_comparison_once(winner_id: int, loser_id: int, k: float, ac
         )
         if applied:
             await conn.commit()
-            db.invalidate_rating_stats_cache()
+            cache_events.invalidate_rating_stats_cache()
             last_propagation_count = len(applied)
             log.debug(f"Propagated Elo to {len(applied)} neighbors "
                      f"(winner={winner_id}, loser={loser_id})")
@@ -313,7 +315,7 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
     if not all_neighbor_ids:
         return []
 
-    neighbors = await db.get_active_images_by_ids(list(all_neighbor_ids))
+    neighbors = await image_repository.get_active_images_by_ids(db.DB_PATH, list(all_neighbor_ids))
 
     conn = await db.get_db()
     try:
@@ -347,7 +349,7 @@ async def _propagate_mosaic_once(winner_id: int, loser_ids: list[int], k: float,
         )
         if applied:
             await conn.commit()
-            db.invalidate_rating_stats_cache()
+            cache_events.invalidate_rating_stats_cache()
             last_propagation_count = len(applied)
             log.debug(f"Propagated mosaic to {len(applied)} neighbors "
                      f"(winner={winner_id}, {len(loser_ids)} losers)")

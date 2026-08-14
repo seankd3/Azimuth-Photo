@@ -8,6 +8,8 @@ import time
 
 from core.search_fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_candidate_scores
 from core.search_planning import plan_search
+from data.repositories import people as people_repository
+from data.repositories import rankings as ranking_repository
 
 
 logger = logging.getLogger(__name__)
@@ -498,7 +500,7 @@ async def resolve_configured_text_search(
         caption_ranked_image_ids=db.caption_search_ranked_image_ids,
         get_active_images_by_ids=db.get_active_images_by_ids,
         caption_count_for_signature=db.caption_count_for_signature,
-        extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
+        extension_search_terms=ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS,
         active_embedding_config=(
             settings.active_embedding_config
             or settings.fast_search_embedding_config
@@ -563,6 +565,6 @@ async def resolve_configured_library_constraints(
         people=people,
         deep=deep,
         resolve_text_search=resolve_text_search or resolve_configured_text_search,
-        parse_people_ids=db.parse_people_ids,
+        parse_people_ids=people_repository.parse_people_ids,
         get_people_image_id_filter=db.get_people_image_id_filter,
     )

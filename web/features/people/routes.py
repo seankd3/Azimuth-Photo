@@ -14,6 +14,7 @@ import thumbnails
 from core import capabilities
 from core.background import track_background_task
 from core.requests import json_object, positive_int
+from data.repositories import people as people_repository
 from archive import role
 
 
@@ -203,7 +204,7 @@ def _render_face_thumbnail(face: dict, output_size: int) -> tuple[str, bytes] | 
 @router.get("/api/people/faces/{face_id}/thumb")
 async def api_people_face_thumb(request: Request, face_id: int, size: int = 160):
     output_size = max(64, min(int(size or 160), 512))
-    face = await db.get_face_thumbnail_context(face_id)
+    face = await people_repository.get_face_thumbnail_context(db.DB_PATH, face_id)
     if face is None:
         return JSONResponse({"error": "Face not found"}, status_code=404)
 
@@ -273,7 +274,7 @@ async def api_merge_people(request: Request):
 
 @router.post("/api/people/merge-suggestions/{suggestion_id}/reject")
 async def api_reject_people_merge(suggestion_id: int):
-    result = await db.reject_merge_suggestion(suggestion_id)
+    result = await people_repository.reject_merge_suggestion(db.DB_PATH, suggestion_id)
     if not isinstance(result, dict) or not result.get("ok"):
         error = result.get("error") if isinstance(result, dict) else ""
         return JSONResponse({"error": error or "Could not reject suggestion"}, status_code=400)

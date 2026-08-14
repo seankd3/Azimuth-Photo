@@ -15,6 +15,10 @@ import helpers as app_helpers
 import settings
 from core import query_constraints
 from core import responses as response_helpers
+from data.repositories import collections as collection_repository
+from data.repositories import images as image_repository
+from data.repositories import imports as import_repository
+from data.repositories import ratings as rating_repository
 from data.repositories.rankings import folder_cache_value
 from features.compare import semantic_pairing
 from features.library import taste as taste_service
@@ -79,11 +83,11 @@ async def _scoped_search(
     if collection_id and collection_id > 0:
         collection_ids = await smart_collections.resolve_collection_image_ids(int(collection_id))
         if collection_ids is None:
-            collection_ids = await db.collection_image_ids(int(collection_id))
+            collection_ids = await collection_repository.collection_image_ids(db.DB_PATH, int(collection_id))
         collection_scope = {int(image_id) for image_id in collection_ids or []}
         scoped_ids = collection_scope if scoped_ids is None else scoped_ids.intersection(collection_scope)
     if import_batch and import_batch > 0:
-        batch_ids = await db.get_import_batch_image_ids(int(import_batch))
+        batch_ids = await import_repository.import_batch_image_ids(db.DB_PATH, int(import_batch))
         batch_scope = {int(image_id) for image_id in batch_ids or []}
         scoped_ids = batch_scope if scoped_ids is None else scoped_ids.intersection(batch_scope)
     if scoped_ids is None:
@@ -152,7 +156,7 @@ async def get_visible_past_matchups(size: str):
     cached = _visible_matchups_cache.get(cache_key)
     if cached is not None:
         return cached["data"]
-    matchups = await db.get_visible_past_matchups(size, cache_root)
+    matchups = await rating_repository.get_visible_past_matchups(db.DB_PATH, size, cache_root)
     _visible_matchups_cache[cache_key] = {"data": matchups}
     return matchups
 
@@ -172,7 +176,7 @@ async def get_past_matchups_for_candidate_ids(size: str, image_ids: list[int]):
     cached = _visible_matchups_cache.get(cache_key)
     if cached is not None:
         return cached["data"]
-    matchups = await db.get_past_matchups_for_image_ids(list(unique_ids))
+    matchups = await rating_repository.get_past_matchups_for_image_ids(db.DB_PATH, list(unique_ids))
     _visible_matchups_cache[cache_key] = {"data": matchups}
     return matchups
 
@@ -318,7 +322,7 @@ async def hydrate_active_rows(rows: list[dict]) -> list[dict]:
         return rows
     except (KeyError, IndexError, TypeError):
         pass
-    by_id = await db.get_active_images_by_ids([row["id"] for row in rows])
+    by_id = await image_repository.get_active_images_by_ids(db.DB_PATH, [row["id"] for row in rows])
     return [by_id.get(row["id"], row) for row in rows]
 
 
@@ -358,7 +362,8 @@ async def default_visible_pairing_candidates(
 
             async def _refresh_visible_pairing_candidates():
                 try:
-                    refreshed = await db.get_visible_images_for_pairing(
+                    refreshed = await rating_repository.visible_images_for_pairing(
+                        db.DB_PATH,
                         size,
                         cache_root,
                         include_card_metadata=include_card_metadata,
@@ -376,7 +381,8 @@ async def default_visible_pairing_candidates(
 
             asyncio.create_task(_refresh_visible_pairing_candidates())
     else:
-        rows = await db.get_visible_images_for_pairing(
+        rows = await rating_repository.visible_images_for_pairing(
+            db.DB_PATH,
             size,
             cache_root,
             include_card_metadata=include_card_metadata,

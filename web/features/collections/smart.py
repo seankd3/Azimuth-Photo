@@ -6,6 +6,7 @@ import json
 import time
 from collections.abc import Awaitable, Callable
 import db
+from data.repositories import collections as collection_repository
 
 
 STRING_QUERY_KEYS = {
@@ -250,7 +251,7 @@ async def resolve_collection_image_ids(collection_id: int) -> set[int] | None:
 
     from core import query_constraints
 
-    collection = await db.get_collection(collection_id, limit=1)
+    collection = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=1)
     if not collection or not collection.get("smart"):
         return None
     image_ids = await resolve_image_ids(

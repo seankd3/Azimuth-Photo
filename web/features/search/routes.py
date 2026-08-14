@@ -2,6 +2,8 @@ import db
 from core import cache_events, query_constraints
 from core import requests as request_helpers
 from core import responses as response_helpers
+from data.repositories import catalog as catalog_repository
+from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.library import routes as library_routes
 from features.media import warm as media_warm
@@ -131,7 +133,7 @@ async def api_similar(image_id: int, limit: int = 50):
 @router.get("/api/duplicates")
 async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     """Find near-duplicate image pairs using embedding similarity."""
-    if not await db.get_active_source_id_set():
+    if not await catalog_repository.active_source_id_set_cached(db.DB_PATH):
         return {"pairs": [], "visible_pairs": 0, "total_pairs": 0, "hidden_pending_thumbnails": 0}
     try:
         import embed_cache
@@ -169,7 +171,7 @@ async def api_duplicates(threshold: float = 0.95, limit: int = 100):
     )
 
     all_ids = list({p[0] for p in pairs} | {p[1] for p in pairs})
-    images = await db.get_active_images_by_ids(all_ids) if all_ids else {}
+    images = await image_repository.get_active_images_by_ids(db.DB_PATH, all_ids) if all_ids else {}
 
     result = []
     for id_a, id_b, sim in pairs[:limit]:
@@ -198,7 +200,7 @@ async def api_exif(image_id: int):
     """Extract EXIF metadata from an image (cached per image)."""
     if image_id in _exif_cache:
         return _exif_cache[image_id]
-    image = await db.get_image_by_id(image_id)
+    image = await image_repository.get_image_by_id(db.DB_PATH, image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
 

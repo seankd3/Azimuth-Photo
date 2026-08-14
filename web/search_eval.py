@@ -25,7 +25,10 @@ sys.path.insert(0, str(WEB_DIR))
 
 import app as app_module  # noqa: E402,F401
 import db  # noqa: E402
+import settings  # noqa: E402
 from core import query_constraints  # noqa: E402
+from data.repositories import images as image_repository  # noqa: E402
+from data.repositories import rankings as ranking_repository  # noqa: E402
 from features.search import evaluation  # noqa: E402
 
 
@@ -41,7 +44,7 @@ async def _rows_for_scores(scores: dict[int, float], limit: int) -> list[dict]:
         image_id
         for image_id, _score in sorted(scores.items(), key=lambda item: item[1], reverse=True)
     ][:limit]
-    rows_by_id = await db.get_active_images_by_ids(ordered_ids)
+    rows_by_id = await image_repository.get_active_images_by_ids(db.DB_PATH, ordered_ids)
     return [rows_by_id[image_id] for image_id in ordered_ids if image_id in rows_by_id]
 
 
@@ -61,8 +64,8 @@ async def _search(query: str, mode: str, limit: int) -> tuple[list[dict], dict]:
             apply_metadata_ids=_noop_apply_metadata,
             get_search_query_embedding=db.get_search_query_embedding,
             store_search_query_embedding=db.store_search_query_embedding,
-            extension_search_terms=db.IMAGE_EXTENSION_SEARCH_TERMS,
-            active_embedding_config=db.active_embedding_config,
+            extension_search_terms=ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS,
+            active_embedding_config=settings.active_embedding_config,
             get_settings=__import__("settings").get_settings,
         )
     else:

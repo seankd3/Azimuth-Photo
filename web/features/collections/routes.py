@@ -4,6 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import db
+from data.repositories import collections as collection_repository
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -100,7 +101,7 @@ async def _append_collection_memberships(collection_id: int, image_ids: list[int
 
 
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
-    smart_state = await db.collection_is_smart(collection_id)
+    smart_state = await collection_repository.collection_is_smart(db.DB_PATH, collection_id)
     if smart_state is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if smart_state:
@@ -141,7 +142,7 @@ async def _collection_update(
 
     materialize_ids = None
     if bool(payload.materialize):
-        current = await db.get_collection(collection_id, limit=1, offset=0)
+        current = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=1, offset=0)
         if current is None:
             return JSONResponse({"error": "Collection not found"}, status_code=404)
         if current.get("smart"):
@@ -157,7 +158,8 @@ async def _collection_update(
                     status_code=409,
                 )
 
-    collection = await db.rename_collection(
+    collection = await collection_repository.rename_collection(
+        db.DB_PATH,
         collection_id,
         name=clean_name,
         query=query_json if query_supplied else None,
@@ -176,7 +178,7 @@ async def _collection_update(
 @router.get("/api/user-collections")
 async def api_user_collections():
     collections = []
-    for collection in await db.list_collections():
+    for collection in await collection_repository.list_collections(db.DB_PATH):
         collections.append(await _with_smart_summary(collection))
     return {"collections": collections}
 
@@ -187,7 +189,8 @@ async def api_create_collection(payload: CreateCollectionBody):
         query_json = smart.query_to_json(payload.query)
     except smart.SmartCollectionQueryError as exc:
         return _invalid_query_response(exc)
-    collection = await db.create_collection(
+    collection = await collection_repository.create_collection(
+        db.DB_PATH,
         name=payload.name,
         description=payload.description,
         image_ids=payload.image_ids,
@@ -283,7 +286,7 @@ async def api_collection_graph_images(collection_id: int, recursive: int = 0):
 
 @router.get("/api/user-collections/{collection_id}")
 async def api_collection(collection_id: int, limit: int = 200, offset: int = 0):
-    collection = await db.get_collection(collection_id, limit=limit, offset=offset)
+    collection = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=limit, offset=offset)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     if collection.get("smart"):
@@ -305,7 +308,7 @@ async def api_update_collection(collection_id: int, payload: UpdateCollectionBod
 @router.post("/api/user-collections/{collection_id}/delete")
 async def api_delete_collection(collection_id: int):
     oplog_payload = await _collection_oplog_payload(collection_id)
-    deleted = await db.delete_collection(collection_id)
+    deleted = await collection_repository.delete_collection(db.DB_PATH, collection_id)
     if not deleted:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_meta(collection_id, deleted=True, payload=oplog_payload)
@@ -320,7 +323,7 @@ async def api_add_collection_images(collection_id: int, payload: CollectionImage
     conflict = await _smart_collection_conflict(collection_id)
     if conflict is not None:
         return conflict
-    collection = await db.add_collection_images(collection_id, payload.image_ids)
+    collection = await collection_repository.add_images(db.DB_PATH, collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_memberships(collection_id, payload.image_ids, member=True)
@@ -335,7 +338,7 @@ async def api_remove_collection_images_post(collection_id: int, payload: Collect
     conflict = await _smart_collection_conflict(collection_id)
     if conflict is not None:
         return conflict
-    collection = await db.remove_collection_images(collection_id, payload.image_ids)
+    collection = await collection_repository.remove_images(db.DB_PATH, collection_id, payload.image_ids)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     await _append_collection_memberships(collection_id, payload.image_ids, member=False)

@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 
 import settings
+from data.repositories import publishes as publish_repository
+from data.repositories import shares as share_repository
 
 
 import db
@@ -20,8 +22,8 @@ ListPublishes = Callable[[], Awaitable[list[dict]]]
 
 @router.get("/api/shares")
 async def api_list_shared_surfaces(request: Request):
-    shares = await db.list_active_collection_shares()
-    publishes = await db.list_collection_publishes()
+    shares = await share_repository.list_active_shares(db.DB_PATH)
+    publishes = await publish_repository.list_publishes(db.DB_PATH)
     by_owner: dict[tuple[str, int], dict] = {}
 
     for share in shares:

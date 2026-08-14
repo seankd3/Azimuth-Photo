@@ -20,6 +20,7 @@ from core.background import track_background_task
 from core.path_groups import safe_commonpath, safe_relpath
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
+from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from features.catalog.folder_roots import quick_browse_roots
 from features.catalog import metadata as catalog_metadata
@@ -76,7 +77,7 @@ def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> No
 async def scan_prefetch_on_batch(count):
     # Start prefetching thumbnails for early images.
     if count <= 200:
-        images = await db.get_recent_active_images(limit=50)
+        images = await image_repository.get_recent_active_images(catalog_path(), limit=50)
         config = settings.get_settings()
         await thumbnails.prefetch_images(
             [dict(r) for r in images],
@@ -106,9 +107,7 @@ async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> 
     # rankings response, so the first landing after an import shows 0 photos.
     _catalog_changed(matchups=True, cache_status=True)
     cache_events.invalidate_rankings_cache()
-    import db as _db
-
-    _db.invalidate_stats_cache()
+    cache_events.invalidate_stats_cache()
     error = str(scanner.scan_state.get("error") or "").strip()
     if error:
         log.error(
@@ -422,7 +421,7 @@ async def api_add_catalog_source(request: Request):
 
 @router.post("/api/catalog/sources/{source_id}/rescan")
 async def api_rescan_catalog_source(source_id: int):
-    source = await db.get_source(source_id)
+    source = await catalog_repository.get_source(catalog_path(), source_id)
     if not source:
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if not os.path.isdir(source["path"]):
@@ -452,7 +451,7 @@ async def api_remove_catalog_source(source_id: int, request: Request):
     if error:
         return error
     mode = body.get("mode", "keep")
-    source = await db.get_source(source_id)
+    source = await catalog_repository.get_source(catalog_path(), source_id)
     if not source:
         return JSONResponse({"error": "Source not found"}, status_code=404)
     if scanner.scan_state["scanning"] and scanner.scan_state.get("source_id") == source_id:
@@ -463,7 +462,7 @@ async def api_remove_catalog_source(source_id: int, request: Request):
         action = {"kept_data": True, "images_deleted": 0, "comparisons_deleted": 0}
         _invalidate_embedding_cache()
     elif mode in ("delete", "purge"):
-        image_ids = await db.get_source_image_ids(source_id)
+        image_ids = await catalog_repository.get_source_image_ids(catalog_path(), source_id)
         cache_result = thumbnails.purge_image_cache(image_ids)
         purge_result = await db.purge_source_catalog_data(source_id)
         action = {"kept_data": False, **purge_result, "cache": cache_result}

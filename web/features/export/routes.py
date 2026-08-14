@@ -16,6 +16,7 @@ from core.path_groups import safe_commonpath
 from core.requests import COMPUTED_SORTS, FolderScope, RankingSort
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
+from data.repositories import imports as import_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 import thumbnails
@@ -90,7 +91,7 @@ async def _get_export_images(
     search = await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:
-        batch_ids = await db.get_import_batch_image_ids(import_batch)
+        batch_ids = await import_repository.import_batch_image_ids(db.DB_PATH, import_batch)
         if batch_ids is None:
             id_filter = set()
         elif id_filter is None:

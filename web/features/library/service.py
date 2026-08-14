@@ -17,7 +17,9 @@ from core import user_activity
 from core import query_constraints
 from core import requests as request_helpers
 from core import responses as response_helpers
+from data.repositories import imports as import_repository
 from data.repositories import rankings as ranking_repository
+from data.repositories import stacks as stack_repository
 from features.library import preview_priority
 from features.library import taste as taste_service
 from archive import role
@@ -527,7 +529,7 @@ async def _combined_import_batch_filter(current_ids, import_batch: int = 0):
     batch_id = _normalized_import_batch_id(import_batch)
     if batch_id <= 0:
         return current_ids
-    batch_ids = await db.get_import_batch_image_ids(batch_id)
+    batch_ids = await import_repository.import_batch_image_ids(db.DB_PATH, batch_id)
     if batch_ids is None:
         return set()
     if current_ids is None:
@@ -576,7 +578,7 @@ def _exclude_collapsed_stack_members(stacks: str = "expanded") -> bool:
 async def _attach_stack_counts(cards: list[dict], stacks: str = "expanded") -> list[dict]:
     if _normalize_stacks_mode(stacks) != "collapsed" or not cards:
         return cards
-    mapping = await db.stack_representative_counts([int(card["id"]) for card in cards])
+    mapping = await stack_repository.representative_stack_counts(db.DB_PATH, [int(card["id"]) for card in cards])
     if not mapping:
         return cards
     for card in cards:
@@ -1014,7 +1016,7 @@ async def api_rankings_impl(
     visible_thumb_size = _preview_thumb_size_for_scope()
     if search_mode == "metadata" and text_query and not search_ids and not file_type:
         extension_query = text_query.lower().lstrip(".")
-        if extension_query in db.IMAGE_EXTENSION_SEARCH_TERMS:
+        if extension_query in ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS:
             file_type = extension_query
             text_query = ""
         elif search_ids is not None:

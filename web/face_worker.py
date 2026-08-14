@@ -18,6 +18,8 @@ from typing import Any
 
 import settings
 from core import memory_pressure, work_coordination
+from core.catalog_path import catalog_path
+from data.repositories import people as people_repository
 
 
 FACE_MODEL_LICENSE_TEXT = (
@@ -336,7 +338,8 @@ async def _run_face_worker_loop() -> None:
                 await asyncio.sleep(max(2.0, float(decision.sleep_seconds or 0.0)))
                 continue
 
-            pending = await db.count_images_needing_faces(
+            pending = await people_repository.count_images_needing_faces(
+                catalog_path(),
                 model_id=model_id,
                 cache_root=str(config.get("ssd_cache_dir") or ""),
             )
@@ -365,7 +368,8 @@ async def _run_face_worker_loop() -> None:
                 batch_limit = int(decision.thumbnail_batch_size)
             if _scan_now:
                 batch_limit = max(batch_limit, 8)
-            rows = await db.get_images_needing_faces(
+            rows = await people_repository.get_images_needing_faces(
+                catalog_path(),
                 model_id=model_id,
                 cache_root=str(config.get("ssd_cache_dir") or ""),
                 limit=max(1, min(batch_limit, 16)),
@@ -433,7 +437,8 @@ async def _run_face_worker_loop() -> None:
             current = get_worker_status()
             remaining = max(0, pending - scanned)
             try:
-                remaining = await db.count_images_needing_faces(
+                remaining = await people_repository.count_images_needing_faces(
+                    catalog_path(),
                     model_id=model_id,
                     cache_root=str(config.get("ssd_cache_dir") or ""),
                 )

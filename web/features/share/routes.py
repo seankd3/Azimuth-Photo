@@ -18,6 +18,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from data.repositories import collections as collection_repository
+from data.repositories import shares as share_repository
 from features.share import auth
 
 
@@ -77,7 +79,7 @@ def _configured() -> None:
 
 
 async def _snapshot_image_ids_for_collection(collection_id: int) -> list[int] | None:
-    collection = await db.get_collection(collection_id, limit=1, offset=0)
+    collection = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=1, offset=0)
     if collection is None or not collection.get("smart"):
         return None
     return await _smart_image_ids(collection["query"] or {})
@@ -322,9 +324,9 @@ def _locked_share_response(
 async def api_create_share(collection_id: int, payload: ShareBody, request: Request):
     _configured()
     if _is_password_only_update(payload):
-        active = await db.get_collection_share(collection_id)
+        active = await share_repository.get_share(db.DB_PATH, collection_id)
         if active is not None:
-            share = await db.set_collection_share_password(collection_id, await _password_hash_for_payload(payload))
+            share = await share_repository.set_share_password(db.DB_PATH, collection_id, await _password_hash_for_payload(payload))
             return {"ok": True, "share": _share_payload(request, share)}
 
     expires_at = None
@@ -332,9 +334,10 @@ async def api_create_share(collection_id: int, payload: ShareBody, request: Requ
         expires_at = time.time() + (payload.expires_in_days * 86400)
     password_hash = await _password_hash_for_payload(payload) if _has_password_change(payload) else None
     if payload.rotate and not _has_password_change(payload):
-        active = await db.get_collection_share(collection_id)
+        active = await share_repository.get_share(db.DB_PATH, collection_id)
         password_hash = active.get("password_hash") if active else None
-    share = await db.create_or_rotate_share(
+    share = await share_repository.create_or_rotate_share(
+        db.DB_PATH,
         collection_id,
         expires_at=expires_at,
         rotate=payload.rotate,
@@ -349,14 +352,14 @@ async def api_create_share(collection_id: int, payload: ShareBody, request: Requ
 @router.get("/api/user-collections/{collection_id}/share")
 async def api_get_share(collection_id: int, request: Request):
     _configured()
-    share = await db.get_collection_share(collection_id)
+    share = await share_repository.get_share(db.DB_PATH, collection_id)
     return {"share": _share_payload(request, share)}
 
 
 @router.post("/api/user-collections/{collection_id}/share/revoke")
 async def api_revoke_share(collection_id: int):
     _configured()
-    revoked = await db.revoke_collection_share(collection_id)
+    revoked = await share_repository.revoke_share(db.DB_PATH, collection_id)
     if not revoked:
         return JSONResponse({"error": "Share not found"}, status_code=404)
     return {"ok": True}
@@ -365,13 +368,13 @@ async def api_revoke_share(collection_id: int):
 @router.get("/api/user-collections/{collection_id}/share/favorites")
 async def api_share_favorites(collection_id: int):
     _configured()
-    favorites = await db.favorites_for_collection(collection_id)
+    favorites = await share_repository.favorites_for_collection(db.DB_PATH, collection_id)
     owner_favorites = [
         {"image_id": int(row["image_id"]), "created_at": float(row["created_at"])}
         for row in favorites
     ]
-    share = await db.get_collection_share(collection_id)
-    groups = await db.favorite_visitors_for_collection(collection_id)
+    share = await share_repository.get_share(db.DB_PATH, collection_id)
+    groups = await share_repository.favorite_visitors_for_collection(db.DB_PATH, collection_id)
     visitors = [
         {
             "visitor": auth.visitor_label(str(group["visitor_id"])),
@@ -391,7 +394,7 @@ async def api_share_favorites(collection_id: int):
 @router.get("/s/{token}", response_class=HTMLResponse)
 async def public_share_gallery(token: str, request: Request):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     status_code = 200 if collection is not None else 404
     locked = bool(collection is not None and not auth.is_unlocked(request, collection))
     if locked:
@@ -421,7 +424,7 @@ async def public_share_gallery(token: str, request: Request):
         status_code=status_code,
     )
     if collection is not None and not request.cookies.get(auth.VIEW_COOKIE_NAME):
-        await db.record_share_view(token)
+        await share_repository.record_share_view(db.DB_PATH, token)
         auth.set_view_cookie(response, token, request=request)
     return _public_response(response)
 
@@ -429,12 +432,12 @@ async def public_share_gallery(token: str, request: Request):
 @router.get("/s/{token}/favorites")
 async def public_share_favorites(token: str, request: Request):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     visitor_id = auth.visitor_id(request)
     favorites = (
-        await db.list_share_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+        await share_repository.list_favorites(db.DB_PATH, int(collection["share_id"]), visitor_id=visitor_id)
         if visitor_id is not None
         else []
     )
@@ -444,14 +447,14 @@ async def public_share_favorites(token: str, request: Request):
 @router.post("/s/{token}/favorite")
 async def public_share_favorite(token: str, payload: FavoriteBody, request: Request):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     if payload.done:
-        finished_at = await db.mark_share_finished(int(collection["share_id"])) if db.mark_share_finished else None
+        finished_at = await share_repository.mark_finished(db.DB_PATH, int(collection["share_id"])) if share_repository.mark_finished else None
         visitor_id = auth.visitor_id(request)
         favorites = (
-            await db.list_share_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+            await share_repository.list_favorites(db.DB_PATH, int(collection["share_id"]), visitor_id=visitor_id)
             if visitor_id is not None
             else []
         )
@@ -460,7 +463,8 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
         return _public_response(JSONResponse({"error": "Image required"}, status_code=422))
     existing_visitor_id = auth.visitor_id(request)
     visitor_id = existing_visitor_id or auth.new_visitor_id()
-    ok = await db.set_share_favorite(
+    ok = await share_repository.set_favorite(
+        db.DB_PATH,
         int(collection["share_id"]),
         int(payload.image_id),
         bool(payload.on),
@@ -469,7 +473,7 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
     )
     if not ok:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    favorites = await db.list_share_favorites(int(collection["share_id"]), visitor_id=visitor_id)
+    favorites = await share_repository.list_favorites(db.DB_PATH, int(collection["share_id"]), visitor_id=visitor_id)
     response = JSONResponse({"ok": True, "favorites": _favorite_ids(favorites), "done": False})
     if existing_visitor_id is None:
         auth.set_visitor_cookie(response, token, visitor_id, request=request)
@@ -479,7 +483,7 @@ async def public_share_favorite(token: str, payload: FavoriteBody, request: Requ
 @router.post("/s/{token}/unlock")
 async def public_share_unlock(token: str, request: Request):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     retry_after = _unlock_retry_after(token)
     if retry_after is not None:
         if collection is not None:
@@ -531,10 +535,10 @@ async def public_share_thumbnail(request: Request, token: str, size: str, image_
     _configured()
     if size not in {"sm", "md", "lg"}:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    allowed = await db.share_token_allows_image(token, image_id)
+    allowed = await share_repository.token_allows_image(db.DB_PATH, token, image_id)
     if not allowed:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     response = await _thumbnail_response(request, size, image_id)
@@ -544,10 +548,10 @@ async def public_share_thumbnail(request: Request, token: str, size: str, image_
 @router.get("/s/{token}/img/{image_id}")
 async def public_share_image(request: Request, token: str, image_id: int):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
-    allowed = await db.share_token_allows_image(token, image_id)
+    allowed = await share_repository.token_allows_image(db.DB_PATH, token, image_id)
     if not allowed:
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     response = await _thumbnail_response(request, SHARE_DOWNLOAD_TIER, image_id)
@@ -557,7 +561,7 @@ async def public_share_image(request: Request, token: str, image_id: int):
 @router.get("/s/{token}/download-all")
 async def public_share_download_all(token: str, request: Request):
     _configured()
-    collection = await db.resolve_share_token(token)
+    collection = await share_repository.resolve_token(db.DB_PATH, token)
     if collection is None or not auth.is_unlocked(request, collection):
         return _public_response(JSONResponse({"error": "Not found"}, status_code=404))
     handle = tempfile.NamedTemporaryFile(prefix="azimuth-share-", suffix=".zip", delete=False)

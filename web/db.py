@@ -19,11 +19,9 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import captions as caption_repository
 from data.repositories import collections as collection_repository
 from data.repositories import shares as share_repository
-from data.repositories import stacks as stack_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
-from data.repositories import imports as import_repository
 from data.repositories import metadata_search as metadata_search_repository
 from data.repositories import people as people_repository
 from data.repositories import publishes as publish_repository
@@ -44,41 +42,23 @@ def _notify_embedding_batch_stored(model_key: str, image_ids: list[int]):
     cache_events.notify_embedding_batch_stored(model_key, image_ids)
 
 
-EXPECTED_EMBEDDING_DIM = data_schema.EXPECTED_EMBEDDING_DIM
 SCHEMA_VERSION = data_schema.SCHEMA_VERSION
 
-SCHEMA = data_schema.SCHEMA
 
 _stats_cache = stats_repository._stats_cache
 _stats_inflight_task = stats_repository._stats_inflight_task
-_catalog_image_counts_cache = stats_repository._catalog_image_counts_cache
 _filter_options_cache = filter_options_repository._filter_options_cache
 _filter_options_refreshing = filter_options_repository._filter_options_refreshing
-_catalog_sources_cache = catalog_repository._catalog_sources_cache
-_catalog_summary_cache = catalog_repository._catalog_summary_cache
-_catalog_light_summary_cache = catalog_repository._catalog_light_summary_cache
-_date_groups_cache = ranking_repository._date_groups_cache
-_date_groups_refreshing = ranking_repository._date_groups_refreshing
-_date_histogram_cache = ranking_repository._date_histogram_cache
-_date_histogram_refreshing = ranking_repository._date_histogram_refreshing
-_map_markers_cache = ranking_repository._map_markers_cache
 _ranking_count_cache = ranking_repository._ranking_count_cache
 _visible_pairing_pool_counts_cache = rating_repository._visible_pairing_pool_counts_cache
 _past_matchups_cache = rating_repository._past_matchups_cache
-_cached_image_ids_cache = cache_entry_repository._cached_image_ids_cache
-_cache_entry_count_cache = cache_entry_repository._cache_entry_count_cache
-_rankable_image_ids_cache = ranking_repository._rankable_image_ids_cache
 _embedding_count_cache = embedding_repository._embedding_count_cache
 _ensured_embedding_model_keys: set[str] = set()
 _ai_status_counts_cache = stats_repository._ai_status_counts_cache
-_active_source_ids_cache = catalog_repository._active_source_ids_cache
 CACHED_IMAGE_IDS_TTL_SECONDS = cache_entry_repository.CACHED_IMAGE_IDS_TTL_SECONDS
 RANKING_COUNT_CACHE_TTL_SECONDS = ranking_repository.RANKING_COUNT_CACHE_TTL_SECONDS
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = rating_repository.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS
 CACHE_ENTRY_COUNT_TTL_SECONDS = cache_entry_repository.CACHE_ENTRY_COUNT_TTL_SECONDS
-RANKABLE_IMAGE_IDS_TTL_SECONDS = ranking_repository.RANKABLE_IMAGE_IDS_TTL_SECONDS
-RANKING_VISIBLE_ID_FILTER_LIMIT = ranking_repository.RANKING_VISIBLE_ID_FILTER_LIMIT
-RANKING_CACHE_FIRST_VISIBLE_LIMIT = ranking_repository.RANKING_CACHE_FIRST_VISIBLE_LIMIT
 STATS_CACHE_TTL_SECONDS = stats_repository.FULL_STATS_CACHE_TTL_SECONDS
 EMBEDDING_COUNT_CACHE_TTL_SECONDS = embedding_repository.EMBEDDING_COUNT_CACHE_TTL_SECONDS
 AI_STATUS_COUNTS_CACHE_TTL_SECONDS = stats_repository.AI_STATUS_COUNTS_CACHE_TTL_SECONDS
@@ -102,11 +82,6 @@ def active_caption_config() -> dict:
 
 def active_caption_model_key() -> str:
     return active_caption_config()["model_key"]
-
-
-normalize_source_path = catalog_repository.normalize_source_path
-source_display_name = catalog_repository.source_display_name
-active_image_condition = catalog_repository.active_image_condition
 
 
 def _invalidate_stats_cache():
@@ -159,10 +134,6 @@ def _invalidate_past_matchups_cache():
 
 def invalidate_stats_cache():
     _invalidate_stats_cache()
-
-
-def invalidate_rating_stats_cache():
-    _invalidate_rating_stats_cache()
 
 
 def _sync_stats_inflight_task_facade():
@@ -344,26 +315,10 @@ async def init_db():
         await db.close()
 
 
-async def set_image_orientation(image_id: int, orientation: str):
-    await image_repository.set_image_orientation(DB_PATH, image_id, orientation)
-
-
-async def get_unclassified_images(limit: int = 200):
-    return await image_repository.get_unclassified_images(DB_PATH, limit)
-
-
 async def batch_set_orientations(updates: list[tuple[str, float, int]]):
     """Set orientation and aspect_ratio for multiple images. Each tuple: (orientation, aspect_ratio, image_id)."""
     await image_repository.batch_set_orientations(DB_PATH, updates)
     _invalidate_filter_options_cache()
-
-
-async def get_images_needing_metadata(limit: int = 100, metadata_version: int = 1):
-    return await image_repository.get_images_needing_metadata(
-        DB_PATH,
-        limit=limit,
-        metadata_version=metadata_version,
-    )
 
 
 async def batch_update_metadata(updates: list[tuple]):
@@ -449,14 +404,6 @@ async def mark_image_missing(image_id: int, missing_at: float | None = None) -> 
     return changed
 
 
-async def get_source(source_id: int):
-    return await catalog_repository.get_source(DB_PATH, source_id)
-
-
-async def get_source_by_path(path: str):
-    return await catalog_repository.get_source_by_path(DB_PATH, path)
-
-
 async def get_catalog_summary():
     return await catalog_repository.catalog_summary_cached(
         DB_PATH,
@@ -472,10 +419,6 @@ async def remove_source_keep_data(source_id: int):
     _invalidate_filter_options_cache()
 
 
-async def get_source_image_ids(source_id: int) -> list[int]:
-    return await catalog_repository.get_source_image_ids(DB_PATH, source_id)
-
-
 async def purge_source_catalog_data(source_id: int) -> dict:
     result = await catalog_repository.purge_source_catalog_data(DB_PATH, source_id)
     _invalidate_stats_cache()
@@ -488,24 +431,12 @@ async def get_recent_active_images(limit: int = 10):
     return await image_repository.get_recent_active_images(DB_PATH, limit)
 
 
-async def get_import_batch_image_ids(batch_id: int) -> set[int] | None:
-    return await import_repository.import_batch_image_ids(DB_PATH, batch_id)
-
-
 async def create_collection(**kwargs):
     return await collection_repository.create_collection(DB_PATH, **kwargs)
 
 
-async def list_collections():
-    return await collection_repository.list_collections(DB_PATH)
-
-
 async def get_collection(collection_id: int, **kwargs):
     return await collection_repository.get_collection(DB_PATH, collection_id, **kwargs)
-
-
-async def rename_collection(collection_id: int, **kwargs):
-    return await collection_repository.rename_collection(DB_PATH, collection_id, **kwargs)
 
 
 async def delete_collection(collection_id: int) -> bool:
@@ -520,32 +451,12 @@ async def remove_collection_images(collection_id: int, image_ids: list[int]):
     return await collection_repository.remove_images(DB_PATH, collection_id, image_ids)
 
 
-async def collection_image_ids(collection_id: int, *, limit: int = 2000) -> list[int] | None:
-    return await collection_repository.collection_image_ids(DB_PATH, collection_id, limit=limit)
-
-
-async def collection_is_smart(collection_id: int) -> bool | None:
-    return await collection_repository.collection_is_smart(DB_PATH, collection_id)
-
-
 async def get_collection_publish(collection_id: int):
     return await publish_repository.get_publish(DB_PATH, collection_id)
 
 
-async def list_collection_publishes():
-    return await publish_repository.list_publishes(DB_PATH)
-
-
 async def upsert_collection_publish(**kwargs):
     return await publish_repository.upsert_publish(DB_PATH, **kwargs)
-
-
-async def delete_collection_publish(collection_id: int) -> bool:
-    return await publish_repository.delete_publish(DB_PATH, collection_id)
-
-
-async def collection_publish_slug_available(slug: str, *, collection_id: int | None = None) -> bool:
-    return await publish_repository.slug_available(DB_PATH, slug, collection_id=collection_id)
 
 
 async def create_or_rotate_share(
@@ -596,10 +507,6 @@ async def set_collection_share_password(collection_id: int, password_hash: str |
     return await share_repository.set_share_password(DB_PATH, collection_id, password_hash)
 
 
-async def record_share_view(token: str):
-    return await share_repository.record_share_view(DB_PATH, token)
-
-
 async def resolve_share_token(token: str):
     return await share_repository.resolve_token(DB_PATH, token)
 
@@ -629,16 +536,8 @@ async def list_share_favorites(share_id: int, *, visitor_id: str | None = None) 
     return await share_repository.list_favorites(DB_PATH, share_id, visitor_id=visitor_id)
 
 
-async def mark_share_finished(share_id: int) -> float | None:
-    return await share_repository.mark_finished(DB_PATH, share_id)
-
-
 async def favorites_for_collection(collection_id: int) -> list[dict]:
     return await share_repository.favorites_for_collection(DB_PATH, collection_id)
-
-
-async def favorite_visitors_for_collection(collection_id: int) -> list[dict]:
-    return await share_repository.favorite_visitors_for_collection(DB_PATH, collection_id)
 
 
 async def set_image_status(image_id: int, status: str):
@@ -828,13 +727,6 @@ def _invalidate_people_dependent_caches():
     )
 
 
-parse_people_ids = people_repository.parse_people_ids
-
-
-_face_embedding_blob = people_repository._face_embedding_blob
-_face_embedding_vector = people_repository._face_embedding_vector
-
-
 async def refresh_people_membership(person_ids: tuple[int, ...] | None = None) -> None:
     await people_repository.refresh_people_membership(DB_PATH, person_ids)
     _invalidate_people_dependent_caches()
@@ -942,10 +834,6 @@ async def get_people_status_counts(long_tail_threshold: int = 1) -> dict:
     )
 
 
-async def get_face_thumbnail_context(face_id: int) -> dict | None:
-    return await people_repository.get_face_thumbnail_context(DB_PATH, face_id)
-
-
 async def label_person(person_id: int, name: str) -> dict:
     result = await people_repository.label_person(DB_PATH, person_id, name)
     if result.get("ok"):
@@ -958,10 +846,6 @@ async def merge_people(source_person_id: int, target_person_id: int) -> dict:
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
-
-
-async def reject_merge_suggestion(suggestion_id: int) -> dict:
-    return await people_repository.reject_merge_suggestion(DB_PATH, suggestion_id)
 
 
 async def assign_face(face_id: int, person_id: int | None = None, name: str = "") -> dict:
@@ -983,13 +867,6 @@ async def ignore_person(person_id: int) -> dict:
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
-
-
-RANKING_SORTS = ranking_repository.RANKING_SORTS
-RANKING_INDEXES = ranking_repository.RANKING_INDEXES
-SPARSE_VISIBLE_ID_FILTER_SORTS = ranking_repository.SPARSE_VISIBLE_ID_FILTER_SORTS
-VISIBLE_CACHE_FIRST_SORTS = ranking_repository.VISIBLE_CACHE_FIRST_SORTS
-IMAGE_EXTENSION_SEARCH_TERMS = ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS
 
 
 async def get_cached_image_ids(
@@ -1184,34 +1061,6 @@ async def scope_counts(**kwargs) -> dict:
     return await ranking_repository.scope_counts(DB_PATH, **kwargs)
 
 
-async def create_stack(**kwargs) -> dict:
-    return await stack_repository.create_stack(DB_PATH, **kwargs)
-
-
-async def get_stack(stack_id: int) -> dict | None:
-    return await stack_repository.get_stack(DB_PATH, stack_id)
-
-
-async def list_stacks(**kwargs) -> dict:
-    return await stack_repository.list_stacks(DB_PATH, **kwargs)
-
-
-async def unstack(stack_id: int) -> bool:
-    return await stack_repository.unstack(DB_PATH, stack_id)
-
-
-async def stack_representative_counts(image_ids) -> dict[int, dict]:
-    return await stack_repository.representative_stack_counts(DB_PATH, image_ids)
-
-
-async def stack_for_image(image_id: int) -> dict | None:
-    return await stack_repository.stack_for_image(DB_PATH, image_id)
-
-
-async def upsert_auto_stacks(kind: str, groups) -> dict:
-    return await stack_repository.upsert_auto_stacks(DB_PATH, kind, groups)
-
-
 async def count_rankings(orientation: str = "", compared: str = "", min_stars: int = 0,
                          folder: str = "", flag: str = "", date_taken: str = "",
                          file_type: str = "", camera: str = "", lens: str = "",
@@ -1365,15 +1214,6 @@ async def get_catalog_image_counts() -> dict:
     )
 
 
-async def get_image_by_id(image_id: int):
-    return await image_repository.get_image_by_id(DB_PATH, image_id)
-
-
-async def get_images_by_ids(image_ids: list[int]) -> dict[int, dict]:
-    """Fetch multiple images by ID in a single query. Returns {id: row_dict}."""
-    return await image_repository.get_images_by_ids(DB_PATH, image_ids)
-
-
 async def get_active_images_by_ids(image_ids: list[int]) -> dict[int, dict]:
     """Fetch active/online images by ID. Returns {id: row_dict}."""
     return await image_repository.get_active_images_by_ids(DB_PATH, image_ids)
@@ -1387,11 +1227,6 @@ async def get_top_images(limit: int = 50):
         limit=limit,
         catalog_counts=counts,
     )
-
-
-async def get_scan_folder():
-    """Get a representative active source folder."""
-    return await catalog_repository.get_scan_folder(DB_PATH)
 
 
 # --- Embedding / Active Learning ---

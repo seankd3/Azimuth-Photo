@@ -7,6 +7,7 @@ import db
 from core.catalog_path import catalog_path
 
 import asyncio
+import functools
 import logging
 import re
 import time
@@ -18,6 +19,9 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 import settings
+from data.repositories import collections as collection_repository
+from data.repositories import images as image_repository
+from data.repositories import publishes as publish_repository
 from data.repositories import shares as share_repository
 from features.publish.builder import build_public_gallery_bundle, export_website_tree
 from features.publish.deployer import (
@@ -226,7 +230,8 @@ async def api_share_published_node(node_id: int, payload: PublishedNodeShareBody
     password_supplied = "password" in _model_fields_set(payload)
     password_hash = share_auth.hash_password(payload.password) if payload.password else None
     try:
-        share = await db.create_published_node_share(
+        share = await share_repository.create_published_node_share(
+            db.DB_PATH,
             node_id,
             password_hash=password_hash,
             update_password=password_supplied,
@@ -278,10 +283,10 @@ async def api_publish_collection(collection_id: int, payload: PublishBody):
         return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
     if not _publish_enabled():
         return JSONResponse({"error": "Choose a publishing folder before publishing this gallery."}, status_code=409)
-    collection = await db.get_collection(collection_id, limit=1, offset=0)
+    collection = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=1, offset=0)
     if collection is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    existing = await db.get_collection_publish(collection_id)
+    existing = await publish_repository.get_publish(db.DB_PATH, collection_id)
     try:
         slug = _clean_slug(payload.slug) if payload.slug else existing.get("slug") if existing else _slugify(collection["name"])
         slug = await _unique_slug(slug, collection_id=collection_id)
@@ -290,7 +295,7 @@ async def api_publish_collection(collection_id: int, payload: PublishBody):
     title = (payload.title or existing.get("title") if existing else payload.title or collection["name"]).strip()
     if not title:
         title = collection["name"] or slug
-    if not await db.collection_publish_slug_available(slug, collection_id=collection_id):
+    if not await publish_repository.slug_available(db.DB_PATH, slug, collection_id=collection_id):
         return JSONResponse({"error": "Slug is already published"}, status_code=409)
     if _job_in_progress(collection_id):
         return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
@@ -302,7 +307,7 @@ async def api_publish_collection(collection_id: int, payload: PublishBody):
 @router.get("/api/user-collections/{collection_id}/publish")
 async def api_get_collection_publish(collection_id: int):
     _configured()
-    publish = await db.get_collection_publish(collection_id)
+    publish = await publish_repository.get_publish(db.DB_PATH, collection_id)
     job = _jobs.get(int(collection_id))
     return {
         "publish": _publish_payload(publish),
@@ -318,7 +323,7 @@ async def api_revoke_collection_publish(collection_id: int):
     _configured()
     if _job_in_progress(collection_id):
         return JSONResponse({"error": "A publish job is already in progress"}, status_code=409)
-    publish = await db.get_collection_publish(collection_id)
+    publish = await publish_repository.get_publish(db.DB_PATH, collection_id)
     if publish is None:
         return JSONResponse({"error": "Publish not found"}, status_code=404)
     if _job_in_progress(collection_id):
@@ -337,7 +342,7 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             _update_job(collection_id, phase=phase)
 
         def published_rows():
-            return asyncio.run(db.list_collection_publishes())
+            return asyncio.run(publish_repository.list_publishes(db.DB_PATH))
 
         def write_bundle(target):
             return asyncio.run(
@@ -347,9 +352,9 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
                     destination=target,
                     templates=_templates,
                     collection_id=collection_id,
-                    get_collection=db.get_collection,
-                    get_images_by_ids=db.get_active_images_by_ids,
-                    collection_image_ids=db.collection_image_ids,
+                    get_collection=functools.partial(collection_repository.get_collection, db.DB_PATH),
+                    get_images_by_ids=functools.partial(image_repository.get_active_images_by_ids, db.DB_PATH),
+                    collection_image_ids=functools.partial(collection_repository.collection_image_ids, db.DB_PATH),
                     resolve_smart_image_ids=_smart_image_ids,
                     thumbnails=_thumbnails,
                 )
@@ -359,7 +364,8 @@ async def _run_publish_job(collection_id: int, slug: str, title: str) -> None:
             hook_failed = bool(hook and not hook.ok)
             attempts = 1 if hook_failed else 0
             return asyncio.run(
-                db.upsert_collection_publish(
+                publish_repository.upsert_publish(
+                    db.DB_PATH,
                     collection_id=collection_id,
                     slug=slug,
                     title=title,
@@ -409,19 +415,20 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
             _update_job(collection_id, phase=phase)
 
         def published_rows():
-            return asyncio.run(db.list_collection_publishes())
+            return asyncio.run(publish_repository.list_publishes(db.DB_PATH))
 
         def persist_revoke(hook):
             if hook is None or hook.ok:
-                return asyncio.run(db.delete_collection_publish(collection_id))
+                return asyncio.run(publish_repository.delete_publish(db.DB_PATH, collection_id))
             # Hook failed: keep the publish row (with the failure recorded) so
             # the retry machinery can re-run the hook against real state.
-            publish = asyncio.run(db.get_collection_publish(collection_id))
+            publish = asyncio.run(publish_repository.get_publish(db.DB_PATH, collection_id))
             if publish is None:
-                return asyncio.run(db.delete_collection_publish(collection_id))
+                return asyncio.run(publish_repository.delete_publish(db.DB_PATH, collection_id))
             attempts = 1
             return asyncio.run(
-                db.upsert_collection_publish(
+                publish_repository.upsert_publish(
+                    db.DB_PATH,
                     collection_id=collection_id,
                     slug=publish["slug"],
                     title=publish["title"],
@@ -446,7 +453,7 @@ async def _run_revoke_job(collection_id: int, slug: str) -> None:
             progress=progress,
         )
         if result.hook and not result.hook.ok:
-            row = await db.get_collection_publish(collection_id)
+            row = await publish_repository.get_publish(db.DB_PATH, collection_id)
             _queue_hook_retry(row, legacy_state="revoked_hook_failed", force=True)
         else:
             _finish_job(collection_id, "revoked", publish=None, push_error=result.push_error, hook=result.hook)
@@ -560,7 +567,7 @@ async def resume_pending_hook_retries() -> None:
     import sqlite3
 
     try:
-        rows = await db.list_collection_publishes()
+        rows = await publish_repository.list_publishes(db.DB_PATH)
     except sqlite3.OperationalError:
         # No publishes schema yet (smoke mode never runs init_db; startup
         # handlers must tolerate a virgin catalog — 5a1b5017 doctrine). A
@@ -579,7 +586,7 @@ async def _wait_for_hook_retry(collection_id: int, operation: str, expected_retr
         await asyncio.sleep(max(0, expected_retry_at - time.time()))
         if _job_in_progress(collection_id):
             return
-        row = await db.get_collection_publish(collection_id)
+        row = await publish_repository.get_publish(db.DB_PATH, collection_id)
         if not _retry_is_current(row, operation, expected_retry_at):
             return
         _update_job(
@@ -604,7 +611,7 @@ async def _wait_for_hook_retry(collection_id: int, operation: str, expected_retr
             "worker=publish operation=hook_retry collection_id=%s failed unexpectedly",
             collection_id,
         )
-        row = await db.get_collection_publish(collection_id)
+        row = await publish_repository.get_publish(db.DB_PATH, collection_id)
         if _retry_is_current(row, operation, expected_retry_at):
             _scheduled_hook_retries.discard(collection_id)
             _queue_hook_retry(row, legacy_state=_legacy_hook_state(operation), force=True)
@@ -626,7 +633,7 @@ def _retry_is_current(row: dict | None, operation: str, expected_retry_at: float
 async def _finalize_hook_retry(row: dict, operation: str, hook: HookStatus) -> None:
     collection_id = int(row["collection_id"])
     if operation == "revoke":
-        await db.delete_collection_publish(collection_id)
+        await publish_repository.delete_publish(db.DB_PATH, collection_id)
         _finish_job(collection_id, "revoked", publish=None, push_error=None, hook=hook)
         return
     published = await _upsert_publish_from_row(row, hook=hook)
@@ -655,7 +662,8 @@ async def _upsert_publish_from_row(
     hook_next_retry_at: float | None = None,
     hook_pending_operation: str = "",
 ) -> dict:
-    return await db.upsert_collection_publish(
+    return await publish_repository.upsert_publish(
+        db.DB_PATH,
         collection_id=int(row["collection_id"]),
         slug=row["slug"],
         title=row["title"],
@@ -784,11 +792,11 @@ def _clean_slug(value: str) -> str:
 
 async def _unique_slug(base: str, *, collection_id: int) -> str:
     slug = _slugify(base) or "gallery"
-    if await db.collection_publish_slug_available(slug, collection_id=collection_id):
+    if await publish_repository.slug_available(db.DB_PATH, slug, collection_id=collection_id):
         return slug
     for index in range(2, 200):
         candidate = f"{slug}-{index}"
-        if await db.collection_publish_slug_available(candidate, collection_id=collection_id):
+        if await publish_repository.slug_available(db.DB_PATH, candidate, collection_id=collection_id):
             return candidate
     raise ValueError("Could not create a unique slug")
 
@@ -818,7 +826,8 @@ def _published_share_payload(share: dict | None) -> dict | None:
 
 
 async def _ensure_private_node_shares(*, root_node_id: int) -> dict | None:
-    return await db.create_published_node_share(
+    return await share_repository.create_published_node_share(
+        db.DB_PATH,
         int(root_node_id),
         password_hash=None,
         update_password=False,
