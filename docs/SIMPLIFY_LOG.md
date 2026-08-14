@@ -7,6 +7,38 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## The desktop app runs today's code against the real library (08-13)
+
+Sean asked for the .exe on his desktop to be usable for film import + editing
+with the hub offline and the archive HDD attached. The gap was purely
+staleness: the installed engine was built Aug 3 — before the simplify merge,
+the offline hardening, H2, and the location rule. The shell itself was
+current (its last source change predates the Aug-3 build), and
+`%APPDATA%\Azimuth Photo\library.json` already pointed at the real library —
+so the fix was one folder.
+
+Rebuilt `azimuth-server` (PyInstaller onedir, 384MB) from a clean detached
+worktree of `249f7388` so the running test-migration workflow could not race
+the packaging read. Before swapping: a frozen-boot smoke on a scratch library
+walked the whole film loop through the packaged binary — scan → commit
+import → grid → thumbs → a Develop save → the tile re-rendering with the
+edit. That last step matters: it proves the H2 develop-bridge's lazy imports
+survived freezing, the exact class of break PyInstaller hides until runtime.
+
+Swapped into `C:\Users\smast\Programs\Azimuth Photo` with the old engine kept
+as `azimuth-server.old`. Verified on the installed app against the real
+catalog: 142,106 photos served at boot+1s, and a real 11.4MB hub-only wedding
+edit rendered its grid tile straight off the attached drive — 200/13.8KB
+cold in 47.8s (USB spin-up + decode; the queued drive sweep exists to
+amortize exactly this), 3ms warm. One probe chosen badly along the way turned
+out to be an 8-byte `cached.jpg` junk row the hub catalogued from an old
+test — the pipeline resolved it, refused to decode 8 bytes into pixels, and
+fell back without marking anything missing, which is the correct behavior
+chain end to end.
+
+Left deliberately to Sean: the first real film import on the refreshed app —
+the machinery is proven; the moment is his.
+
 ## The archive's own disk answers before the hub does (08-13, `ea1d1995`)
 
 Sean plugged the hub's expansion drive into the laptop. One new rule
