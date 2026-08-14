@@ -7,6 +7,32 @@ stopped needing a branch. Prod on omarchy follows `main` from here.
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
 
+## The archive's own disk answers before the hub does (08-13, `ea1d1995`)
+
+Sean plugged the hub's expansion drive into the laptop. One new rule
+(`photo/location.py`, the plan's location module arriving ahead of schedule)
+makes 144,413 hub-only rows readable in place: strip leading components off
+the archive's POSIX path until an attached drive holds the rest, remember the
+split, and accept a match only when the file exists *and* matches the
+catalog's recorded size — a same-named stranger on another drive can never
+stand in. A remembered mapping drops only when its volume is gone, never
+because one file is absent.
+
+Three read seams consume it: the thumb route derives tiles locally on a miss
+(stored under the mirror's signature via the same call the hub-fetch path
+uses — a generation-signed entry would be dropped as stale on the next
+request, an oscillation caught in design), the full route falls through to
+the normal local flow, and Develop resolves once for both the base probe and
+the base generator so the cache's recorded source never flip-flops. Write
+paths (XMP sidecars, exports) deliberately keep the catalog's own path —
+nothing ever writes to the archive volume uninvited.
+
+Proven live: a hub-only photo with no cached tile served 29,012 bytes of
+real pixels; the warm re-request hit the cache in 21ms. Left deliberately
+undone: bulk-warming the ~50k pending backlog — request-driven warming on a
+USB spindle contends with itself; that sweep belongs to the local-compute
+button (H5) as one orderly pass.
+
 ## H2: the derivation identity, and edits reach their own thumbnails (08-13)
 
 Three commits (`eba9f378`, `0aa2856c`, `d7c03db7`), one sentence: *a derived
