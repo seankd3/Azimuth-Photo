@@ -128,9 +128,9 @@ def get_local(
 
     if size not in MIRROR_SIZES or not preview_version:
         return None
-    import thumbnails
+    from thumbnails import cache_entries
 
-    entry = thumbnails.fast_disk_path_entry(size, int(image_id), None)
+    entry = cache_entries.fast_disk_path_entry(size, int(image_id), None)
     if entry is None:
         return None
     signature, path = entry
@@ -153,9 +153,9 @@ def get_local(
 
 def _touch_quietly(size: str, image_id: int, preview_version: str) -> None:
     try:
-        import thumbnails
+        from thumbnails import cache_entries
 
-        thumbnails.touch_cached_signature(size, image_id, preview_version)
+        cache_entries.touch_cached_signature(size, image_id, preview_version)
     except Exception:
         pass
 
@@ -231,11 +231,12 @@ def store(image_id: int, tier: str, signature: str, data: bytes, *, hot: bool) -
     """
 
     import thumbnails
+    from thumbnails import config
 
     if tier in MIRROR_SIZES and str(signature).startswith("pv:"):
         return put(image_id, tier, signature, data, hot=hot)
     thumbnails._write_thumbnail_to_disk(tier, int(image_id), signature, data, hot=False)
-    if hot and tier != thumbnails.FULL_TIER:
+    if hot and tier != config.FULL_TIER:
         thumbnails._memory_put(tier, int(image_id), signature, data)
     return True
 
@@ -407,7 +408,7 @@ async def next_mirror_targets(
     disk budget is the real limit and it is checked when writing.
     """
 
-    import thumbnails
+    from thumbnails import cache_entries
 
     conn = await connection.open_async(db_path)
     needed: list[tuple[int, str, str, int]] = []
@@ -436,7 +437,7 @@ async def next_mirror_targets(
                 continue
             version = preview_version_for_image(row)
             for size in sizes:
-                if thumbnails.fast_disk_has(size, int(row["id"]), version):
+                if cache_entries.fast_disk_has(size, int(row["id"]), version):
                     continue
                 needed.append((int(row["id"]), size, version, hub_id))
             if len(needed) >= limit:

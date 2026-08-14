@@ -290,6 +290,7 @@ async def run_startup(
     from features.compare import service as compare_service
     from features.library import routes as library_routes
     from features.settings import routes as settings_routes
+    from thumbnails import cache_entries
 
     init_db = db.init_db
     get_filter_options = db.get_filter_options
@@ -557,7 +558,7 @@ async def run_startup(
         # the whole cache table, so it waits for a gap like the other warmers.
         await wait_for_user_gap()
         try:
-            await thumbnails.warm_disk_path_index()
+            await cache_entries.warm_disk_path_index()
         except Exception:
             log.debug("cache path index warmup skipped", exc_info=True)
 

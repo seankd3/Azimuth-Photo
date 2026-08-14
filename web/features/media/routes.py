@@ -15,12 +15,13 @@ from features.sync import preview_mirror, satellite
 from features.sync.prefetch import ThumbPrefetcher
 from photo import location
 import thumbnails
+from thumbnails import cache_entries, config
 
 
 import db
 from archive import transport
 router = APIRouter()
-_browser_image_extensions = thumbnails.BROWSER_ORIGINAL_EXTENSIONS
+_browser_image_extensions = config.BROWSER_ORIGINAL_EXTENSIONS
 log = logging.getLogger(__name__)
 # Thumb miss never awaits the hub on the request path (was 2.0s). Kept as a
 # named constant so tests/docs can assert the non-blocking contract.
@@ -118,7 +119,7 @@ def _local_stand_in_response(size: str, image_id: int) -> Response | None:
                 media_type="image/jpeg",
                 headers={"Cache-Control": "no-store", "X-Azimuth-Tier": smaller},
             )
-        path_entry = thumbnails.fast_disk_path_entry(smaller, image_id)
+        path_entry = cache_entries.fast_disk_path_entry(smaller, image_id)
         if path_entry is not None:
             return FileResponse(
                 path_entry[1],
@@ -212,13 +213,13 @@ async def _source_error_response(image, state: str) -> JSONResponse | None:
 
 
 def _remote_media_endpoint(remote_id: int, tier: str) -> str:
-    if tier == thumbnails.FULL_TIER:
+    if tier == config.FULL_TIER:
         return f"/api/full/{remote_id}"
     return f"/api/thumb/{tier}/{remote_id}"
 
 
 def _remote_media_pending_response(tier: str) -> Response:
-    if tier != thumbnails.FULL_TIER:
+    if tier != config.FULL_TIER:
         return Response(status_code=204, headers={"Cache-Control": "no-store"})
     return JSONResponse(
         {
@@ -331,7 +332,7 @@ async def _thumbnail_response_inner(
     cached: bool = False,
     mark=lambda _stage: None,
 ):
-    if size not in thumbnails.SIZES:
+    if size not in config.SIZES:
         return JSONResponse({"error": "Invalid size"}, status_code=400)
 
     preview_mirror.note_request()
@@ -376,7 +377,7 @@ async def _thumbnail_response_inner(
                     return Response(status_code=304, headers=headers)
                 return FileResponse(path, media_type="image/jpeg", headers=headers)
         else:
-            path_entry = thumbnails.fast_disk_path_entry(size, image_id)
+            path_entry = cache_entries.fast_disk_path_entry(size, image_id)
             if path_entry is not None:
                 signature, path = path_entry
                 headers = _cache_headers(signature)
@@ -384,7 +385,7 @@ async def _thumbnail_response_inner(
                     return Response(status_code=304, headers=headers)
                 return FileResponse(path, media_type="image/jpeg", headers=headers)
         entry = await asyncio.to_thread(
-            thumbnails.fast_disk_read_entry,
+            cache_entries.fast_disk_read_entry,
             size,
             image_id,
             required_signature,
@@ -395,7 +396,7 @@ async def _thumbnail_response_inner(
             thumbnails._memory_put(size, image_id, signature, data)
         elif required_signature is not None:
             # Version mismatch left a stale unversioned index hit — drop it.
-            stale = thumbnails.fast_disk_path_entry(size, image_id)
+            stale = cache_entries.fast_disk_path_entry(size, image_id)
             if stale is not None and stale[0] != required_signature:
                 preview_mirror.delete_entry(image_id, size)
     if entry is not None:
@@ -509,7 +510,7 @@ async def _thumbnail_response_inner(
 async def serve_full_image(request: Request, image_id: int, background_tasks: BackgroundTasks, cached: bool = False):
     request_etag = request.headers.get("if-none-match")
     if cached:
-        entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
+        entry = cache_entries.fast_disk_path_entry(config.FULL_TIER, image_id)
         if entry is None:
             return Response(status_code=204, headers={"Cache-Control": "no-store"})
         signature, path = entry
@@ -529,7 +530,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             return source_error
 
     # SSD full-tier hit before any original spindle inspect.
-    full_entry = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id)
+    full_entry = cache_entries.fast_disk_path_entry(config.FULL_TIER, image_id)
     if full_entry is not None:
         signature, path = full_entry
         headers = _cache_headers(signature)
@@ -545,7 +546,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
             location.local_path, image["filepath"], expected_size=image["file_size"]
         )
         if resolved is None:
-            return await _remote_media_response(image, thumbnails.FULL_TIER)
+            return await _remote_media_response(image, config.FULL_TIER)
         image = dict(image)
         image["filepath"] = resolved
         image["hub_remote"] = 0
@@ -556,7 +557,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         return source_error
 
     if source_state == "remote":
-        return await _remote_media_response(image, thumbnails.FULL_TIER)
+        return await _remote_media_response(image, config.FULL_TIER)
 
     if source_state == "offline":
         return JSONResponse(
@@ -599,7 +600,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
         return Response(content=data, media_type="image/jpeg", headers=headers)
 
     headers = await asyncio.to_thread(
-        thumbnails.response_headers, image["filepath"], thumbnails.FULL_TIER, image_id
+        thumbnails.response_headers, image["filepath"], config.FULL_TIER, image_id
     )
     if request_etag == headers["ETag"]:
         return Response(status_code=304, headers=headers)
@@ -631,7 +632,7 @@ async def serve_full_image(request: Request, image_id: int, background_tasks: Ba
 
 def image_media_status_payload(image_id: int) -> dict:
     tiers = {}
-    for size in thumbnails.THUMB_TIERS:
+    for size in config.THUMB_TIERS:
         cached = thumbnails.has_cached_fast(size, image_id)
         tiers[size] = {
             "cached": cached,
@@ -639,8 +640,8 @@ def image_media_status_payload(image_id: int) -> dict:
             "cached_url": f"/api/thumb/{size}/{image_id}?cached=1",
         }
 
-    full_cached = thumbnails.fast_disk_path_entry(thumbnails.FULL_TIER, image_id) is not None
-    tiers[thumbnails.FULL_TIER] = {
+    full_cached = cache_entries.fast_disk_path_entry(config.FULL_TIER, image_id) is not None
+    tiers[config.FULL_TIER] = {
         "cached": full_cached,
         "url": f"/api/full/{image_id}",
         "cached_url": f"/api/full/{image_id}?cached=1",
@@ -655,7 +656,7 @@ def _normalize_warm_requests(tier_requests) -> tuple[dict[str, list[int]], set[i
     if not isinstance(tier_requests, dict):
         return requested, all_ids
     for tier, values in tier_requests.items():
-        if tier not in thumbnails.ALL_TIERS:
+        if tier not in config.ALL_TIERS:
             continue
         ids = []
         seen_for_tier = set()

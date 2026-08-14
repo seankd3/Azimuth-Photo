@@ -19,7 +19,7 @@ from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
-import thumbnails
+from thumbnails import cache_entries
 import settings
 
 
@@ -203,7 +203,7 @@ def _zip_source_for_image(image: dict, size: str) -> tuple[str | None, str]:
         if not os.path.exists(path):
             return None, "source file unavailable"
         return path, ""
-    entry = thumbnails.fast_disk_path_entry(size, image_id)
+    entry = cache_entries.fast_disk_path_entry(size, image_id)
     if entry is None:
         return None, f"{size} cache entry missing"
     _signature, path = entry

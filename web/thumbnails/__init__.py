@@ -224,10 +224,6 @@ def sweep_missing_cache_entries(
     )
 
 
-SSD_REMAINDER_PROFILES = thumbnail_config.SSD_REMAINDER_PROFILES
-MEMORY_CACHE_PROFILES = thumbnail_config.MEMORY_CACHE_PROFILES
-
-
 def _active_memory_ratios() -> dict[str, float]:
     return thumbnail_config.active_memory_ratios(CACHE_PROFILE)
 

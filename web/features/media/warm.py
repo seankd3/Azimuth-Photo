@@ -5,6 +5,7 @@ import asyncio
 import helpers as app_helpers
 import thumbnails
 from core import work_coordination
+from thumbnails import cache_entries
 
 
 _thumbnail_prefetch_inflight: set[str] = set()
@@ -75,7 +76,7 @@ def schedule_cached_thumbnail_memory_warm(
                 break
             if thumbnails._memory_get_entry_fast(size, image_id) is not None:
                 continue
-            if thumbnails.fast_disk_read_entry(size, image_id, populate_memory=True) is not None:
+            if cache_entries.fast_disk_read_entry(size, image_id, populate_memory=True) is not None:
                 warmed += 1
 
     async def _run_warm():

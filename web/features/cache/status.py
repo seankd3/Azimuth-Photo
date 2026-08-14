@@ -13,6 +13,7 @@ from core import requests as request_helpers
 from core import responses as response_helpers
 from data.repositories import stats as stats_repository
 from features.settings import status as settings_status
+from thumbnails import config
 
 
 AsyncDictBuilder = Callable[[], Awaitable[dict]]
@@ -59,7 +60,7 @@ async def _browser_original_summary() -> dict:
     summary = await stats_repository.browser_original_summary(
         catalog_path(),
         catalog_counts=await _catalog_image_counts(),
-        browser_extensions=tuple(sorted(thumbnails.BROWSER_ORIGINAL_EXTENSIONS)),
+        browser_extensions=tuple(sorted(config.BROWSER_ORIGINAL_EXTENSIONS)),
         is_browser_displayable_original=thumbnails.is_browser_displayable_original,
     )
     _browser_original_count_cache["value"] = int(summary.get("count") or 0)
@@ -77,9 +78,9 @@ def _cache_recommendations(
 ) -> dict:
     estimates = estimates or thumbnails.cache_archive_estimates()
     tiers = {}
-    for tier_name in thumbnails.ALL_TIERS:
+    for tier_name in config.ALL_TIERS:
         avg_bytes = int(estimates.get("avg_bytes", {}).get(tier_name) or thumbnails.estimated_tier_bytes(tier_name))
-        target_count = browser_original_images if tier_name == thumbnails.FULL_TIER else eligible_images
+        target_count = browser_original_images if tier_name == config.FULL_TIER else eligible_images
         full_archive_bytes = int(estimates.get("needed_bytes", {}).get(tier_name) or 0)
         if full_archive_bytes <= 0:
             full_archive_bytes = avg_bytes * max(0, int(target_count))
@@ -112,7 +113,7 @@ def _cache_archive_estimates_from_status(
 ) -> dict:
     avg_bytes = {}
     sample_count = {}
-    for tier_name in thumbnails.ALL_TIERS:
+    for tier_name in config.ALL_TIERS:
         tier = cache.get("disk", {}).get("tiers", {}).get(tier_name, {})
         count = int(tier.get("current_count") or tier.get("count") or 0)
         bytes_used = int(tier.get("current_bytes") or tier.get("bytes") or 0)
@@ -125,17 +126,17 @@ def _cache_archive_estimates_from_status(
 
     needed_bytes = {
         tier_name: avg_bytes[tier_name] * max(0, int(active_images))
-        for tier_name in thumbnails.THUMB_TIERS
+        for tier_name in config.THUMB_TIERS
     }
     if browser_original_bytes > 0:
-        avg_bytes[thumbnails.FULL_TIER] = max(
+        avg_bytes[config.FULL_TIER] = max(
             1,
             int(browser_original_bytes / max(1, int(browser_original_images or 0))),
         )
-        needed_bytes[thumbnails.FULL_TIER] = int(browser_original_bytes)
+        needed_bytes[config.FULL_TIER] = int(browser_original_bytes)
     else:
-        needed_bytes[thumbnails.FULL_TIER] = (
-            avg_bytes[thumbnails.FULL_TIER] * max(0, int(total_images))
+        needed_bytes[config.FULL_TIER] = (
+            avg_bytes[config.FULL_TIER] * max(0, int(total_images))
         )
     return {
         "active_images": max(0, int(active_images)),
@@ -334,7 +335,7 @@ async def build_cache_status(
     ) if disk["limit_bytes"] > 0 else 0.0
 
     for tier_name, tier in disk["tiers"].items():
-        progress_total = active_total if tier_name in thumbnails.THUMB_TIERS else browser_original_total
+        progress_total = active_total if tier_name in config.THUMB_TIERS else browser_original_total
         progress_count = (
             tier.get("current_count", 0)
             if tier.get("replacement_mode")

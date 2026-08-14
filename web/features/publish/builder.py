@@ -24,6 +24,7 @@ from fastapi.templating import Jinja2Templates
 
 import settings
 from features.publish import nodes as published_nodes
+from thumbnails import cache_entries
 
 
 log = logging.getLogger(__name__)
@@ -388,7 +389,7 @@ async def _snapshot_image_ids(
 
 async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path: Path) -> None:
     image_id = int(image["id"])
-    path_entry = await asyncio.to_thread(thumbnails.fast_disk_path_entry, size, image_id)
+    path_entry = await asyncio.to_thread(cache_entries.fast_disk_path_entry, size, image_id)
     if path_entry is not None:
         _signature, cached_path = path_entry
         try:
@@ -397,7 +398,7 @@ async def _write_cached_jpeg(*, thumbnails, image: dict, size: str, output_path:
         except FileNotFoundError:
             pass
 
-    read_entry = await asyncio.to_thread(thumbnails.fast_disk_read_entry, size, image_id, None)
+    read_entry = await asyncio.to_thread(cache_entries.fast_disk_read_entry, size, image_id, None)
     if read_entry is not None:
         _signature, data = read_entry
         await asyncio.to_thread(output_path.write_bytes, data)

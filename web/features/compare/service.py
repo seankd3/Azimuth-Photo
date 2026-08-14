@@ -2,6 +2,7 @@
 
 import asyncio
 import thumbnails
+from thumbnails import cache_entries
 import db
 from core import cache_events
 from features.media import warm as media_warm
@@ -1380,7 +1381,7 @@ def _schedule_disk_index_warm(thumbnails) -> None:
     async def _warm_disk_index():
         global _disk_index_warming
         try:
-            await thumbnails.warm_disk_path_index()
+            await cache_entries.warm_disk_path_index()
         except Exception:
             pass
         finally:
@@ -1394,14 +1395,14 @@ def _tier_file_exists(tier: str, image_id: int) -> bool:
     try:
         import thumbnails
 
-        if not thumbnails.disk_index_ready():
+        if not cache_entries.disk_index_ready():
             # Building the index reads every cache_entries row for this cache
             # root — 771ms measured on a 240k-row catalog. Warm it off the loop
             # and fail open until it lands, the same as any other
             # infrastructure gap.
             _schedule_disk_index_warm(thumbnails)
             return True
-        return bool(thumbnails.fast_disk_has(tier, image_id))
+        return bool(cache_entries.fast_disk_has(tier, image_id))
     except Exception:
         # Fail open only on infrastructure errors — never for a known-missing file.
         return True

@@ -16,6 +16,7 @@ import db
 import scanner
 import settings
 import thumbnails
+from thumbnails import config
 from data.repositories import catalog as catalog_repository
 from data.repositories import collections as collection_repository
 from data.repositories import imports as import_repository
@@ -318,8 +319,8 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
     cached.parent.mkdir(parents=True, exist_ok=True)
     image = thumbnails.generation.load_source_image(
         entry["path"], THUMB_MAX_EDGE, True,
-        jpeg_extensions=thumbnails.JPEG_EXTENSIONS,
-        raw_extensions=thumbnails.RAW_EXTENSIONS,
+        jpeg_extensions=config.JPEG_EXTENSIONS,
+        raw_extensions=config.RAW_EXTENSIONS,
     )
     try:
         resized = thumbnails.generation.resize_to_long_side(image, THUMB_MAX_EDGE)

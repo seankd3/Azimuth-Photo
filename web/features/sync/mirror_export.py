@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-import thumbnails
+from thumbnails import cache_entries
 
 from data import connection
 from features.library import keywords
@@ -166,7 +166,7 @@ def _tar_padding(size: int) -> bytes:
 def _cached_thumb_path(size: str, image_id: int) -> Path | None:
     # This only consults the thumbnail disk index; it deliberately does not
     # route through thumbnail generation or decode code.
-    entry = thumbnails.fast_disk_path_entry(size, image_id)
+    entry = cache_entries.fast_disk_path_entry(size, image_id)
     if entry is None:
         return None
     _signature, path = entry
