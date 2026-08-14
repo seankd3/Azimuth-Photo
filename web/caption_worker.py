@@ -16,6 +16,7 @@ import settings
 from core import memory_pressure, work_coordination
 from core.ai_failures import is_gpu_resource_error
 from workers.caption_health import CaptionOomCircuit
+from workers.lane import Lane, MODEL_LOAD_FAILURE_PAUSE_THRESHOLD
 
 
 log = logging.getLogger("caption_worker")
@@ -25,9 +26,6 @@ if not log.handlers:
 
 WORKER_SLEEP_SECONDS = 20
 MODEL_LOAD_FAILURE_RETRY_SECONDS = 300
-MODEL_LOAD_FAILURE_PAUSE_THRESHOLD = 3
-OOM_COOLDOWN_BASE_SECONDS = 15 * 60
-OOM_COOLDOWN_MAX_SECONDS = 2 * 60 * 60
 CAPTION_PROMPT = (
     "Describe this photo for private photo-library search. Return only JSON with "
     "keys caption, tags, visible_text, entities, and attributes. caption must be "
@@ -49,84 +47,55 @@ _oom_circuit = CaptionOomCircuit(threshold=3)
 _model = None
 _processor = None
 _loaded_key: tuple[str, str, str, str] | None = None
-# Auto-resume: when captioning is enabled in settings, the worker starts
-# running after a service restart instead of waiting for a manual click —
-# a 47k backfill must survive routine deploy restarts unattended.
-def _initial_manual_pause() -> bool:
-    try:
-        import settings as _settings
-        return not bool(_settings.get_settings()["caption_scan_enabled"])
-    except Exception:
-        return True
 
-
-_caption_manual_pause = _initial_manual_pause()
-_caption_manual_pause_message = "Captions are stopped until you start them from Background Work."
-_model_load_failure_count = 0
-_load_failure_cooldown_until = 0.0
-_oom_cooldown_until = 0.0
-_oom_cooldown_count = 0
-_status = {
-    "state": "idle",
-    "message": "Captions have not scanned cached previews yet.",
-    "ready": False,
-    "running": False,
-    "manual_pause": True,
-    "model_id": "",
-    "model_key": "",
-    "model_dir": "",
-    "quantization": "",
-    "prompt_version": "",
-    "last_error": "",
-    "last_batch_size": 0,
-    "last_batch_seconds": 0.0,
-    "last_captioned_at": None,
-    "pending_cached_images": 0,
-    "session_captioned": 0,
-    "session_started_at": None,
-    "oom_backoffs": 0,
-    "retry_at": None,
-    "model_load_failures": 0,
-    "source_files_preserved": True,
-    "source_media_read": "app_owned_cached_previews_only",
-}
-
-
-
-def _set_status(**updates: Any) -> None:
-    _status.update(updates)
-    _status["manual_pause"] = _caption_manual_pause
+lane = Lane(
+    key="captions",
+    settings_flag="caption_scan_enabled",
+    noun="Captions are",
+    status_seed={
+        "state": "idle",
+        "message": "Captions have not scanned cached previews yet.",
+        "ready": False,
+        "running": False,
+        "manual_pause": True,
+        "model_id": "",
+        "model_key": "",
+        "model_dir": "",
+        "quantization": "",
+        "prompt_version": "",
+        "last_error": "",
+        "last_batch_size": 0,
+        "last_batch_seconds": 0.0,
+        "last_captioned_at": None,
+        "pending_cached_images": 0,
+        "session_captioned": 0,
+        "session_started_at": None,
+        "oom_backoffs": 0,
+        "retry_at": None,
+        "model_load_failures": 0,
+        "source_files_preserved": True,
+        "source_media_read": "app_owned_cached_previews_only",
+    },
+    startup_stopped_message="Captions are stopped until you start them from Background Work.",
+    stopped_message="Captions are stopped.",
+    resume_message="Captions will scan cached previews.",
+    uses_gpu=True,
+    release=lambda: _unload_model(),
+    on_resume=lambda: _oom_circuit.reset(),
+)
+_set_status = lane.set_status
 
 
 def get_worker_status() -> dict[str, Any]:
-    _status["manual_pause"] = _caption_manual_pause
-    return dict(_status)
+    return lane.get_status()
 
 
 def mark_dependencies_unavailable(capability: dict[str, Any]) -> None:
-    """Publish one stable missing-pack state without starting a retry loop."""
-
-    _set_status(
-        state="unavailable",
-        ready=False,
-        running=False,
-        message=capability["message"],
-        last_error="",
-    )
+    lane.mark_dependencies_unavailable(capability)
 
 
 def manual_pause_active() -> bool:
-    return _caption_manual_pause
-
-
-def _release_worker_owners() -> None:
-    work_coordination.release_manual_owner("captions")
-    _unload_model()
-
-
-def _enter_paused(message: str) -> None:
-    _release_worker_owners()
-    _set_status(state="paused", ready=False, message=message, last_error="")
+    return lane.manual_pause
 
 
 def pause_caption_worker(
@@ -134,86 +103,11 @@ def pause_caption_worker(
     *,
     persist: bool = True,
 ) -> dict[str, Any]:
-    global _caption_manual_pause, _caption_manual_pause_message
-    if persist:
-        app_config = settings.get_settings()
-        if bool(app_config["caption_scan_enabled"]):
-            settings.save_settings({**app_config, "caption_scan_enabled": False})
-    _caption_manual_pause = True
-    _caption_manual_pause_message = message
-    _enter_paused(message)
-    return get_worker_status()
+    return lane.pause(message, persist=persist)
 
 
 def resume_caption_worker(*, persist: bool = True) -> dict[str, Any]:
-    global _caption_manual_pause, _caption_manual_pause_message, _model_load_failure_count
-    global _load_failure_cooldown_until, _oom_cooldown_until, _oom_cooldown_count
-    app_config = settings.get_settings()
-    if persist and not bool(app_config["caption_scan_enabled"]):
-        settings.save_settings({**app_config, "caption_scan_enabled": True})
-    _caption_manual_pause = False
-    _caption_manual_pause_message = ""
-    _model_load_failure_count = 0
-    _load_failure_cooldown_until = 0.0
-    _oom_cooldown_until = 0.0
-    _oom_cooldown_count = 0
-    _oom_circuit.reset()
-    _set_status(
-        state="idle",
-        message="Captions will scan cached previews.",
-        model_load_failures=0,
-        retry_at=None,
-    )
-    return get_worker_status()
-
-
-def _enter_oom_cooldown() -> None:
-    """Defer after repeated OOMs without forgetting the user's automatic intent."""
-
-    global _oom_cooldown_until, _oom_cooldown_count
-    _oom_cooldown_count += 1
-    seconds = min(
-        OOM_COOLDOWN_MAX_SECONDS,
-        OOM_COOLDOWN_BASE_SECONDS * (2 ** max(0, _oom_cooldown_count - 1)),
-    )
-    _oom_cooldown_until = time.time() + seconds
-    _release_worker_owners()
-    _set_status(
-        state="cooldown",
-        ready=False,
-        message=(
-            "Captions are making room for other work and will retry "
-            f"automatically in about {max(1, round(seconds / 60))} minutes."
-        ),
-        retry_at=_oom_cooldown_until,
-        last_error="",
-    )
-
-
-def _reset_model_load_failures() -> None:
-    global _model_load_failure_count
-    if _model_load_failure_count:
-        _model_load_failure_count = 0
-        _set_status(model_load_failures=0)
-
-
-def _record_model_load_failure(error: Exception) -> bool:
-    global _model_load_failure_count
-    _model_load_failure_count += 1
-    _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
-    if _model_load_failure_count < MODEL_LOAD_FAILURE_PAUSE_THRESHOLD:
-        return False
-    # Cool down instead of a permanent pause: transient GPU contention (the
-    # dev server or another worker holding VRAM) must not end the backfill.
-    global _load_failure_cooldown_until
-    _load_failure_cooldown_until = time.time() + 900
-    _model_load_failure_count = 0
-    _set_status(
-        state="cooldown",
-        message="Caption model failed to load 3 times - retrying in 15 minutes.",
-    )
-    _set_status(model_load_failures=_model_load_failure_count, last_error=str(error))
-    return True
+    return lane.resume(persist=persist)
 
 
 def _is_cuda_oom_error(error) -> bool:
@@ -243,32 +137,9 @@ def _unload_model() -> None:
         _drop_caption_residency()
 
 
-async def _wait_for_caption_turn() -> None:
-    if work_coordination.manual_turn_blocked("captions"):
-        _set_status(
-            state="waiting_for_turn",
-            ready=False,
-            message="Captions are waiting for other background work.",
-        )
-    await work_coordination.wait_for_manual_turn("captions")
-    if work_coordination.gpu_turn_blocked("captions"):
-        _set_status(
-            state="waiting_for_gpu",
-            ready=False,
-            message="Captions are waiting for the GPU.",
-        )
-    await work_coordination.wait_for_gpu_turn("captions")
-
-
-async def _renew_caption_turn() -> None:
-    if work_coordination.lost_ownership("captions", gpu=True):
-        _unload_model()
-    await _wait_for_caption_turn()
-
-
 def shutdown_caption_worker() -> None:
     global _caption_executor
-    _release_worker_owners()
+    lane.release_owners()
     _caption_executor.shutdown(wait=False, cancel_futures=True)
     _caption_executor = _new_caption_executor()
 
@@ -441,11 +312,10 @@ async def run_caption_worker() -> None:
     try:
         await _run_caption_worker_loop()
     finally:
-        _release_worker_owners()
+        lane.release_owners()
 
 
 async def _run_caption_worker_loop() -> None:
-    global _oom_cooldown_count
     _set_status(running=True, session_started_at=time.time())
     batch_size = 1
     while True:
@@ -461,38 +331,27 @@ async def _run_caption_worker_loop() -> None:
                 quantization=caption_config["quantization"],
                 prompt_version=caption_config["prompt_version"],
             )
-            if _caption_manual_pause or not bool(app_config["caption_scan_enabled"]):
-                _enter_paused(
-                    _caption_manual_pause_message or "Captions are stopped."
+            if lane.manual_pause or not bool(app_config["caption_scan_enabled"]):
+                lane.enter_paused(
+                    lane.manual_pause_message or "Captions are stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
-            retry_at = max(_oom_cooldown_until, _load_failure_cooldown_until)
+            retry_at = lane.cooldown_until()
             if retry_at and time.time() < retry_at:
-                remaining = max(1, int(retry_at - time.time()))
-                _release_worker_owners()
-                _set_status(
-                    state="cooldown",
-                    ready=False,
-                    message=(
-                        "Captions are making room for other work and will retry "
-                        f"automatically in about {max(1, round(remaining / 60))} minutes."
-                    ),
-                    retry_at=retry_at,
-                    last_error="",
-                )
+                remaining = lane.publish_cooldown_wait(retry_at)
                 await asyncio.sleep(min(remaining, WORKER_SLEEP_SECONDS))
                 continue
 
             pressure = memory_pressure.gate_bulk_work()
             if pressure.pause_bulk:
-                _enter_paused(pressure.message or memory_pressure.PAUSE_MESSAGE)
+                lane.enter_paused(pressure.message or memory_pressure.PAUSE_MESSAGE)
                 await asyncio.sleep(2)
                 continue
 
             if not ai_models.model_files_present(caption_config["model_dir"]):
-                _release_worker_owners()
+                lane.release_owners()
                 _set_status(
                     state="waiting_for_model",
                     ready=False,
@@ -508,7 +367,7 @@ async def _run_caption_worker_loop() -> None:
             )
             _set_status(pending_cached_images=pending, last_error="")
             if pending <= 0:
-                _release_worker_owners()
+                lane.release_owners()
                 _set_status(
                     state="idle",
                     ready=True,
@@ -528,11 +387,11 @@ async def _run_caption_worker_loop() -> None:
                 include_understanding_backfill=True,
             )
             if not rows:
-                _release_worker_owners()
+                lane.release_owners()
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
 
-            await _wait_for_caption_turn()
+            await lane.wait_for_turn()
             loop = asyncio.get_running_loop()
             _set_status(
                 state="captioning",
@@ -548,13 +407,13 @@ async def _run_caption_worker_loop() -> None:
                             caption_config,
                             False,
                         )
-                    _reset_model_load_failures()
+                    lane.reset_model_load_failures()
                 except Exception as exc:
                     if _is_cuda_oom_error(exc):
                         batch_size = max(1, batch_size // 2)
-                        _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
-                    _release_worker_owners()
-                    paused = _record_model_load_failure(exc)
+                        _set_status(oom_backoffs=int(lane.status_value("oom_backoffs") or 0) + 1)
+                    lane.release_owners()
+                    paused = lane.record_model_load_failure(exc)
                     if paused:
                         log.error("Caption worker paused after repeated model load failures: %s", exc, exc_info=True)
                         await asyncio.sleep(WORKER_SLEEP_SECONDS)
@@ -564,7 +423,7 @@ async def _run_caption_worker_loop() -> None:
                             ready=False,
                             message=(
                                 "Caption model load failed "
-                                f"({_model_load_failure_count}/{MODEL_LOAD_FAILURE_PAUSE_THRESHOLD})."
+                                f"({lane.model_load_failure_count}/{MODEL_LOAD_FAILURE_PAUSE_THRESHOLD})."
                             ),
                             last_batch_seconds=round(time.perf_counter() - started, 3),
                         )
@@ -572,7 +431,7 @@ async def _run_caption_worker_loop() -> None:
                         await asyncio.sleep(MODEL_LOAD_FAILURE_RETRY_SECONDS)
                     continue
                 for row in rows:
-                    await _renew_caption_turn()
+                    await lane.renew_turn()
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")
                     try:
@@ -593,15 +452,13 @@ async def _run_caption_worker_loop() -> None:
                         )
                         captioned += 1
                         _oom_circuit.reset()
-                        if _oom_cooldown_count:
-                            _oom_cooldown_count = 0
-                            _set_status(retry_at=None)
+                        lane.clear_oom_streak()
                     except Exception as exc:
                         is_oom = _is_cuda_oom_error(exc)
                         pause_after_error = False
                         if is_oom:
                             batch_size = max(1, batch_size // 2)
-                            _set_status(oom_backoffs=int(_status.get("oom_backoffs") or 0) + 1)
+                            _set_status(oom_backoffs=int(lane.status_value("oom_backoffs") or 0) + 1)
                             _clear_cuda_cache()
                             if batch_size == 1:
                                 pause_after_error = _oom_circuit.record_failure()
@@ -617,9 +474,9 @@ async def _run_caption_worker_loop() -> None:
                         )
                         _set_status(last_error=str(exc))
                         if pause_after_error:
-                            _enter_oom_cooldown()
+                            lane.enter_oom_cooldown()
                             break
-                if _caption_manual_pause:
+                if lane.manual_pause:
                     continue
             elapsed = round(time.perf_counter() - started, 3)
             _set_status(
@@ -628,11 +485,11 @@ async def _run_caption_worker_loop() -> None:
                 message=f"Captioned {captioned} cached previews; {max(0, pending - captioned)} queued.",
                 last_batch_size=captioned,
                 last_batch_seconds=elapsed,
-                last_captioned_at=time.time() if captioned else _status.get("last_captioned_at"),
-                session_captioned=int(_status.get("session_captioned") or 0) + captioned,
+                last_captioned_at=time.time() if captioned else lane.status_value("last_captioned_at"),
+                session_captioned=int(lane.status_value("session_captioned") or 0) + captioned,
             )
         except Exception as exc:
-            _release_worker_owners()
+            lane.release_owners()
             _set_status(
                 state="error",
                 ready=False,

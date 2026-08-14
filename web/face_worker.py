@@ -12,7 +12,6 @@ import db
 from dataclasses import asdict, dataclass
 from importlib.util import find_spec
 import os
-import threading
 import time
 from typing import Any
 
@@ -20,6 +19,7 @@ import settings
 from core import memory_pressure, work_coordination
 from core.catalog_path import catalog_path
 from data.repositories import people as people_repository
+from workers.lane import Lane
 
 
 FACE_MODEL_LICENSE_TEXT = (
@@ -50,69 +50,63 @@ class PeopleBackgroundDecision:
         data["can_start_heavy_work"] = not self.pause and self.mode != "paused"
         return data
 
-_status_lock = threading.Lock()
-_status: dict[str, Any] = {
-    "state": "idle",
-    "message": "People has not scanned cached previews yet.",
-    "ready": False,
-    "running": False,
-    "model_id": "buffalo_l",
-    "model_dir": "",
-    "model_license": FACE_MODEL_LICENSE_TEXT,
-    "auto_install": True,
-    "runtime_install": False,
-    "last_error": "",
-    "last_scan_at": None,
-    "last_batch_size": 0,
-    "last_batch_seconds": 0.0,
-    "pending_cached_images": 0,
-    "background_decision": {},
-    "session_detected_faces": 0,
-    "session_scanned_images": 0,
-    "session_started_at": None,
-    "source_files_preserved": True,
-    "source_media_read": "app_owned_cached_previews_only",
-}
 _face_app_key: tuple[str, str, int] | None = None
 _scan_now = False
-def _initial_manual_pause() -> bool:
-    try:
-        return not bool(settings.get_settings()["people_scan_enabled"])
-    except Exception:
-        return True
 
 
-_face_manual_pause = _initial_manual_pause()
-_face_manual_pause_message = "People is stopped until you start it from Background Work."
+def _resume_eagerness() -> None:
+    work_coordination.claim_manual_owner("people")
+    request_scan_now()
 
 
-def _set_status(**updates: Any) -> None:
-    with _status_lock:
-        _status.update(updates)
+lane = Lane(
+    key="people",
+    settings_flag="people_scan_enabled",
+    noun="People is",
+    status_seed={
+        "state": "idle",
+        "message": "People has not scanned cached previews yet.",
+        "ready": False,
+        "running": False,
+        "model_id": "buffalo_l",
+        "model_dir": "",
+        "model_license": FACE_MODEL_LICENSE_TEXT,
+        "auto_install": True,
+        "runtime_install": False,
+        "last_error": "",
+        "last_scan_at": None,
+        "last_batch_size": 0,
+        "last_batch_seconds": 0.0,
+        "pending_cached_images": 0,
+        "background_decision": {},
+        "session_detected_faces": 0,
+        "session_scanned_images": 0,
+        "session_started_at": None,
+        "model_load_failures": 0,
+        "retry_at": None,
+        "source_files_preserved": True,
+        "source_media_read": "app_owned_cached_previews_only",
+    },
+    startup_stopped_message="People is stopped until you start it from Background Work.",
+    stopped_message="People is stopped.",
+    resume_message="People will scan cached previews.",
+    release=lambda: _unload_face_app(),
+    on_resume=_resume_eagerness,
+)
+_set_status = lane.set_status
 
 
 def get_worker_status() -> dict[str, Any]:
-    with _status_lock:
-        status = dict(_status)
-    status["manual_pause"] = _face_manual_pause
-    return status
+    return lane.get_status()
 
 
 def mark_dependencies_unavailable(capability: dict[str, Any]) -> None:
-    """Publish one stable missing-pack state without starting the worker loop."""
-
-    _set_status(
-        state="unavailable",
-        ready=False,
-        running=False,
-        runtime_install=False,
-        message=capability["message"],
-        last_error="",
-    )
+    lane.mark_dependencies_unavailable(capability)
+    _set_status(runtime_install=False)
 
 
 def manual_pause_active() -> bool:
-    return _face_manual_pause
+    return lane.manual_pause
 
 
 def request_scan_now() -> dict[str, Any]:
@@ -122,33 +116,12 @@ def request_scan_now() -> dict[str, Any]:
     return get_worker_status()
 
 
-def _enter_paused(message: str) -> None:
-    work_coordination.release_manual_owner("people")
-    _set_status(state="paused", ready=False, message=message, last_error="")
-
-
 def pause_face_worker(*, persist: bool = True) -> None:
-    global _face_manual_pause, _face_manual_pause_message
-    if persist:
-        config = settings.get_settings()
-        if bool(config["people_scan_enabled"]):
-            settings.save_settings({**config, "people_scan_enabled": False})
-    _face_manual_pause = True
-    _face_manual_pause_message = "People is stopped."
-    _enter_paused(_face_manual_pause_message)
+    lane.pause(persist=persist)
 
 
 def resume_face_worker(*, persist: bool = True) -> None:
-    global _face_manual_pause, _face_manual_pause_message
-    if persist:
-        config = settings.get_settings()
-        if not bool(config["people_scan_enabled"]):
-            settings.save_settings({**config, "people_scan_enabled": True})
-    _face_manual_pause = False
-    _face_manual_pause_message = ""
-    work_coordination.claim_manual_owner("people")
-    request_scan_now()
-    _set_status(state="idle", message="People will scan cached previews.")
+    lane.resume(persist=persist)
 
 
 def _people_background_decision(config: dict[str, Any]) -> PeopleBackgroundDecision:
@@ -239,23 +212,6 @@ def _unload_face_app() -> None:
         _drop_face_residency()
 
 
-async def _wait_for_face_turn() -> None:
-    if work_coordination.manual_turn_blocked("people"):
-        _set_status(
-            state="waiting_for_turn",
-            ready=False,
-            message="People is waiting for other background work.",
-            last_error="",
-        )
-    await work_coordination.wait_for_manual_turn("people")
-
-
-async def _renew_face_turn() -> None:
-    if work_coordination.lost_ownership("people"):
-        _unload_face_app()
-    await _wait_for_face_turn()
-
-
 def _detect_faces(cache_path: str, config: dict[str, Any]) -> list[dict[str, Any]]:
     import cv2
     import numpy as np
@@ -297,7 +253,7 @@ async def run_face_worker() -> None:
     try:
         await _run_face_worker_loop()
     finally:
-        work_coordination.release_manual_owner("people")
+        lane.release_owners()
 
 
 async def _run_face_worker_loop() -> None:
@@ -315,9 +271,9 @@ async def _run_face_worker_loop() -> None:
                 model_dir=str(config.get("face_model_dir") or ""),
                 auto_install=bool(config.get("people_auto_install", True)),
             )
-            if _face_manual_pause or not bool(config["people_scan_enabled"]):
-                _enter_paused(
-                    _face_manual_pause_message or "People is stopped."
+            if lane.manual_pause or not bool(config["people_scan_enabled"]):
+                lane.enter_paused(
+                    lane.manual_pause_message or "People is stopped."
                 )
                 await asyncio.sleep(WORKER_SLEEP_SECONDS)
                 continue
@@ -389,7 +345,7 @@ async def _run_face_worker_loop() -> None:
                 continue
 
             loop = asyncio.get_running_loop()
-            await _wait_for_face_turn()
+            await lane.wait_for_turn()
             _set_status(
                 state="scanning",
                 ready=True,
@@ -401,7 +357,7 @@ async def _run_face_worker_loop() -> None:
 
             with work_coordination.manual_bulk("people"):
                 for row in rows:
-                    await _renew_face_turn()
+                    await lane.renew_turn()
                     image_id = int(row["id"])
                     cache_path = str(row.get("cache_path") or "")
                     try:

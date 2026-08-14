@@ -53,7 +53,8 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
             people_routes.invalidate_people_status_cache()
 
     async def test_people_immediate_claim_does_not_report_waiting(self):
-        old_status = dict(face_worker._status)
+        old_state = face_worker.lane.status_value("state")
+        old_message = face_worker.lane.status_value("message")
         face_worker._set_status(state="scanning")
         try:
             with (
@@ -68,12 +69,11 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
                     new=mock.AsyncMock(),
                 ),
             ):
-                await face_worker._wait_for_face_turn()
+                await face_worker.lane.wait_for_turn()
 
             self.assertEqual(face_worker.get_worker_status()["state"], "scanning")
         finally:
-            face_worker._status.clear()
-            face_worker._status.update(old_status)
+            face_worker._set_status(state=old_state, message=old_message)
 
     async def test_people_ownership_loss_unloads_before_reentering_wait(self):
         with (
@@ -89,7 +89,7 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
                 new=mock.AsyncMock(),
             ) as wait_for_manual,
         ):
-            await face_worker._renew_face_turn()
+            await face_worker.lane.renew_turn()
 
         unload_model.assert_called_once_with()
         wait_for_manual.assert_awaited_once_with("people")
@@ -108,23 +108,24 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
                 new=mock.AsyncMock(),
             ) as wait_for_manual,
         ):
-            await face_worker._renew_face_turn()
+            await face_worker.lane.renew_turn()
 
         unload_model.assert_not_called()
         wait_for_manual.assert_awaited_once_with("people")
 
     async def test_disabled_people_loop_releases_manual_owner(self):
-        old_pause = face_worker._face_manual_pause
-        old_pause_message = face_worker._face_manual_pause_message
-        old_status = dict(face_worker._status)
+        old_pause = face_worker.lane.manual_pause
+        old_pause_message = face_worker.lane.manual_pause_message
+        old_state = face_worker.lane.status_value("state")
+        old_message = face_worker.lane.status_value("message")
         sleep_started = asyncio.Event()
 
         async def hold_sleep(_seconds):
             sleep_started.set()
             await asyncio.Future()
 
-        face_worker._face_manual_pause = False
-        face_worker._face_manual_pause_message = ""
+        face_worker.lane.manual_pause = False
+        face_worker.lane.manual_pause_message = ""
         owner = work_coordination.manual_owner()
         if owner:
             work_coordination.release_manual_owner(owner)
@@ -145,10 +146,9 @@ class PeopleTests(BulkMemoryIsolatedTestCase, BackendTestCase):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            face_worker._face_manual_pause = old_pause
-            face_worker._face_manual_pause_message = old_pause_message
-            face_worker._status.clear()
-            face_worker._status.update(old_status)
+            face_worker.lane.manual_pause = old_pause
+            face_worker.lane.manual_pause_message = old_pause_message
+            face_worker._set_status(state=old_state, message=old_message)
             work_coordination.release_manual_owner("people")
     async def _request(self, method, path, **kwargs):
         transport = httpx.ASGITransport(app=__import__("app").app)
