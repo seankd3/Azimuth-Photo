@@ -75,6 +75,11 @@ DEFAULT_SETTINGS = {
     "embedding_scan_enabled": True,
     "people_scan_enabled": True,
     "caption_scan_enabled": True,
+    # The one button (owner-blessed 08-04): a hub-backed satellite may run the
+    # AI workers itself. Default off — the hub is the batch engine. Models that
+    # do not fit this machine back off via the existing OOM circuit and leave
+    # the work owed; nothing degrades to a smaller model.
+    "process_locally_when_hub_offline": False,
     "caption_model_preset": DEFAULT_CAPTION_MODEL_PRESET_KEY,
     "caption_model_id": "Qwen/Qwen2.5-VL-7B-Instruct",
     "caption_model_revision": "main",
@@ -580,6 +585,10 @@ def normalize_settings(raw: dict | None) -> dict:
     normalized["caption_scan_enabled"] = _normalize_bool(
         raw.get("caption_scan_enabled", normalized["caption_scan_enabled"]),
         DEFAULT_SETTINGS["caption_scan_enabled"],
+    )
+    normalized["process_locally_when_hub_offline"] = _normalize_bool(
+        raw.get("process_locally_when_hub_offline", normalized["process_locally_when_hub_offline"]),
+        DEFAULT_SETTINGS["process_locally_when_hub_offline"],
     )
     normalized["people_auto_install"] = _normalize_bool(
         raw.get("people_auto_install", normalized["people_auto_install"]),

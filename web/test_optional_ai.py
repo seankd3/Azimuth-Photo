@@ -177,6 +177,11 @@ assert app.app.title == 'Azimuth Photo'
             def mark_dependencies_unavailable(self, _status):
                 raise AssertionError("satellite must not arm hub workers")
 
+        class Settings:
+            @staticmethod
+            def get_settings():
+                return {}
+
         with patch.dict(os.environ, {"AZIMUTH_MODE": "satellite"}), patch.object(
             background.capabilities,
             "capability_status",
@@ -184,13 +189,74 @@ assert app.app.title == 'Azimuth Photo'
         ), patch("archive.role.works_in_someone_elses_archive", return_value=True):
             statuses = background.schedule_optional_workers(
                 track_background_task=tracked.append,
-                settings=object(),
+                settings=Settings(),
                 face_worker=Worker(),
                 caption_worker=Worker(),
             )
 
         self.assertEqual(tracked, [])
         self.assertTrue(statuses["search"]["available"])
+
+    def test_the_one_button_arms_a_satellites_workers(self):
+        """process_locally_when_hub_offline says this machine may compute too.
+
+        Owner-blessed 08-04: one boolean, default off. On, a hub-backed
+        satellite arms the same workers a hub arms; models that do not fit
+        back off through the OOM circuit and the work stays owed.
+        """
+
+        available = {
+            key: {"available": True, "install_command": ""}
+            for key in ("search", "people", "captions")
+        }
+        tracked = []
+
+        class Worker:
+            def __init__(self):
+                self.resumed = False
+
+            def resume_face_worker(self, persist=False):
+                self.resumed = True
+
+            def resume_caption_worker(self, persist=False):
+                self.resumed = True
+
+            async def run_face_worker(self):
+                pass
+
+            async def run_caption_worker(self):
+                pass
+
+            def mark_dependencies_unavailable(self, _status):
+                raise AssertionError("every pack is available in this test")
+
+        class Settings:
+            @staticmethod
+            def get_settings():
+                return {"process_locally_when_hub_offline": True, "caption_scan_enabled": True}
+
+        people_worker = Worker()
+        captions_worker = Worker()
+        with patch.dict(os.environ, {"AZIMUTH_MODE": "satellite"}), patch.object(
+            background.capabilities,
+            "capability_status",
+            side_effect=lambda key: available[key],
+        ), patch(
+            "archive.role.works_in_someone_elses_archive", return_value=True
+        ), patch.object(embedding_worker, "resume_embedding_worker") as resume_embeddings:
+            background.schedule_optional_workers(
+                track_background_task=tracked.append,
+                settings=Settings(),
+                face_worker=people_worker,
+                caption_worker=captions_worker,
+            )
+        for daemon in tracked:
+            daemon.close()
+
+        self.assertEqual(len(tracked), 3, "the button must arm all three workers")
+        resume_embeddings.assert_called_once()
+        self.assertTrue(people_worker.resumed)
+        self.assertTrue(captions_worker.resumed)
 
     def test_standalone_startup_arms_the_workers_a_hub_arms(self):
         # The installed desktop app runs standalone with no hub: it holds the

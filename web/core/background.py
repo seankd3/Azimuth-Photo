@@ -135,14 +135,19 @@ def schedule_optional_workers(*, track_background_task, settings, face_worker, c
     """Arm inference workers whose explicit dependency packs are present.
 
     Hub and standalone installs both hold the canonical library, so both run
-    the full engine; only a hub-backed satellite defers inference to its hub.
+    the full engine. A hub-backed satellite defers inference to its hub —
+    unless the owner flips the one button (process_locally_when_hub_offline),
+    which says this machine may compute too. Models that do not fit back off
+    via the OOM circuit and leave the work owed; quality never degrades.
     """
 
     statuses = {
         key: capabilities.capability_status(key)
         for key in ("search", "people", "captions")
     }
-    if role.defers_bulk_compute():
+    if role.defers_bulk_compute() and not settings.get_settings().get(
+        "process_locally_when_hub_offline", False
+    ):
         log.info("worker=optional_ai skipped reason=hub_backed_satellite")
         return statuses
 
