@@ -17,6 +17,7 @@ import asyncio
 import os
 import re
 import shutil
+import sqlite3
 import time
 import uuid
 import zipfile
@@ -94,14 +95,19 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
     conn = connection.open_sync(db.DB_PATH)
     try:
         rows = conn.execute(
-            "SELECT id, filepath, file_size FROM images "
+            "SELECT id, filepath, file_size, relative_path FROM images "
             "WHERE substr(replace(filepath, char(92), '/'), 1, ?) = ?",
             (len(prefix) + 1, prefix + "/"),
         ).fetchall()
         if not rows:
             raise ValueError("No photos found in this folder")
-        first = rows[0]
-        resolved = location.local_path(first["filepath"], expected_size=first["file_size"])
+        # One deleted or edited-in-place frame must not block the whole roll.
+        first = resolved = None
+        for row in rows[:5]:
+            candidate = location.local_path(row["filepath"], expected_size=row["file_size"])
+            if candidate:
+                first, resolved = row, candidate
+                break
         if resolved is None:
             raise ValueError("The roll's files aren't reachable right now")
         depth_below_roll = str(first["filepath"]).replace("\\", "/")[len(prefix) + 1:].count("/") + 1
@@ -109,15 +115,19 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
         for _ in range(depth_below_roll):
             physical = physical.parent
         target = physical.with_name(cleaned)
-        case_change_only = target.name.lower() == physical.name.lower()
-        if target.exists() and not case_change_only:
-            raise ValueError("A folder with that name already exists")
+        if target.exists():
+            try:
+                renaming_own_casing = target.samefile(physical)
+            except OSError:
+                renaming_own_casing = False
+            if not renaming_own_casing:
+                raise ValueError("A folder with that name already exists")
 
         new_prefix = prefix.rsplit("/", 1)[0] + "/" + cleaned
-        try:
-            os.rename(physical, target)
-        except OSError as exc:
-            raise ValueError("The folder is busy — try again in a moment") from exc
+        old_leaf = prefix.rsplit("/", 1)[-1]
+        # Rows first, directory rename last, one transaction: if the rename
+        # fails, the row updates roll back with it — there is no undo-rename
+        # step left to fail halfway.
         try:
             with conn:
                 for row in rows:
@@ -125,20 +135,30 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
                     new_filepath = new_prefix + tail
                     if "\\" in str(row["filepath"]):
                         new_filepath = new_filepath.replace("/", "\\")
+                    new_relative = row["relative_path"]
+                    if new_relative:
+                        parts = str(new_relative).split("/")
+                        roll_index = len(parts) - 1 - tail.count("/")
+                        if 0 <= roll_index < len(parts) and parts[roll_index] == old_leaf:
+                            parts[roll_index] = cleaned
+                            new_relative = "/".join(parts)
                     conn.execute(
-                        "UPDATE images SET filepath = ? WHERE id = ?",
-                        (new_filepath, row["id"]),
+                        "UPDATE images SET filepath = ?, relative_path = ? WHERE id = ?",
+                        (new_filepath, new_relative, row["id"]),
                     )
                 # The import batch named after the roll follows the rename.
                 conn.execute(
                     "UPDATE import_batches SET name = ? WHERE name = ? AND id IN ("
                     "  SELECT DISTINCT batch_id FROM import_batch_images WHERE image_id IN ("
                     f"    {','.join('?' * len(rows))}))",
-                    (cleaned, prefix.rsplit("/", 1)[-1], *[row["id"] for row in rows]),
+                    (cleaned, old_leaf, *[row["id"] for row in rows]),
                 )
-        except Exception:
-            os.rename(target, physical)
-            raise
+                try:
+                    os.rename(physical, target)
+                except OSError as exc:
+                    raise ValueError("The folder is busy — try again in a moment") from exc
+        except sqlite3.IntegrityError as exc:
+            raise ValueError("That name is already taken in the library") from exc
     finally:
         connection.close_sync(conn, db_path=db.DB_PATH)
     return {"path": new_prefix, "name": cleaned}

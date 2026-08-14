@@ -8,15 +8,18 @@ catalog debris in two shapes:
 
   ghost — a second row for the same file at a retired spelling
           (Photos/RAWS/…, Photos/RAWs/…, Photos/Film Scans/…) whose
-          canonical row already exists. Deleted, after migrating any
+          canonical row already exists. Deleted, after copying its
           keyword / import-batch links to the canonical row.
   stale — the only row for its file, recorded under a retired spelling.
           The path is updated in place; the file is not touched.
 
-No file is ever moved, renamed, or deleted. Rows whose file cannot be
-verified on the drive, whose twin disagrees on size, that carry virtual
-copies, or that are referenced by any table this script does not know
-(hub Elo history, for example) are reported and left alone.
+No file is ever moved, renamed, or deleted. A row is repaired only when its
+file verifies at the canonical path with the exact on-disk casing (Windows
+resolves paths case-blind; the catalog is not). Rows whose file cannot be
+verified, whose twin disagrees on size, that carry virtual copies, or that
+are referenced by any table or column this script does not know (Elo
+comparisons, stack representatives, collection covers, …) are reported and
+left alone.
 
 Run against the laptop catalog now; run the same script against the hub's
 catalog at reconciliation, before its service scans again:
@@ -47,13 +50,18 @@ CANONICAL_TREES = (
     "Raws/Digital/", "Raws/Film Scans/", "Snapshots/", "Edits/", "Astrophotography/",
 )
 
-# Ghost references that carry user data: migrated to the twin before deletion.
-MIGRATE = {"image_keywords": "keyword_id", "import_batch_images": "batch_id"}
+# Ghost references that carry user data: copied to the twin (all columns,
+# image_id swapped) before the ghost's rows are deleted.
+MIGRATE = ("image_keywords", "import_batch_images")
 # Ghost references that are derived state: deleted with the row.
-DERIVED = {
+DERIVED = (
     "sync_state", "image_shoot_hints", "cache_entries",
     "cache_image_presence", "face_scan_backlog",
-}
+)
+# Columns that reference images.id from other tables. hub_image_id is a hub
+# namespace id, not a local reference.
+_REF_COLUMN = re.compile(r"^(image_id|winner_id|loser_id|.+_image_id)$")
+_NOT_A_REF = frozenset({"hub_image_id"})
 
 
 def canonical_path(tail: str) -> str | None:
@@ -65,17 +73,40 @@ def canonical_path(tail: str) -> str | None:
     return None
 
 
-def image_ref_tables(conn: sqlite3.Connection) -> list[str]:
-    tables = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")]
-    return [
-        t for t in tables
-        if t != "images"
-        and any(c[1] == "image_id" for c in conn.execute(f"PRAGMA table_info({t})"))
-    ]
+def reference_columns(conn: sqlite3.Connection) -> list[tuple[str, str]]:
+    """Every (table, column) that can hold an images.id, images itself aside."""
+
+    pairs = []
+    for (table,) in conn.execute("SELECT name FROM sqlite_master WHERE type='table'"):
+        if table == "images":
+            continue
+        for info in conn.execute(f"PRAGMA table_info({table})"):
+            column = info[1]
+            if _REF_COLUMN.match(column) and column not in _NOT_A_REF:
+                pairs.append((table, column))
+    return pairs
 
 
-def classify(conn: sqlite3.Connection, drive: Path, ref_tables: list[str]):
+def _verified_exact(drive: Path, fixed: str, file_size: int | None) -> bool:
+    """The file exists at the canonical path — with the canonical casing.
+
+    Windows happily opens ``Raws/…`` when the directory on disk is spelled
+    ``RAWS/``; the hub's filesystem will not. resolve() reports the on-disk
+    casing, so the repair only writes a path the case-sensitive side can read.
+    """
+
+    target = drive / fixed
+    try:
+        if not (target.is_file() and target.stat().st_size == (file_size or -1)):
+            return False
+        return target.resolve().as_posix().endswith("/" + fixed)
+    except OSError:
+        return False
+
+
+def classify(conn: sqlite3.Connection, drive: Path, ref_pairs: list[tuple[str, str]]):
     ghosts, stales, reports = [], [], []
+    handled = {(table, "image_id") for table in (*MIGRATE, *DERIVED)}
     rows = conn.execute(
         "SELECT id, filepath, file_size FROM images WHERE filepath GLOB ? "
         + "".join(" AND NOT filepath GLOB ?" for _ in CANONICAL_TREES),
@@ -87,8 +118,7 @@ def classify(conn: sqlite3.Connection, drive: Path, ref_tables: list[str]):
         if fixed is None:
             reports.append((image_id, tail, "no rewrite rule"))
             continue
-        target = drive / fixed
-        if not (target.is_file() and target.stat().st_size == (file_size or -1)):
+        if not _verified_exact(drive, fixed, file_size):
             reports.append((image_id, tail, "file not verified at canonical path"))
             continue
         if conn.execute("SELECT 1 FROM images WHERE vc_of = ?", (image_id,)).fetchone():
@@ -104,11 +134,14 @@ def classify(conn: sqlite3.Connection, drive: Path, ref_tables: list[str]):
         if twin[1] != file_size:
             reports.append((image_id, tail, f"twin #{twin[0]} size differs"))
             continue
-        unknown = [
-            t for t in ref_tables
-            if t not in MIGRATE and t not in DERIVED
-            and conn.execute(f"SELECT 1 FROM {t} WHERE image_id = ?", (image_id,)).fetchone()
-        ]
+        unknown = sorted({
+            f"{table}.{column}"
+            for table, column in ref_pairs
+            if (table, column) not in handled
+            and conn.execute(
+                f"SELECT 1 FROM {table} WHERE {column} = ?", (image_id,)
+            ).fetchone()
+        })
         if unknown:
             reports.append((image_id, tail, f"referenced by {', '.join(unknown)}"))
             continue
@@ -116,19 +149,29 @@ def classify(conn: sqlite3.Connection, drive: Path, ref_tables: list[str]):
     return ghosts, stales, reports
 
 
-def apply(conn: sqlite3.Connection, ghosts, stales) -> None:
+def _copy_links(cur: sqlite3.Cursor, table: str, ghost_id: int, twin_id: int) -> None:
+    """Re-home the ghost's rows onto the twin, every column intact."""
+
+    columns = [info[1] for info in cur.execute(f"PRAGMA table_info({table})")]
+    select = ", ".join("?" if column == "image_id" else column for column in columns)
+    cur.execute(
+        f"INSERT OR IGNORE INTO {table} ({', '.join(columns)}) "
+        f"SELECT {select} FROM {table} WHERE image_id = ?",
+        (twin_id, ghost_id),
+    )
+
+
+def apply(conn: sqlite3.Connection, ghosts, stales, tables: set[str]) -> None:
     cur = conn.cursor()
     cur.execute("BEGIN IMMEDIATE")
     for ghost_id, _tail, twin_id in ghosts:
-        for table, payload in MIGRATE.items():
-            cur.execute(
-                f"INSERT OR IGNORE INTO {table} (image_id, {payload}) "
-                f"SELECT ?, {payload} FROM {table} WHERE image_id = ?",
-                (twin_id, ghost_id),
-            )
-            cur.execute(f"DELETE FROM {table} WHERE image_id = ?", (ghost_id,))
+        for table in MIGRATE:
+            if table in tables:
+                _copy_links(cur, table, ghost_id, twin_id)
+                cur.execute(f"DELETE FROM {table} WHERE image_id = ?", (ghost_id,))
         for table in DERIVED:
-            cur.execute(f"DELETE FROM {table} WHERE image_id = ?", (ghost_id,))
+            if table in tables:
+                cur.execute(f"DELETE FROM {table} WHERE image_id = ?", (ghost_id,))
         cur.execute("DELETE FROM images WHERE id = ?", (ghost_id,))
         assert cur.rowcount == 1, f"ghost #{ghost_id} vanished mid-repair"
     for image_id, _tail, fixed in stales:
@@ -149,13 +192,14 @@ def main() -> int:
 
     conn = sqlite3.connect(args.db, timeout=30)
     try:
-        ref_tables = image_ref_tables(conn)
+        ref_pairs = reference_columns(conn)
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         # Two stale rows can name the same canonical path (a RAWS/ and a RAWs/
         # double of one file). Repairing the first turns the second into an
         # ordinary ghost, so apply runs classify-repair passes to a fixpoint
         # instead of special-casing the collision.
         for round_number in (1, 2, 3):
-            ghosts, stales, reports = classify(conn, Path(args.drive), ref_tables)
+            ghosts, stales, reports = classify(conn, Path(args.drive), ref_pairs)
             claimed: set[str] = set()
             ready, deferred = [], []
             for row in stales:
@@ -178,8 +222,8 @@ def main() -> int:
                 return 0
             if not ghosts and not stales:
                 break
-            apply(conn, ghosts, stales)
-        ghosts, stales, _ = classify(conn, Path(args.drive), ref_tables)
+            apply(conn, ghosts, stales, tables)
+        ghosts, stales, _ = classify(conn, Path(args.drive), ref_pairs)
         remaining = len(ghosts) + len(stales)
         print(f"applied — {remaining} actionable rows remain")
         return 0 if remaining == 0 else 1

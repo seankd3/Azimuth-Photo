@@ -348,6 +348,13 @@ function startRollRename(node) {
             cancel();
         }
     });
+    // The input sits inside the row's select button: keep caret clicks from
+    // bubbling into folder navigation while the editor is open.
+    input.addEventListener('pointerdown', (event) => event.stopPropagation());
+    input.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+    });
     input.addEventListener('blur', cancel);
 }
 
@@ -577,7 +584,14 @@ export async function refreshFoldersPanel({ toastEmpty = false } = {}) {
 
 function scheduleFolderRefresh() {
     window.clearTimeout(refreshTimer);
-    refreshTimer = window.setTimeout(() => refreshFoldersPanel(), 300);
+    refreshTimer = window.setTimeout(() => {
+        // A background refresh must not wipe an open rename editor; wait it out.
+        if (document.querySelector('.folder-rename-input')) {
+            scheduleFolderRefresh();
+            return;
+        }
+        refreshFoldersPanel();
+    }, 300);
 }
 
 export async function initFoldersPanel(options = {}) {
