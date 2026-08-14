@@ -1118,6 +1118,23 @@ update commit together, and a database failure renames the directory back.
 `photo/location` resolves the physical directory, so a roll on the archive
 drive renames the same as one on the laptop.
 
+**H5, measured against its own estimate.** The plan scored the three AI
+workers as ≈1,328 lines of the same eight concerns written three times. The
+true fully-shared part was the state machine — status dict, manual pause
+mirroring a settings flag, OOM/load-failure cooldowns, the coordination
+turn — and that is now one class (`workers/lane.py`), adopted by captions
+and people. The rest refused honestly: the two loops share a gate sequence
+but diverge at every decision point (caption's load-failure circuit and
+adaptive batch; people's background-decision object, clustering pass, and
+scan-now boost), and embedding's plumbing is different in *behavior* — its
+status writes stamp model config and refresh batch metrics, its resume
+computes readiness from residency, its failure tracking is keyed by model
+identity. Folding those means hooks at every divergence, which is how a
+codebase gets a config-object monster instead of three readable loops. Same
+verdict shape as the withdrawn four-sharing-packages merge: the duplication
+that was real is gone; what remains is difference, not debt. The one button
+(`process_locally_when_hub_offline`) shipped earlier in the wave.
+
 ## Lessons, paid for
 
 **Automated sweeps for finding, hands for editing.** Seven regex sweeps corrupted
