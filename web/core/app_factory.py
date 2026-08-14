@@ -12,25 +12,6 @@ from core import cache_events
 from core.browser_origin import BrowserOriginGuardMiddleware
 from core.owner_auth import OwnerAuthMiddleware
 from core.static_assets import StaticAssetContext, warm_templates
-from features.access import routes as access_routes
-from features.auth import routes as auth_routes
-from features.ai import routes as ai_routes
-from features.cache import routes as cache_routes
-from features.captions import routes as caption_routes
-from features.catalog import routes as catalog_routes
-from features.collections import routes as collection_routes
-from features.compare import routes as compare_routes
-from features.dev import routes as dev_routes
-from features.export import routes as export_routes
-from features.imports import routes as imports_routes
-from features.library import routes as library_routes
-from features.media import routes as media_routes
-from features.pages import routes as page_routes
-from features.people import routes as people_routes
-from features.search import routes as search_routes
-from features.stacks import routes as stack_routes
-from features.settings import routes as settings_routes
-from features.trash import routes as trash_routes
 
 
 DEFAULT_TEMPLATE_WARMUP = ("desktop.html", "mobile.html")
@@ -158,12 +139,6 @@ def create_base_app(*, base_dir: str | None = None, title: str = "Azimuth Photo"
     return app
 
 
-def create_app(*, base_dir: str | None = None, title: str = "Azimuth Photo") -> FastAPI:
-    """Create the routed app shell with runtime and lifecycle wiring."""
-
-    return create_app_shell(base_dir=base_dir, title=title).app
-
-
 def create_templates(*, base_dir: str | None = None) -> Jinja2Templates:
     root = base_dir or os.path.dirname(os.path.dirname(__file__))
     return Jinja2Templates(directory=os.path.join(root, "templates"))
@@ -204,53 +179,3 @@ def configure_idle_activity_middleware(shell: AppShell) -> Callable:
     )
     object.__setattr__(shell, "idle_activity_middleware", middleware)
     return middleware
-
-
-def create_app_shell(
-    *,
-    base_dir: str | None = None,
-    started_at: float | None = None,
-    title: str = "Azimuth Photo",
-) -> AppShell:
-    root = base_dir or os.path.dirname(os.path.dirname(__file__))
-    app = create_base_app(base_dir=root, title=title)
-    templates = create_templates(base_dir=root)
-    static_assets = StaticAssetContext(
-        app_dir=root,
-        repo_dir=os.path.dirname(root),
-        started_at=started_at,
-    )
-    shell = AppShell(
-        app=app,
-        templates=templates,
-        static_assets=static_assets,
-    )
-    app.state.azimuth_shell = shell
-    cache_events.register_with_db()
-    import thumbnails
-
-    page_routes.configure(templates=templates, template_context=shell.template_context)
-    app.include_router(page_routes.router)
-    auth_routes.configure(templates=templates)
-    app.include_router(auth_routes.router)
-    app.include_router(access_routes.router)
-    app.include_router(people_routes.router)
-    dev_routes.configure(started_at=static_assets.started_at, git_commit=static_assets.git_commit)
-    app.include_router(dev_routes.router)
-    app.include_router(catalog_routes.router)
-    app.include_router(compare_routes.router)
-    app.include_router(media_routes.router)
-    app.include_router(library_routes.router)
-    app.include_router(collection_routes.router)
-    app.include_router(stack_routes.router)
-    app.include_router(trash_routes.router)
-    app.include_router(export_routes.router)
-    app.include_router(imports_routes.router)
-    app.include_router(search_routes.router)
-    app.include_router(settings_routes.router)
-    app.include_router(cache_routes.router)
-    app.include_router(caption_routes.router)
-    app.include_router(ai_routes.router)
-    configure_idle_activity_middleware(shell)
-    configure_app_lifecycle(shell)
-    return shell

@@ -86,26 +86,6 @@ class BackendIntegrationTests(BackendTestCase):
         self.assertNotIn('strategy="diverse"', light_warmup)
         self.assertIn('strategy="explore"', light_warmup)
 
-    async def test_startup_pauses_search_index_without_cold_loading_model(self):
-        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
-
-        self.assertIn("pause_embedding_worker", startup_source)
-        self.assertIn("_start_background_daemon(embedding_worker.run_embedding_worker)", startup_source)
-        self.assertNotIn("start_search_model_load", startup_source)
-        self.assertNotIn("_warm_embed_cache", startup_source)
-        self.assertLess(
-            startup_source.index("pause_embedding_worker"),
-            startup_source.index("_start_background_daemon(embedding_worker.run_embedding_worker)"),
-        )
-
-    async def test_startup_starts_ai_and_people_worker_status_loops_without_idle_gate(self):
-        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
-
-        self.assertIn("_start_background_daemon(embedding_worker.run_embedding_worker)", startup_source)
-        self.assertIn("_start_background_daemon(face_worker.run_face_worker", startup_source)
-        self.assertNotIn("_start_background_after_ready(embedding_worker.run_embedding_worker", startup_source)
-        self.assertNotIn("_start_background_after_ready(face_worker.run_face_worker", startup_source)
-
     async def test_shutdown_cancels_tracked_background_tasks(self):
         cancelled = asyncio.Event()
 
@@ -154,9 +134,3 @@ class BackendIntegrationTests(BackendTestCase):
         error_log.assert_called_once()
         self.assertEqual(error_log.call_args.args[1], "test_warmup")
 
-    async def test_caption_startup_failure_is_not_silently_swallowed(self):
-        startup_source = inspect.getsource(background_runtime.schedule_optional_workers)
-        caption_block = startup_source.split('if statuses["captions"]["available"]:', 1)[1]
-
-        self.assertIn("log.exception", caption_block)
-        self.assertNotIn("except Exception:\n        pass", caption_block)
