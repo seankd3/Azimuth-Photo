@@ -131,65 +131,19 @@ async def _start_background_daemon(coro_factory, delay: float = 5.0):
     await coro_factory()
 
 
-def schedule_optional_workers(*, track_background_task, settings, face_worker, caption_worker) -> dict:
-    """Arm inference workers whose explicit dependency packs are present.
+def schedule_optional_workers(*, track_background_task, settings, face_worker=None, caption_worker=None) -> dict:
+    """The AI derivation fleet is gone (2026-08-14 gutting order).
 
-    Hub and standalone installs both hold the canonical library, so both run
-    the full engine. A hub-backed satellite defers inference to its hub —
-    unless the owner flips the one button (process_locally_when_hub_offline),
-    which says this machine may compute too. Models that do not fit back off
-    via the OOM circuit and leave the work owed; quality never degrades.
+    Search, People, and captions serve what has already been derived; the
+    hub was the batch engine and its return is where new derivation lives.
+    The capability statuses survive so the UI can say what is served.
     """
 
-    statuses = {
+    del track_background_task, settings, face_worker, caption_worker
+    return {
         key: capabilities.capability_status(key)
         for key in ("search", "people", "captions")
     }
-    if role.defers_bulk_compute() and not settings.get_settings().get(
-        "process_locally_when_hub_offline", False
-    ):
-        log.info("worker=optional_ai skipped reason=hub_backed_satellite")
-        return statuses
-
-    if statuses["search"]["available"]:
-        try:
-            import embedding_worker
-
-            if settings.get_settings().get("embedding_scan_enabled", True):
-                embedding_worker.resume_embedding_worker(persist=False)
-            else:
-                embedding_worker.pause_embedding_worker(
-                    "Search is stopped until you start it from Background Work.",
-                    persist=False,
-                )
-            track_background_task(_start_background_daemon(embedding_worker.run_embedding_worker))
-        except ImportError:
-            log.exception("worker=embedding startup import failed")
-
-    if statuses["people"]["available"]:
-        if settings.get_settings().get("people_scan_enabled", True):
-            face_worker.resume_face_worker(persist=False)
-        else:
-            face_worker.pause_face_worker(persist=False)
-        track_background_task(_start_background_daemon(face_worker.run_face_worker, delay=25.0))
-    else:
-        face_worker.mark_dependencies_unavailable(statuses["people"])
-
-    if statuses["captions"]["available"]:
-        try:
-            if not settings.get_settings().get("caption_scan_enabled"):
-                caption_worker.pause_caption_worker(
-                    "Captions are stopped until you start them from Background Work.",
-                    persist=False,
-                )
-            else:
-                caption_worker.resume_caption_worker(persist=False)
-            track_background_task(_start_background_daemon(caption_worker.run_caption_worker, delay=30.0))
-        except Exception:
-            log.exception("worker=caption startup failed; caption worker was not scheduled")
-    else:
-        caption_worker.mark_dependencies_unavailable(statuses["captions"])
-    return statuses
 
 
 async def track_idle_activity(
@@ -239,7 +193,6 @@ async def run_shutdown(
     *,
     thumbnails,
     background_task_tracker: BackgroundTaskTracker,
-    caption_worker=None,
 ) -> None:
     from data import connection as data_connection
     from features.media import warm as media_warm
@@ -255,15 +208,6 @@ async def run_shutdown(
     await _fire_and_forget.cancel_all()
     await thumbnails.cancel_background_tasks()
     await media_warm.cancel_background_tasks()
-    try:
-        import embedding_worker
-
-        await embedding_worker.shutdown_embedding_worker()
-    except ImportError:
-        pass
-    if caption_worker is not None:
-        caption_worker.shutdown_caption_worker()
-
     # Only now can nothing reopen what we are about to release.
     await data_connection.close_shared_readers()
 
@@ -282,9 +226,7 @@ async def run_startup(
     # The startup warmers reach straight for what they warm. These used to be
     # 36 keyword parameters, threaded from a 29-field dataclass in app_factory,
     # so that this module would not import them.
-    import caption_worker
     import db
-    import face_worker
     import settings
     import thumbnails
     from features.ai import routes as ai_routes
@@ -617,8 +559,6 @@ async def run_startup(
     schedule_optional_workers(
         track_background_task=track_background_task,
         settings=settings,
-        face_worker=face_worker,
-        caption_worker=caption_worker,
     )
 
     # Auto-resume bulk workers that were running before the last shutdown.

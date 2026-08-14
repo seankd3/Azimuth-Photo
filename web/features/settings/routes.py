@@ -7,7 +7,6 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 import ai_models
-import face_worker
 import settings
 import thumbnails
 from core.requests import json_object
@@ -261,8 +260,6 @@ async def api_save_settings(request: Request):
         cache_events.invalidate_vector_derived_caches()
     if search_runtime_changed:
         cache_events.invalidate_rankings_cache()
-    if people_runtime_changed:
-        face_worker.request_scan_now()
     cache_status_service.invalidate_cache_status_cache()
     ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
@@ -306,7 +303,6 @@ async def api_reset_settings():
     cache_status_service.invalidate_cache_status_cache()
     ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
-    face_worker.request_scan_now()
     return {
         "ok": True,
         "settings": settings.public_settings(saved),

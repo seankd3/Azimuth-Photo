@@ -8,7 +8,22 @@ from collections.abc import Awaitable, Callable
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
-import face_worker
+# The face worker died with the derivation fleet (2026-08-14 gutting
+# order). People shows what has been derived; these constants keep the
+# status payload's shape for the surfaces that read it.
+FACE_MODEL_LICENSE_TEXT = (
+    "InsightFace model packs are non-commercial research models by default. "
+    "Use face_model_dir with a licensed compatible model for other use."
+)
+_WORKER_ABSENT = {
+    "state": "unavailable",
+    "ready": False,
+    "running": False,
+    "manual_pause": False,
+    "message": "Faces were derived on the hub; this device shows the results.",
+    "last_error": "",
+    "pending_cached_images": 0,
+}
 import settings
 import thumbnails
 from core import capabilities
@@ -88,7 +103,7 @@ async def _fast_people_counts(worker: dict) -> tuple[dict, bool]:
 async def people_status_payload(review: dict | None = None) -> dict:
     started = time.perf_counter()
     config = settings.get_settings()
-    worker = face_worker.get_worker_status()
+    worker = dict(_WORKER_ABSENT)
     capability = capabilities.capability_status("people")
     # A hub-backed satellite never runs this worker: the hub owns face work and
     # the satellite receives the results. Saying so is the honest answer. The
@@ -116,9 +131,7 @@ async def people_status_payload(review: dict | None = None) -> dict:
     counts.setdefault("pending_cached_images", int(worker.get("pending_cached_images") or 0))
     return {
         "capability": capability,
-        "active": capability["available"]
-        and bool(config["people_scan_enabled"])
-        and not face_worker.manual_pause_active(),
+        "active": False,
         "automatic": bool(config["people_scan_enabled"]),
         "auto_install": False,
         "auto_install_legacy": bool(config.get("people_auto_install", True)),
@@ -132,7 +145,7 @@ async def people_status_payload(review: dict | None = None) -> dict:
         "contextual_search_policy": "qwen_after_people_filter",
         "source_files_preserved": True,
         "source_media_read": "app_owned_cached_previews_only",
-        "model_license": face_worker.FACE_MODEL_LICENSE_TEXT,
+        "model_license": FACE_MODEL_LICENSE_TEXT,
         "worker": worker,
         "counts": counts,
         "counts_stale": counts_stale,
@@ -228,22 +241,6 @@ async def api_people_face_thumb(request: Request, face_id: int, size: int = 160)
     if request.headers.get("if-none-match") == headers["ETag"]:
         return Response(status_code=304, headers=headers)
     return Response(content=data, media_type="image/jpeg", headers=headers)
-
-
-@router.post("/api/people/scan/pause")
-async def api_people_scan_pause():
-    face_worker.pause_face_worker()
-    return {"ok": True, "status": await people_status_payload()}
-
-
-@router.post("/api/people/scan/resume")
-async def api_people_scan_resume():
-    capability = capabilities.capability_status("people")
-    if not capability["available"]:
-        return JSONResponse(capabilities.unavailable_response("people"), status_code=409)
-    thumbnails.start_pregeneration()
-    face_worker.resume_face_worker()
-    return {"ok": True, "status": await people_status_payload()}
 
 
 @router.post("/api/people/{person_id}/label")

@@ -24,10 +24,6 @@ _text_search_resolution_cache_ttl_seconds = 300.0
 # As-you-type response budget for the query encode. A warm small encode / a
 # cache hit / the test mock lands well under this; a cold 8B encode blows it
 # and we fall back to metadata while the embedding warms in the background.
-_FAST_ENCODE_BUDGET_SECONDS = 0.35
-_COMMITTED_COLD_START_BUDGET_SECONDS = 2.0
-_inflight_query_encodes: set = set()
-_inflight_model_loads: set = set()
 
 
 def clear_text_search_caches() -> None:
@@ -38,39 +34,6 @@ def normalize_search_query(query: str) -> str:
     normalized = " ".join(str(query or "").split())
     max_length = 160
     return normalized[:max_length].strip()
-
-
-def encode_text_with_config(encoder, query: str, config: dict):
-    try:
-        if len(inspect.signature(encoder).parameters) < 2:
-            return encoder(query)
-    except (TypeError, ValueError):
-        pass
-    return encoder(query, config)
-
-
-def start_search_model_load(embedding_worker) -> bool:
-    start = getattr(embedding_worker, "start_search_model_load", None)
-    if not callable(start):
-        return False
-    try:
-        return bool(start())
-    except Exception:
-        return False
-
-
-async def ensure_search_model_loaded(embedding_worker) -> bool:
-    """Wait for the interactive model only after a committed search needs it."""
-    ensure = getattr(embedding_worker, "ensure_model_loaded_for_search", None)
-    if not callable(ensure):
-        return False
-    try:
-        result = ensure()
-        if inspect.isawaitable(result):
-            result = await result
-        return bool(result)
-    except Exception:
-        return False
 
 
 def _embedding_ranked_scores(matrix, text_vec, image_ids, threshold, max_results: int) -> dict[int, float]:
@@ -189,9 +152,6 @@ async def resolve_text_search(
     *,
     deep: bool = False,
     normalize_query=normalize_search_query,
-    encode_text=encode_text_with_config,
-    start_model_load=start_search_model_load,
-    ensure_model_loaded=ensure_search_model_loaded,
     apply_metadata_ids=None,
     get_search_query_embedding=None,
     store_search_query_embedding=None,
@@ -261,17 +221,14 @@ async def resolve_text_search(
         return result
 
     try:
-        import embedding_worker
         import embed_cache
         import numpy as np
 
-        default_loader = (
-            getattr(embedding_worker.ensure_model_loaded_for_search, "__module__", "")
-            == "embedding_worker"
-        )
-        if default_loader and importlib.util.find_spec("torch") is None:
-            raise RuntimeError("torch is not installed")
-
+        # The embedding model lived with the derivation fleet, which is gone
+        # (2026-08-14 gutting order). A query still searches semantically when
+        # its vector was cached by an earlier deep search; otherwise metadata,
+        # filenames, and captions carry it — the same graceful floor the app
+        # already stood on whenever the model was absent.
         text_vec = None
         if get_search_query_embedding is not None:
             cached_blob = await get_search_query_embedding(active_config, normalized_query)
@@ -281,110 +238,6 @@ async def resolve_text_search(
                     text_vec = cached_vec
 
         if text_vec is None:
-            encode_future = asyncio.ensure_future(
-                asyncio.get_event_loop().run_in_executor(
-                    None,
-                    encode_text,
-                    embedding_worker.encode_text,
-                    normalized_query,
-                    active_config,
-                )
-            )
-            if deep:
-                text_vec = await encode_future
-            else:
-                # As-you-type: only wait a short budget for the encode.
-                try:
-                    text_vec = await asyncio.wait_for(
-                        asyncio.shield(encode_future), _FAST_ENCODE_BUDGET_SECONDS
-                    )
-                except asyncio.TimeoutError:
-                    text_vec = None
-                except Exception:
-                    text_vec = None
-            if text_vec is not None and store_search_query_embedding is not None:
-                text_arr = np.asarray(text_vec, dtype=np.float32)
-                if text_arr.shape[0] == int(active_config["dimension"]):
-                    await store_search_query_embedding(
-                        active_config,
-                        normalized_query,
-                        text_arr.tobytes(),
-                    )
-                    text_vec = text_arr
-            elif text_vec is None and not deep and not encode_future.done():
-                # Encode is still running (slow model). Serve metadata/FTS now and
-                # persist the embedding when the background encode lands, so the
-                # next identical query is fully semantic.
-                _inflight_query_encodes.add(encode_future)
-
-                def _store_encoded(fut, config=active_config, query=normalized_query):
-                    _inflight_query_encodes.discard(fut)
-                    try:
-                        vec = fut.result()
-                    except Exception:
-                        return
-                    if vec is None or store_search_query_embedding is None:
-                        return
-                    arr = np.asarray(vec, dtype=np.float32)
-                    if arr.shape[0] != int(config["dimension"]):
-                        return
-                    try:
-                        asyncio.ensure_future(
-                            store_search_query_embedding(config, query, arr.tobytes())
-                        )
-                    except RuntimeError:
-                        pass
-
-                encode_future.add_done_callback(_store_encoded)
-                if await _apply_lexical_search(
-                    result,
-                    normalized_query,
-                    query_plan=query_plan,
-                    metadata_ranked_image_ids=metadata_ranked_image_ids,
-                    caption_ranked_image_ids=caption_ranked_image_ids,
-                    get_active_images_by_ids=get_active_images_by_ids,
-                ):
-                    return result
-                result.update({
-                    "text_query": normalized_query,
-                    "search_mode": "metadata",
-                    "search_sources": ["metadata"],
-                    "ai_unavailable": True,
-                    "fallback_reason": "embedding_warming",
-                })
-                if extension_query not in extension_search_terms and apply_metadata_ids is not None:
-                    await apply_metadata_ids(result, normalized_query)
-                return result
-        model_ready = False
-        if text_vec is None and deep:
-            model_load = asyncio.create_task(ensure_model_loaded(embedding_worker))
-            _inflight_model_loads.add(model_load)
-            model_load.add_done_callback(_inflight_model_loads.discard)
-            try:
-                model_ready = await asyncio.wait_for(
-                    asyncio.shield(model_load),
-                    _COMMITTED_COLD_START_BUDGET_SECONDS,
-                )
-            except asyncio.TimeoutError:
-                model_ready = False
-        if text_vec is None and deep and model_ready:
-            text_vec = await asyncio.get_event_loop().run_in_executor(
-                None,
-                encode_text,
-                embedding_worker.encode_text,
-                normalized_query,
-                active_config,
-            )
-            if text_vec is not None and store_search_query_embedding is not None:
-                text_arr = np.asarray(text_vec, dtype=np.float32)
-                if text_arr.shape[0] == int(active_config["dimension"]):
-                    await store_search_query_embedding(
-                        active_config,
-                        normalized_query,
-                        text_arr.tobytes(),
-                    )
-                    text_vec = text_arr
-        if text_vec is None and deep and not model_ready:
             if await _apply_lexical_search(
                 result,
                 normalized_query,
@@ -394,13 +247,10 @@ async def resolve_text_search(
                 get_active_images_by_ids=get_active_images_by_ids,
             ):
                 return result
-        if text_vec is None and start_model_load(embedding_worker):
             result.update({
                 "text_query": normalized_query,
                 "search_mode": "metadata",
                 "search_sources": ["metadata"],
-                "ai_unavailable": True,
-                "fallback_reason": "model_loading",
             })
             if extension_query not in extension_search_terms and apply_metadata_ids is not None:
                 await apply_metadata_ids(result, normalized_query)
@@ -495,16 +345,12 @@ async def resolve_configured_text_search(
     q: str,
     *,
     deep: bool = False,
-    encode_text=None,
-    start_model_load=None,
     apply_metadata_ids=None,
 ) -> dict:
     return await resolve_text_search(
         q,
         deep=deep,
         normalize_query=normalize_search_query,
-        encode_text=encode_text or encode_text_with_config,
-        start_model_load=start_model_load or start_search_model_load,
         apply_metadata_ids=apply_metadata_ids or apply_configured_metadata_search_ids,
         get_search_query_embedding=get_catalog_search_query_embedding,
         store_search_query_embedding=store_catalog_search_query_embedding,

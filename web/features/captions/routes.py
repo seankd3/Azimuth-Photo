@@ -7,7 +7,18 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-import caption_worker
+# The caption worker died with the derivation fleet (2026-08-14 gutting
+# order). Captions show what has been derived; this constant keeps the
+# status payload's shape.
+_WORKER_ABSENT = {
+    "state": "unavailable",
+    "ready": False,
+    "running": False,
+    "manual_pause": False,
+    "message": "Captions were written on the hub; this device shows the results.",
+    "last_error": "",
+    "pending_cached_images": 0,
+}
 import settings
 from core import capabilities
 from core.background import track_background_task
@@ -100,7 +111,7 @@ async def _cached_caption_counts(caption_config: dict, worker: dict) -> tuple[di
 async def caption_status_payload() -> dict:
     config = settings.get_settings()
     caption_config = settings.active_caption_config(config)
-    worker = caption_worker.get_worker_status()
+    worker = dict(_WORKER_ABSENT)
     capability = capabilities.capability_status("captions")
     # Same as faces: a hub-backed satellite never captions anything itself, so
     # a perpetual "Refreshing…" was describing work that would never start.
@@ -121,9 +132,7 @@ async def caption_status_payload() -> dict:
     counts, counts_stale = await _cached_caption_counts(caption_config, worker)
     return {
         "capability": capability,
-        "active": capability["available"]
-        and bool(config["caption_scan_enabled"])
-        and not caption_worker.manual_pause_active(),
+        "active": False,
         "automatic": bool(config["caption_scan_enabled"]),
         "model_id": caption_config["model_id"],
         "model_key": caption_config["model_key"],
@@ -177,38 +186,3 @@ async def api_update_image_caption(image_id: int, body: CaptionBody):
     return {"ok": True, "caption": {**caption, "has_caption": True}}
 
 
-@router.post("/api/captions/scan/pause")
-async def api_pause_captions():
-    try:
-        caption_worker.pause_caption_worker()
-    except Exception:
-        log.exception("worker=caption operation=pause failed")
-        return JSONResponse(
-            {
-                "error": "Captions could not be paused",
-                "detail": "Check Background Work status and try again.",
-            },
-            status_code=503,
-        )
-    settings_status.invalidate_settings_response_cache()
-    return {"ok": True, "captions_status": await caption_status_payload()}
-
-
-@router.post("/api/captions/scan/resume")
-async def api_resume_captions():
-    capability = capabilities.capability_status("captions")
-    if not capability["available"]:
-        return JSONResponse(capabilities.unavailable_response("captions"), status_code=409)
-    try:
-        caption_worker.resume_caption_worker()
-    except Exception:
-        log.exception("worker=caption operation=resume failed")
-        return JSONResponse(
-            {
-                "error": "Captions could not be started",
-                "detail": "Check Background Work status and try again.",
-            },
-            status_code=503,
-        )
-    settings_status.invalidate_settings_response_cache()
-    return {"ok": True, "captions_status": await caption_status_payload()}

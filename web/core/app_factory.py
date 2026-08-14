@@ -177,13 +177,11 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
         )
 
     async def shutdown() -> None:
-        import caption_worker
         import thumbnails
 
         await background_runtime.run_shutdown(
             thumbnails=thumbnails,
             background_task_tracker=shell.background_task_tracker,
-            caption_worker=caption_worker,
         )
 
     shell.app.router.on_startup.append(startup)

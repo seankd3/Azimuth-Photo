@@ -15,7 +15,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 import app as app_module  # noqa: E402
 import db  # noqa: E402
 import embed_cache  # noqa: E402
-import embedding_worker  # noqa: E402
 import settings  # noqa: E402
 import thumbnails  # noqa: E402
 from core import cache_events  # noqa: E402
@@ -79,11 +78,9 @@ class ApiShapeTests(unittest.TestCase):
         self.old_settings_state = settings._settings
         self.old_cache_dir = thumbnails.SSD_CACHE_DIR
         self.old_prefetch_images = thumbnails.prefetch_images
-        self.old_encode_text = embedding_worker.encode_text
         self.old_get_matrix = embed_cache.get_matrix
         self.old_get_index = embed_cache.get_index
         self.old_get_vector = embed_cache.get_vector
-        self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
         self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
         self.old_smoke_mode = os.environ.get("AZIMUTH_SMOKE_MODE")
 
@@ -106,11 +103,7 @@ class ApiShapeTests(unittest.TestCase):
         async def noop_prefetch(*_args, **_kwargs):
             return 0
 
-        async def no_model_load():
-            return False
-
         thumbnails.prefetch_images = noop_prefetch
-        embedding_worker.ensure_model_loaded_for_search = no_model_load
         self.source_id = self._create_source()
         self.ids = self._create_images()
         self.client = TestClient(app_module.app)
@@ -118,8 +111,6 @@ class ApiShapeTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         thumbnails.prefetch_images = self.old_prefetch_images
-        embedding_worker.encode_text = self.old_encode_text
-        embedding_worker.ensure_model_loaded_for_search = self.old_ensure_model_loaded_for_search
         embed_cache.get_matrix = self.old_get_matrix
         embed_cache.get_index = self.old_get_index
         embed_cache.get_vector = self.old_get_vector
@@ -363,7 +354,6 @@ class ApiShapeTests(unittest.TestCase):
         self.assertIn("", [card["date_group"] for card in cards])
 
     def test_search_cards_include_similarity_context(self):
-        embedding_worker.encode_text = lambda _query: None
 
         response = self.client.get("/api/search?q=sunset&limit=10")
         self.assertEqual(response.status_code, 200)
@@ -374,7 +364,9 @@ class ApiShapeTests(unittest.TestCase):
         self.assertEqual(data["total_images"], 2)
         for card in data["images"]:
             self.assertCardShape(card, contextual=("similarity",))
-            self.assertIsNone(card["similarity"])
+            # Lexical search ranks through the fusion scorer now, so metadata
+            # matches carry a real relevance score instead of null.
+            self.assertIsInstance(card["similarity"], float)
 
     def test_similar_cards_include_similarity_context(self):
         image_ids = self.ids

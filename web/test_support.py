@@ -22,9 +22,7 @@ import app as app_module  # noqa: E402
 import ai_models  # noqa: E402
 import db
 from data import connection as data_connection  # noqa: E402
-import embedding_worker  # noqa: E402
 import elo_propagation  # noqa: E402
-import face_worker  # noqa: E402
 import scanner  # noqa: E402
 import settings  # noqa: E402
 import thumbnails  # noqa: E402
@@ -157,10 +155,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         self.old_get_matrix = elo_propagation.embed_cache.get_matrix
         self.old_get_index = elo_propagation.embed_cache.get_index
         self.old_get_vector = elo_propagation.embed_cache.get_vector
-        self.old_encode_text = embedding_worker.encode_text
-        self.old_ensure_model_loaded_for_search = embedding_worker.ensure_model_loaded_for_search
-        self.old_start_search_model_load = embedding_worker.start_search_model_load
-        self.old_embedding_manual_pause = embedding_worker.get_worker_status()["manual_pause"]
         self.old_prefetch_images = thumbnails.prefetch_images
         self.old_schedule_full_image_cache = thumbnails.schedule_full_image_cache
         self.old_has_cached_fast = thumbnails.has_cached_fast
@@ -199,13 +193,8 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         async def noop_prefetch(*_args, **_kwargs):
             return 0
 
-        async def no_model_load_for_search():
-            return False
-
         compare_routes._schedule_propagation = close_scheduled
         thumbnails.prefetch_images = noop_prefetch
-        embedding_worker.ensure_model_loaded_for_search = no_model_load_for_search
-        embedding_worker.start_search_model_load = lambda: False
 
     async def asyncTearDown(self):
         await self._close_thumbnail_cache_after_background_tasks()
@@ -213,13 +202,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         elo_propagation.embed_cache.get_matrix = self.old_get_matrix
         elo_propagation.embed_cache.get_index = self.old_get_index
         elo_propagation.embed_cache.get_vector = self.old_get_vector
-        embedding_worker.encode_text = self.old_encode_text
-        embedding_worker.ensure_model_loaded_for_search = self.old_ensure_model_loaded_for_search
-        embedding_worker.start_search_model_load = self.old_start_search_model_load
-        if self.old_embedding_manual_pause:
-            embedding_worker.pause_embedding_worker()
-        else:
-            embedding_worker.resume_embedding_worker()
         thumbnails.prefetch_images = self.old_prefetch_images
         thumbnails.schedule_full_image_cache = self.old_schedule_full_image_cache
         thumbnails.has_cached_fast = self.old_has_cached_fast
@@ -403,14 +385,25 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             with open(stub, "wb") as fh:
                 fh.write(b"stub")
 
-    def _stub_text_search(self, image_ids, scores):
-        matrix = np.array([[score, 0.0] for score in scores], dtype=np.float32)
+    async def _stub_text_search(self, image_ids, scores, query="landscapes"):
+        # The query encoder died with the derivation fleet (2026-08-14);
+        # semantic search serves cached query vectors. The stub caches a unit
+        # vector for the query at the model's real dimension and pins a
+        # matrix whose first column carries each photo's score — the same
+        # similarities the encoder used to produce.
+        config = settings.active_embedding_config()
+        dim = int(config["dimension"])
+        matrix = np.zeros((len(scores), dim), dtype=np.float32)
+        matrix[:, 0] = scores
 
         async def fake_get_matrix(_model_key=None):
             return image_ids, matrix
 
-        def fake_encode_text(_query):
-            return np.array([1.0, 0.0], dtype=np.float32)
-
         elo_propagation.embed_cache.get_matrix = fake_get_matrix
-        embedding_worker.encode_text = fake_encode_text
+        from data.repositories import embeddings as embedding_repository
+
+        vec = np.zeros(dim, dtype=np.float32)
+        vec[0] = 1.0
+        await embedding_repository.store_search_query_embedding(
+            db.DB_PATH, config=config, query=query, blob=vec.tobytes(),
+        )

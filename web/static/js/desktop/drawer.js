@@ -92,7 +92,6 @@ const SETTING_DEFS = {
     face_merge_suggestion_threshold: { type: 'number', min: 0.1, max: 0.95, step: 0.01 },
     people_scan_enabled: { type: 'checkbox' },
     embedding_scan_enabled: { type: 'checkbox' },
-    process_locally_when_hub_offline: { type: 'checkbox' },
     people_auto_install: { type: 'checkbox' },
     caption_scan_enabled: { type: 'checkbox' },
     caption_model_preset: { type: 'select' },
@@ -817,8 +816,6 @@ function renderAiSettings() {
         + presetSelect
         + (selectedPreset?.description ? `<div class="setting-hint">${esc(selectedPreset.description)}</div>` : '')
         + settingToggle('embedding_scan_enabled', 'Understand new photos automatically')
-        + settingToggle('process_locally_when_hub_offline', 'Process AI on this computer when the hub is away')
-        + '<div class="setting-hint">Same models, same quality — a model that does not fit this machine simply waits for the hub.</div>'
         + settingInput('search_similarity_threshold', 'Search threshold', { hint: 'Higher is stricter for visual/text search matches.' })
         + settingToggle('refine_semantic_pairing', 'Use semantic pairing in Refine')
         + '<div class="setting-actions">'

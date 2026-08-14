@@ -520,43 +520,6 @@ def request_model_unload(*, force: bool = False) -> list[str]:
     except Exception:
         log.debug("memory_pressure: model_pool unload_all failed", exc_info=True)
 
-    # Straggler sweep: clear worker globals even if they bypassed the pool
-    # (tests, legacy paths). Pool-aware unload helpers are no-ops when empty
-    # or when a pin blocks them.
-    try:
-        import embedding_worker
-        from core.model_pool import get_model_pool
-
-        had_model = embedding_worker._model is not None
-        embedding_worker._unload_model(force=force)
-        if (
-            "embeddings" not in unloaded
-            and had_model
-            and embedding_worker._model is None
-            and "embeddings" not in get_model_pool().resident_names()
-        ):
-            unloaded.append("embeddings")
-    except Exception:
-        log.debug("memory_pressure: embedding unload failed", exc_info=True)
-
-    try:
-        import caption_worker
-
-        caption_worker._unload_model()
-        if "captions" not in unloaded:
-            unloaded.append("captions")
-    except Exception:
-        log.debug("memory_pressure: caption unload failed", exc_info=True)
-
-    try:
-        import face_worker
-
-        face_worker._unload_face_app()
-        if "people" not in unloaded:
-            unloaded.append("people")
-    except Exception:
-        log.debug("memory_pressure: people unload failed", exc_info=True)
-
     try:
         from features.develop import ai_masks
 
