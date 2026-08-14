@@ -30,8 +30,8 @@ class _Providers:
 _providers: _Providers | None = None
 
 # Write-behind queue for cache DB entries. This reduces metadata lock contention.
-# Entries are (size, image_id, source_signature, path, size_bytes, access_time)
-# with an optional trailing "touch" marker for LRU-touch-only entries.
+# Entries are (size, image_id, source_signature, path, size_bytes, access_time,
+# recipe) with an optional trailing "touch" marker for LRU-touch-only entries.
 _write_queue: list[tuple] = []
 _write_queue_lock = threading.Lock()
 _WRITE_FLUSH_SIZE = 96
@@ -42,18 +42,20 @@ _cache_metadata_lock_failures = 0
 
 # Every write stamps the derivation identity: content_hash comes from the
 # catalog row via a subquery (?3 is the entry's image_id), so no caller has
-# to thread it through. Isolated fixture DBs have no images table; their
-# writes use the unstamped variant chosen once at connect.
+# to thread it through; the recipe (?9) comes from the writer — '' for the
+# unedited pipeline, the real recipe for develop-rendered tiles. Isolated
+# fixture DBs have no images table; their writes use the unstamped variant
+# chosen once at connect.
 _INSERT_ENTRY_STAMPED = (
     "INSERT OR REPLACE INTO cache_entries "
     "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at, content_hash, recipe) "
     "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, "
-    "COALESCE((SELECT content_hash FROM images WHERE id = ?3), ''), '')"
+    "COALESCE((SELECT content_hash FROM images WHERE id = ?3), ''), ?9)"
 )
 _INSERT_ENTRY_PLAIN = (
     "INSERT OR REPLACE INTO cache_entries "
-    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
-    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)"
+    "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at, recipe) "
+    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)"
 )
 _insert_entry_sql = _INSERT_ENTRY_PLAIN
 
@@ -222,7 +224,7 @@ def stamp_missing_content_hashes() -> None:
 
 
 def _is_touch_entry(entry: tuple) -> bool:
-    return len(entry) > 6 and entry[6] == "touch"
+    return len(entry) > 7 and entry[7] == "touch"
 
 
 def _note_cache_metadata_lock():
@@ -392,6 +394,7 @@ def _get_disk_entry(
                     row["path"],
                     int(row["size_bytes"]),
                     providers.current_time(),
+                    "",
                     "touch",
                 )
             _index_disk_entry(size, image_id, row["path"], row["source_signature"])
@@ -695,6 +698,7 @@ def _store_disk_entry(
     size_bytes: int,
     *,
     hot: bool = True,
+    recipe: str = "",
 ):
     providers = _p()
     cache_root = providers.cache_root()
@@ -726,6 +730,7 @@ def _store_disk_entry(
                 int(size_bytes),
                 access_time,
                 now,
+                recipe,
             ),
         )
         if size in _tier_byte_totals:
@@ -740,7 +745,9 @@ def _store_disk_entry(
             providers.note_cached_image_ids_added(cache_root, size, [image_id])
 
 
-def _write_thumbnail_to_disk(size: str, image_id: int, source_signature: str, data: bytes, *, hot: bool) -> bool:
+def _write_thumbnail_to_disk(
+    size: str, image_id: int, source_signature: str, data: bytes, *, hot: bool, recipe: str = ""
+) -> bool:
     providers = _p()
     cache_root = providers.cache_root()
     budget = providers.disk_allocations().get(size, 0)
@@ -755,7 +762,9 @@ def _write_thumbnail_to_disk(size: str, image_id: int, source_signature: str, da
     os.replace(temp_path, path)
     _index_disk_entry(size, image_id, path, source_signature)
     with _write_queue_lock:
-        _write_queue.append((size, image_id, source_signature, path, len(data), providers.cache_access_time(hot=hot)))
+        _write_queue.append(
+            (size, image_id, source_signature, path, len(data), providers.cache_access_time(hot=hot), recipe)
+        )
     _maybe_flush_write_queue()
     return True
 
@@ -792,6 +801,7 @@ def _flush_write_queue() -> bool:
             added_by_size: dict[str, list[int]] = {}
             for entry in batch:
                 size, image_id, source_signature, path, size_bytes, access_time = entry[:6]
+                recipe = entry[6] if len(entry) > 6 else ""
                 if _is_touch_entry(entry):
                     # LRU touch: only bump last_accessed; never rewrite the row
                     # (preserves created_at and tier byte accounting).
@@ -813,7 +823,7 @@ def _flush_write_queue() -> bool:
 
                 conn.execute(
                     _insert_entry_sql,
-                    (cache_root, size, image_id, path, source_signature, int(size_bytes), access_time, now),
+                    (cache_root, size, image_id, path, source_signature, int(size_bytes), access_time, now, recipe),
                 )
                 if size in _tier_byte_totals:
                     _tier_byte_totals[size] += int(size_bytes) - old_bytes

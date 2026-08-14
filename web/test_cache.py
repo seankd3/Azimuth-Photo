@@ -98,7 +98,7 @@ class CacheRouteTests(BackendTestCase):
             )
             conn.execute(
                 thumbnail_cache_entries._insert_entry_sql,
-                (thumbnails.SSD_CACHE_DIR, "sm", image_id, "/tile", "sig-x", 9, 1.0, 2.0),
+                (thumbnails.SSD_CACHE_DIR, "sm", image_id, "/tile", "sig-x", 9, 1.0, 2.0, ""),
             )
             conn.commit()
 
@@ -118,6 +118,44 @@ class CacheRouteTests(BackendTestCase):
         await asyncio.to_thread(thumbnail_cache_entries.stamp_missing_content_hashes)
 
         self.assertEqual(await self._entry_identity(image_id), ("bb" * 16, ""))
+
+    async def test_an_edited_photos_thumbnail_renders_the_edit(self):
+        """The grid tile of an edited photo is the edit.
+
+        Before the develop bridge, thumbnails always decoded the unedited
+        source, so a saved edit never reached the grid — the tile stayed the
+        camera's rendition forever.
+        """
+
+        from PIL import Image as PILImage
+
+        source = await self._source()
+        image_id = await self._image(source["id"], "edited.jpg")
+        original = os.path.join(source["path"], "edited.jpg")
+        PILImage.new("RGB", (64, 48), (118, 121, 119)).save(original, format="JPEG")
+
+        baseline = await asyncio.to_thread(
+            thumbnails._generate_missing_thumbnails_sync, original, "sm", image_id
+        )
+        self.assertTrue(baseline)
+
+        conn = await db.get_db()
+        try:
+            await conn.execute(
+                "INSERT INTO develop_settings (image_id, settings, origin, updated_at) "
+                "VALUES (?, ?, 'user', 123.0)",
+                (image_id, '{"Exposure2012": 2.0}'),
+            )
+            await conn.commit()
+        finally:
+            await conn.close()
+        thumbnails.purge_image_cache([image_id])
+
+        edited = await asyncio.to_thread(
+            thumbnails._generate_missing_thumbnails_sync, original, "sm", image_id
+        )
+        self.assertTrue(edited)
+        self.assertNotEqual(edited, baseline)
 
     async def test_pregen_start_and_stop_flip_cache_worker_state(self):
         started = await self._request("POST", "/api/cache/pregen/start")

@@ -626,6 +626,15 @@ def _upgrade_cached_metadata(paths: BasePaths, source_path: str | os.PathLike[st
     return meta
 
 
+def load_base(paths: BasePaths) -> np.ndarray:
+    """Read a cached base back into linear uint16 pixels."""
+
+    with gzip.open(paths.binary, "rb") as handle:
+        payload = handle.read()
+    rgb, _width, _height = parse_base_payload(payload)
+    return rgb
+
+
 def parse_base_payload(payload: bytes) -> tuple[np.ndarray, int, int]:
     """Parse an uncompressed PABASE1 stream; used by tests and future streams."""
 

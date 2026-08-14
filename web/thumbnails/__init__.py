@@ -852,6 +852,32 @@ def _generate_missing_thumbnails_sync(
     from . import harvest
     import photo_metadata
 
+    # An edited photo's tile is the edit. Render it through Develop's own
+    # pipeline and fall back to the unedited path only when no base exists.
+    if requested_size in THUMB_TIERS:
+        from . import develop_bridge
+
+        edited = develop_bridge.edit_state(image_id)
+        if edited is not None:
+            fingerprint, dev_settings = edited
+            wanted = [requested_size] + (
+                [s for s in THUMB_TIERS if SIZES[s] < SIZES[requested_size]]
+                if include_smaller_tiers
+                else []
+            )
+            rendered = develop_bridge.render_and_store(
+                filepath,
+                image_id,
+                wanted,
+                fingerprint=fingerprint,
+                settings=dev_settings,
+                build_source_signature=_build_source_signature,
+                memory_put=_memory_put,
+                hot=hot,
+            )
+            if rendered is not None:
+                return rendered.get(requested_size, b"")
+
     def _generate(*_args, on_source_loaded=None, source_data=None, **_ignored):
         return generation.generate_missing_thumbnails(
             filepath,
@@ -917,6 +943,33 @@ def _generate_thumbnail_set_sync(
 ) -> dict:
     from . import generation  # deferred: keeps Pillow off boot until thumbnail pixels are requested
     from . import harvest
+
+    # An edited photo's thumb tiers render through Develop's pipeline; the
+    # original (full tier) and hash/metadata sides still take the normal path
+    # below, so pruning the rendered tiers is all this branch does.
+    thumb_wanted = [size for size in size_signatures if size in THUMB_TIERS]
+    if thumb_wanted:
+        from . import develop_bridge
+
+        edited = develop_bridge.edit_state(image_id)
+        if edited is not None:
+            fingerprint, dev_settings = edited
+            rendered = develop_bridge.render_and_store(
+                filepath,
+                image_id,
+                thumb_wanted,
+                fingerprint=fingerprint,
+                settings=dev_settings,
+                build_source_signature=_build_source_signature,
+                memory_put=_memory_put,
+                hot=hot,
+            )
+            if rendered:
+                size_signatures = {
+                    size: signature
+                    for size, signature in size_signatures.items()
+                    if size not in rendered
+                }
 
     def _generate(fp, iid, sigs, **kwargs):
         return generation.generate_thumbnail_set(

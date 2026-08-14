@@ -609,3 +609,34 @@ def develop_default_render(
         asshot_tint=(as_shot or {}).get("tint") if isinstance(as_shot, Mapping) else None,
         color_profile=color or None,
     )
+
+
+def render_edited_thumbnail(
+    image_id: int,
+    source_path: str,
+    settings: Mapping[str, object],
+    *,
+    long_side: int,
+    quality: int,
+) -> bytes:
+    """One edited photo at thumbnail size, exactly as Develop shows it.
+
+    Renders from the cached working base — the same pixels the editor edits —
+    through the same pipeline and geometry, so the grid tile of an edited
+    photo is the edit, not the camera's embedded preview of the unedited
+    frame. Raises RawDecodeError (via ensure_base_cache) when no base can be
+    produced; callers fall back to the unedited pipeline.
+    """
+
+    from features.develop import rawproc
+
+    paths, meta = rawproc.ensure_base_cache(image_id, source_path)
+    linear01 = rawproc.load_base(paths).astype(np.float32) / 65535.0
+    developed = develop_default_render(linear01, meta, settings)
+    developed = apply_geometry(developed, settings, max_px=int(long_side))
+    encoded = np.asarray(np.clip(developed * 255.0 + 0.5, 0, 255), dtype=np.uint8)
+    buffer = io.BytesIO()
+    Image.fromarray(encoded, mode="RGB").save(
+        buffer, format="JPEG", quality=int(np.clip(quality, 1, 100))
+    )
+    return buffer.getvalue()

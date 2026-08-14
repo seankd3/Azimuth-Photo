@@ -6,6 +6,7 @@ from core.catalog_path import catalog_path
 
 import asyncio
 import json
+import logging
 import os
 import time
 from datetime import datetime, timezone
@@ -23,6 +24,8 @@ from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import presets, virtual_copies
 from features.sync import oplog
+
+log = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -528,7 +531,9 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
         finally:
             await connection.close_async(conn, db_path=catalog_path())
 
-    return await connection.run_with_busy_retry(_write)
+    result = await connection.run_with_busy_retry(_write)
+    await _refresh_grid_previews(image_id)
+    return result
 
 
 async def _reset_settings(image_id: int) -> dict[str, Any]:
@@ -579,12 +584,31 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
         )
         await conn.commit()
         await oplog.append_develop(catalog_path(), image_id)
-        return {"settings": snapshot, "origin": origin, "updated_at": now}
+        result = {"settings": snapshot, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
         raise
     finally:
         await connection.close_async(conn, db_path=catalog_path())
+    await _refresh_grid_previews(image_id)
+    return result
+
+
+async def _refresh_grid_previews(image_id: int) -> None:
+    """A saved edit owns its thumbnail.
+
+    Purging the stale tiers makes the next request re-render them through the
+    Develop pipeline (thumbnails/develop_bridge.py), so the grid tile becomes
+    the edit without waiting for any sweep. Best-effort: a failed purge leaves
+    yesterday's tile, which the serve-side recipe check also catches.
+    """
+
+    import thumbnails
+
+    try:
+        await asyncio.to_thread(thumbnails.purge_image_cache, [int(image_id)])
+    except Exception:
+        log.exception("develop save could not refresh previews image_id=%s", image_id)
 
 
 @router.get("/api/develop/{image_id}/base.bin")
