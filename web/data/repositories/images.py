@@ -206,18 +206,40 @@ async def get_images_needing_metadata(
         await connection.close_async(conn, db_path=db_path)
 
 
+async def set_image_dates(
+    db_path: str, image_ids: list[int], *, date_taken: str, date_source: str
+) -> None:
+    """Stamp an authoritative date — e.g. a film roll's delivery day."""
+    if not image_ids:
+        return
+    conn = await connection.open_async(db_path)
+    try:
+        await conn.executemany(
+            "UPDATE images SET date_taken = ?, date_source = ? WHERE id = ?",
+            [(date_taken, date_source, int(image_id)) for image_id in image_ids],
+        )
+        await conn.commit()
+    finally:
+        await connection.close_async(conn, db_path=db_path)
+
+
 async def batch_update_metadata(db_path: str, updates: list[tuple]):
     if not updates:
         return
     conn = await connection.open_async(db_path)
     try:
         await conn.executemany(
+            # A film scan's clock is the scanner's, not the shoot's: the
+            # delivery-day stamp (date_source = 'film_delivery') outranks any
+            # EXIF the metadata scan finds later.
             "UPDATE images SET "
             "date_taken = CASE "
+            "WHEN COALESCE(date_source, '') = 'film_delivery' THEN date_taken "
             "WHEN ? = 'exif' AND ? IS NOT NULL THEN ? "
             "WHEN date_taken IS NULL OR date_taken = '' THEN ? "
             "ELSE date_taken END, "
             "date_source = CASE "
+            "WHEN COALESCE(date_source, '') = 'film_delivery' THEN date_source "
             "WHEN ? = 'exif' AND ? IS NOT NULL THEN 'exif' "
             "WHEN (date_taken IS NULL OR date_taken = '') AND ? IS NOT NULL THEN ? "
             "WHEN (date_source IS NULL OR date_source = '') AND date_taken IS NOT NULL AND date_taken != '' THEN 'exif' "

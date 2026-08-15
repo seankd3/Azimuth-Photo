@@ -458,6 +458,23 @@ class StagedImportTests(BackendTestCase):
                     )
                 batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
                 self.assertEqual(batch["name"], "Alaska Rolls 1 2")
+                # Scan dates are not shoot dates: every frame carries the
+                # roll's delivery day as its date, authoritative over the
+                # scanner clock the EXIF pass would otherwise write.
+                from data import connection as data_conn
+                conn = await data_conn.open_async(db.DB_PATH)
+                try:
+                    dated = await (await conn.execute(
+                        "SELECT date_taken, date_source FROM images "
+                        "WHERE replace(filepath, char(92), '/') LIKE ?",
+                        ("%/Alaska Rolls 1 2/%",),
+                    )).fetchall()
+                finally:
+                    await data_conn.close_async(conn, db_path=db.DB_PATH)
+                self.assertEqual(len(dated), 3)
+                for row in dated:
+                    self.assertEqual(row["date_taken"], f"{day} 12:00:00")
+                    self.assertEqual(row["date_source"], "film_delivery")
                 # "(also an easy way to rename the roll folder)" — a landed
                 # roll renames as one unit: folder, rows, and batch name.
                 old_dir = originals / "Raws" / "Film Scans" / day[:4] / day / "Alaska Rolls 1 2"

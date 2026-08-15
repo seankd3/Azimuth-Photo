@@ -311,6 +311,15 @@ async def batch_update_metadata(updates: list[tuple]):
     cache_events.invalidate_rankings_cache()
 
 
+async def set_image_dates(image_ids: list[int], *, date_taken: str, date_source: str):
+    """Stamp an authoritative date — e.g. a film roll's delivery day."""
+    await image_repository.set_image_dates(
+        DB_PATH, image_ids, date_taken=date_taken, date_source=date_source
+    )
+    _invalidate_filter_options_cache()
+    cache_events.invalidate_rankings_cache()
+
+
 async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
     """Insert image rows, ignoring duplicates."""
     if not rows:

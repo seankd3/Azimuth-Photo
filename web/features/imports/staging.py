@@ -534,23 +534,29 @@ def _destination_directory(job: ImportJob, entry: dict) -> Path:
     )
 
 
+def _film_delivery_day(job: ImportJob, entry: dict) -> str:
+    """The roll's day: the lab's own stamp in the archive name
+    (``…_2026-08-06_2203``), else the import date."""
+    import re
+
+    parts = str(entry.get("rel_path") or "").split("/")
+    derived = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
+    date_match = re.search(r"(?:19|20)\d{2}-\d{2}-\d{2}", derived)
+    return date_match.group(0) if date_match else time.strftime("%Y-%m-%d")
+
+
 def _film_destination_directory(job: ImportJob, entry: dict) -> Path:
     """Scan dates are not shoot dates: one archive/batch lands in one roll
     folder, filed by delivery date — ``Film Scans/<YYYY>/<YYYY-MM-DD>/<roll>/``
-    (the owner's convention, 08-14). The date is the lab's own stamp in the
-    archive name (``…_2026-08-06_2203``) and falls back to the import date;
-    the roll folder is whatever the owner typed at import, or the archive
-    name when they typed nothing.
+    (the owner's convention, 08-14). The roll folder is whatever the owner
+    typed at import, or the archive name when they typed nothing.
     """
-    import re
-
     library_root = originals_root()
     if library_root.name in taxonomy.RAWS_ROOT_NAMES:
         library_root = library_root.parent
     parts = str(entry.get("rel_path") or "").split("/")
     derived = parts[0] if len(parts) > 1 else (job.scan.label or "Film scans")
-    date_match = re.search(r"(?:19|20)\d{2}-\d{2}-\d{2}", derived)
-    day = date_match.group(0) if date_match else time.strftime("%Y-%m-%d")
+    day = _film_delivery_day(job, entry)
     roll = job.roll_name or derived
     return taxonomy.resolve_destination_dir(library_root, taxonomy.DEST_FILM) / day[:4] / day / roll
 
@@ -603,6 +609,15 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
         result["content_hash"],
         source_root=_catalog_source_root_for_destination(destination),
     )
+    if job.scan.film_source:
+        # Scan dates are not shoot dates: the roll's delivery day — the same
+        # day the folder layout files by — is the photo's date, and it
+        # outranks whatever clock the scanner wrote into the EXIF.
+        await db.set_image_dates(
+            [image_id],
+            date_taken=f"{_film_delivery_day(job, entry)} 12:00:00",
+            date_source="film_delivery",
+        )
     job.image_rows.append({"image_id": image_id, "filepath": destination, "original_name": entry["name"]})
     if _removes_source(job):
         await _remove_verified_source(job, entry, destination, int(result["bytes"]))
