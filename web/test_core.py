@@ -25,7 +25,8 @@ class CoreCase(unittest.TestCase):
         with open(os.path.join(os.path.dirname(drives.__file__), "schema.sql"), encoding="utf-8") as handle:
             self.conn.executescript(handle.read())
         self.conn.execute(
-            "CREATE TABLE images (id INTEGER PRIMARY KEY, tail TEXT, file_size INTEGER, vc_of INTEGER)"
+            "CREATE TABLE images (id INTEGER PRIMARY KEY, tail TEXT, file_size INTEGER,"
+            " content_hash TEXT, vc_of INTEGER)"
         )
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -196,6 +197,52 @@ class BackupRefuses(CoreCase):
         shutil.rmtree(self.cold_root)
         with patch.object(drives, "_candidate_roots", return_value=[]):
             self.assertEqual(backup.back_up(self.conn, image), "no record drive attached")
+
+    def test_reclaim_frees_the_working_copy_and_never_the_archive_s(self):
+        image, source = self._queued()
+        backup.back_up(self.conn, image)
+        self.assertEqual(backup.reclaim(self.conn, image), "freed")
+        self.assertFalse(os.path.exists(source))
+        self.assertTrue(os.path.exists(os.path.join(self.cold_root, TAIL.replace("/", os.sep))))
+
+    def test_reclaim_refuses_on_a_stale_copy_row(self):
+        # The row says the archive has it. The disk says otherwise, and the
+        # disk is what a deletion has to answer to.
+        image, source = self._queued()
+        copies.saw(self.conn, image, int(self.cold["id"]))
+        self.conn.commit()
+        self.assertEqual(backup.reclaim(self.conn, image), "not archived")
+        self.assertTrue(os.path.exists(source))
+
+    def test_reclaim_refuses_when_the_two_copies_differ(self):
+        image, source = self._queued()
+        self.write(self.cold_root, body=b"not the same photograph at all")
+        copies.saw(self.conn, image, int(self.cold["id"]))
+        self.conn.commit()
+        self.assertEqual(backup.reclaim(self.conn, image), "copies differ")
+        self.assertTrue(os.path.exists(source))
+
+
+class PuttingAFileDown(CoreCase):
+    def test_put_writes_verifies_and_identifies(self):
+        source = os.path.join(self.tmp, "card.CR3")
+        with open(source, "wb") as handle:
+            handle.write(b"straight-off-the-card")
+        result = photos.put(self.conn, source, self.hot["uuid"], TAIL)
+        self.assertEqual(result["outcome"], "written")
+        self.assertEqual(open(result["path"], "rb").read(), b"straight-off-the-card")
+        self.assertEqual(result["hash"], photos.content_hash(source))
+
+    def test_put_never_overwrites_a_different_photograph(self):
+        source = os.path.join(self.tmp, "card.CR3")
+        with open(source, "wb") as handle:
+            handle.write(b"straight-off-the-card")
+        existing = self.write(self.hot_root, body=b"something already here")
+        self.assertEqual(
+            photos.put(self.conn, source, self.hot["uuid"], TAIL)["outcome"],
+            "different file at that tail",
+        )
+        self.assertEqual(open(existing, "rb").read(), b"something already here")
 
 
 class DecisionsSurvive(CoreCase):

@@ -117,6 +117,56 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
     return "copied"
 
 
+def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
+    """Free the working disk's copy, having just proved the archive's is identical.
+
+    Everything expensive about this function is deliberate. It re-opens both
+    files *now* and compares full digests, because a copy row is a hint written
+    some time ago and a hint may not authorise a deletion. It deletes only from
+    a drive whose `is_record` is 0, so the archive's copy is unreachable from
+    here no matter what a caller passes. And it re-reads the record drive's
+    marker after the digest, so a drive pulled mid-compare cannot be the one
+    that vouched for what we are about to remove.
+
+    A guess may be wrong. A consequence may not.
+    """
+
+    row = conn.execute("SELECT tail FROM images WHERE id = ?", (int(photo_id),)).fetchone()
+    if row is None or not row["tail"]:
+        return "no tail"
+
+    drive = record_drive(conn)
+    if drive is None:
+        return "no record drive attached"
+    archived = drives.path_for(conn, drive["uuid"], row["tail"])
+    if archived is None or not os.path.exists(archived):
+        return "not archived"
+
+    freed = []
+    for holder in copies.drives_holding(conn, photo_id):
+        if int(holder["is_record"]):
+            continue
+        here = drives.path_for(conn, holder["uuid"], holder["tail"] if "tail" in holder.keys() else row["tail"])
+        here = here or drives.path_for(conn, holder["uuid"], row["tail"])
+        if not here or not os.path.exists(here) or os.path.normcase(here) == os.path.normcase(archived):
+            continue
+
+        if digest(here) != digest(archived):
+            return "copies differ"
+        if drives.read_marker(drives.root_of(conn, drive["uuid"]) or "") != drive["uuid"]:
+            return "record drive changed while verifying"
+        if dry_run:
+            return "would free"
+        os.remove(here)
+        copies.forget(conn, photo_id, int(holder["id"]))
+        freed.append(here)
+
+    if not freed:
+        return "nothing to free"
+    conn.commit()
+    return "freed"
+
+
 def back_up_all(conn, *, limit: int | None = None, dry_run: bool = False, on_step=None) -> dict:
     """Work the backup queue. Stops early only if the record drive goes away."""
 

@@ -21,9 +21,96 @@ wrong photograph:
 
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 
 from model import drives
+
+# The identity digest: the first 8 MiB of the file, then its size as eight
+# little-endian bytes. Cheap enough to run on a cold archive drive, and the
+# size suffix is what stops two files that share an 8 MiB header — a roll of
+# film scans, a burst of the same frame — from colliding for free.
+HASH_PREFIX_BYTES = 8 * 1024 * 1024
+HASH_DIGEST_BYTES = 16
+
+
+def content_hash(path: str) -> str:
+    """What photo is this, as far as a cheap read can tell.
+
+    Names candidates and nothing more. Never identity, never permission to
+    delete, and never permission to merge — a merge that drops the loser's
+    decisions breaks the one promise this design makes. When the answer must be
+    load-bearing, `backup.digest` reads every byte instead.
+    """
+
+    size = os.stat(path).st_size
+    digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
+    with open(path, "rb") as handle:
+        digest.update(handle.read(HASH_PREFIX_BYTES))
+    digest.update(int(size).to_bytes(8, byteorder="little", signed=False))
+    return digest.hexdigest()
+
+
+def identify(conn, path: str) -> dict:
+    """What photo is this, and do we already know it?
+
+    Returns the hash and size always, and an `id` when some catalogued photo
+    shares that hash. A caller that finds one has found a *candidate* — the
+    same photo on another drive, most often, but possibly a different frame
+    that shares a header. What it may do with that is add a copy row. What it
+    may never do is merge two rows, because the loser's decisions are the only
+    thing here that cannot be recomputed.
+    """
+
+    digest = content_hash(path)
+    row = conn.execute(
+        "SELECT id FROM images WHERE content_hash = ? AND vc_of IS NULL LIMIT 1", (digest,)
+    ).fetchone()
+    return {"hash": digest, "size": os.stat(path).st_size, "id": row["id"] if row else None}
+
+
+def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
+    """Write a file onto a drive at a tail, then identify it and record the copy.
+
+    Import is this function plus one pure `(date, kind, roll) -> tail`, which is
+    why importing is not a subsystem.
+
+    It never overwrites. A different file already at that tail is a refusal, not
+    a resolution: choosing a `-2` suffix here would hide the fact that the
+    naming rule produced a collision, and the caller is the only thing that
+    knows whether that is expected.
+    """
+
+    target = drives.path_for(conn, drive_uuid, tail)
+    if target is None:
+        return {"outcome": "drive not attached"}
+
+    if os.path.exists(target):
+        if os.path.getsize(target) == os.path.getsize(source) and content_hash(target) == content_hash(source):
+            return {"outcome": "already there", "path": target, **identify(conn, target)}
+        return {"outcome": "different file at that tail", "path": target}
+
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    staging = f"{target}.importing"
+    try:
+        shutil.copy2(source, staging)
+        # Proved before it is visible: a partial copy that took the real name
+        # would be indexed as the photograph, and the original may already be
+        # off the card by then.
+        if content_hash(staging) != content_hash(source):
+            os.remove(staging)
+            return {"outcome": "verify failed"}
+        os.replace(staging, target)
+    except OSError as error:
+        if os.path.exists(staging):
+            try:
+                os.remove(staging)
+            except OSError:
+                pass
+        return {"outcome": f"copy failed: {error}"}
+
+    return {"outcome": "written", "path": target, **identify(conn, target)}
 
 
 def _verified(path: str, expected_size: int | None) -> bool:
