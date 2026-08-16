@@ -1,0 +1,8 @@
+# Measured 2026-08-16 at c9f253c9. One number per gate — see docs/GATES.md.
+# It falls by measurement (`check.py --write`) and rises only by hand, in its
+# own commit. A number that is not the measurement describes a tree that is
+# not there.
+seam 16
+layers 21
+tables 68
+invokes 4
