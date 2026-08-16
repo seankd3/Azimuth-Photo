@@ -232,17 +232,11 @@ async def run_startup(
     from thumbnails import cache_entries
 
     init_db = db.init_db
-    get_filter_options = db.get_filter_options
-    get_date_groups = db.get_date_groups
-    get_catalog_image_counts = db.get_catalog_image_counts
-    get_stats = db.get_stats
     get_ai_status_counts = db.get_ai_status_counts
-    get_visible_orientation_pairing_pool_counts = db.get_visible_orientation_pairing_pool_counts
     get_catalog_summary = db.get_catalog_summary
     build_ai_status = ai_routes.build_ai_status
     build_cache_status = cache_status_service.build_cache_status
     api_folders = catalog_routes.api_folders
-    api_settings = settings_routes.api_settings
     classify_orientations_background = catalog_metadata.classify_orientations_background
     scan_metadata_background = catalog_metadata.scan_metadata_background
 
