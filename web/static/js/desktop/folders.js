@@ -88,6 +88,7 @@ function libraryRoots(list) {
                 online: source.online,
                 reveal_available: folder.reveal_available !== false,
                 total_count: Number(folder.total_count || 0),
+                drives: Array.isArray(folder.drives) ? folder.drives : [],
                 folders: Array.isArray(folder.children) ? folder.children : [],
             });
         }
@@ -412,6 +413,16 @@ function closeFolderMenu() {
     }
 }
 
+function driveMark(node) {
+    const drives = Array.isArray(node.drives) ? node.drives.filter(Boolean) : [];
+    if (!drives.length) return '';
+    // One dot per drive holding photographs under this folder. Deliberately
+    // initials rather than names: it is a reassurance you read at a glance,
+    // not a fact you act on, and the folder is one folder either way.
+    const dots = drives.map((name) => `<i class="folder-drive-dot" title="${esc(name)}">${esc(String(name).slice(0, 1))}</i>`).join('');
+    return `<span class="folder-drives" title="${esc(drives.join(' + '))}">${dots}</span>`;
+}
+
 function renderFolderNode(node, level, query = '') {
     if (query && !nodeMatches(node, query)) return '';
     const children = Array.isArray(node.children) ? node.children : [];
@@ -425,6 +436,7 @@ function renderFolderNode(node, level, query = '') {
     const row = `<div class="folder-row${active}${isOpen ? ' open' : ''}" role="treeitem" aria-selected="${active ? 'true' : 'false'}" aria-expanded="${hasChildren ? (isOpen ? 'true' : 'false') : 'false'}" data-folder-path="${esc(node.path)}" style="--folder-level:${level}">`
         + `<button class="folder-main" type="button" data-folder-select="${esc(node.path)}" title="${esc(label)}">`
         + `<span class="folder-label" title="${esc(label)}">${esc(label)}</span>`
+        + driveMark(node)
         + `<span class="folder-count">${fmt(node.total_count)}</span></button>`
         + chevron
         + '</div>'
