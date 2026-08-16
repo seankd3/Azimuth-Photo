@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Azimuth Photo server entrypoint for frozen binaries and source/Docker runs.
+"""Azimuth Photo server entrypoint.
 
-Honors all existing AZIMUTH_* environment variables. With none set it
-uses platform-default data dirs (see web/core/runtime_paths.py) and serves
-on 127.0.0.1:8000. Docker/compose should set AZIMUTH_HOST=0.0.0.0 and
-AZIMUTH_HOME=/data.
+Azimuth is one person's app on one machine, so it binds loopback and only
+loopback. That is not a default -- there is no flag, no environment variable
+and no argument that can make it listen outward, which is what allows the
+whole authentication layer to not exist. Anything reachable from another
+machine would need it back.
 """
 
 from __future__ import annotations
@@ -35,8 +36,7 @@ def ensure_sys_path() -> Path:
     return web
 
 
-def _default_host() -> str:
-    return os.environ.get("AZIMUTH_HOST") or "127.0.0.1"
+HOST = "127.0.0.1"
 
 
 def _default_port() -> int:
@@ -50,12 +50,7 @@ def _default_port() -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="azimuth-server",
-        description="Azimuth Photo library server (hub / standalone / satellite).",
-    )
-    parser.add_argument(
-        "--host",
-        default=None,
-        help="Bind address (default: AZIMUTH_HOST or 127.0.0.1)",
+        description="Azimuth Photo library server.",
     )
     parser.add_argument(
         "--port",
@@ -68,7 +63,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    host = args.host or _default_host()
+    host = HOST
     port = args.port if args.port is not None else _default_port()
 
     # Keep env and CLI aligned so runtime_paths / status probes see the same values.

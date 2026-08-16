@@ -9,8 +9,6 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from core import background as background_runtime
 from core import cache_events
-from core.browser_origin import BrowserOriginGuardMiddleware
-from core.owner_auth import OwnerAuthMiddleware
 from core.static_assets import StaticAssetContext, warm_templates
 
 
@@ -133,8 +131,6 @@ def create_base_app(*, base_dir: str | None = None, title: str = "Azimuth Photo"
     app = FastAPI(title=title)
     app.add_middleware(SelectiveGZipMiddleware, minimum_size=1000)
     app.add_middleware(StaticCacheHeadersMiddleware, max_age=300)
-    app.add_middleware(BrowserOriginGuardMiddleware)
-    app.add_middleware(OwnerAuthMiddleware)
     app.mount("/static", StaticFiles(directory=os.path.join(root, "static")), name="static")
     return app
 

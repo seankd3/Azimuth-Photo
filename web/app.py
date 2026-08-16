@@ -16,7 +16,6 @@ from core.app_factory import (
 )
 from core.static_assets import StaticAssetContext
 from features.ai import routes as ai_routes
-from features.auth import routes as auth_routes
 from features.backup import routes as cloud_backup_routes
 from features.cache import routes as cache_routes
 from features.captions import routes as caption_routes
@@ -53,14 +52,12 @@ app.state.azimuth_shell = shell
 cache_events.register_with_db()
 
 page_routes.configure(templates=templates, template_context=shell.template_context)
-auth_routes.configure(templates=templates)
 dev_routes.configure(
     started_at=shell.static_assets.started_at, git_commit=shell.static_assets.git_commit
 )
 
 for router in (
     page_routes.router,
-    auth_routes.router,
     people_routes.router,
     dev_routes.router,
     catalog_routes.router,
