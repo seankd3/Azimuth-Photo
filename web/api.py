@@ -70,13 +70,14 @@ async def thumb(size: str, image_id: int):
     if row is None:
         return Response(status_code=404)
 
-    recipe = {"size": longest, "edits": None}
+    turn = int(decisions.latest(conn, row["hash"], decisions.ROTATE) or 0) if row["hash"] else 0
+    recipe = {"size": longest, "edits": None, "rotate": turn}
     if row["hash"]:
         entry = cache.get(conn, row["hash"], "tile", recipe)
         body = tiles.read(entry) if entry and entry["state"] == cache.READY else None
         if body:
             return Response(content=body, media_type="image/jpeg",
-                            headers={"ETag": f'"{row["hash"]}-{longest}"',
+                            headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
                                      "Cache-Control": "private, max-age=31536000"})
         if entry and entry["state"] == cache.FAILED:
             return Response(status_code=410)  # unreadable, and we know why
@@ -88,18 +89,19 @@ async def thumb(size: str, image_id: int):
     if not row["hash"]:
         return Response(status_code=204)  # preparing: identity is owed first
 
-    made = await asyncio.to_thread(_make_tile, row["hash"], longest, source)
+    made = await asyncio.to_thread(_make_tile, row["hash"], longest, source, turn)
     if made is None:
         return Response(status_code=410)
     return Response(content=made, media_type="image/jpeg",
-                    headers={"ETag": f'"{row["hash"]}-{longest}"',
+                    headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
                              "Cache-Control": "private, max-age=31536000"})
 
 
-def _make_tile(hash: str, longest: int, source: str) -> bytes | None:
+def _make_tile(hash: str, longest: int, source: str, turn: int = 0) -> bytes | None:
     conn = _writer()
     try:
-        entry = cache.make(conn, hash, "tile", source, {"size": longest, "edits": None})
+        entry = cache.make(conn, hash, "tile", source,
+                           {"size": longest, "edits": None, "rotate": turn})
         return tiles.read(entry) if entry else None
     finally:
         connection.close_sync(conn, db_path=catalog_path())
@@ -633,6 +635,36 @@ async def clear_cache():
     conn = _writer()
     try:
         return await asyncio.to_thread(tiles.clear, conn)
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.post("/api/image/{image_id}/rotate")
+async def rotate(image_id: int, degrees: int = 90, absolute: bool = False):
+    """Turn a photograph that was filed sideways.
+
+    A rotation is a decision, not an edit and not a file change. The lab that
+    scans a portrait frame into a landscape TIFF writes no orientation tag, so
+    no renderer can guess it and every one gets it "wrong" the same honest way
+    — the correction is something the owner knows and the file does not.
+
+    Being a decision it goes in the log, survives the row being rebuilt, and
+    rides the same path Lightroom's own rotations will when they are read from
+    XMP. The original file is never touched.
+    """
+
+    conn = _writer()
+    try:
+        row = conn.execute(
+            "SELECT content_hash AS hash FROM images WHERE id = ?", (image_id,)
+        ).fetchone()
+        if row is None or not row["hash"]:
+            return {"ok": False, "reason": "this photo has no identity yet"}
+        was = int(decisions.latest(conn, row["hash"], decisions.ROTATE) or 0)
+        now = int(degrees) % 360 if absolute else (was + int(degrees)) % 360
+        decisions.decide(conn, row["hash"], decisions.ROTATE, now)
+        conn.commit()
+        return {"ok": True, "rotate": now, "was": was}
     finally:
         connection.close_sync(conn, db_path=catalog_path())
 

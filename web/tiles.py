@@ -47,15 +47,20 @@ def configure(settings: dict | None = None) -> None:
         CACHE_DIR = str(settings["thumb_cache_dir"])
 
 
-def path_for(hash: str, size: int) -> str:
-    """`<dir>/<ab>/<hash>-<size>.jpg` — named by what it shows, never by where
-    the photograph is or which row it was."""
+def path_for(hash: str, size: int, rotate: int = 0) -> str:
+    """`<dir>/<ab>/<hash>-<size>[r90].jpg` — named by what it shows.
 
-    return os.path.join(CACHE_DIR, str(hash)[:2], f"{hash}-{size}.jpg")
+    The rotation is in the name because it is in the recipe: a photograph the
+    owner has turned is a different picture at the same size, and the old tile
+    stays valid for anyone who has not turned it.
+    """
+
+    turn = f"r{int(rotate) % 360}" if int(rotate) % 360 else ""
+    return os.path.join(CACHE_DIR, str(hash)[:2], f"{hash}-{size}{turn}.jpg")
 
 
 def make_tile(source: str, hash: str, size: int = render.GRID,
-              edits: str | None = None) -> cache.Made:
+              edits: str | None = None, rotate: int = 0) -> cache.Made:
     """Render one tile to disk and report where it went.
 
     Written under a temporary name and renamed, so a tile is either absent or
@@ -63,8 +68,8 @@ def make_tile(source: str, hash: str, size: int = render.GRID,
     Same rule `put()` uses for photographs, for the same reason.
     """
 
-    body = render.render(source, size, None)
-    target = path_for(hash, size)
+    body = render.render(source, size, None, rotate=rotate)
+    target = path_for(hash, size, rotate)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     staging = f"{target}.writing"
     with open(staging, "wb") as handle:
@@ -76,7 +81,7 @@ def make_tile(source: str, hash: str, size: int = render.GRID,
 TILE = cache.register(cache.Kind(
     name="tile",
     compute=make_tile,
-    params=("size", "edits"),
+    params=("size", "edits", "rotate"),
     cost=0.4,
     wants="1",
 ))

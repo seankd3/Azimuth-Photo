@@ -191,14 +191,24 @@ def encode(image: Image.Image, quality: int = QUALITY) -> bytes:
     return out.getvalue()
 
 
-def render(source: str, size: int = GRID, edits: dict | None = None) -> bytes:
+def render(source: str, size: int = GRID, edits: dict | None = None,
+           rotate: int = 0) -> bytes:
     """One photograph, at one size, with one set of edits. JPEG bytes.
 
     The whole surface. Grid asks for GRID, loupe for LOUPE, export for FULL,
     and Develop asks for whichever it is showing — same code, same pixels.
+
+    `rotate` is the owner's correction for a file that is filed sideways — a
+    lab that scans a portrait frame into a landscape TIFF and writes no
+    orientation tag, which no renderer can guess and every renderer therefore
+    gets "wrong" in the same honest way. It is applied after decode and before
+    the resize, so the tile is the right shape rather than a rotated crop.
     """
 
     image = decode(source, size)
+    if rotate % 360:
+        # PIL rotates counter-clockwise; the owner means clockwise.
+        image = image.rotate(-int(rotate) % 360, expand=True)
     if edits:
         from develop import apply_edits  # imported late: the grid never needs it
 
