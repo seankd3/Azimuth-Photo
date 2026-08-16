@@ -37,6 +37,7 @@ import rank
 import render
 import tiles
 import work
+import xmp
 from core.catalog_path import catalog_path
 from data import connection
 from model import cache, decisions, photos
@@ -703,6 +704,49 @@ async def rotate_folder(folder: str, degrees: int = 90, absolute: bool = True):
         conn.commit()
         return {"ok": True, "folder": folder, "photos": len(rows),
                 "turned": turned, "rotate": int(degrees) % 360}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.post("/api/folder/read-sidecars")
+async def read_sidecars(folder: str = "", limit: int = 5000):
+    """Take in what another application wrote beside these photographs.
+
+    Lightroom calls this Read Metadata from Files, and it means the same thing
+    here: stars, colour labels and orientation written by Lightroom, darktable
+    or Bridge are decisions, so they join the log with the sidecar's own
+    timestamp.
+
+    That timestamp is the whole precedence rule. A star you set here yesterday
+    beats a sidecar written last week; a sidecar written this morning beats a
+    star you set last year. Nothing needs a merge strategy because the log is
+    already ordered, and `latest()` was always going to answer this correctly.
+    """
+
+    conn = _writer()
+    try:
+        args: list = []
+        where = "i.content_hash IS NOT NULL AND i.tail IS NOT NULL"
+        if folder:
+            prefix = str(folder).replace("\\", "/").strip("/") + "/"
+            where += " AND substr(i.tail, 1, ?) = ?"
+            args += [len(prefix), prefix]
+        rows = conn.execute(
+            f"SELECT i.id, i.tail, i.file_size FROM images i WHERE {where} LIMIT ?",
+            (*args, int(limit)),
+        ).fetchall()
+
+        read = found = 0
+        for row in rows:
+            source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+            if source is None:
+                continue
+            read += 1
+            if xmp.adopt(conn, row["id"], source):
+                found += 1
+        conn.commit()
+        return {"ok": True, "folder": folder or "everything",
+                "photographs": len(rows), "readable": read, "with sidecars": found}
     finally:
         connection.close_sync(conn, db_path=catalog_path())
 
