@@ -8,7 +8,6 @@ import uuid
 
 from date_inference import infer_image_date
 from data.repositories import catalog as catalog_repository
-from data.people_schema import PEOPLE_QUERY_SCHEMA
 from core.path_groups import safe_commonpath, safe_relpath
 
 log = logging.getLogger(__name__)
@@ -965,7 +964,9 @@ CREATE INDEX IF NOT EXISTS idx_image_checksums_checked
 ON image_checksums(checked_at);
 """
 
-SCHEMA += PEOPLE_QUERY_SCHEMA
+# The people tables are no longer created. They held zero rows, the feature
+# they backed is gone, and a fresh install should not inherit six empty
+# tables and their indexes. Existing catalogs keep theirs, unused.
 
 PRE_SCHEMA_CATALOG_SOURCES_DDL = (
     "CREATE TABLE IF NOT EXISTS catalog_sources ("

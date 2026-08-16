@@ -12,7 +12,6 @@ from core.search_fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_
 from core.search_planning import plan_search
 from data.repositories import embeddings as embedding_repository
 from data.repositories import images as image_repository
-from data.repositories import people as people_repository
 from data.repositories import rankings as ranking_repository
 
 
@@ -394,22 +393,21 @@ async def resolve_library_constraints(
     people: str = "",
     deep: bool = False,
     resolve_text_search,
-    parse_people_ids,
-    get_people_image_id_filter,
 ) -> dict:
-    """Resolve whole-image text search plus People membership as image ID constraints."""
+    """Resolve whole-image text search as an image ID constraint.
+
+    People used to be the other half of this, threaded in as two injected
+    functions so that this module would not import the people repository. With
+    `people` and `face_detections` holding zero rows the branch could only ever
+    return early, so both the injection and the thing it was avoiding are gone.
+
+    `people` is still accepted and still answered, because the UI sends it. It
+    simply never narrows anything, which is the truth.
+    """
 
     search = await resolve_text_search(q, deep=deep)
-    people_ids = parse_people_ids(people)
-    if not people_ids:
-        search["people_ids"] = []
-        search["people_active"] = False
-        return search
-
-    people_filter = await get_people_image_id_filter(people_ids)
-    search["id_filter"] = intersect_image_id_filters(search.get("id_filter"), people_filter)
-    search["people_ids"] = list(people_ids)
-    search["people_active"] = True
+    search["people_ids"] = []
+    search["people_active"] = False
     return search
 
 
@@ -425,8 +423,4 @@ async def resolve_configured_library_constraints(
         people=people,
         deep=deep,
         resolve_text_search=resolve_text_search or resolve_configured_text_search,
-        parse_people_ids=people_repository.parse_people_ids,
-        get_people_image_id_filter=partial(
-            people_repository.get_people_image_id_filter, catalog_path()
-        ),
     )

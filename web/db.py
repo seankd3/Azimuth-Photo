@@ -21,7 +21,6 @@ from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
 from data.repositories import metadata_search as metadata_search_repository
-from data.repositories import people as people_repository
 from data.repositories import ratings as rating_repository
 from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
@@ -563,19 +562,6 @@ async def undo_last_comparison():
     return result
 
 
-def _invalidate_people_dependent_caches():
-    cache_events.invalidate_people_dependent_caches(
-        filter_options_invalidator=_invalidate_filter_options_cache,
-    )
-
-
-async def refresh_people_membership(person_ids: tuple[int, ...] | None = None) -> None:
-    await people_repository.refresh_people_membership(DB_PATH, person_ids)
-    _invalidate_people_dependent_caches()
-
-
-async def get_people_image_id_filter(person_ids: tuple[int, ...] | str) -> set[int] | None:
-    return await people_repository.get_people_image_id_filter(DB_PATH, person_ids)
 
 
 async def store_face_scan_result(
