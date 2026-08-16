@@ -505,6 +505,37 @@ need their routes reduced to the empty answers they already give, and their
 machinery deleted. Only the UI's expectations are load-bearing, and the UI is
 already rendering nothing for all of them.
 
+**Three of them are not actually empty, and checking first is why.** Captured
+from the running app rather than assumed:
+
+- **`/api/collections/suggestions` generates real content** — shoots derived
+  from the library, not stored rows. `suggestions.py` (1,250) is a working
+  feature and stays until it is rebuilt as a query.
+- **`/api/keywords` returns 74 real keywords.** They are decisions, already in
+  the log.
+- **`/api/stacks/identical/*` is duplicate detection over content hashes**, and
+  works. Only the *stack* tables are empty; the finder is live and its
+  replacement is `api.duplicates`.
+
+The genuinely inert routes, with the exact shapes their replacements must
+return, so this does not need re-deriving:
+
+```
+/api/collections/tree      {"nodes": [], "links": [], "root_ids": []}
+/api/user-collections      {"collections": []}
+/api/saved-views           {"views": []}
+/api/tags                  {"tags": []}
+/api/stacks                {"stacks": [], "total": 0, "rebuild_status": {...idle}}
+/api/stacks/representatives {"representatives": {}}
+/api/people                {"sections": {most_seen, named_people, needs_review,
+                            other_faces}, "counts": {...}, "status": {...}}
+```
+
+`/api/people/status` reports `available: false` — insightface and onnxruntime
+are not installed — so people is not a subsystem here at all. In the core's
+terms it is a **cache kind whose `here()` is false**: owed work this machine
+cannot do, which records nothing rather than a failure.
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
