@@ -90,3 +90,94 @@ def first_labelled(conn, image_id: int, label: str):
 
     found = [e for e in entries(conn, image_id) if e["label"] == label]
     return found[-1]["settings"] if found else None
+
+
+# ---------------------------------------------------------------------------
+# The async half. Every caller is inside an open aiosqlite transaction, so
+# these take that connection rather than opening one: a second connection
+# would not see the uncommitted settings row it is recording history for, and
+# on Windows would sit behind its write lock.
+
+
+async def record_async(conn, image_id: int, settings_json: str, label: str = "") -> bool:
+    """Note an edit on the caller's own connection and transaction.
+
+    `at` is the moment of the decision, taken here. The old table stored a text
+    timestamp its callers formatted; converting those at seventeen call sites
+    would be seventeen chances to disagree about a format, and the honest value
+    is simply now.
+    """
+
+    import json
+    import time
+
+    cursor = await conn.execute("SELECT content_hash FROM images WHERE id = ?", (int(image_id),))
+    row = await cursor.fetchone()
+    if not row or not row["content_hash"]:
+        return False
+    try:
+        settings = json.loads(settings_json) if isinstance(settings_json, str) else settings_json
+    except (TypeError, ValueError):
+        settings = settings_json
+    await conn.execute(
+        "INSERT INTO decisions(subject, family, value, at) VALUES (?, ?, ?, ?)",
+        (row["content_hash"], "develop",
+         json.dumps({"settings": settings, "label": label or ""}), time.time()),
+    )
+    return True
+
+
+async def entries_async(conn, image_id: int) -> list[dict]:
+    """One photograph's history, newest first, snapshots pinned above edits."""
+
+    import json
+
+    cursor = await conn.execute("SELECT content_hash FROM images WHERE id = ?", (int(image_id),))
+    row = await cursor.fetchone()
+    if not row or not row["content_hash"]:
+        return []
+
+    cursor = await conn.execute(
+        "SELECT id, value, at FROM decisions WHERE subject = ? AND family = 'develop' "
+        "ORDER BY at DESC, id DESC LIMIT ?",
+        (row["content_hash"], EDIT_LIMIT + SNAPSHOT_LIMIT),
+    )
+    edits, snaps = [], []
+    for record in await cursor.fetchall():
+        try:
+            value = json.loads(record["value"]) or {}
+        except (TypeError, ValueError):
+            value = {}
+        if not isinstance(value, dict):
+            value = {"settings": value}
+        entry = {
+            "id": record["id"],
+            "settings": value.get("settings"),
+            "label": value.get("label") or "",
+            "created_at": record["at"],
+        }
+        lane = snaps if entry["label"].startswith(SNAPSHOT_PREFIX) else edits
+        if len(lane) < (SNAPSHOT_LIMIT if lane is snaps else EDIT_LIMIT):
+            lane.append(entry)
+    return snaps + edits
+
+
+async def forget_snapshot(conn, image_id: int, entry_id: int) -> bool:
+    """Drop a named snapshot.
+
+    The one place the log is written to rather than appended, and it is
+    deliberate: a snapshot is a bookmark the owner placed, so removing it is
+    removing a bookmark rather than rewriting what happened. The edit it named
+    stays in the history either way.
+    """
+
+    cursor = await conn.execute("SELECT content_hash FROM images WHERE id = ?", (int(image_id),))
+    row = await cursor.fetchone()
+    if not row or not row["content_hash"]:
+        return False
+    await conn.execute(
+        "DELETE FROM decisions WHERE id = ? AND subject = ? AND family = 'develop' "
+        "AND value LIKE '%\"label\": \"Snapshot:%'",
+        (int(entry_id), row["content_hash"]),
+    )
+    return True
