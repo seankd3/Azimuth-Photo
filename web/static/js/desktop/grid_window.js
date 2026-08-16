@@ -1,3 +1,4 @@
+import { photoAspect } from '../lib.js';
 import { viewState } from './state.js';
 
 const chunks = [];
@@ -62,12 +63,7 @@ function createChunk(startIndex, images) {
         el: document.createElement('div'),
         start: Number(startIndex) || 0,
         count: (images || []).length,
-        aspects: (images || []).map((image) => {
-            const ratio = Number(image?.aspect_ratio) || (Number(image?.width) && Number(image?.height)
-                ? Number(image.width) / Number(image.height)
-                : 1.5);
-            return Math.max(.45, Math.min(3.8, ratio));
-        }),
+        aspects: (images || []).map((image) => photoAspect(image)),
         height: 0,
         live: true,
     };

@@ -22,9 +22,26 @@ export function formatCount(value) {
     return Number(value || 0).toLocaleString('en-US');
 }
 
-export function photoAspect(image) {
-    const ratio = Number(image?.aspect_ratio) || (Number(image?.width) && Number(image?.height) ? Number(image.width) / Number(image.height) : 1.5);
-    return Math.max(.45, Math.min(3.8, ratio));
+// The shape of a photograph, and the only place that question is answered.
+//
+// **Measured beats remembered.** `aspect_ratio` is a stored derivation of two
+// columns in the same row, written once with COALESCE and never updated, so
+// wherever it disagrees with the dimensions it is the older value -- 12,127
+// photographs in this catalog, every one a cell the wrong shape for its tile.
+// Dimensions are re-read whenever the file changes; this is not. It stays only
+// as the answer for the 37,260 photographs whose dimensions have not been read
+// yet, which is the one thing it is still good for.
+export function photoShape(image) {
+    const width = Number(image?.width);
+    const height = Number(image?.height);
+    if (width > 0 && height > 0) return width / height;
+    const remembered = Number(image?.aspect_ratio);
+    return remembered > 0 ? remembered : 1.5;
+}
+
+// The clamp is a layout choice and belongs to the caller; the shape does not.
+export function photoAspect(image, min = .45, max = 3.8) {
+    return Math.max(min, Math.min(max, photoShape(image)));
 }
 
 export function bytes(value) {

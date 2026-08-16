@@ -130,9 +130,12 @@ function openCluster(index, pin) {
     pop.innerHTML = `<div class="mp-head">${fmt(item.markers.length)} photo${item.markers.length === 1 ? '' : 's'} here</div>`
         + '<div class="mp-previews">'
         + item.markers.slice(0, 9).map((marker) => (
-            `<button class="mp-preview" data-id="${marker.id}">${marker.preview_ready !== false && marker.thumb_url
-                ? `<img src="${esc(marker.thumb_url)}" loading="lazy" decoding="async" alt="">`
-                : `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`}<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
+            // `/api/map/markers` returns id, lat and lon — a marker has never
+            // carried a thumbnail or a filename, so the image branch here could
+            // never run. The pin is what a marker actually has to show.
+            `<button class="mp-preview" data-id="${marker.id}">`
+            + `<i class="map-thumb-neutral" aria-hidden="true">${icon('map-pin')}</i>`
+            + `<span>${esc(marker.filename || `Image ${marker.id}`)}</span></button>`
         )).join('')
         + '</div><button class="mp-open-grid" data-open-grid type="button">Open in Grid</button>';
     pop.style.left = `${Math.min(window.innerWidth - 220, rect.left)}px`;

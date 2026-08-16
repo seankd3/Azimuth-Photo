@@ -40,8 +40,8 @@ class ImageHelperTests(unittest.TestCase):
         base.update(overrides)
         return base
 
-    def test_image_card_defaults_and_thumb_url(self):
-        card = helpers.image_card({"id": 7, "filename": "seven.jpg"}, "md")
+    def test_image_card_defaults_and_carries_identity(self):
+        card = helpers.image_card({"id": 7, "filename": "seven.jpg"})
 
         self.assertEqual(card["id"], 7)
         self.assertEqual(card["filename"], "seven.jpg")
@@ -51,7 +51,12 @@ class ImageHelperTests(unittest.TestCase):
         self.assertEqual(card["status"], "kept")
         self.assertEqual(card["flag"], "unflagged")
         self.assertEqual(card["aspect_ratio"], 1.5)
-        self.assertEqual(card["thumb_url"], "/api/thumb/md/7")
+        # No address. A tile URL has to carry the photograph's identity or a
+        # browser goes on showing the picture it cached, and the server cannot
+        # build that -- only the client knows the rotation it is displaying.
+        # What the card owes it is the identity to build one from.
+        self.assertNotIn("thumb_url", card)
+        self.assertIn("hash", card)
         self.assertIn("created_at", card)
         self.assertNotIn("similarity", card)
         self.assertNotIn("date_group", card)
@@ -59,7 +64,6 @@ class ImageHelperTests(unittest.TestCase):
     def test_image_card_contextual_similarity_and_date_group(self):
         card = helpers.image_card(
             self.image(3, elo=1321.25),
-            "sm",
             similarity=0.987654,
             date_group="2024-05",
         )
@@ -77,13 +81,11 @@ class ImageHelperTests(unittest.TestCase):
         self.assertEqual(
             helpers.image_card(
                 image,
-                "md",
                 similarity=0.812345,
                 date_group="2024-05",
             ),
             response_helpers.image_card(
                 image,
-                "md",
                 similarity=0.812345,
                 date_group="2024-05",
             ),

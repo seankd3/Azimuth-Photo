@@ -92,7 +92,7 @@ def _folder(filepath: str | None, source_path: str | None = None) -> str:
 
 def _member_card(row) -> dict:
     data = dict(row)
-    card = app_helpers.image_card(data, "sm")
+    card = app_helpers.image_card(data)
     card["folder"] = _folder(data.get("filepath"), data.get("source_path"))
     if "score" in data:
         card["score"] = data.get("score")

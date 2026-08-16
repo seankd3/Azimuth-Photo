@@ -120,11 +120,13 @@ async def thumb(size: str, image_id: int, r: int = 0, v: str = "", request: Requ
 
     turn = int(decisions.latest(conn, row["hash"], decisions.ROTATE) or 0) if row["hash"] else 0
     recipe = {"size": longest, "edits": None, "rotate": turn}
+    # What makes this tile that tile, spelled once: the bytes, the size, the
+    # turn. It is the ETag, and it is what `v` in the URL is a prefix of.
+    tag = f'"{row["hash"]}-{longest}-{turn}"'
     if row["hash"]:
         entry = cache.get(conn, row["hash"], "tile", recipe)
         body = tiles.read(entry) if entry and entry["state"] == cache.READY else None
         if body:
-            tag = f'"{row["hash"]}-{longest}-{turn}"'
             if request is not None and request.headers.get("if-none-match") == tag:
                 # Unchanged, so send nothing: the browser asked, and the answer
                 # is 304 rather than 300 KB.
@@ -144,8 +146,7 @@ async def thumb(size: str, image_id: int, r: int = 0, v: str = "", request: Requ
     made = await asyncio.to_thread(_make_tile, row["hash"], longest, source, turn)
     if made is None:
         return Response(status_code=410)
-    return Response(content=made, media_type="image/jpeg",
-                    headers=_tile_headers(f'"{row["hash"]}-{longest}-{turn}"', bool(v)))
+    return Response(content=made, media_type="image/jpeg", headers=_tile_headers(tag, bool(v)))
 
 
 def _make_tile(hash: str, longest: int, source: str, turn: int = 0) -> bytes | None:

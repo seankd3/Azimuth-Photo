@@ -31,7 +31,6 @@ def _rounded_elo(value) -> float:
 
 def image_card(
     image: dict,
-    thumb_size: str = "sm",
     *,
     elo_value=_MISSING,
     similarity=_MISSING,
@@ -58,7 +57,10 @@ def image_card(
         "has_caption": bool(_get(image, "has_caption", False)),
         "caption_tags": list(_get(image, "caption_tags", []) or []),
         **metadata_payload(image),
-        "thumb_url": f"/api/thumb/{thumb_size}/{image_id}",
+        # No `thumb_url`. The address has to carry the photograph's identity or
+        # a browser keeps showing the picture it cached, and the server cannot
+        # build that: only the client knows the rotation it is displaying. One
+        # builder, in `previews.js`, is the whole of it.
     }
     if similarity is not _MISSING:
         card["similarity"] = None if similarity is None else round(_as_float(similarity, 0.0), 4)

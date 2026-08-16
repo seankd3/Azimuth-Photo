@@ -552,7 +552,7 @@ function render() {
         setImageMetrics({ focus });
     };
     // preview_ready exception: opening Loupe intentionally uses its progressive proxy-to-full loader.
-    image.src = img.thumb_url || thumbUrl('sm', img.id);
+    image.src = previewThumbUrl(img, 'sm') || thumbUrl('sm', img.id);
     upgradeStageToMedium(img, token);
     const size = imageSizeFromMetadata(img, image);
     naturalWidth = size.width;

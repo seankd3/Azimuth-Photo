@@ -169,7 +169,6 @@ async def suggestions(conn, *, stack_ids: list[int] | None = None, cache_root: s
                 "taste_elo": round(float(taste_scores[int(member["image_id"])]), 3) if int(member["image_id"]) in taste_scores else None,
                 "blended_score": score,
                 "preview_ready": True,
-                "thumb_url": f"/api/thumb/sm/{int(member['image_id'])}",
             })
         serialized_members.sort(key=lambda item: (-item["blended_score"], -item["quality_score"], item["id"]))
         serialized_members[0]["suggested_pick"] = True

@@ -596,7 +596,7 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
         )
         images = []
         for row in await cursor.fetchall():
-            card = app_helpers.image_card(dict(row), "sm")
+            card = app_helpers.image_card(dict(row))
             card["trashed_at"] = row["trashed_at"]
             card["file_size"] = row["file_size"]
             card["pending_hub"] = bool(row["trash_pending_hub"])

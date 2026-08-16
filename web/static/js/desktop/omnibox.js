@@ -1,4 +1,4 @@
-import { esc, formatCount as fmt } from '../lib.js';
+import { esc, formatCount as fmt, photoAspect } from '../lib.js';
 import {
     getFilterOptions, getFolders, getPeople, getRankings, getTags, listCollections, previewThumbUrl, thumbUrl,
 } from './api.js';
@@ -125,10 +125,7 @@ function highlight(value, term) {
     return `${esc(text.slice(0, index))}<mark>${esc(text.slice(index, index + cleanTerm.length))}</mark>${esc(text.slice(index + cleanTerm.length))}`;
 }
 
-function aspect(img) {
-    const ar = Number(img?.aspect_ratio) || (Number(img?.width) && Number(img?.height) ? Number(img.width) / Number(img.height) : 1.5);
-    return Math.max(.65, Math.min(2.1, ar));
-}
+const aspect = (img) => photoAspect(img, .65, 2.1);
 
 function activeToken(input) {
     const raw = String(input || '');

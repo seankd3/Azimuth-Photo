@@ -5,7 +5,7 @@ import {
     compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl,
 } from './api.js';
 import { showToast } from './toast.js';
-import { escapeHtml as esc } from '../lib.js';
+import { escapeHtml as esc, photoAspect } from '../lib.js';
 
 const MODE_KEY = 'pa_d_refine_mode';
 const SIZE_KEY = 'pa_d_refine_size';
@@ -271,11 +271,9 @@ function renderSet() {
 const SIZING_ASPECT_MIN = 0.4;
 const SIZING_ASPECT_MAX = 2.6;
 
-function sizingAspect(img) {
-    const raw = Number(img && img.aspect_ratio);
-    if (!Number.isFinite(raw) || raw <= 0) return 1;
-    return Math.min(SIZING_ASPECT_MAX, Math.max(SIZING_ASPECT_MIN, raw));
-}
+// Was the only one that never consulted the dimensions, so a photograph with
+// no stored ratio laid out square regardless of its actual shape.
+const sizingAspect = (img) => photoAspect(img, SIZING_ASPECT_MIN, SIZING_ASPECT_MAX);
 
 function layoutEqualArea() {
     const stage = document.getElementById('refine-stage');
