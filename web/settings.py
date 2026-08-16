@@ -5,7 +5,6 @@ import threading
 
 from core.runtime_paths import resolve_runtime_paths
 from core import env_names
-from archive import role
 
 WEB_DIR = os.path.dirname(__file__)
 SETTINGS_PATH = resolve_runtime_paths().settings_file
@@ -301,25 +300,16 @@ def _system_memory_gb() -> float | None:
 def default_memory_cache_gb() -> float:
     """Automatic RAM thumb-cache size from detected hardware.
 
-    Satellite: min(25% of total RAM, 8GB), floor 512MB.
-    Hub: modest host_profile cache so small boxes stay calm and big ones
-    keep more of the working set hot.
+    A modest host_profile cache, so small boxes stay calm and big ones keep more
+    of the working set hot.
     """
 
     try:
-        if not role.works_in_someone_elses_archive():
-            try:
-                from core.host_profile import detect_host_profile
+        from core.host_profile import detect_host_profile
 
-                return detect_host_profile().hub_memory_cache_gb()
-            except Exception:
-                return 0.5
+        return detect_host_profile().hub_memory_cache_gb()
     except Exception:
         return 0.5
-    total = _system_memory_gb()
-    if total is None or total <= 0:
-        return 0.5
-    return max(0.5, min(float(total) * 0.25, 8.0))
 
 
 def _clamp(value: int, minimum: int, maximum: int) -> int:

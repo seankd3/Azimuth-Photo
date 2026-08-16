@@ -6,7 +6,6 @@ import time
 from core import capabilities
 from core.catalog_path import catalog_path
 from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
-from archive import role
 from photo import identity as photo_identity
 
 
@@ -562,20 +561,14 @@ async def run_startup(
     )
 
     # Auto-resume bulk workers that were running before the last shutdown.
-    # Pregen and cloud vault own the canonical archive disk — a hub's or a
-    # standalone install's. Hub-backed satellites keep only interactive/
-    # on-demand previews and receive generated work through sync.
-    if not role.defers_bulk_compute():
-        try:
-            from core import bulk_scheduler as _bulk_scheduler
+    try:
+        from core import bulk_scheduler as _bulk_scheduler
 
-            if _bulk_scheduler.pregen_desired():
-                log.info("bulk_scheduler resuming preview pregen from prior desired state")
-                thumbnails.start_pregeneration()
-        except Exception:
-            log.exception("worker=pregen auto-resume failed")
-    else:
-        log.info("worker=pregen auto-resume skipped reason=hub_backed_satellite")
+        if _bulk_scheduler.pregen_desired():
+            log.info("bulk_scheduler resuming preview pregen from prior desired state")
+            thumbnails.start_pregeneration()
+    except Exception:
+        log.exception("worker=pregen auto-resume failed")
 
     try:
         import db as _db
@@ -590,38 +583,35 @@ async def run_startup(
     except Exception:
         log.exception("worker=catalog_backup scheduler failed to arm")
 
-    if not role.defers_bulk_compute():
-        try:
-            import db as _db
-            from core import bulk_scheduler as _bulk_scheduler
-            from features.backup import cloud as _cloud_backup
+    try:
+        import db as _db
+        from core import bulk_scheduler as _bulk_scheduler
+        from features.backup import cloud as _cloud_backup
 
-            async def _resume_vault_if_desired() -> None:
-                if not _bulk_scheduler.vault_desired():
-                    return
-                log.info("bulk_scheduler resuming cloud vault from prior desired state")
-                try:
-                    await asyncio.to_thread(
-                        _cloud_backup.start_sync,
-                        _db.DB_PATH,
-                        manual_override=False,
-                    )
-                except Exception:
-                    log.exception("cloud_backup auto-resume failed to start")
-
-            track_background_task(
-                _start_background_daemon(
-                    lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
-                    delay=25.0,
+        async def _resume_vault_if_desired() -> None:
+            if not _bulk_scheduler.vault_desired():
+                return
+            log.info("bulk_scheduler resuming cloud vault from prior desired state")
+            try:
+                await asyncio.to_thread(
+                    _cloud_backup.start_sync,
+                    _db.DB_PATH,
+                    manual_override=False,
                 )
+            except Exception:
+                log.exception("cloud_backup auto-resume failed to start")
+
+        track_background_task(
+            _start_background_daemon(
+                lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
+                delay=25.0,
             )
-            track_background_task(
-                _start_background_daemon(_resume_vault_if_desired, delay=3.0)
-            )
-        except Exception:
-            log.exception("worker=cloud_backup scheduler failed to arm")
-    else:
-        log.info("worker=cloud_backup skipped reason=hub_backed_satellite")
+        )
+        track_background_task(
+            _start_background_daemon(_resume_vault_if_desired, delay=3.0)
+        )
+    except Exception:
+        log.exception("worker=cloud_backup scheduler failed to arm")
 
     try:
         import db as _db

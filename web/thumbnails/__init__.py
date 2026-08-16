@@ -36,7 +36,6 @@ from .runtime import as_bool as _as_bool
 from .runtime import current_time as _current_time
 from .runtime import is_sqlite_locked as _is_sqlite_locked
 from .runtime import replace_executor as _replace_executor
-from archive import role
 
 
 for _name in thumbnail_config.DEFAULT_EXPORT_NAMES:
@@ -80,10 +79,7 @@ def _previews_start_paused() -> bool:
     out behind it.
     """
 
-    try:
-        return role.defers_bulk_compute()
-    except Exception:
-        return False
+    return False
 
 
 _previews_paused = _previews_start_paused()

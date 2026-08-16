@@ -15,7 +15,6 @@ from core.app_factory import (
     create_templates,
 )
 from core.static_assets import StaticAssetContext
-from features.access import routes as access_routes
 from features.ai import routes as ai_routes
 from features.auth import routes as auth_routes
 from features.backup import routes as cloud_backup_routes
@@ -62,7 +61,6 @@ dev_routes.configure(
 for router in (
     page_routes.router,
     auth_routes.router,
-    access_routes.router,
     people_routes.router,
     dev_routes.router,
     catalog_routes.router,

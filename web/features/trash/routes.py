@@ -26,7 +26,6 @@ def _invalidate_after_trash() -> None:
 from core import cache_events
 from features.cache import status as cache_status_service
 from features.settings import status as settings_status
-from archive import role
 router = APIRouter()
 DbPath = Callable[[], str]
 MAX_IMAGE_IDS_PER_REQUEST = 10000
