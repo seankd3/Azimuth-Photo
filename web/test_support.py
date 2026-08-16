@@ -181,12 +181,17 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         await self._cleanup_tempdir()
 
     async def _close_thumbnail_cache_after_background_tasks(self):
-        """Keep the per-test thumbnail database alive until async work drains."""
-        await self._drain_test_tasks(
-            "media-warm background",
-        )
+        """Keep the per-test cache alive until async work drains.
 
-        # A media-warm wrapper can finish after handing thumbnail probes to
+        There used to be a first drain here, of the media-warm wrapper's own
+        tasks. Its task list went with the thumbnail cache and the call was
+        left behind holding only its label — a `TypeError` on every teardown,
+        which the earlier `NameError` in `_reset_shared_runtime_state` hid by
+        failing first. What remains is the drain that still has something to
+        wait for.
+        """
+
+        # A background wrapper can finish after handing probes to
         # asyncio/to_thread or an executor. Those child tasks are not retained
         current = asyncio.current_task()
         handed_off_tasks = tuple(

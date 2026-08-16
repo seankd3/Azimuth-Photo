@@ -998,6 +998,17 @@ PRE_SCHEMA_CATALOG_SOURCES_DDL = (
     ")"
 )
 
+# The core's two columns on `images`. An absolute path is a drive plus a tail,
+# and the tail is the half that is stored — it survives a drive being
+# relettered, a folder being renamed, and the same photograph living on two
+# disks. They belong beside the core's tables rather than in the compatibility
+# list below, because `model/schema.sql` declares indexes over `images(tail)`
+# and an index cannot be created before its column.
+CORE_IMAGE_COLUMNS = (
+    ("tail", "TEXT DEFAULT NULL"),
+    ("drive_id", "INTEGER DEFAULT NULL"),
+)
+
 IMAGE_COMPAT_COLUMNS = (
     ("source_id", "INTEGER REFERENCES catalog_sources(id)"),
     # Where the photo sits *inside* its source. `filepath` stays as the
@@ -2146,6 +2157,35 @@ async def _executescript_in_transaction(conn, script: str) -> None:
         raise
 
 
+async def apply_core_schema(conn) -> None:
+    """Create the core's tables: drives, copies, decisions, cache.
+
+    They live in `model/schema.sql` because that is where the core describes
+    itself, and until now **nothing in the running application read that file** —
+    only `test_core.py` did. The four tables exist in this catalog solely
+    because one-off migration steps created them while the core was being
+    built, so a *fresh* install would have had none of them, and every flag,
+    status, rotation, tile and synchronize would have failed on `no such table`.
+    That is the same shape as the `cache_image_presence` gap: a table created
+    once by hand, never by the schema.
+
+    Applied after `SCHEMA` because `schema.sql` declares indexes over `images`,
+    which the legacy schema creates — and `images.tail` is added here first,
+    for the same reason: an index cannot be created before its column. Every
+    statement is `IF NOT EXISTS`, so this is a no-op on a catalog that has them.
+    """
+
+    from pathlib import Path
+
+    await _add_columns_if_missing(conn, "images", CORE_IMAGE_COLUMNS)
+    core_sql = Path(__file__).resolve().parent.parent / "model" / "schema.sql"
+    try:
+        text = core_sql.read_text(encoding="utf-8")
+    except OSError as error:
+        raise RuntimeError(f"the core schema is missing: {core_sql}") from error
+    await _executescript_in_transaction(conn, text)
+
+
 async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
     cursor = await conn.execute("PRAGMA user_version")
     row = await cursor.fetchone()
@@ -2153,6 +2193,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
     if db_exists:
         await prepare_existing_database_for_schema(conn)
     await _executescript_in_transaction(conn, SCHEMA)
+    await apply_core_schema(conn)
     from features.develop.virtual_copies import ensure_virtual_copies
     await ensure_virtual_copies(conn)
     try:
