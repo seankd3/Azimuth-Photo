@@ -25,6 +25,24 @@ improves on its own.** One more comparison, or one more embedding off the owed
 queue, re-ranks everything that resembles it. The old design froze its output
 the moment it wrote it.
 
+Measured against the live library, which is the clearest picture of what
+propagation is worth:
+
+| | |
+|---|---|
+| comparisons the owner made | 2,532 |
+| photographs those pairs name | 665 |
+| of those, ones that have a vector | **310** |
+| photographs reached by propagation | **8,617** |
+| time to compute the whole thing | **0.4 s** |
+
+So 310 judged photographs currently carry an opinion to 8,617 others — and the
+first row of that table is the interesting one. **Fewer than half the judged
+photographs have a vector yet.** Every embedding off the owed queue does not
+merely make one more photo searchable; it may connect a judgement the owner
+already made to a part of the library it cannot presently reach. That is the
+sense in which the owed embeddings are load-bearing for ranking.
+
 The constants were recovered from the ledger rather than from the code, by
 reading `elo_before` down consecutive rows: an even matchup moved the loser
 6.0 points, which is K=12 against the standard 400-point logistic from a 1200
