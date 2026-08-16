@@ -36,7 +36,20 @@ from __future__ import annotations
 from model import decisions
 
 # The one predicate. Spelled once, imported everywhere, never inlined.
-IN_LIBRARY = "i.status != 'trashed'"
+#
+# Two clauses, and the second was missing until an adversarial read caught it.
+# `catalog_sources` row 4 (`C:\Pictures`) carries `included = 0, removed_at =
+# 1785542505` — the owner deliberately removed that source and kept its rows —
+# and 10,689 photographs came back into the grid the moment the source join
+# went away. They are all duplicates (measured: zero unique hashes, every one
+# also on a tailed row), so showing them is doubly wrong.
+#
+# The fix is not to restore the source join. **A photograph with no tail is not
+# in the library yet**, because a tail is how anything is ever opened, and all
+# 12,793 tail-less rows are either those duplicates or rows awaiting adoption.
+# One clause, no join, and it says something true about the core rather than
+# about a table that is going away.
+IN_LIBRARY = "i.status != 'trashed' AND i.tail IS NOT NULL"
 
 # Sorts the grid may ask for. A sort not in here is refused -- never silently
 # swapped for another, which is how "sort by date" quietly became "sort by Elo"

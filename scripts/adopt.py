@@ -178,6 +178,32 @@ def adopt(conn, *, dry_run: bool = False) -> dict[str, int]:
         ):
             keep(row["image_id"], "keyword", row["name"])
 
+    # The oplog. Missed on the first pass and found by an adversarial read of
+    # the kill lists, which is the best argument for doing them: this is
+    # already an append-only decision log, keyed on content hash, with
+    # families — the same shape arrived at independently — and it holds 311
+    # rows of the owner's keywords, flags, edits and statuses that exist
+    # nowhere else. Deleting features/sync/ without reading it first would
+    # have thrown them away silently.
+    if table_exists("oplog"):
+        renamed = {"keywords": "keyword"}
+        for row in conn.execute("SELECT content_hash, family, payload, ts FROM oplog ORDER BY seq"):
+            if not row["content_hash"]:
+                continue
+            try:
+                value = json.loads(row["payload"]) if row["payload"] else None
+            except (TypeError, ValueError):
+                value = row["payload"]
+            family = renamed.get(row["family"], row["family"])
+            at = _epoch(row["ts"])
+            payload = json.dumps(value)
+            if at is None or (subject_of and (row["content_hash"], family, round(at, 3), payload) in timed):
+                continue
+            timed.add((row["content_hash"], family, round(at, 3), payload))
+            tally[family] = tally.get(family, 0) + 1
+            if not dry_run:
+                decisions.decide(conn, row["content_hash"], family, value, at=at)
+
     if table_exists("image_quality"):
         columns = {r["name"] for r in conn.execute("PRAGMA table_info(image_quality)")}
         if "image_id" in columns:
