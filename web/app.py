@@ -30,7 +30,6 @@ from features.pages import routes as page_routes
 from features.quality import routes as quality_routes
 from features.settings import routes as settings_routes
 from features.stacks import routes as stack_routes
-from features.sync import lr_routes
 from features.system import backup_routes, health_routes, quit_routes, version_routes
 from features.trash import routes as trash_routes
 
@@ -83,7 +82,6 @@ for router in (
     version_routes.router,
     quality_routes.router,
     watched_routes.router,
-    lr_routes.router,
 ):
     app.include_router(router)
 

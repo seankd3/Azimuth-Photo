@@ -66,7 +66,7 @@ class SettingsRouteTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        from features.sync import elo_stars
+        import elo_stars
         await elo_stars.refresh_stored_stars(db.DB_PATH)
         fetched = await self._request("GET", f"/api/image/{image_id}/rating")
         payload = fetched.json()

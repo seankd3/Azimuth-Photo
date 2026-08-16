@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from features.collections import graph
 from features.collections import smart
 from features.collections import suggestions as collection_suggestions
-from features.sync import oplog
+import judgements
 
 
 from core import query_constraints
@@ -87,19 +87,12 @@ def _invalidate_suggestions_cache() -> None:
     collection_suggestions.invalidate_cache()
 
 
-async def _collection_oplog_payload(collection_id: int) -> dict | None:
-    return await oplog.collection_meta_payload(catalog_path(), collection_id)
-
-
-async def _append_collection_meta(collection_id: int, *, deleted: bool = False, payload: dict | None = None) -> None:
-    payload = payload or await _collection_oplog_payload(collection_id)
-    if payload is None:
-        return
-    await oplog.append_collection_meta(catalog_path(), {**payload, "deleted": deleted})
+async def _append_collection_meta(collection_id: int) -> None:
+    await judgements.collection(catalog_path(), collection_id)
 
 
 async def _append_collection_memberships(collection_id: int, image_ids: list[int], *, member: bool) -> None:
-    await oplog.append_collection_memberships(catalog_path(), collection_id, image_ids, member=member)
+    await judgements.membership(catalog_path(), collection_id, image_ids, member=member)
 
 
 async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
@@ -309,11 +302,14 @@ async def api_update_collection(collection_id: int, payload: UpdateCollectionBod
 
 @router.post("/api/user-collections/{collection_id}/delete")
 async def api_delete_collection(collection_id: int):
-    oplog_payload = await _collection_oplog_payload(collection_id)
+    # Read the uuid before the row goes: the judgement that it was deleted is
+    # about the collection's identity, and identity is what outlives the row.
+    state = await judgements.collection_state(catalog_path(), collection_id)
     deleted = await collection_repository.delete_collection(db.DB_PATH, collection_id)
     if not deleted:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    await _append_collection_meta(collection_id, deleted=True, payload=oplog_payload)
+    if state:
+        await judgements.forget_collection(catalog_path(), state["collection_uuid"])
     _invalidate_suggestions_cache()
     return {"ok": True}
 

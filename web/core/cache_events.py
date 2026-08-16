@@ -155,7 +155,7 @@ def _schedule_stored_star_refresh() -> None:
     """Stars are a stored projection of Elo — re-persist after rankings move."""
     try:
         import db
-        from features.sync import elo_stars
+        import elo_stars
 
         elo_stars.schedule_stored_stars_refresh(db.DB_PATH)
     except Exception:

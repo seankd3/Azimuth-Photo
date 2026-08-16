@@ -15,7 +15,7 @@ import xml.etree.ElementTree as etree
 
 import db
 from data import connection
-from features.sync import oplog
+import judgements
 
 
 KEYWORD_DDL = """
@@ -247,7 +247,7 @@ async def assign_keyword(image_ids: Iterable[int], keyword_id: int, *, origin: s
                 [(image_id, keyword_id, origin) for image_id in ids],
             )
             await conn.commit()
-            await oplog.append_keywords(db.DB_PATH, ids)
+            await judgements.keywords(db.DB_PATH, ids)
             return max(int(cursor.rowcount or 0), 0)
         finally:
             await conn.close()
@@ -268,7 +268,7 @@ async def unassign_keyword(image_ids: Iterable[int], keyword_id: int) -> int:
             (keyword_id, *ids),
         )
         await conn.commit()
-        await oplog.append_keywords(db.DB_PATH, ids)
+        await judgements.keywords(db.DB_PATH, ids)
         return max(int(cursor.rowcount or 0), 0)
     finally:
         await conn.close()
@@ -369,7 +369,7 @@ async def save_iptc(image_id: int, *, title: str = "", caption: str = "", copyri
             (image_id, values["title"], values["caption"], values["copyright"], values["creator"], _now()),
         )
         await conn.commit()
-        await oplog.append_iptc(db.DB_PATH, image_id)
+        await judgements.iptc(db.DB_PATH, image_id)
         return await get_iptc(image_id)
     finally:
         await conn.close()

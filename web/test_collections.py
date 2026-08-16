@@ -83,7 +83,7 @@ class CollectionTests(BackendTestCase):
         self.assertTrue(renamed["ok"])
         self.assertEqual(renamed["collection"]["name"], "Final selects")
 
-    async def test_regular_collection_mutations_emit_uuid_backed_oplog_entries(self):
+    async def test_regular_collection_mutations_are_recorded_as_decisions(self):
         source = await self._source()
         first = await self._image(source["id"], "first.jpg")
         second = await self._image(source["id"], "second.jpg")
@@ -114,24 +114,36 @@ class CollectionTests(BackendTestCase):
         conn = await db.get_db()
         try:
             rows = await (await conn.execute(
-                "SELECT family, payload FROM oplog ORDER BY seq"
+                "SELECT subject, family, value FROM decisions ORDER BY id"
             )).fetchall()
         finally:
             await conn.close()
-        entries = [(row["family"], json.loads(row["payload"])) for row in rows]
+        entries = [(row["subject"], row["family"], json.loads(row["value"])) for row in rows]
+        uuid = created["collection"]["uuid"]
+
+        # The collection is decided about by its uuid, not by an all-zeros
+        # stand-in content hash. That is the whole reason `subject` is any
+        # stable identity rather than a photograph.
+        meta = [value for subject, family, value in entries
+                if family == "collection_meta" and subject == uuid]
+        self.assertEqual(len(meta), 2, "create and rename each say what it is")
+        self.assertEqual(meta[-1]["name"], "Summer selects")
+
+        # Membership is decided about the *photograph*, so "which collections
+        # is this in" is the log filtered to one subject.
+        member = [(subject, value) for subject, family, value in entries
+                  if family == "collection_member"]
         self.assertEqual(
-            [family for family, _ in entries],
-            [
-                "collection_meta",
-                "collection_membership",
-                "collection_meta",
-                "collection_membership",
-                "collection_membership",
-                "collection_meta",
-            ],
+            [(subject, value["member"]) for subject, value in member],
+            [("a" * 32, True), ("b" * 32, True), ("a" * 32, False)],
         )
-        self.assertEqual(entries[-1][1]["deleted"], True)
-        self.assertTrue(all(payload["collection_uuid"] == created["collection"]["uuid"] for _, payload in entries))
+        self.assertTrue(all(value["collection"] == uuid for _, value in member))
+
+        # Deleting says so against the uuid, which still exists after the row
+        # does not.
+        self.assertEqual(
+            [subject for subject, family, _ in entries if family == "forget"], [uuid]
+        )
 
     async def test_collection_api_rename_rejects_unknown_and_bad_names(self):
         missing = await collection_routes.api_rename_collection(

@@ -149,7 +149,7 @@ async def shoot_rank_payload(db_path: str) -> dict[str, Any]:
     ):
         return _payload_cache["payload"]
 
-    from features.sync import elo_stars as elo_stars_mod
+    import elo_stars as elo_stars_mod
 
     min_n, _thresholds = elo_stars_mod._settings_projection()
     conn = await connection.open_async(db_path)

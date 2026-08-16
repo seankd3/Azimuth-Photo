@@ -238,9 +238,10 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         # which pauses all bulk work (pregen, captions, decode batches) for
         # every later test in the process; clear it on both setup and teardown.
         memory_pressure.reset_for_tests()
-        # Each test gets a fresh DB; a disk-path index built against an earlier
-        # test's DB would hide this test's cache rows from fast_disk_has.
-        _tce._clear_disk_index()
+        # There used to be a disk-path index to clear here, belonging to the
+        # thumbnail cache. `tiles` keys on the content hash and holds no such
+        # index, so there is nothing to reset — and the line outlived the
+        # module by enough to fail 201 tests with a bare NameError.
         query_constraints._text_search_resolution_cache.clear()
 
     async def _source(self, name="catalog", *, online=True):

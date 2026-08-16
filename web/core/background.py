@@ -324,7 +324,7 @@ async def run_startup(
         await wait_for_user_gap()
         try:
             import db as _db
-            from features.sync import elo_stars as _elo_stars
+            import elo_stars as _elo_stars
             await _elo_stars.refresh_stored_stars(_db.DB_PATH)
         except Exception:
             log.debug("stored star reconcile skipped", exc_info=True)

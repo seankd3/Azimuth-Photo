@@ -23,7 +23,7 @@ from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
 from features.develop import history, presets, virtual_copies
-from features.sync import oplog
+import judgements
 
 log = logging.getLogger(__name__)
 
@@ -289,7 +289,7 @@ async def _write_synced_settings(
         )
         await history.record_async(conn, image_id, settings_json, label)
         await conn.commit()
-        await oplog.append_develop(catalog_path(), image_id)
+        await judgements.develop(catalog_path(), image_id)
         return {"settings": merged, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()
@@ -508,7 +508,7 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
             )
             await history.record_async(conn, image_id, settings_json, label)
             await conn.commit()
-            await oplog.append_develop(catalog_path(), image_id)
+            await judgements.develop(catalog_path(), image_id)
             return {"settings": merged, "origin": origin, "updated_at": now}
         except Exception:
             await conn.rollback()
@@ -563,7 +563,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
         )
         await history.record_async(conn, image_id, encoded, "Reset")
         await conn.commit()
-        await oplog.append_develop(catalog_path(), image_id)
+        await judgements.develop(catalog_path(), image_id)
         result = {"settings": snapshot, "origin": origin, "updated_at": now}
     except Exception:
         await conn.rollback()

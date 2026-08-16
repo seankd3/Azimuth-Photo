@@ -426,7 +426,37 @@ finish the core, then rebuild each surface on it and delete what it replaces.
 | `search.py` + `ai.py` | `features/search/`, `people/`, `captions/`, `ai/`, `embed_cache.py` | one ranked fusion; embeddings are a never-evict cache kind |
 | `develop/` | `features/develop/` minus its plumbing | the colour maths survives; the schedulers, history table and proof tiles do not |
 | `app.py` + `boot.py` | `app.py`, `core/`, `features/system/`, `data/schema.py` | boot is: open the catalog, answer one query, paint |
-| *(nothing)* | the hub residue, the network layer, `features/sync/` | no port reachable from outside, no pairing, no oplog |
+| *(nothing)* **done** | the hub residue, the network layer, `features/sync/` | no port reachable from outside, no pairing, no oplog |
+
+**`features/sync/` is gone (08-16), and it is the cleanest illustration of the
+whole method.** 2,770 lines, of which the 997-line operation log was the heart:
+a device id, a per-origin sequence number, a last-write-wins comparison per
+family, a pending queue with retries, and an apply pipeline that read each
+entry back and wrote it onto the catalog.
+
+Every one of that log's fourteen call sites had the same shape — the caller
+wrote its own table, committed, *then* recorded the entry, whose apply step
+looked the photograph back up by content hash and set the same column a second
+time. The machinery resolved conflicts between devices that no longer exist.
+`features/trash/service.py` carried the epitaph in a comment: *"a satellite's
+trash was reverted by the hub's copy of the row on the next mirror refresh"* —
+a true description of a real bug, in a hub that has been deleted.
+
+What replaced it is `judgements.py`, which records the same seven verbs in the
+log and does nothing else. Two things fell out rather than being built:
+
+* **The all-zeros content hash is gone.** A collection had to be *some*
+  photograph to be decided about, so the old log invented one. `decisions`
+  takes any stable identity, so a collection is decided about by its uuid.
+* **Deleting a collection stopped needing a captured payload.** The old route
+  read the state, deleted the row, then replayed the state with `deleted:
+  true`. The `FORGET` family already existed and was never used; a uuid
+  outlives its row, so the judgement can simply be made after the fact.
+
+Also found and fixed while doing it: one undefined name in the shared test
+fixture — `_tce._clear_disk_index()`, a disk index belonging to the deleted
+thumbnail cache — was failing **201 tests** with a bare `NameError`. The suite
+is the instrument for the remaining surface deletions, so it had to work first.
 
 **The only ordering constraint left.** `render.py` before the surfaces that read
 pixels, because the Develop base keyed on `(image_id, source_path)` and the

@@ -8,7 +8,7 @@ import unittest
 from contextlib import closing
 from pathlib import Path
 
-from features.sync import elo_stars, shoot_rank
+import elo_stars, shoot_rank
 
 
 CATALOG_DDL = """

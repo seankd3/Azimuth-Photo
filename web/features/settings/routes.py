@@ -14,7 +14,7 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
-from features.sync import oplog
+import judgements
 
 
 logger = logging.getLogger(__name__)
@@ -110,7 +110,7 @@ async def api_set_image_flag(image_id: int, request: Request):
         return JSONResponse({"error": "Image not found"}, status_code=404)
 
     await image_repository.set_image_flag(catalog_path(), image_id, flag)
-    await oplog.append_flags(catalog_path(), [image_id], flag)
+    await judgements.flag(catalog_path(), [image_id], flag)
     cache_events.invalidate_image_flag_caches()
     cache_events.invalidate_pairing_cache()
     return {"ok": True, "id": image_id, "flag": flag}
@@ -123,8 +123,8 @@ async def api_get_image_rating(image_id: int):
     image = await image_repository.get_image_by_id(catalog_path(), image_id)
     if not image:
         return JSONResponse({"error": "Image not found"}, status_code=404)
-    from features.sync import elo_stars as elo_stars_mod
-    from features.sync import shoot_rank as shoot_rank_mod
+    import elo_stars as elo_stars_mod
+    import shoot_rank as shoot_rank_mod
 
     row = dict(image) if not isinstance(image, dict) else image
     stars = int(row.get("stars") or 0)
@@ -185,7 +185,7 @@ async def api_batch_set_flag(request: Request):
         return JSONResponse({"error": "No valid image ids"}, status_code=400)
 
     count = await image_repository.batch_set_image_flags(catalog_path(), normalized_ids, flag)
-    await oplog.append_flags(catalog_path(), normalized_ids, flag)
+    await judgements.flag(catalog_path(), normalized_ids, flag)
     if count:
         cache_events.invalidate_image_flag_caches()
     cache_events.invalidate_pairing_cache()

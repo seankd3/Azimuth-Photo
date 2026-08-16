@@ -1212,13 +1212,11 @@ def begin_integrity_scan(db_path: str, *, limit: int = 50) -> dict[str, Any]:
 def integrity_summary(db_path: str) -> dict[str, Any]:
     """Combine live scan status with stored mismatch-capable counts."""
     status = integrity_status()
-    from features.sync import lr_status
 
     summary: dict[str, Any] = {
         "catalog": catalog_health(db_path),
         "scan": status,
         "backup": backup_run_status(),
-        "lr_bridge": lr_status.delta_exchange_status(),
         "checksummed": 0,
         "mismatch_count": len(status.get("mismatch_ids") or []),
         "mismatches": list(status.get("mismatch_ids") or []),
