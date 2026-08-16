@@ -6,7 +6,7 @@ from core.responses import (
     metadata_payload as metadata_payload,
 )
 import db
-from data.repositories import rankings as ranking_repository
+import library
 
 
 
@@ -47,7 +47,7 @@ def filter_by_metadata(
         if date_taken == "undated":
             images = [img for img in images if not img.get("date_taken")]
         else:
-            date_range = ranking_repository.date_taken_filter_range(date_taken)
+            date_range = library.date_range(date_taken)
             if date_range is None:
                 # A scope we cannot read matches nothing. Skipping the filter
                 # returned everything, which reads as a working filter.

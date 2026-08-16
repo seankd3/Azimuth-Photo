@@ -319,3 +319,39 @@ def rerank(conn, subjects=None, vectors=None) -> int:
     )
     conn.commit()
     return len(scores)
+
+
+_DATE_PRECISIONS = ("%Y", "%Y-%m", "%Y-%m-%d")
+
+
+def date_range(date_taken: str) -> tuple[str, str] | None:
+    """The half-open range a date prefix covers, or None if it is not a date.
+
+    A `>= / <` range rather than a prefix match, so the `date_taken` index still
+    applies — `LIKE '2026-08%'` cannot use it.
+
+    The day form was missing once, and it mattered more than it looks: clicking
+    a day in the timeline sends `YYYY-MM-DD`, this returned None, the caller
+    then added no date condition at all, and the grid showed the whole library
+    while the chip read the date the owner had clicked. A filter that cannot be
+    read must match nothing, never everything.
+    """
+
+    import datetime as _dt
+
+    value = (date_taken or "").strip()
+    for precision in _DATE_PRECISIONS:
+        try:
+            start = _dt.datetime.strptime(value, precision)
+        except ValueError:
+            continue
+        if precision == "%Y":
+            end = start.replace(year=start.year + 1)
+        elif precision == "%Y-%m":
+            end = (start.replace(year=start.year + 1, month=1) if start.month == 12
+                   else start.replace(month=start.month + 1))
+        else:
+            end = start + _dt.timedelta(days=1)
+        stamp = "%Y-%m-%d %H:%M:%S"
+        return start.strftime(stamp), end.strftime(stamp)
+    return None
