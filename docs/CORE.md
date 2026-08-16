@@ -16,9 +16,16 @@ Azimuth knows four things about a photo:
 
 Three rules:
 
-- **Only #3 is irreplaceable.** Everything else rebuilds from scratch.
+- **Only #3 is irreplaceable.** Everything else rebuilds from scratch — so the
+  decisions log is written to every record drive, and a sweep checks it is there.
+  It is the one thing copy-counting must cover and today does not.
 - **#2 is a guess, checked when it matters.** A stale guess costs nothing.
-- **Nothing is deleted without proving another copy exists.**
+  **A read never consults `copies`, `drives`, or the cache.** A photo with no
+  known copy still browses, still ranks, still stays in its collections.
+- **The machine never deletes the last copy. Only you do.** (The earlier wording
+  — *nothing is deleted without proving another copy exists* — outlawed Empty
+  Trash and draining a card with the archive unplugged. Both are yours to
+  command; neither is the machine's to decide.)
 
 ---
 
@@ -26,11 +33,17 @@ Three rules:
 
 ```sql
 drives    (id, uuid, root, is_record)
-photos    (id, hash, version_of, tail, <your decisions>, <computed memo>)
-copies    (photo_id, drive_id, tail, seen_at)
+photos    (id, hash, version_of, tail, taste, <your decisions>, <computed memo>)
+copies    (photo_id, drive_id, tail NULL, seen_at)
 decisions (subject, family, value, at)
-cache     (hash, kind, recipe, state, path)
+cache     (hash, kind, recipe, state, path NULL, value NULL, bytes)
 ```
+
+`photos.tail` is where the photograph *belongs*; `copies.tail` is NULL unless
+that copy sits somewhere else — which happens, because 5,460 rows already carry
+a `-N` collision suffix. `cache.path` names a rendition on disk; `cache.value`
+holds a computed fact (an embedding, a caption) — 42,937 embeddings read as one
+matrix, not 42,937 file opens that reclaim would mistake for previews.
 
 > **An absolute path is a drive plus a tail, and we stored them fused.**
 
@@ -62,13 +75,46 @@ files of one) and stay out of scope: `stacks` holds 0 rows.
 ## Six functions
 
 ```
-identify(file)        what photo is this
-open(photo)           give me the file        (first drive that has it, SSD first)
-saw(photo, drive)     record a copy           (a hint)
-make(photo, kind)     thumbnail / preview     (memoized)
-decide(photo, what)   record a decision       (append to the log)
-sweep(drive)          check what's on a drive
+identify(file)          what photo is this
+open(photo)             give me the file      (first drive that has it, SSD first)
+put(file, drive, tail)  write it, then identify + saw
+saw(photo, drive)       record a copy         (a hint)
+make(photo, kind, recipe)  thumbnail / preview / embedding  (memoized)
+decide(subject, what)   record a decision     (append to the log)
+sweep(drive)            check what's on a drive
 ```
+
+Seven, not six — `put()` was missing, and its absence is why export mints a fake
+source row per export and HDR merge points one at a cache directory. Anything
+Azimuth writes goes through it, and a file we wrote knows its own `version_of`
+without reading metadata back.
+
+Four rules make these honest:
+
+- **`decide(subject, …)` takes any stable identity** — a photo's hash, a folder's
+  tail, a drive's uuid, a person's name. This is what kills the all-zeros fake
+  content hash collections invented to fit, and seven side tables with it.
+- **The machine's read of a file is cache. Your save is a decision. The decision
+  wins.** Decision columns on `photos` are an index rebuilt from the log, never
+  consulted for recency.
+- **`recipe` is an argument and a pure function of its inputs — never a
+  timestamp.** Feeding `updated_at` in means reset-then-redo re-renders identical
+  pixels and two machines never share a cache entry.
+- **`identify()`'s hash names candidates.** It is never identity, never
+  permission to delete, and **never permission to merge** — a merge that drops
+  the loser's decisions breaks the one promise this design makes. Proof is a
+  full-file digest whose read starts and ends on the same file.
+
+**One walker owns admission**: `.trash/`, `Astrophotography/` (case-blind, on the
+resolved path), junk directories, dotfiles, `.lrdata`, zero-length files and
+in-flight `.importing`/`.moving` partials. Nothing else re-implements it. Without
+`.trash/` in that list, "a new tail with a known hash just gets a copy row"
+silently un-trashes every photo you ever threw away.
+
+**The marker file is the gate.** A copy row is retired only by a failed read on a
+drive whose marker is readable; a sweep that cannot read the marker changes
+nothing. That one sentence replaces `missing_at`, the 5%/10-row breaker,
+`AZIMUTH_ALLOW_MASS_MISSING` and four exception classes.
 
 | Feature | Sits on |
 |---|---|
