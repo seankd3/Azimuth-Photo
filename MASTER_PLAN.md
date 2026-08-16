@@ -118,6 +118,11 @@ global `CLAUDE.md`.
 - `unverified` "photo is already in a folder. the only ones with issues are the personal folders" — 07-31
 - `unverified` "when files are imported they should be imported and sorted by the structure I said." — 07-31
 - `partial` "i dont want to do all this through you, I want the app to support this so users can easily and seemlessly migrate from LRC to this." — 07-12 · `web/features/develop/import_routes.py:78`, `web/features/develop/lrcat_import.py:417`, `web/static/js/desktop/drawer.js:761` — LRCAT scan/import API and importer exist, but no desktop/static UI calls /api/develop/lrcat (searched web/static, web/templates, desktop, android); Connect Lightroom is a bridge, not seamless full migrate.
+- `open` "azimuth photo should read seemlessly across both reguardless of how I move them bertween these two locations" — 08-15 · the two locations being hot `D:\Pictures` and cold `E:\Photos`. **This ask is what produced Azimuth 2.0.** Root cause found: an absolute path is a drive plus a tail and they were stored fused, so every workaround in the tree — `photo/location.py` probing, `hub_remote`, `missing_at`, the mass-missing breaker, `rebind_moved_source` — is an attempt to recover a tail from a path that swallowed its drive. Answer: store the tail, compute the path. `docs/CORE.md`.
+- `open` "Ive worked on lots of photos recently in lightroom withing the D/pictures structure, azimuth should auto update as photos and folders update and move" — 08-15 · measured the same hour: reconcile matches strays by `basename+size`, calls the rest *gone*, and `apply()` refuses the whole plan above 5% — raising *before* `_remember_directories`, so a large reorganization stalls it permanently and silently. Under 2.0 there is no rename code path at all: a file at a new tail with a known hash simply gets a copy row.
+- `open` "I want to be able to offload work to omarchy or have my files live on that server, without totally complicating everything into a bloated mess" — 08-15 · answered without a new concept: a share is a drive, and a helper is another machine doing owed work that writes results this machine sweeps up. ~200 lines where the hub took 17,000. The rule that keeps it honest: this machine never waits for a helper, and a helper's absence is indistinguishable from a slow day.
+- `decided` "Park the phone" — 08-15 · desktop only for the MVP; the whole network layer (auth, unlock, device tokens, origin checks, CORS, remote access, Tailscale serving, pairing) is deleted and the Android client stops working until a transport is deliberately rebuilt.
+- `decided` "Leave it for omarchy" — 08-15 · the Qwen3-VL-8B embedding space stays; the remaining ~131k embeddings stay *owed* rather than being recomputed with a weaker model that fits a 4 GB laptop. Semantic search is honestly partial (25%) until the box is powered on. Consistent with 1.3's ground-truth ruling that the 2B was not good enough.
 
 ### 1.5 Editing and colour
 
@@ -172,6 +177,13 @@ global `CLAUDE.md`.
 - `live` "when I right click sources, it should give an option to open in explorer." — 07-15 · `revealFolder()` in `web/static/js/desktop/api.js`
 
 ---
+
+### 1.9b Codebase and architecture (08-15, the 2.0 order)
+
+- `open` "I want the codebase to have zero tech debt, just clean dead simple code. small codebase." — 08-15 · measured honestly rather than agreed to: 146,178 lines, of which 39,135 is UI. Cutting the UI removes the product, not the debt, so the target is stated against the backend — **107k → ~12k**, tests → ~5k, UI → ~25k. One mechanical gate holds it: a line budget that fails the build. Advisory doctrine decays; this is the lesson from three previous cleanup waves growing back.
+- `open` "can we also dtich the web shit? I just want a desktop app." — 08-15 · separated into three tiers: delete everything that exists because it was reachable over a network (doing), replace HTTP with direct calls once one API client is the chokepoint (next), rewrite the UI natively (**refused** — 39k lines of grid, loupe and keyboard polish is the product, and HTML/CSS is a rendering layer, not a liability).
+- `open` "the simpler our architecture the more powerful it will be" — 08-15 · borne out the same session: every capability gained came from a deletion. Storing the tail bought cross-tier reads, folder-move following and one-row letter changes. "Owed is a query, not a queue" deleted a 93,220-row backlog *and* is why a helper needs no protocol. Remote helpers cost 17,000 lines in the hub design and ~200 here — complexity does not merely look bad, it makes capabilities unaffordable.
+- `open` "lets keep refining the ideas for elegance and first principles thinking" — 08-15 · the standing mode for 2.0. Design is adjudicated by whether a feature *falls out* of the shapes or has to be built: Develop history stopped needing a table, move detection stopped needing code, the 10,750-duplicate merge stopped existing.
 
 ### 1.10 Non-goals
 
