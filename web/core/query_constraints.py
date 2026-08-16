@@ -12,7 +12,13 @@ from core.search_fusion import FUSED_CANDIDATE_LIMIT, candidate_evidence, fused_
 from core.search_planning import plan_search
 from data.repositories import embeddings as embedding_repository
 from data.repositories import images as image_repository
-from data.repositories import rankings as ranking_repository
+# The one thing the ranking repository was still consulted for: which typed
+# words mean "a file extension" rather than a search term.
+IMAGE_EXTENSION_SEARCH_TERMS = frozenset(
+    {"jpg", "jpeg", "png", "tif", "tiff", "webp", "heic", "heif",
+     "cr2", "cr3", "arw", "dng", "nef", "orf", "raf", "rw2",
+     "mp4", "mov", "avi", "m4v"}
+)
 
 
 logger = logging.getLogger(__name__)
@@ -359,7 +365,7 @@ async def resolve_configured_text_search(
             image_repository.get_active_images_by_ids, catalog_path()
         ),
         caption_count_for_signature=db.caption_count_for_signature,
-        extension_search_terms=ranking_repository.IMAGE_EXTENSION_SEARCH_TERMS,
+        extension_search_terms=IMAGE_EXTENSION_SEARCH_TERMS,
         active_embedding_config=(
             settings.active_embedding_config
             or settings.fast_search_embedding_config

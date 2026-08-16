@@ -17,7 +17,6 @@ from core.requests import COMPUTED_SORTS, FolderScope, RankingSort
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
-from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 from thumbnails import cache_entries
 import settings
@@ -121,30 +120,31 @@ async def _get_export_images(
         text_query=search.get("text_query") or "",
         exclude_collapsed_stack_members=(stacks or "").strip().lower() == "collapsed",
     )
-    catalog_counts = await stats_repository.catalog_image_counts_cached(db_path)
-    if limit is not None:
-        return await ranking_repository.rankings(
-            db_path,
-            catalog_counts=catalog_counts,
-            limit=max(1, int(limit)),
-            offset=0,
-            **ranking_args,
-        )
+    # The ranked library, read straight from the catalog. This used to page
+    # through the ranking repository, which is the only reason a 2,482-line
+    # module survived every route it served being rebuilt. An export is a
+    # SELECT: it wants columns and an order, not a cached, faceted,
+    # scope-counted ranking response.
+    import asyncio
 
-    images = []
-    offset = 0
-    while True:
-        page = await ranking_repository.rankings(
-            db_path,
-            catalog_counts=catalog_counts,
-            limit=EXPORT_PAGE_SIZE,
-            offset=offset,
-            **ranking_args,
+    import library
+    from data import connection
+
+    def _read() -> list[dict]:
+        conn = connection.inline_reader(db_path)
+        sql = (
+            "SELECT i.id, i.filename, i.filepath, i.tail, i.elo, i.comparisons,"
+            " i.propagated_updates, i.status, i.flag, i.date_taken, i.camera_make,"
+            " i.camera_model, i.lens, i.file_ext, i.file_size, i.file_modified_at,"
+            " i.width, i.height, i.latitude, i.longitude"
+            f" FROM images i WHERE {library.IN_LIBRARY}"
+            " ORDER BY i.elo DESC, i.id DESC"
         )
-        images.extend(page)
-        if len(page) < EXPORT_PAGE_SIZE:
-            return images
-        offset += len(page)
+        if limit is not None:
+            sql += f" LIMIT {max(1, int(limit))}"
+        return [dict(row) for row in conn.execute(sql)]
+
+    return await asyncio.to_thread(_read)
 
 
 def _export_row(rank: int, image: dict) -> dict:

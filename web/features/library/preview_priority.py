@@ -4,14 +4,13 @@ import re
 import time
 from collections import deque
 
-from data.repositories import rankings as ranking_repository
 
 
 _priority_scopes = deque(maxlen=4)
 
 
 def record_scope(*, folder="", collection_id: int = 0, timestamp: float | None = None) -> None:
-    normalized_folder = ranking_repository.folder_cache_value(folder)
+    normalized_folder = (str(folder or '').replace(chr(92), '/').strip('/') or None)
     normalized_collection_id = max(0, int(collection_id or 0))
     if not normalized_folder and not normalized_collection_id:
         return
