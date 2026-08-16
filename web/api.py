@@ -114,15 +114,9 @@ async def folders():
 
 
 @router.get("/api/catalog")
-async def catalog(folder: str | None = None, sort: str = "newest",
-                  starred: int | None = None, limit: int = 200, offset: int = 0):
-    try:
-        rows = library.photos(db(), folder=folder, sort=sort, starred=starred,
-                              limit=limit, offset=offset)
-    except ValueError as refused:
-        # A sort we do not have is refused, never quietly swapped for Elo.
-        return Response(status_code=400, content=str(refused))
-    return {"images": rows}
+async def catalog(folder: str | None = None, sort: str = "", starred: int = 0,
+                  limit: int = 200, offset: int = 0):
+    return _page(sort, limit, offset, folder, starred)
 
 
 @router.get("/api/search")
@@ -243,11 +237,53 @@ async def undo_compare():
         connection.close_sync(conn, db_path=catalog_path())
 
 
-@router.get("/api/rankings")
-async def rankings(limit: int = 200):
-    """The library in the owner's order."""
+# What the UI calls a sort, and what the library calls it. The UI's names are
+# the contract -- it is not being rewritten -- so the translation lives here
+# rather than leaking its vocabulary into `library.SORTS`.
+_UI_SORTS = {
+    "date_taken": "newest", "date_taken_asc": "oldest", "newest": "newest",
+    "oldest": "oldest", "taste": "best", "elo": "best", "best": "best",
+    "rating": "stars", "stars": "stars", "filename": "folder", "folder": "folder",
+    "added": "added", "": "newest",
+}
 
-    return {"images": library.photos(db(), sort="best", limit=limit)}
+
+@router.get("/api/rankings")
+async def rankings(sort: str = "", limit: int = 100, offset: int = 0,
+                   folder: str | None = None, min_stars: int = 0):
+    """The grid's own route, in the grid's own shape.
+
+    The counts beside the page are not decoration: the UI sizes its scroller
+    from `total_images` and shows an empty grid without them. Shadowing this
+    route with `{"images": [...]}` alone is exactly what "preserve the response
+    shape unless the task changes the contract" is there to stop, and it showed
+    up as *0 photos* over a library of 144,271.
+
+    Two fields are honestly zero rather than omitted. Nothing is hidden for
+    want of a thumbnail any more — a photo with no tile yet is *preparing*, and
+    it appears in the grid while it renders.
+    """
+
+    return _page(sort, limit, offset, folder, min_stars)
+
+
+def _page(sort: str, limit: int, offset: int, folder, min_stars) -> dict:
+    conn = db()
+    rows = library.photos(
+        conn, folder=folder, sort=_UI_SORTS.get(sort or "", "newest"),
+        starred=min_stars or None, limit=limit, offset=offset,
+    )
+    tally = library.counts(conn)
+    return {
+        "images": rows,
+        "total_images": tally["photos"],
+        "visible_images": tally["photos"],
+        "total_kept": tally["photos"],
+        "pending_thumbnails": 0,
+        "hidden_pending_thumbnails": 0,
+        "status_stale": False,
+        "counts_stale": False,
+    }
 
 
 @router.get("/api/image/{image_id}/state")
