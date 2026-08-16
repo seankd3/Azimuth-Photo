@@ -146,6 +146,14 @@ def reindex(conn) -> dict[str, int]:
     so a grid paint is one query. Running this can only ever restore what the
     owner said — which is why a bad write to `images` is an inconvenience here
     and used to be a loss.
+
+    **A decision belongs to the photograph, not to the row.** Subjects are
+    content hashes, so where two rows carry the same hash they share every
+    decision, and this writes the log's latest answer to both. That is the
+    correct reading — the same bytes are the same photograph — but it means a
+    duplicate row is not harmless: measured on the live catalog, 2 status and
+    38 star values disagree between rows that are the same photograph. The
+    repair is to stop having duplicate rows, not to key decisions on `id`.
     """
 
     counts: dict[str, int] = {}
@@ -172,23 +180,38 @@ def reindex(conn) -> dict[str, int]:
     return counts
 
 
-def rerank(conn) -> int:
-    """Recompute Elo from the log and write it into the sort index.
+def rerank(conn, subjects=None, vectors=None) -> int:
+    """Recompute the ranking from the log and write it into the sort index.
 
     Ranking is a derivation, so this is the only place it is stored, and it is
     stored only so that `ORDER BY elo` is an index read. Losing this column
     costs one recomputation; losing the log would cost the judgements.
+
+    **It refuses to run without vectors, and that refusal is the point.**
+    Ranking without propagation is not a smaller version of the ranking, it is
+    a different and much worse one: 2,532 comparisons cover 665 photographs,
+    and propagation is what carries them to the other 156,000. Writing plain
+    Elo over the index would quietly replace a whole-library order with an
+    order over 0.4% of it, and nothing would look broken — the grid would just
+    be wrong in a way no error message could describe.
+
+    So: pass the embedding space, or do not rerank. Reading with a stale
+    ranking is strictly better than writing a lesser one.
     """
 
     import rank
 
-    scores = rank.ranking(conn)
+    if vectors is None or not subjects:
+        raise ValueError(
+            "rerank needs the embedding space; plain Elo covers 665 of 157,064 photos"
+        )
+
+    scores = rank.ranking(conn, subjects, vectors)
     if not scores:
         return 0
-    rows = [
-        (score, subject)
-        for subject, score in scores.items()
-    ]
-    conn.executemany("UPDATE images SET elo = ? WHERE content_hash = ?", rows)
+    conn.executemany(
+        "UPDATE images SET elo = ? WHERE content_hash = ?",
+        [(score, subject) for subject, score in scores.items()],
+    )
     conn.commit()
-    return len(rows)
+    return len(scores)
