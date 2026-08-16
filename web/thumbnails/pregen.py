@@ -3,7 +3,6 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 
-from data.repositories import rankings as ranking_repository
 from data.repositories.common import stage_temp_ids
 
 
@@ -180,11 +179,15 @@ async def priority_candidate_batch(
     excluded_ids = None
     scope_join = ""
 
-    folder_filter = ranking_repository.folder_filter_sql(scope.get("folder"))
-    if folder_filter is not None:
-        condition, folder_params = folder_filter
-        conditions.append(condition)
-        params.extend(folder_params)
+    # A folder is a prefix of a tail. The helper this replaced matched on
+    # `filepath` and `source_id`, and needed a special case for the hub mirror
+    # path -- all three of which the tail model removed. `substr()` rather than
+    # LIKE so a bracket in a folder name cannot become a character class.
+    folder = str(scope.get("folder") or "").replace("\\", "/").strip("/")
+    if folder:
+        prefix = folder + "/"
+        conditions.append("substr(i.tail, 1, ?) = ?")
+        params.extend([len(prefix), prefix])
     if image_ids is not None:
         scope_ids = sorted(int(image_id) for image_id in image_ids)
         if not scope_ids:
