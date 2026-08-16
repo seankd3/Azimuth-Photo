@@ -38,10 +38,14 @@ def notify_embedding_batch_stored(model_key: str, image_ids: list[int]) -> None:
 
 
 def invalidate_pairing_cache(*, matchups: bool = False) -> int:
-    from features.compare import service as compare_service
+    """Nothing to invalidate: the mosaic is a query, not a cached answer.
 
-    compare_service.invalidate_pairing_cache(matchups=matchups)
-    return compare_service._visible_pairing_candidates_generation
+    This used to clear four response caches and bump a generation counter that
+    other caches watched. `rank.candidates` reads the library at 28 ms, so
+    there is no cached answer to go stale and no counter to keep in step.
+    """
+
+    return 0
 
 
 def invalidate_rankings_cache() -> None:
@@ -75,9 +79,7 @@ def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
 
 
 def invalidate_interaction_response_cache() -> None:
-    from features.compare import service as compare_service
-
-    compare_service.invalidate_interaction_response_cache()
+    """Also nothing. Kept as a name so its callers need not all change at once."""
 
 
 def invalidate_stats_cache() -> None:

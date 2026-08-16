@@ -22,7 +22,6 @@ from features.cache import routes as cache_routes
 from features.captions import routes as caption_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
-from features.compare import routes as compare_routes
 from features.dev import routes as dev_routes
 from features.develop import ai_mask_routes, hdr_routes, import_routes, preset_routes, routes as develop_routes, xmp_write_routes
 from features.develop import export_presets
@@ -67,7 +66,6 @@ for router in (
     people_routes.router,
     dev_routes.router,
     catalog_routes.router,
-    compare_routes.router,
     library_routes.router,
     collection_routes.router,
     stack_routes.router,

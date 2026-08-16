@@ -228,8 +228,6 @@ async def run_startup(
     from features.cache import status as cache_status_service
     from features.catalog import metadata as catalog_metadata
     from features.catalog import routes as catalog_routes
-    from features.compare import routes as compare_routes
-    from features.compare import service as compare_service
     from features.library import routes as library_routes
     from features.settings import routes as settings_routes
     from thumbnails import cache_entries
@@ -249,18 +247,8 @@ async def run_startup(
     api_map_markers = library_routes.api_map_markers
     api_date_groups = library_routes.api_date_groups
     api_settings = settings_routes.api_settings
-    mosaic_next = compare_routes.mosaic_next
-    default_visible_pairing_candidates = compare_service.default_visible_pairing_candidates
-    warm_filtered_visible_ranked_candidates = compare_service.warm_filtered_visible_ranked_candidates
-    get_visible_past_matchups = compare_service.get_visible_past_matchups
     classify_orientations_background = catalog_metadata.classify_orientations_background
     scan_metadata_background = catalog_metadata.scan_metadata_background
-    swiss_pair_window = compare_service._SWISS_PAIR_WINDOW
-    filtered_swiss_pair_window = compare_service._FILTERED_SWISS_PAIR_WINDOW
-    filtered_mosaic_window = compare_service._FILTERED_MOSAIC_WINDOW
-    mosaic_explore_window = compare_service._MOSAIC_EXPLORE_WINDOW
-    mosaic_diverse_window = compare_service._MOSAIC_DIVERSE_WINDOW
-    interaction_cache_warmup_delay_seconds = INTERACTION_CACHE_WARMUP_DELAY_SECONDS
 
     def cache_root() -> str:
         return thumbnails.SSD_CACHE_DIR
@@ -352,118 +340,6 @@ async def run_startup(
             result.get("removed"),
             result.get("batches"),
         )
-
-    async def _warm_common_filter_caches():
-        options = await get_filter_options()
-        file_types = [
-            str(item.get("ext") or "")
-            for item in (options.get("file_types") or [])[:3]
-            if item.get("ext")
-        ]
-        await _gather_logged(
-            "common_filter_cache_warmup",
-            *(
-                api_rankings(limit=100, file_type=file_type, stacks="collapsed")
-                for file_type in file_types
-            ),
-            *(
-                api_rankings(limit=100, q=file_type, stacks="collapsed")
-                for file_type in file_types
-            ),
-            *(
-                get_date_groups(
-                    file_type=file_type,
-                    visible_thumb_size="sm",
-                    cache_root=cache_root(),
-                )
-                for file_type in file_types
-            ),
-        )
-
-    async def _warm_light_startup_caches():
-        await asyncio.sleep(0.1)
-        await _gather_logged(
-            "light_startup_cache_warmup",
-            get_catalog_image_counts(),
-            get_stats(),
-            get_ai_status_counts(),
-            get_filter_options(),
-            build_ai_status(),
-            get_date_groups(visible_thumb_size="sm", cache_root=cache_root()),
-            api_rankings(limit=100, stacks="collapsed"),
-            mosaic_next(n=12, strategy="explore"),
-            api_folders(max_depth=0),
-            api_folders(max_depth=1),
-            api_folders(max_depth=2),
-            api_map_markers(),
-            api_settings(),
-            get_visible_orientation_pairing_pool_counts("md", cache_root(), "landscape"),
-            get_visible_orientation_pairing_pool_counts("md", cache_root(), "portrait"),
-            get_visible_orientation_pairing_pool_counts("sm", cache_root(), "landscape"),
-            get_visible_orientation_pairing_pool_counts("sm", cache_root(), "portrait"),
-            _warm_common_filter_caches(),
-            warm_filtered_visible_ranked_candidates(
-                "md",
-                limit=filtered_swiss_pair_window,
-                orientation="landscape",
-                warm_matchups=True,
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "md",
-                limit=filtered_swiss_pair_window,
-                orientation="portrait",
-                warm_matchups=True,
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "sm",
-                limit=filtered_mosaic_window,
-                orientation="landscape",
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "sm",
-                limit=filtered_mosaic_window,
-                orientation="portrait",
-            ),
-            asyncio.to_thread(warm_templates),
-        )
-
-    track_background_task(_warm_light_startup_caches())
-
-    async def _warm_priority_interaction_caches():
-        # These are the heaviest queries in the app. Firing them the instant the
-        # port opens is what made a fresh launch feel frozen.
-        await wait_for_user_gap()
-        await _gather_logged(
-            "priority_interaction_cache_warmup",
-            get_stats(),
-            get_filter_options(),
-            default_visible_pairing_candidates(
-                "md",
-                limit=swiss_pair_window,
-                include_card_metadata=True,
-            ),
-            default_visible_pairing_candidates(
-                "sm",
-                copy_rows=True,
-                limit=mosaic_explore_window,
-                order="cache",
-            ),
-            default_visible_pairing_candidates(
-                "sm",
-                limit=mosaic_diverse_window,
-                order="least_compared",
-                include_card_metadata=False,
-            ),
-            get_visible_past_matchups("md"),
-            api_folders(max_depth=1),
-            api_rankings(limit=100, stacks="collapsed"),
-            api_rankings(limit=50, sort="resolution"),
-            api_settings(),
-        )
-        await mosaic_next(n=12, strategy="explore")
-        await mosaic_next(n=12, strategy="diverse")
-
-    track_background_task(_warm_priority_interaction_caches())
 
     async def _warm_collection_suggestions():
         # Populate the suggestions cache off the request path so the first user
@@ -621,49 +497,3 @@ async def run_startup(
     except Exception:
         log.exception("worker=watched_folder_poller failed to arm")
 
-    async def _warm_interaction_caches():
-        await asyncio.sleep(interaction_cache_warmup_delay_seconds)
-        await _gather_logged(
-            "interaction_cache_warmup",
-            get_ai_status_counts(),
-            get_visible_orientation_pairing_pool_counts("md", cache_root(), "landscape"),
-            get_visible_orientation_pairing_pool_counts("md", cache_root(), "portrait"),
-            get_visible_orientation_pairing_pool_counts("sm", cache_root(), "landscape"),
-            get_visible_orientation_pairing_pool_counts("sm", cache_root(), "portrait"),
-            warm_filtered_visible_ranked_candidates(
-                "md",
-                limit=filtered_swiss_pair_window,
-                orientation="landscape",
-                warm_matchups=True,
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "md",
-                limit=filtered_swiss_pair_window,
-                orientation="portrait",
-                warm_matchups=True,
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "sm",
-                limit=filtered_mosaic_window,
-                orientation="landscape",
-            ),
-            warm_filtered_visible_ranked_candidates(
-                "sm",
-                limit=filtered_mosaic_window,
-                orientation="portrait",
-            ),
-            build_cache_status(ahead=0),
-            get_catalog_summary(),
-            api_date_groups(),
-            api_map_markers(),
-            api_rankings(limit=50, sort="newest"),
-            api_rankings(limit=50, sort="camera"),
-        )
-        await _gather_logged(
-            "interaction_pairing_warmup",
-            mosaic_next(n=6, orientation="landscape"),
-            mosaic_next(n=12, strategy="diverse"),
-            mosaic_next(n=12, strategy="diverse", orientation="landscape"),
-            mosaic_next(n=12, strategy="diverse", orientation="portrait"),
-        )
-    track_background_task(_warm_interaction_caches())
