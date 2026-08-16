@@ -1,4 +1,18 @@
-"""Collect the owner's judgements out of the old schema and into the log.
+"""Bring a 1.x catalog into the 2.0 core. Run once; safe to run again.
+
+Two adoptions, because the old schema kept the two kinds of fact in eight
+different places and the core keeps them in two:
+
+* **judgements → the `decisions` log**, which is the only irreplaceable thing;
+* **embeddings → the `cache` table**, keyed on the photograph's bytes rather
+  than on a row id, so they survive the rows being rebuilt.
+
+Nothing is dropped and nothing is cleared. The old tables are left exactly as
+they were, so this is reversible by ignoring its output.
+
+---
+
+Collect the owner's judgements out of the old schema and into the log.
 
 Measured before writing this: a 2.4 GB catalog of 84 tables holds about 89,378
 rows the owner actually decided. Everything else is recomputable. So this reads
@@ -177,6 +191,51 @@ def adopt(conn, *, dry_run: bool = False) -> dict[str, int]:
     return tally
 
 
+def adopt_embeddings(conn, *, dry_run: bool = False) -> dict[str, int]:
+    """Re-key the embedding vectors onto the photographs they describe.
+
+    They were stored against `image_id`, which is a row number: rebuild the
+    table, renumber, re-import, and 42,937 vectors that cost hours of GPU time
+    are pointing at the wrong photographs or at nothing. Keyed on the content
+    hash they survive all of that, because the vector describes the *bytes*.
+
+    They land in `value` rather than as files on disk, deliberately. The whole
+    set is read as one matrix when ranking or searching; 42,937 file opens is a
+    different kind of operation, and reclaim would have mistaken them for
+    previews and evicted the most expensive thing in the catalog.
+    """
+
+    if not conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embeddings_by_model'"
+    ).fetchone():
+        return {"embedding": 0}
+
+    already = {
+        row["hash"] for row in conn.execute("SELECT hash FROM cache WHERE kind = 'embedding'")
+    }
+    moved = 0
+    for row in conn.execute(
+        """
+        SELECT i.content_hash AS hash, e.embedding, e.model_key
+        FROM embeddings_by_model e JOIN images i ON i.id = e.image_id
+        WHERE i.content_hash IS NOT NULL
+        """
+    ).fetchall():
+        if row["hash"] in already:
+            continue
+        already.add(row["hash"])
+        moved += 1
+        if not dry_run:
+            conn.execute(
+                "INSERT OR REPLACE INTO cache(hash, kind, recipe, state, value, bytes, at)"
+                " VALUES (?, 'embedding', '', 'ready', ?, ?, ?)",
+                (row["hash"], row["embedding"], len(row["embedding"]), time.time()),
+            )
+    if not dry_run:
+        conn.commit()
+    return {"embedding": moved}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("catalog")
@@ -190,11 +249,19 @@ def main() -> int:
         conn.executescript(handle.read())
 
     tally = adopt(conn, dry_run=not args.apply)
-    total = sum(tally.values())
+    print("judgements -> decisions")
     for family in sorted(tally):
         print(f"  {family:10} {tally[family]:>7,}")
-    print(f"  {'total':10} {total:>7,}{'' if args.apply else '   (dry run; pass --apply)'}")
-    print(f"  log now holds {conn.execute('SELECT COUNT(*) FROM decisions').fetchone()[0]:,}")
+    print(f"  {'total':10} {sum(tally.values()):>7,}")
+
+    vectors = adopt_embeddings(conn, dry_run=not args.apply)
+    print("embeddings -> cache")
+    print(f"  {'embedding':10} {vectors['embedding']:>7,}")
+
+    if not args.apply:
+        print("\n  dry run; pass --apply")
+    print(f"\n  log holds {conn.execute('SELECT COUNT(*) FROM decisions').fetchone()[0]:,}"
+          f", cache holds {conn.execute('SELECT COUNT(*) FROM cache').fetchone()[0]:,}")
     conn.close()
     return 0
 

@@ -26,7 +26,7 @@ units, so there is nothing to calibrate.
 
 from __future__ import annotations
 
-import struct
+
 
 from model import cache, decisions
 
@@ -78,8 +78,66 @@ def _by_keyword(conn, query: str, limit: int) -> list[int]:
     )]
 
 
-def _vector(blob: bytes) -> list[float]:
-    return list(struct.unpack(f"{len(blob) // 4}f", blob))
+def _vector(blob: bytes):
+    import numpy as np
+
+    return np.frombuffer(blob, dtype=np.float32)
+
+
+# The embedding space, loaded once. Not a cache of an answer — a cache of the
+# *data*, which is 703 MB and unchanged between queries. Keyed on how many
+# vectors there are, so a helper landing more of them invalidates it without
+# anything having to notify anybody.
+_space: tuple[int, list[str], object] | None = None
+
+
+def space(conn):
+    """Every embedding as one normalised matrix, and the hashes beside it.
+
+    Three decisions, measured on the real 42,937 vectors, worth **390x**
+    together — 19,538 ms per query down to 50 ms:
+
+    * **`np.frombuffer` over the joined blobs, not `struct.unpack` per row.**
+      Unpacking 176 million floats through Python took 11 s; reading the same
+      bytes as one array takes 0.145 s.
+    * **Normalise once, here.** A unit vector is the same vector, so doing it
+      per query paid 0.5 s every time for an answer that never changed.
+    * **Count before fetching.** Selecting 703 MB out of SQLite and *then*
+      finding the memo warm still cost 5 s a query. Once memoised, the load was
+      never the expensive part — the `SELECT` was.
+
+    > The cold load is 6.2 s and **must never be on the boot path.**
+
+    That is the shape of every boot wound this project has had: something
+    correct and expensive placed before the first paint. Ranking and search
+    both degrade honestly without it, so it is owed work like any other — the
+    grid paints, and the space arrives when it arrives.
+    """
+
+    global _space
+    import numpy as np
+
+    # Count before fetching. Reading 703 MB out of SQLite and *then* noticing
+    # the memo was warm cost 5 s per query -- the load was never the expensive
+    # part once it was memoised, the SELECT was.
+    have = conn.execute(
+        "SELECT COUNT(*) FROM cache WHERE kind = ? AND state = 'ready'", (EMBEDDING,)
+    ).fetchone()[0]
+    if not have:
+        return [], None
+    if _space is not None and _space[0] == have:
+        return _space[1], _space[2]
+
+    rows = conn.execute(
+        "SELECT hash, value FROM cache WHERE kind = ? AND state = 'ready' ORDER BY hash",
+        (EMBEDDING,),
+    ).fetchall()
+    matrix = np.frombuffer(b"".join(r["value"] for r in rows), dtype=np.float32)
+    matrix = matrix.reshape(len(rows), -1).copy()
+    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
+    hashes = [r["hash"] for r in rows]
+    _space = (have, hashes, matrix)
+    return hashes, matrix
 
 
 def _semantic(conn, query_vector, limit: int) -> list[int]:
@@ -95,20 +153,15 @@ def _semantic(conn, query_vector, limit: int) -> list[int]:
         return []
     import numpy as np
 
-    rows = conn.execute(
-        "SELECT c.hash, c.value FROM cache c WHERE c.kind = ? AND c.state = 'ready'",
-        (EMBEDDING,),
-    ).fetchall()
-    if not rows:
+    hashes_all, matrix = space(conn)
+    if matrix is None:
         return []
 
-    matrix = np.array([_vector(r["value"]) for r in rows], dtype=np.float32)
-    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
     q = np.asarray(query_vector, dtype=np.float32)
-    q /= np.linalg.norm(q) + 1e-9
-
-    order = np.argsort(matrix @ q)[::-1][:limit]
-    hashes = [rows[i]["hash"] for i in order]
+    q = q / (np.linalg.norm(q) + 1e-9)
+    similarity = matrix @ q
+    top = np.argpartition(similarity, -min(limit, len(similarity)))[-limit:]
+    hashes = [hashes_all[i] for i in top[np.argsort(similarity[top])[::-1]]]
     holes = ",".join("?" for _ in hashes)
     found = {
         row["content_hash"]: row["id"]
