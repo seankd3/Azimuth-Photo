@@ -164,6 +164,40 @@ the grid, loupe and keyboard work are the product.
 
 Both are independent of the data steps below and can run alongside them.
 
+## Helpers
+
+Another machine may hold the files, do the work, or both. Neither needs a new
+concept.
+
+**A share is a drive.** `\\192.168.1.72\Expansion\Photos` instead of
+`E:\Photos` — same marker file, same uuid, same everything. `open()` still
+prefers the local copy, so browsing runs off local thumbnails and only opening
+an original crosses the network. A server that is off is a drive that is
+unplugged, which is already a first-class state.
+
+**A helper is another machine doing owed work.** Owed is a query, not a queue,
+so a helper needs no protocol at all: it runs the same worker against the same
+shared drive and writes results where this machine already looks. `sweep()` —
+which already discovers what is on a drive — finds them. No HTTP client, no
+pairing, no discovery, no mirror, no API revision.
+
+> **This machine never waits for a helper. A helper's absence is
+> indistinguishable from a slow day.**
+
+That sentence is the entire difference from the hub design this replaces. That
+one made the laptop *depend* on the server, so every surface grew an "is it
+reachable" branch — fifteen of them are still in the tree.
+
+Two hard lines, because this is the one part of the design that has already
+failed once:
+
+- **The catalog never lives on a share.** SQLite over SMB corrupts, and the
+  notebook belongs on the machine you are sitting at — which is also what keeps
+  it fast.
+- **Never ask a helper a question and wait for the answer.** One direction only:
+  the helper writes, the sweep finds. The first synchronous call is the hub
+  coming back.
+
 ## Build order
 
 Each step is worth having even if the next never lands.
