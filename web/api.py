@@ -669,6 +669,44 @@ async def rotate(image_id: int, degrees: int = 90, absolute: bool = False):
         connection.close_sync(conn, db_path=catalog_path())
 
 
+@router.post("/api/folder/rotate")
+async def rotate_folder(folder: str, degrees: int = 90, absolute: bool = True):
+    """Turn every photograph in a folder the same way.
+
+    A lab scans a whole roll the same way round, so the correction is a
+    property of the roll rather than of each frame. Doing it per photograph
+    would be 36 identical decisions the owner had to make one at a time.
+
+    `absolute` defaults true here, unlike the single-photo verb: "this roll is
+    sideways, turn it" is a statement about how the roll should sit, not a
+    nudge relative to wherever each frame happens to be already.
+    """
+
+    conn = _writer()
+    try:
+        prefix = str(folder or "").replace("\\", "/").strip("/") + "/"
+        rows = conn.execute(
+            "SELECT content_hash AS hash FROM images"
+            " WHERE substr(tail, 1, ?) = ? AND content_hash IS NOT NULL",
+            (len(prefix), prefix),
+        ).fetchall()
+        if not rows:
+            return {"ok": False, "reason": f"no identified photographs under {folder!r}"}
+
+        turned = 0
+        for row in rows:
+            was = int(decisions.latest(conn, row["hash"], decisions.ROTATE) or 0)
+            now = int(degrees) % 360 if absolute else (was + int(degrees)) % 360
+            if now != was:
+                decisions.decide(conn, row["hash"], decisions.ROTATE, now)
+                turned += 1
+        conn.commit()
+        return {"ok": True, "folder": folder, "photos": len(rows),
+                "turned": turned, "rotate": int(degrees) % 360}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""
