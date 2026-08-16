@@ -638,6 +638,76 @@ proves imports resolve and nothing else.
 ~3,500. Not because anything was written tersely — the core is heavily
 commented — but because most of what was there had stopped being asked.
 
+## Alongside Lightroom
+
+Working nicely beside Lightroom Classic is a selling point, so it is worth
+saying exactly what the integration is:
+
+> **There isn't one. Lightroom's channel to Azimuth is the photograph.**
+
+Lightroom Classic keeps rotations, stars and labels in its catalog until you
+ask it to write them out. When you do — Save Metadata to Files, or better,
+Catalog Settings → Metadata → *Automatically write changes into XMP* — it puts
+them in the photograph: the TIFF/DNG header for formats it can write into, an
+`.xmp` sidecar for proprietary raws. Azimuth reads the photograph. That is the
+whole of it.
+
+A `.lrcat` reader was built and then deleted, and the reason is the general
+one. Adobe's schema is private, has 84 tables, serves one application and may
+be renamed in any release. The photograph is a published format that every
+camera, darktable, Bridge and Capture One already write. The version that
+reads the file is smaller *and* strictly more capable, so there is no trade
+being made — the coupled version was worse at its own job.
+
+**Measured, on the roll this was built for:** with orientation written to the
+files, `decode()` agreed with Lightroom on **40 of 40** frames, 18 turned and
+22 upright, with no Lightroom-specific code in the path.
+
+### What a file changing costs, and the one word that pays it
+
+Saving metadata **rewrites the photograph**. All 40 files changed size and
+digest. That invalidates more than it looks like:
+
+* the tiles, which were computed from bytes that no longer exist;
+* `width`/`height`, which is what the grid sizes each cell from;
+* the **content hash — which is the subject of every decision.** 88,809 of
+  them, 79,512 develop edits among them. The digest covers the first 8 MiB,
+  and in a TIFF or DNG that is exactly where metadata lives.
+
+That last one is the sharp edge, and it is a real tension in the design:
+`content_hash` is documented as *"never identity"* and is nonetheless what
+`decisions.subject` holds.
+
+All of it is paid by one word. `synchronize` reports **`changed`** beside
+`new` and `missing` — a photograph whose file is present but is no longer the
+file we read. Size is the test: already recorded for all 144,271 photographs,
+so it needs no migration, and it costs the `stat` the walk is doing anyway.
+Applying a change re-reads the file and calls `decisions.carry`, which appends
+the current answer in each family under the new digest. Not a migration and
+not a merge — the old rows stay exactly where they are, so the record of what
+was decided when is never rewritten.
+
+The reason to like this: it is not about Lightroom. `changed` is equally the
+answer for darktable writing a sidecar, a file restored from backup, a re-scan
+after a repair, and every future application that edits a photograph in place.
+
+### What is deliberately not read
+
+Adobe's `crs:` develop settings. They are a private edit format, and rendering
+someone else's edit *wrongly* is worse than not rendering it. Stars, labels and
+orientation transfer exactly because they are the fields that mean the same
+thing everywhere.
+
+### What this deleted
+
+`web/lightroom.py` (136 lines) and `POST /api/lightroom/read`, plus
+`POST /api/folder/rotate`. The last one is worth its own sentence, because it
+read as a labour saver and was a footgun: "a lab scans a roll the same way
+round" is true, and then the photographer turns individual frames, which is
+the only reason the roll needed attention at all. Pointed at one roll it wrote
+40 corrections over Lightroom's 18, and the 22 upright frames came back
+sideways. **A verb that is wrong exactly when it is used is not a shortcut.**
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
