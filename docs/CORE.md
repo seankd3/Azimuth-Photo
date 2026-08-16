@@ -70,11 +70,19 @@ rows carry a `-N` collision suffix.
 
 **version_of** — one nullable column covering raws, exports and virtual copies. A
 group is an original plus everything whose chain reaches it, so exporting an
-export lands in one group rather than a chain of pairs. It replaces `vc_of`: a
-virtual copy is a version with no file of its own. The link is *read, not
+export lands in one group rather than a chain of pairs. The link is *read, not
 guessed* — Lightroom stamps `crs:RawFileName` and `xmpMM:OriginalDocumentID` into
 every export. Bursts are a different axis and stay out of scope: `stacks` holds
 0 rows.
+
+> **`version_of` is a NEW column. It never renames `vc_of`.** `vc_of` does not
+> mean "version of" — it means **"this row does not own a file."** Verified:
+> `idx_images_original_filepath` is `UNIQUE(filepath) WHERE vc_of IS NULL`, and
+> the foreign key is `vc_of → images.id ON DELETE CASCADE`. An export owns a real
+> file, so putting it in `vc_of` would drop it out of the uniqueness index and
+> cascade-delete it with its parent. `version_of` is nullable with
+> `ON DELETE SET NULL`, and `vc_of` keeps its own meaning until virtual copies
+> are rebuilt on top of it.
 
 **cache** — `path` names a rendition on disk, `value` holds a computed fact.
 42,937 embeddings read as one matrix, not 42,937 file opens that reclaim would
@@ -262,7 +270,8 @@ deliberately rebuilt.
 | | Step | Status | Done when |
 |---|---|---|---|
 | 1 | `drives` + marker uuids | **done** `69cf6d76` | both roots resolve with letters swapped |
-| 2 | one tail convention on every photo | next | `Raws/Digital/2026/x.CR3` is the same tail on both drives |
+| 0 | **purge the phantom rows** | **awaiting go** | source 5 reads 2,050 rows against 2,240 files on disk |
+| 2 | one tail convention on every photo | after 0 | `Raws/Digital/2026/x.CR3` is the same tail on both drives |
 | 3 | `open()` replaces path probing | | archive photos open and reveal |
 | 4 | `copies` + `sweep()`, hints only | | unplug and replug mid-session; the grid never blinks |
 | 5 | re-key Develop base + thumbnail ETag onto the hash | | plug the archive in warm: no re-decode wave |
@@ -281,6 +290,33 @@ deliberately rebuilt.
 | 5 before working-disk-preferred reads | The Develop base keys on `(image_id, source_path)`; the thumbnail ETag folds in `filepath`. 143,803 of 144,473 cache rows belong to the archive. |
 | loopback before deleting auth (A) | Dropping auth while still listening outward is worse than today. |
 | one client before killing `fetch` (B) | 33 files bypass the client with inline `/api/` strings. |
+
+**Step 0 — purge the phantoms (blocks step 2).** `make_test_library` output was
+scanned into the live catalog and its files later deleted, leaving **17,132 rows
+that point at nothing** — 89.7% of source 5. That, not the Lightroom work, is
+what would trip the mass-missing breaker on the next scan and stall reconcile
+permanently.
+
+They are unmistakable: sequential names `20260520-000000.CR3` onward, no
+dimensions, no camera, no content hash, all stamped exactly noon, files on
+neither drive, and no judgment of any kind. But **`2026-05-20` is also a real
+shoot folder** — an EOS R5 row with EXIF `03:34:08`, real dimensions and a hash
+sits among them — so the folder is not the discriminator and a folder-wide
+delete would take photographs.
+
+The rule that cannot: purge a row only when it is *simultaneously* absent from
+disk, hash-less, dimension-less, camera-less, not EXIF-dated, and judgment-free.
+Measured: 18,911 evidence-free rows, of which **1,779 exist on disk and are kept**
+(real photos merely not scanned yet) and **17,132 are purged**. Source 5 lands at
+2,050 against 2,240 image files on `D:\Pictures`.
+
+Every source-5 figure quoted before this was ~89% phantom: the hot tier is 2,050
+rows, and hash coverage is **13%**, not 1.4%.
+
+**Also found, and fixed before any migration runs:** `data/schema.py:2307`
+commits `PRAGMA user_version = SCHEMA_VERSION` *before* returning the answer
+computed from the old value — so a migration that fails after that point stamps
+the new version anyway and is silently skipped forever after.
 
 **Guard rails.** Cold backup with the app stopped before any data step — one
 exists at `C:\Azimuth Photo\data\manual-backups\2026-08-15-pre-core\`, verified.
