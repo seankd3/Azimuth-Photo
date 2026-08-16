@@ -34,6 +34,31 @@ The UI is not being rewritten — 39k lines of grid, loupe and keyboard work is
 the product, and it is the one part that was ever good. The **backend goes from
 107k to about 12k**.
 
+### The measurement that settles the argument
+
+Counted on the live catalog, 2026-08-16. It is **2.4 GB across 84 tables**, and
+**41 of those tables are empty**. Of everything in the other 43, this is all the
+owner ever decided:
+
+| | |
+|---|---|
+| develop settings | 79,487 |
+| stars | 6,165 |
+| comparison pairs | 2,532 |
+| develop presets | 994 |
+| quality marks | 89 |
+| keywords | 77 |
+| flags | 32 |
+| trashings | 2 |
+| **total** | **≈ 89,378 rows** |
+
+Everything else — every index, backlog, ledger, cursor, scan state, FTS shadow,
+presence table and derived column — is a machine's opinion about bytes it can
+read again. **The irreplaceable part of Azimuth fits in one append-only table**,
+and it is 0.06% of the rows in the catalog holding it. That is the whole case
+for the shape of this rewrite, and it is why "smaller" and "safer" are the same
+direction here rather than opposite ones.
+
 ---
 
 ## The contract
@@ -175,9 +200,45 @@ smaller tile while the right one renders is UI behaviour, not a cache concept.
 **Ranking.** You make comparisons; everything else is computed from them. A
 comparison is a decision, Elo and taste are derivations, the mosaic is a
 candidate query. One sort registry — a sort not in it is rejected, never
-silently falling back to Elo. *Caveat:* the existing `elo`/`stars`/`comparisons`
-columns are irreplaceable, because their pair ledger was never replicated here
-(415,360 counted against 2,532 rows). Preserve those; derive only new ones.
+silently falling back to Elo.
+
+> **Correction (08-16).** An earlier draft called the `elo`/`comparisons`
+> columns irreplaceable because "the pair ledger was never replicated". Measured
+> against the live catalog, the opposite is true, and the real numbers are the
+> best argument this design has:
+
+| | Rows | What it is |
+|---|---|---|
+| `comparisons` table | **2,532 pairs over 665 photos** | the owner's actual judgement |
+| `images.comparisons` counter | 415,360 across 21,376 photos | fiction — **20,811 of those photos appear in no pair at all**, and the counts cluster at 10–14, which is a machine's wave, not a person clicking |
+| `images.elo` | 29,845 moved off the 1200 default | of which only 585 are in the ledger — the other 29,260 are **propagated**, see below |
+| `images.stars` | 6,165 | judgement |
+| `images.flag` | 32 | judgement |
+
+The ledger exists and *is* the record. The columns are derivations written into
+the same place as the judgement, which is precisely the failure this design
+refuses with **the machine's read is cache, your save is a decision**.
+
+> **Propagation is the point, not the pollution.** Those 29,260 Elos are the
+> taste model spreading real comparisons through the embedding space to
+> photographs that *look like* the ones you judged. It is the mechanism that
+> multiplies ranking power — it is why 2,532 comparisons can order 157,000
+> photos, and it is a feature, not drift.
+
+That makes the shape better rather than worse. Elo is **derived from
+comparisons *and* vectors**, so it is a cache kind whose answer improves every
+time either input grows: one more comparison, or one more embedding off the
+owed queue, re-ranks everything that resembles it. Recomputing is a feature.
+Storing it as if it were judgement is what stopped it improving.
+
+Two consequences worth stating plainly:
+
+- **Embeddings are load-bearing for ranking, not only for search.** The ~131k
+  owed vectors are not a nice-to-have; each one is a photograph that cannot yet
+  receive propagated taste.
+- **The owner's ranking judgement is 8,729 rows** — 2,532 pairs, 6,165 stars,
+  32 flags. That is all that must survive. Everything the ranking engine
+  produces from it can be made again, and should be.
 
 **AI.** Cache, with two riders: never evict (small, hours to remake), and your
 answer about the machine's answer — a name, "not a face", a fixed caption — is a
