@@ -29,6 +29,21 @@ Everything below that looks like a magic number was paid for once:
 * **A frame too big to afford is refused, never clamped.** Clamping an
   oversized weight to the ceiling is how one 4.2 GB panorama was charged 768 MB
   and killed the service four times in an hour.
+
+Two things checked against the real archive rather than assumed, because both
+would have been silent:
+
+* **Orientation is applied exactly once.** `rawpy.postprocess` already honours
+  the camera's flip, and `exif_transpose` is a no-op on an image built from an
+  array, so the two do not compound. Verified on a `flip=5` frame: an 8191×5463
+  sensor decodes to 2732×4096 portrait. Applying both would double-rotate every
+  portrait RAW; applying neither would leave whole camera bodies sideways.
+* **Some files genuinely will not decode, and that is an answer.** Measured
+  over 119 TIFFs, two refuse — a 32-bit-float astronomy stack and one export —
+  with Pillow's *unknown pixel mode*. They record as `failed` with the reason,
+  and the second request costs 0.01 ms instead of 74 ms because nothing tries
+  again. That is the `unreadable` word, and writing a decoder for 1.7% of the
+  TIFFs is not the smaller codebase.
 """
 
 from __future__ import annotations
@@ -116,7 +131,11 @@ def _decode_display(path: str, longest: int) -> Image.Image:
 
     image = Image.open(path)
     if longest:
-        image.draft("RGB", (longest, longest))
+        # Twice the target, not the target: `draft` only scales by powers of
+        # two, so asking for exactly the target can land a 1/8 read just under
+        # it and the upscale back is visibly soft. 2x always leaves a frame at
+        # least as large as what is wanted.
+        image.draft("RGB", (longest * 2, longest * 2))
     _affordable(image.width, image.height, longest)
     image.load()
     return image
