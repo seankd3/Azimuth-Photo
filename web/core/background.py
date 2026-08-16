@@ -373,14 +373,11 @@ async def run_startup(
     # prefetch worker, a pregen worker and a warm worker that arbitrated
     # between themselves through a governor: owed is a query, so there is
     # nothing to divide up.
-    def _chores() -> None:
-        import work
-        from core.catalog_path import catalog_path
-        from data import connection as _conn
+    from core.catalog_path import catalog_path
+    from data import connection as _conn
 
-        work.run(lambda: _conn.open_sync(catalog_path()))
-
-    threading.Thread(target=_chores, name="chores", daemon=True).start()
+    started = work.start(lambda: _conn.open_sync(catalog_path()))
+    log.info("worker=chores lanes=%s", started)
     # A separate identity backfill ran here on a five-minute daemon, with its
     # own INDEXED BY hint and its own skip cursor. Identity is the first thing
     # work.step() asks for -- it has to be, since every cache row is keyed on

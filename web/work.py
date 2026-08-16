@@ -254,7 +254,8 @@ def _identify_one(conn, row) -> bool:
     return True
 
 
-def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = None) -> dict | None:
+def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = None,
+         lane: int = 0, lanes: int = 1) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
     One item, then return. Concurrency lives *above* this function — in how
@@ -265,6 +266,12 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
     `yield_to` is accepted for callers that want to stand down entirely (a
     battery saver, a test). It defaults to never, because chores running is the
     normal state.
+
+    **`lane` is how several workers share one query without coordinating.**
+    Each takes every `lanes`-th candidate from the same window, so two workers
+    never pick the same photograph and nothing has to claim, lock or lease a
+    row. A worker that dies mid-item leaves no claim to expire — its item is
+    simply owed again, which is the property the whole design turns on.
     """
 
     if paused(conn):
@@ -286,7 +293,7 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
         # meant a single away photo stalled every other kind of work behind it.
         # Trying a handful costs nothing and makes progress whenever *any* of
         # them is reachable.
-        for row in owed(conn, name, on_screen=on_screen, limit=CANDIDATES):
+        for row in owed(conn, name, on_screen=on_screen, limit=CANDIDATES)[lane::lanes]:
             source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
             if source is None:
                 continue
@@ -312,7 +319,8 @@ def sweep_cache(conn, ceiling_bytes: int) -> int:
     return len(dropped)
 
 
-def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> None:
+def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
+        lane: int = 0, lanes: int = 1) -> None:
     """The chore loop. Runs until the process ends; owns everything it touches.
 
     Deliberately a plain `while` in a thread rather than a task on the event
@@ -328,7 +336,7 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> No
     try:
         while True:
             try:
-                did = step(conn, on_screen=on_screen())
+                did = step(conn, on_screen=on_screen(), lane=lane, lanes=lanes)
             except Exception:
                 log.exception("worker=chores step failed")
                 did = None
@@ -341,3 +349,32 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> No
             conn.close()
         except Exception:
             pass
+
+
+def start(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> int:
+    """Run the chore loop on as many threads as this machine can afford.
+
+    Threads rather than processes, and the reason is worth stating because the
+    appendix warns the other way: `rawpy.postprocess` holds the GIL, so RAW
+    decode does not parallelise here. But most of this library is JPEG and
+    TIFF, and Pillow releases the GIL for both decode and encode — so the
+    threads are real parallelism for the common case and merely harmless for
+    the RAW one. A process pool would parallelise RAW too, at the cost of
+    shipping frames over a pipe and giving each child its own catalog
+    connection; that trade is worth making when RAW is the bottleneck and not
+    before.
+
+    Each thread takes its own lane of the same query, so they never collide and
+    never coordinate.
+    """
+
+    import threading
+
+    count = workers()
+    for lane in range(count):
+        threading.Thread(
+            target=run, args=(open_conn,),
+            kwargs={"on_screen": on_screen, "lane": lane, "lanes": count},
+            name=f"chores-{lane}", daemon=True,
+        ).start()
+    return count
