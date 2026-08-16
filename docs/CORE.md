@@ -562,6 +562,40 @@ base keyed on `(image_id, source_path)`, its private eviction budget, and
 hash is what makes `cache.evict` cover it — and is the same change that stops
 a re-decode wave the first time the archive is plugged in warm.
 
+## The last change: re-key the Develop base
+
+Everything else is done. This is the one ordering constraint left, and it is
+small but exact — worth writing down precisely rather than approximately.
+
+**Where it is.** `features/develop/rawproc.py:136`
+
+```python
+def base_paths(image_id, source_path=None) -> BasePaths:
+    cache_dir = _raw_base_cache_dir() if ... else BASE_CACHE_DIR
+    stem = cache_dir / str(int(image_id))          # <- the whole problem
+```
+
+The base is named by **row number**. Rebuild the table, renumber, or re-import
+and hours of demosaic are pointing at nothing — the same failure the tile cache
+had before tiles were named `<hash>-<size>.jpg`.
+
+**The change.** `stem = cache_dir / content_hash`, with the hash passed in
+rather than derived: `cached_base_paths` is documented as an inexpensive probe
+and hashing reads 8 MiB. Every caller already holds the row, so the hash is one
+column away.
+
+**Why it is worth doing beyond tidiness.** 143,803 of 144,473 cache rows belong
+to the archive. Keyed on the row, plugging the archive in warm re-decodes them;
+keyed on the bytes, nothing re-decodes at all. That is the wave CORE.md has
+warned about since step 5.
+
+**What it unblocks.** `base_cache_budget.py` (134 lines) and its hourly worker,
+because `cache.evict` covers anything in the `cache` table and nothing else
+needs a private eviction policy.
+
+**What it must not touch.** Any of the 22 mathematics files. This is a cache
+key and a filename; if a pixel changes, something has gone wrong.
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
