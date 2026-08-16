@@ -965,8 +965,22 @@ ON image_checksums(checked_at);
 """
 
 # The people tables are no longer created. They held zero rows, the feature
-# they backed is gone, and a fresh install should not inherit six empty
-# tables and their indexes. Existing catalogs keep theirs, unused.
+# they backed is gone, and a fresh install should not inherit six empty tables
+# and their indexes. Existing catalogs keep theirs, unused.
+#
+# But `cache_image_presence` lived in that same file and is NOT a people
+# table -- it is the thumbnail presence index, 93,220 rows on the live
+# catalog. Deleting people_schema.py silently stopped creating it, which broke
+# nothing here (the table already existed) and would have broken every fresh
+# install. Found only because repairing the test suite made 29 hidden tests
+# run again.
+SCHEMA += """
+CREATE TABLE IF NOT EXISTS cache_image_presence (
+    cache_root TEXT NOT NULL,
+    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    PRIMARY KEY (cache_root, image_id)
+);
+"""
 
 PRE_SCHEMA_CATALOG_SOURCES_DDL = (
     "CREATE TABLE IF NOT EXISTS catalog_sources ("
@@ -1339,16 +1353,6 @@ REQUIRED_TABLES = {
     "share_images",
     "share_favorites",
     "collection_publishes",
-    "people",
-    "face_detections",
-    "face_assignments",
-    "person_image_membership",
-    "people_merge_suggestions",
-    "face_scan_images",
-    "face_scan_models",
-    "face_scan_backlog",
-    "people_operational_metrics",
-    "face_scan_status_counts",
     "image_checksums",
 }
 
@@ -2114,34 +2118,21 @@ async def backfill_image_tags(conn) -> None:
 
 
 async def backfill_people_query_aggregates(conn) -> None:
-    await conn.execute(
-        "UPDATE people SET "
-        "photo_count = (SELECT COUNT(*) FROM person_image_membership pim WHERE pim.person_id = people.id), "
-        "face_count = COALESCE((SELECT SUM(face_count) FROM person_image_membership pim WHERE pim.person_id = people.id), 0), "
-        "best_quality = COALESCE((SELECT MAX(best_quality) FROM person_image_membership pim WHERE pim.person_id = people.id), 0), "
-        "latest_face_at = COALESCE((SELECT MAX(latest_face_at) FROM person_image_membership pim WHERE pim.person_id = people.id), 0)"
-    )
-    await conn.execute(
-        "UPDATE people_operational_metrics SET value = ("
-        "SELECT COUNT(*) FROM face_detections WHERE ignored = 0"
-        ") WHERE metric = 'detected_faces'"
-    )
-    await conn.execute("DELETE FROM face_scan_status_counts")
-    await conn.execute(
-        "INSERT INTO face_scan_status_counts(status, value) "
-        "SELECT status, COUNT(*) FROM face_scan_images GROUP BY status"
-    )
+    """Nothing to backfill: the people tables are no longer created.
 
+    Faces became a cache kind this machine cannot make, so a fresh catalog
+    has none of these tables. Left as a no-op rather than removed because a
+    migration step is referenced by version number, and renumbering them is
+    how a migration silently stops running.
+    """
 
 async def backfill_cache_image_presence(conn) -> None:
     await conn.execute(
         "INSERT OR IGNORE INTO cache_image_presence(cache_root, image_id) "
         "SELECT cache_root, image_id FROM cache_entries GROUP BY cache_root, image_id"
     )
-    await conn.execute(
-        "INSERT OR IGNORE INTO face_scan_models(model_id) "
-        "SELECT DISTINCT model_id FROM face_scan_images WHERE model_id != ''"
-    )
+    # The face_scan_models seed that stood here went with the faces feature.
+    # It had no business in a cache-presence backfill in the first place.
 
 
 async def _executescript_in_transaction(conn, script: str) -> None:

@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from test_support import *  # noqa: F401,F403
 from data.repositories import collections as collection_repository
 from data.repositories import stacks as stack_repository
-from features.media import routes as media_routes
 from features.develop import virtual_copies
 from features.trash import service as trash_service
 

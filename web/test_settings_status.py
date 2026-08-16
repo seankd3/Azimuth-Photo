@@ -4,7 +4,6 @@ from unittest import mock
 
 from data.repositories import embeddings as embedding_repository
 from features.catalog import metadata as catalog_metadata
-from features.captions import routes as caption_routes
 
 
 class SettingsStatusTests(BackendTestCase):
@@ -58,12 +57,12 @@ class SettingsStatusTests(BackendTestCase):
             "build_cache_status",
             new=mock.AsyncMock(return_value=cache),
         ), mock.patch.object(
-            settings_routes.people_routes,
-            "people_status_payload",
+            settings_routes.core_api,
+            "people_status",
             new=mock.AsyncMock(return_value=people),
         ), mock.patch.object(
-            caption_routes,
-            "caption_status_payload",
+            settings_routes.core_api,
+            "captions_status",
             new=mock.AsyncMock(return_value=captions),
         ), mock.patch.object(
             catalog_metadata,

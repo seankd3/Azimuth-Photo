@@ -16,7 +16,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 import thumbnails  # noqa: E402
 from data import schema as data_schema  # noqa: E402
 from features.library import preview_priority  # noqa: E402
-from features.library import service as library_service  # noqa: E402
 from thumbnails import budget as thumbnail_budget  # noqa: E402
 from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 from thumbnails import config as thumbnail_config  # noqa: E402
@@ -2533,8 +2532,7 @@ class ThumbnailBulkWarmupTests(BulkMemoryIsolatedTestCase, unittest.TestCase):
         self._add_catalog_original(1, backlog)
         self._add_catalog_original(2, priority)
 
-        library_service._record_preview_priority_scope(
-            {"hidden_pending_thumbnails": 1},
+        preview_priority.record_scope(
             folder=os.path.dirname(priority),
             collection_id=0,
         )
