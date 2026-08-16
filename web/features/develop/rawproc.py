@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+
+from model import cache as _cache
 from PIL import Image, ImageOps
 from core import pil_limits  # noqa: F401  # disables the decompression-bomb limit process-wide
 
@@ -602,6 +604,53 @@ def _enrich_source_metadata(meta: dict[str, Any], path: str | os.PathLike[str]) 
 def _linear_to_srgb(linear: np.ndarray) -> np.ndarray:
     clipped = np.clip(linear, 0.0, 1.0)
     return np.where(clipped <= 0.0031308, clipped * 12.92, 1.055 * np.power(clipped, 1.0 / 2.4) - 0.055)
+
+
+def _remove_base(path: str) -> None:
+    """Remove a base: all three files, or none of them is useful.
+
+    A base is the pixels, its metadata and a preview sharing one stem. An
+    eviction that unlinked only the big one would leave something that looks
+    present and cannot be read -- the exact shape of bug the five-word error
+    vocabulary exists to prevent.
+    """
+
+    from pathlib import Path as _Path
+
+    stem = _Path(str(path))
+    for name in (stem, stem.with_suffix(".json"), stem.with_suffix(".jpg")):
+        try:
+            os.remove(name)
+        except OSError:
+            pass
+
+
+BASE = _cache.register(_cache.Kind(
+    name="base",
+    # A base is made by Develop's own decoder on demand, not by the chore loop:
+    # nobody wants 144,000 linear RAW decodes on a disk that also holds tiles.
+    # It is registered so that `cache.evict` can see it -- one ceiling over
+    # everything cached, which is what deletes its private eviction worker.
+    compute=lambda source, hash: _cache.Made(),
+    here=lambda: False,
+    wants="0",
+    cost=8.0,
+    remove=_remove_base,
+))
+
+
+def record_base(conn, image_id: int, paths: BasePaths) -> None:
+    """Tell the cache a base exists, so one ceiling covers it like everything else."""
+
+    total = 0
+    for name in (paths.binary, paths.metadata, paths.preview):
+        try:
+            total += name.stat().st_size
+        except OSError:
+            pass
+    _cache.put(conn, base_name(image_id), "base",
+               _cache.Made(path=str(paths.binary), bytes=total))
+    conn.commit()
 
 
 def _write_base_cache(paths: BasePaths, rgb: np.ndarray, meta: dict[str, Any]) -> None:

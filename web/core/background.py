@@ -355,19 +355,11 @@ async def run_startup(
 
     track_background_task(_start_background_daemon(_reconcile_folders, delay=30.0))
 
-    async def _hold_develop_cache_to_budget():
-        # A decode cache with no ceiling is a slow leak: it reached 77GB on the
-        # hub, which is also why it ended up on the archive disk. Oldest out
-        # first, the same law as the laptop cache.
-        import db as app_db
-        from data import connection as data_connection
-        from features.develop import base_cache_budget
-
-        if data_connection.is_ephemeral_db_path(app_db.DB_PATH):
-            return
-        await base_cache_budget.run_base_cache_budget_worker()
-
-    track_background_task(_start_background_daemon(_hold_develop_cache_to_budget, delay=45.0))
+    # An hourly worker held the Develop base cache to its own private budget,
+    # walking a directory and evicting oldest-first. Bases are cache rows now,
+    # so `cache.evict` covers them under the same ceiling as everything else --
+    # and a second eviction policy for one kind of answer was always the thing
+    # to delete rather than to tune.
 
     # One chore loop, in a thread with its own connection. It replaces a
     # prefetch worker, a pregen worker and a warm worker that arbitrated

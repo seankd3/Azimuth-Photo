@@ -311,12 +311,17 @@ def sweep_cache(conn, ceiling_bytes: int) -> int:
     """
 
     dropped = cache.evict(conn, ceiling_bytes)
-    for path in dropped:
+    for kind, path in dropped:
+        remove = getattr(cache.kinds().get(kind), "remove", None) or _unlink
         try:
-            os.remove(path)
+            remove(path)
         except OSError:
             pass
     return len(dropped)
+
+
+def _unlink(path: str) -> None:
+    os.remove(path)
 
 
 def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),

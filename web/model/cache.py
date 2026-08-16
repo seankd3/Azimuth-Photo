@@ -61,6 +61,13 @@ class Kind:
     # Can this machine make it right now? A missing model, no GPU, a helper's
     # job. Asked, never remembered.
     here: Callable[[], bool] = lambda: True
+    # How to remove one. Almost always "unlink the path", but a Develop base is
+    # three files sharing a stem -- the pixels, the metadata and a preview --
+    # and an eviction that took one of them would leave a base that looks
+    # present and cannot be read. The registry already answers what a kind
+    # costs and whether it can be made; how to throw one away belongs beside
+    # them rather than as a special case inside the evictor.
+    remove: Callable[[str], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -204,8 +211,8 @@ def size(conn, *, kind: str | None = None) -> int:
     return int(conn.execute(sql, args).fetchone()["total"])
 
 
-def evict(conn, ceiling_bytes: int) -> list[str]:
-    """Bring the cache under one ceiling, oldest first. Returns paths to unlink.
+def evict(conn, ceiling_bytes: int) -> list[tuple[str, str]]:
+    """Bring the cache under one ceiling, oldest first. Returns (kind, path).
 
     One number, one order. Not a tier policy, not a per-kind budget, not a
     least-recently-used accounting table — those exist to decide *which* answer
@@ -237,6 +244,6 @@ def evict(conn, ceiling_bytes: int) -> list[str]:
         )
         total -= int(row["bytes"] or 0)
         if row["path"]:
-            dropped.append(row["path"])
+            dropped.append((row["kind"], row["path"]))
     conn.commit()
     return dropped

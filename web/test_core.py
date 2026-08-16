@@ -355,7 +355,7 @@ class CacheRefuses(CoreCase):
         cache.put(self.conn, "h1", "embedding", cache.Made(value=b"vector", bytes=3000))
         cache.put(self.conn, "h1", "test_thumb", cache.Made(path="/t.jpg", bytes=3000), {"size": 400})
         self.conn.commit()
-        self.assertEqual(cache.evict(self.conn, 0), ["/t.jpg"])
+        self.assertEqual(cache.evict(self.conn, 0), [("test_thumb", "/t.jpg")])
         self.assertIsNotNone(cache.get(self.conn, "h1", "embedding"))
 
 
