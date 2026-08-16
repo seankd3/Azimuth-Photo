@@ -293,17 +293,20 @@ thumbnail signature. Reconcile is enough, watched, not left unattended.
 
 ## Tests
 
-32,777 lines today, and **424 assertions read frontend source as literal text**,
-so renaming a private function fails a test instead of finding a bug. Three of
-the files they read are already dead code.
+**32,892 lines across 141 files** (measured 08-15). The source-text contract
+suite — `test_desktop_correctness.py`, `test_ui_contracts.py`,
+`test_mobile_contracts.py`, `test_modular_contracts.py`, and the 424 assertions
+that read frontend source as literal text — **is already gone**, deleted in an
+earlier wave. So the remaining problem is size, not coupling: the two largest
+files alone are 6,332 lines.
 
-- **Delete the source-text suite now**: `test_desktop_correctness.py` (785),
-  `test_ui_contracts.py` (311), `test_mobile_contracts.py` (197),
-  `test_modular_contracts.py` (463).
 - **Tests arrive with their step**, as step 1 did: 7 behaviour tests, 0.21 s.
 - **What earns a test**: the seven functions; the five acceptance properties; the
-  perf budgets; and each lesson below that a naive rewrite would destroy.
-- **A test may not read source code as text.**
+  perf budgets; and each lesson in the appendix that a naive rewrite would
+  destroy.
+- **A test may not read source code as text**, so the old suite cannot grow back.
+- Old tests die with the code they cover — a step that deletes a subsystem
+  deletes its tests in the same commit, rather than leaving them to rot red.
 
 Target: **~5,000 lines**, full suite under a minute.
 
