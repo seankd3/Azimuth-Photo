@@ -355,6 +355,20 @@ class OwedIsAQuery(CoreCase):
         work.step(self.conn, yield_to=lambda: False)
         self.assertEqual(work.owed(self.conn, "thumb"), [])
 
+    def test_one_unreachable_photo_cannot_stall_the_queue(self):
+        # This livelocked tile generation on the live library at 95 tiles with
+        # 156,831 owed: the worker asked for one candidate, that candidate had
+        # no tail so it could never be located, and the same row came back on
+        # every pass forever.
+        self.conn.execute(
+            "INSERT INTO images(tail, file_size, content_hash, date_taken)"
+            " VALUES (NULL, 1, 'no-tail', '2099-01-01')"
+        )
+        self.conn.commit()
+        reachable = self._catalogued("Raws/reachable.CR3")
+        self.assertNotIn("no-tail", [row["hash"] for row in work.owed(self.conn, "thumb")])
+        self.assertEqual(work.step(self.conn, yield_to=lambda: False)["photo"], reachable)
+
     def test_a_failure_is_not_rediscovered_every_pass(self):
         cache.register(cache.Kind(name="boom", compute=lambda source, hash: 1 / 0))
         self.addCleanup(cache.unregister, "boom")

@@ -112,7 +112,29 @@ async def counts():
 
 @router.get("/api/folders/tree")
 async def folders():
-    return {"folders": await asyncio.to_thread(library.folders, db())}
+    """The folder tree, merged across every drive.
+
+    Returned under one source rather than one per drive, and that is the
+    design rather than a shim: a folder is a prefix of a tail, so the same
+    shoot filed on the working disk and the archive is *one* node that happens
+    to be held twice. Lightroom shows it twice and makes the owner know which
+    copy they clicked.
+
+    `drives` rides along on each node as a quiet fact — where these
+    photographs are — instead of being the axis the tree is built on.
+    """
+
+    tree = await asyncio.to_thread(library.folder_tree, db())
+    return {
+        "sources": [{
+            "id": 1,
+            "path": "",
+            "display_name": "Library",
+            "online": True,
+            "folders": tree,
+        }],
+        "folders": tree,
+    }
 
 
 @router.get("/api/catalog")

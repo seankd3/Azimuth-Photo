@@ -355,3 +355,54 @@ def date_range(date_taken: str) -> tuple[str, str] | None:
         stamp = "%Y-%m-%d %H:%M:%S"
         return start.strftime(stamp), end.strftime(stamp)
     return None
+
+
+def folder_tree(conn, *, max_depth: int = 3) -> list[dict]:
+    """One tree over every drive, because a folder is a prefix of a tail.
+
+    Lightroom shows a tree per source, so the same shoot filed on two disks
+    appears twice and the owner has to know which copy they are clicking. Here
+    the tail *is* the folder, and the drive is a property of the photographs
+    underneath it — so `Raws/Digital/2026` is one node whether it lives on the
+    working disk, the archive, or both.
+
+    Which drives hold it comes back on the node as a quiet fact rather than as
+    the thing the tree is organised by. That is the whole difference, and it is
+    free: the tails already say it.
+    """
+
+    counts: dict[str, int] = {}
+    where: dict[str, set] = {}
+    drive_of = {
+        int(row["id"]): row["label"] or row["root"]
+        for row in conn.execute("SELECT id, label, root FROM drives")
+    }
+
+    for row in conn.execute(
+        f"""
+        SELECT i.tail, (SELECT GROUP_CONCAT(c.drive_id) FROM copies c WHERE c.photo_id = i.id) AS drives
+        FROM images i WHERE {IN_LIBRARY} AND i.tail GLOB '*/*'
+        """
+    ):
+        parts = str(row["tail"]).split("/")[:-1]
+        held = {drive_of.get(int(d)) for d in str(row["drives"] or "").split(",") if d.strip().isdigit()}
+        for depth in range(1, min(len(parts), max_depth) + 1):
+            key = "/".join(parts[:depth])
+            counts[key] = counts.get(key, 0) + 1
+            where.setdefault(key, set()).update(held - {None})
+
+    def node(path: str) -> dict:
+        children = sorted(
+            k for k in counts
+            if k.startswith(path + "/") and k.count("/") == path.count("/") + 1
+        )
+        return {
+            "path": path,
+            "name": path.rsplit("/", 1)[-1],
+            "total_count": counts[path],
+            "drives": sorted(where.get(path) or []),
+            "reveal_available": True,
+            "children": [node(child) for child in children],
+        }
+
+    return [node(k) for k in sorted(counts) if "/" not in k]

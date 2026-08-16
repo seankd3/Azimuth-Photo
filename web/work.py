@@ -65,6 +65,11 @@ log = logging.getLogger(__name__)
 # that a pause between keystrokes is not an invitation to start a demosaic.
 QUIET_AFTER_SECONDS = 2.0
 
+# How many owed photographs to consider before giving up on this pass. Not a
+# batch -- one item is still done per step. It is the number of away or
+# unreadable photographs the worker will step over to find one it can do.
+CANDIDATES = 64
+
 _last_touch = 0.0
 
 
@@ -167,6 +172,14 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
     A failed entry counts as answered: it is in `cache` with `state='failed'`,
     so the anti-join steps over it and the worker does not rediscover the same
     unreadable file on every pass. Asking again is `cache.forget`, deliberately.
+
+    **A tail is required, and leaving it out livelocked the whole queue.** A
+    photograph with no tail can never be located, so it is skipped on every
+    pass — and because the worker asked for one row at a time, the same
+    unlocatable row came back forever. Measured on the live catalog: 12,853 of
+    156,831 owed rows have no tail, and the first of them stopped tile
+    generation dead at 95 tiles. A photograph that is not in the library is not
+    owed work.
     """
 
     entry = cache.kind_of(kind)
@@ -184,6 +197,7 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
         LEFT JOIN cache c
                ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
         WHERE i.content_hash IS NOT NULL
+          AND i.tail IS NOT NULL
           AND i.vc_of IS NULL
           AND c.hash IS NULL
           AND ({entry.wants})
@@ -267,7 +281,12 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
     for name, kind in cache.kinds().items():
         if not kind.here():
             continue
-        for row in owed(conn, name, on_screen=on_screen, limit=1):
+        # A window rather than one row. Being unable to locate a photograph is
+        # normal -- its drive is away -- and asking for exactly one candidate
+        # meant a single away photo stalled every other kind of work behind it.
+        # Trying a handful costs nothing and makes progress whenever *any* of
+        # them is reachable.
+        for row in owed(conn, name, on_screen=on_screen, limit=CANDIDATES):
             source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
             if source is None:
                 continue
