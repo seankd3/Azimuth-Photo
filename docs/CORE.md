@@ -528,6 +528,40 @@ are not installed — so people is not a subsystem here at all. In the core's
 terms it is a **cache kind whose `here()` is false**: owed work this machine
 cannot do, which records nothing rather than a failure.
 
+## Develop: which half is which
+
+Measured 08-16, by asking which files touch a database, a route, or the cache.
+The answer is unusually clean, and it is what makes this surface safe to work
+on without an acceptance set — as long as the left column is not opened.
+
+**Mathematics — 22 files, ~5,700 lines. Stays byte-identical.**
+`pipeline` · `masks` · `dng_pipeline` · `adobe_profiles` · `ops_constants` ·
+`film` · `noise_profiles` · `guided_filter` · `transform` · `lens` · `looks` ·
+`heal` · `lossydng` · `autotone` · `highlights_recon` · `camera_profile` ·
+`sigmoid_view` · `ramps` · `shots` · `discovery` · `native_exif`
+
+None of these import `db`, a router, or the cache. They are pure functions over
+pixels, fitted against real acceptance data, and **being wrong about them is
+silent** — a plausible image that is not the one the owner made. They are not
+touched until there is an agreed acceptance set.
+
+**Plumbing — the rest.** `routes` (1,228) · `rawproc` (709) · `render` (642) ·
+`lrcat_import` (526) · `xmp_write` (500) · `hdr` (378) · `presets` (324) ·
+`importer` (273) · `ai_masks` (265) · `virtual_copies` (231) · `lua_table` ·
+`export_presets` · `preset_routes` · `base_cache_budget` (134) · four thin
+route files.
+
+Not all of it is disposable — presets, XMP write-back and Lightroom import are
+real features. What *is* disposable is the caching and scheduling: the develop
+base keyed on `(image_id, source_path)`, its private eviction budget, and
+`develop_history`.
+
+**The one ordering constraint left in the whole rewrite.**
+`base_cache_budget` cannot be deleted before the Develop base moves into
+`cache`, or that cache becomes unbounded. Re-keying the base onto the content
+hash is what makes `cache.evict` cover it — and is the same change that stops
+a re-decode wave the first time the archive is plugged in warm.
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
