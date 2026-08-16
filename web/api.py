@@ -57,6 +57,29 @@ def _writer():
     return connection.open_sync(catalog_path())
 
 
+async def _writing(job, *args, **kwargs):
+    """Run a writer off the loop, on a connection opened where it is used.
+
+    A sqlite3 connection belongs to the thread that opened it, so making one on
+    the loop and handing it to `to_thread` is a 500 that waits for the route to
+    be exercised. That is exactly how it survived: `POST /api/folder/synchronize`
+    had the defect from the day it was written and nobody had pressed the button
+    until a Lightroom metadata save gave it 149 files to refresh.
+
+    Reads do not need this — `inline_reader` is opened `check_same_thread=False`
+    on purpose, because a read-only WAL connection can never hold a write lock.
+    """
+
+    def run():
+        conn = _writer()
+        try:
+            return job(conn, *args, **kwargs)
+        finally:
+            connection.close_sync(conn, db_path=catalog_path())
+
+    return await asyncio.to_thread(run)
+
+
 @router.get("/api/thumb/{size}/{image_id}")
 async def thumb(size: str, image_id: int, r: int = 0, request: Request = None):
     """One tile. Cache, or make it, or say which of the five words applies."""
@@ -687,11 +710,7 @@ def _chores(stop: bool) -> dict:
 
 @router.post("/api/cache/clear")
 async def clear_cache():
-    conn = _writer()
-    try:
-        return await asyncio.to_thread(tiles.clear, conn)
-    finally:
-        connection.close_sync(conn, db_path=catalog_path())
+    return await _writing(tiles.clear)
 
 
 @router.post("/api/image/{image_id}/rotate")
@@ -799,12 +818,8 @@ async def synchronize_apply(folder: str = "", adopt: bool = True,
     touch the `missing` list — which is empty whenever any drive is away.
     """
 
-    conn = _writer()
-    try:
-        return await asyncio.to_thread(synchronize.apply, conn, folder,
-                                       adopt=adopt, refresh=refresh, forget=forget)
-    finally:
-        connection.close_sync(conn, db_path=catalog_path())
+    return await _writing(synchronize.apply, folder,
+                          adopt=adopt, refresh=refresh, forget=forget)
 
 
 @router.get("/api/image/{image_id}/state")

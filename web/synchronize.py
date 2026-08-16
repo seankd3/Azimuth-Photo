@@ -100,14 +100,21 @@ def plan(conn, folder: str = "") -> dict:
             if kind.extension(tail) in PHOTOGRAPHS:
                 on_disk.setdefault(scope + tail, os.path.join(start, tail.replace("/", os.sep)))
 
-    catalogued = {
-        row["tail"]: row["file_size"]
-        for row in conn.execute(
-            "SELECT tail, file_size FROM images WHERE tail IS NOT NULL"
-            + (" AND substr(tail, 1, ?) = ?" if scope else ""),
-            (len(scope), scope) if scope else (),
-        )
-    }
+    # A tail should name one photograph. 110 in this archive name two — the
+    # same file catalogued once per drive, from before `copies` existed — and
+    # the two rows carry the two drives' sizes, which now differ because one
+    # drive has the Lightroom-updated file and the other has the old one.
+    # Both sides pick the lowest id so `plan` and `apply` are talking about the
+    # same row; without that the file is reported changed, refreshed, and
+    # reported changed again forever.
+    catalogued: dict[str, int] = {}
+    for row in conn.execute(
+        "SELECT tail, file_size FROM images WHERE tail IS NOT NULL"
+        + (" AND substr(tail, 1, ?) = ?" if scope else "")
+        + " ORDER BY id",
+        (len(scope), scope) if scope else (),
+    ):
+        catalogued.setdefault(row["tail"], row["file_size"])
 
     new = sorted(set(on_disk) - set(catalogued))
     missing: list[str] = []
@@ -194,7 +201,8 @@ def apply(conn, folder: str = "", *, adopt: bool = True, refresh: bool = True,
     if refresh:
         for tail in found["changed"]:
             row = conn.execute(
-                "SELECT id, content_hash AS hash FROM images WHERE tail = ?", (tail,)
+                "SELECT id, content_hash AS hash FROM images WHERE tail = ?"
+                " ORDER BY id LIMIT 1", (tail,)
             ).fetchone()
             path = _found_at(conn, tail)
             if row is None or not path:
