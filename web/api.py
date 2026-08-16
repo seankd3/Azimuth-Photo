@@ -129,14 +129,23 @@ async def folders():
     """
 
     tree = await asyncio.to_thread(library.folder_tree, db())
+    # Each root *is* a source. Wrapping them in a synthetic "Library" node put
+    # a row reading "Library 0" above everything, which had to be expanded
+    # before any folder was visible and whose count could only ever be a lie --
+    # a shim standing in for a source concept that no longer exists.
     return {
-        "sources": [{
-            "id": 1,
-            "path": "",
-            "display_name": "Library",
-            "online": True,
-            "folders": tree,
-        }],
+        "sources": [
+            {
+                "id": index + 1,
+                "path": node["path"],
+                "display_name": node["name"],
+                "online": True,
+                "total_count": node["total_count"],
+                "drives": node["drives"],
+                "folders": node["children"],
+            }
+            for index, node in enumerate(tree)
+        ],
         "folders": tree,
     }
 

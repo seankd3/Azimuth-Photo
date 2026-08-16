@@ -61,6 +61,7 @@ function normalizeSource(source) {
         reveal_available: source?.reveal_available !== false,
         library_namespace: Boolean(source?.library_namespace),
         total_count: Number(source?.total_count || 0),
+        drives: Array.isArray(source?.drives) ? source.drives : [],
         folders: Array.isArray(source?.folders) ? source.folders : [],
     };
 }
@@ -416,11 +417,19 @@ function closeFolderMenu() {
 function driveMark(node) {
     const drives = Array.isArray(node.drives) ? node.drives.filter(Boolean) : [];
     if (!drives.length) return '';
-    // One dot per drive holding photographs under this folder. Deliberately
-    // initials rather than names: it is a reassurance you read at a glance,
-    // not a fact you act on, and the folder is one folder either way.
-    const dots = drives.map((name) => `<i class="folder-drive-dot" title="${esc(name)}">${esc(String(name).slice(0, 1))}</i>`).join('');
-    return `<span class="folder-drives" title="${esc(drives.join(' + '))}">${dots}</span>`;
+    // Colour rather than initials, because a colour is read and a letter is
+    // decoded. Green: on the working disk, so it opens instantly. Yellow: on
+    // the archive, which is plugged in but slow. Red: on the archive and the
+    // archive is not here -- the one state where clicking will not show you a
+    // photograph, said before you click rather than after.
+    const dots = drives.map((drive) => {
+        const state = typeof drive === 'string' ? 'archive' : (drive.state || 'archive');
+        const label = typeof drive === 'string' ? drive : (drive.label || '');
+        const says = { local: 'on this disk', archive: 'on the archive',
+                       offline: 'on the archive, which is not plugged in' }[state] || state;
+        return `<i class="folder-drive-dot is-${esc(state)}" title="${esc(label)} — ${esc(says)}"></i>`;
+    }).join('');
+    return `<span class="folder-drives">${dots}</span>`;
 }
 
 function renderFolderNode(node, level, query = '') {
@@ -463,8 +472,8 @@ function renderLibraryRoot(source, query = '') {
         + `<div class="folder-source-row${active}${isOpen ? ' open' : ''}${quiet ? ' is-quiet' : ''}" role="treeitem" aria-selected="${active ? 'true' : 'false'}" aria-expanded="${isOpen ? 'true' : 'false'}" data-folder-source-path="${esc(source.path)}" data-source-id="${Number(source.id) || 0}" title="${esc(source.display_name)}">`
         + `<button class="folder-expander" type="button" data-folder-source-toggle="${esc(source.path)}" aria-label="Toggle ${esc(source.display_name)}" aria-expanded="${isOpen ? 'true' : 'false'}">${icon('chevron-right')}</button>`
         + `<button class="folder-main" type="button" data-folder-select="${esc(source.path)}" title="${esc(source.display_name)}">`
-        + `<span class="nr-dot ${source.online ? 'on' : 'off'}"></span>`
         + `<span class="folder-label" title="${esc(source.display_name)}">${esc(source.display_name)}</span>`
+        + driveMark(source)
         + `<span class="folder-count">${countLabel}</span></button>`
         + '</div>'
         + `<div class="folder-children source-children" data-folder-source-children="${esc(source.path)}"${isOpen ? '' : ' hidden'}>`

@@ -2362,12 +2362,18 @@ body.import-stage-active #canvas > .view:not(#view-import) { display: none !impo
 .export-dialog-actions { display: flex; gap: 6px; }
 .export-dialog-actions button { flex: 1; }
 
-/* Which drives hold a folder. One tree, whatever it is stored on -- so this is
-   a quiet fact on the row, not a reason to show the folder twice. */
-.folder-drives { display: inline-flex; gap: 2px; margin-left: 6px; opacity: .45; }
-.folder-row:hover .folder-drives, .folder-row.active .folder-drives { opacity: .8; }
+/* Which drives hold a folder. One tree whatever it is stored on, so this is a
+   quiet fact on the row rather than a reason to show the folder twice.
+   Green: on the working disk, opens instantly. Yellow: on the archive, plugged
+   in but slow. Red: on the archive and the archive is not here. */
+.folder-drives { display: inline-flex; gap: 3px; margin-left: 6px; align-items: center; }
 .folder-drive-dot {
-    font-style: normal; font-size: 9px; line-height: 12px; width: 12px; height: 12px;
-    border-radius: 50%; text-align: center; letter-spacing: 0;
-    background: var(--surface-3, #2a2a2a); color: var(--text-dim, #9a9a9a);
+    width: 6px; height: 6px; border-radius: 50%; display: inline-block;
+    background: var(--text-dim, #7a7a7a); opacity: .75; transition: opacity .12s;
 }
+.folder-row:hover .folder-drive-dot,
+.folder-source-row:hover .folder-drive-dot,
+.folder-row.active .folder-drive-dot { opacity: 1; }
+.folder-drive-dot.is-local   { background: #4ac26b; }
+.folder-drive-dot.is-archive { background: #d8a63a; }
+.folder-drive-dot.is-offline { background: #e05c5c; }
