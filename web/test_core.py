@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import rank
 import work
 from model import backup, cache, copies, decisions, drives, photos
 
@@ -359,6 +360,47 @@ class OwedIsAQuery(CoreCase):
     def test_identity_is_owed_before_anything_keyed_on_it(self):
         image = self._catalogued(hashed=False)
         self.assertEqual(work.step(self.conn, yield_to=lambda: False), {"did": "identity", "photo": image})
+
+
+class RankingIsDerived(CoreCase):
+    def _beat(self, winner, loser, at):
+        decisions.decide(self.conn, winner, decisions.COMPARE, {"beat": loser, "mode": "mosaic"}, at=at)
+
+    def test_an_even_matchup_moves_the_loser_six_points(self):
+        # K=12 from a 1200 base over the standard 400-point logistic, recovered
+        # from the archive's own ledger. Its first 41 pairs replay exactly.
+        self._beat("a", "b", 1.0)
+        scores = rank.ratings(self.conn)
+        self.assertAlmostEqual(scores["a"], 1206.0, places=6)
+        self.assertAlmostEqual(scores["b"], 1194.0, places=6)
+
+    def test_a_judged_photo_takes_its_own_rating_never_its_neighbours(self):
+        # The guarantee the old MAX_DIRECT_COMPARISONS cap was trying to buy.
+        import numpy as np
+        self._beat("a", "b", 1.0)
+        judged = rank.ratings(self.conn)
+        out = rank.propagate(judged, ["a", "b", "c"], np.eye(3, dtype=np.float32))
+        self.assertAlmostEqual(out["a"], judged["a"], places=6)
+        self.assertAlmostEqual(out["b"], judged["b"], places=6)
+
+    def test_propagation_is_bounded_however_many_neighbours_agree(self):
+        # Summing deltas is what made a frame resembling fifty judged photos
+        # drift past all of them; an average cannot.
+        import numpy as np
+        for i in range(20):
+            self._beat(f"win{i}", f"lose{i}", 1.0 + i)
+        judged = rank.ratings(self.conn)
+        subjects = list(judged) + ["newcomer"]
+        vectors = np.ones((len(subjects), 2), dtype=np.float32)
+        vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
+        out = rank.propagate(judged, subjects, vectors)
+        spread = max(judged.values()) - rank.BASE
+        self.assertLessEqual(abs(out["newcomer"] - rank.BASE), spread)
+
+    def test_with_no_vectors_it_is_plain_elo_not_a_failure(self):
+        # Ranking works at zero embedding coverage and sharpens as they land.
+        self._beat("a", "b", 1.0)
+        self.assertEqual(rank.ranking(self.conn), rank.ratings(self.conn))
 
 
 if __name__ == "__main__":

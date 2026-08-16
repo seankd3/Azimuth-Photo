@@ -179,6 +179,43 @@ features   queries over the facts, plus the decisions they write
 ui         renders queries, calls verbs
 ```
 
+### The whole backend, as files
+
+Not a diagram — the actual target tree, with a line budget per file. A surface
+that will not fit its budget is a surface whose shape is still wrong, and that
+is the useful thing about writing the numbers down before the code.
+
+| | Lines | What it is |
+|---|---|---|
+| `model/` | 900 | drives · photos · copies · decisions · cache · backup · schema.sql |
+| `work.py` | 200 | owed is a query; one worker; the politeness gate |
+| `render.py` | 400 | decode + edits → pixels, at three sizes, for everyone |
+| `develop/` | 3,500 | the colour mathematics, and nothing else |
+| `library.py` | 400 | the queries the grid reads: folders, filters, counts |
+| `rank.py` | 300 | comparisons → Elo → propagation through the vectors |
+| `search.py` | 250 | one query, ranked fusion, degrades never blocks |
+| `importer.py` | 300 | identify + put, over one pure (date, kind, roll) → tail |
+| `ai.py` | 400 | embeddings, captions, faces — registered as cache kinds |
+| `app.py` | 600 | routes, thin |
+| `boot.py` | 150 | open the catalog, answer one query, paint |
+| **total** | **≈ 7,400** | against 107k today |
+
+Two things this table asserts, and both are load-bearing:
+
+**Develop is 47% of the backend, and that is correct.** It is the only surface
+whose bulk is irreducible mathematics — tone curves, colour matrices,
+highlight reconstruction, guided filter, noise profiles, lens corrections —
+fitted against real acceptance data and expensive to be wrong about. Everything
+around it (caches, schedulers, history tables, proof tiles, progressive UI) is
+plumbing that the core already provides. The maths survives verbatim; the
+plumbing dies.
+
+**Nothing in this tree is a subsystem.** There is no `services/`, no
+`repositories/`, no `managers/`, no `coordinators/`. A file here is a set of
+queries over the five tables plus the decisions it writes, and when one starts
+wanting a table of its own it has found either a decision family or a cache
+kind — never a new noun.
+
 **A feature may not own a table.** If it thinks it needs one, it is either a
 decision family or a cache kind. Mechanically checkable: no `CREATE TABLE`
 outside `model/schema.sql`.
