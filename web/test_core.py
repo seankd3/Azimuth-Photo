@@ -24,12 +24,15 @@ class CoreCase(unittest.TestCase):
     def setUp(self):
         self.conn = sqlite3.connect(":memory:")
         self.conn.row_factory = sqlite3.Row
-        with open(os.path.join(os.path.dirname(drives.__file__), "schema.sql"), encoding="utf-8") as handle:
-            self.conn.executescript(handle.read())
+        # The photo table first: schema.sql declares the indexes over it, so it
+        # is a real dependency here and in any catalog the core is applied to.
         self.conn.execute(
             "CREATE TABLE images (id INTEGER PRIMARY KEY, tail TEXT, file_size INTEGER,"
-            " content_hash TEXT, date_taken TEXT, vc_of INTEGER)"
+            " content_hash TEXT, date_taken TEXT, stars INTEGER DEFAULT 0, elo REAL DEFAULT 1200.0,"
+            " status TEXT DEFAULT 'kept', vc_of INTEGER)"
         )
+        with open(os.path.join(os.path.dirname(drives.__file__), "schema.sql"), encoding="utf-8") as handle:
+            self.conn.executescript(handle.read())
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.addCleanup(self.conn.close)
