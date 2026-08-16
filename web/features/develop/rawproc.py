@@ -133,9 +133,48 @@ def _uses_raw_base_cache(path: str | os.PathLike[str]) -> bool:
     return is_raw_path(source)
 
 
+_names: dict[int, str] = {}
+
+
+def base_name(image_id: int) -> str:
+    """What a photograph's base is called on disk: its content hash.
+
+    It used to be the row number, and that was the whole problem — rebuild the
+    table, renumber, or re-import and hours of demosaic point at nothing. The
+    bytes do not change when the row does, so the hash does not either. This is
+    the same fix tiles got when they became `<hash>-<size>.jpg`.
+
+    Beyond tidiness: 143,803 of 144,473 cache rows belong to the archive. Keyed
+    on the row, plugging the archive in warm re-decodes all of them. Keyed on
+    the bytes, nothing re-decodes.
+
+    Looked up rather than passed, because ten call sites hold an `image_id` and
+    none of them holds a hash — and memoised, because `cached_base_paths` is
+    documented as an inexpensive probe and must stay one. A photograph with no
+    identity yet falls back to its row number, which is exactly as good as
+    before and no worse.
+    """
+
+    known = _names.get(int(image_id))
+    if known:
+        return known
+    try:
+        from core.catalog_path import catalog_path
+        from data import connection
+
+        row = connection.inline_reader(catalog_path()).execute(
+            "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
+        ).fetchone()
+        name = (row["content_hash"] if row else None) or str(int(image_id))
+    except Exception:
+        name = str(int(image_id))
+    _names[int(image_id)] = name
+    return name
+
+
 def base_paths(image_id: int, source_path: str | os.PathLike[str] | None = None) -> BasePaths:
     cache_dir = _raw_base_cache_dir() if source_path is not None and _uses_raw_base_cache(source_path) else BASE_CACHE_DIR
-    stem = cache_dir / str(int(image_id))
+    stem = cache_dir / base_name(image_id)
     return BasePaths(binary=stem.with_suffix(".bin.gz"), metadata=stem.with_suffix(".json"), preview=stem.with_suffix(".jpg"))
 
 
