@@ -749,6 +749,31 @@ The reason to like this: it is not about Lightroom. `changed` is equally the
 answer for darktable writing a sidecar, a file restored from backup, a re-scan
 after a repair, and every future application that edits a photograph in place.
 
+### Orientation on TIFFs, and why it is left alone
+
+**Pillow does not surface a TIFF's orientation tag.** `getexif()` returns `1`
+while the file's own `tag_v2[274]` reads `8`, so `ImageOps.exif_transpose` —
+which reads `getexif()` — is a silent no-op on every TIFF. `decode()` therefore
+ignores TIFF orientation entirely.
+
+That is a real gap and it is deliberately **not** closed, because on this
+archive closing it would break photographs that are currently right. Measured
+across 14 film rolls on both drives: exactly one roll carries orientation at
+all, and on that roll the 18 tagged frames are *already stored portrait*.
+Honouring the tag would turn them again and lay 18 correct photographs on their
+side. Lightroom appears to rewrite a TIFF's pixels when saving metadata while
+leaving the old tag behind, so the tag and the pixels each claim the turn.
+
+The rule that follows: **a tag that disagrees with the pixels is not evidence,
+and the pixels are what the owner sees.** If TIFF orientation is ever honoured
+it needs a way to tell a live tag from a spent one, and there is none in the
+file. Until then this is recorded as known and shaped, not forgotten.
+
+Every other roll is 100% landscape with every tag upright — the lab delivers
+frames the way the scanner fed them and writes no orientation. For those, no
+rotation data exists anywhere and none can be recovered; turning them is a
+decision, which is what `{`/`}` and the context menu are for.
+
 ### What is deliberately not read
 
 Adobe's `crs:` develop settings. They are a private edit format, and rendering
