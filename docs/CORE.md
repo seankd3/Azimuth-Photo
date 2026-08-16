@@ -480,6 +480,31 @@ thumbnail signature. Reconcile is enough, watched, not left unattended.
 
 ---
 
+## The surfaces that serve nothing
+
+Measured on the live catalog, 2026-08-16. Every one of these tables holds
+**zero rows**, and has for as long as anyone has looked:
+
+| Table | Rows | Backed by |
+|---|---|---|
+| `collections`, `collection_images`, `collection_links` | 0 | `features/collections/` (2,148) |
+| `saved_views` | 0 | `features/library/saved_views.py` |
+| `stacks`, `stack_members` | 0 | `features/stacks/` (1,249) + `repositories/stacks.py` (682) |
+| `people`, `person_image_membership` | 0 | `features/people/` (312) + `repositories/people.py` (1,075) + schema + clustering (293) |
+| `image_captions` | 0 | `features/captions/` (188) + `repositories/captions.py` (567) |
+| `face_detections` | 0 | the 93,220-row backlog and its six triggers |
+
+**About 6,500 lines of backend serve zero rows between them.** That is not a
+feature that is unused; it is a feature that was never finished, kept alive by
+its own routes and its own tests. The owner's whole judgement is 88,690
+decisions and none of it is here.
+
+The implication for the rewrite is that the remaining third is smaller than a
+line count suggests. These surfaces do not need rebuilding on the core — they
+need their routes reduced to the empty answers they already give, and their
+machinery deleted. Only the UI's expectations are load-bearing, and the UI is
+already rendering nothing for all of them.
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
