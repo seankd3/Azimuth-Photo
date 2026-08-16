@@ -61,7 +61,7 @@ function normalizeSource(source) {
         reveal_available: source?.reveal_available !== false,
         library_namespace: Boolean(source?.library_namespace),
         total_count: Number(source?.total_count || 0),
-        drives: Array.isArray(source?.drives) ? source.drives : [],
+        safety: source?.safety || '',
         folders: Array.isArray(source?.folders) ? source.folders : [],
     };
 }
@@ -89,7 +89,7 @@ function libraryRoots(list) {
                 online: source.online,
                 reveal_available: folder.reveal_available !== false,
                 total_count: Number(folder.total_count || 0),
-                drives: Array.isArray(folder.drives) ? folder.drives : [],
+                safety: folder.safety || '',
                 folders: Array.isArray(folder.children) ? folder.children : [],
             });
         }
@@ -415,21 +415,24 @@ function closeFolderMenu() {
 }
 
 function driveMark(node) {
-    const drives = Array.isArray(node.drives) ? node.drives.filter(Boolean) : [];
-    if (!drives.length) return '';
-    // Colour rather than initials, because a colour is read and a letter is
-    // decoded. Green: on the working disk, so it opens instantly. Yellow: on
-    // the archive, which is plugged in but slow. Red: on the archive and the
-    // archive is not here -- the one state where clicking will not show you a
-    // photograph, said before you click rather than after.
-    const dots = drives.map((drive) => {
-        const state = typeof drive === 'string' ? 'archive' : (drive.state || 'archive');
-        const label = typeof drive === 'string' ? drive : (drive.label || '');
-        const says = { local: 'on this disk', archive: 'on the archive',
-                       offline: 'on the archive, which is not plugged in' }[state] || state;
-        return `<i class="folder-drive-dot is-${esc(state)}" title="${esc(label)} — ${esc(says)}"></i>`;
-    }).join('');
-    return `<span class="folder-drives">${dots}</span>`;
+    // One mark, one question: is everything in this folder backed up?
+    //
+    // Which disks a folder happens to sit on is trivia. Whether a copy exists
+    // on a drive allowed to hold the last one is the thing worth knowing, and
+    // it is the only one of the two that ever asks you to do something.
+    //
+    // Nothing is drawn for a safe folder. A row that marks the normal case
+    // teaches you to stop reading the marks -- so the amber dot means "this
+    // folder has work that exists in one place only", and the hollow ring
+    // means "the archive is not plugged in, so I cannot honestly say".
+    const state = node.safety || '';
+    if (state === 'at-risk') {
+        return '<span class="folder-risk is-at-risk" title="Some photographs here exist only on the working disk"></span>';
+    }
+    if (state === 'unknown') {
+        return '<span class="folder-risk is-unknown" title="The archive is not plugged in, so backup cannot be checked"></span>';
+    }
+    return '';
 }
 
 function renderFolderNode(node, level, query = '') {

@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import asyncio
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, Request, Response
 
 import library
 import rank
@@ -57,7 +57,7 @@ def _writer():
 
 
 @router.get("/api/thumb/{size}/{image_id}")
-async def thumb(size: str, image_id: int):
+async def thumb(size: str, image_id: int, r: int = 0, request: Request = None):
     """One tile. Cache, or make it, or say which of the five words applies."""
 
     work.touched()
@@ -78,9 +78,16 @@ async def thumb(size: str, image_id: int):
         entry = cache.get(conn, row["hash"], "tile", recipe)
         body = tiles.read(entry) if entry and entry["state"] == cache.READY else None
         if body:
+            tag = f'"{row["hash"]}-{longest}-{turn}"'
+            if request is not None and request.headers.get("if-none-match") == tag:
+                # Unchanged, so send nothing. This is the half of `no-cache`
+                # that makes it cheap: the browser still asks, but the answer
+                # is 304 rather than 300 KB.
+                return Response(status_code=304, headers={"ETag": tag,
+                                                          "Cache-Control": "private, no-cache"})
             return Response(content=body, media_type="image/jpeg",
                             headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
-                                     "Cache-Control": "private, max-age=31536000"})
+                                     "Cache-Control": "private, no-cache"})
         if entry and entry["state"] == cache.FAILED:
             return Response(status_code=410)  # unreadable, and we know why
 
@@ -96,7 +103,7 @@ async def thumb(size: str, image_id: int):
         return Response(status_code=410)
     return Response(content=made, media_type="image/jpeg",
                     headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
-                             "Cache-Control": "private, max-age=31536000"})
+                             "Cache-Control": "private, no-cache"})
 
 
 def _make_tile(hash: str, longest: int, source: str, turn: int = 0) -> bytes | None:
@@ -141,7 +148,7 @@ async def folders():
                 "display_name": node["name"],
                 "online": True,
                 "total_count": node["total_count"],
-                "drives": node["drives"],
+                "safety": node["safety"],
                 "folders": node["children"],
             }
             for index, node in enumerate(tree)
@@ -274,6 +281,41 @@ async def undo_compare():
         connection.close_sync(conn, db_path=catalog_path())
 
 
+def _apply_rotation(conn, rows: list[dict]) -> None:
+    """Report the dimensions the photograph will actually be shown at.
+
+    A quarter turn swaps width and height, and the grid sizes each cell from
+    these numbers. Leaving them unrotated is why a turned film scan sat
+    sideways inside a landscape cell: the tile was right and the hole it went
+    into was wrong.
+
+    One query for the page rather than one per photograph -- the rotations are
+    decisions, so they come back in a single `IN`.
+    """
+
+    hashes = [row["hash"] for row in rows if row.get("hash")]
+    if not hashes:
+        return
+    holes = ",".join("?" for _ in hashes)
+    turned = {
+        row["subject"]: int(str(row["value"]).strip('"') or 0)
+        for row in conn.execute(
+            f"""
+            SELECT subject, value FROM (
+                SELECT subject, value,
+                       ROW_NUMBER() OVER (PARTITION BY subject ORDER BY at DESC, id DESC) AS rank
+                FROM decisions WHERE family = 'rotate' AND subject IN ({holes})
+            ) WHERE rank = 1
+            """,
+            hashes,
+        )
+    }
+    for row in rows:
+        if turned.get(row.get("hash"), 0) % 180 == 90:
+            row["width"], row["height"] = row["height"], row["width"]
+            row["rotate"] = turned[row["hash"]]
+
+
 # What the UI calls a sort, and what the library calls it. The UI's names are
 # the contract -- it is not being rewritten -- so the translation lives here
 # rather than leaking its vocabulary into `library.SORTS`.
@@ -310,6 +352,7 @@ def _page(sort: str, limit: int, offset: int, folder, min_stars) -> dict:
         conn, folder=folder, sort=_UI_SORTS.get(sort or "", "newest"),
         starred=min_stars or None, limit=limit, offset=offset,
     )
+    _apply_rotation(conn, rows)
     tally = library.counts(conn)
     return {
         "images": rows,

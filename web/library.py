@@ -384,15 +384,16 @@ def folder_tree(conn) -> list[dict]:
     from model import drives as drive_model
 
     drive_of = {}
+    record_attached = False
     for row in conn.execute("SELECT id, uuid, label, root, is_record FROM drives"):
         online = drive_model.root_of(conn, row["uuid"]) is not None
         drive_of[int(row["id"])] = {
             "label": row["label"] or row["root"],
-            # local = the working disk, archive = the one allowed to hold the
-            # last copy, offline = not plugged in. Which is `is_record` plus
-            # whether it answered, and nothing else.
-            "state": "offline" if not online else ("archive" if row["is_record"] else "local"),
+            "is_record": bool(row["is_record"]),
+            "online": online,
         }
+        if row["is_record"] and online:
+            record_attached = True
 
     for row in conn.execute(
         f"""
@@ -401,15 +402,15 @@ def folder_tree(conn) -> list[dict]:
         """
     ):
         parts = str(row["tail"]).split("/")[:-1]
-        held = {
-            (drive_of[int(d)]["label"], drive_of[int(d)]["state"])
-            for d in str(row["drives"] or "").split(",")
-            if d.strip().isdigit() and int(d) in drive_of
-        }
+        on = [drive_of[int(d)] for d in str(row["drives"] or "").split(",")
+              if d.strip().isdigit() and int(d) in drive_of]
+        # One question per photograph: is there a copy on a drive allowed to
+        # hold the last one? Everything else about where it lives is trivia.
+        held = "safe" if any(d["is_record"] for d in on) else ("only-here" if on else "unknown")
         for depth in range(1, len(parts) + 1):
             key = "/".join(parts[:depth])
             counts[key] = counts.get(key, 0) + 1
-            where.setdefault(key, set()).update(held)
+            where.setdefault(key, set()).add(held)
 
     def node(path: str) -> dict:
         children = sorted(
@@ -420,12 +421,29 @@ def folder_tree(conn) -> list[dict]:
             "path": path,
             "name": path.rsplit("/", 1)[-1],
             "total_count": counts[path],
-            "drives": [
-                {"label": label, "state": state}
-                for label, state in sorted(where.get(path) or [])
-            ],
+            "safety": _safety(where.get(path) or set(), record_attached),
             "reveal_available": True,
             "children": [node(child) for child in children],
         }
 
     return [node(k) for k in sorted(counts) if "/" not in k]
+
+
+def _safety(states: set, record_attached: bool) -> str:
+    """One word for a folder: is everything here backed up?
+
+    Green when every photograph has a copy on a drive allowed to hold the last
+    one. Amber when any of them exists only on the working disk -- the disk
+    that is meant to be cheap to lose. Hollow when the record drive is not
+    plugged in, because then the honest answer is that we cannot say, and a
+    green dot we are not entitled to is worse than no dot at all.
+
+    Only amber asks for anything. That is the point of there being one mark:
+    a row you scan past unless it is telling you something.
+    """
+
+    if not record_attached:
+        return "unknown"
+    if "only-here" in states or "unknown" in states:
+        return "at-risk"
+    return "safe"
