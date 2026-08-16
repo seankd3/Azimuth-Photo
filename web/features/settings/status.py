@@ -13,7 +13,7 @@ from data.repositories import catalog as catalog_repository
 import db
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
-from features.people import routes as people_routes
+import api as core_api
 from features.catalog import metadata as catalog_metadata
 
 
@@ -124,7 +124,7 @@ async def build_settings_response() -> dict:
         _stale_catalog_status,
     ))
     people_status_task = asyncio.create_task(_bounded_status(
-        people_routes.people_status_payload(),
+        core_api.people_status(),
         _stale_people_status,
     ))
     cache_status, ai_status, catalog, people_status = await asyncio.gather(

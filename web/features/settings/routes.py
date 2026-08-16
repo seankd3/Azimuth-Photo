@@ -23,7 +23,7 @@ import db
 from core import background, cache_events
 from features.ai import routes as ai_routes
 from features.cache import status as cache_status_service
-from features.people import routes as people_routes
+import api as core_api
 
 
 router = APIRouter()
@@ -79,7 +79,7 @@ async def api_background_work_status():
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
         settings_status._bounded_status(
-            people_routes.people_status_payload(),
+            core_api.people_status(),
             settings_status._stale_people_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
@@ -269,7 +269,7 @@ async def api_save_settings(request: Request):
         "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
-        "people_status": await people_routes.people_status_payload(),
+        "people_status": await core_api.people_status(),
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }
@@ -309,7 +309,7 @@ async def api_reset_settings():
         "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
-        "people_status": await people_routes.people_status_payload(),
+        "people_status": await core_api.people_status(),
         "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }

@@ -30,7 +30,6 @@ from features.imports import routes as imports_routes
 from features.library import keyword_routes, saved_views, watched_routes
 from features.media import routes as media_routes
 from features.pages import routes as page_routes
-from features.people import routes as people_routes
 from features.quality import routes as quality_routes
 from features.settings import routes as settings_routes
 from features.stacks import routes as stack_routes
@@ -62,7 +61,6 @@ for router in (
     # that used to answer it is deleted rather than left shadowed.
     core_api.router,
     page_routes.router,
-    people_routes.router,
     dev_routes.router,
     catalog_routes.router,
     collection_routes.router,

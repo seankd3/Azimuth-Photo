@@ -1,1 +1,0 @@
-"""People route package."""

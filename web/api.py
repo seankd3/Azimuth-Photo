@@ -452,6 +452,45 @@ def _rows_for(conn, ids: list[int]) -> list[dict]:
     return [found[i] for i in ids if i in found]
 
 
+# Faces are a cache kind this machine cannot make: insightface and onnxruntime
+# are not installed, `people` and `face_detections` hold zero rows, and the
+# 93,220-row backlog that fed them was the largest queue in the catalog. In the
+# core's terms that is not a subsystem, it is owed work with `here()` false --
+# which records nothing rather than a failure, so the machine that *can* do it
+# is not looking at rows saying these photographs have no faces.
+_NO_FACES = {
+    "capability": {
+        "key": "people", "label": "People recognition", "available": False,
+        "missing": ["insightface", "onnxruntime"], "optional_missing": [],
+        "requirements_file": "requirements-ai-people.txt",
+        "install_command": "python -m pip install -r requirements-ai-people.txt",
+        "runtime_install": False,
+        "message": "People recognition is not installed. Existing library data "
+                   "remains available; install the optional pack to create new results.",
+    },
+    "active": False,
+}
+
+
+@router.get("/api/people")
+async def people():
+    return {
+        "sections": {"most_seen": [], "named_people": [], "needs_review": [], "other_faces": []},
+        "counts": {"people": 0, "named_people": 0, "unknown_people": 0, "other_faces": 0,
+                   "detected_faces": 0, "pending_cached_images": 0,
+                   "merge_suggestions": 0, "scan": {}},
+        "ranking_policy": "distinct_photo_count_first",
+        "identity_policy": "face_embeddings_only",
+        "source_files_preserved": True,
+        "status": _NO_FACES,
+    }
+
+
+@router.get("/api/people/status")
+async def people_status():
+    return _NO_FACES
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""
