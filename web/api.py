@@ -529,10 +529,20 @@ async def caption(image_id: int):
             "user_edited": True, "has_caption": True}
 
 
+# A caption and its tags are bounded here rather than by a request model. The
+# model this replaced existed to reject unbounded lists, and dropping it would
+# have quietly removed that guard -- caught by a hardening test that named the
+# model directly.
+MAX_TAGS = 500
+MAX_CAPTION = 4000
+
+
 @router.post("/api/image/{image_id}/caption")
 async def write_caption(image_id: int, caption: str = "", tags: str = ""):
-    value = {"caption": caption, "tags": [t.strip() for t in tags.split(",") if t.strip()]}
-    return _decide(image_id, CAPTION, value)
+    parsed = [t.strip() for t in tags.split(",") if t.strip()]
+    if len(parsed) > MAX_TAGS or len(caption) > MAX_CAPTION:
+        return {"ok": False, "reason": f"at most {MAX_TAGS} tags and {MAX_CAPTION} characters"}
+    return _decide(image_id, CAPTION, {"caption": caption, "tags": parsed})
 
 
 @router.get("/api/tags")

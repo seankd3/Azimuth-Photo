@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat as _stat
 import shutil
 
 from model import drives
@@ -114,11 +115,22 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
 
 
 def _verified(path: str, expected_size: int | None) -> bool:
+    """Is this a real file on this drive, of the size we recorded?
+
+    `lstat`, not `stat`, and the symlink check is the point: a catalogued tail
+    must resolve to a regular file *on the drive it names*. A symlink there
+    points wherever it likes — outside the library, onto another volume, at a
+    file the owner never imported — and `stat` follows it silently, so the app
+    would serve bytes from a path no sweep ever walked.
+    """
+
     try:
-        stat = os.stat(path)
+        entry = os.lstat(path)
     except OSError:
         return False
-    return not expected_size or stat.st_size == int(expected_size)
+    if not _stat.S_ISREG(entry.st_mode):
+        return False
+    return not expected_size or entry.st_size == int(expected_size)
 
 
 def _by_preference(conn) -> list[dict]:

@@ -97,6 +97,22 @@ class OpeningAPhoto(CoreCase):
         hot = self.write(self.hot_root)
         self.assertEqual(photos.open_photo(self.conn, image), hot)
 
+    def test_a_symlink_at_a_catalogued_tail_is_not_the_photograph(self):
+        # A tail must resolve to a regular file on the drive it names. A
+        # symlink points wherever it likes -- off the volume, at a file never
+        # imported -- and os.stat follows it in silence, so the app would serve
+        # bytes from a path no sweep ever walked.
+        real = os.path.join(self.tmp, "elsewhere.CR3")
+        with open(real, "wb") as handle:
+            handle.write(b"the-photograph")
+        link = os.path.join(self.cold_root, TAIL.replace("/", os.sep))
+        os.makedirs(os.path.dirname(link), exist_ok=True)
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            self.skipTest("this platform will not make symlinks unprivileged")
+        self.assertIsNone(photos.open_photo(self.conn, self.photo(size=14)))
+
     def test_a_same_named_stranger_never_stands_in(self):
         self.write(self.cold_root, body=b"a different photograph entirely")
         self.assertIsNone(photos.open_photo(self.conn, self.photo(size=14)))
