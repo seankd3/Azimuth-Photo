@@ -178,6 +178,91 @@ def propagate(judged: dict[str, float], subjects: list[str], vectors) -> dict[st
     return out
 
 
+def _somewhere(upper: int) -> int:
+    """A random offset. Its own function so a test can hold it still."""
+
+    import random
+
+    return random.randint(0, upper) if upper > 0 else 0
+
+
+def seen(conn) -> dict[str, int]:
+    """How many comparisons each photograph has been in, winning or losing."""
+
+    import json
+
+    counts: dict[str, int] = {}
+    for row in conn.execute(
+        "SELECT subject, value FROM decisions WHERE family = ?", (decisions.COMPARE,)
+    ):
+        counts[row["subject"]] = counts.get(row["subject"], 0) + 1
+        try:
+            beaten = json.loads(row["value"])["beat"]
+        except (TypeError, ValueError, KeyError):
+            continue
+        counts[beaten] = counts.get(beaten, 0) + 1
+    return counts
+
+
+def candidates(conn, n: int = 12, *, folder: str | None = None) -> list[dict]:
+    """Photographs worth comparing next.
+
+    The mosaic is a candidate query, and the query is one sentence: **show the
+    least-judged photographs, and around them the ones closest in rating.** A
+    comparison between two photographs you already know the order of teaches
+    nothing; a comparison between two that are close teaches the most.
+
+    That replaces a route with 22 parameters and a strategy engine. Filters are
+    not an argument here — narrowing the library is `library.photos`'s job, and
+    a mosaic over a folder is this query over that folder.
+    """
+
+    experience = seen(conn)
+    scores = ratings(conn)
+
+    where = "i.status != 'trashed' AND i.tail IS NOT NULL AND i.content_hash IS NOT NULL"
+    args: list = []
+    if folder:
+        prefix = folder.replace("\\", "/").rstrip("/") + "/"
+        where += " AND substr(i.tail, 1, ?) = ?"
+        args += [len(prefix), prefix]
+
+    # A window at a random offset, not the top of the library. Ordering the
+    # pool by rating looked reasonable and was wrong: 127,219 photographs sit
+    # at exactly the 1200 default, so "the best 4,000" contains only ones
+    # already judged, and the mosaic would never show you an unrated photograph
+    # again. A window costs the same and reaches everything.
+    # Seek to a random id rather than paging with OFFSET. OFFSET has to walk
+    # every row it skips, which on this library cost 850 ms; `id >= ?` is an
+    # index seek and costs nothing. Wrapping to the start when the window falls
+    # off the end keeps the last few thousand photographs reachable.
+    window = 4000
+    highest = conn.execute("SELECT MAX(id) FROM images").fetchone()[0] or 0
+    pool = [dict(row) for row in conn.execute(
+        f"SELECT i.id, i.tail, i.content_hash AS hash, i.elo, i.width, i.height"
+        f" FROM images i WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
+        (*args, _somewhere(highest), window),
+    )]
+    if len(pool) < window:
+        pool += [dict(row) for row in conn.execute(
+            f"SELECT i.id, i.tail, i.content_hash AS hash, i.elo, i.width, i.height"
+            f" FROM images i WHERE {where} ORDER BY i.id LIMIT ?",
+            (*args, window - len(pool)),
+        )]
+    if not pool:
+        return []
+
+    for photo in pool:
+        photo["comparisons"] = experience.get(photo["hash"], 0)
+        photo["rating"] = scores.get(photo["hash"], float(photo["elo"] or BASE))
+
+    # The least-judged photograph anchors the set; the rest are its nearest
+    # neighbours by rating, which is what makes the answer informative.
+    anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
+    pool.sort(key=lambda p: abs(p["rating"] - anchor["rating"]))
+    return pool[:max(2, int(n))]
+
+
 def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
     """The whole ranking: fold the log, then spread it through the vectors.
 

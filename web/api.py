@@ -33,6 +33,7 @@ import asyncio
 from fastapi import APIRouter, Response
 
 import library
+import rank
 import render
 import work
 from core.catalog_path import catalog_path
@@ -166,6 +167,87 @@ def _decide(image_id: int, family: str, value):
         return {"ok": True, family: value}
     finally:
         connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.get("/api/mosaic/next")
+async def mosaic(n: int = 12, folder: str | None = None):
+    """Photographs worth comparing. One query, no strategy engine.
+
+    The route it replaces took 22 parameters — orientation, camera, lens, tag,
+    people, collection, import batch, exclude-sources, a strategy name, a grid
+    Elo — because narrowing the library and choosing a pair had been fused into
+    one call. They are two things: `library.photos` narrows, this chooses.
+    """
+
+    return {"images": rank.candidates(db(), n=n, folder=folder)}
+
+
+@router.post("/api/compare")
+async def compare(winner: int, loser: int, mode: str = "mosaic"):
+    """Record which of two photographs is better. The whole ranking write path.
+
+    Nothing is propagated here and no Elo is written. A comparison is a
+    decision; the ranking is recomputed from the log and the vectors, so this
+    handler cannot leave a partial state behind and needs no lock, no retry and
+    no undo journal.
+    """
+
+    conn = _writer()
+    try:
+        rows = {
+            int(r["id"]): r["hash"] for r in conn.execute(
+                "SELECT id, content_hash AS hash FROM images WHERE id IN (?, ?)", (winner, loser)
+            )
+        }
+        if rows.get(winner) is None or rows.get(loser) is None:
+            return {"ok": False, "reason": "both photos need an identity first"}
+        decisions.decide(conn, rows[winner], decisions.COMPARE,
+                         {"beat": rows[loser], "mode": mode})
+        conn.commit()
+        return {"ok": True, "winner": winner, "loser": loser}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.post("/api/mosaic/pick")
+async def pick(winner: int, losers: str = ""):
+    """One winner over several others — a mosaic click is several comparisons."""
+
+    beaten = [int(x) for x in losers.split(",") if x.strip().isdigit()]
+    for loser in beaten:
+        await compare(winner, loser, mode="mosaic")
+    return {"ok": True, "winner": winner, "compared": len(beaten)}
+
+
+@router.post("/api/compare/undo")
+async def undo_compare():
+    """Take back the last comparison, by saying the opposite is not so.
+
+    Deleting the row would be simpler and wrong: the log's job is to say what
+    happened. So the last comparison is superseded, not erased, and the
+    recomputed ranking simply stops counting it.
+    """
+
+    conn = _writer()
+    try:
+        last = conn.execute(
+            "SELECT id, subject FROM decisions WHERE family = ? ORDER BY at DESC, id DESC LIMIT 1",
+            (decisions.COMPARE,),
+        ).fetchone()
+        if last is None:
+            return {"ok": False, "reason": "nothing to undo"}
+        decisions.decide(conn, last["subject"], "compare_undone", {"undid": last["id"]})
+        conn.commit()
+        return {"ok": True, "undid": last["id"]}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.get("/api/rankings")
+async def rankings(limit: int = 200):
+    """The library in the owner's order."""
+
+    return {"images": library.photos(db(), sort="best", limit=limit)}
 
 
 @router.get("/api/image/{image_id}/state")
