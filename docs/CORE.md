@@ -1,7 +1,12 @@
 # Azimuth 2.0 — the core
 
-**Status:** in progress. Step 1 of 11 landed (`69cf6d76`).
+**Status:** the core is complete — five tables, seven functions, and the work
+layer, in ~1,100 lines under `web/model/` and `web/work.py`. What remains is
+rebuilding each surface on top of it and deleting the machinery it replaces.
 **Version:** 1.0.0-rc.1 → 2.0.0-dev.
+**Method (08-16):** gut it and rebuild from first principles. Surfaces are not
+adapted, wrapped or threaded through — they are rewritten on the core and their
+old machinery is deleted in the same commit.
 **This is the master document.** Design, order, proofs and lessons. If a change
 needs a special case to fit here, the shape is wrong — fix the shape, not the
 caller.
@@ -10,13 +15,24 @@ caller.
 
 ## Why
 
-Azimuth works and is used daily. It is also **146,178 lines**, 24% of its 2,203
-commit subjects are repair-shaped, and simple changes take days. 2.0 is not a
-feature release: it is the same product on a core small enough to hold in your
-head.
+**Azimuth does not work well and nobody uses it daily.** That is the owner's
+own correction (08-16) to the sentence this document used to open with, and it
+changes what the rewrite owes: there is no working daily-driver to protect, so
+no commit has to keep the old app runnable, no old surface is owed a migration,
+and *current behaviour is not evidence that a shape is right*. A thing that
+never worked well is not a requirement.
 
-The UI is not the problem and is not being rewritten — 39k lines of grid, loupe
-and keyboard work is the product. The **backend goes from 107k to about 12k**.
+What is true is the size: **146,178 lines**, 24% of its 2,203 commit subjects
+repair-shaped, and simple changes take days. Those two facts are the same fact.
+
+So 2.0 is a rebuild from first principles on a core small enough to hold in your
+head. What carries forward is the **appendix** — lessons already paid for — and
+nothing else. Where a lesson and an old implementation disagree, keep the lesson
+and write the code new.
+
+The UI is not being rewritten — 39k lines of grid, loupe and keyboard work is
+the product, and it is the one part that was ever good. The **backend goes from
+107k to about 12k**.
 
 ---
 
