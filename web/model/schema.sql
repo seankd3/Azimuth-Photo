@@ -1,7 +1,8 @@
 -- The core's tables. Five when it is finished; each arrives with the step that
 -- needs it, so this file never describes something that is not yet true.
 --
--- Steps 1 and 4: drives, copies.
+-- Steps 1 and 4: drives, copies. Then decisions and cache, the two halves of
+-- "what you decided" and "what we computed".
 
 CREATE TABLE IF NOT EXISTS drives (
     id         INTEGER PRIMARY KEY,
@@ -30,3 +31,46 @@ CREATE TABLE IF NOT EXISTS copies (
 );
 
 CREATE INDEX IF NOT EXISTS idx_copies_drive ON copies(drive_id);
+
+-- The only irreplaceable table. Append-only: a decision is never updated and
+-- never deleted, so changing your mind is one more row and the row before it
+-- is still there. `subject` is any stable identity — a photo's content hash, a
+-- folder's tail, a drive's uuid, a person's name — which is what stops a
+-- decision about a folder from needing a table of its own.
+CREATE TABLE IF NOT EXISTS decisions (
+    id      INTEGER PRIMARY KEY,
+    subject TEXT NOT NULL,
+    family  TEXT NOT NULL,
+    value   TEXT,
+    at      REAL NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_decisions_subject
+    ON decisions(subject, family, at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_decisions_family ON decisions(family, at DESC);
+
+-- Everything the machine worked out, keyed on what it looked at rather than
+-- where the file was. `recipe` is a pure function of the inputs and never a
+-- timestamp: feed `updated_at` in and reset-then-redo re-renders identical
+-- pixels while two machines never share an entry.
+--
+-- `path` names a rendition on disk; `value` holds a computed fact inline. One
+-- table for both because a thumbnail and an embedding differ only in where the
+-- answer is big enough to want its own file.
+CREATE TABLE IF NOT EXISTS cache (
+    hash   TEXT    NOT NULL,
+    kind   TEXT    NOT NULL,
+    recipe TEXT    NOT NULL DEFAULT '',
+    -- ready | failed. A failure is stored so it is not rediscovered every
+    -- pass; `note` says why, once.
+    state  TEXT    NOT NULL DEFAULT 'ready',
+    path   TEXT,
+    value  BLOB,
+    bytes  INTEGER NOT NULL DEFAULT 0,
+    note   TEXT,
+    at     REAL    NOT NULL,
+    PRIMARY KEY (hash, kind, recipe)
+);
+
+-- Eviction reads this: oldest first, within one kind.
+CREATE INDEX IF NOT EXISTS idx_cache_kind_age ON cache(kind, at);
