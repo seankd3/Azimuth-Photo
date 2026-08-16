@@ -491,6 +491,63 @@ async def people_status():
     return _NO_FACES
 
 
+# A caption the owner writes is a decision. A caption the machine writes is a
+# cache kind. CORE.md puts it exactly: "your answer about the machine's answer
+# is a decision stored elsewhere". The old surface was 755 lines and one table
+# holding zero rows, because it kept both in the same place and needed a
+# scan ledger, an FTS shadow and a status worker to tell them apart.
+CAPTION = "caption"
+
+
+@router.get("/api/captions/status")
+async def captions_status():
+    return {
+        "capability": {
+            "key": "captions", "label": "Captions", "available": False,
+            "missing": ["captioning model"],
+            "requirements_file": "requirements-ai-captions.txt",
+            "install_command": "python -m pip install -r requirements-ai-captions.txt",
+            "message": "Captioning is not installed. Captions you write yourself are "
+                       "kept regardless; install the optional pack to generate new ones.",
+        },
+        "active": False,
+    }
+
+
+@router.get("/api/image/{image_id}/caption")
+async def caption(image_id: int):
+    conn = db()
+    row = conn.execute(
+        "SELECT content_hash AS hash FROM images WHERE id = ?", (image_id,)
+    ).fetchone()
+    written = decisions.latest(conn, row["hash"], CAPTION) if row and row["hash"] else None
+    if not written:
+        return {"image_id": image_id, "caption": "", "tags": [], "quality": "",
+                "user_edited": False, "has_caption": False}
+    return {"image_id": image_id, "caption": written.get("caption", ""),
+            "tags": written.get("tags", []), "quality": "",
+            "user_edited": True, "has_caption": True}
+
+
+@router.post("/api/image/{image_id}/caption")
+async def write_caption(image_id: int, caption: str = "", tags: str = ""):
+    value = {"caption": caption, "tags": [t.strip() for t in tags.split(",") if t.strip()]}
+    return _decide(image_id, CAPTION, value)
+
+
+@router.get("/api/tags")
+async def tags(limit: int = 100, q: str = ""):
+    """Every tag the owner has written, from the log. No tag table."""
+
+    counts: dict[str, int] = {}
+    for value in decisions.current(db(), CAPTION).values():
+        for tag in (value or {}).get("tags", []) if isinstance(value, dict) else []:
+            if not q or q.lower() in str(tag).lower():
+                counts[tag] = counts.get(tag, 0) + 1
+    ranked = sorted(counts.items(), key=lambda kv: -kv[1])[: int(limit)]
+    return {"tags": [{"tag": name, "count": n} for name, n in ranked]}
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""

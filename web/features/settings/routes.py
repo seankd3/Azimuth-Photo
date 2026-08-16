@@ -66,7 +66,6 @@ async def api_settings():
 async def api_background_work_status():
     """One bounded snapshot for the desktop activity widget."""
 
-    from features.captions import routes as caption_routes
     ai_status, cache_status, people_status, captions = await asyncio.gather(
         settings_status._bounded_status(
             ai_routes.build_ai_status(),
@@ -84,7 +83,7 @@ async def api_background_work_status():
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
         settings_status._bounded_status(
-            caption_routes.caption_status_payload(),
+            core_api.captions_status(),
             settings_status._stale_caption_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
