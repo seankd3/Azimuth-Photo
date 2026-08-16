@@ -460,6 +460,38 @@ thumbnail signature. Reconcile is enough, watched, not left unattended.
 
 ---
 
+## Deletion guard rails
+
+A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
+unnecessary. An adversarial pass over those kill lists then found **36 places
+where deleting would have cost something**, and it is worth stating plainly
+that the adversarial half earned its keep: two of its findings were live
+defects in code already written, not hypotheticals.
+
+Everything below must be *handled* before the file or column it names is
+deleted. Handled, not preserved — most of these end up somewhere better.
+
+| Do not delete until | Because |
+|---|---|
+| `photo/location.py` | 12,793 rows still have no tail, and `locate()` returns None for a falsy tail. Deleting the old resolver first makes those photographs unopenable. |
+| `catalog_sources` · `images.source_id` | `included = 0, removed_at` on source 4 is an **owner decision**: 10,689 photographs deliberately removed. Now carried by *"a photo with no tail is not in the library yet"*, which needs no join. |
+| `features/sync/oplog.py` | It is already an append-only decision log keyed on content hash — 311 rows of keywords, flags, edits and statuses existing nowhere else. **Adopted `550e6bd6`.** |
+| `develop_settings.origin` | 79,482 rows are `origin='xmp'` and **5 are `origin='user'`**. It is what stops an XMP re-import overwriting an edit the owner made here. |
+| `develop/routes.py` settings-merge | Keeps 377 mask rows and 7,035 `LocalExposure2012` values through a partial save. |
+| `thumbnails/disk_store.cache_dir_safe_to_clear` | The only guard between "Clear cache" and `shutil.rmtree` of an arbitrary user folder. |
+| `features/system/backups.py` restore + retention | The whole restore engine and the always-keep-premigrate rule. Nothing else protects a catalog. |
+| `trash/service.py` away-guard | `_inspect_trash_file` treats `FileNotFoundError` as success, so trashing a photo whose drive is *away* would report success having moved nothing. |
+| `import_batch_image_ids` | Scopes the comparison engine — the thing that produces the irreplaceable pairs. Not history. |
+| `search/similar.scan_duplicate_pairs` | Live second caller in `stacks/builders.py`. |
+| `cache_entries` | Joined by ranking, search, AI and quality SQL, and it has triggers. |
+
+**One claim in that pass is overruled, deliberately.** `propagation_updates`
+(2,263 rows) was defended as "the only record of which neighbour received which
+delta, and it cannot be recomputed". It cannot — and it does not need to be.
+The whole point of making ranking a derivation is that the *output* is
+disposable; an undo journal for a value that is recomputed from scratch is
+machinery guarding something that no longer needs guarding.
+
 ## Tests
 
 **32,892 lines across 141 files** (measured 08-15). The source-text contract
