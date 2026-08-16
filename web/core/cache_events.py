@@ -8,7 +8,6 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import filter_options as filter_options_repository
 from data.repositories import ratings as rating_repository
-from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 
 
@@ -176,36 +175,39 @@ def invalidate_catalog_cache() -> None:
 
 
 def invalidate_facet_caches() -> None:
-    ranking_repository.invalidate_facet_caches()
+    """Nothing to invalidate: the facet and count caches it cleared lived in
+    the ranking repository, whose queries no longer have callers."""
 
 
 def invalidate_visible_facet_caches(cache_root: str | None = None, size: str | None = None) -> None:
-    ranking_repository.invalidate_visible_facet_caches(cache_root, size)
+    """Nothing to invalidate: the facet and count caches it cleared lived in
+    the ranking repository, whose queries no longer have callers."""
 
 
 def invalidate_rating_facet_caches() -> None:
-    ranking_repository.invalidate_rating_facet_caches()
+    """Nothing to invalidate: the facet and count caches it cleared lived in
+    the ranking repository, whose queries no longer have callers."""
 
 
 def invalidate_ranking_count_cache() -> None:
-    ranking_repository.invalidate_ranking_count_cache()
     rating_repository.invalidate_visible_pairing_pool_counts_cache()
     _invalidate_smart_collection_cache()
 
 
-cache_scope_matches = ranking_repository.cache_scope_matches
+# Re-exported for callers that still import it from here.
+from data.repositories.cache_entries import _cache_scope_matches as cache_scope_matches  # noqa: E402
 
 
 def invalidate_visible_cache_dependent_counts(
     cache_root: str | None = None,
     size: str | None = None,
 ) -> None:
-    ranking_repository.invalidate_visible_cache_dependent_counts(cache_root, size)
     rating_repository.invalidate_visible_pairing_pool_counts_cache(cache_root, size)
 
 
 def invalidate_rating_ranking_count_cache() -> None:
-    ranking_repository.invalidate_rating_ranking_count_cache()
+    """Nothing to invalidate: the facet and count caches it cleared lived in
+    the ranking repository, whose queries no longer have callers."""
 
 
 def invalidate_cached_image_ids_cache(
@@ -232,7 +234,7 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
 
 
 def invalidate_rankable_image_ids_cache() -> None:
-    ranking_repository.invalidate_rankable_image_ids_cache()
+    """Nothing to invalidate: the ranking repository's queries have no callers."""
 
 
 def _invalidate_smart_collection_cache() -> None:
