@@ -587,6 +587,57 @@ ceiling cover everything and deletes that worker.
 **What it must not touch.** Any of the 22 mathematics files. This is a cache
 key and a filename; if a pixel changes, something has gone wrong.
 
+## How it stays small
+
+Seven rules, each earned by a deletion in this rewrite rather than borrowed
+from a book. They are ordered by how much they removed.
+
+**1. Delete the question, not the answer.** Almost every large cut followed
+noticing that something had stopped being *asked*. `thumbnails/` was 9,160
+lines answering *when should a tile be made* and *where should it go*; owed
+became a query and where became a filename, so both questions vanished and
+took the module with them. Ask what a subsystem is deciding. If nothing is
+deciding it any more, the subsystem is already dead.
+
+**2. A four-figure file is usually held up by two or three small couplings.**
+`features/library/service.py` was 1,661 lines kept alive by one 8-line
+function that belonged in collections. The people stack came out because a
+search resolver took two injected callables. db.py's ranking facade was seven
+wrappers with no callers. **Find the coupling, not the file** — the file falls
+over on its own.
+
+**3. If a fix needs a guard, look for the version that needs no guard.**
+"Clear cache" was `shutil.rmtree(root)` behind a marker check that was the only
+thing between a settings typo and someone's Documents folder. Deleting exactly
+the files we recorded writing made the guard *unnecessary* rather than better.
+A guard is a sign the operation is shaped wrong.
+
+**4. Make the invariant mechanical, not advisory.** "A recipe is never a
+timestamp" was a comment for years and broke anyway. Now a kind declares its
+parameters and `canonical()` refuses anything else. Doctrine decays; a
+`ValueError` does not.
+
+**5. One table per idea, and derive the rest.** `decisions` and `cache`
+absorbed roughly ten tables between them. Elo, the folder tree, edit history,
+snapshots, status counts and tag lists are all *computed* — and each stopped
+being a thing that could disagree with the truth. Storage is a liability you
+pay for in reconciliation.
+
+**6. Give one job to one place, then let concurrency be a number.** Three
+preview workers arbitrating through a governor became one loop plus a lane
+index. Lanes need no claims, leases or visibility timeouts, because a worker
+that dies leaves nothing to expire — the queue is a query.
+
+**7. Verify by running it.** Every real bug this session was found this way and
+none by reading: an empty grid behind a 200, a livelock that had stopped tiles
+at 95, a middleware import that 500'd everything, a table whose deletion would
+have broken every fresh install, 75 sidecars offered as photographs. `app OK`
+proves imports resolve and nothing else.
+
+**The measurement.** 106,940 lines to ~74,000, and the part doing the work is
+~3,500. Not because anything was written tersely — the core is heavily
+commented — but because most of what was there had stopped being asked.
+
 ## Deletion guard rails
 
 A survey of all eight surfaces (08-16) named **91,676 lines** the core makes
