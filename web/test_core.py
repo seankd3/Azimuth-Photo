@@ -13,6 +13,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
+import work
 from model import backup, cache, copies, decisions, drives, photos
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -26,7 +27,7 @@ class CoreCase(unittest.TestCase):
             self.conn.executescript(handle.read())
         self.conn.execute(
             "CREATE TABLE images (id INTEGER PRIMARY KEY, tail TEXT, file_size INTEGER,"
-            " content_hash TEXT, vc_of INTEGER)"
+            " content_hash TEXT, date_taken TEXT, vc_of INTEGER)"
         )
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
@@ -274,7 +275,7 @@ class CacheRefuses(CoreCase):
             compute=lambda source, size=0: cache.Made(path=f"{source}@{size}", bytes=10),
             params=("size",),
         ))
-        self.addCleanup(cache.kinds().pop, "test_thumb", None)
+        self.addCleanup(cache.unregister, "test_thumb")
 
     def test_a_recipe_refuses_anything_the_kind_did_not_declare(self):
         # This is "recipe is never a timestamp", made mechanical. Feeding
@@ -285,7 +286,7 @@ class CacheRefuses(CoreCase):
 
     def test_a_failure_is_recorded_once_with_why(self):
         cache.register(cache.Kind(name="boom", compute=lambda source: 1 / 0))
-        self.addCleanup(cache.kinds().pop, "boom", None)
+        self.addCleanup(cache.unregister, "boom")
         self.assertIsNone(cache.make(self.conn, "hash1", "boom", "x.CR3"))
         stored = cache.get(self.conn, "hash1", "boom")
         self.assertEqual(stored["state"], cache.FAILED)
@@ -295,18 +296,69 @@ class CacheRefuses(CoreCase):
         # "Not here" is a fact about this machine. Stored, it would poison the
         # entry for the helper that can make it.
         cache.register(cache.Kind(name="gpu", compute=lambda source: cache.Made(), here=lambda: False))
-        self.addCleanup(cache.kinds().pop, "gpu", None)
+        self.addCleanup(cache.unregister, "gpu")
         self.assertIsNone(cache.make(self.conn, "hash1", "gpu", "x.CR3"))
         self.assertIsNone(cache.get(self.conn, "hash1", "gpu"))
 
     def test_eviction_never_takes_what_it_cannot_remake_cheaply(self):
         cache.register(cache.Kind(name="embedding", compute=lambda source: cache.Made(), evictable=False))
-        self.addCleanup(cache.kinds().pop, "embedding", None)
+        self.addCleanup(cache.unregister, "embedding")
         cache.put(self.conn, "h1", "embedding", cache.Made(value=b"vector", bytes=3000))
         cache.put(self.conn, "h1", "test_thumb", cache.Made(path="/t.jpg", bytes=3000), {"size": 400})
         self.conn.commit()
         self.assertEqual(cache.evict(self.conn, 0), ["/t.jpg"])
         self.assertIsNotNone(cache.get(self.conn, "h1", "embedding"))
+
+
+class OwedIsAQuery(CoreCase):
+    def setUp(self):
+        super().setUp()
+        cache.register(cache.Kind(name="thumb", compute=lambda source: cache.Made(path="/t.jpg", bytes=1)))
+        self.addCleanup(cache.unregister, "thumb")
+        work.touched.__globals__["_last_touch"] = 0.0
+
+    def _catalogued(self, tail=TAIL, *, hashed=True):
+        path = self.write(self.hot_root, tail)
+        self.conn.execute(
+            "INSERT INTO images(tail, file_size, content_hash) VALUES (?, ?, ?)",
+            (tail, os.path.getsize(path), tail if hashed else None),
+        )
+        self.conn.commit()
+        return self.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+    def test_a_new_photo_is_owed_without_anything_enqueuing_it(self):
+        image = self._catalogued()
+        self.assertEqual([row["id"] for row in work.owed(self.conn, "thumb")], [image])
+
+    def test_making_it_is_what_removes_it_from_the_queue(self):
+        self._catalogued()
+        work.step(self.conn, yield_to=lambda: False)
+        self.assertEqual(work.owed(self.conn, "thumb"), [])
+
+    def test_a_failure_is_not_rediscovered_every_pass(self):
+        cache.register(cache.Kind(name="boom", compute=lambda source: 1 / 0))
+        self.addCleanup(cache.unregister, "boom")
+        self._catalogued()
+        self.assertEqual(len(work.owed(self.conn, "boom")), 1)
+        cache.make(self.conn, TAIL, "boom", "whatever")
+        self.assertEqual(work.owed(self.conn, "boom"), [])
+
+    def test_what_is_on_screen_is_served_first(self):
+        self._catalogued("Raws/a.CR3")
+        watching = self._catalogued("Raws/b.CR3")
+        owed = work.owed(self.conn, "thumb", on_screen=[watching])
+        self.assertEqual(owed[0]["id"], watching)
+
+    def test_chores_stand_down_while_you_are_using_the_app(self):
+        # Browsing was 23 ms with chores quiet and minutes with them running.
+        self._catalogued()
+        work.touched()
+        self.assertIsNone(work.step(self.conn))
+        self.assertEqual(len(work.owed(self.conn, "thumb")), 1)
+
+    def test_identity_is_owed_before_anything_keyed_on_it(self):
+        image = self._catalogued(hashed=False)
+        self.assertEqual(work.step(self.conn, yield_to=lambda: False), {"did": "identity", "photo": image})
 
 
 if __name__ == "__main__":

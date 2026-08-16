@@ -50,6 +50,11 @@ class Kind:
     # the mechanical half of "recipe is never a timestamp".
     params: tuple[str, ...] = ()
     evictable: bool = True
+    # Which photos should have one, as a SQL condition over `images i`. This is
+    # the half of "owed is a query" that a kind owns: the work layer asks
+    # *should exist* minus *is cached* and needs to be told the first half
+    # exactly once, here, rather than in a scheduler per kind.
+    wants: str = "1"
     # Can this machine make it right now? A missing model, no GPU, a helper's
     # job. Asked, never remembered.
     here: Callable[[], bool] = lambda: True
@@ -74,7 +79,13 @@ def register(kind: Kind) -> Kind:
     return kind
 
 
+def unregister(name: str) -> None:
+    _KINDS.pop(str(name), None)
+
+
 def kinds() -> dict[str, Kind]:
+    """A copy, so iterating cannot be disturbed by a kind registering late."""
+
     return dict(_KINDS)
 
 
