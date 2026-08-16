@@ -37,14 +37,27 @@ export function createPendingPreviewPoll({ active, refresh, delay = 3000 }) {
 export const pendingCount = (data) => Number(data?.pending_thumbnails ?? data?.hidden_pending_thumbnails) || 0;
 
 export const pendingPreviewCount = (images) => (images || []).filter((image) => image?.preview_ready === false).length;
-// The rotation rides in the URL, not just in the ETag. A turned photograph is
-// a different picture, so it deserves a different address -- and a browser
-// that cached the unturned one under a long max-age will never revalidate it,
-// which is the same shape as the poisoned-service-worker incident: a cache you
-// cannot reach is not fixed by fixing the server, only by changing the URL.
+// **The address names the picture.** A browser that cached a tile under a long
+// max-age never asks again, so a cache you cannot reach is not fixed by fixing
+// the server -- only by changing the URL. Rotation was the first reason found
+// for that and it was fixed too narrowly: the general reason is that the bytes
+// on disk can change. Lightroom writing metadata rewrites the photograph, and
+// the tile with it, at the same address.
+//
+// So the identity rides in the URL, which is what the ETag was already keyed
+// on. Measured on a roll Lightroom had rewritten: the same URL returned
+// 265x400 from the network and 400x265 from the browser's own cache, and every
+// portrait frame sat sideways in a correctly-shaped cell.
+//
+// `thumb_url` used to short-circuit this for grid tiles. It is the same path
+// without the version, which made it a second source of truth that was always
+// the wrong one; it is deliberately not consulted.
 export const previewThumbUrl = (image, size = 'sm') => {
     if (!image || image.preview_ready === false) return '';
-    if (size === 'sm' && image.thumb_url) return image.thumb_url;
     const turn = Number(image.rotate || 0) % 360;
-    return `/api/thumb/${size}/${image.id}` + (turn ? `?r=${turn}` : '');
+    const query = new URLSearchParams();
+    if (turn) query.set('r', String(turn));
+    if (image.hash) query.set('v', String(image.hash).slice(0, 12));
+    const suffix = query.toString();
+    return `/api/thumb/${size}/${image.id}` + (suffix ? `?${suffix}` : '');
 };

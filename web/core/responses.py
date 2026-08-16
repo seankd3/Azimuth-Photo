@@ -52,6 +52,9 @@ def image_card(
         "status": _get(image, "status") or "kept",
         "flag": _get(image, "flag") or "unflagged",
         "aspect_ratio": _as_float(_get(image, "aspect_ratio"), 1.5) or 1.5,
+        # The tile URL is versioned on this, so a photograph whose bytes change
+        # gets a new address instead of a stale cached picture.
+        "hash": _get(image, "content_hash") or _get(image, "hash") or "",
         "has_caption": bool(_get(image, "has_caption", False)),
         "caption_tags": list(_get(image, "caption_tags", []) or []),
         **metadata_payload(image),

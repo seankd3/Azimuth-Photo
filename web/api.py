@@ -80,9 +80,31 @@ async def _writing(job, *args, **kwargs):
     return await asyncio.to_thread(run)
 
 
+def _tile_headers(tag: str, versioned: bool) -> dict:
+    """How long a tile may be kept, which depends on what its address names.
+
+    A URL carrying `v` names the bytes it was made from, so it can never go
+    stale and may be kept forever without asking. A bare URL points at
+    "whatever this photograph looks like now", which changes when an
+    application rewrites the file — so it must be revalidated every time.
+
+    This is the rule the old `max-age=31536000` broke by applying the first
+    answer to the second kind of address, and those cached copies are why a
+    correct server still showed sideways photographs.
+    """
+
+    return {"ETag": tag, "Cache-Control": (
+        "private, max-age=31536000, immutable" if versioned else "private, no-cache")}
+
+
 @router.get("/api/thumb/{size}/{image_id}")
-async def thumb(size: str, image_id: int, r: int = 0, request: Request = None):
-    """One tile. Cache, or make it, or say which of the five words applies."""
+async def thumb(size: str, image_id: int, r: int = 0, v: str = "", request: Request = None):
+    """One tile. Cache, or make it, or say which of the five words applies.
+
+    `v` is the photograph's identity, read by nothing here — it exists so the
+    address changes when the picture does, which is the only thing that can
+    reach a cache the browser has already decided is fresh.
+    """
 
     work.touched()
     longest = render.SIZES.get(size)
@@ -104,14 +126,11 @@ async def thumb(size: str, image_id: int, r: int = 0, request: Request = None):
         if body:
             tag = f'"{row["hash"]}-{longest}-{turn}"'
             if request is not None and request.headers.get("if-none-match") == tag:
-                # Unchanged, so send nothing. This is the half of `no-cache`
-                # that makes it cheap: the browser still asks, but the answer
+                # Unchanged, so send nothing: the browser asked, and the answer
                 # is 304 rather than 300 KB.
-                return Response(status_code=304, headers={"ETag": tag,
-                                                          "Cache-Control": "private, no-cache"})
+                return Response(status_code=304, headers=_tile_headers(tag, bool(v)))
             return Response(content=body, media_type="image/jpeg",
-                            headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
-                                     "Cache-Control": "private, no-cache"})
+                            headers=_tile_headers(tag, bool(v)))
         if entry and entry["state"] == cache.FAILED:
             return Response(status_code=410)  # unreadable, and we know why
 
@@ -126,8 +145,7 @@ async def thumb(size: str, image_id: int, r: int = 0, request: Request = None):
     if made is None:
         return Response(status_code=410)
     return Response(content=made, media_type="image/jpeg",
-                    headers={"ETag": f'"{row["hash"]}-{longest}-{turn}"',
-                             "Cache-Control": "private, no-cache"})
+                    headers=_tile_headers(f'"{row["hash"]}-{longest}-{turn}"', bool(v)))
 
 
 def _make_tile(hash: str, longest: int, source: str, turn: int = 0) -> bytes | None:
