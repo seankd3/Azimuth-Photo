@@ -1,233 +1,208 @@
 # The Core
 
-Derived from first principles, 2026-08-15. Every feature stands on what is in
-this file. If something here needs a special case to hold, the shape is wrong —
-fix the shape, not the caller.
+The whole design, in plain words. If a change needs a special case to fit here,
+the shape is wrong — fix the shape, not the caller.
 
 ---
 
-## What is actually true
+## Four things
 
-Strip the app to what exists in the world and there are **four kinds of fact**:
+Azimuth needs to know four things about a photo. Nothing else is stored.
 
-| | | |
-|---|---|---|
-| **A photograph** | bytes someone made | survives copying, moving, renaming, re-importing |
-| **A place** | a volume that currently holds it | many per photograph, cheap, disposable |
-| **A judgment** | something the owner decided | irreplaceable — the only thing worth backing up |
-| **A derivation** | anything computable from the bytes and the judgments | disposable by definition |
+1. **What it is** — its bytes.
+2. **Where copies are** — which drives have it.
+3. **What you decided** — keeps, stars, ratings, edits, names.
+4. **What we computed** — thumbnails, previews, dates, embeddings, captions.
 
-Everything the catalog stores is one of those four. Anything that is none of
-them is machinery, and machinery is what we are removing.
+## Three rules
 
----
+- **Only #3 is irreplaceable.** Everything else can be rebuilt from scratch.
+- **#2 is a guess, checked when it matters.** A stale guess costs nothing,
+  because reading verifies.
+- **Nothing is deleted without proving another copy exists.**
 
-## Three names, three jobs
-
-A single concept called "the photo's path" was doing three unrelated jobs. Split
-it and most of the complexity disappears:
-
-| | | |
-|---|---|---|
-| `id` | **the handle** | arbitrary, stable, what 31 foreign-key columns point at |
-| `tail` | **the address** | `Raws/Digital/2026/2026-07-11/SKDA3268.CR3` — where it sits *inside a library*, on any volume |
-| `content_hash` | **the identity** | survives a move; proves a copy is a copy |
-
-### The one sentence
-
-> **An absolute path is a volume plus a tail, and we stored them fused.**
-
-That fusion is the disease behind every workaround in the tree: `location.py`'s
-drive probing, `hub_remote`, `missing_at`, the 5% mass-missing breaker,
-`rebind_moved_source`, and the two-tier problem itself. All of them are attempts
-to recover a tail from a path that swallowed its volume.
-
-So: **store the tail, compute the path.** `filepath` stops being a column and
-becomes a function. A renamed root is one row. A changed drive letter is one
-row. The same tail under two roots *is* the two-tier model, with nothing to
-reconcile.
+That is the entire product contract. The rest of this file is how.
 
 ---
 
-## The shapes
-
-Five tables. Two already exist and are kept as they are.
+## Five tables
 
 ```sql
-volumes(id, uuid, root, kind, online)
-    -- kind: hot | cold. `uuid` lives in a marker file inside the root, so a
-    -- drive letter is never an identity. N rows, not two: a card is a volume.
-
-photos(id, tail UNIQUE, content_hash, vc_of, <judgments>, <derived memo>)
-    -- one row per photograph in the library. No source_id. No filepath.
-
-sightings(photo_id, volume_id, seen_at)
-    -- three columns. A hint that this volume held this tail. Never a truth.
-
-judgments(content_hash, family, value, at)        -- today's `oplog`, kept
-derivations(content_hash, kind, recipe, state, path)  -- exists, from H2
+drives    (id, uuid, root, is_record)
+photos    (id, hash, version_of, tail, <your decisions>, <computed memo>)
+copies    (photo_id, drive_id, tail, seen_at)
+decisions (subject, family, value, at)
+cache     (hash, kind, recipe, state, path)
 ```
 
-`photos` keeps its derived memo columns (`date_taken`, `camera`, `width`,
-`orientation`, …) because the grid sorts and filters on them and a join per tile
-is not free. They are memos, and the law below says what that means.
+**drives** — where photos live. `D:\Pictures` and `E:\Photos` today, a card
+tomorrow. Identity is a uuid in a marker file inside the root, never a drive
+letter, because letters move. `is_record` is the only policy bit in the whole
+storage model: **may this drive be the last copy?** The archive may. The SSD may
+not. From that one bit: reads prefer the SSD (fast and expendable), backup
+copies SSD→archive, and reclaim only ever deletes from the SSD.
+
+**photos** — one row per photograph. `hash` is what it is; `tail` is a memo of
+where it sits (`Raws/Digital/2026/2026-07-11/SKDA3268.CR3`) kept only so folder
+browsing stays fast; `id` is a handle, because 31 tables and every API URL use
+integers.
+
+**copies** — which drives hold it. Many per photo. A guess, never a truth.
+
+**decisions** — the append-only log of what you said. The only thing worth
+backing up.
+
+**cache** — anything computable, keyed by *what photo, what kind, what version*.
+
+### The one sentence behind all of it
+
+> **An absolute path is a drive plus a tail, and we stored them fused.**
+
+That fusion caused the drive-probing, `hub_remote`, `missing_at`, the
+mass-missing breaker, `rebind_moved_source`, and the two-tier problem itself —
+every one of them an attempt to recover a tail from a path that swallowed its
+drive. So: **store the tail, compute the path.** A renamed root is one row. A
+changed drive letter is one row. The same tail on two drives *is* the two-tier
+model, with nothing to reconcile.
 
 ---
 
-## The core
-
-Six functions. Nothing else is core.
+## Six functions
 
 ```
-identify(path)              -> hash             bytes name themselves
-locate(photo)               -> path | None      first online volume whose root+tail exists,
-                                                hot preferred, size-verified
-sight(photo, volume)                            record a hint
-derive(photo, kind)         -> bytes | row      memoized pure function
-judge(photo, family, value)                     record a decision
-sweep(volume)                                   walk a root; reconcile tails and hints
+identify(file)          what photo is this          (bytes name themselves)
+open(photo)             give me the file            (first drive that has it, SSD first)
+saw(photo, drive)       record a copy               (a hint)
+make(photo, kind)       give me a thumbnail/preview (memoized)
+decide(photo, what)     record a decision           (append to the log)
+sweep(drive)            check what's on a drive
 ```
+
+Every feature stands on these six. Nothing else is core.
 
 ---
 
-## The two rules that delete the most
+## Versions: raws, exports, virtual copies
 
-### 1. A sighting is a hint. A read is the proof.
+A photograph often has several files: the raw, the JPEGs you exported, a virtual
+copy with different settings. **One nullable column handles all of it** —
+`photos.version_of` points at the original. A group is an original plus
+everything whose chain reaches it, so exporting an export still lands in one
+group instead of a chain of pairs.
 
-Nothing precious may depend on the sightings table being correct. `locate()`
-tries the volumes and verifies; if a hint was stale, the read still succeeds and
-the hint is corrected in passing.
+This replaces `vc_of` rather than joining it: a virtual copy is a version with
+no file of its own, an export is a version with one. Same idea, one column.
 
-This is what makes the rest simple. Because a wrong hint costs nothing:
+**The link is read, not guessed.** Lightroom already writes it — your exports
+carry `crs:RawFileName` and `xmpMM:OriginalDocumentID` naming their source. So
+linking is a *computation over metadata*, and evidence has grades: exactly one
+match in the library links it, more than one proposes it, none leaves it alone.
+Your own grouping always outranks the evidence.
 
-- there is no mass-missing breaker, no 5% ratio, no `AZIMUTH_ALLOW_MASS_MISSING`
-- there is no proven-read scoping, no per-file skip list, no scan-void logic
-- there is no exFAT DST clock guard
-- `missing_at` does not exist — **missing is what a failed read returns**, not a
-  verdict a sweep writes down
+In the grid this is one tile per photograph — the finished edit, because that's
+the one you want to see — with a badge for what's underneath.
 
-The corollary is the safety rule: **anything with a consequence verifies for
-itself.** Deleting a hot copy re-reads the cold one and compares a full-file
-digest at that moment. It never trusts a hint, a prefix hash, or a timestamp.
-
-### 2. Judgment beats derivation. Always.
-
-One rule replaces every per-column authority `CASE` in the tree — including the
-film-delivery date guards. If a human said it, it wins, permanently, and a later
-worker may not overwrite it.
-
-The test of the whole design: **delete every derivation, run one pass, and the
-library comes back identical.** Anything that does not come back was a judgment
-hiding in a memo. That test is what found the Elo problem.
+Bursts and brackets are a different axis (several *pictures* taken together, not
+several files of one picture). Today `stacks` holds **0 rows**, so that axis is
+out of scope until it is wanted.
 
 ---
 
-## Every use case, walked
+## Where every feature sits
 
-The shapes are only justified if the real work falls out of them.
-
-| Use case | How it falls out |
+| Feature | Sits on |
 |---|---|
-| **Import** | `identify()` the file, pick its `tail` from the taxonomy, copy to the hot volume, insert `photos`, `sight()`. |
-| **Grid** | Query `photos`; tiles are `derive(photo, 'thumb:md')`. Never touches an original — so the grid is fully alive with the archive unplugged. |
-| **Loupe / full size** | `locate(photo)` → decode. No volume answers → *away*. |
-| **Judge** (pick, rate, rank) | `judge()`. Writes the durable log and the fast column together. |
-| **Develop** | The recipe is a judgment. Base and render are `derive(photo, 'base' \| 'render', recipe)`. |
-| **Find** | Query over `photos` memo columns, judgments, and embeddings (a derivation). |
-| **Export / share** | Render at a size, write to the hot volume. |
-| **Owner reorganizes in Lightroom** | The tail changed. `sweep()` finds a new tail carrying a known hash and updates `photos.tail`. Judgments follow the `id`, derivations follow the hash. **Nothing else moves.** |
-| **Backup** | Copy hot→cold at the same tail, verify, `sight()`. *Backed up* = has a cold sighting. |
-| **Free up space** | For photos with a cold sighting: verify the full digest on cold, delete the hot file, drop the hot sighting. |
-| **Archive unplugged** | `volumes.online = 0`. `locate()` skips it. Photos still list, thumbnails still paint. |
-| **Trash** | The tail moves under `.trash/`; `status = 'trashed'` is the judgment. No role column, no new state. |
-| **Virtual copies** | One photograph, two recipes. A VC is a `photos` row sharing tail and hash, with `vc_of` — so it keeps its own id, its own judgments, its own derivations. |
-| **Duplicates** | Two tails, one hash. Honest: two files really do exist. The dedup view lists them; merging is optional, never automatic. |
-| **Stacks, collections, keywords, people** | Set-shaped judgments over photo ids. |
+| Import | `identify` → pick a tail → copy to the SSD → row + `saw` |
+| Grid | query `photos`; tiles are `make(photo, 'thumb')`. Never touches originals, so it works with the archive unplugged |
+| Loupe / full size | `open(photo)` |
+| Pick, rate, rank | `decide` |
+| Develop | your edits are **decisions**; the decode and the render are **cache** |
+| Search | `photos` columns + embeddings (cache) |
+| Export | `make` at full size, written to the SSD |
+| Backup | copy to a record drive, verify, `saw` |
+| Free up space | verify the archive copy in full, then delete the SSD file |
+| Trash | the tail moves under `.trash/`; `status='trashed'` is a decision |
+| People / captions | the machine's answer is **cache**; your answer is a **decision** |
 
-Three photo states — **backed up**, **only here**, **away** — are `SELECT`s over
-sightings, never stored columns.
+### Two consequences worth naming
+
+**Develop needs no new primitives.** Edit history *is* the decisions log filtered
+to one photo, so the separate `develop_history` table goes. Saving an edit
+changes the recipe, so the grid tile is owed again automatically — nothing has to
+remember to invalidate it. And grid, Develop and export become one function at
+three sizes, which ends exports that don't match the canvas.
+
+**AI needs no new primitives.** Embeddings, captions and faces are cache with two
+riders: never evict them (small, and hours to remake), and the human's response
+to them — a name, "that's not a face", a fixed caption — is a decision stored
+elsewhere, or a re-scan silently erases your work.
 
 ---
 
-## What this deletes
+## Build order
 
-Concepts, not just lines:
+Each step works on its own and is worth having even if the next one never lands.
 
-- `source_id` and `catalog_sources` as an addressing concept — volumes replace
-  them, and **"excluded source" stops existing**. Measured: all 10,689
-  `C:\Pictures` hashes are also in the archive, **zero unique, zero judgments**
-  (one develop row, from a recoverable XMP sidecar). So those rows are not a
-  source to exclude — they are *sightings on a third volume*. The
-  10,750-duplicate-identity merge, with its Elo self-pair hazard and 31-column
-  FK rewrite, does not get solved: it stops existing.
-- `filepath` as stored data; `relative_path`'s three competing conventions
-- `missing_at`, `would_mass_mark_missing`, `StorageUnavailableDuringScan`,
-  `SuspiciousEmptyScan`, `AZIMUTH_ALLOW_MASS_MISSING`
-- `photo/location.py`'s strip-and-probe, `_MAX_STRIP`, the mapping cache
-- `hub_remote`, `hub_image_id`, `row_version` and its two triggers
-- move detection, rename detection, `_key`, `Plan.moved`/`Plan.gone`,
-  `rebind_moved_source`
-- the `crosssource` stack kind — it existed to group "the same photo from two
-  sources," which is now one photo with two sightings
-- every per-column date-authority `CASE`
+| | Step | Done when |
+|---|---|---|
+| 1 | `drives` + marker uuids in both roots | both resolve with the letters swapped |
+| 2 | `tail` on every photo, one convention | `Raws/Digital/2026/x.CR3` is the same tail on both drives |
+| 3 | `open()` replaces the path-probing | archive photos open and reveal |
+| 4 | `copies` + `sweep()` — hints only, no verdicts | unplug and replug mid-session; the grid never blinks |
+| 5 | Re-key the Develop base and thumbnail ETag onto the hash | plug in the archive warm: no re-decode wave |
+| 6 | Retire `source_id`; the old sources become drives | starred/Elo/develop counts identical, by exact SQL |
+| 7 | Backup + free-up-space | the 33 GB of unarchived 2026 work drains |
+| 8 | `version_of` + reading the export links | your 22 finished frames group with their scans |
+| 9 | Delete what's now unreachable | ~3,100 lines of hub residue, plus six guard mechanisms |
+
+**Order is load-bearing.** Step 6 before step 3 would be catastrophic: pointing a
+source at `E:\Photos` while its rows still carry `/mnt/expansion/...` paths makes
+every row look absent and every file look new, and the reconcile worker — which
+runs every 300 seconds — would adopt the entire archive as ~144,000 duplicate
+rows.
+
+---
+
+## What disappears
+
+Not just lines — concepts. `source_id` and "excluded source" (measured: all
+10,689 `C:\Pictures` hashes are also in the archive, zero unique, zero
+judgments — so they are copies on a third drive, and the 10,750-duplicate merge
+stops existing rather than needing a procedure). `filepath` as stored data.
+`missing_at` and the whole mass-missing apparatus. `hub_remote`, `row_version`
+and its triggers. Move detection, rename detection, `rebind_moved_source` — a
+file at a new tail with a known hash simply gets a copy row, so there is no
+rename code path at all. The `crosssource` stack kind. `develop_history`. Every
+per-column date-authority `CASE`.
 
 ---
 
 ## What must survive
 
-These are bugs already paid for once; the shapes above must not lose them.
-
-- **Decode by content, not extension** — 1,306 `.CR2` files here are JPEGs
-- **The prefix hash is not proof** — it covers 8 MiB + size. A roll of film scans
-  can share both. Fine for finding candidates; never permission to delete
-- **The app mutates its own identity** — fixed-size DNG XMP splices change the
-  hashed prefix without changing size. Any in-app write into an original must
-  re-identify it
-- **`compute_content_hash` needs the re-stat guard** `compute_hash_pair` already
-  has, or a file mid-write gets a permanent name
-- **Busy-timeout belongs to the request, not the connection**
-- **Room, not budget, decides admission**; `draft()` before `load()`; 9 GB peak
-  per demosaic worker, measured
-- **Nothing heavy on the boot path**; stop DB-touching work before releasing
-  handles
-- **`Astrophotography/` is fenced case-blind in every walker** (done —
-  `scanner.is_fenced_directory`)
-- **Statuses are only kept/maybe/trashed**
-- **Perf budgets are product invariants**, enforced in the default test suite
+Bugs already paid for once. Decode by content, not extension — 1,306 `.CR2`
+files here are JPEGs. The hash covers 8 MiB plus size: excellent for finding
+candidates, **never permission to delete** — a roll of film scans can share both.
+The app mutates its own identity, because embedded DNG writes are fixed-size
+splices inside the hashed region, so any in-app write must re-identify. Busy
+timeout belongs to the request, not the connection. Room, not budget, decides
+admission. `draft()` before `load()` — the archive holds 527 MP photos. 9 GB peak
+per demosaic worker, measured, not guessed. Nothing heavy on the boot path. Stop
+database work before releasing handles, or Windows keeps the library file.
+`Astrophotography/` is fenced case-blind in every walker. Statuses are only
+kept / maybe / trashed. Perf budgets are product invariants, enforced in the
+default test suite.
 
 ---
 
-## Migration, in order
+## How you judge it
 
-Each step is provable on its own and reversible until the one after it.
+Not by the diagram — by these five:
 
-| | Step | Proof |
-|---|---|---|
-| **1** | `volumes` table; marker uuid written into `D:\Pictures` and `E:\Photos` | both resolve by uuid with letters swapped |
-| **2** | `tail` on `photos`, computed from today's paths; one convention, namespace segment included | `Raws/Digital/2026/x.CR3` is the same tail on both drives |
-| **3** | `locate()` replaces `location.py`; the six cold paths that read `filepath` raw move onto it | archive photos open and reveal with `hub://` still in place |
-| **4** | `sightings` + `sweep()`; hints only, no verdicts | unplug and replug mid-session; the grid never blinks |
-| **5** | Re-key the develop base cache and thumbnail ETag onto `content_hash`/recipe | plug in the HDD warm: no RAW re-decode wave |
-| **6** | Retire `source_id`; `hub://` and `C:\Pictures` become volumes | starred/Elo/develop counts identical, by exact SQL |
-| **7** | Backup + free-up-space | the 33 GB hot-only 2026 gap drains; reclaim refuses without a verified twin |
-| **8** | Delete the hub residue and the guard apparatus | ~3,100 lines, plus six mechanisms rule 1 made unnecessary |
+1. A photo opens whether it's on the SSD or the archive drive.
+2. You move folders in Explorer or Lightroom; Azimuth follows without being told.
+3. Unplug the archive: the whole library still browses, searches and ranks.
+4. It tells you what isn't backed up, and backs it up when the drive is attached.
+5. "Free up space" never removes anything that isn't provably archived.
 
-**Order is load-bearing.** Step 6 before step 3 would be catastrophic:
-`_within()` compares a catalogued path against the source folder, so pointing
-source 3 at `E:\Photos` while its rows still carry `/mnt/expansion/...` makes
-every row look absent and every file look new — and the reconcile worker, which
-runs every 300 s, would `_adopt` the entire archive as ~144,000 duplicate rows.
-
----
-
-## The standing rules
-
-- Originals are never deleted by a sweep, a merge, or a guess. Only the reclaim
-  verb deletes, only a hot copy, only after a full-digest match, only after
-  showing what it will remove.
-- **Cold is read-only except for whole-file archival copies.** Sidecar writes,
-  trash moves and DNG splices happen on hot. This settles which sidecar wins and
-  why the archive never diverges.
-- `Astrophotography/` is out of scope for every path that reads, indexes,
-  imports, cleans, dedups or reclaims.
-- A hint may be wrong. A consequence may not.
+And one standing rule underneath all of them: **a guess may be wrong; a
+consequence may not.**
