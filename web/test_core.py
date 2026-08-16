@@ -180,6 +180,35 @@ class SweepingRefuses(CoreCase):
         self.assertTrue(copies.drives_holding(self.conn, image))
 
 
+class SynchronizeRefuses(CoreCase):
+    def test_an_away_drive_can_never_produce_a_removal_offer(self):
+        # The sentence the whole design turns on, doing its job in the one
+        # feature where being wrong deletes photographs. Lightroom's dialog
+        # cannot make this distinction, which is why it can offer to remove
+        # photographs that are simply on a disk you did not plug in.
+        import synchronize
+
+        path = self.write(self.cold_root)
+        self.photo(size=os.path.getsize(path))
+        shutil.rmtree(self.cold_root)
+
+        with patch.object(drives, "_candidate_roots", return_value=[]):
+            found = synchronize.plan(self.conn, "")
+        self.assertEqual(found["missing"], [])
+        self.assertIn("away", found["note"])
+
+    def test_a_walk_that_could_not_be_read_offers_nothing_either(self):
+        # "I could not read the folder" and "the folder is empty" look
+        # identical from here and are opposite facts.
+        import synchronize
+
+        self.write(self.cold_root)
+        self.photo()
+        with patch.object(copies, "walk_tails", return_value=(set(), False)):
+            found = synchronize.plan(self.conn, "")
+        self.assertEqual(found["missing"], [])
+
+
 class BackupRefuses(CoreCase):
     def _queued(self):
         source = self.write(self.hot_root)

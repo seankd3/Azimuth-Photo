@@ -35,6 +35,7 @@ from fastapi import APIRouter, Response
 import library
 import rank
 import render
+import synchronize
 import tiles
 import work
 import xmp
@@ -747,6 +748,36 @@ async def read_sidecars(folder: str = "", limit: int = 5000):
         conn.commit()
         return {"ok": True, "folder": folder or "everything",
                 "photographs": len(rows), "readable": read, "with sidecars": found}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.get("/api/folder/synchronize")
+async def synchronize_plan(folder: str = ""):
+    """What synchronizing this folder would change. Writes nothing.
+
+    The GET is the dialog and the POST is the button, which is the whole point:
+    a scan that acts on its own is one you cannot trust with a drive that was
+    briefly unplugged.
+    """
+
+    return await asyncio.to_thread(synchronize.plan, db(), folder)
+
+
+@router.post("/api/folder/synchronize")
+async def synchronize_apply(folder: str = "", adopt: bool = True, forget: bool = False):
+    """Act on the plan. Adopting is on by default; forgetting is not.
+
+    They are not symmetrical and should not be. Adopting adds rows for files
+    that exist. Forgetting takes a photograph out of the library, so it is
+    opt-in and can only ever touch the `missing` list -- which is empty
+    whenever any drive is away.
+    """
+
+    conn = _writer()
+    try:
+        return await asyncio.to_thread(synchronize.apply, conn, folder,
+                                       adopt=adopt, forget=forget)
     finally:
         connection.close_sync(conn, db_path=catalog_path())
 
