@@ -126,6 +126,46 @@ def current(conn, family: str) -> dict[str, Any]:
     return {row["subject"]: _loaded(row) for row in rows}
 
 
+def carry(conn, subject: str, to: str) -> int:
+    """Re-file what you decided about one subject under another.
+
+    The identity digest covers the head of the file, and in a TIFF or a DNG
+    that is exactly where metadata lives — so an application that writes a
+    rating or an orientation into the photograph moves its digest, and every
+    decision keyed on the old one is left behind. Measured: Lightroom saving
+    metadata to a 40-frame roll changed all 40.
+
+    This is not a migration and not a merge. It appends the current answer in
+    each family under the new subject, which is the log doing the one thing it
+    does; the rows under the old subject stay exactly where they were, so the
+    record of what was decided when is never rewritten.
+
+    The stored `value` is carried verbatim rather than decoded and re-encoded,
+    because a round trip through JSON is a chance to change a number's spelling
+    and there is nothing to gain by taking it.
+    """
+
+    if subject == to or not to:
+        return 0
+    rows = conn.execute(
+        """
+        SELECT family, value FROM (
+            SELECT family, value,
+                   ROW_NUMBER() OVER (PARTITION BY family ORDER BY at DESC, id DESC) AS rank
+            FROM decisions WHERE subject = ?
+        ) WHERE rank = 1
+        """,
+        (str(subject),),
+    ).fetchall()
+    now = time.time()
+    for row in rows:
+        conn.execute(
+            "INSERT INTO decisions(subject, family, value, at) VALUES (?, ?, ?, ?)",
+            (str(to), row["family"], row["value"], now),
+        )
+    return len(rows)
+
+
 def undo(conn, subject: str, family: str) -> Any:
     """Put back what you said before, by saying it again.
 

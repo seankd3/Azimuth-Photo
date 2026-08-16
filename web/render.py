@@ -217,12 +217,25 @@ def render(source: str, size: int = GRID, edits: dict | None = None,
 
 
 def dimensions(path: str) -> tuple[int, int]:
-    """Width and height without decoding. A header read, not a picture."""
+    """The shape the photograph is *shown* at. A header read, not a picture.
+
+    Shown, not stored, because every caller wants the former: the grid sizes
+    each cell from these numbers, and a cell that disagrees with its tile is
+    the letterboxed-portrait bug. Keeping the sensor's shape here would mean
+    each caller had to re-derive the turn, which is how two decoders start.
+
+    A raw's flip is the camera's own, already honoured by `postprocess`, so it
+    has to be honoured here too or the two disagree. Measured across this
+    archive: `flip=5` (8224x5490 sensor) and `flip=6` (8191x5463) both decode
+    portrait, `flip=0` decodes landscape, and `flip=3` is a half turn that
+    swaps nothing.
+    """
 
     if kind.is_raw(path):
         import rawpy
 
         with rawpy.imread(path) as raw:
-            return int(raw.sizes.width), int(raw.sizes.height)
+            width, height = int(raw.sizes.width), int(raw.sizes.height)
+            return (height, width) if raw.sizes.flip in (5, 6) else (width, height)
     with Image.open(path) as image:
         return int(image.width), int(image.height)

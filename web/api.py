@@ -29,6 +29,7 @@ and it must never be rendered as one.
 from __future__ import annotations
 
 import asyncio
+import json
 
 from fastapi import APIRouter, Request, Response
 
@@ -298,7 +299,7 @@ def _apply_rotation(conn, rows: list[dict]) -> None:
         return
     holes = ",".join("?" for _ in hashes)
     turned = {
-        row["subject"]: int(str(row["value"]).strip('"') or 0)
+        row["subject"]: int(json.loads(row["value"]) or 0)
         for row in conn.execute(
             f"""
             SELECT subject, value FROM (
@@ -695,16 +696,16 @@ async def clear_cache():
 
 @router.post("/api/image/{image_id}/rotate")
 async def rotate(image_id: int, degrees: int = 90, absolute: bool = False):
-    """Turn a photograph that was filed sideways.
+    """Turn a photograph the file itself gets wrong.
 
-    A rotation is a decision, not an edit and not a file change. The lab that
-    scans a portrait frame into a landscape TIFF writes no orientation tag, so
-    no renderer can guess it and every one gets it "wrong" the same honest way
-    — the correction is something the owner knows and the file does not.
+    A correction *on top of* the file, not a replacement for it. `decode` has
+    already applied whatever the photograph says about itself, so `0` here is
+    not a claim that the frame is upright — it is the absence of a correction,
+    and the file has the last word. That is what makes this safe to apply to
+    something Lightroom has already turned.
 
     Being a decision it goes in the log, survives the row being rebuilt, and
-    rides the same path Lightroom's own rotations will when they are read from
-    XMP. The original file is never touched.
+    never touches the original file.
     """
 
     conn = _writer()
@@ -723,42 +724,12 @@ async def rotate(image_id: int, degrees: int = 90, absolute: bool = False):
         connection.close_sync(conn, db_path=catalog_path())
 
 
-@router.post("/api/folder/rotate")
-async def rotate_folder(folder: str, degrees: int = 90, absolute: bool = True):
-    """Turn every photograph in a folder the same way.
-
-    A lab scans a whole roll the same way round, so the correction is a
-    property of the roll rather than of each frame. Doing it per photograph
-    would be 36 identical decisions the owner had to make one at a time.
-
-    `absolute` defaults true here, unlike the single-photo verb: "this roll is
-    sideways, turn it" is a statement about how the roll should sit, not a
-    nudge relative to wherever each frame happens to be already.
-    """
-
-    conn = _writer()
-    try:
-        prefix = str(folder or "").replace("\\", "/").strip("/") + "/"
-        rows = conn.execute(
-            "SELECT content_hash AS hash FROM images"
-            " WHERE substr(tail, 1, ?) = ? AND content_hash IS NOT NULL",
-            (len(prefix), prefix),
-        ).fetchall()
-        if not rows:
-            return {"ok": False, "reason": f"no identified photographs under {folder!r}"}
-
-        turned = 0
-        for row in rows:
-            was = int(decisions.latest(conn, row["hash"], decisions.ROTATE) or 0)
-            now = int(degrees) % 360 if absolute else (was + int(degrees)) % 360
-            if now != was:
-                decisions.decide(conn, row["hash"], decisions.ROTATE, now)
-                turned += 1
-        conn.commit()
-        return {"ok": True, "folder": folder, "photos": len(rows),
-                "turned": turned, "rotate": int(degrees) % 360}
-    finally:
-        connection.close_sync(conn, db_path=catalog_path())
+# There is deliberately no folder-wide rotate. It read as a labour saver --
+# "a lab scans a roll the same way round" -- and it is true right up to the
+# moment the photographer turns individual frames, which is the only reason
+# the roll needed attention at all. Pointed at one 40-frame roll it wrote 40
+# corrections over Lightroom's 18, and the ~21 upright frames came back
+# sideways. A verb that is wrong exactly when it is used is not a shortcut.
 
 
 @router.post("/api/folder/read-sidecars")
@@ -817,19 +788,21 @@ async def synchronize_plan(folder: str = ""):
 
 
 @router.post("/api/folder/synchronize")
-async def synchronize_apply(folder: str = "", adopt: bool = True, forget: bool = False):
-    """Act on the plan. Adopting is on by default; forgetting is not.
+async def synchronize_apply(folder: str = "", adopt: bool = True,
+                            refresh: bool = True, forget: bool = False):
+    """Act on the plan. Adopting and refreshing are on by default; forgetting is not.
 
     They are not symmetrical and should not be. Adopting adds rows for files
-    that exist. Forgetting takes a photograph out of the library, so it is
-    opt-in and can only ever touch the `missing` list -- which is empty
-    whenever any drive is away.
+    that exist and refreshing re-reads facts about files that changed — both
+    only ever tell the catalog something the disk already knows. Forgetting
+    takes a photograph out of the library, so it is opt-in and can only ever
+    touch the `missing` list — which is empty whenever any drive is away.
     """
 
     conn = _writer()
     try:
         return await asyncio.to_thread(synchronize.apply, conn, folder,
-                                       adopt=adopt, forget=forget)
+                                       adopt=adopt, refresh=refresh, forget=forget)
     finally:
         connection.close_sync(conn, db_path=catalog_path())
 
