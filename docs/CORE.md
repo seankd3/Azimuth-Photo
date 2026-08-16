@@ -142,6 +142,28 @@ work.
 
 ---
 
+## The shape: a desktop app, not a server
+
+Azimuth is one person's app on one machine. Everything that exists because it
+was reachable over a network is deleted: owner auth, the unlock page, device
+tokens, browser-origin and rebinding checks, CORS, remote access, Tailscale
+serving, pairing. None of it has a reason to exist here.
+
+**The seven functions are the API.** HTTP is a transport, and it goes too — the
+UI calls the core directly instead of fetching from a port. That removes the
+whole class of "is the server running", port conflicts, and the offline-cache
+poisoning that once made the app show an empty library.
+
+The UI itself stays. HTML and CSS are a rendering layer, not a liability, and
+the grid, loupe and keyboard work are the product.
+
+| | Step | Note |
+|---|---|---|
+| **A** | Bind loopback-only, then delete auth, unlock, device tokens, origin checks, remote access, pairing | the two halves ship together — dropping auth while still listening outward is the one unsafe ordering |
+| **B** | Route every call through one client, then swap `fetch` for a direct call | 33 files bypass the client with inline `/api/` strings today; fix that first and the swap is one file. `<img src>` needs a custom protocol — that is the only real work |
+
+Both are independent of the data steps below and can run alongside them.
+
 ## Build order
 
 Each step is worth having even if the next never lands.
