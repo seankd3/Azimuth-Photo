@@ -45,12 +45,10 @@ from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
 from features.compare import routes as compare_routes  # noqa: E402
 from features.compare import service as compare_service  # noqa: E402
-from features.library import routes as library_routes  # noqa: E402
 from features.library import service as library_service  # noqa: E402
 from features.media import routes as media_routes  # noqa: E402
 from features.media import warm as media_warm  # noqa: E402
 from features.people import routes as people_routes  # noqa: E402
-from features.search import routes as search_routes  # noqa: E402
 from features.search import service as search_service  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402

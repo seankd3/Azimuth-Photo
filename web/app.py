@@ -27,12 +27,11 @@ from features.develop import ai_mask_routes, hdr_routes, import_routes, preset_r
 from features.develop import export_presets
 from features.export import routes as export_routes
 from features.imports import routes as imports_routes
-from features.library import keyword_routes, routes as library_routes, saved_views, watched_routes
+from features.library import keyword_routes, saved_views, watched_routes
 from features.media import routes as media_routes
 from features.pages import routes as page_routes
 from features.people import routes as people_routes
 from features.quality import routes as quality_routes
-from features.search import routes as search_routes
 from features.settings import routes as settings_routes
 from features.stacks import routes as stack_routes
 from features.sync import lr_routes
@@ -71,7 +70,6 @@ for router in (
     trash_routes.router,
     export_routes.router,
     imports_routes.router,
-    search_routes.router,
     settings_routes.router,
     cache_routes.router,
     caption_routes.router,

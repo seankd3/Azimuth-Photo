@@ -358,6 +358,100 @@ async def storage():
     }
 
 
+@router.get("/api/similar/{image_id}")
+async def similar(image_id: int, limit: int = 50):
+    """Photographs that look like this one.
+
+    The same embedding space that carries propagated taste. It is one lookup
+    and one matrix multiply, so "find similar" and "spread a judgement to
+    look-alikes" are the same operation seen from two ends — which is why
+    neither needed its own index, its own cache or its own worker.
+    """
+
+    import search as search_module
+
+    conn = db()
+    row = conn.execute(
+        "SELECT content_hash AS hash FROM images WHERE id = ?", (image_id,)
+    ).fetchone()
+    if row is None:
+        return Response(status_code=404)
+
+    found = []
+    if row["hash"]:
+        entry = cache.get(conn, row["hash"], search_module.EMBEDDING)
+        if entry and entry["value"]:
+            ids = await asyncio.to_thread(
+                search_module._semantic, conn, search_module._vector(entry["value"]),
+                max(1, min(int(limit), 500)) + 1,
+            )
+            found = [i for i in ids if i != image_id]
+
+    return {"images": _rows_for(conn, found), "source_id": image_id}
+
+
+@router.get("/api/duplicates")
+async def duplicates(limit: int = 200):
+    """Photographs whose bytes are the same.
+
+    The hash names candidates and nothing more — never permission to delete and
+    never permission to merge. So this reports, and any acting on it is the
+    owner's.
+    """
+
+    conn = db()
+    groups = [
+        {"hash": row["content_hash"], "count": row["n"],
+         "ids": [int(x) for x in str(row["ids"]).split(",")]}
+        for row in conn.execute(
+            f"""
+            SELECT content_hash, COUNT(*) AS n, GROUP_CONCAT(id) AS ids
+            FROM images i WHERE {library.IN_LIBRARY} AND content_hash IS NOT NULL
+            GROUP BY content_hash HAVING n > 1 ORDER BY n DESC LIMIT ?
+            """,
+            (int(limit),),
+        )
+    ]
+    return {"groups": groups, "total": len(groups)}
+
+
+@router.get("/api/image/{image_id}/exif")
+async def exif(image_id: int):
+    """What the camera recorded, as the catalog already holds it.
+
+    Read from the row, not from the file. The old route opened the original —
+    possibly a 45 MP RAW on a sleeping archive drive — and kept a per-process
+    dictionary to avoid doing it twice. Every field it returned was scanned
+    into the catalog at import, so the disk read bought nothing and the cache
+    existed to hide it.
+    """
+
+    row = db().execute(
+        "SELECT id, tail, date_taken, camera_make, camera_model, lens, file_size,"
+        " width, height, orientation, latitude, longitude, file_ext"
+        " FROM images WHERE id = ?", (image_id,)
+    ).fetchone()
+    if row is None:
+        return Response(status_code=404)
+    out = dict(row)
+    out["camera"] = " ".join(x for x in (out.pop("camera_make"), out.pop("camera_model")) if x).strip()
+    out["filename"] = (out["tail"] or "").split("/")[-1]
+    return out
+
+
+def _rows_for(conn, ids: list[int]) -> list[dict]:
+    if not ids:
+        return []
+    holes = ",".join("?" for _ in ids)
+    found = {
+        row["id"]: dict(row) for row in conn.execute(
+            f"SELECT id, tail, date_taken, stars, elo, content_hash AS hash, width, height"
+            f" FROM images WHERE id IN ({holes})", ids
+        )
+    }
+    return [found[i] for i in ids if i in found]
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""
