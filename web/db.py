@@ -22,7 +22,6 @@ from data.repositories import filter_options as filter_options_repository
 from data.repositories import images as image_repository
 from data.repositories import metadata_search as metadata_search_repository
 from data.repositories import ratings as rating_repository
-from data.repositories import rankings as ranking_repository
 from data.repositories import stats as stats_repository
 import settings
 
@@ -46,7 +45,7 @@ _filter_options_refreshing = filter_options_repository._filter_options_refreshin
 _ensured_embedding_model_keys: set[str] = set()
 _ai_status_counts_cache = stats_repository._ai_status_counts_cache
 CACHED_IMAGE_IDS_TTL_SECONDS = cache_entry_repository.CACHED_IMAGE_IDS_TTL_SECONDS
-RANKING_COUNT_CACHE_TTL_SECONDS = ranking_repository.RANKING_COUNT_CACHE_TTL_SECONDS
+RANKING_COUNT_CACHE_TTL_SECONDS = 60.0
 VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = rating_repository.VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS
 CACHE_ENTRY_COUNT_TTL_SECONDS = cache_entry_repository.CACHE_ENTRY_COUNT_TTL_SECONDS
 STATS_CACHE_TTL_SECONDS = stats_repository.FULL_STATS_CACHE_TTL_SECONDS
@@ -54,7 +53,7 @@ EMBEDDING_COUNT_CACHE_TTL_SECONDS = embedding_repository.EMBEDDING_COUNT_CACHE_T
 AI_STATUS_COUNTS_CACHE_TTL_SECONDS = stats_repository.AI_STATUS_COUNTS_CACHE_TTL_SECONDS
 ACTIVE_SOURCE_IDS_TTL_SECONDS = catalog_repository.ACTIVE_SOURCE_IDS_TTL_SECONDS
 CATALOG_CACHE_TTL_SECONDS = catalog_repository.CATALOG_CACHE_TTL_SECONDS
-FACET_CACHE_TTL_SECONDS = ranking_repository.FACET_CACHE_TTL_SECONDS
+FACET_CACHE_TTL_SECONDS = 60.0
 FILTER_OPTIONS_CACHE_TTL_SECONDS = filter_options_repository.FILTER_OPTIONS_CACHE_TTL_SECONDS
 
 
@@ -734,63 +733,9 @@ async def _cache_entry_count(size: str, cache_root: str) -> int:
 # smart collections started asking library.py directly, and a facade with no
 # callers is not an abstraction, it is a file nobody dared delete.
 
-async def get_date_groups(orientation: str = "", compared: str = "", min_stars: int = 0,
-                          folder: str = "", flag: str = "", date_taken: str = "",
-                          file_type: str = "", camera: str = "", lens: str = "",
-                          tag: str = "",
-                          visible_thumb_size: str = "", cache_root: str = "",
-                          id_filter: set | None = None, text_query: str = "",
-                          _force_refresh: bool = False,
-                          exclude_collapsed_stack_members: bool = False,
-                          exclude_sources=()):
-    return await ranking_repository.date_groups_cached(
-        DB_PATH,
-        get_catalog_image_counts=get_catalog_image_counts,
-        orientation=orientation, compared=compared, min_stars=min_stars,
-        folder=folder, flag=flag, date_taken=date_taken,
-        file_type=file_type, camera=camera, lens=lens, tag=tag,
-        visible_thumb_size=visible_thumb_size, cache_root=cache_root,
-        id_filter=id_filter, text_query=text_query,
-        force_refresh=_force_refresh,
-        ttl_seconds=FACET_CACHE_TTL_SECONDS,
-        exclude_collapsed_stack_members=exclude_collapsed_stack_members,
-        exclude_sources=exclude_sources,
-        caption_model_key=active_caption_model_key(),
-    )
-
-
-async def get_map_markers(orientation: str = "", compared: str = "", min_stars: int = 0,
-                          folder: str = "", flag: str = "", date_taken: str = "",
-                          file_type: str = "", camera: str = "", lens: str = "",
-                          tag: str = "",
-                          visible_thumb_size: str = "", cache_root: str = "",
-                          id_filter: set | None = None, text_query: str = "", collection_id: int = 0,
-                          exclude_sources=()):
-    return await ranking_repository.map_markers_cached(
-        DB_PATH,
-        get_catalog_image_counts=get_catalog_image_counts,
-        count_rankings_func=count_rankings,
-        get_visible_pairing_pool_counts=get_visible_pairing_pool_counts,
-        orientation=orientation,
-        compared=compared,
-        min_stars=min_stars,
-        folder=folder,
-        flag=flag,
-        date_taken=date_taken,
-        file_type=file_type,
-        camera=camera,
-        lens=lens,
-        tag=tag,
-        visible_thumb_size=visible_thumb_size,
-        cache_root=cache_root,
-        id_filter=id_filter,
-        text_query=text_query,
-        collection_id=collection_id,
-        exclude_sources=exclude_sources,
-        ttl_seconds=FACET_CACHE_TTL_SECONDS,
-        caption_model_key=active_caption_model_key(),
-    )
-
+# get_date_groups and get_map_markers stood here. Both became unreachable when
+# api.py started answering /api/date-groups and /api/map/markers from
+# library.months() and a direct query.
 
 async def get_filter_options(**scope):
     # Request wiring always passes the full kwargs spray, so drop default
