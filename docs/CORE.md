@@ -493,6 +493,34 @@ commits `PRAGMA user_version = SCHEMA_VERSION` *before* returning the answer
 computed from the old value — so a migration that fails after that point stamps
 the new version anyway and is silently skipped forever after.
 
+**And the one that would have shipped.** `model/schema.sql` describes the
+core's four tables, and until 08-16 **nothing in the running application read
+it** — only `test_core.py` did. `drives`, `copies`, `decisions` and `cache`
+existed in this catalog only because the migration steps that built the core
+created them along the way. Measured on a catalog built from nothing through
+the real boot path:
+
+```
+drives MISSING · copies MISSING · decisions MISSING · cache MISSING
+images.tail MISSING · images.drive_id MISSING
+idx_photos_tail MISSING · idx_decisions_subject MISSING
+-> "table images has no column named tail"
+```
+
+Every flag, status, rotation, tile, sweep and synchronize would have failed on
+a first run. This is the same shape as the `cache_image_presence` gap and it is
+worth stating as a rule: **a table created once by hand is a table that does
+not exist.** The schema is the only place a claim about the catalog is true for
+every install, and the way to check is to build one from nothing rather than to
+read the file.
+
+Both were found the same way, too — by repairing the test fixture rather than
+by reading code. Two dead lines in `test_support.py`, each left behind by a
+deletion (`_tce._clear_disk_index` from the thumbnail cache, and a
+`_drain_test_tasks` call holding only its label), were failing 201 tests before
+any assertion ran. A suite that fails everywhere reports nothing; fixing the
+harness is what made the real defect visible.
+
 **Guard rails.** Cold backup with the app stopped before any data step — one
 exists at `C:\Azimuth Photo\data\manual-backups\2026-08-15-pre-core\`, verified.
 `AZIMUTH_ALLOW_MASS_MISSING` stays unset; it is the switch that turns a stuck
