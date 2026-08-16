@@ -21,10 +21,33 @@ Three consequences, all free:
   the same drive and writes results where this one already looks.
 
 **Order is closeness to your eyes**: what is on screen now, then the rest of
-this view, then newest, then the oldest debt. And one gate — chores yield while
-you are using the app. Measured: browsing was 23 ms with chores quiet and
-*minutes* with them running, which is the whole reason a politeness rule beats
-another priority number.
+this view, then newest, then the oldest debt.
+
+## Staying out of the way without stopping
+
+Browsing was 23 ms with chores quiet and *minutes* with them running. The first
+reading of that was "chores must stop while you are using the app", and it is
+the wrong lesson — it leaves the machine idle exactly when someone is sitting
+in front of it, which is when there is most to do.
+
+The right lesson is that the measurement was never about *whether* work ran. It
+was about **what it shared with the request path**. Three separations, and
+after them chores can run flat out:
+
+* **Its own connection.** A chore holding a write transaction is a grid query
+  waiting on a lock. The worker opens its own and never borrows the reader the
+  routes use.
+* **Its own process for decode.** `rawpy.postprocess` holds the GIL, so a
+  thread pool adds contention without parallelism — the measured trap. Bulk
+  rendering goes to a process pool; the interpreter serving the UI never blocks
+  on a demosaic.
+* **A slot kept free.** Chores use every core but one. The one left is what
+  answers a tile the owner is looking at *right now*, which must never queue
+  behind a hundred it has not asked for.
+
+What remains of politeness is one sentence: **chores run one item at a time and
+check between items.** That is enough, because an item is bounded — and it
+means stopping is instant and costs nothing, since the queue is a query.
 """
 
 from __future__ import annotations
@@ -46,14 +69,95 @@ _last_touch = 0.0
 
 
 def touched() -> None:
-    """You did something. Chores stand down."""
+    """You did something. Chores make room -- they do not stop."""
 
     global _last_touch
     _last_touch = time.monotonic()
 
 
 def busy() -> bool:
+    """Is the owner doing something right now?
+
+    Read to decide how *hard* to work, never whether to work at all. Chores
+    keep going while the app is in use; they simply leave more of the machine
+    alone while someone is watching.
+    """
+
     return (time.monotonic() - _last_touch) < QUIET_AFTER_SECONDS
+
+
+def workers(*, interactive: bool | None = None) -> int:
+    """How many chore processes to run. Never every core, and never zero.
+
+    Two constraints, both measured rather than guessed:
+
+    * **Memory, priced at what a decode may actually cost.** The famous number
+      here is 9 GB peak per demosaic worker — a 15 GB box sized for two workers
+      wanting 17 GB was OOM-killed every four minutes. But that is the price of
+      a *full-resolution* demosaic, and `render` refuses any decode over
+      `DECODE_CEILING_BYTES` outright. Sizing the pool against the ceiling that
+      is actually enforced rather than against the worst frame ever seen is the
+      difference between 2 workers and 6 on this machine.
+    * **One core stays free** so a tile the owner is looking at is rendered
+      immediately instead of queueing behind a hundred they have not asked for.
+
+    The two guards protect different things, which is why neither has to be
+    conservative on the other's behalf: `render` refuses any single frame whose
+    decode would exceed its ceiling, so no one item can be too big, and this
+    only has to bound how many run at once. When memory cannot be measured —
+    psutil is optional and is not installed here — falling back to a flat 2 on
+    a sixteen-core machine left most of it idle for a risk the per-item ceiling
+    had already taken care of.
+
+    While the app is in use this halves again — not to be polite, but because
+    the interactive render and the UI itself want the room.
+    """
+
+    import render
+
+    cores = os.cpu_count() or 2
+    ceiling = min(cores - 1, 6)
+    try:
+        import psutil
+
+        # Half the machine's memory, divided by what one decode may cost.
+        affordable = int(psutil.virtual_memory().total // 2 // render.DECODE_CEILING_BYTES)
+        ceiling = min(ceiling, max(1, affordable))
+    except Exception:
+        pass
+    slots = max(1, ceiling)
+    if interactive if interactive is not None else busy():
+        slots = max(1, slots // 2)
+    return slots
+
+
+# Whether chores should run at all is a *preference*, and a preference is a
+# decision — so it is a row in the log rather than a flag in this module. That
+# is not a flourish: a flag forgets itself on restart, which is exactly when
+# someone who paused chores to save battery would be most annoyed to find them
+# running again.
+#
+# It is deliberately a different question from `busy()`. "Are you using the app
+# right now" and "have you told me to stop" are two things, and the old module
+# conflated them into one pause flag that the politeness gate also wrote to.
+CHORES = "chores"
+MACHINE = "this machine"
+
+
+def paused(conn) -> bool:
+    """Has the owner asked for chores to stop?"""
+
+    from model import decisions
+
+    return decisions.latest(conn, MACHINE, CHORES) == "paused"
+
+
+def set_paused(conn, stop: bool) -> bool:
+    from model import decisions
+
+    decisions.decide(conn, MACHINE, CHORES, "paused" if stop else "running")
+    conn.commit()
+    return stop
 
 
 def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
@@ -136,15 +240,20 @@ def _identify_one(conn, row) -> bool:
     return True
 
 
-def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = busy) -> dict | None:
+def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = None) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
-    One worker, one item at a time. Concurrency lives above this function — in
-    how often it is called — rather than inside it, which is what keeps the
-    politeness gate a single `if` instead of a pool that has to be drained.
+    One item, then return. Concurrency lives *above* this function — in how
+    many workers call it and where they run — rather than inside it, which is
+    what keeps this readable and what makes stopping instant: there is never a
+    batch half-finished, because the queue is a query.
+
+    `yield_to` is accepted for callers that want to stand down entirely (a
+    battery saver, a test). It defaults to never, because chores running is the
+    normal state.
     """
 
-    if yield_to():
+    if paused(conn):
         return None
 
     for row in unidentified(conn, limit=1):
@@ -182,3 +291,34 @@ def sweep_cache(conn, ceiling_bytes: int) -> int:
         except OSError:
             pass
     return len(dropped)
+
+
+def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> None:
+    """The chore loop. Runs until the process ends; owns everything it touches.
+
+    Deliberately a plain `while` in a thread rather than a task on the event
+    loop. A chore that blocks — a 45 MP demosaic, a cold archive read — would
+    stall every request sharing that loop, and the whole point of this design
+    is that it cannot.
+
+    It opens its own connection and never borrows the reader the routes use, so
+    the longest a grid query can wait on a chore is zero.
+    """
+
+    conn = open_conn()
+    try:
+        while True:
+            try:
+                did = step(conn, on_screen=on_screen())
+            except Exception:
+                log.exception("worker=chores step failed")
+                did = None
+            # Nothing owed, or standing down: look again shortly rather than
+            # spinning. Nothing here accumulates, so a long sleep costs only
+            # latency on the next item.
+            time.sleep(0.05 if did else 5.0)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

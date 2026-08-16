@@ -18,7 +18,6 @@ from core.static_assets import StaticAssetContext
 import api as core_api
 from features.ai import routes as ai_routes
 from features.backup import routes as cloud_backup_routes
-from features.cache import routes as cache_routes
 from features.catalog import routes as catalog_routes
 from features.collections import routes as collection_routes
 from features.dev import routes as dev_routes
@@ -67,7 +66,6 @@ for router in (
     export_routes.router,
     imports_routes.router,
     settings_routes.router,
-    cache_routes.router,
     ai_routes.router,
     hdr_routes.router,
     ai_mask_routes.router,

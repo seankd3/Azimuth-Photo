@@ -20,11 +20,9 @@ def _invalidate_after_trash() -> None:
     cache_events.invalidate_pairing_cache(matchups=True)
     cache_events.invalidate_cached_image_ids_cache()
     cache_events.invalidate_filter_options_cache()
-    cache_status_service.invalidate_cache_status_cache()
     settings_status.invalidate_settings_response_cache()
 
 from core import cache_events
-from features.cache import status as cache_status_service
 from features.settings import status as settings_status
 router = APIRouter()
 DbPath = Callable[[], str]

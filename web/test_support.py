@@ -39,8 +39,6 @@ from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, ratings, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
-from features.cache import routes as cache_routes  # noqa: E402
-from features.cache import status as cache_status_service  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
 from features.media import warm as media_warm  # noqa: E402
 from features.search import service as search_service  # noqa: E402
@@ -167,7 +165,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         await db.init_db()
         cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
-        cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
 
         def close_scheduled(coro):
@@ -197,7 +194,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         db.clear_filter_options_cache()
         cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
-        cache_status_service.invalidate_cache_status_cache()
         settings_status.invalidate_settings_response_cache()
         await self._cleanup_tempdir()
 

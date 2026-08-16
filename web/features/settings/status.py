@@ -12,7 +12,6 @@ from core import responses as response_helpers
 from data.repositories import catalog as catalog_repository
 import db
 from features.ai import routes as ai_routes
-from features.cache import status as cache_status_service
 import api as core_api
 from features.catalog import metadata as catalog_metadata
 
@@ -112,7 +111,7 @@ async def _bounded_status(coro, stale_builder, timeout_seconds: float = _status_
 async def build_settings_response() -> dict:
     model_status = ai_models.get_model_status()
     cache_status_task = asyncio.create_task(_bounded_status(
-        cache_status_service.build_cache_status(ahead=0),
+        core_api.cache_status(),
         _stale_cache_status,
     ))
     ai_status_task = asyncio.create_task(_bounded_status(

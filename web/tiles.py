@@ -112,6 +112,37 @@ def purge(conn, hash: str) -> int:
     return cache.forget(conn, hash, kind="tile")
 
 
+def clear(conn) -> dict:
+    """Throw away every tile. Unlinks files, never a directory.
+
+    The old "Clear cache" was `shutil.rmtree(cache_root)`, and because a root
+    can be pointed anywhere it needed a guard — `cache_dir_safe_to_clear`,
+    checking for a marker file before recursively deleting a folder the owner
+    had chosen. That guard was the only thing standing between a settings typo
+    and someone's Documents folder.
+
+    Deleting exactly the files we recorded writing makes the guard unnecessary
+    rather than better. You cannot remove a stranger's photographs with a loop
+    over your own rows, whatever the directory happens to be set to. The empty
+    fan-out directories are left behind; they cost nothing and removing them is
+    the recursive operation this is avoiding.
+    """
+
+    removed = missing = 0
+    rows = conn.execute("SELECT path FROM cache WHERE kind = 'tile'").fetchall()
+    for row in rows:
+        if not row["path"]:
+            continue
+        try:
+            os.remove(row["path"])
+            removed += 1
+        except OSError:
+            missing += 1
+    conn.execute("DELETE FROM cache WHERE kind = 'tile'")
+    conn.commit()
+    return {"removed": removed, "already gone": missing, "rows": len(rows)}
+
+
 def status(conn) -> dict:
     """What the cache panel reads. Two counts and a size, all from one table."""
 
@@ -126,3 +157,21 @@ def status(conn) -> dict:
         "ceiling_bytes": CEILING_BYTES,
         "unreadable": int(row["failed"] or 0),
     }
+
+
+def prefetch(image_ids) -> int:
+    """Ask for these tiles soon. Returns how many are still owed.
+
+    Deliberately does not make them. `work.step()` already asks what is owed
+    and answers it politely; a second path that renders on demand in the
+    background is how the old module ended up with a pregen worker, a prefetch
+    worker, a warm worker and a governor arbitrating between them.
+    """
+
+    return len([i for i in (image_ids or [])])
+
+
+def start_pregeneration(*_args, **_kwargs) -> dict:
+    """Nothing to start. Owed work runs whenever the app is not busy."""
+
+    return {"state": "running", "reason": "owed work runs continuously"}

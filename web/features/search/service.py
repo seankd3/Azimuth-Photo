@@ -2,7 +2,7 @@
 
 from core.catalog_path import catalog_path
 import heapq
-import thumbnails
+import tiles
 
 from data.repositories import cache_entries as cache_entry_repository
 from data.repositories import images as image_repository
@@ -14,7 +14,7 @@ _duplicates_cache = {"key": None, "data": None}
 
 
 def _configured_cache_root() -> str:
-    return thumbnails.SSD_CACHE_DIR
+    return tiles.CACHE_DIR
 
 
 

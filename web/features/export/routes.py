@@ -18,7 +18,6 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from data.repositories import stats as stats_repository
-from thumbnails import cache_entries
 import settings
 
 

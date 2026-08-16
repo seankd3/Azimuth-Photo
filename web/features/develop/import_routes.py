@@ -17,9 +17,9 @@ from features.develop import importer, lrcat_import
 
 
 def _prefetch_sm(images):
-    return thumbnails.prefetch_images(images, "sm", limit=len(images))
+    return tiles.prefetch(images, "sm", limit=len(images))
 
-import thumbnails
+import tiles
 router = APIRouter()
 DbPath = Callable[[], str]
 _LOG = logging.getLogger(__name__)

@@ -15,8 +15,8 @@ from core.dates import safe_datetime_fromtimestamp
 import db
 import scanner
 import settings
-import thumbnails
-from thumbnails import config
+import render
+import tiles
 from data.repositories import catalog as catalog_repository
 from data.repositories import collections as collection_repository
 from data.repositories import imports as import_repository
@@ -302,7 +302,7 @@ def entry_for_key(scan: Scan, key: str) -> dict | None:
 
 
 def preview_path(scan: Scan, entry: dict) -> Path:
-    cache = Path(thumbnails.SSD_CACHE_DIR) / "import-staging"
+    cache = Path(tiles.CACHE_DIR) / "import-staging"
     return cache / scan.id / f"{entry['key']}.jpg"
 
 
@@ -322,13 +322,12 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
     # also survived a load_source_image signature change here and 500'd every
     # canvas preview — nothing tested this route, so it broke silently until
     # a real lab roll hit the import canvas.
-    from thumbnails import generation
-
-    image = generation.load_source_image(
-        entry["path"], THUMB_MAX_EDGE,
-        jpeg_extensions=config.JPEG_EXTENSIONS,
-        raw_extensions=config.RAW_EXTENSIONS,
-    )
+    # render.decode is the one decoder: RAW-ness by content, draft before load,
+    # orientation applied exactly once. The comment that stood here warned that
+    # a stale third positional argument had 500'd every canvas preview because
+    # nothing tested this route -- a keyword-free call into one function cannot
+    # drift that way.
+    image = render.decode(entry["path"], THUMB_MAX_EDGE)
     try:
         resized = generation.resize_to_long_side(image, THUMB_MAX_EDGE)
         if resized.mode not in ("RGB", "L"):

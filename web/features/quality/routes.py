@@ -15,7 +15,7 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-import thumbnails
+import tiles
 from features.quality import scorer as quality_scorer
 from features.quality import autocull
 
@@ -405,7 +405,7 @@ async def api_quality_autocull(body: AutocullBody | None = None):
         payload = await autocull.suggestions(
             conn,
             stack_ids=stack_ids,
-            cache_root=thumbnails.SSD_CACHE_DIR,
+            cache_root=tiles.CACHE_DIR,
         )
     finally:
         await conn.close()
@@ -423,7 +423,7 @@ async def api_quality_autocull_apply(body: AutocullApplyBody):
         payload = await autocull.apply(
             conn,
             stack_ids=body.stack_ids,
-            cache_root=thumbnails.SSD_CACHE_DIR,
+            cache_root=tiles.CACHE_DIR,
         )
     finally:
         await conn.close()

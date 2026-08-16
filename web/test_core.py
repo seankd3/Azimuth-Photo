@@ -369,12 +369,27 @@ class OwedIsAQuery(CoreCase):
         owed = work.owed(self.conn, "thumb", on_screen=[watching])
         self.assertEqual(owed[0]["id"], watching)
 
-    def test_chores_stand_down_while_you_are_using_the_app(self):
+    def test_chores_keep_running_while_you_use_the_app_but_take_less_room(self):
         # Browsing was 23 ms with chores quiet and minutes with them running.
+        # The fix is not to stop -- that idles the machine exactly when someone
+        # is sitting at it -- but to take fewer workers and share nothing with
+        # the request path.
         self._catalogued()
         work.touched()
+        self.assertIsNotNone(work.step(self.conn))
+        self.assertLess(work.workers(interactive=True), work.workers(interactive=False) + 1)
+        self.assertGreaterEqual(work.workers(interactive=True), 1)
+
+    def test_the_owner_can_stop_chores_and_it_survives_a_restart(self):
+        # A preference is a decision, so it is a row in the log rather than a
+        # flag -- a flag forgets itself exactly when someone who paused chores
+        # to save battery would most mind them resuming.
+        image = self._catalogued()
+        work.set_paused(self.conn, True)
         self.assertIsNone(work.step(self.conn))
-        self.assertEqual(len(work.owed(self.conn, "thumb")), 1)
+        self.assertTrue(work.paused(self.conn))
+        work.set_paused(self.conn, False)
+        self.assertIsNotNone(work.step(self.conn))
 
     def test_identity_is_owed_before_anything_keyed_on_it(self):
         image = self._catalogued(hashed=False)

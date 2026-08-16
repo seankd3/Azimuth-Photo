@@ -560,6 +560,61 @@ async def tags(limit: int = 100, q: str = ""):
     return {"tags": [{"tag": name, "count": n} for name, n in ranked]}
 
 
+@router.get("/api/cache/status")
+async def cache_status():
+    """What is made, what is owed, and whether chores are running.
+
+    Three facts from two queries. The panel this feeds used to read a 394-line
+    status builder that reconciled a tier-allocation profile, four per-size
+    budgets, a presence table, an in-flight set and a generation counter --
+    all of which described the machinery rather than the answer.
+    """
+
+    conn = db()
+    return {
+        **tiles.status(conn),
+        "owed": work.debt(conn),
+        "paused": work.paused(conn),
+    }
+
+
+@router.post("/api/cache/pregen/start")
+async def resume_chores():
+    return _chores(False)
+
+
+@router.post("/api/cache/pregen/stop")
+async def pause_chores():
+    return _chores(True)
+
+
+def _chores(stop: bool) -> dict:
+    """Start and stop mean something narrower here, and it is worth being exact.
+
+    Chores already yield while you are using the app, so these do not control
+    *when* work happens -- they say whether it should happen at all. That is a
+    preference, so it is a decision in the log rather than a flag in a module,
+    and it therefore survives a restart. Someone who paused chores to save
+    battery would not thank us for resuming them on the next launch.
+    """
+
+    conn = _writer()
+    try:
+        work.set_paused(conn, stop)
+        return {"paused": stop, "state": "paused" if stop else "running"}
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
+@router.post("/api/cache/clear")
+async def clear_cache():
+    conn = _writer()
+    try:
+        return await asyncio.to_thread(tiles.clear, conn)
+    finally:
+        connection.close_sync(conn, db_path=catalog_path())
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""

@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse
 
 import ai_models
 import settings
-import thumbnails
+import tiles
 from core.requests import json_object
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 import db
 from core import background, cache_events
 from features.ai import routes as ai_routes
-from features.cache import status as cache_status_service
 import api as core_api
 
 
@@ -73,7 +72,7 @@ async def api_background_work_status():
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
         settings_status._bounded_status(
-            cache_status_service.build_cache_status(ahead=0),
+            core_api.cache_status(),
             settings_status._stale_cache_status,
             ACTIVITY_STATUS_INITIAL_WAIT_SECONDS,
         ),
@@ -241,7 +240,7 @@ async def api_save_settings(request: Request):
         thumbnail_changed
         and str(body.get("thumbnail_cache_policy", "keep")).strip().lower() == "replace"
     )
-    thumbnails.configure({**saved, "_replace_thumbnail_cache": replace_thumbnail_cache})
+    tiles.configure({**saved, "_replace_thumbnail_cache": replace_thumbnail_cache})
     if model_changed:
         try:
             import embedding_worker
@@ -259,13 +258,12 @@ async def api_save_settings(request: Request):
         cache_events.invalidate_vector_derived_caches()
     if search_runtime_changed:
         cache_events.invalidate_rankings_cache()
-    cache_status_service.invalidate_cache_status_cache()
     ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
     return {
         "ok": True,
         "settings": settings.public_settings(saved),
-        "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
+        "cache_stats": await core_api.cache_status(),
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
         "people_status": await core_api.people_status(),
@@ -278,7 +276,7 @@ async def api_save_settings(request: Request):
 async def api_reset_settings():
     current = settings.get_settings()
     saved = settings.reset_settings()
-    thumbnails.configure(saved)
+    tiles.configure(saved)
     try:
         import embed_cache
         import embedding_worker
@@ -299,13 +297,12 @@ async def api_reset_settings():
                 exc_info=True,
             )
     cache_events.invalidate_rankings_cache()
-    cache_status_service.invalidate_cache_status_cache()
     ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
     return {
         "ok": True,
         "settings": settings.public_settings(saved),
-        "cache_stats": await cache_status_service.build_cache_status(ahead=0, force=True),
+        "cache_stats": await core_api.cache_status(),
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
         "people_status": await core_api.people_status(),

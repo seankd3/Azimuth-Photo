@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 
 import db
 import scanner
-import thumbnails
+import tiles
 from data import connection
 from features.imports import service
 from photo import location
@@ -165,7 +165,7 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
 
 
 def staging_root() -> Path:
-    return Path(thumbnails.SSD_CACHE_DIR) / STAGING_DIR_NAME
+    return Path(tiles.CACHE_DIR) / STAGING_DIR_NAME
 
 
 def is_staging_path(path: Path | str) -> bool:

@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 import scanner
 import settings
-import thumbnails
+import tiles
 from core import cache_events
 from core.background import track_background_task
 from core.path_groups import safe_commonpath, safe_relpath
@@ -27,7 +27,6 @@ from features.catalog import metadata as catalog_metadata
 from features.catalog import reveal as catalog_reveal
 
 
-from features.cache import status as cache_status_service
 router = APIRouter()
 log = logging.getLogger(__name__)
 
@@ -66,11 +65,18 @@ def clear_folders_cache() -> None:
     _folder_tree_cache["expires"] = 0
 
 
-def _catalog_changed(*, matchups: bool = True, cache_status: bool = False) -> None:
+def _catalog_changed(*, matchups: bool = True) -> None:
+    """The catalog changed; drop what was derived from it.
+
+    The `cache_status` argument that used to live here selected whether to also
+    invalidate a cached cache-status payload. That payload is now two queries
+    answered on request, so the argument selected nothing -- and an argument
+    that selects nothing is worse than none, because every call site still has
+    to decide what to pass.
+    """
+
     cache_events.invalidate_pairing_cache(matchups=matchups)
     invalidate_folders_cache()
-    if cache_status:
-        cache_status_service.invalidate_cache_status_cache()
     _invalidate_embedding_cache()
 
 
@@ -79,7 +85,7 @@ async def scan_prefetch_on_batch(count):
     if count <= 200:
         images = await image_repository.get_recent_active_images(catalog_path(), limit=50)
         config = settings.get_settings()
-        await thumbnails.prefetch_images(
+        await tiles.prefetch(
             [dict(r) for r in images],
             "lg",
             limit=min(len(images), config["scan_prefetch_limit"]),
@@ -94,7 +100,7 @@ async def _is_first_run_import() -> bool:
 
 
 def _start_first_run_pipeline() -> None:
-    thumbnails.start_pregeneration()
+    tiles.start_pregeneration()
     catalog_metadata.resume_catalog_metadata()
 
 
@@ -105,7 +111,7 @@ async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> 
     # Invalidate read caches at COMPLETION too — _catalog_changed at scan start
     # is not enough: a grid query during the scan re-primes a stale empty
     # rankings response, so the first landing after an import shows 0 photos.
-    _catalog_changed(matchups=True, cache_status=True)
+    _catalog_changed(matchups=True)
     cache_events.invalidate_rankings_cache()
     cache_events.invalidate_stats_cache()
     error = str(scanner.scan_state.get("error") or "").strip()
@@ -463,7 +469,7 @@ async def api_remove_catalog_source(source_id: int, request: Request):
         _invalidate_embedding_cache()
     elif mode in ("delete", "purge"):
         image_ids = await catalog_repository.get_source_image_ids(catalog_path(), source_id)
-        cache_result = thumbnails.purge_image_cache(image_ids)
+        cache_result = tiles.purge(image_ids)
         purge_result = await db.purge_source_catalog_data(source_id)
         action = {"kept_data": False, **purge_result, "cache": cache_result}
         _invalidate_embedding_cache()
@@ -472,7 +478,6 @@ async def api_remove_catalog_source(source_id: int, request: Request):
 
     cache_events.invalidate_pairing_cache(matchups=True)
     invalidate_folders_cache()
-    cache_status_service.invalidate_cache_status_cache()
     return {"ok": True, "source_id": source_id, **action, "catalog": await db.get_catalog_summary()}
 
 
