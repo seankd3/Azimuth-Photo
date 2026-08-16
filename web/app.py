@@ -15,6 +15,7 @@ from core.app_factory import (
     create_templates,
 )
 from core.static_assets import StaticAssetContext
+import api as core_api
 from features.ai import routes as ai_routes
 from features.backup import routes as cloud_backup_routes
 from features.cache import routes as cache_routes
@@ -57,12 +58,16 @@ dev_routes.configure(
 )
 
 for router in (
+    # The core's routes come first, because FastAPI matches in registration
+    # order. Everything below this line is the old implementation being
+    # replaced one surface at a time; as each route moves up here, the module
+    # that used to answer it is deleted rather than left shadowed.
+    core_api.router,
     page_routes.router,
     people_routes.router,
     dev_routes.router,
     catalog_routes.router,
     compare_routes.router,
-    media_routes.router,
     library_routes.router,
     collection_routes.router,
     stack_routes.router,

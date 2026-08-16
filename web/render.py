@@ -66,10 +66,16 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # which knows what the machine can actually pay.
 Image.MAX_IMAGE_PIXELS = None
 
-# The three sizes. Not tiers with policies -- just how long the long side is.
-GRID = 400
-LOUPE = 1600
-FULL = 0  # native resolution
+# The sizes, which are the sizes the UI already asks for. Not tiers with
+# policies, budgets and allocation profiles -- just how long the long side is.
+SIZES = {"sm": 400, "md": 1920, "lg": 3840, "full": 0}
+GRID = SIZES["sm"]
+LOUPE = SIZES["md"]
+FULL = SIZES["full"]  # native resolution
+
+# What the archive's existing tiles were encoded at. Kept so re-rendering a
+# photo does not visibly change it.
+QUALITY = 92
 
 # What one decode may cost, in bytes of RGB. A frame whose full decode would
 # exceed this is refused rather than attempted; 527 MP is 1.5 GB before rawpy's
@@ -179,7 +185,7 @@ def fit(image: Image.Image, longest: int) -> Image.Image:
     return image.resize(size, Image.BILINEAR if longest >= 1920 else Image.LANCZOS)
 
 
-def encode(image: Image.Image, quality: int = 88) -> bytes:
+def encode(image: Image.Image, quality: int = QUALITY) -> bytes:
     out = io.BytesIO()
     image.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
     return out.getvalue()
