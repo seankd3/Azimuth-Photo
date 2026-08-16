@@ -154,3 +154,26 @@ def path_for(conn, drive_uuid: str, tail: str) -> str | None:
     if root is None:
         return None
     return os.path.join(root, tail.replace("/", os.sep))
+
+
+def tail_for(root: str, path: str) -> str | None:
+    """The tail of `path` under `root`, or None if it does not live there.
+
+    The inverse of `path_for`, and deliberately its neighbour: a path is a
+    drive plus a tail, so the two halves of that sentence belong in one file.
+
+    Tails are always POSIX-separated, whatever the platform wrote. They travel
+    between drives — that is their entire job — and a tail carrying `\\` would
+    stop matching the same photo on a drive that spells it `/`. Comparison is
+    case-folded because NTFS is, but the tail keeps the case the disk actually
+    uses, so it still reads like the folder it names.
+    """
+
+    root_parts = [p for p in os.path.normpath(root).replace("\\", "/").split("/") if p]
+    path_parts = [p for p in os.path.normpath(path).replace("\\", "/").split("/") if p]
+    if len(path_parts) <= len(root_parts):
+        return None
+    for mine, theirs in zip(root_parts, path_parts):
+        if os.path.normcase(mine) != os.path.normcase(theirs):
+            return None
+    return "/".join(path_parts[len(root_parts):])

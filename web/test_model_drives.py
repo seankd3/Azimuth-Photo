@@ -66,6 +66,44 @@ class DriveTests(unittest.TestCase):
         resolved = drives.path_for(self.conn, drive["uuid"], "Raws/Digital/2026/x.CR3")
         self.assertEqual(resolved, os.path.join(root, "Raws", "Digital", "2026", "x.CR3"))
 
+    def test_a_tail_is_the_path_with_the_drive_taken_off(self):
+        cases = [
+            (r"D:\Pictures", r"D:\Pictures\Raws\Digital\2026\x.CR3", "Raws/Digital/2026/x.CR3"),
+            (r"E:\Photos", r"E:\Photos\Raws\Digital\2026\x.CR3", "Raws/Digital/2026/x.CR3"),
+            (r"D:\Pictures\\", r"D:\Pictures\Raws\x.CR3", "Raws/x.CR3"),
+            # NTFS is case-insensitive, so a differently-cased root still matches...
+            (r"d:\pictures", r"D:\Pictures\Raws\x.CR3", "Raws/x.CR3"),
+        ]
+        for root, path, expected in cases:
+            self.assertEqual(drives.tail_for(root, path), expected, path)
+
+        # ...but the tail keeps the case the disk actually uses.
+        self.assertEqual(
+            drives.tail_for(r"D:\Pictures", r"D:\Pictures\Raws\Film Scans\x.tif"),
+            "Raws/Film Scans/x.tif",
+        )
+
+    def test_a_path_outside_the_drive_has_no_tail(self):
+        for root, path in [
+            (r"D:\Pictures", r"E:\Photos\Raws\x.CR3"),
+            (r"D:\Pictures", r"D:\PicturesOld\Raws\x.CR3"),
+            (r"D:\Pictures", r"D:\Pictures"),
+            (r"D:\Pictures\Raws", r"D:\Pictures\x.CR3"),
+        ]:
+            self.assertIsNone(drives.tail_for(root, path), f"{root} :: {path}")
+
+    def test_the_same_tail_names_the_same_photo_on_either_drive(self):
+        hot = drives.tail_for(r"D:\Pictures", r"D:\Pictures\Raws\Digital\2026\x.CR3")
+        cold = drives.tail_for(r"E:\Photos", r"E:\Photos\Raws\Digital\2026\x.CR3")
+        self.assertEqual(hot, cold)
+
+    def test_a_tail_survives_the_round_trip(self):
+        root = self._root("Pictures")
+        drive = drives.attach(self.conn, root)
+        tail = "Raws/Digital/2026/2026-07-11/SKDA3268.CR3"
+        path = drives.path_for(self.conn, drive["uuid"], tail)
+        self.assertEqual(drives.tail_for(root, path), tail)
+
     def test_an_absent_drive_is_offline_not_an_error(self):
         root = self._root("Photos")
         drive = drives.attach(self.conn, root)
