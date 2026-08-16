@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from features.develop import history
+
 from features.develop.discovery import lightroom_preset_roots
 from features.develop.importer import parse_xmp_text
 
@@ -291,9 +293,8 @@ async def apply_preset_to_image(conn, preset_id: int, image_id: int) -> dict[str
     xmp_path = existing["xmp_path"] if existing else None
     xmp_mtime = existing["xmp_mtime"] if existing else None
     if existing and origin == "xmp":
-        await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+        await history.record_async(
+            conn, image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP"
         )
         origin = "user"
     await conn.execute(
@@ -310,10 +311,7 @@ async def apply_preset_to_image(conn, preset_id: int, image_id: int) -> dict[str
         (image_id, encoded, origin, xmp_path, xmp_mtime, now),
     )
     label = f"Preset: {preset['name']}"
-    await conn.execute(
-        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-        (image_id, encoded, label, now),
-    )
+    await history.record_async(conn, image_id, encoded, label)
     await conn.commit()
     return {
         "preset": preset,

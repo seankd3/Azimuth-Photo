@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from data import connection
 from data.repositories import images as image_repository
 from data.repositories import stacks as stack_repository
-from features.develop import presets, virtual_copies
+from features.develop import history, presets, virtual_copies
 from features.sync import oplog
 
 log = logging.getLogger(__name__)
@@ -269,9 +269,8 @@ async def _write_synced_settings(
             xmp_path = existing["xmp_path"]
             xmp_mtime = existing["xmp_mtime"]
             if origin == "xmp":
-                await conn.execute(
-                    "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-                    (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+                await history.record_async(
+                    conn, image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP"
                 )
                 origin = "user"
         settings_json = json.dumps(merged, separators=(",", ":"))
@@ -288,10 +287,7 @@ async def _write_synced_settings(
             """,
             (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
         )
-        await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, settings_json, label, now),
-        )
+        await history.record_async(conn, image_id, settings_json, label)
         await conn.commit()
         await oplog.append_develop(catalog_path(), image_id)
         return {"settings": merged, "origin": origin, "updated_at": now}
@@ -354,21 +350,10 @@ async def _load_settings(image_id: int) -> dict[str, Any] | None:
 async def _history(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(catalog_path())
     try:
-        cursor = await conn.execute(
-            # Named snapshots are pinned separately from edits, but each lane is capped.
-            "WITH pinned AS ("
-            "  SELECT id, settings, label, created_at FROM develop_history "
-            "  WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
-            "), recent AS ("
-            "  SELECT id, settings, label, created_at FROM develop_history "
-            "  WHERE image_id = ? AND label NOT LIKE 'Snapshot:%' ORDER BY id DESC LIMIT ?"
-            ") SELECT * FROM pinned UNION ALL SELECT * FROM recent ORDER BY id DESC",
-            (image_id, HISTORY_SNAPSHOT_LIMIT, image_id, HISTORY_EDIT_LIMIT),
-        )
-        return [
-            {**dict(row), "settings": presets._json_settings(row["settings"])}
-            for row in await cursor.fetchall()
-        ]
+        # Snapshots pin above edits, each lane capped -- which used to need a
+        # WITH pinned AS (...) UNION ALL because they lived in one table told
+        # apart by a label prefix. Both are just decisions now.
+        return await history.entries_async(conn, image_id)
     finally:
         await connection.close_async(conn, db_path=catalog_path())
 
@@ -376,15 +361,8 @@ async def _history(image_id: int) -> list[dict[str, Any]]:
 async def _snapshots(image_id: int) -> list[dict[str, Any]]:
     conn = await connection.open_async(catalog_path())
     try:
-        cursor = await conn.execute(
-            "SELECT id, settings, label, created_at FROM develop_history "
-            "WHERE image_id = ? AND label LIKE 'Snapshot:%' ORDER BY id DESC",
-            (image_id,),
-        )
-        return [
-            {**dict(row), "settings": presets._json_settings(row["settings"])}
-            for row in await cursor.fetchall()
-        ]
+        entries = await history.entries_async(conn, image_id)
+        return [e for e in entries if e["label"].startswith(history.SNAPSHOT_PREFIX)]
     finally:
         await connection.close_async(conn, db_path=catalog_path())
 
@@ -510,9 +488,8 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
                 xmp_path = existing["xmp_path"]
                 xmp_mtime = existing["xmp_mtime"]
                 if origin == "xmp":
-                    await conn.execute(
-                        "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-                        (image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP", now),
+                    await history.record_async(
+                        conn, image_id, json.dumps(prior, separators=(",", ":")), "Import from XMP"
                     )
                     origin = "user"
             settings_json = json.dumps(merged, separators=(",", ":"))
@@ -529,10 +506,7 @@ async def _upsert_settings(image_id: int, incoming: dict[str, Any], label: str |
                 """,
                 (image_id, settings_json, origin, xmp_path, xmp_mtime, now),
             )
-            await conn.execute(
-                "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-                (image_id, settings_json, label, now),
-            )
+            await history.record_async(conn, image_id, settings_json, label)
             await conn.commit()
             await oplog.append_develop(catalog_path(), image_id)
             return {"settings": merged, "origin": origin, "updated_at": now}
@@ -567,12 +541,10 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             xmp_path = current["xmp_path"]
             xmp_mtime = current["xmp_mtime"]
         else:
-            cursor = await conn.execute(
-                "SELECT settings FROM develop_history WHERE image_id = ? AND label = 'Import from XMP' ORDER BY id ASC LIMIT 1",
-                (image_id,),
-            )
-            baseline = await cursor.fetchone()
-            snapshot = presets._json_settings(baseline["settings"] if baseline else "{}")
+            entries = await history.entries_async(conn, image_id)
+            imported = [e for e in entries if e["label"] == "Import from XMP"]
+            baseline = imported[-1]["settings"] if imported else None
+            snapshot = baseline or {}
             origin = "xmp" if baseline else "user"
             xmp_path = current["xmp_path"]
             xmp_mtime = current["xmp_mtime"]
@@ -589,10 +561,7 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
             """,
             (image_id, encoded, origin, xmp_path, xmp_mtime, now),
         )
-        await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, encoded, "Reset", now),
-        )
+        await history.record_async(conn, image_id, encoded, "Reset")
         await conn.commit()
         await oplog.append_develop(catalog_path(), image_id)
         result = {"settings": snapshot, "origin": origin, "updated_at": now}
@@ -913,9 +882,8 @@ async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
     }
     conn = await connection.open_async(catalog_path())
     try:
-        cursor = await conn.execute(
-            "INSERT INTO develop_history (image_id, settings, label, created_at) VALUES (?, ?, ?, ?)",
-            (image_id, json.dumps(body.settings, separators=(",", ":")), entry["label"], now),
+        await history.record_async(
+            conn, image_id, json.dumps(body.settings, separators=(",", ":")), entry["label"]
         )
         await conn.commit()
         return {"id": int(cursor.lastrowid), **entry}
@@ -927,12 +895,9 @@ async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
 async def api_delete_snapshot(image_id: int, history_id: int):
     conn = await connection.open_async(catalog_path())
     try:
-        cursor = await conn.execute(
-            "DELETE FROM develop_history WHERE id = ? AND image_id = ? AND label LIKE 'Snapshot:%'",
-            (history_id, image_id),
-        )
+        removed = await history.forget_snapshot(conn, image_id, history_id)
         await conn.commit()
-        if not cursor.rowcount:
+        if not removed:
             return JSONResponse({"error": "Snapshot not found"}, status_code=404)
         return {"deleted": history_id}
     finally:
