@@ -1,28 +1,20 @@
 # Azimuth 2.0 — the core
 
-**Status (08-16):** the core is complete and the first surface runs on it.
+**Status (08-16):** the core is complete and most of the app runs on it.
 
 | | |
 |---|---|
-| the 2.0 core, written and proven on the live catalog | **2,712 lines** |
-| deadwood deleted, each verified unreferenced first | **15,587 lines** |
-| `web/` production Python remaining | 73,162 → target ~12,000 |
-| judgements adopted into the log | 88,690 |
-| embedding vectors re-keyed onto content hashes | 42,937 |
+| the 2.0 core, proven on the live catalog | ~3,500 lines |
+| `web/` production Python | 74,283 → **64,259** |
+| tests | 32,657 → **25,327** |
+| judgements in the log | 88,690 |
+| embedding vectors keyed on content hashes | 42,937 |
 
-Done: `model/` (five tables, seven functions), `work.py`, `render.py`,
-`library.py`, `rank.py`, `search.py`, `importer.py`, and `api.py` serving
-tiles, grid, counts, folders, search, ratings, flags and the five-word state
-from the core — verified through HTTP against the real 157,064-row library.
+Rebuilt on the core and their machinery deleted, each verified in the running
+app: tiles and media, the grid and library queries, search, comparisons and
+Elo propagation, the mosaic, import, faces, captions, the boot warmers, the
+ranking repository, the people stack, and the phone's web surface.
 
-**What remains, and it is the bulk of it.** Each old surface is still in the
-tree behind the core's routes. They cannot be deleted one file at a time
-because they are knotted together: 16 modules import `thumbnails/`, so removing
-it is a sixteen-call-site rebuild rather than a deletion. The order is
-therefore *rebuild the caller, then delete the callee*, surface by surface —
-develop, compare, collections, stacks, people, captions, quality, trash,
-imports, catalog, sync — each one moving its routes into `api.py` and taking
-its machinery with it.
 **Version:** 1.0.0-rc.1 → 2.0.0-dev.
 **Method (08-16):** gut it and rebuild from first principles. Surfaces are not
 adapted, wrapped or threaded through — they are rewritten on the core and their
