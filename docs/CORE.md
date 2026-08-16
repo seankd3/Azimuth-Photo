@@ -743,6 +743,20 @@ difference is entirely photographs whose `width`/`height` had never been
 measured, so the check silently could not run. **A safety rule that reads a
 fact the catalog does not have is not a safety rule.**
 
+**Then the same mistake again, one step further in.** That fix read the file
+only when the dimensions were *missing*, and went on trusting the column when
+it was merely *wrong* — so 8 photographs whose stored shape was stale passed
+the check and were turned onto their sides. Found by rendering the roll and
+looking at it, an hour after writing down that `aspect_ratio` cannot be trusted
+for precisely this reason. The rule now measures every candidate:
+
+> **A stored dimension is a cached answer and can be stale. The photograph
+> cannot.** Anything deciding which way up a picture goes reads the file.
+
+Cost: one header read per candidate. The repair pass that found it retracted 8
+and kept 369, and re-running it retracts nothing — which is the only evidence
+worth having that a rule of this kind is right.
+
 **Measured, on the roll this was built for:** with orientation written to the
 files, `decode()` agreed with Lightroom on **40 of 40** frames, 18 turned and
 22 upright, with no Lightroom-specific code in the path.

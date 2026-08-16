@@ -160,26 +160,26 @@ def adopt(conn, roots: tuple[str, ...] = ROOTS, *, apply: bool = False) -> dict:
         degrees = wanted.get(str(row["tail"]).split("/")[-1].lower())
         if not degrees:
             continue
-        width, height = row["width"] or 0, row["height"] or 0
-        if not width or not height:
-            # The rule needs to know which way up this is shown, and 2,424 of
-            # the photographs Lightroom turned have never had their dimensions
-            # read. Read them now and keep them: it is a fact the grid needs
-            # anyway, and measuring only the candidates keeps it bounded.
-            source = location.locate(conn, row["id"]) if hasattr(location, "locate") else None
-            source = source or _on_disk(conn, str(row["tail"]))
-            if not source:
-                unreadable += 1
-                continue
-            try:
-                width, height = render.dimensions(source)
-            except Exception:
-                unreadable += 1
-                continue
-            measured += 1
-            if apply:
-                conn.execute("UPDATE images SET width = ?, height = ? WHERE id = ?",
-                             (width, height, row["id"]))
+        # **Measure the file. Always.** The first version of this trusted
+        # `images.width`/`height` and only read the file when they were
+        # missing -- so a row whose stored shape was *wrong* passed the check
+        # and 5 already-upright photographs on one roll were turned onto their
+        # sides. A stored dimension is a cached answer like any other and can
+        # be stale; the photograph cannot. Reading a header per candidate is
+        # the whole cost of not being wrong.
+        source = _on_disk(conn, str(row["tail"]))
+        if not source:
+            unreadable += 1
+            continue
+        try:
+            width, height = render.dimensions(source)
+        except Exception:
+            unreadable += 1
+            continue
+        measured += 1
+        if apply and (width, height) != (row["width"], row["height"]):
+            conn.execute("UPDATE images SET width = ?, height = ? WHERE id = ?",
+                         (width, height, row["id"]))
         if height > width:
             # Already standing up — the turn is in the file, and saying it
             # again would lay the photograph on its side.
