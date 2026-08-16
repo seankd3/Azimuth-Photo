@@ -1,7 +1,7 @@
 -- The core's tables. Five when it is finished; each arrives with the step that
 -- needs it, so this file never describes something that is not yet true.
 --
--- Step 1: drives.
+-- Steps 1 and 4: drives, copies.
 
 CREATE TABLE IF NOT EXISTS drives (
     id         INTEGER PRIMARY KEY,
@@ -14,3 +14,19 @@ CREATE TABLE IF NOT EXISTS drives (
     is_record  INTEGER NOT NULL DEFAULT 0,
     seen_at    REAL
 );
+
+-- A copy is a hint that this drive held this photo. It is never a truth:
+-- reading verifies, and deleting verifies harder. Because a stale copy row
+-- costs nothing, a sweep may drop what it did not see without any of the
+-- ratios, thresholds and override switches that guarding a *verdict* required.
+CREATE TABLE IF NOT EXISTS copies (
+    photo_id  INTEGER NOT NULL,
+    drive_id  INTEGER NOT NULL REFERENCES drives(id) ON DELETE CASCADE,
+    -- NULL means "at the photo's own tail", which is the normal case. It is
+    -- spelled out only when a copy sits somewhere else.
+    tail      TEXT,
+    seen_at   REAL NOT NULL,
+    PRIMARY KEY (photo_id, drive_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_copies_drive ON copies(drive_id);
