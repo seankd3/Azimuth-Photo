@@ -381,29 +381,48 @@ deliberately rebuilt.
 
 ## Build order
 
-| | Step | Status | Done when |
-|---|---|---|---|
-| 1 | `drives` + marker uuids | **done** `69cf6d76` | both roots resolve with letters swapped |
-| 0 | **purge the phantom rows** | **awaiting go** | source 5 reads 2,050 rows against 2,240 files on disk |
-| 2 | one tail convention on every photo | after 0 | `Raws/Digital/2026/x.CR3` is the same tail on both drives |
-| 3 | `open()` replaces path probing | | archive photos open and reveal |
-| 4 | `copies` + `sweep()`, hints only | | unplug and replug mid-session; the grid never blinks |
-| 5 | re-key Develop base + thumbnail ETag onto the hash | | plug the archive in warm: no re-decode wave |
-| 6 | retire `source_id`; sources become drives | | starred / Elo / develop counts identical, by exact SQL |
-| 7 | backup + free-up-space | | the 33 GB of unarchived 2026 work drains |
-| 8 | `version_of` + read the export links | | the 22 finished frames group with their scans |
-| 9 | delete the hub residue | | ~3,100 lines |
-| A | stop being a server | parallel | no port, no auth, no unlock |
-| B | one API client, then kill `fetch` | parallel | `<img>` served by a custom protocol |
+**The order changed on 08-16** and it is worth saying why. The original eleven
+steps were a *migration*: each one moved the live app from an old shape to a new
+one without breaking it. Once the owner said the app never worked well and he
+does not use it, migration stopped being the job. What is left is far simpler —
+finish the core, then rebuild each surface on it and delete what it replaces.
 
-**Ordering constraints — the only places order is load-bearing:**
+### Part one — the core. Done.
 
-| Constraint | Why |
+| | Landed |
 |---|---|
-| 2 before 6 | `_within()` compares a catalogued path against its source folder. Repoint a source while its rows carry old paths and every row looks absent, every file looks new, and the 300-second reconcile worker `_adopt`s the archive as ~144,000 duplicate rows. |
-| 5 before working-disk-preferred reads | The Develop base keys on `(image_id, source_path)`; the thumbnail ETag folds in `filepath`. 143,803 of 144,473 cache rows belong to the archive. |
-| loopback before deleting auth (A) | Dropping auth while still listening outward is worse than today. |
-| one client before killing `fetch` (B) | 33 files bypass the client with inline `/api/` strings. |
+| `drives` + marker uuids | `69cf6d76` |
+| every photo has a tail | `bcc747b1` |
+| `open()` replaces path probing | `d908b32f` |
+| `copies` + a sweep that refuses rather than guesses | `210789b6` |
+| the phantom purge, and both drives swept | `d05c7c9e` · `ce1d3052` |
+| `decide()` — the log | `e03c628a` |
+| `make()` — one cache for every computed answer | `e03c628a` |
+| `identify()`, `put()`, `reclaim()` | `5265300c` |
+| owed is a query, one worker | `1bfa9ad1` |
+| 88,379 judgements adopted into the log | `d1e39c5f` |
+| ranking as two pure functions | `2fd8ab16` |
+
+### Part two — the surfaces. Each lands whole, on the core, and deletes its own machinery.
+
+| Surface | Replaces | Done when |
+|---|---|---|
+| `render.py` | `thumbnails/` (9,157) + `features/media/` (703) | one function answers grid, Develop and export, so they cannot disagree |
+| `library.py` | `features/library/` + `features/catalog/` + four repositories | the grid paints from one query with no path in it |
+| `rank.py` **done** | `elo_propagation.py`, `rankings.py`, `ratings.py`, `features/compare/` | ranking recomputes from 2,532 pairs and improves as embeddings land |
+| `importer.py` | `features/imports/`, `scanner.py`, `synchronize.py` | a card imports through `identify` + `put` and one pure tail rule |
+| `search.py` + `ai.py` | `features/search/`, `people/`, `captions/`, `ai/`, `embed_cache.py` | one ranked fusion; embeddings are a never-evict cache kind |
+| `develop/` | `features/develop/` minus its plumbing | the colour maths survives; the schedulers, history table and proof tiles do not |
+| `app.py` + `boot.py` | `app.py`, `core/`, `features/system/`, `data/schema.py` | boot is: open the catalog, answer one query, paint |
+| *(nothing)* | the hub residue, the network layer, `features/sync/` | no port reachable from outside, no pairing, no oplog |
+
+**The only ordering constraint left.** `render.py` before the surfaces that read
+pixels, because the Develop base keyed on `(image_id, source_path)` and the
+thumbnail ETag folded in `filepath` — 143,803 of 144,473 cache rows belong to
+the archive, and re-keying onto the hash is what stops a re-decode wave the
+first time the archive is plugged in warm. Everything else may land in any
+order, which is itself a result of the core: surfaces no longer share state, so
+they no longer share a schedule.
 
 **Step 0 — purge the phantoms (blocks step 2).** `make_test_library` output was
 scanned into the live catalog and its files later deleted, leaving **17,132 rows
