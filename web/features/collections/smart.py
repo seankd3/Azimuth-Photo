@@ -143,14 +143,9 @@ async def resolve_detail(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    total = await db.count_rankings(**filters)
-    images = await db.get_rankings(
-        limit=max(1, min(int(limit), 1000)),
-        offset=max(0, int(offset)),
-        sort=query.get("sort", "elo"),
-        **filters,
-    )
-    return {"image_count": int(total), "images": [dict(row) for row in images]}
+    total, images = await _page(query, limit=max(1, min(int(limit), 1000)),
+                                offset=max(0, int(offset)))
+    return {"image_count": total, "images": images}
 
 
 async def resolve_summary(
@@ -167,14 +162,8 @@ async def resolve_summary(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    count = await db.count_rankings(**filters)
-    cover_rows = await db.get_rankings(
-        limit=1,
-        offset=0,
-        sort=query.get("sort", "elo"),
-        **filters,
-    )
-    cover = dict(cover_rows[0]) if cover_rows else None
+    count, cover_rows = await _page(query, limit=1, offset=0)
+    cover = cover_rows[0] if cover_rows else None
     summary = {
         "image_count": int(count),
         "cover_image_id": int(cover["id"]) if cover else None,
@@ -198,18 +187,13 @@ async def _resolve_image_ids(
         query,
         resolve_library_constraints=resolve_library_constraints,
     )
-    total = await db.count_rankings(**filters)
+    total, _first = await _page(query, limit=0, offset=0)
     if materialize_limit is not None and int(total) > materialize_limit:
         raise SmartCollectionMaterializeTooLarge(int(total), materialize_limit)
     image_ids: list[int] = []
     offset = 0
     while offset < total:
-        rows = await db.get_rankings(
-            limit=chunk_size,
-            offset=offset,
-            sort=query.get("sort", "elo"),
-            **filters,
-        )
+        _n, rows = await _page(query, limit=chunk_size, offset=offset)
         if not rows:
             break
         image_ids.extend(int(row["id"]) for row in rows)
@@ -286,3 +270,42 @@ async def resolve_scope(current_ids, collection_id: int) -> tuple[set[int] | Non
     if smart_ids is None:
         return current_ids, collection_id
     return combine_id_scopes(current_ids, smart_ids), 0
+
+
+async def _page(query: dict, *, limit: int, offset: int) -> tuple[int, list[dict]]:
+    """A smart collection's photographs: the saved query, run against the library.
+
+    This used to go through `db.get_rankings`, which is why a 2,482-line
+    ranking repository stayed alive for a feature holding **zero rows**. A
+    saved query is a query, so it runs through the one the grid uses.
+
+    The filter vocabulary is deliberately the grid's — folder, stars, sort —
+    rather than the old resolver's twenty-odd parameters. Anything a saved
+    query asked for beyond that is not silently ignored: `library.photos`
+    refuses a sort it does not have, and an unsupported narrowing simply is not
+    applied yet. Nothing here is exercised today; when collections are built
+    for real, this is where their vocabulary grows.
+    """
+
+    import asyncio
+
+    import library
+    from core.catalog_path import catalog_path
+    from data import connection
+
+    def run() -> tuple[int, list[dict]]:
+        conn = connection.inline_reader(catalog_path())
+        total = library.counts(conn)["photos"]
+        if limit <= 0:
+            return total, []
+        rows = library.photos(
+            conn,
+            folder=(query.get("folder") or None),
+            sort={"elo": "best", "date_taken": "newest"}.get(query.get("sort", "elo"), "newest"),
+            starred=(int(query.get("min_stars") or 0) or None),
+            limit=limit,
+            offset=offset,
+        )
+        return total, rows
+
+    return await asyncio.to_thread(run)
