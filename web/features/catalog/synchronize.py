@@ -34,9 +34,6 @@ from data.repositories import catalog as catalog_repository
 
 log = logging.getLogger(__name__)
 
-# Astrophotography is out of scope and is never read, per AGENTS.md.
-_SKIPPED_DIR_NAMES = frozenset({"Astrophotography"})
-
 _FOLDER_STATE_DDL = """
 CREATE TABLE IF NOT EXISTS folder_scan_state (
     directory TEXT PRIMARY KEY,
@@ -122,7 +119,7 @@ def _walk_directories(folder: str, known: dict[str, float]) -> tuple[set[str], s
     for dirpath, dirnames, _files in os.walk(folder):
         dirnames[:] = [
             name for name in dirnames
-            if not scanner.is_junk_directory(name) and name not in _SKIPPED_DIR_NAMES
+            if not scanner.is_junk_directory(name) and not scanner.is_fenced_directory(name)
         ]
         directory = os.path.normpath(dirpath)
         seen.add(directory)

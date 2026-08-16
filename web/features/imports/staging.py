@@ -108,14 +108,12 @@ async def allowed_roots() -> list[str]:
     return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
 
 
-ASTRO_ROOT_NAME = "astrophotography"
-
-
 def _under_astro(path: str | Path) -> bool:
     """MASTER_PLAN §1.10: Astrophotography/ is out of scope for every import
-    path — never read from it, never delete under it. Case-blind on purpose:
-    over-fencing only skips a file, under-fencing loses one."""
-    return any(str(part).lower() == ASTRO_ROOT_NAME for part in Path(path).parts)
+    path — never read from it, never delete under it. The name is
+    `scanner.FENCED_DIRECTORY_NAME` so the walkers and the import guards cannot
+    drift apart; this one asks about a whole path rather than one segment."""
+    return any(scanner.is_fenced_directory(str(part)) for part in Path(path).parts)
 
 
 async def library_roots() -> list[str]:

@@ -44,6 +44,19 @@ def is_junk_directory(name: str) -> bool:
     return normalized in JUNK_DIRECTORY_NAMES or normalized.endswith(JUNK_DIRECTORY_SUFFIXES)
 
 
+# Astrophotography is the owner's, not the library's: MASTER_PLAN §1.10 fences it
+# out of every scan, index, import, cleanup and dedup path. It lives here, beside
+# the junk rule, because this walker is what the library scan, the Develop
+# importer and watched folders all descend through — a fence any one of them can
+# forget is not a fence. Case-blind on purpose: over-fencing only skips a file,
+# under-fencing loses one.
+FENCED_DIRECTORY_NAME = "astrophotography"
+
+
+def is_fenced_directory(name: str) -> bool:
+    return name.lower() == FENCED_DIRECTORY_NAME
+
+
 def is_junk_file(name: str) -> bool:
     return name.startswith("._")  # AppleDouble sidecars
 
@@ -64,7 +77,9 @@ def walk_images(folder: str, *, excluded_directory_paths: list[str] | None = Non
     for root, _dirs, files in os.walk(folder, onerror=onerror):
         included_dirs = []
         for directory in _dirs:
-            if is_junk_directory(directory):
+            if is_junk_directory(directory) or is_fenced_directory(directory):
+                # Recorded, not silently dropped: the excluded prefixes are what
+                # stop a pass from marking rows under them missing.
                 if excluded_directory_paths is not None:
                     excluded_directory_paths.append(os.path.join(root, directory))
             else:

@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import scanner
 from features.imports import taxonomy
 from photo.identity import compute_content_hash
 
@@ -34,7 +35,6 @@ _SEARCH_ROOTS = (
     taxonomy.DEST_VIDEO,
     *taxonomy.LEGACY_DESTINATIONS,
 )
-_SKIPPED_DIR_NAMES = frozenset({"Astrophotography"})
 
 
 def _walk_library_files(library: Path) -> dict[tuple[str, int], list[Path]]:
@@ -49,7 +49,7 @@ def _walk_library_files(library: Path) -> dict[tuple[str, int], list[Path]]:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [
                 entry for entry in dirnames
-                if entry not in _SKIPPED_DIR_NAMES and not entry.startswith(".")
+                if not scanner.is_fenced_directory(entry) and not entry.startswith(".")
             ]
             for filename in filenames:
                 if filename.startswith("."):
