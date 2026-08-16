@@ -319,6 +319,45 @@ async def map_markers(limit: int = 5000):
     ]}
 
 
+@router.get("/api/storage/overview")
+async def storage():
+    """Where the photographs live, and how much room is left.
+
+    Read off the `drives` table rather than a configured home path, so a drive
+    that came back on a different letter reports itself correctly and an
+    unplugged one is simply absent instead of reporting zero bytes free.
+    """
+
+    import shutil
+
+    from model import drives
+
+    conn = db()
+    out = []
+    for row in conn.execute("SELECT * FROM drives ORDER BY is_record, id"):
+        root = drives.root_of(conn, row["uuid"])
+        entry = {"label": row["label"], "root": root, "attached": root is not None,
+                 "is_record": bool(row["is_record"])}
+        if root:
+            try:
+                usage = shutil.disk_usage(root)
+                entry |= {"disk_total_bytes": usage.total, "disk_free_bytes": usage.free}
+            except OSError:
+                pass
+        out.append(entry)
+
+    first = next((d for d in out if d["attached"]), {})
+    return {
+        "drives": out,
+        "photo_count": library.counts(conn)["photos"],
+        # The old single-drive shape, so the panel keeps working.
+        "home_path": first.get("root"),
+        "disk_free_bytes": first.get("disk_free_bytes", 0),
+        "disk_total_bytes": first.get("disk_total_bytes", 0),
+        "disk_label": first.get("label", ""),
+    }
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""

@@ -228,7 +228,6 @@ async def run_startup(
     from features.cache import status as cache_status_service
     from features.catalog import metadata as catalog_metadata
     from features.catalog import routes as catalog_routes
-    from features.library import routes as library_routes
     from features.settings import routes as settings_routes
     from thumbnails import cache_entries
 
@@ -242,10 +241,7 @@ async def run_startup(
     get_catalog_summary = db.get_catalog_summary
     build_ai_status = ai_routes.build_ai_status
     build_cache_status = cache_status_service.build_cache_status
-    api_rankings = library_routes.api_rankings
     api_folders = catalog_routes.api_folders
-    api_map_markers = library_routes.api_map_markers
-    api_date_groups = library_routes.api_date_groups
     api_settings = settings_routes.api_settings
     classify_orientations_background = catalog_metadata.classify_orientations_background
     scan_metadata_background = catalog_metadata.scan_metadata_background

@@ -66,7 +66,6 @@ for router in (
     people_routes.router,
     dev_routes.router,
     catalog_routes.router,
-    library_routes.router,
     collection_routes.router,
     stack_routes.router,
     trash_routes.router,
