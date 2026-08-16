@@ -946,6 +946,20 @@ function patchCell(cell) {
     }
 }
 
+function repaintCells(imageIds = []) {
+    // A rotation changes two things `patchCell` has never touched: the cell's
+    // shape (`--ar`) and its tile URL, which carries the turn. Patching the
+    // flag and moving on leaves the new tile in the old hole, which is the
+    // letterboxed-portrait bug arriving by a different road. Rebuild the cell.
+    for (const id of imageIds.map(Number).filter((value) => value > 0)) {
+        const cell = document.querySelector(`.cell[data-id="${id}"]`);
+        const img = byId.get(id);
+        if (!cell || !img) continue;
+        cell.outerHTML = cellHtml(img, Number(cell.dataset.idx) || 0);
+    }
+    observeImages(document.getElementById('grid-flow'));
+}
+
 function patchCells(imageIds = null) {
     const ids = Array.isArray(imageIds) ? imageIds.map(Number).filter((id) => id > 0) : [];
     const cells = ids.length
@@ -1002,6 +1016,12 @@ export function initGrid() {
     });
     document.addEventListener('azimuth:cull-applied', () => {
         if (mounted) loadFirstPage();
+    });
+    on('rotate', ({ imageIds } = {}) => {
+        // The cell changes shape, not just contents, so the heights the
+        // windowed grid measured are stale too.
+        repaintCells(imageIds || []);
+        invalidateHeights({ remeasureGhosts: true });
     });
     on('selection', ({ imageIds } = {}) => patchCells(imageIds));
     on('trash:changed', ({ imageIds } = {}) => {

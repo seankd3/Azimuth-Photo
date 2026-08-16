@@ -23,6 +23,7 @@ export const SHORTCUTS = [
     { area: 'Library', key: 'J', label: 'Cycle grid density' },
     { area: 'Library', key: 'Delete', label: 'Trash selection' },
     { area: 'Library', key: '[ / ]', label: 'Toggle left / info panel' },
+    { area: 'Library', key: '{ / }', label: 'Rotate left / right' },
     { area: 'Develop', key: '[ / ]', label: 'Toggle filmstrip / right panel' },
     { area: 'Loupe', key: 'Left / Right', label: 'Previous / next photo' },
     { area: 'Loupe', key: 'Shift Arrows', label: 'Pan while zoomed' },

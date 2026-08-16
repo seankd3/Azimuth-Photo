@@ -1,7 +1,7 @@
 import {
     byId, clearSelection, emit, on, selection, selectionChanged, selState, viewState,
 } from './state.js';
-import { writeFlags } from './api.js';
+import { writeFlags, writeRotate } from './api.js';
 import { showToast } from './toast.js';
 import { exportScope, openExportMenu } from './export_menu.js';
 
@@ -80,6 +80,47 @@ export function selectLoadedImages() {
     const changed = imageIds.filter((id) => !before.has(id));
     selectionChanged(changed.length ? changed : imageIds);
     return selection.size;
+}
+
+export async function applyRotation(rawIds, degrees) {
+    // A correction on top of whatever the file says about itself, so the photo
+    // that arrives upright stays upright and this only ever moves it from
+    // there. Applied to the model first: the tile URL carries the turn, so
+    // changing it here is what fetches the newly-shaped tile.
+    const imageIds = [...new Set(rawIds.map(Number))].filter((id) => id > 0);
+    if (!imageIds.length) return;
+    const turned = [];
+    for (const id of imageIds) {
+        const img = byId.get(id);
+        if (!img) continue;
+        const was = Number(img.rotate || 0);
+        const now = (((was + Number(degrees)) % 360) + 360) % 360;
+        // A quarter turn swaps the shape of the hole the tile goes in; a half
+        // turn does not. Getting this wrong is the letterboxed-portrait bug.
+        if ((was % 180 === 90) !== (now % 180 === 90)) {
+            const width = img.width;
+            img.width = img.height;
+            img.height = width;
+        }
+        img.rotate = now;
+        turned.push([id, was]);
+    }
+    emit('rotate', { imageIds });
+    for (const [id, was] of turned) {
+        const result = await writeRotate(id, degrees);
+        if (result && result.ok) continue;
+        const img = byId.get(id);
+        if (img) {
+            if ((Number(img.rotate || 0) % 180 === 90) !== (was % 180 === 90)) {
+                const width = img.width;
+                img.width = img.height;
+                img.height = width;
+            }
+            img.rotate = was;
+        }
+        emit('rotate', { imageIds: [id] });
+        showToast('Couldn’t turn that photo');
+    }
 }
 
 export async function applyFlags(rawIds, flag) {

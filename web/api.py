@@ -335,9 +335,15 @@ def _apply_rotation(conn, rows: list[dict]) -> None:
         )
     }
     for row in rows:
-        if turned.get(row.get("hash"), 0) % 180 == 90:
+        turn = turned.get(row.get("hash"), 0) % 360
+        if not turn:
+            continue
+        # The turn always travels, because the tile URL carries it and a tile
+        # rendered at 180 is a different picture from one rendered at 0. Only a
+        # quarter turn swaps the shape of the cell it goes in.
+        row["rotate"] = turn
+        if turn % 180 == 90:
             row["width"], row["height"] = row["height"], row["width"]
-            row["rotate"] = turned[row["hash"]]
 
 
 # What the UI calls a sort, and what the library calls it. The UI's names are

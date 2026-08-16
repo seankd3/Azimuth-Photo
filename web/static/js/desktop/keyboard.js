@@ -4,7 +4,7 @@ import {
     createStackFromSelection, moveFocus, focusColumns, focusPageStep, currentFocusedImage,
     setFocus, toggleFocusedStack,
 } from './grid.js';
-import { applyFlags, selectLoadedImages, toggleFocusedSelection } from './selection.js';
+import { applyFlags, applyRotation, selectLoadedImages, toggleFocusedSelection } from './selection.js';
 import {
     closeLoupe, fitLoupe, flagLoupeOrFocused, loupeImageId, loupeOpen, navLoupe, navLoupeTo,
     openLoupe, panLoupe, toggleLoupeInfo, toggleLoupeLights, toggleLoupeVersion, zoomLoupeBy,
@@ -113,6 +113,34 @@ function flagTarget(flag) {
         applyFlags([img.id], flag);
         if (viewState.prefs.autoAdvanceFlags) moveFocus(1);
     }
+}
+
+function rotateFromKey(event) {
+    // Both spellings. Keyboard layouts -- and automated input -- disagree about
+    // whether Shift+[ arrives as '{' or as '[' with shiftKey set, and a
+    // shortcut that works on one layout only is not a shortcut. Checked before
+    // the bare [ and ] panel toggles so the shifted pair never falls through.
+    if (event.key === '{' || (event.shiftKey && event.key === '[')) return -90;
+    if (event.key === '}' || (event.shiftKey && event.key === ']')) return 90;
+    return 0;
+}
+
+function rotateTarget(event) {
+    // Returns whether it handled the key, so the caller can fall through to
+    // the bare [ and ] panel toggles without asking the same question twice.
+    //
+    // Same target rule as flagging: the loupe's photo, else the selection,
+    // else whatever has focus. One rule, so the keys never surprise.
+    const degrees = rotateFromKey(event);
+    if (!degrees) return false;
+    const id = loupeOpen() ? loupeImageId() : null;
+    if (id) applyRotation([id], degrees);
+    else if (selection.size) applyRotation([...selection], degrees);
+    else {
+        const img = currentFocusedImage();
+        if (img) applyRotation([img.id], degrees);
+    }
+    return true;
 }
 
 function stackRows() {
@@ -425,6 +453,7 @@ export function initKeyboard() {
                 selectionChanged([imageId]);
                 trashSelectedImages();
             }
+            else if (rotateTarget(event)) { /* handled */ }
             else if (lk === '[') toggleLeftPanel();
             else if (lk === ']') toggleRightPanel();
             else if (lk === 'g') closeLoupe({ force: true });
@@ -521,6 +550,8 @@ export function initKeyboard() {
                 event.preventDefault();
                 trashSelectedImages();
             }
+        } else if (rotateTarget(event)) {
+            event.preventDefault();
         } else if (key === '[') {
             event.preventDefault();
             toggleLeftPanel();

@@ -547,6 +547,10 @@ export async function writeFlags(imageIds, flag) {
     return postJsonWithStatus('/api/images/flag', { image_ids: imageIds, flag });
 }
 
+export async function writeRotate(imageId, degrees) {
+    return postJsonWithStatus(`/api/image/${Number(imageId)}/rotate?degrees=${Number(degrees)}`, {});
+}
+
 export async function mosaicNext(n, params, exclude = '', strategy = 'explore', gridElo = 0) {
     const query = new URLSearchParams(params);
     query.set('n', String(n));
