@@ -152,6 +152,97 @@ def counts(conn) -> dict:
     }
 
 
+_MONTHS = ("January", "February", "March", "April", "May", "June",
+           "July", "August", "September", "October", "November", "December")
+
+
+def months(conn, *, cover: bool = False) -> list[dict]:
+    """Every month that holds photographs, newest first, with a count.
+
+    `date_taken` is stored as `YYYY-MM-DD HH:MM:SS`, so the month is
+    `substr(date_taken, 1, 7)` — a prefix of a text column, which SQLite can
+    group without a function over every row. This is the one shape behind both
+    the date histogram and the date-group headers; they were two queries in two
+    modules returning the same numbers under different key names.
+    """
+
+    picked = ", MIN(i.id) AS cover_id" if cover else ""
+    return [
+        {"month": row["month"], "count": row["count"],
+         **({"cover_id": row["cover_id"]} if cover else {})}
+        for row in conn.execute(
+            f"""
+            SELECT substr(i.date_taken, 1, 7) AS month, COUNT(*) AS count{picked}
+            FROM images i
+            WHERE {IN_LIBRARY} AND i.date_taken IS NOT NULL AND i.date_taken != ''
+            GROUP BY month ORDER BY month DESC
+            """
+        )
+    ]
+
+
+def month_label(month: str) -> str:
+    """`2026-08` as `August 2026`. The only place a date is spelled for a human."""
+
+    try:
+        year, number = month.split("-")
+        return f"{_MONTHS[int(number) - 1]} {year}"
+    except (ValueError, IndexError):
+        return month
+
+
+def facets(conn) -> dict:
+    """What you can filter by, and how many of each there are.
+
+    One pass per facet, each grouping a column. They are separate queries for
+    the same reason the counts are: a single pass computing all of them with
+    conditional aggregates cannot use an index and reads every row.
+    """
+
+    def tally(column: str, key: str) -> list[dict]:
+        return [
+            {key: row[0], "count": row[1]}
+            for row in conn.execute(
+                f"SELECT {column}, COUNT(*) FROM images i"
+                f" WHERE {IN_LIBRARY} AND {column} IS NOT NULL AND {column} != ''"
+                f" GROUP BY {column} ORDER BY COUNT(*) DESC"
+            )
+        ]
+
+    return {
+        "years": [
+            {"year": row[0], "count": row[1]}
+            for row in conn.execute(
+                f"SELECT substr(i.date_taken, 1, 4) AS y, COUNT(*) FROM images i"
+                f" WHERE {IN_LIBRARY} AND i.date_taken IS NOT NULL AND i.date_taken != ''"
+                f" GROUP BY y ORDER BY y DESC"
+            )
+        ],
+        "file_types": [
+            {"ext": str(row[0] or "").lstrip(".").lower(), "count": row[1]}
+            for row in conn.execute(
+                f"SELECT i.file_ext, COUNT(*) FROM images i"
+                f" WHERE {IN_LIBRARY} AND i.file_ext IS NOT NULL AND i.file_ext != ''"
+                f" GROUP BY lower(i.file_ext) ORDER BY COUNT(*) DESC"
+            )
+        ],
+        "cameras": [
+            {"camera": row[0], "count": row[1]}
+            for row in conn.execute(
+                f"SELECT TRIM(COALESCE(i.camera_make,'') || ' ' || COALESCE(i.camera_model,'')) AS c,"
+                f" COUNT(*) FROM images i WHERE {IN_LIBRARY} AND c != ''"
+                f" GROUP BY c ORDER BY COUNT(*) DESC"
+            )
+        ],
+        "lenses": tally("i.lens", "lens"),
+        "undated": int(conn.execute(
+            f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY}"
+            f" AND (i.date_taken IS NULL OR i.date_taken = '')"
+        ).fetchone()[0]),
+        "people": [],
+    }
+
+
 def reindex(conn) -> dict[str, int]:
     """Rebuild the decision columns from the log.
 

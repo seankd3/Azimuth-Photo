@@ -286,6 +286,39 @@ def _page(sort: str, limit: int, offset: int, folder, min_stars) -> dict:
     }
 
 
+@router.get("/api/date-histogram")
+async def date_histogram():
+    return {"months": await asyncio.to_thread(library.months, db(), cover=True)}
+
+
+@router.get("/api/date-groups")
+async def date_groups():
+    rows = await asyncio.to_thread(library.months, db())
+    return {"groups": [
+        {"date": r["month"], "label": library.month_label(r["month"]), "count": r["count"]}
+        for r in rows
+    ]}
+
+
+@router.get("/api/filter-options")
+async def filter_options():
+    return await asyncio.to_thread(library.facets, db())
+
+
+@router.get("/api/map/markers")
+async def map_markers(limit: int = 5000):
+    """Photographs that know where they were taken."""
+
+    return {"markers": [
+        {"id": r["id"], "lat": r["latitude"], "lon": r["longitude"]}
+        for r in db().execute(
+            f"SELECT i.id, i.latitude, i.longitude FROM images i"
+            f" WHERE {library.IN_LIBRARY} AND i.latitude IS NOT NULL LIMIT ?",
+            (int(limit),),
+        )
+    ]}
+
+
 @router.get("/api/image/{image_id}/state")
 async def state(image_id: int):
     """One of the five words, computed now and never stored."""
