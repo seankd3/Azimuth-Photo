@@ -292,7 +292,7 @@ class CacheRefuses(CoreCase):
         super().setUp()
         self.kind = cache.register(cache.Kind(
             name="test_thumb",
-            compute=lambda source, size=0: cache.Made(path=f"{source}@{size}", bytes=10),
+            compute=lambda source, hash, size=0: cache.Made(path=f"{source}@{size}", bytes=10),
             params=("size",),
         ))
         self.addCleanup(cache.unregister, "test_thumb")
@@ -305,7 +305,7 @@ class CacheRefuses(CoreCase):
             cache.canonical("test_thumb", {"size": 400, "updated_at": 1.0})
 
     def test_a_failure_is_recorded_once_with_why(self):
-        cache.register(cache.Kind(name="boom", compute=lambda source: 1 / 0))
+        cache.register(cache.Kind(name="boom", compute=lambda source, hash: 1 / 0))
         self.addCleanup(cache.unregister, "boom")
         self.assertIsNone(cache.make(self.conn, "hash1", "boom", "x.CR3"))
         stored = cache.get(self.conn, "hash1", "boom")
@@ -315,13 +315,13 @@ class CacheRefuses(CoreCase):
     def test_a_machine_that_cannot_make_it_records_nothing(self):
         # "Not here" is a fact about this machine. Stored, it would poison the
         # entry for the helper that can make it.
-        cache.register(cache.Kind(name="gpu", compute=lambda source: cache.Made(), here=lambda: False))
+        cache.register(cache.Kind(name="gpu", compute=lambda source, hash: cache.Made(), here=lambda: False))
         self.addCleanup(cache.unregister, "gpu")
         self.assertIsNone(cache.make(self.conn, "hash1", "gpu", "x.CR3"))
         self.assertIsNone(cache.get(self.conn, "hash1", "gpu"))
 
     def test_eviction_never_takes_what_it_cannot_remake_cheaply(self):
-        cache.register(cache.Kind(name="embedding", compute=lambda source: cache.Made(), evictable=False))
+        cache.register(cache.Kind(name="embedding", compute=lambda source, hash: cache.Made(), evictable=False))
         self.addCleanup(cache.unregister, "embedding")
         cache.put(self.conn, "h1", "embedding", cache.Made(value=b"vector", bytes=3000))
         cache.put(self.conn, "h1", "test_thumb", cache.Made(path="/t.jpg", bytes=3000), {"size": 400})
@@ -333,7 +333,7 @@ class CacheRefuses(CoreCase):
 class OwedIsAQuery(CoreCase):
     def setUp(self):
         super().setUp()
-        cache.register(cache.Kind(name="thumb", compute=lambda source: cache.Made(path="/t.jpg", bytes=1)))
+        cache.register(cache.Kind(name="thumb", compute=lambda source, hash: cache.Made(path="/t.jpg", bytes=1)))
         self.addCleanup(cache.unregister, "thumb")
         work.touched.__globals__["_last_touch"] = 0.0
 
@@ -356,7 +356,7 @@ class OwedIsAQuery(CoreCase):
         self.assertEqual(work.owed(self.conn, "thumb"), [])
 
     def test_a_failure_is_not_rediscovered_every_pass(self):
-        cache.register(cache.Kind(name="boom", compute=lambda source: 1 / 0))
+        cache.register(cache.Kind(name="boom", compute=lambda source, hash: 1 / 0))
         self.addCleanup(cache.unregister, "boom")
         self._catalogued()
         self.assertEqual(len(work.owed(self.conn, "boom")), 1)

@@ -216,21 +216,3 @@ def dimensions(path: str) -> tuple[int, int]:
             return int(raw.sizes.width), int(raw.sizes.height)
     with Image.open(path) as image:
         return int(image.width), int(image.height)
-
-
-def _make_tile(source: str, size: int = GRID, edits: str | None = None):
-    body = render(source, size, None)
-    return cache.Made(value=body, bytes=len(body))
-
-
-# One kind, three sizes, and the edits folded into the recipe -- which is what
-# makes "the grid tile of an edited photo" a different cached answer from "the
-# grid tile of the original" without either of them needing to be invalidated.
-TILE = cache.register(cache.Kind(
-    name="tile",
-    compute=_make_tile,
-    params=("size", "edits"),
-    cost=0.4,
-    # Every photo the owner can see should have a grid tile.
-    wants="1",
-))

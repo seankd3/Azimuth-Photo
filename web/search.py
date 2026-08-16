@@ -221,7 +221,7 @@ def _needs_a_helper() -> bool:
 
 EMBEDDING_KIND = cache.register(cache.Kind(
     name=EMBEDDING,
-    compute=lambda source: cache.Made(),
+    compute=lambda source, hash: cache.Made(),
     cost=2.0,
     evictable=False,
     here=_needs_a_helper,

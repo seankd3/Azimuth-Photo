@@ -35,6 +35,7 @@ from fastapi import APIRouter, Response
 import library
 import rank
 import render
+import tiles
 import work
 from core.catalog_path import catalog_path
 from data import connection
@@ -72,8 +73,9 @@ async def thumb(size: str, image_id: int):
     recipe = {"size": longest, "edits": None}
     if row["hash"]:
         entry = cache.get(conn, row["hash"], "tile", recipe)
-        if entry and entry["state"] == cache.READY and entry["value"]:
-            return Response(content=entry["value"], media_type="image/jpeg",
+        body = tiles.read(entry) if entry and entry["state"] == cache.READY else None
+        if body:
+            return Response(content=body, media_type="image/jpeg",
                             headers={"ETag": f'"{row["hash"]}-{longest}"',
                                      "Cache-Control": "private, max-age=31536000"})
         if entry and entry["state"] == cache.FAILED:
@@ -98,7 +100,7 @@ def _make_tile(hash: str, longest: int, source: str) -> bytes | None:
     conn = _writer()
     try:
         entry = cache.make(conn, hash, "tile", source, {"size": longest, "edits": None})
-        return entry["value"] if entry else None
+        return tiles.read(entry) if entry else None
     finally:
         connection.close_sync(conn, db_path=catalog_path())
 

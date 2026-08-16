@@ -42,6 +42,9 @@ class Kind:
     """
 
     name: str
+    # compute(source, hash, **recipe). The hash is passed because a kind
+    # that writes a file has to name it after what it shows, and re-deriving
+    # it would mean reading 8 MiB of the photograph again.
     compute: Callable[..., "Made"]
     # Roughly what one costs, in seconds. Used to order work and to refuse a
     # frame this machine cannot afford; never for a progress bar.
@@ -171,7 +174,7 @@ def make(conn, hash: str, kind: str, source: str, recipe: dict[str, Any] | None 
         return None
 
     try:
-        made = entry.compute(source, **(recipe or {}))
+        made = entry.compute(source, hash, **(recipe or {}))
     except Exception as error:  # noqa: BLE001 - the note is the whole point
         failed(conn, hash, kind, f"{type(error).__name__}: {error}", recipe)
         conn.commit()
