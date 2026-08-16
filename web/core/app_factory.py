@@ -57,10 +57,9 @@ class AppShell:
     def track_background_task(self, coro):
         return self.background_task_tracker.track(coro)
 
-    def install_idle_activity_middleware(self, *, thumbnails, excluded_paths=None):
+    def install_idle_activity_middleware(self, *, excluded_paths=None):
         return background_runtime.install_idle_activity_middleware(
             self.app,
-            thumbnails=thumbnails,
             excluded_paths=excluded_paths or self.idle_activity_excluded_paths,
         )
 
@@ -167,10 +166,7 @@ def configure_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
 
 
 def configure_idle_activity_middleware(shell: AppShell) -> Callable:
-    import thumbnails
-
     middleware = shell.install_idle_activity_middleware(
-        thumbnails=thumbnails,
         excluded_paths=shell.idle_activity_excluded_paths,
     )
     object.__setattr__(shell, "idle_activity_middleware", middleware)

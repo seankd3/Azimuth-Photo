@@ -396,6 +396,37 @@ class OwedIsAQuery(CoreCase):
         self.assertEqual(work.step(self.conn, yield_to=lambda: False), {"did": "identity", "photo": image})
 
 
+class DecodingRefuses(unittest.TestCase):
+    """Two properties carried over from the deleted thumbnail suite.
+
+    Ported rather than dropped, because deleting a test file is how a guard
+    goes quiet -- which happened once already today with the symlink refusal.
+    """
+
+    def test_raw_ness_is_decided_by_the_first_three_bytes(self):
+        # This archive holds 1,306 files named .CR2 that are full-resolution
+        # JPEGs. LibRaw refuses them as "not a raw file", so every branch taken
+        # on the extension gets them wrong and they never get a tile.
+        from photo import kind
+
+        with tempfile.NamedTemporaryFile(suffix=".CR2", delete=False) as handle:
+            handle.write(b"\xff\xd8\xff" + b"0" * 64)
+            impostor = handle.name
+        self.addCleanup(os.unlink, impostor)
+        self.assertFalse(kind.is_raw(impostor))
+        self.assertTrue(kind.is_raw(impostor, data=b"II*\x00"))
+
+    def test_a_frame_too_big_to_afford_is_refused_not_clamped(self):
+        # One 4.2 GB panorama charged at 768 MB because its weight was clamped
+        # to the ceiling OOM-killed the service four times in an hour. A budget
+        # that clamps has admitted a frame at a price it cannot pay.
+        import render
+
+        render._affordable(8192, 5464, render.GRID)  # a 45 MP frame at 400 px
+        with self.assertRaises(render.TooBig):
+            render._affordable(40000, 30000, 0)  # 1.2 Gpx at native size
+
+
 class RankingIsDerived(CoreCase):
     def _beat(self, winner, loser, at):
         decisions.decide(self.conn, winner, decisions.COMPARE, {"beat": loser, "mode": "mosaic"}, at=at)

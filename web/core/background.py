@@ -1,4 +1,7 @@
 import asyncio
+import threading
+
+import work
 import logging
 import os
 import time
@@ -6,7 +9,6 @@ import time
 from core import capabilities
 from core.catalog_path import catalog_path
 from core.user_activity import IDLE_ACTIVITY_EXCLUDED_PATHS, marks_user_activity
-from photo import identity as photo_identity
 
 
 log = logging.getLogger(__name__)
@@ -101,9 +103,9 @@ async def wait_for_user_gap(
             await asyncio.sleep(min(1.0, STARTUP_WARM_GRACE_SECONDS - uptime))
             continue
         try:
-            import thumbnails
+            import work
 
-            idle = thumbnails.get_idle_seconds()
+            idle = 0.0 if work.busy() else idle_seconds
         except Exception:
             return
         if idle >= idle_seconds:
@@ -149,7 +151,6 @@ async def track_idle_activity(
     request,
     call_next,
     *,
-    thumbnails,
     excluded_paths: set[str] | None = None,
     activity_classifier=None,
 ):
@@ -165,11 +166,11 @@ async def track_idle_activity(
     response = await call_next(request)
     served = int(getattr(response, "status_code", 200) or 200) < 400
     if served and classify(path) and (excluded_paths is None or path not in excluded_paths):
-        thumbnails.note_user_activity()
+        work.touched()
     return response
 
 
-def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
+def install_idle_activity_middleware(app, *, excluded_paths=None):
     extra_excludes = set(excluded_paths) if excluded_paths is not None else None
 
     @app.middleware("http")
@@ -177,7 +178,6 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
         return await track_idle_activity(
             request,
             call_next,
-            thumbnails=thumbnails,
             excluded_paths=extra_excludes,
         )
 
@@ -186,11 +186,9 @@ def install_idle_activity_middleware(app, *, thumbnails, excluded_paths=None):
 
 async def run_shutdown(
     *,
-    thumbnails,
     background_task_tracker: BackgroundTaskTracker,
 ) -> None:
     from data import connection as data_connection
-    from features.media import warm as media_warm
 
     # First stop everything that can touch a database. Releasing handles while
     # warm, embedding or caption work was still winding down let those reopen
@@ -198,11 +196,12 @@ async def run_shutdown(
     # the app still holds the library file after saying it was finished with
     # it, and in the test suite meant a temporary catalog that would not
     # delete, failing a different test each run.
-    thumbnails.stop_prefetch()
     await background_task_tracker.cancel_all()
     await _fire_and_forget.cancel_all()
-    await thumbnails.cancel_background_tasks()
-    await media_warm.cancel_background_tasks()
+    # media_warm's cancel stood here. Nothing schedules prefetch or memory-warm
+    # tasks any more -- the chore loop is the only background work -- so the
+    # trackers above are the whole of it. The *ordering* is the lesson and it
+    # is unchanged: stop everything database-touching before releasing handles.
     # Only now can nothing reopen what we are about to release.
     await data_connection.close_shared_readers()
 
@@ -223,12 +222,10 @@ async def run_startup(
     # so that this module would not import them.
     import db
     import settings
-    import thumbnails
     from features.ai import routes as ai_routes
     from features.catalog import metadata as catalog_metadata
     from features.catalog import routes as catalog_routes
     from features.settings import routes as settings_routes
-    from thumbnails import cache_entries
 
     init_db = db.init_db
     get_ai_status_counts = db.get_ai_status_counts
@@ -239,7 +236,9 @@ async def run_startup(
     scan_metadata_background = catalog_metadata.scan_metadata_background
 
     def cache_root() -> str:
-        return thumbnails.SSD_CACHE_DIR
+        import tiles
+
+        return tiles.CACHE_DIR
 
     from core import on_the_loop
 
@@ -278,7 +277,9 @@ async def run_startup(
             await asyncio.to_thread(warm_templates)
             return
     await init_db()
-    thumbnails.configure(settings.load_settings())
+    import tiles
+
+    tiles.configure(settings.load_settings())
 
     async def _warm_tile_row_reader():
         # The first tile after launch pays the reader's first-touch page
@@ -299,35 +300,9 @@ async def run_startup(
 
     track_background_task(_warm_tile_row_reader())
 
-    # Bulk HDD sequencing: one spindle consumer at a time (previews before vault).
-    try:
-        from core import bulk_scheduler as _bulk_scheduler
-
-        def _previews_hold_disk() -> bool:
-            status = getattr(thumbnails, "_pregen_status", {}) or {}
-            return _bulk_scheduler.previews_hold_disk(
-                manual_mode=bool(status.get("manual_mode")),
-                manual_pause=bool(status.get("manual_pause")),
-                state=str(status.get("state") or ""),
-            )
-
-        _bulk_scheduler.configure(previews_pending=_previews_hold_disk)
-    except Exception:
-        log.exception("worker=bulk_scheduler failed to configure")
-
-    async def _cleanup_stale_cache_temps_when_quiet():
-        await asyncio.to_thread(thumbnails.cleanup_stale_cache_temps)
-
-    async def _sweep_phantom_cache_entries():
-        # Once per process start; low priority after interactive warmers settle.
-        await asyncio.sleep(45.0)
-        result = await asyncio.to_thread(thumbnails.sweep_missing_cache_entries)
-        log.info(
-            "worker=cache_phantom_sweep scanned=%s removed=%s batches=%s",
-            result.get("scanned"),
-            result.get("removed"),
-            result.get("batches"),
-        )
+    # The bulk-HDD sequencer stood here, asking whether previews were holding
+    # the disk so a second bulk consumer could wait its turn. There is one
+    # consumer now -- the chore loop -- so the question has no second asker.
 
     async def _warm_collection_suggestions():
         # Populate the suggestions cache off the request path so the first user
@@ -358,17 +333,10 @@ async def run_startup(
     # from touching the catalog: cancellation lands in the sleep, not mid-query.
     track_background_task(_start_background_daemon(_reconcile_stored_stars, delay=10.0))
 
-    async def _warm_disk_path_index():
-        # Otherwise the first request that gates a tile on cache truth pays the
-        # whole-table index build inline (771ms on a 240k-row cache). It reads
-        # the whole cache table, so it waits for a gap like the other warmers.
-        await wait_for_user_gap()
-        try:
-            await cache_entries.warm_disk_path_index()
-        except Exception:
-            log.debug("cache path index warmup skipped", exc_info=True)
-
-    track_background_task(_warm_disk_path_index())
+    # A disk-path index warmer stood here, because the first request that
+    # gated a tile on cache truth paid a 771 ms whole-table index build. The
+    # tile route asks for one row by primary key now -- (hash, kind, recipe)
+    # -- so there is no index to build and nothing to warm.
 
     async def _reconcile_folders():
         # The catalog follows the folders on its own: renaming or reorganising a
@@ -401,18 +369,22 @@ async def run_startup(
 
     track_background_task(_start_background_daemon(_hold_develop_cache_to_budget, delay=45.0))
 
-    track_background_task(_start_background_daemon(thumbnails.run_prefetch_worker))
-    # Runs on every role. A satellite's scan already hashes what it imports, so
-    # there the candidate set is empty and this costs one index probe every five
-    # minutes; on a hub or a standalone install it is the only thing that gives
-    # an older photo an identity on purpose rather than by side effect.
-    track_background_task(
-        _start_background_daemon(
-            lambda: photo_identity.run_identity_backfill(catalog_path), delay=15.0
-        )
-    )
-    track_background_task(_start_background_daemon(_cleanup_stale_cache_temps_when_quiet, delay=20.0))
-    track_background_task(_sweep_phantom_cache_entries())
+    # One chore loop, in a thread with its own connection. It replaces a
+    # prefetch worker, a pregen worker and a warm worker that arbitrated
+    # between themselves through a governor: owed is a query, so there is
+    # nothing to divide up.
+    def _chores() -> None:
+        import work
+        from core.catalog_path import catalog_path
+        from data import connection as _conn
+
+        work.run(lambda: _conn.open_sync(catalog_path()))
+
+    threading.Thread(target=_chores, name="chores", daemon=True).start()
+    # A separate identity backfill ran here on a five-minute daemon, with its
+    # own INDEXED BY hint and its own skip cursor. Identity is the first thing
+    # work.step() asks for -- it has to be, since every cache row is keyed on
+    # the hash -- so the chore loop already does it, cursor-free.
     track_background_task(_start_background_daemon(classify_orientations_background))
     track_background_task(_start_background_daemon(scan_metadata_background))
     schedule_optional_workers(
@@ -423,10 +395,6 @@ async def run_startup(
     # Auto-resume bulk workers that were running before the last shutdown.
     try:
         from core import bulk_scheduler as _bulk_scheduler
-
-        if _bulk_scheduler.pregen_desired():
-            log.info("bulk_scheduler resuming preview pregen from prior desired state")
-            thumbnails.start_pregeneration()
     except Exception:
         log.exception("worker=pregen auto-resume failed")
 

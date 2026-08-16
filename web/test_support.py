@@ -24,7 +24,6 @@ import db
 from data import connection as data_connection  # noqa: E402
 import scanner  # noqa: E402
 import settings  # noqa: E402
-import thumbnails  # noqa: E402
 from core import app_factory, bulk_scheduler  # noqa: E402
 from core import background as background_runtime  # noqa: E402
 from core import on_the_loop  # noqa: E402
@@ -40,11 +39,9 @@ from data.repositories import images as image_repository  # noqa: E402
 from data.repositories import metadata_search, ratings, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
-from features.media import warm as media_warm  # noqa: E402
 from features.search import service as search_service  # noqa: E402
 from features.settings import routes as settings_routes  # noqa: E402
 from features.settings import status as settings_status  # noqa: E402
-from thumbnails import cache_entries as thumbnail_cache_entries  # noqa: E402
 
 
 class JsonRequest:
@@ -141,17 +138,10 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
 
         data_connection.open_async = _tracked_open
         self.old_db_path = db.DB_PATH
-        self.old_prefetch_images = thumbnails.prefetch_images
-        self.old_schedule_full_image_cache = thumbnails.schedule_full_image_cache
-        self.old_has_cached_fast = thumbnails.has_cached_fast
-        self.old_fast_disk_path_entry = thumbnails.fast_disk_path_entry
-        self.old_fast_disk_read_entry = thumbnails.fast_disk_read_entry
-        self.old_thumbnail_persistent_conn = thumbnail_cache_entries._persistent_conn
         self.old_settings_path = settings.SETTINGS_PATH
         self.old_settings_state = settings._settings
 
         db.DB_PATH = os.path.join(self.tempdir.name, "azimuth-test.db")
-        thumbnail_cache_entries._persistent_conn = None
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         settings._settings = None
         bulk_scheduler.reset_for_tests(
@@ -173,17 +163,10 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         async def noop_prefetch(*_args, **_kwargs):
             return 0
 
-        thumbnails.prefetch_images = noop_prefetch
 
     async def asyncTearDown(self):
         await self._close_thumbnail_cache_after_background_tasks()
-        thumbnails.prefetch_images = self.old_prefetch_images
-        thumbnails.schedule_full_image_cache = self.old_schedule_full_image_cache
-        thumbnails.has_cached_fast = self.old_has_cached_fast
-        thumbnails.fast_disk_path_entry = self.old_fast_disk_path_entry
-        thumbnails.fast_disk_read_entry = self.old_fast_disk_read_entry
         self._reset_shared_runtime_state()
-        thumbnail_cache_entries._persistent_conn = self.old_thumbnail_persistent_conn
         settings.SETTINGS_PATH = self.old_settings_path
         settings._settings = self.old_settings_state
         bulk_scheduler.reset_for_tests()
@@ -200,13 +183,11 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
     async def _close_thumbnail_cache_after_background_tasks(self):
         """Keep the per-test thumbnail database alive until async work drains."""
         await self._drain_test_tasks(
-            tuple(media_warm._background_tasks),
             "media-warm background",
         )
 
         # A media-warm wrapper can finish after handing thumbnail probes to
         # asyncio/to_thread or an executor. Those child tasks are not retained
-        # in media_warm._background_tasks, but still share this test's database.
         current = asyncio.current_task()
         handed_off_tasks = tuple(
             task
@@ -215,8 +196,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         )
         await self._drain_test_tasks(handed_off_tasks, "handed-off background")
 
-        if thumbnail_cache_entries._persistent_conn is not None:
-            thumbnail_cache_entries._persistent_conn.close()
 
     async def _drain_test_tasks(self, tasks, label):
         if tasks:
@@ -252,7 +231,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 pass
         self._tracked_conns.clear()
         await data_connection.close_shared_readers()
-        thumbnail_cache_entries.close_persistent_conn()
         self.tempdir.cleanup()
 
     def _reset_shared_runtime_state(self):
@@ -260,15 +238,9 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         # which pauses all bulk work (pregen, captions, decode batches) for
         # every later test in the process; clear it on both setup and teardown.
         memory_pressure.reset_for_tests()
-        thumbnails._clear_memory_cache()
         # Each test gets a fresh DB; a disk-path index built against an earlier
         # test's DB would hide this test's cache rows from fast_disk_has.
-        from thumbnails import cache_entries as _tce
         _tce._clear_disk_index()
-        thumbnails._thumbnail_retry_after.clear()
-        thumbnails._inflight.clear()
-        media_warm._thumbnail_prefetch_inflight.clear()
-        media_warm._thumbnail_memory_warm_inflight.clear()
         query_constraints._text_search_resolution_cache.clear()
 
     async def _source(self, name="catalog", *, online=True):
@@ -334,7 +306,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 "(cache_root, size, image_id, path, source_signature, size_bytes, last_accessed, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    thumbnails.SSD_CACHE_DIR,
                     size,
                     image_id,
                     os.path.join(self.tempdir.name, f"{size}-{image_id}.jpg"),
