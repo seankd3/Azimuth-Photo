@@ -50,9 +50,6 @@ def invalidate_pairing_cache(*, matchups: bool = False) -> int:
 
 def invalidate_rankings_cache() -> None:
     from core import query_constraints
-    from features.library import service as library_service
-
-    library_service.invalidate_rankings_response_cache()
     query_constraints.clear_text_search_caches()
     _invalidate_smart_collection_cache()
 
@@ -227,15 +224,11 @@ def note_cached_image_ids_added(cache_root: str, size: str, image_ids) -> None:
         return
     invalidate_visible_cache_dependent_counts(cache_root, size)
     invalidate_visible_facet_caches(cache_root, size)
-    if size == "sm":
-        # Preview readiness on cards changed — drop response payloads only.
-        # Taste/Elo ordered-id caches do not depend on thumbnail rows; clearing
-        # them here made every taste request rebuild (18–30s) during pregen.
-        from features.library import service as library_service
-
-        library_service.invalidate_rankings_response_cache(
-            order_caches=False, image_ids=added_ids
-        )
+    # A tile arriving used to drop the rankings response payloads here. There
+    # are none: rankings is a live query. The comment that stood in this block
+    # is worth keeping as the reason it must not creep back — clearing the
+    # taste/Elo ordered-id caches on every preview made a taste request rebuild
+    # for 18–30 s during pre-generation.
 
 
 def invalidate_rankable_image_ids_cache() -> None:

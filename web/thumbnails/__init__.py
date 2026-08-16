@@ -1325,7 +1325,7 @@ async def _pregen_bulk_candidate_batch(limit: int):
 
 
 async def _pregen_priority_candidate_batch(limit: int, processed_ids: set[int]):
-    from features.library import service as library_service  # deferred: keeps numpy off boot until preview pre-generation runs
+    from features.collections import smart as smart_collections  # deferred: keeps numpy off boot until preview pre-generation runs
 
     for scope in preview_priority.recent_scopes():
         rows = await pregen.priority_candidate_batch(
@@ -1335,7 +1335,7 @@ async def _pregen_priority_candidate_batch(limit: int, processed_ids: set[int]):
             limit,
             cache_root=SSD_CACHE_DIR,
             preview_size="sm",
-            resolve_collection_scope=library_service._resolve_collection_scope,
+            resolve_collection_scope=smart_collections.resolve_scope,
         )
         if rows:
             collection_name = rows[0]["priority_collection_name"] or ""

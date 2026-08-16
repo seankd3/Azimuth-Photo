@@ -25,7 +25,7 @@ import settings
 
 import db
 from core import query_constraints
-from features.library import service as library_service
+from features.collections import smart as smart_collections
 router = APIRouter()
 
 EXPORT_FIELD_NAMES = (
@@ -98,7 +98,7 @@ async def _get_export_images(
             id_filter = set(batch_ids)
         else:
             id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
-    id_filter, collection_id = await library_service._resolve_collection_scope(id_filter, collection_id)
+    id_filter, collection_id = await smart_collections.resolve_scope(id_filter, collection_id)
     # The computed orders need the service's search/blend context, which an
     # export of raw rows does not carry. Elo is taste's own backbone, stated
     # here rather than left to a silent registry fallback.

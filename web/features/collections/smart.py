@@ -259,3 +259,30 @@ async def resolve_collection_image_ids(collection_id: int) -> set[int] | None:
         resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
     )
     return set(image_ids)
+
+
+def combine_id_scopes(current_ids, requested_ids: set[int] | None):
+    """Two id scopes narrowed together. Neither present means no narrowing."""
+
+    if requested_ids is None:
+        return current_ids
+    if current_ids is None:
+        return requested_ids
+    return {int(image_id) for image_id in current_ids}.intersection(requested_ids)
+
+
+async def resolve_scope(current_ids, collection_id: int) -> tuple[set[int] | None, int]:
+    """Narrow a set of ids by a collection, if that collection is a smart one.
+
+    Moved here from the library service, which is where it always belonged: it
+    resolves a *collection*. It was the last thing keeping a 1,661-line module
+    alive after every route it served had been rebuilt on the core.
+    """
+
+    collection_id = int(collection_id or 0)
+    if collection_id <= 0:
+        return current_ids, 0
+    smart_ids = await resolve_collection_image_ids(collection_id)
+    if smart_ids is None:
+        return current_ids, collection_id
+    return combine_id_scopes(current_ids, smart_ids), 0
