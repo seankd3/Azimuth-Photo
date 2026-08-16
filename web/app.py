@@ -27,7 +27,6 @@ from features.develop import export_presets
 from features.export import routes as export_routes
 from features.imports import routes as imports_routes
 from features.library import keyword_routes, saved_views, watched_routes
-from features.media import routes as media_routes
 from features.pages import routes as page_routes
 from features.quality import routes as quality_routes
 from features.settings import routes as settings_routes
