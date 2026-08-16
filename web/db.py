@@ -737,35 +737,8 @@ async def _cache_entry_count(size: str, cache_root: str) -> int:
 # api.py started answering /api/date-groups and /api/map/markers from
 # library.months() and a direct query.
 
-async def get_filter_options(**scope):
-    # Request wiring always passes the full kwargs spray, so drop default
-    # values first: an all-default scope is the plain Library request and must
-    # ride the warmed SWR cache. An empty-but-present id_filter is a real
-    # scope (a search that matched nothing), never the cached payload.
-    scope = {
-        key: value
-        for key, value in scope.items()
-        if value or (key == "id_filter" and value is not None)
-    }
-    if scope:
-        scope["caption_model_key"] = scope.get("caption_model_key") or active_caption_model_key()
-        catalog_counts = await get_catalog_image_counts()
-        return await filter_options_repository.filter_options(
-            DB_PATH,
-            catalog_counts=catalog_counts,
-            active_source_ids=sorted(await get_active_source_id_set()),
-            **scope,
-        )
-    try:
-        return await filter_options_repository.filter_options_cached(
-            DB_PATH,
-            get_catalog_image_counts=get_catalog_image_counts,
-            get_active_source_id_set=get_active_source_id_set,
-            ttl_seconds=FILTER_OPTIONS_CACHE_TTL_SECONDS,
-        )
-    finally:
-        _sync_filter_options_refreshing_facade()
-
+# get_filter_options stood here. api.py answers /api/filter-options from
+# library.facets(), so nothing reached it.
 
 async def get_stats():
     try:
