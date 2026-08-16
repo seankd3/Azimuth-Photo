@@ -710,12 +710,38 @@ them in the photograph: the TIFF/DNG header for formats it can write into, an
 `.xmp` sidecar for proprietary raws. Azimuth reads the photograph. That is the
 whole of it.
 
-A `.lrcat` reader was built and then deleted, and the reason is the general
-one. Adobe's schema is private, has 84 tables, serves one application and may
-be renamed in any release. The photograph is a published format that every
-camera, darktable, Bridge and Capture One already write. The version that
-reads the file is smaller *and* strictly more capable, so there is no trade
-being made — the coupled version was worse at its own job.
+A `.lrcat` reader was built, deleted, and then brought back in a different
+category — and the correction is worth keeping, because the first version of
+this section was confidently wrong.
+
+The principle is right for everything Lightroom has been *told* to write out.
+It is silent about what it has not. Measured across this machine's three
+catalogs — and there are three, not one; the first search looked in a single
+folder and concluded from that — **2,953 photographs are turned in Lightroom
+and carry no orientation in the file**, because Save Metadata was never run on
+them. A principle that loses the owner's decisions is incomplete, not pure.
+
+So the reader exists again as an **adoption**, the same category as the oplog
+adoption before it, and not as the runtime coupling that was removed:
+
+* it runs when asked, files what it finds into the log, and is then done;
+* nothing in the request path reads a `.lrcat`, so Adobe renaming a table
+  breaks a future import and nothing else;
+* running it twice writes nothing the second time.
+
+**The safety rule is the whole of it.** A turn can already be in the file — a
+camera's flip, which `rawpy` honours, or pixels an application rewrote — and
+adopting on top of that lays a correct photograph on its side. So: *adopt only
+where Azimuth is currently showing the photograph the other way round from
+Lightroom.* That compares two presentations instead of trusting either.
+
+The number that justifies the rule: of those 2,953, **2,849 were already
+upright** and only **375** were genuinely flat. An adoption that trusted the
+catalog would have turned 2,849 correct photographs onto their sides. Worse,
+the count *before* their dimensions were read looked like 1,872 — the
+difference is entirely photographs whose `width`/`height` had never been
+measured, so the check silently could not run. **A safety rule that reads a
+fact the catalog does not have is not a safety rule.**
 
 **Measured, on the roll this was built for:** with orientation written to the
 files, `decode()` agreed with Lightroom on **40 of 40** frames, 18 turned and
@@ -790,6 +816,46 @@ round" is true, and then the photographer turns individual frames, which is
 the only reason the roll needed attention at all. Pointed at one roll it wrote
 40 corrections over Lightroom's 18, and the 22 upright frames came back
 sideways. **A verb that is wrong exactly when it is used is not a shortcut.**
+
+## Where the remaining lines are, and what it costs to remove them
+
+Measured 08-16, and it changes what "keep carving" means from here.
+
+Two instruments were pointed at the tree looking for a large easy deletion, and
+both came back nearly empty. Walking the import graph from `app.py` finds
+**2,650 lines no module reaches**. Enumerating every registered route in mount
+order finds **three** handlers shadowed by an earlier mount — `/api/catalog`,
+`/api/folders/tree` and one flag route, all beaten by `api.py`. That is the
+whole of the dead code.
+
+**So the easy deletions are done.** The remaining 27,641 lines in `features/`
+are live: they answer 142 of the app's 194 endpoints. Nothing can be cut by
+finding what nobody calls, because nearly everything is called.
+
+What is left is a density problem, and it is measurable:
+
+| Area | Lines | Routes | Lines per route |
+|---|---:|---:|---:|
+| `features/quality/` | 1,019 | 3 | 340 |
+| `features/develop/` | 11,673 | 38 | 307 |
+| `features/trash/` | 1,012 | 4 | 253 |
+| `features/system/` | 2,149 | 10 | 215 |
+| `features/imports/` | 2,894 | 16 | 181 |
+| `features/catalog/` | 2,063 | 13 | 159 |
+| `features/collections/` | 2,167 | 14 | 155 |
+| `features/library/` | 1,953 | 20 | 98 |
+| **`api.py`** — the same job on the core | **876** | **37** | **24** |
+
+`api.py` answers more endpoints than any feature package and is smaller than
+all but one of them, because a handler on the core is a name, an argument or
+two, and one call. **The ratio is the estimate**: a surface rebuilt on the core
+costs roughly a tenth of what it costs beside it, and the difference is the
+machinery the core makes unnecessary — not the feature.
+
+That is also why the next move is not another survey. Every remaining line is
+attached to something the product does, so it comes out one surface at a time,
+each rebuilt and its machinery deleted in the same commit — the build order
+above, in the order of that table.
 
 ## Deletion guard rails
 

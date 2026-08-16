@@ -34,6 +34,7 @@ import json
 from fastapi import APIRouter, Request, Response
 
 import library
+import lightroom
 import rank
 import render
 import synchronize
@@ -845,6 +846,20 @@ async def synchronize_apply(folder: str = "", adopt: bool = True,
 
     return await _writing(synchronize.apply, folder,
                           adopt=adopt, refresh=refresh, forget=forget)
+
+
+@router.post("/api/lightroom/adopt")
+async def adopt_lightroom(apply: bool = False):
+    """Take in the turns Lightroom recorded and never wrote to the files.
+
+    An adoption, not an integration: it runs when asked and is then done, and
+    nothing in the request path ever reads a `.lrcat`. Reports without writing
+    unless `apply` is set, because a rotation applied to 2,849 photographs that
+    were already upright is worse than none at all — which is what the numbers
+    looked like before their dimensions were actually measured.
+    """
+
+    return await _writing(lightroom.adopt, apply=apply)
 
 
 @router.get("/api/image/{image_id}/state")
