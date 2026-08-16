@@ -12,7 +12,7 @@ from core import cache_events
 from core.static_assets import StaticAssetContext, warm_templates
 
 
-DEFAULT_TEMPLATE_WARMUP = ("desktop.html", "mobile.html")
+DEFAULT_TEMPLATE_WARMUP = ("desktop.html",)
 INTERACTION_CACHE_WARMUP_DELAY_SECONDS = 0.05
 
 

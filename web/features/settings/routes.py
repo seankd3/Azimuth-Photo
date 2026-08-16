@@ -64,7 +64,7 @@ async def api_settings():
 
 @router.get("/api/background-work/status")
 async def api_background_work_status():
-    """One bounded snapshot for the desktop and mobile activity widgets."""
+    """One bounded snapshot for the desktop activity widget."""
 
     from features.captions import routes as caption_routes
     ai_status, cache_status, people_status, captions = await asyncio.gather(

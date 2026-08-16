@@ -86,8 +86,6 @@ def _render(request: Request, template_name: str):
             mod for mod in _eager_module_preloads("desktop/bootstrap.js")
             if "/develop/" not in mod
         ]
-    elif template_name == "mobile.html":
-        context["module_preloads"] = _eager_module_preloads("mobile/bootstrap.js")
     return _templates.TemplateResponse(request, template_name, context)
 
 
@@ -130,13 +128,6 @@ async def index(request: Request):
     if needs_setup():
         return RedirectResponse("/setup", status_code=307)
     return _render(request, "desktop.html")
-
-
-@router.get("/m", response_class=HTMLResponse)
-async def mobile_page(request: Request):
-    if needs_setup():
-        return RedirectResponse("/setup", status_code=307)
-    return _render(request, "mobile.html")
 
 
 @router.get("/d", response_class=HTMLResponse)
