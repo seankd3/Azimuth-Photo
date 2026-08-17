@@ -49,42 +49,57 @@ def main() -> int:
     say(f"model {model}")
     say(f"owed {work.owing(conn, search.EMBEDDING, recipe=recipe):,}")
 
-    done = failed = skipped = 0
+    tile_recipe = {"size": render.LOUPE, "edits": None, "rotate": 0}
+    done = failed = 0
+    from_archive = 0
+    unreachable: set[str] = set()
     started = time.perf_counter()
+
     while True:
-        rows = work.owed(conn, search.EMBEDDING, recipe=recipe, limit=400)
+        # Ask for more than we can use, because photographs we cannot reach stay
+        # owed forever and would otherwise be handed back every pass. They are
+        # skipped in memory rather than recorded as failures: "not on this
+        # machine" is a fact about the machine, and writing it into the cache
+        # would tell a future run with the drive plugged in not to bother.
+        rows = [r for r in work.owed(conn, search.EMBEDDING, recipe=recipe, limit=4000)
+                if r["hash"] not in unreachable]
         if not rows:
-            say("nothing owed; done")
+            say("nothing left that this machine can reach; done")
             break
-        progressed = False
+
         for row in rows:
-            # A rendition on the laptop is the fast path and the offline one:
-            # 6.00 img/s against 0.56, and no archive drive needed.
-            source = tiles.path_for(row["hash"], render.LOUPE)
+            digest = row["hash"]
+            source = tiles.path_for(digest, render.LOUPE)
             if not os.path.exists(source):
-                source = tiles.path_for(row["hash"], render.GRID)
+                source = tiles.path_for(digest, render.GRID)
             if not os.path.exists(source):
-                source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
-            if not source:
-                skipped += 1
-                continue
+                # No rendition here, so the original has to be read. Render the
+                # tile from it first and embed from that: the decode is the
+                # expensive part and this way it is paid once for two answers,
+                # and the photograph gets a preview that lives on the laptop.
+                original = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+                if not original:
+                    unreachable.add(digest)
+                    continue
+                from_archive += 1
+                made = cache.make(conn, digest, "tile", original, tile_recipe)
+                source = (made or {}).get("path") or original
             try:
-                made = cache.make(conn, row["hash"], search.EMBEDDING, source, recipe)
-                progressed = True
-                done += 1 if made else 0
-                failed += 0 if made else 1
+                got = cache.make(conn, digest, search.EMBEDDING, source, recipe)
+                done += 1 if got else 0
+                failed += 0 if got else 1
             except Exception as error:  # keep going; the row records the reason
                 failed += 1
                 say(f"  {type(error).__name__}: {error}"[:160])
-            if (done + failed) % 200 == 0 and done:
+            if (done + failed) and (done + failed) % 250 == 0:
                 rate = done / max(time.perf_counter() - started, 1e-9)
-                left = work.owing(conn, search.EMBEDDING, recipe=recipe)
-                say(f"{done:,} embedded  {failed} failed  {skipped} unreachable"
-                    f"  {rate:.2f} img/s  ~{left / max(rate, 1e-9) / 3600:.1f} h left")
-        if not progressed:
-            say(f"stalled: {skipped:,} unreachable (archive drive unplugged?)")
-            break
-    say(f"finished: {done:,} embedded, {failed} failed, {skipped} unreachable")
+                left = work.owing(conn, search.EMBEDDING, recipe=recipe) - len(unreachable)
+                say(f"{done:,} embedded ({from_archive:,} needed the archive)  {failed} failed"
+                    f"  {len(unreachable):,} unreachable  {rate:.2f} img/s"
+                    f"  ~{max(left, 0) / max(rate, 1e-9) / 3600:.1f} h left")
+
+    say(f"finished: {done:,} embedded, {from_archive:,} from the archive,"
+        f" {failed} failed, {len(unreachable):,} unreachable")
     return 0
 
 
