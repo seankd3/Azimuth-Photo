@@ -55,10 +55,19 @@ def _ranking_sort(sort: str = Query("elo")) -> str:
     keeps it a 400 the caller can read instead of a 500 from inside the SQL.
     """
 
-    from data.repositories.rankings import RANKING_SORTS
+    # `data.repositories.rankings` held the registry until d5b4c004 deleted it
+    # with the other 2,482 lines. This import was left behind, so every route
+    # declaring `sort: RankingSort` raised ModuleNotFoundError inside its own
+    # dependency -- a 500 before the handler was reached.
+    #
+    # The allowlist is `api._UI_SORTS`, not `library.SORTS`: the UI's vocabulary
+    # is the contract a caller writes against (`elo`, `date_taken`, `rating`),
+    # and `library.SORTS` is what those translate *into*. Checking the inner
+    # names would reject `elo` -- the export route's own default.
+    from api import _UI_SORTS
 
     value = str(sort or "").strip()
-    if value and value not in RANKING_SORTS and value not in COMPUTED_SORTS:
+    if value and value not in _UI_SORTS and value not in COMPUTED_SORTS:
         raise HTTPException(status_code=400, detail=f"unknown sort: {value}")
     return value or "elo"
 
