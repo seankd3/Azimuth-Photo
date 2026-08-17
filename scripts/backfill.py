@@ -68,19 +68,46 @@ def main() -> int:
     done = failed = 0
     from_archive = 0
     unreachable: set[str] = set()
+    archive_now = False
     started = time.perf_counter()
 
+    # Photographs owed a vector that already have a rendition here. Asked as a
+    # join rather than filtered in Python: `work.owed` hands back the same top
+    # rows every pass, so skipping the archive ones in memory meant re-reading
+    # and re-discarding them until the set was exhausted. The database can
+    # answer "owed AND has a tile" directly, and it is the difference between
+    # embedding at 1.37 img/s and grinding RAWs at 0.01.
+    WITH_TILE = """
+        SELECT i.content_hash AS hash, i.tail, i.file_size
+        FROM images i
+        JOIN cache t ON t.hash = i.content_hash AND t.kind = 'tile' AND t.state = 'ready'
+        LEFT JOIN cache e ON e.hash = i.content_hash AND e.kind = 'embedding'
+                         AND e.recipe = ? AND e.state = 'ready'
+        WHERE i.content_hash IS NOT NULL AND i.tail IS NOT NULL AND i.vc_of IS NULL
+          AND i.status != 'trashed' AND e.hash IS NULL
+        GROUP BY i.content_hash
+        LIMIT 2000
+    """
+
     while True:
-        # Ask for more than we can use, because photographs we cannot reach stay
-        # owed forever and would otherwise be handed back every pass. They are
-        # skipped in memory rather than recorded as failures: "not on this
-        # machine" is a fact about the machine, and writing it into the cache
-        # would tell a future run with the drive plugged in not to bother.
-        rows = [r for r in work.owed(conn, search.EMBEDDING, recipe=recipe, limit=4000)
-                if r["hash"] not in unreachable]
-        if not rows:
-            say("nothing left that this machine can reach; done")
-            break
+        if not archive_now:
+            rows = conn.execute(WITH_TILE, (cache.canonical(search.EMBEDDING, recipe),)).fetchall()
+            if not rows:
+                say(f"renditions done: {done:,} embedded in "
+                    f"{(time.perf_counter() - started) / 3600:.1f} h. Now the archive.")
+                archive_now = True
+                continue
+        else:
+            # Everything left needs the original read. Unreachable ones stay
+            # owed forever, so they are skipped in memory rather than recorded
+            # as failures: "not on this machine" is a fact about the machine,
+            # and a later run with the drive plugged in must not read it as a
+            # fact about the photograph.
+            rows = [r for r in work.owed(conn, search.EMBEDDING, recipe=recipe, limit=4000)
+                    if r["hash"] not in unreachable]
+            if not rows:
+                say("nothing left that this machine can reach; done")
+                break
 
         # In batches, for two reasons that cost 11x between them: the GPU is
         # idle through most of a single-image call, and `cache.make` commits to
