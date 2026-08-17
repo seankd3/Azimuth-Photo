@@ -147,15 +147,21 @@ class AbandonedWorkTests(unittest.IsolatedAsyncioTestCase):
         await data_connection.close_shared_readers()
 
         # The claim is that the handle is released, not that the worker thread
-        # has already been scheduled out — so wait for it, briefly, rather than
-        # asserting on the operating system's timing.
-        for _ in range(40):
+        # has already been scheduled out — so wait for it rather than asserting
+        # on the operating system's timing.
+        #
+        # Two seconds was not waiting; it was a timing assertion with a generous
+        # constant, and it failed about one run in three on a busy machine. That
+        # is worse than no test: a suite that cries wolf teaches people to scroll
+        # past red. Ten seconds still fails in bounded time if a handle is really
+        # held, and stops failing when Windows is merely slow.
+        for _ in range(200):
             try:
                 os.unlink(self.path)
                 return
             except PermissionError:
                 await asyncio.sleep(0.05)
-        self.fail("the catalog was still held two seconds after every close")
+        self.fail("the catalog was still held ten seconds after every close")
 
     async def test_a_cancelled_reader_still_hands_its_connection_back(self):
         """`finally` runs, but its awaits are cancelled too — hence the shield."""
