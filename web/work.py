@@ -273,9 +273,9 @@ def debt(conn) -> dict[str, int]:
     """How much is owed, per kind. What a status line reads; nothing depends on it."""
 
     tally = {"identity": _unidentified_count(conn)}
-    for name in cache.kinds():
+    for name, kind in cache.kinds().items():
         try:
-            tally[name] = owing(conn, name)
+            tally[name] = sum(owing(conn, name, recipe=recipe) for recipe in kind.ahead)
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
             log.debug("worker=debt kind=%s could not be counted", name)
     return tally
@@ -331,12 +331,14 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
         # meant a single away photo stalled every other kind of work behind it.
         # Trying a handful costs nothing and makes progress whenever *any* of
         # them is reachable.
-        for row in owed(conn, name, on_screen=on_screen, limit=CANDIDATES)[lane::lanes]:
-            source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
-            if source is None:
-                continue
-            cache.make(conn, row["hash"], name, source)
-            return {"did": name, "photo": row["id"]}
+        for recipe in kind.ahead:
+            for row in owed(conn, name, recipe=recipe, on_screen=on_screen,
+                            limit=CANDIDATES)[lane::lanes]:
+                source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+                if source is None:
+                    continue
+                cache.make(conn, row["hash"], name, source, recipe)
+                return {"did": name, "photo": row["id"], "recipe": recipe}
     return None
 
 

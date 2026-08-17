@@ -161,6 +161,16 @@ TILE = cache.register(cache.Kind(
     name="tile",
     compute=make_tile,
     params=("size", "edits", "rotate"),
+    # Grid and loupe are made before they are asked for; `lg` is not. Two sizes
+    # for 144,000 photographs is 50 GB and covers browsing, comparing and
+    # ranking the whole library with the archive unplugged. The third is 177 GB
+    # and answers one question — "show me this one at full width" — which is a
+    # deliberate act with a photograph already in front of you, so it can wait
+    # the half second it takes to render.
+    ahead=(
+        {"size": render.GRID, "edits": None, "rotate": 0},
+        {"size": render.LOUPE, "edits": None, "rotate": 0},
+    ),
     cost=0.4,
     wants="1",
 ))

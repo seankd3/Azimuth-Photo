@@ -52,6 +52,17 @@ class Kind:
     # The recipe's whole vocabulary. Anything outside it is refused, which is
     # the mechanical half of "recipe is never a timestamp".
     params: tuple[str, ...] = ()
+    # Which recipes are worth making before anyone asks for them. `wants` says
+    # *which photographs* should have this kind; this says *which versions*.
+    #
+    # A kind with no parameters has exactly one version, spelled `{}` — which is
+    # why the work loop could get away with passing no recipe at all, right up
+    # until a kind had sizes. `tile` does, and the loop was recording every tile
+    # it made under `{}` while `/api/thumb` looked for
+    # `{"edits":null,"rotate":0,"size":400}`: 5,340 rows nothing would ever
+    # read, the grid remaking on demand what the loop had just made, and 1920
+    # and 3840 never made ahead at all.
+    ahead: tuple[dict[str, Any], ...] = ({},)
     evictable: bool = True
     # Which photos should have one, as a SQL condition over `images i`. This is
     # the half of "owed is a query" that a kind owns: the work layer asks
