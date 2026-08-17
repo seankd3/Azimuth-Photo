@@ -19,7 +19,7 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 BUDGET = HERE / "budget.txt"
-NAMES = ("seam", "layers", "tables", "invokes", "routes", "names")
+NAMES = ("seam", "layers", "tables", "invokes", "routes", "names", "collects")
 
 sys.path.insert(0, str(HERE))
 

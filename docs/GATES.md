@@ -35,13 +35,21 @@ code produces more of them, never fewer.
 | `invokes` | paths a workflow names that are not tracked | **4** | " |
 | `routes` | a path served twice, stranded, or shadowed | **0** | " |
 | `names` | a name that is called and defined nowhere | **0** | " |
+| `collects` | test modules that fail to import | **0** | " |
 
-Whole set: **2.3 s** warm, no network, no database. Five gates are stdlib only;
+Whole set: **5.6 s** warm, no network, no database. Five are stdlib only.
+
 `names` shells out to **pyflakes**, which must be importable by whichever Python
-runs `check.py` (`python -m pip install pyflakes`). It is the one dependency any
-gate has, and it is deliberate: Python's scoping rules are involved enough that a
-hand-rolled undefined-name check would be subtly wrong, and a checker that is
-subtly wrong does not merely miss things — it certifies them.
+runs `check.py` (`python -m pip install pyflakes`). That dependency is
+deliberate: Python's scoping rules are involved enough that a hand-rolled
+undefined-name check would be subtly wrong, and a checker that is subtly wrong
+does not merely miss things — it certifies them.
+
+`collects` runs `pytest --collect-only` under **the project's own interpreter**,
+found at `web/.venv` rather than assumed to be the one running the gates. A gate
+that reported 63 collection errors because it was looking through an interpreter
+without fastapi installed would be a false alarm, and a false alarm teaches
+people to ignore the gate.
 
 ```
 $ for i in 1 2 3; do s=$(date +%s%N); python scripts/gates/check.py >/dev/null; \
