@@ -7,6 +7,7 @@ artifact — no thumbnail key, no embedding, no caption, no face vector.
 """
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import asyncio
 import sqlite3
@@ -27,12 +28,12 @@ class IdentityBackfillTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.db_path = str(self.root / "catalog.db")
-        self.old_db_path = db.DB_PATH
-        db.DB_PATH = self.db_path
+        self.old_db_path = catalog_path()
+        catalog_path_use(self.db_path)
         asyncio.run(db.init_db())
 
     def tearDown(self):
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         self.tempdir.cleanup()
 
     def add(self, name: str, *, date_taken: str, on_disk: bool = True, **columns) -> int:

@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 from typing import Literal
 
@@ -212,13 +213,13 @@ async def api_import_options():
 
 @router.get("/api/imports")
 async def api_import_batches(limit: int = 20):
-    batches = await import_repository.recent_import_batches(db.DB_PATH, limit=limit)
+    batches = await import_repository.recent_import_batches(catalog_path(), limit=limit)
     return {"imports": batches}
 
 
 @router.get("/api/imports/{batch_id}")
 async def api_import_batch(batch_id: int):
-    batch = await import_repository.import_batch(db.DB_PATH, batch_id)
+    batch = await import_repository.import_batch(catalog_path(), batch_id)
     if not batch:
         return JSONResponse({"error": "Import batch not found"}, status_code=404)
     return {"ok": True, "batch": batch, "library_url": _import_library_url(batch_id)}
@@ -250,7 +251,7 @@ async def api_create_import(
     )
     preserve = import_service.truthy(preserve_structure)
     batch_id = await import_repository.create_import_batch(
-        db.DB_PATH,
+        catalog_path(),
         {
             "name": plan["name"],
             "destination_mode": plan["mode"],
@@ -287,7 +288,7 @@ async def api_create_import(
                 source_id=int(source["id"]),
             )
             ids_by_path = await import_repository.image_ids_by_filepaths(
-                db.DB_PATH,
+                catalog_path(),
                 [item["filepath"] for item in copied],
             )
             image_rows = [
@@ -301,7 +302,7 @@ async def api_create_import(
             ]
 
         await import_repository.complete_import_batch(
-            db.DB_PATH,
+            catalog_path(),
             batch_id,
             source_id=int(source["id"]) if source else None,
             image_rows=image_rows,
@@ -310,7 +311,7 @@ async def api_create_import(
             collision_count=copy_result["collision_count"],
         )
     except Exception as exc:
-        await import_repository.fail_import_batch(db.DB_PATH, batch_id, str(exc))
+        await import_repository.fail_import_batch(catalog_path(), batch_id, str(exc))
         raise
 
     cache_events.invalidate_rankings_cache()
@@ -359,7 +360,7 @@ async def api_import_taxonomy():
         ],
         "misplaced_personal_under_raws": (
             await taxonomy.preview_misplaced_personal_photos(
-                db.DB_PATH,
+                catalog_path(),
                 taxonomy.default_library_root(),
             )
         ),
@@ -373,7 +374,7 @@ async def api_import_taxonomy_reclassify(body: ReclassifyRequest):
     Never runs automatically. confirm=true and dry_run=false required to mutate.
     """
     result = await taxonomy.reclassify_misplaced_personal_photos(
-        db.DB_PATH,
+        catalog_path(),
         taxonomy.default_library_root(),
         confirm=body.confirm,
         move_files=body.move_files,

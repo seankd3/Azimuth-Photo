@@ -10,6 +10,7 @@ Whether two paths are one directory is a question only the filesystem can
 answer, so this asks it.
 """
 
+from core.catalog_path import catalog_path, use as catalog_path_use
 import asyncio
 import os
 import tempfile
@@ -28,7 +29,7 @@ class OneFolderIsOneSourceTests(unittest.IsolatedAsyncioTestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.addCleanup(self.tempdir.cleanup)
         self.db_path = os.path.join(self.tempdir.name, "catalog.db")
-        db.DB_PATH = self.db_path
+        catalog_path_use(self.db_path)
         await db.init_db()
         self.photos = os.path.join(self.tempdir.name, "Photos")
         os.makedirs(self.photos, exist_ok=True)

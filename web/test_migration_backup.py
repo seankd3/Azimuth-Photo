@@ -1,5 +1,6 @@
 """Pre-migration catalog backups: labeled snapshots, retention protection, hook."""
 
+from core import catalog_path as catalog_path_module
 import os
 import sqlite3
 from contextlib import closing
@@ -117,7 +118,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
     async def test_startup_refuses_migration_when_snapshot_returns_none(self):
         conn = await data_connection.open_async(self.db)
         try:
-            with mock.patch.object(app_db, "DB_PATH", self.db), mock.patch.object(
+            with mock.patch.object(catalog_path_module, "_path", self.db), mock.patch.object(
                 backups,
                 "backup_before_migration",
                 return_value=None,
@@ -134,7 +135,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
             conn.execute("INSERT INTO images DEFAULT VALUES")
         conn = await data_connection.open_async(version_zero_db)
         try:
-            with mock.patch.object(app_db, "DB_PATH", version_zero_db), mock.patch.object(
+            with mock.patch.object(catalog_path_module, "_path", version_zero_db), mock.patch.object(
                 backups,
                 "backup_before_migration",
                 return_value={"ok": True},
@@ -151,7 +152,7 @@ class MigrationSafetyGateTests(unittest.IsolatedAsyncioTestCase):
         with closing(sqlite3.connect(version_zero_db)) as conn, conn:
             conn.execute("INSERT INTO images DEFAULT VALUES")
         with (
-            mock.patch.object(app_db, "DB_PATH", version_zero_db),
+            mock.patch.object(catalog_path_module, "_path", version_zero_db),
             mock.patch.object(
                 backups,
                 "backup_before_migration",

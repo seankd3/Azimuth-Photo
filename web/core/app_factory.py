@@ -147,10 +147,12 @@ def register_app_lifecycle(shell: AppShell) -> AppLifecycleHandlers:
         )
 
     async def shutdown() -> None:
-        import thumbnails
-
+        # `import thumbnails` stood here, and a `thumbnails=` argument that
+        # `run_shutdown` stopped taking. The module went in 6fc7e31c, so every
+        # shutdown since has raised ModuleNotFoundError before reaching the
+        # TypeError behind it — and nobody saw either, because a collection
+        # error had the test suite reporting nothing for the same 32 commits.
         await background_runtime.run_shutdown(
-            thumbnails=thumbnails,
             background_task_tracker=shell.background_task_tracker,
         )
 

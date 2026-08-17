@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import os
 import sqlite3
 import time
@@ -60,7 +61,7 @@ class WatchedFolderTests(BackendTestCase):
             removed = client.delete(f"/api/watched-folders/{folder['id']}")
             self.assertEqual(removed.status_code, 200, removed.text)
 
-        conn = sqlite3.connect(db.DB_PATH)
+        conn = sqlite3.connect(catalog_path())
         try:
             count = conn.execute('SELECT COUNT(*) FROM images').fetchone()[0]
         finally:
@@ -75,8 +76,8 @@ class WatchedFolderTests(BackendTestCase):
             with open(path, 'wb') as handle:
                 handle.write(b'image')
 
-        folder = await watched_folders.add_folder(db.DB_PATH, inbox, recursive=False)
-        result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        folder = await watched_folders.add_folder(catalog_path(), inbox, recursive=False)
+        result = await watched_folders.scan_folder(catalog_path(), folder['id'])
         self.assertTrue(result['ok'])
         self.assertEqual(result['registered'], 1)
 
@@ -86,14 +87,14 @@ class WatchedFolderTests(BackendTestCase):
         with open(os.path.join(inbox, 'photo.jpg'), 'wb') as handle:
             handle.write(b'image')
 
-        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
+        folder = await watched_folders.add_folder(catalog_path(), inbox)
         real_to_thread = asyncio.to_thread
         with mock.patch.object(
             watched_folders.asyncio,
             'to_thread',
             wraps=real_to_thread,
         ) as to_thread:
-            result = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+            result = await watched_folders.scan_folder(catalog_path(), folder['id'])
 
         self.assertTrue(result['ok'])
         self.assertEqual(result['registered'], 1)
@@ -108,8 +109,8 @@ class WatchedFolderTests(BackendTestCase):
             handle.write(b'first image')
         os.utime(first, (old_mtime, old_mtime))
 
-        folder = await watched_folders.add_folder(db.DB_PATH, inbox)
-        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        folder = await watched_folders.add_folder(catalog_path(), inbox)
+        initial = await watched_folders.scan_folder(catalog_path(), folder['id'])
         self.assertEqual(initial['registered'], 1)
 
         preserved = os.path.join(inbox, 'copied-with-old-time.jpg')
@@ -117,10 +118,10 @@ class WatchedFolderTests(BackendTestCase):
             handle.write(b'preserved image')
         os.utime(preserved, (old_mtime, old_mtime))
 
-        incremental = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        incremental = await watched_folders.scan_folder(catalog_path(), folder['id'])
 
         self.assertEqual(incremental['registered'], 1)
-        conn = sqlite3.connect(db.DB_PATH)
+        conn = sqlite3.connect(catalog_path())
         try:
             paths = {row[0] for row in conn.execute('SELECT filepath FROM images')}
         finally:
@@ -134,8 +135,8 @@ class WatchedFolderTests(BackendTestCase):
         with open(original, 'wb') as handle:
             handle.write(b'virtual copy source')
 
-        folder = await watched_folders.add_folder(db.DB_PATH, inbox, recursive=True)
-        initial = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        folder = await watched_folders.add_folder(catalog_path(), inbox, recursive=True)
+        initial = await watched_folders.scan_folder(catalog_path(), folder['id'])
         self.assertEqual(initial['registered'], 1)
 
         conn = await db.get_db()
@@ -164,7 +165,7 @@ class WatchedFolderTests(BackendTestCase):
         finally:
             await conn.close()
 
-        rematch = await watched_folders.scan_folder(db.DB_PATH, folder['id'])
+        rematch = await watched_folders.scan_folder(catalog_path(), folder['id'])
         self.assertEqual(rematch['registered'], 1)
         conn = await db.get_db()
         try:

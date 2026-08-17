@@ -1,5 +1,6 @@
 """The one assembly: create the shell, mount every router, arm the lifecycle."""
 
+from core.catalog_path import catalog_path
 from core.runtime_paths import apply_environment_defaults
 
 apply_environment_defaults()
@@ -113,6 +114,6 @@ async def _repair_metadata_search_index():
             )
             await data_schema.rebuild_metadata_fts(conn)
         finally:
-            await data_connection.close_async(conn, db_path=db.DB_PATH)
+            await data_connection.close_async(conn, db_path=catalog_path())
 
     shell.track_background_task(_repair())

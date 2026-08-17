@@ -12,6 +12,7 @@ That is the whole bar for a test here: it holds a property that already broke.
 """
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import contextlib
 import sqlite3
@@ -39,7 +40,7 @@ class KeywordTests(BackendTestCase):
     def _conn(self):
         # Closed on the way out: Windows will not delete the temp catalog while
         # a handle is open, so a leaked connection fails teardown, not the test.
-        conn = sqlite3.connect(db.DB_PATH)
+        conn = sqlite3.connect(catalog_path())
         conn.row_factory = sqlite3.Row
         try:
             yield conn
@@ -55,7 +56,7 @@ class KeywordTests(BackendTestCase):
             sets.add(conn, animals, digest)
             conn.commit()
 
-        packet = keywords.xmp_metadata_for_image(db.DB_PATH, image_id)
+        packet = keywords.xmp_metadata_for_image(catalog_path(), image_id)
         self.assertEqual(packet["keywords"], ["Animals > Cats"])
 
     async def test_a_removed_keyword_leaves_the_xmp_write_back(self):
@@ -67,7 +68,7 @@ class KeywordTests(BackendTestCase):
             sets.remove(conn, keyword, digest)
             conn.commit()
 
-        self.assertEqual(keywords.xmp_metadata_for_image(db.DB_PATH, image_id)["keywords"], [])
+        self.assertEqual(keywords.xmp_metadata_for_image(catalog_path(), image_id)["keywords"], [])
 
     def test_a_path_is_the_hierarchy(self):
         """No parent column, so spacing is the only thing that can differ."""

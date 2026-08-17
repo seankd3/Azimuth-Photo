@@ -1,6 +1,7 @@
 """Focused contracts for Phase 2 HDR discovery, alignment, and cache output."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import gzip
 import os
@@ -117,7 +118,7 @@ class HdrMergeCacheTests(unittest.TestCase):
         self.assertEqual(base.dtype, np.dtype("<u2"))
 
         app = FastAPI()
-        db.DB_PATH = self.db_path
+        catalog_path_use(self.db_path)
         app.include_router(develop_routes.router)
         original_is_raw = rawproc.is_raw_path
         with mock.patch.object(rawproc, "is_raw_path", side_effect=lambda path: original_is_raw(path) or Path(path).suffix.lower() == ".exr"):

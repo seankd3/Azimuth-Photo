@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path, use as catalog_path_use
 import pytest
 import json
 import os
@@ -194,7 +195,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
 
         app = FastAPI()
         app.include_router(import_routes.router)
-        db.DB_PATH = self.db_path
+        catalog_path_use(self.db_path)
         return TestClient(app)
 
     def test_catalogs_route_lists_discovered_catalogs(self):

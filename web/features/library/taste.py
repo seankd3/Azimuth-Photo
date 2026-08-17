@@ -396,7 +396,7 @@ async def taste_vector() -> dict:
     """Return the learned taste vector and availability metadata."""
     model_key = _active_model_key()
     db_path = catalog_path()
-    db_signature = db.DB_PATH
+    db_signature = catalog_path()
     now = time.monotonic()
     cached_payload = _cache.get("payload")
     cached_source_key = cached_payload.get("_cache_key") if isinstance(cached_payload, dict) else None

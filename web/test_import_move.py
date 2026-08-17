@@ -2,6 +2,7 @@
 per file and Move-from-library degrading to Copy. Fixtures only — never a
 real catalog."""
 
+from core.catalog_path import catalog_path
 import asyncio
 import os
 from pathlib import Path
@@ -53,7 +54,7 @@ class MoveImportTests(BackendTestCase):
 
     async def _registered_paths(self, path: Path) -> list[str]:
         content_hash, _full, _size = await asyncio.to_thread(card.content_hash_from_stream, path)
-        return await staging.import_repository.image_paths_by_content_hash(db.DB_PATH, content_hash)
+        return await staging.import_repository.image_paths_by_content_hash(catalog_path(), content_hash)
 
     async def test_move_lands_verified_copy_then_drains_source(self):
         stage = Path(self.tempdir.name) / "staging"

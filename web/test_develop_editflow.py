@@ -1,6 +1,7 @@
 """EDITFLOW clipboard requests preserve the selected or complete Develop look."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import asyncio
 import json
@@ -21,10 +22,10 @@ from features.develop import rawproc, routes as develop_routes  # noqa: E402
 class DevelopEditFlowTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.old_db_path = db.DB_PATH
+        self.old_db_path = catalog_path()
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
         self.old_cache_dir = rawproc.BASE_CACHE_DIR
-        db.DB_PATH = os.path.join(self.tempdir.name, "editflow.db")
+        catalog_path_use(os.path.join(self.tempdir.name, "editflow.db"))
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         asyncio.run(db.init_db())
@@ -36,7 +37,7 @@ class DevelopEditFlowTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         self.tempdir.cleanup()

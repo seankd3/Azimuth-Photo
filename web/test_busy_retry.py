@@ -1,6 +1,7 @@
 """Regression coverage for SQLite busy-retry on user-facing writes."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import sqlite3
 import unittest
@@ -57,7 +58,7 @@ class UserFacingBusyRetryTests(BackendTestCase):
             mock.patch.object(connection, "open_async", side_effect=flaky_open),
             mock.patch.object(connection.asyncio, "sleep", new=mock.AsyncMock()),
         ):
-            await image_repository.set_image_flag(db.DB_PATH, image_id, "picked")
+            await image_repository.set_image_flag(catalog_path(), image_id, "picked")
 
         self.assertEqual(attempts["n"], 2)
         conn = await db.get_db()

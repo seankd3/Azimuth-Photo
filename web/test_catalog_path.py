@@ -3,10 +3,10 @@
 Twenty-eight modules used to keep a private `_db_path` global, a
 `configure(db_path=...)` setter, a `_configured_db_path()` reader that raised
 if nobody had called the setter, and a line in `wiring.py` — and every one of
-those wiring lines passed the same `lambda: db.DB_PATH`.
+those wiring lines passed the same `lambda: catalog_path()`.
 
 The indirection existed so tests could point at a temporary catalog, which they
-already do by setting `db.DB_PATH`. So it bought nothing and cost a concept: a
+already do by setting `catalog_path()`. So it bought nothing and cost a concept: a
 module could be imported but "not configured", and several modules treated that
 as normal — returning quietly instead of writing to the oplog.
 """
@@ -15,7 +15,7 @@ import pathlib
 import unittest
 
 import db
-from core.catalog_path import catalog_path
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 WEB = pathlib.Path(__file__).parent
 SKIPPED = {".venv", "node_modules", "__pycache__", "build", "dist"}
@@ -30,19 +30,19 @@ def _production_modules():
 
 class CatalogPathTests(unittest.TestCase):
     def setUp(self):
-        self.original = db.DB_PATH
-        self.addCleanup(setattr, db, "DB_PATH", self.original)
+        self.original = catalog_path()
+        self.addCleanup(catalog_path_use, self.original)
 
     def test_it_is_the_path_the_process_is_working_with(self):
-        db.DB_PATH = "X:/library/catalog.db"
+        catalog_path_use("X:/library/catalog.db")
         self.assertEqual(catalog_path(), "X:/library/catalog.db")
 
     def test_it_follows_a_change_rather_than_caching_one(self):
         """A test switching catalogs must not need to reconfigure anything."""
 
-        db.DB_PATH = "X:/first.db"
+        catalog_path_use("X:/first.db")
         self.assertEqual(catalog_path(), "X:/first.db")
-        db.DB_PATH = "X:/second.db"
+        catalog_path_use("X:/second.db")
         self.assertEqual(catalog_path(), "X:/second.db")
 
 
@@ -59,7 +59,7 @@ class NobodyKeepsAPrivateCopyTests(unittest.TestCase):
         strays = [
             str(path.relative_to(WEB)).replace("\\", "/")
             for path in _production_modules()
-            if "db_path=lambda: db.DB_PATH" in path.read_text(encoding="utf-8", errors="replace")
+            if "db_path=lambda: catalog_path()" in path.read_text(encoding="utf-8", errors="replace")
         ]
         self.assertEqual(strays, [], f"wiring still passes the path: {strays}")
 

@@ -4,6 +4,7 @@ The absolute `filepath` stays exactly as it was — every reader, index, ETag an
 external contract still works. This adds the durable half beside it.
 """
 
+from core.catalog_path import catalog_path, use as catalog_path_use
 import asyncio
 import sqlite3
 import tempfile
@@ -20,12 +21,12 @@ class RelativePathTests(unittest.TestCase):
         self.tempdir = tempfile.TemporaryDirectory()
         self.root = Path(self.tempdir.name)
         self.db_path = str(self.root / "catalog.db")
-        self.old_db_path = db.DB_PATH
-        db.DB_PATH = self.db_path
+        self.old_db_path = catalog_path()
+        catalog_path_use(self.db_path)
         asyncio.run(db.init_db())
 
     def tearDown(self):
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         self.tempdir.cleanup()
 
     def _connect(self) -> sqlite3.Connection:

@@ -1,8 +1,13 @@
+# layers rose 19 -> 42 on 2026-08-16 because the RULE widened, not because the
+# code did: it now also counts core/ and model/ importing `db` or
+# `data.repositories`, the old data layer. Widening a rule and recording the new
+# number is the one case where a rise is honest — say so here, or the next
+# reader cannot tell it from a regression that was ratcheted away.
 # Measured 2026-08-16 at c9f253c9. One number per gate — see docs/GATES.md.
 # It falls by measurement (`check.py --write`) and rises only by hand, in its
 # own commit. A number that is not the measurement describes a tree that is
 # not there.
 seam 16
-layers 19
+layers 42
 tables 61
 invokes 4

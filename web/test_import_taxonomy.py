@@ -1,6 +1,7 @@
 """Library taxonomy routing — three roots + phone-under-Raws regression."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import asyncio
 import errno
@@ -439,20 +440,20 @@ class ReclassifyGatedTests(BackendTestCase):
         )
 
         preview = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=False, dry_run=True,
+            catalog_path(), library, confirm=False, dry_run=True,
         )
         self.assertEqual(preview["action"], "preview")
         self.assertGreaterEqual(preview["count"], 1)
         self.assertTrue(stranded.exists())
 
         preview2 = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=True, dry_run=True,
+            catalog_path(), library, confirm=True, dry_run=True,
         )
         self.assertEqual(preview2["action"], "preview")
         self.assertTrue(stranded.exists())
 
         result = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+            catalog_path(), library, confirm=True, dry_run=False, move_files=True,
         )
         self.assertEqual(result["action"], "reclassify")
         self.assertEqual(result["updated"], 1)
@@ -531,7 +532,7 @@ class ReclassifyGatedTests(BackendTestCase):
         with patch.object(taxonomy, "_to_thread_move", side_effect=crash_after_second_move):
             with self.assertRaisesRegex(RuntimeError, "simulated process crash"):
                 await taxonomy.reclassify_misplaced_personal_photos(
-                    db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+                    catalog_path(), library, confirm=True, dry_run=False, move_files=True,
                 )
 
         moved_paths = [
@@ -539,13 +540,13 @@ class ReclassifyGatedTests(BackendTestCase):
             for path in stranded[:2]
         ]
         self.assertTrue(all(path.exists() for path in moved_paths))
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             stale = await (
                 await conn.execute("SELECT filepath FROM images WHERE filename = ?", (stranded[1].name,))
             ).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(stale["filepath"], str(stranded[1]))
 
         try:
@@ -557,10 +558,10 @@ class ReclassifyGatedTests(BackendTestCase):
             )
 
         fresh_result = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=False, dry_run=True,
+            catalog_path(), library, confirm=False, dry_run=True,
         )
         self.assertEqual(fresh_result["recovery"], {"redone": 1, "undone": 0, "ambiguous": 0, "lost": 0})
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             rows = await (
                 await conn.execute(
@@ -568,7 +569,7 @@ class ReclassifyGatedTests(BackendTestCase):
                 )
             ).fetchall()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         by_name = {row["filename"]: row["filepath"] for row in rows}
         for path, moved_path in zip(stranded[:2], moved_paths):
             self.assertEqual(by_name[path.name], str(moved_path))
@@ -587,25 +588,25 @@ class ReclassifyGatedTests(BackendTestCase):
         )
 
         result = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=True, dry_run=False, move_files=False,
+            catalog_path(), library, confirm=True, dry_run=False, move_files=False,
         )
         self.assertEqual(result["updated"], 0)
         self.assertEqual(len(result["errors"]), 1)
         self.assertIn("destination missing", result["errors"][0]["message"])
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             row = await (
                 await conn.execute("SELECT filepath FROM images WHERE filename = ?", (stranded.name,))
             ).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(row["filepath"], str(stranded))
 
         good = library / "Snapshots" / "2026" / "2026-07-10" / stranded.name
         good.parent.mkdir(parents=True)
         good.write_bytes(stranded.read_bytes())
         result = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=True, dry_run=False, move_files=False,
+            catalog_path(), library, confirm=True, dry_run=False, move_files=False,
         )
         self.assertEqual(result["updated"], 1)
 
@@ -669,7 +670,7 @@ class MoveJournalRecoveryTests(BackendTestCase):
         await db.insert_images_batch(
             [("old.jpg", str(old_path), ".jpg", 1, 0)], source_id=old_source["id"],
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             image = await (
                 await conn.execute("SELECT id FROM images WHERE filepath = ?", (str(old_path),))
@@ -683,27 +684,27 @@ class MoveJournalRecoveryTests(BackendTestCase):
             )
             await conn.commit()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         return journal, image["id"], old_path, new_path, new_source["id"]
 
     async def _journal_count(self) -> int:
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             row = await (await conn.execute("SELECT COUNT(*) AS count FROM taxonomy_move_journal")).fetchone()
             return row["count"]
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
 
     async def test_recover_redoes_completed_disk_move(self):
         journal, image_id, _old_path, new_path, new_source_id = await self._pending_move(
             old_exists=False, new_exists=True,
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             result = await journal.recover(conn)
             image = await (await conn.execute("SELECT filepath, source_id FROM images WHERE id = ?", (image_id,))).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(result, {"redone": 1, "undone": 0, "ambiguous": 0, "lost": 0})
         self.assertEqual((image["filepath"], image["source_id"]), (str(new_path), new_source_id))
         self.assertEqual(await self._journal_count(), 0)
@@ -712,12 +713,12 @@ class MoveJournalRecoveryTests(BackendTestCase):
         journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
             old_exists=True, new_exists=False,
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             result = await journal.recover(conn)
             image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(result, {"redone": 0, "undone": 1, "ambiguous": 0, "lost": 0})
         self.assertEqual(image["filepath"], str(old_path))
         self.assertEqual(await self._journal_count(), 0)
@@ -726,12 +727,12 @@ class MoveJournalRecoveryTests(BackendTestCase):
         journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
             old_exists=True, new_exists=True,
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             result = await journal.recover(conn)
             image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(result, {"redone": 0, "undone": 0, "ambiguous": 1, "lost": 0})
         self.assertEqual(image["filepath"], str(old_path))
         self.assertEqual(await self._journal_count(), 1)
@@ -740,12 +741,12 @@ class MoveJournalRecoveryTests(BackendTestCase):
         journal, image_id, old_path, _new_path, _new_source_id = await self._pending_move(
             old_exists=False, new_exists=False,
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             result = await journal.recover(conn)
             image = await (await conn.execute("SELECT filepath FROM images WHERE id = ?", (image_id,))).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         self.assertEqual(result, {"redone": 0, "undone": 0, "ambiguous": 0, "lost": 1})
         self.assertEqual(image["filepath"], str(old_path))
         self.assertEqual(await self._journal_count(), 0)
@@ -802,7 +803,7 @@ class MoveJournalRecoveryTests(BackendTestCase):
 
         with patch.object(connection, "open_async", side_effect=open_with_commit_failure):
             result = await taxonomy.reclassify_misplaced_personal_photos(
-                db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+                catalog_path(), library, confirm=True, dry_run=False, move_files=True,
             )
 
         good = [library / "Snapshots" / "2026" / "2026-07-10" / path.name for path in stranded]
@@ -814,7 +815,7 @@ class MoveJournalRecoveryTests(BackendTestCase):
         self.assertEqual(len(result["errors"]), 1)
 
         healed = await taxonomy.reclassify_misplaced_personal_photos(
-            db.DB_PATH, library, confirm=True, dry_run=False, move_files=True,
+            catalog_path(), library, confirm=True, dry_run=False, move_files=True,
         )
         self.assertEqual(healed["updated"], 1)
         for image_id, path in zip(image_ids, good, strict=True):

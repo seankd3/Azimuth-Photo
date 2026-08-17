@@ -4,6 +4,7 @@ Do Not Add New Logic Here: put SQL in ``data.repositories`` modules and keep
 this module as a stable delegate for older callers during the migration.
 """
 
+from core.catalog_path import catalog_path
 import aiosqlite
 import asyncio
 import logging
@@ -25,7 +26,10 @@ from data.repositories import ratings as rating_repository
 from data.repositories import stats as stats_repository
 import settings
 
-DB_PATH = resolve_runtime_paths().catalog_db
+# The catalog's location lives in `core.catalog_path` now, because it is a path
+# and a path has no business inside a data layer. Nothing here holds it: a
+# module constant froze at import, so a test pointing at a temporary catalog
+# was served the real one by anything that had already read the constant.
 log = logging.getLogger(__name__)
 
 
@@ -127,7 +131,7 @@ def _sync_filter_options_refreshing_facade():
 
 
 async def get_db() -> aiosqlite.Connection:
-    return await data_connection.open_async(DB_PATH)
+    return await data_connection.open_async(catalog_path())
 
 
 _refresh_source_online_states_on_conn = catalog_repository.refresh_source_online_states_on_conn
@@ -202,7 +206,7 @@ async def purge_retired_embedding_data() -> dict:
 
 async def get_search_query_embedding(config: dict, query: str) -> bytes | None:
     return await embedding_repository.get_search_query_embedding(
-        DB_PATH,
+        catalog_path(),
         config=config,
         query=query,
     )
@@ -210,7 +214,7 @@ async def get_search_query_embedding(config: dict, query: str) -> bytes | None:
 
 async def store_search_query_embedding(config: dict, query: str, blob: bytes):
     return await embedding_repository.store_search_query_embedding(
-        DB_PATH,
+        catalog_path(),
         config=config,
         query=query,
         blob=blob,
@@ -243,18 +247,18 @@ async def _backup_before_migration(conn) -> None:
     from features.system import backups
 
     result = await asyncio.to_thread(
-        backups.backup_before_migration, DB_PATH, current, SCHEMA_VERSION
+        backups.backup_before_migration, catalog_path(), current, SCHEMA_VERSION
     )
     if not result or not result.get("ok"):
         raise RuntimeError("Pre-migration catalog backup failed; schema upgrade refused")
 
 
 async def init_db():
-    db_exists = os.path.exists(DB_PATH)
+    db_exists = os.path.exists(catalog_path())
     db = await get_db()
     try:
         if not db_exists:
-            await data_connection.enable_wal(db, db_path=DB_PATH)
+            await data_connection.enable_wal(db, db_path=catalog_path())
         if db_exists:
             await _backup_before_migration(db)
         if db_exists and await _schema_is_current(db):
@@ -296,7 +300,7 @@ async def init_db():
 
 async def batch_set_orientations(updates: list[tuple[str, float, int]]):
     """Set orientation and aspect_ratio for multiple images. Each tuple: (orientation, aspect_ratio, image_id)."""
-    await image_repository.batch_set_orientations(DB_PATH, updates)
+    await image_repository.batch_set_orientations(catalog_path(), updates)
     _invalidate_filter_options_cache()
 
 
@@ -304,7 +308,7 @@ async def batch_update_metadata(updates: list[tuple]):
     """Persist extracted metadata. Tuples are built in features.catalog.metadata.metadata_update_tuple."""
     if not updates:
         return
-    await image_repository.batch_update_metadata(DB_PATH, updates)
+    await image_repository.batch_update_metadata(catalog_path(), updates)
     _invalidate_filter_options_cache()
     cache_events.invalidate_rankings_cache()
 
@@ -312,7 +316,7 @@ async def batch_update_metadata(updates: list[tuple]):
 async def set_image_dates(image_ids: list[int], *, date_taken: str, date_source: str):
     """Stamp an authoritative date — e.g. a film roll's delivery day."""
     await image_repository.set_image_dates(
-        DB_PATH, image_ids, date_taken=date_taken, date_source=date_source
+        catalog_path(), image_ids, date_taken=date_taken, date_source=date_source
     )
     _invalidate_filter_options_cache()
     cache_events.invalidate_rankings_cache()
@@ -322,9 +326,9 @@ async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
     """Insert image rows, ignoring duplicates."""
     if not rows:
         return
-    await catalog_repository.insert_images_batch(DB_PATH, rows, source_id)
+    await catalog_repository.insert_images_batch(catalog_path(), rows, source_id)
     zero_byte_paths = [str(row[1]) for row in rows if len(row) > 3 and row[3] == 0]
-    quarantined = await catalog_repository.mark_zero_byte_images_missing(DB_PATH, zero_byte_paths)
+    quarantined = await catalog_repository.mark_zero_byte_images_missing(catalog_path(), zero_byte_paths)
     for image in quarantined:
         log.warning(
             "worker=catalog_scan image_id=%s skipped zero-byte image path=%r",
@@ -337,20 +341,20 @@ async def insert_images_batch(rows: list[tuple], source_id: int | None = None):
 
 
 async def refresh_source_online_states():
-    if await catalog_repository.refresh_source_online_states(DB_PATH):
+    if await catalog_repository.refresh_source_online_states(catalog_path()):
         _invalidate_stats_cache()
         _invalidate_filter_options_cache()
 
 
 async def add_or_restore_source(path: str):
-    source = await catalog_repository.add_or_restore_source(DB_PATH, path)
+    source = await catalog_repository.add_or_restore_source(catalog_path(), path)
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
     return source
 
 
 async def mark_source_scan_started(source_id: int):
-    if await catalog_repository.mark_source_scan_started(DB_PATH, source_id):
+    if await catalog_repository.mark_source_scan_started(catalog_path(), source_id):
         _invalidate_stats_cache()
         _invalidate_filter_options_cache()
 
@@ -361,7 +365,7 @@ async def mark_source_scan_finished(
     excluded_directory_paths: list[str] | None = None,
 ):
     await catalog_repository.mark_source_scan_finished(
-        DB_PATH,
+        catalog_path(),
         source_id,
         seen_filepaths,
         excluded_directory_paths,
@@ -373,7 +377,7 @@ async def mark_source_scan_finished(
 
 def mark_image_missing_sync(image_id: int, missing_at: float | None = None) -> bool:
     """Mark one image missing from sync thumbnail/worker code."""
-    changed = catalog_repository.mark_image_missing_sync(DB_PATH, image_id, missing_at)
+    changed = catalog_repository.mark_image_missing_sync(catalog_path(), image_id, missing_at)
     if changed:
         _invalidate_stats_cache()
         _invalidate_filter_options_cache()
@@ -383,7 +387,7 @@ def mark_image_missing_sync(image_id: int, missing_at: float | None = None) -> b
 
 async def mark_image_missing(image_id: int, missing_at: float | None = None) -> bool:
     """Mark one image missing from async request/worker code."""
-    changed = await catalog_repository.mark_image_missing(DB_PATH, image_id, missing_at)
+    changed = await catalog_repository.mark_image_missing(catalog_path(), image_id, missing_at)
     if changed:
         _invalidate_stats_cache()
         _invalidate_filter_options_cache()
@@ -394,7 +398,7 @@ async def mark_image_missing(image_id: int, missing_at: float | None = None) -> 
 
 async def get_catalog_summary():
     return await catalog_repository.catalog_summary_cached(
-        DB_PATH,
+        catalog_path(),
         get_stats=get_stats,
         refresh_source_online_states=refresh_source_online_states,
         ttl_seconds=CATALOG_CACHE_TTL_SECONDS,
@@ -402,13 +406,13 @@ async def get_catalog_summary():
 
 
 async def remove_source_keep_data(source_id: int):
-    await catalog_repository.remove_source_keep_data(DB_PATH, source_id)
+    await catalog_repository.remove_source_keep_data(catalog_path(), source_id)
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
 
 
 async def purge_source_catalog_data(source_id: int) -> dict:
-    result = await catalog_repository.purge_source_catalog_data(DB_PATH, source_id)
+    result = await catalog_repository.purge_source_catalog_data(catalog_path(), source_id)
     _invalidate_stats_cache()
     _invalidate_filter_options_cache()
     invalidate_cached_image_ids_cache()
@@ -416,14 +420,14 @@ async def purge_source_catalog_data(source_id: int) -> dict:
 
 
 async def set_image_status(image_id: int, status: str):
-    await image_repository.set_image_status(DB_PATH, image_id, status)
+    await image_repository.set_image_status(catalog_path(), image_id, status)
     _invalidate_past_matchups_cache()
     _invalidate_rating_stats_cache()
     _invalidate_filter_options_cache()
 
 
 async def set_image_flag(image_id: int, flag: str):
-    await image_repository.set_image_flag(DB_PATH, image_id, flag)
+    await image_repository.set_image_flag(catalog_path(), image_id, flag)
     cache_events.invalidate_rankings_cache()
     _invalidate_ranking_count_cache()
     _invalidate_filter_options_cache()
@@ -431,7 +435,7 @@ async def set_image_flag(image_id: int, flag: str):
 
 async def batch_set_image_flags(image_ids: list[int], flag: str, chunk_size: int = 500) -> int:
     updated = await image_repository.batch_set_image_flags(
-        DB_PATH,
+        catalog_path(),
         image_ids,
         flag,
         chunk_size,
@@ -445,14 +449,14 @@ async def batch_set_image_flags(image_ids: list[int], flag: str, chunk_size: int
 
 async def get_active_images_for_pairing():
     return await rating_repository.get_active_images_for_pairing(
-        DB_PATH,
+        catalog_path(),
         get_catalog_image_counts=get_catalog_image_counts,
     )
 
 
 async def get_visible_pairing_pool_counts(size: str, cache_root: str) -> dict:
     return await rating_repository.visible_pairing_pool_counts_cached(
-        DB_PATH,
+        catalog_path(),
         get_catalog_image_counts=get_catalog_image_counts,
         size=size,
         cache_root=cache_root,
@@ -466,7 +470,7 @@ async def get_visible_orientation_pairing_pool_counts(
     orientation: str,
 ) -> dict:
     return await rating_repository.visible_orientation_pairing_pool_counts_cached(
-        DB_PATH,
+        catalog_path(),
         get_catalog_image_counts=get_catalog_image_counts,
         count_rankings=count_rankings,
         size=size,
@@ -478,7 +482,7 @@ async def get_visible_orientation_pairing_pool_counts(
 
 async def get_past_matchups() -> set[tuple[int, int]]:
     return await rating_repository.get_past_matchups(
-        DB_PATH,
+        catalog_path(),
         get_active_source_id_set=get_active_source_id_set,
     )
 
@@ -494,7 +498,7 @@ async def record_comparison(
     action_id: str | None = None,
 ):
     await rating_repository.record_comparison(
-        DB_PATH,
+        catalog_path(),
         winner_id=winner_id,
         loser_id=loser_id,
         mode=mode,
@@ -516,7 +520,7 @@ async def record_active_comparison(
     """Validate active images and record a comparison in one DB round trip."""
     counts = await get_catalog_image_counts()
     result = await rating_repository.record_active_comparison(
-        DB_PATH,
+        catalog_path(),
         winner_id=winner_id,
         loser_id=loser_id,
         mode=mode,
@@ -539,7 +543,7 @@ async def record_active_mosaic_pick(
     """Validate active mosaic images and record the full pick action."""
     counts = await get_catalog_image_counts()
     result = await rating_repository.record_active_mosaic_pick(
-        DB_PATH,
+        catalog_path(),
         picked_id=picked_id,
         other_ids=other_ids,
         action_id=action_id,
@@ -555,7 +559,7 @@ async def record_active_mosaic_pick(
 
 async def undo_last_comparison():
     """Undo the last comparison/action, restoring Elo ratings."""
-    result = await rating_repository.undo_last_comparison(DB_PATH)
+    result = await rating_repository.undo_last_comparison(catalog_path())
     if result is not None:
         _invalidate_rating_stats_cache()
     return result
@@ -573,7 +577,7 @@ async def store_face_scan_result(
     error: str = "",
 ) -> dict:
     result = await people_repository.store_face_scan_result(
-        DB_PATH,
+        catalog_path(),
         image_id=image_id,
         model_id=model_id,
         cache_path=cache_path,
@@ -598,7 +602,7 @@ async def cluster_unassigned_faces(
     limit: int = 500,
 ) -> dict:
     result = await people_repository.cluster_unassigned_faces(
-        DB_PATH,
+        catalog_path(),
         model_id=model_id,
         similarity_threshold=similarity_threshold,
         merge_threshold=merge_threshold,
@@ -613,7 +617,7 @@ async def cluster_unassigned_faces(
 async def get_people_review(limit: int = 24, long_tail_threshold: int = 1) -> dict:
     current_settings = settings.get_settings()
     return await people_repository.get_people_review(
-        DB_PATH,
+        catalog_path(),
         limit=limit,
         long_tail_threshold=long_tail_threshold,
         face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
@@ -624,7 +628,7 @@ async def get_people_review(limit: int = 24, long_tail_threshold: int = 1) -> di
 async def get_people_status_counts(long_tail_threshold: int = 1) -> dict:
     current_settings = settings.get_settings()
     return await people_repository.get_people_status_counts(
-        DB_PATH,
+        catalog_path(),
         long_tail_threshold=long_tail_threshold,
         face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
         cache_root=str(current_settings.get("ssd_cache_dir") or ""),
@@ -632,35 +636,35 @@ async def get_people_status_counts(long_tail_threshold: int = 1) -> dict:
 
 
 async def label_person(person_id: int, name: str) -> dict:
-    result = await people_repository.label_person(DB_PATH, person_id, name)
+    result = await people_repository.label_person(catalog_path(), person_id, name)
     if result.get("ok"):
         _invalidate_filter_options_cache()
     return result
 
 
 async def merge_people(source_person_id: int, target_person_id: int) -> dict:
-    result = await people_repository.merge_people(DB_PATH, source_person_id, target_person_id)
+    result = await people_repository.merge_people(catalog_path(), source_person_id, target_person_id)
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
 
 
 async def assign_face(face_id: int, person_id: int | None = None, name: str = "") -> dict:
-    result = await people_repository.assign_face(DB_PATH, face_id, person_id=person_id, name=name)
+    result = await people_repository.assign_face(catalog_path(), face_id, person_id=person_id, name=name)
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
 
 
 async def ignore_face(face_id: int) -> dict:
-    result = await people_repository.ignore_face(DB_PATH, face_id)
+    result = await people_repository.ignore_face(catalog_path(), face_id)
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
 
 
 async def ignore_person(person_id: int) -> dict:
-    result = await people_repository.ignore_person(DB_PATH, person_id)
+    result = await people_repository.ignore_person(catalog_path(), person_id)
     if result.get("ok"):
         _invalidate_people_dependent_caches()
     return result
@@ -675,7 +679,7 @@ async def get_cached_image_ids(
     """Return IDs with a cache_entries row for the exact cache root/tier."""
     del chunk_size
     return await cache_entry_repository.cached_image_ids(
-        DB_PATH,
+        catalog_path(),
         image_ids,
         size,
         cache_root,
@@ -686,7 +690,7 @@ async def get_cached_image_ids(
 async def get_cached_image_id_set(size: str, cache_root: str) -> frozenset[int]:
     """Return cached image IDs for one cache root/tier with a short TTL."""
     return await cache_entry_repository.cached_image_id_set_cached(
-        DB_PATH,
+        catalog_path(),
         size=size,
         cache_root=cache_root,
         ttl_seconds=CACHED_IMAGE_IDS_TTL_SECONDS,
@@ -695,7 +699,7 @@ async def get_cached_image_id_set(size: str, cache_root: str) -> frozenset[int]:
 
 async def get_active_source_id_set() -> frozenset[int]:
     return await catalog_repository.active_source_id_set_cached(
-        DB_PATH,
+        catalog_path(),
         ttl_seconds=ACTIVE_SOURCE_IDS_TTL_SECONDS,
     )
 
@@ -710,7 +714,7 @@ async def metadata_search_image_ids(text_query: str, *, max_results: int = 5000)
     if len(query) < 3:
         return None
     return await metadata_search_repository.metadata_search_image_ids(
-        DB_PATH,
+        catalog_path(),
         query,
         active_source_ids=await get_active_source_id_set(),
         max_results=max_results,
@@ -719,7 +723,7 @@ async def metadata_search_image_ids(text_query: str, *, max_results: int = 5000)
 
 async def _cache_entry_count(size: str, cache_root: str) -> int:
     return await cache_entry_repository.cache_entry_count_cached(
-        DB_PATH,
+        catalog_path(),
         size=size,
         cache_root=cache_root,
         ttl_seconds=CACHE_ENTRY_COUNT_TTL_SECONDS,
@@ -743,7 +747,7 @@ async def _cache_entry_count(size: str, cache_root: str) -> int:
 async def get_stats():
     try:
         return await stats_repository.full_stats_cached(
-            DB_PATH,
+            catalog_path(),
             ttl_seconds=STATS_CACHE_TTL_SECONDS,
             refresh=_get_stats_uncached,
         )
@@ -754,7 +758,7 @@ async def get_stats():
 async def _get_stats_uncached():
     try:
         return await stats_repository.refresh_full_stats_cache(
-            DB_PATH,
+            catalog_path(),
             ttl_seconds=STATS_CACHE_TTL_SECONDS,
         )
     finally:
@@ -763,7 +767,7 @@ async def _get_stats_uncached():
 
 async def get_catalog_image_counts() -> dict:
     return await stats_repository.catalog_image_counts_cached(
-        DB_PATH,
+        catalog_path(),
         ttl_seconds=CATALOG_CACHE_TTL_SECONDS,
     )
 
@@ -772,7 +776,7 @@ async def get_top_images(limit: int = 50):
     """Get top N images by Elo for top-tier refinement."""
     counts = await get_catalog_image_counts()
     return await image_repository.get_top_images(
-        DB_PATH,
+        catalog_path(),
         limit=limit,
         catalog_counts=counts,
     )
@@ -789,7 +793,7 @@ async def get_unembedded_images(
     """Get kept/maybe images that don't have CLIP embeddings yet."""
     embedding_config = embedding_config or active_embedding_config()
     return await embedding_repository.get_unembedded_images(
-        DB_PATH,
+        catalog_path(),
         embedding_config=embedding_config,
         **_embedding_repository_kwargs(),
         limit=limit,
@@ -805,7 +809,7 @@ async def store_embeddings_batch(rows: list[tuple[int, bytes]], embedding_config
     embedding_config = embedding_config or active_embedding_config()
     model_key = embedding_config["model_key"]
     image_ids = await embedding_repository.store_embeddings_batch(
-        DB_PATH,
+        catalog_path(),
         rows=rows,
         embedding_config=embedding_config,
         **_embedding_repository_kwargs(),
@@ -823,7 +827,7 @@ async def poison_embedding_image(
     force: bool = False,
 ) -> bool:
     return await embedding_repository.poison_embedding_image(
-        DB_PATH,
+        catalog_path(),
         image_id=image_id,
         embedding_config=embedding_config or active_embedding_config(),
         error=error,
@@ -835,7 +839,7 @@ async def clear_embedding_poison_ledger(
     embedding_config: dict | None = None,
 ) -> int:
     return await embedding_repository.clear_embedding_poison_ledger(
-        DB_PATH,
+        catalog_path(),
         embedding_config=embedding_config or active_embedding_config(),
     )
 
@@ -843,7 +847,7 @@ async def clear_embedding_poison_ledger(
 async def count_embeddings_for_model(embedding_config: dict, *, online_only: bool = False) -> int:
     if online_only:
         return await embedding_repository.count_embeddings_for_model(
-            DB_PATH,
+            catalog_path(),
             embedding_config=embedding_config,
             **_embedding_repository_kwargs(),
             online_only=True,
@@ -854,7 +858,7 @@ async def count_embeddings_for_model(embedding_config: dict, *, online_only: boo
         return 0
     active_source_ids = sorted(await get_active_source_id_set())
     return await embedding_repository.count_embeddings_for_model(
-        DB_PATH,
+        catalog_path(),
         embedding_config=embedding_config,
         **_embedding_repository_kwargs(),
         online_only=False,
@@ -867,7 +871,7 @@ async def get_all_embeddings():
     """Get all embeddings for prediction pass."""
     model_key = active_embedding_model_key()
     return await embedding_repository.get_all_embeddings(
-        DB_PATH,
+        catalog_path(),
         model_key=model_key,
         **_embedding_repository_kwargs(),
     )
@@ -884,7 +888,7 @@ async def get_embedding_count() -> int:
 async def ensure_active_caption_fts_model(caption_config: dict | None = None) -> None:
     caption_config = caption_config or active_caption_config()
     await caption_repository.ensure_active_caption_fts_model(
-        DB_PATH,
+        catalog_path(),
         caption_config["model_key"],
     )
 
@@ -898,7 +902,7 @@ async def get_images_needing_captions(
 ) -> list[dict]:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.get_images_needing_captions(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
         cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
         cache_size=cache_size,
@@ -915,7 +919,7 @@ async def count_images_needing_captions(
 ) -> int:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.count_images_needing_captions(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
         cache_root=cache_root or settings.get_settings()["ssd_cache_dir"],
         cache_size=cache_size,
@@ -937,7 +941,7 @@ async def store_caption_result(
     caption_config = caption_config or active_caption_config()
     await ensure_active_caption_fts_model(caption_config)
     await caption_repository.store_caption_result(
-        DB_PATH,
+        catalog_path(),
         image_id=image_id,
         model_key=caption_config["model_key"],
         caption=caption,
@@ -956,7 +960,7 @@ async def store_caption_result(
 async def get_caption_status_counts(caption_config: dict | None = None) -> dict:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.caption_status_counts(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
         cache_root=settings.get_settings()["ssd_cache_dir"],
     )
@@ -965,7 +969,7 @@ async def get_caption_status_counts(caption_config: dict | None = None) -> dict:
 async def get_image_caption(image_id: int, caption_config: dict | None = None) -> dict | None:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.get_image_caption(
-        DB_PATH,
+        catalog_path(),
         image_id=image_id,
         model_key=caption_config["model_key"],
     )
@@ -981,7 +985,7 @@ async def owner_update_caption(
     caption_config = caption_config or active_caption_config()
     await ensure_active_caption_fts_model(caption_config)
     result = await caption_repository.owner_update_caption(
-        DB_PATH,
+        catalog_path(),
         image_id=image_id,
         model_key=caption_config["model_key"],
         caption=caption,
@@ -1000,11 +1004,11 @@ async def owner_update_caption(
 async def get_tags(q: str = "", limit: int = 100, caption_config: dict | None = None) -> list[dict]:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.list_tags(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
         q=q,
         limit=limit,
-        signature=await caption_repository.tag_signature(DB_PATH, model_key=caption_config["model_key"]),
+        signature=await caption_repository.tag_signature(catalog_path(), model_key=caption_config["model_key"]),
     )
 
 
@@ -1014,7 +1018,7 @@ async def _annotate_caption_presence(rows, caption_config: dict | None = None) -
         return data
     caption_config = caption_config or active_caption_config()
     summaries = await caption_repository.image_caption_summaries(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
         image_ids=[row.get("id") for row in data],
     )
@@ -1033,7 +1037,7 @@ async def caption_search_ranked_image_ids(
 ) -> list[tuple[int, float]]:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.caption_search_ranked_image_ids(
-        DB_PATH,
+        catalog_path(),
         text_query,
         active_source_ids=await get_active_source_id_set(),
         model_key=caption_config["model_key"],
@@ -1047,7 +1051,7 @@ async def metadata_search_ranked_image_ids(
     max_results: int = 5000,
 ) -> list[tuple[int, float]]:
     return await metadata_search_repository.metadata_search_ranked_image_ids(
-        DB_PATH,
+        catalog_path(),
         text_query,
         active_source_ids=await get_active_source_id_set(),
         max_results=max_results,
@@ -1057,7 +1061,7 @@ async def metadata_search_ranked_image_ids(
 async def caption_count_for_signature(caption_config: dict | None = None) -> int:
     caption_config = caption_config or active_caption_config()
     return await caption_repository.caption_count_for_signature(
-        DB_PATH,
+        catalog_path(),
         model_key=caption_config["model_key"],
     )
 
@@ -1065,7 +1069,7 @@ async def caption_count_for_signature(caption_config: dict | None = None) -> int
 async def get_ai_status_counts() -> dict:
     """Return the small stats subset needed by the AI status poller."""
     return await stats_repository.ai_status_counts_cached(
-        DB_PATH,
+        catalog_path(),
         get_embedding_count=get_embedding_count,
         get_active_source_ids=get_active_source_id_set,
         active_embedding_config=active_embedding_config,

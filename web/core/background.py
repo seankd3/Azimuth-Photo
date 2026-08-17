@@ -209,7 +209,7 @@ async def run_shutdown(
     from features.system import backups
     import db
 
-    await asyncio.to_thread(backups.mark_clean_shutdown, db.DB_PATH)
+    await asyncio.to_thread(backups.mark_clean_shutdown, catalog_path())
 
 
 async def run_startup(
@@ -261,9 +261,9 @@ async def run_startup(
     # 139k catalog). fsck pattern: a clean shutdown earns an instant boot with a
     # background verification; anything else (crash, kill, power loss) still
     # pays the full blocking check before serving.
-    if backups.consume_clean_shutdown(db.DB_PATH):
+    if backups.consume_clean_shutdown(catalog_path()):
         async def _verify_catalog_in_background():
-            result = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+            result = await asyncio.to_thread(backups.catalog_quick_check, catalog_path())
             if not result["ok"]:
                 log.error(
                     "background catalog check FAILED after clean-shutdown boot "
@@ -271,7 +271,7 @@ async def run_startup(
                 )
         track_background_task(_verify_catalog_in_background())
     else:
-        catalog = await asyncio.to_thread(backups.catalog_quick_check, db.DB_PATH)
+        catalog = await asyncio.to_thread(backups.catalog_quick_check, catalog_path())
         if not catalog["ok"]:
             log.error("catalog startup blocked state=%s error=%s", catalog["state"], catalog.get("error"))
             await asyncio.to_thread(warm_templates)
@@ -286,12 +286,12 @@ async def run_startup(
         # faults (~400ms measured) unless someone else pays them first.
         from data import connection as data_connection
 
-        if data_connection.is_ephemeral_db_path(db.DB_PATH):
+        if data_connection.is_ephemeral_db_path(catalog_path()):
             # Temp catalogs never hold an inline reader (Windows deletability).
             return
         try:
             await asyncio.to_thread(
-                lambda: data_connection.inline_reader(db.DB_PATH)
+                lambda: data_connection.inline_reader(catalog_path())
                 .execute("SELECT id FROM images ORDER BY id LIMIT 1")
                 .fetchone()
             )
@@ -311,7 +311,7 @@ async def run_startup(
         try:
             import db as _db
             from features.collections import suggestions as _suggestions
-            await _suggestions.collection_suggestions(_db.DB_PATH)
+            await _suggestions.collection_suggestions(_catalog_path())
         except Exception:
             log.debug("collection suggestions warmup skipped", exc_info=True)
 
@@ -325,7 +325,7 @@ async def run_startup(
         try:
             import db as _db
             import elo_stars as _elo_stars
-            await _elo_stars.refresh_stored_stars(_db.DB_PATH)
+            await _elo_stars.refresh_stored_stars(_catalog_path())
         except Exception:
             log.debug("stored star reconcile skipped", exc_info=True)
 
@@ -347,11 +347,11 @@ async def run_startup(
         from data import connection as data_connection
         from features.catalog import synchronize
 
-        if data_connection.is_ephemeral_db_path(app_db.DB_PATH):
+        if data_connection.is_ephemeral_db_path(app_catalog_path()):
             # A temp catalog belongs to a test, and a worker still holding it
             # when the fixture tears down is a Windows deletability failure.
             return
-        await synchronize.run_reconcile_worker(lambda: app_db.DB_PATH)
+        await synchronize.run_reconcile_worker(lambda: app_catalog_path())
 
     track_background_task(_start_background_daemon(_reconcile_folders, delay=30.0))
 
@@ -365,7 +365,11 @@ async def run_startup(
     # prefetch worker, a pregen worker and a warm worker that arbitrated
     # between themselves through a governor: owed is a query, so there is
     # nothing to divide up.
-    from core.catalog_path import catalog_path
+    # `catalog_path` is imported at the top of this module. Repeating it here
+    # made the name local to this whole function, so the four uses *above* this
+    # line raised UnboundLocalError — the appendix lesson in docs/CORE.md,
+    # walked into again the moment a sweep put `catalog_path()` in a function
+    # that already re-imported it.
     from data import connection as _conn
 
     started = work.start(lambda: _conn.open_sync(catalog_path()))
@@ -393,7 +397,7 @@ async def run_startup(
 
         track_background_task(
             _start_background_daemon(
-                lambda: _catalog_backups.run_daily_backup_scheduler(lambda: _db.DB_PATH),
+                lambda: _catalog_backups.run_daily_backup_scheduler(lambda: _catalog_path()),
                 delay=15.0,
             )
         )
@@ -412,7 +416,7 @@ async def run_startup(
             try:
                 await asyncio.to_thread(
                     _cloud_backup.start_sync,
-                    _db.DB_PATH,
+                    _catalog_path(),
                     manual_override=False,
                 )
             except Exception:
@@ -420,7 +424,7 @@ async def run_startup(
 
         track_background_task(
             _start_background_daemon(
-                lambda: _cloud_backup.run_nightly_scheduler(lambda: _db.DB_PATH),
+                lambda: _cloud_backup.run_nightly_scheduler(lambda: _catalog_path()),
                 delay=25.0,
             )
         )
@@ -435,7 +439,7 @@ async def run_startup(
         from features.library import watched_folders
         track_background_task(
             _start_background_daemon(
-                lambda: watched_folders.run_poller(lambda: _db.DB_PATH),
+                lambda: watched_folders.run_poller(lambda: _catalog_path()),
                 delay=35.0,
             )
         )

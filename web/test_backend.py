@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path, use as catalog_path_use
 import unittest.mock
 from test_support import *  # noqa: F401,F403
 from data import schema as data_schema
@@ -5,10 +6,10 @@ from data import schema as data_schema
 
 class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
     async def test_init_db_creates_clean_catalog_when_wal_is_enabled(self):
-        original_path = db.DB_PATH
+        original_path = catalog_path()
         with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as tempdir:
             clean_path = os.path.join(tempdir, "clean-catalog.db")
-            db.DB_PATH = clean_path
+            catalog_path_use(clean_path)
             cache_events.invalidate_stats_cache()
             try:
                 await db.init_db()
@@ -25,7 +26,7 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
                 finally:
                     conn.close()
             finally:
-                db.DB_PATH = original_path
+                catalog_path_use(original_path)
                 cache_events.invalidate_stats_cache()
 
         self.assertEqual(version, data_schema.SCHEMA_VERSION)
@@ -36,7 +37,7 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
 
 class BackendIntegrationTests(BackendTestCase):
     async def test_init_db_migrates_legacy_comparison_action_id_before_indexes(self):
-        original_path = db.DB_PATH
+        original_path = catalog_path()
         legacy_path = os.path.join(self.tempdir.name, "legacy-comparisons.db")
         conn = sqlite3.connect(legacy_path)
         try:
@@ -55,7 +56,7 @@ class BackendIntegrationTests(BackendTestCase):
         finally:
             conn.close()
 
-        db.DB_PATH = legacy_path
+        catalog_path_use(legacy_path)
         cache_events.invalidate_stats_cache()
         try:
             await db.init_db()
@@ -66,7 +67,7 @@ class BackendIntegrationTests(BackendTestCase):
             finally:
                 conn.close()
         finally:
-            db.DB_PATH = original_path
+            catalog_path_use(original_path)
             cache_events.invalidate_stats_cache()
 
         self.assertIn("action_id", columns)

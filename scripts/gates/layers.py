@@ -19,6 +19,14 @@ BELOW = ("web/data/*.py", "web/core/*.py", "web/model/*.py", "web/photo/*.py", "
 UP = re.compile(r"^[ \t]*(?:from|import) +features\b|importlib\.import_module\(\s*[\"']features")
 UP_API = re.compile(r"^[ \t]*(?:from|import) +(?:api|app)\b|importlib\.import_module\(\s*[\"'](?:api|app)")
 
+# The old data layer, which `model/` replaces. `core/` reaching into it is the
+# same backwards dependency as the rest, and the gate could not see it: for
+# months `core/catalog_path.py` — whose entire job is to answer "where is the
+# catalog" — answered by importing `db`, so 204 call sites that wanted a string
+# had to load 1,077 lines of repositories to get one. A rule that only knew
+# about `features` reported zero.
+OLD = re.compile(r"^[ \t]*(?:from +(?:db|data\.repositories)\b|import +db\b)")
+
 
 def _hits(root, pathspecs, pattern, skip=()):
     found = []
@@ -32,6 +40,8 @@ def _hits(root, pathspecs, pattern, skip=()):
 
 
 def run(root) -> list[str]:
-    return _hits(root, BELOW, UP) + _hits(
-        root, ("web/*.py",), UP_API, skip=("web/app.py", "web/server_entry.py")
+    return (
+        _hits(root, BELOW, UP)
+        + _hits(root, ("web/*.py",), UP_API, skip=("web/app.py", "web/server_entry.py"))
+        + _hits(root, ("web/core/*.py", "web/model/*.py", "web/photo/*.py", "web/pixels/*.py"), OLD)
     )

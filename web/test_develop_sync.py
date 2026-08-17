@@ -1,6 +1,7 @@
 """Develop settings sync (§24) — copy chosen groups across a selection."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import pytest
 
@@ -67,12 +68,12 @@ class DevelopSyncHttpTests(unittest.TestCase):
     def setUp(self):
         worker = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
         self.tempdir = tempfile.TemporaryDirectory(prefix=f"azimuth-develop-sync-{worker}-")
-        self.old_db_path = db.DB_PATH
+        self.old_db_path = catalog_path()
         self.old_cache_dir = rawproc.BASE_CACHE_DIR
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
         self.old_smoke = os.environ.get("AZIMUTH_SMOKE_MODE")
         os.environ["AZIMUTH_SMOKE_MODE"] = "1"
-        db.DB_PATH = os.path.join(self.tempdir.name, "develop-sync.db")
+        catalog_path_use(os.path.join(self.tempdir.name, "develop-sync.db"))
         rawproc.BASE_CACHE_ROOT = __import__("pathlib").Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc.BASE_CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -90,7 +91,7 @@ class DevelopSyncHttpTests(unittest.TestCase):
             self.client.close()
         except Exception:
             pass
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()

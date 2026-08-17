@@ -1,5 +1,6 @@
 """Synchronize Folder: the catalog follows the disk, in one pass."""
 
+from core.catalog_path import catalog_path, use as catalog_path_use
 import asyncio
 import os
 import shutil
@@ -28,12 +29,12 @@ class LibraryFixture:
         self.root = Path(self.tempdir.name)
         self.library = self.root / "Photos"
         self.db_path = str(self.root / "catalog.db")
-        self.old_db_path = db.DB_PATH
-        db.DB_PATH = self.db_path
+        self.old_db_path = catalog_path()
+        catalog_path_use(self.db_path)
         asyncio.run(db.init_db())
 
     def tearDown(self):
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         self.tempdir.cleanup()
 
     def _photo(self, relative: str, payload: bytes = JPEG) -> Path:

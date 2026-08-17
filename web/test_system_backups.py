@@ -1,6 +1,7 @@
 """Contracts for catalog backups and integrity audits (TIMEMACHINE lane)."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import pytest
 import gzip
@@ -583,7 +584,7 @@ class BackupRouteTests(unittest.TestCase):
             )
 
         app = FastAPI()
-        db.DB_PATH = str(self.db_path)
+        catalog_path_use(str(self.db_path))
         app.include_router(backup_routes.router)
         self.client = TestClient(app)
 
@@ -698,8 +699,8 @@ class CatalogRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tempdir:
             corrupt = Path(tempdir) / "azimuth.db"
             corrupt.write_bytes(b"not a sqlite catalog")
-            original_path = db.DB_PATH
-            db.DB_PATH = str(corrupt)
+            original_path = catalog_path()
+            catalog_path_use(str(corrupt))
             init_called = False
 
             async def init_db():
@@ -732,7 +733,7 @@ class CatalogRecoveryTests(unittest.TestCase):
                 self.assertFalse(init_called)
                 self.assertEqual(corrupt.read_bytes(), b"not a sqlite catalog")
             finally:
-                db.DB_PATH = original_path
+                catalog_path_use(original_path)
 
 
 if __name__ == "__main__":

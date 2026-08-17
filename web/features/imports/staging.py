@@ -1,6 +1,7 @@
 """Staged-import scans, previews, and background commit jobs."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import asyncio
 import os
@@ -103,7 +104,7 @@ def originals_root() -> Path:
 
 async def allowed_roots() -> list[str]:
     roots = [str(originals_root())]
-    roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
+    roots.extend(await import_repository.catalog_source_paths(catalog_path()))
     roots.extend(row["path"] for row in catalog_routes.quick_browse_roots())
     return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
 
@@ -120,7 +121,7 @@ async def library_roots() -> list[str]:
     """Roots that hold catalog data. Moving *from* one of these would relocate
     library files, not drain a card, so Move degrades to Copy under them."""
     roots = [str(originals_root())]
-    roots.extend(await import_repository.catalog_source_paths(db.DB_PATH))
+    roots.extend(await import_repository.catalog_source_paths(catalog_path()))
     return list(dict.fromkeys(catalog_repository.normalize_source_path(path) for path in roots))
 
 
@@ -224,7 +225,7 @@ async def _scan_worker(scan: Scan) -> None:
     try:
         await asyncio.to_thread(_enumerate_scan, scan)
         suspects = await import_repository.suspect_catalog_paths(
-            db.DB_PATH, [(entry["name"], entry["size"]) for entry in scan.entries]
+            catalog_path(), [(entry["name"], entry["size"]) for entry in scan.entries]
         )
         for entry in scan.entries:
             if (entry["name"], entry["size"]) in suspects:
@@ -403,7 +404,7 @@ async def start_commit(
     else:
         raise ValueError("keys must be a list or all_checked_default")
     cleaned_roll = film.clean_roll_name(roll_name) if scan.film_source else None
-    batch_id = await import_repository.create_import_batch(db.DB_PATH, {
+    batch_id = await import_repository.create_import_batch(catalog_path(), {
         "name": cleaned_roll or scan.label or Path(scan.path).name or "Import",
         "destination_mode": mode,
         "destination_root": str(originals_root()),
@@ -447,7 +448,7 @@ async def _commit_worker(job: ImportJob) -> None:
             else import_repository.complete_import_batch
         )
         await finish_batch(
-            db.DB_PATH, job.batch_id,
+            catalog_path(), job.batch_id,
             source_id=None,
             image_rows=job.image_rows,
             imported_files=len(job.image_rows),
@@ -459,7 +460,7 @@ async def _commit_worker(job: ImportJob) -> None:
     except Exception as exc:
         job.errors.append({"message": str(exc)})
         job.phase = "failed"
-        await import_repository.fail_import_batch(db.DB_PATH, job.batch_id, str(exc))
+        await import_repository.fail_import_batch(catalog_path(), job.batch_id, str(exc))
 
 
 async def _reclaim_film_staging(job: ImportJob) -> None:
@@ -620,7 +621,7 @@ async def _copy_and_register(job: ImportJob, entry: dict) -> None:
 
 async def _known_exact_duplicate(content_hash: str, full_hash: str) -> str | None:
     """Return the catalog's verified copy so deletion can guard against it."""
-    candidates = await import_repository.image_paths_by_content_hash(db.DB_PATH, content_hash)
+    candidates = await import_repository.image_paths_by_content_hash(catalog_path(), content_hash)
     for candidate in candidates:
         try:
             if await asyncio.to_thread(card.compute_full_hash, candidate) == full_hash:
@@ -714,7 +715,7 @@ async def _register_file(path: str, entry: dict, content_hash: str, *, source_ro
         orientation = "landscape" if width >= height else "portrait"
         aspect_ratio = round(width / height, 4)
     await db.insert_images_batch([(Path(path).name, path, Path(path).suffix.lower(), int(stat.st_size), float(stat.st_mtime), orientation, aspect_ratio)], source_id=int(source["id"]))
-    image_id = await import_repository.set_image_content_hash(db.DB_PATH, path, content_hash)
+    image_id = await import_repository.set_image_content_hash(catalog_path(), path, content_hash)
     if image_id is None:
         raise RuntimeError("Verified import was not registered")
     return image_id
@@ -726,7 +727,7 @@ async def _apply_during_import(job: ImportJob) -> None:
         return
     if job.keywords:
         def tag():
-            conn = connection.open_sync(db.DB_PATH)
+            conn = connection.open_sync(catalog_path())
             try:
                 digests = photos.hashes(conn, ids)
                 known = {s["name"]: s["id"] for s in sets.all(conn, kind=sets.KEYWORD)}
@@ -741,7 +742,7 @@ async def _apply_during_import(job: ImportJob) -> None:
         await asyncio.to_thread(tag)
     if job.collection_id:
         def put():
-            conn = connection.open_sync(db.DB_PATH)
+            conn = connection.open_sync(catalog_path())
             try:
                 sets.add(conn, str(job.collection_id), photos.hashes(conn, ids))
                 conn.commit()

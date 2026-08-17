@@ -12,6 +12,7 @@ picker copy says "ZIP or TIFF files" honestly.
 """
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import asyncio
 import os
@@ -92,7 +93,7 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
     if cleaned == prefix.rsplit("/", 1)[-1]:
         return {"path": prefix, "name": cleaned}
 
-    conn = connection.open_sync(db.DB_PATH)
+    conn = connection.open_sync(catalog_path())
     try:
         rows = conn.execute(
             "SELECT id, filepath, file_size, relative_path FROM images "
@@ -160,7 +161,7 @@ def rename_roll(tree_path: str, new_name: str) -> dict:
         except sqlite3.IntegrityError as exc:
             raise ValueError("That name is already taken in the library") from exc
     finally:
-        connection.close_sync(conn, db_path=db.DB_PATH)
+        connection.close_sync(conn, db_path=catalog_path())
     return {"path": new_prefix, "name": cleaned}
 
 

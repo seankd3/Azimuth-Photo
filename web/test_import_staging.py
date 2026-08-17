@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import asyncio
 import io
 import os
@@ -63,7 +64,7 @@ class StagedImportTests(BackendTestCase):
             self.assertEqual(job.skipped_duplicates, 1)
             self.assertFalse(shot.exists())
             content_hash, _full, _size = await asyncio.to_thread(card.content_hash_from_stream, stranded)
-            registered = await staging.import_repository.image_paths_by_content_hash(db.DB_PATH, content_hash)
+            registered = await staging.import_repository.image_paths_by_content_hash(catalog_path(), content_hash)
             self.assertIn(str(stranded), registered)
         finally:
             if old_root is None:
@@ -95,7 +96,7 @@ class StagedImportTests(BackendTestCase):
             self.assertEqual(job.phase, "complete")
 
             from data import connection
-            conn = await connection.open_async(db.DB_PATH)
+            conn = await connection.open_async(catalog_path())
             try:
                 cursor = await conn.execute(
                     "SELECT orientation, aspect_ratio FROM images WHERE filename = ?",
@@ -103,7 +104,7 @@ class StagedImportTests(BackendTestCase):
                 )
                 row = await cursor.fetchone()
             finally:
-                await connection.close_async(conn, db_path=db.DB_PATH)
+                await connection.close_async(conn, db_path=catalog_path())
             self.assertIsNotNone(row)
             self.assertEqual(row["orientation"], "landscape")
             self.assertAlmostEqual(float(row["aspect_ratio"]), 400 / 300, places=3)
@@ -259,7 +260,7 @@ class StagedImportTests(BackendTestCase):
             source = await db.add_or_restore_source(str(known_dir))
             await db.insert_images_batch([(known.name, str(known), ".cr3", known.stat().st_size, known.stat().st_mtime)], source_id=source["id"])
             known_hash, _full, _size = await asyncio.to_thread(card.content_hash_from_stream, known)
-            await staging.import_repository.set_image_content_hash(db.DB_PATH, str(known), known_hash)
+            await staging.import_repository.set_image_content_hash(catalog_path(), str(known), known_hash)
 
             # A card yanked during its file leaves that original untouched and
             # unregistered; a rerun after reinsertion heals it.
@@ -342,7 +343,7 @@ class StagedImportTests(BackendTestCase):
                 )
                 await self._wait(job)
 
-            batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+            batch = await staging.import_repository.import_batch(catalog_path(), job.batch_id)
             self.assertEqual(job.phase, "cancelled")
             self.assertEqual(batch["status"], "cancelled")
             self.assertEqual(batch["imported_files"], 1)
@@ -456,13 +457,13 @@ class StagedImportTests(BackendTestCase):
                         path.parent,
                         originals / "Raws" / "Film Scans" / day[:4] / day / "Alaska Rolls 1 2",
                     )
-                batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+                batch = await staging.import_repository.import_batch(catalog_path(), job.batch_id)
                 self.assertEqual(batch["name"], "Alaska Rolls 1 2")
                 # Scan dates are not shoot dates: every frame carries the
                 # roll's delivery day as its date, authoritative over the
                 # scanner clock the EXIF pass would otherwise write.
                 from data import connection as data_conn
-                conn = await data_conn.open_async(db.DB_PATH)
+                conn = await data_conn.open_async(catalog_path())
                 try:
                     dated = await (await conn.execute(
                         "SELECT date_taken, date_source FROM images "
@@ -470,7 +471,7 @@ class StagedImportTests(BackendTestCase):
                         ("%/Alaska Rolls 1 2/%",),
                     )).fetchall()
                 finally:
-                    await data_conn.close_async(conn, db_path=db.DB_PATH)
+                    await data_conn.close_async(conn, db_path=catalog_path())
                 self.assertEqual(len(dated), 3)
                 for row in dated:
                     self.assertEqual(row["date_taken"], f"{day} 12:00:00")
@@ -489,16 +490,16 @@ class StagedImportTests(BackendTestCase):
                     ["evil.tif", "frame01.tif", "frame02.tif"],
                 )
                 from data import connection
-                conn = await connection.open_async(db.DB_PATH)
+                conn = await connection.open_async(catalog_path())
                 try:
                     moved = await conn.execute_fetchall(
                         "SELECT filepath FROM images WHERE replace(filepath, char(92), '/') LIKE ?",
                         (new_dir.as_posix() + "/%",),
                     )
                 finally:
-                    await connection.close_async(conn, db_path=db.DB_PATH)
+                    await connection.close_async(conn, db_path=catalog_path())
                 self.assertEqual(len(moved), 3)
-                batch = await staging.import_repository.import_batch(db.DB_PATH, job.batch_id)
+                batch = await staging.import_repository.import_batch(catalog_path(), job.batch_id)
                 self.assertEqual(batch["name"], "Denali Roll 1")
                 # A clean full commit reclaims the transient extraction dir.
                 self.assertFalse(Path(staged["path"]).exists())

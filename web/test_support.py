@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path, use as catalog_path_use
 import gc
 import io
 import inspect
@@ -137,11 +138,11 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             return conn
 
         data_connection.open_async = _tracked_open
-        self.old_db_path = db.DB_PATH
+        self.old_db_path = catalog_path()
         self.old_settings_path = settings.SETTINGS_PATH
         self.old_settings_state = settings._settings
 
-        db.DB_PATH = os.path.join(self.tempdir.name, "azimuth-test.db")
+        catalog_path_use(os.path.join(self.tempdir.name, "azimuth-test.db"))
         settings.SETTINGS_PATH = os.path.join(self.tempdir.name, "settings.local.json")
         settings._settings = None
         bulk_scheduler.reset_for_tests(
@@ -170,7 +171,7 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         settings.SETTINGS_PATH = self.old_settings_path
         settings._settings = self.old_settings_state
         bulk_scheduler.reset_for_tests()
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         cache_events.invalidate_stats_cache()
         cache_events.invalidate_cached_image_ids_cache()
         cache_events.invalidate_past_matchups_cache()
@@ -350,5 +351,5 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         vec = np.zeros(dim, dtype=np.float32)
         vec[0] = 1.0
         await embedding_repository.store_search_query_embedding(
-            db.DB_PATH, config=config, query=query, blob=vec.tobytes(),
+            catalog_path(), config=config, query=query, blob=vec.tobytes(),
         )

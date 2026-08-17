@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import os
 import re
 import sqlite3
@@ -105,7 +106,7 @@ def needs_setup() -> bool:
     import db
 
     try:
-        conn = sqlite3.connect(db.DB_PATH)
+        conn = sqlite3.connect(catalog_path())
         try:
             count = conn.execute("SELECT COUNT(*) FROM catalog_sources").fetchone()[0]
         finally:

@@ -6,6 +6,7 @@ and makes reparenting safe.
 """
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
@@ -110,7 +111,7 @@ async def get_iptc(image_id: int) -> dict[str, Any]:
     """
 
     def job():
-        conn = connection.open_sync(db.DB_PATH)
+        conn = connection.open_sync(catalog_path())
         try:
             return _iptc_of(conn, image_id)
         finally:
@@ -128,7 +129,7 @@ async def save_iptc(image_id: int, *, title: str = "", caption: str = "",
         raise ValueError("IPTC values must be 10,000 characters or fewer")
 
     def job():
-        conn = connection.open_sync(db.DB_PATH)
+        conn = connection.open_sync(catalog_path())
         try:
             digest = photos.hashes(conn, [image_id])
             if not digest:

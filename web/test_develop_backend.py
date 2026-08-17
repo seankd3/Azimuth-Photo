@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path, use as catalog_path_use
 import asyncio
 import gzip
 import io
@@ -42,10 +43,10 @@ RAW_ROOT = Path("/mnt/expansion/Photos/RAWS")
 class DevelopBackendTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.old_db_path = db.DB_PATH
+        self.old_db_path = catalog_path()
         self.old_cache_dir = rawproc.BASE_CACHE_DIR
         self.old_cache_root = rawproc.BASE_CACHE_ROOT
-        db.DB_PATH = os.path.join(self.tempdir.name, "develop.db")
+        catalog_path_use(os.path.join(self.tempdir.name, "develop.db"))
         rawproc.BASE_CACHE_ROOT = Path(self.tempdir.name) / "develop-cache"
         rawproc.BASE_CACHE_DIR = rawproc.BASE_CACHE_ROOT / "base" / "v2"
         rawproc._recent_decodes.clear()
@@ -64,7 +65,7 @@ class DevelopBackendTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         rawproc.BASE_CACHE_DIR = self.old_cache_dir
         rawproc.BASE_CACHE_ROOT = self.old_cache_root
         rawproc._recent_decodes.clear()

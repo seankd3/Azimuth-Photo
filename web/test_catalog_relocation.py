@@ -1,6 +1,7 @@
 """Catalog-follows-renames repair — rename, reshuffle, collision, unmatched."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path
 
 import unittest
 from pathlib import Path
@@ -79,7 +80,7 @@ class RelocationFixtureTests(BackendTestCase):
             [(name, filepath, Path(name).suffix.lower(), size, 1000.0)],
             source_id=source["id"],
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             row = await (
                 await conn.execute("SELECT id FROM images WHERE filepath = ?", (filepath,))
@@ -97,17 +98,17 @@ class RelocationFixtureTests(BackendTestCase):
                     )
             await conn.commit()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         return image_id
 
     async def _images(self, image_id: int) -> dict:
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             row = await (
                 await conn.execute("SELECT * FROM images WHERE id = ?", (image_id,))
             ).fetchone()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
         return dict(row) if row is not None else None
 
     async def test_rename_matches_by_relative_path_and_dry_run_is_read_only(self):
@@ -134,7 +135,7 @@ class RelocationFixtureTests(BackendTestCase):
         ]
 
         before = {image_id: (await self._images(image_id))["filepath"] for image_id in ids}
-        report = await relocation.relocate_catalog(db.DB_PATH, self.library)
+        report = await relocation.relocate_catalog(catalog_path(), self.library)
         self.assertTrue(report["dry_run"])
         self.assertEqual(report["relocated"], 3)
         self.assertEqual(report["matched_by"]["relative_path"], 3)
@@ -143,7 +144,7 @@ class RelocationFixtureTests(BackendTestCase):
             row = await self._images(image_id)
             self.assertEqual(row["filepath"], before[image_id], "dry-run must not rewrite")
 
-        applied = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        applied = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertFalse(applied["dry_run"])
         self.assertEqual(applied["relocated"], 3)
         expected = {ids[0]: snap, ids[1]: edit, ids[2]: scan}
@@ -152,7 +153,7 @@ class RelocationFixtureTests(BackendTestCase):
             self.assertEqual(row["filepath"], str(path))
             self.assertIsNone(row["missing_at"])
             top = path.relative_to(self.library).parts[0]
-            conn = await connection.open_async(db.DB_PATH)
+            conn = await connection.open_async(catalog_path())
             try:
                 source = await (
                     await conn.execute(
@@ -160,11 +161,11 @@ class RelocationFixtureTests(BackendTestCase):
                     )
                 ).fetchone()
             finally:
-                await connection.close_async(conn, db_path=db.DB_PATH)
+                await connection.close_async(conn, db_path=catalog_path())
             self.assertEqual(source["path"], str(self.library / top))
 
         # Idempotent: nothing left to repair on a second pass.
-        again = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        again = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertEqual(again["rows_missing_file"], 0)
 
     async def test_file_moved_onto_digital_shelf_is_found_by_relative_path(self):
@@ -189,7 +190,7 @@ class RelocationFixtureTests(BackendTestCase):
             )
         )
 
-        report = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        report = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertEqual(report["relocated"], 2)
         self.assertEqual(report["matched_by"]["relative_path"], 2)
         self.assertEqual(report["unmatched_total"], 0)
@@ -218,7 +219,7 @@ class RelocationFixtureTests(BackendTestCase):
         self._file("Raws/2024/a/twin.jpg", b"twin-jpg1")
         self._file("Raws/2024/b/twin.jpg", b"twin-jpg2")
 
-        report = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        report = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertEqual(report["matched_by"]["basename_size"], 1)
         self.assertEqual(report["matched_by"]["content_hash"], 1)
         self.assertEqual((await self._images(moved_id))["filepath"], str(moved))
@@ -252,7 +253,7 @@ class RelocationFixtureTests(BackendTestCase):
             size=bystander.stat().st_size,
             source_top="Raws",
         )
-        conn = await connection.open_async(db.DB_PATH)
+        conn = await connection.open_async(catalog_path())
         try:
             await conn.execute(
                 "INSERT INTO comparisons (winner_id, loser_id, mode) VALUES (?, ?, 'duel')",
@@ -264,9 +265,9 @@ class RelocationFixtureTests(BackendTestCase):
             )
             await conn.commit()
         finally:
-            await connection.close_async(conn, db_path=db.DB_PATH)
+            await connection.close_async(conn, db_path=catalog_path())
 
-        report = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        report = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertEqual(report["merged"], 1)
         self.assertEqual(report["actions_total"], 1)
         self.assertEqual(report["actions"][0]["retired_image_id"], fresh_id)
@@ -294,7 +295,7 @@ class RelocationFixtureTests(BackendTestCase):
             source_top="Personal Photos",
         )
 
-        report = await relocation.relocate_catalog(db.DB_PATH, self.library, apply=True)
+        report = await relocation.relocate_catalog(catalog_path(), self.library, apply=True)
         self.assertEqual(report["unmatched_total"], 1)
         self.assertEqual(report["unmatched"][0]["id"], gone_id)
         self.assertEqual(report["unmatched"][0]["reason"], "no matching file found")

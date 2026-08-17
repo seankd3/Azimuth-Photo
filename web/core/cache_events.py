@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import logging
 
 from core.numbers import increment_cached_int  # noqa: F401  (re-exported)
@@ -156,7 +157,7 @@ def _schedule_stored_star_refresh() -> None:
         import db
         import elo_stars
 
-        elo_stars.schedule_stored_stars_refresh(db.DB_PATH)
+        elo_stars.schedule_stored_stars_refresh(catalog_path())
     except Exception:
         logger.debug("Stored star refresh scheduling skipped", exc_info=True)
 

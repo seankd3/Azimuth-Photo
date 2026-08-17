@@ -1,6 +1,7 @@
 """CRUD + Lightroom import coverage for Develop presets (§15)."""
 
 from __future__ import annotations
+from core.catalog_path import catalog_path, use as catalog_path_use
 
 import asyncio
 import json
@@ -43,8 +44,8 @@ def _ensure_router_mounted() -> None:
 class DevelopPresetsTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.old_db_path = db.DB_PATH
-        db.DB_PATH = os.path.join(self.tempdir.name, "presets.db")
+        self.old_db_path = catalog_path()
+        catalog_path_use(os.path.join(self.tempdir.name, "presets.db"))
         preset_routes._lr_import_attempted = False
         asyncio.run(db.init_db())
         _ensure_router_mounted()
@@ -73,7 +74,7 @@ class DevelopPresetsTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        db.DB_PATH = self.old_db_path
+        catalog_path_use(self.old_db_path)
         self.tempdir.cleanup()
 
     def test_crud_round_trip(self):

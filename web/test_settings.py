@@ -1,5 +1,6 @@
 """HTTP behavior gates for settings and batch cull mutations."""
 
+from core.catalog_path import catalog_path
 import asyncio
 
 from fastapi.testclient import TestClient
@@ -67,7 +68,7 @@ class SettingsRouteTests(BackendTestCase):
         finally:
             await conn.close()
         import elo_stars
-        await elo_stars.refresh_stored_stars(db.DB_PATH)
+        await elo_stars.refresh_stored_stars(catalog_path())
         fetched = await self._request("GET", f"/api/image/{image_id}/rating")
         payload = fetched.json()
         self.assertEqual(payload["stars"], 5)

@@ -1,3 +1,4 @@
+from core.catalog_path import catalog_path
 import pytest
 import os
 import sqlite3
@@ -17,7 +18,7 @@ class TrashTests(BackendTestCase):
     async def test_explicit_empty_hub_purge_is_immediate_with_busy_writer(self):
         def probe():
             with TestClient(app_module.app) as client:
-                writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+                writer = sqlite3.connect(catalog_path(), timeout=0.1)
                 try:
                     writer.execute("BEGIN IMMEDIATE")
                     started = time.perf_counter()
@@ -44,13 +45,13 @@ class TrashTests(BackendTestCase):
     async def test_nonempty_purge_bounds_catalog_lock_wait(self):
         source, _root = await self._source_root()
         image_id, _filepath = await self._file_image(source, "locked-delete.jpg", data=b"locked")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
-        writer = sqlite3.connect(db.DB_PATH, timeout=0.1)
+        writer = sqlite3.connect(catalog_path(), timeout=0.1)
         try:
             writer.execute("BEGIN IMMEDIATE")
             started = time.perf_counter()
-            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+            result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
             elapsed = time.perf_counter() - started
         finally:
             writer.rollback()
@@ -68,7 +69,7 @@ class TrashTests(BackendTestCase):
     async def test_purge_lock_failure_keeps_rows_for_retry(self):
         source, _root = await self._source_root()
         image_id, _filepath = await self._file_image(source, "retryable.jpg", data=b"retryable")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
         deferred = {"id": image_id, "reason": "catalog row deletion deferred: locked"}
 
@@ -78,7 +79,7 @@ class TrashTests(BackendTestCase):
             new_callable=AsyncMock,
             return_value=([], [deferred]),
         ):
-            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+            result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
 
         row = await self._image_row(image_id)
         self.assertEqual(result["deleted_count"], 0)
@@ -88,7 +89,7 @@ class TrashTests(BackendTestCase):
         self.assertEqual(row["status"], "trashed")
         self.assertEqual(row["trash_path"], trash_path)
 
-        retried = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        retried = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
         self.assertEqual(retried["deleted_count"], 1)
         self.assertEqual(retried["errors"], [])
         self.assertFalse(await self._image_exists(image_id))
@@ -173,7 +174,7 @@ class TrashTests(BackendTestCase):
         source, _root = await self._source_root()
         image_id, filepath = await self._file_image(source, "shoot/one.jpg", data=b"one")
 
-        result = await trash_service.trash_images(db.DB_PATH, [image_id])
+        result = await trash_service.trash_images(catalog_path(), [image_id])
         row = await self._image_row(image_id)
 
         self.assertEqual(result["trashed"], [image_id])
@@ -190,7 +191,7 @@ class TrashTests(BackendTestCase):
         observed_states = []
 
         def fail_before_db_write(_filepath, _dest, _token):
-            conn = sqlite3.connect(db.DB_PATH)
+            conn = sqlite3.connect(catalog_path())
             try:
                 observed_states.append(
                     conn.execute("SELECT status, trash_path FROM images WHERE id = ?", (image_id,)).fetchone()
@@ -201,7 +202,7 @@ class TrashTests(BackendTestCase):
 
         trash_service._move_to_trash = fail_before_db_write
         try:
-            result = await trash_service.trash_images(db.DB_PATH, [image_id])
+            result = await trash_service.trash_images(catalog_path(), [image_id])
         finally:
             trash_service._move_to_trash = original_move
         row = await self._image_row(image_id)
@@ -246,9 +247,9 @@ class TrashTests(BackendTestCase):
         original = b"\x00raw-ish-bytes\xff"
         image_id, filepath = await self._file_image(source, "roundtrip/raw.dng", data=original)
 
-        trashed = await trash_service.trash_images(db.DB_PATH, [image_id])
+        trashed = await trash_service.trash_images(catalog_path(), [image_id])
         self.assertEqual(trashed["trashed"], [image_id])
-        restored = await trash_service.restore_images(db.DB_PATH, [image_id])
+        restored = await trash_service.restore_images(catalog_path(), [image_id])
 
         row = await self._image_row(image_id)
         self.assertEqual(restored["restored"], [image_id])
@@ -261,11 +262,11 @@ class TrashTests(BackendTestCase):
     async def test_restore_collision_errors_without_overwrite(self):
         source, _root = await self._source_root()
         image_id, filepath = await self._file_image(source, "collision.jpg", data=b"original")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         with open(filepath, "wb") as handle:
             handle.write(b"new file")
 
-        restored = await trash_service.restore_images(db.DB_PATH, [image_id])
+        restored = await trash_service.restore_images(catalog_path(), [image_id])
         row = await self._image_row(image_id)
 
         self.assertEqual(restored["restored"], [])
@@ -276,7 +277,7 @@ class TrashTests(BackendTestCase):
     async def test_restore_missing_file_returns_error_and_keeps_trashed_row(self):
         source, _root = await self._source_root()
         image_id, filepath = await self._file_image(source, "missing.jpg", data=b"missing")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
         os.remove(trash_path)
 
@@ -299,14 +300,14 @@ class TrashTests(BackendTestCase):
         source, _root = await self._source_root()
         first_id, _ = await self._file_image(source, "first.jpg", data=b"12345")
         second_id, _ = await self._file_image(source, "nested/second.jpg", data=b"abcdef")
-        trashed = await trash_service.trash_images(db.DB_PATH, [first_id, second_id])
+        trashed = await trash_service.trash_images(catalog_path(), [first_id, second_id])
         self.assertEqual(set(trashed["trashed"]), {first_id, second_id})
         trash_paths = [
             (await self._image_row(first_id))["trash_path"],
             (await self._image_row(second_id))["trash_path"],
         ]
 
-        emptied = await trash_service.empty_trash(db.DB_PATH)
+        emptied = await trash_service.empty_trash(catalog_path())
 
         self.assertEqual(emptied["deleted_count"], 2)
         self.assertEqual(emptied["freed_bytes"], 11)
@@ -319,7 +320,7 @@ class TrashTests(BackendTestCase):
     async def test_empty_trash_keeps_row_when_catalog_delete_fails(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "delete-fails.jpg", data=b"irreplaceable")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
 
         async def fail_catalog_delete(_db_path, image_ids):
@@ -333,7 +334,7 @@ class TrashTests(BackendTestCase):
             "_delete_emptied_catalog_rows",
             side_effect=fail_catalog_delete,
         ):
-            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+            result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["freed_bytes"], 13)
@@ -343,7 +344,7 @@ class TrashTests(BackendTestCase):
     async def test_empty_trash_unlink_failure_keeps_row_for_retry(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "unlink-fails.jpg", data=b"leftover")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
 
         with patch.object(
@@ -352,7 +353,7 @@ class TrashTests(BackendTestCase):
             new_callable=AsyncMock,
             return_value=(0, "injected unlink failure"),
         ):
-            result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+            result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
 
         # A file that could not be removed keeps its catalog row so the next
         # Empty Trash can retry it — never a stranded orphan on disk.
@@ -362,7 +363,7 @@ class TrashTests(BackendTestCase):
         self.assertTrue(os.path.exists(trash_path))
         self.assertTrue(await self._image_exists(image_id))
 
-        retried = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        retried = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
         self.assertEqual(retried["deleted_count"], 1)
         self.assertEqual(retried["errors"], [])
         self.assertFalse(os.path.exists(trash_path))
@@ -371,11 +372,11 @@ class TrashTests(BackendTestCase):
     async def test_empty_trash_happy_path_prunes_removed_file_tree(self):
         source, root = await self._source_root()
         image_id, _filepath = await self._file_image(source, "trip/day/photo.jpg", data=b"seven77")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
         nested_trash_dir = os.path.dirname(trash_path)
 
-        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
 
         self.assertEqual(result["deleted_count"], 1)
         self.assertEqual(result["freed_bytes"], 7)
@@ -388,7 +389,7 @@ class TrashTests(BackendTestCase):
     async def test_empty_trash_does_not_follow_or_remove_symlink(self):
         source, root = await self._source_root()
         image_id, _filepath = await self._file_image(source, "linked.jpg", data=b"linked")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trash_path = (await self._image_row(image_id))["trash_path"]
         target_path = os.path.join(root, ".trash", "target.jpg")
         with open(target_path, "wb") as handle:
@@ -396,7 +397,7 @@ class TrashTests(BackendTestCase):
         os.remove(trash_path)
         os.symlink(target_path, trash_path)
 
-        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[image_id])
+        result = await trash_service.empty_trash(catalog_path(), image_ids=[image_id])
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["errors"], [{"id": image_id, "reason": "trash path is a symlink"}])
@@ -424,7 +425,7 @@ class TrashTests(BackendTestCase):
         finally:
             await conn.close()
 
-        result = await trash_service.empty_trash(db.DB_PATH)
+        result = await trash_service.empty_trash(catalog_path())
 
         self.assertEqual(result["deleted_count"], 1)
         self.assertEqual(result["skipped_offline"], 0)
@@ -439,7 +440,7 @@ class TrashTests(BackendTestCase):
         outside_original = os.path.join(root, "outside.jpg")
         with open(outside_original, "wb") as handle:
             handle.write(b"must remain")
-        await trash_service.trash_images(db.DB_PATH, [expired_id, recent_id, unsafe_id])
+        await trash_service.trash_images(catalog_path(), [expired_id, recent_id, unsafe_id])
         expired = await self._image_row(expired_id)
         recent = await self._image_row(recent_id)
         conn = await db.get_db()
@@ -450,7 +451,7 @@ class TrashTests(BackendTestCase):
         finally:
             await conn.close()
 
-        result = await trash_service.purge_expired_trash(db.DB_PATH, retention_seconds=60, now=200.0)
+        result = await trash_service.purge_expired_trash(catalog_path(), retention_seconds=60, now=200.0)
 
         self.assertEqual(result["deleted_count"], 1)
         self.assertEqual(result["errors"], [{"id": unsafe_id, "reason": "trash path is outside source trash"}])
@@ -465,7 +466,7 @@ class TrashTests(BackendTestCase):
     async def test_retention_skips_offline_source_without_error(self):
         source, _root = await self._source_root()
         image_id, _ = await self._file_image(source, "offline.jpg", data=b"offline")
-        await trash_service.trash_images(db.DB_PATH, [image_id])
+        await trash_service.trash_images(catalog_path(), [image_id])
         trashed = await self._image_row(image_id)
         conn = await db.get_db()
         try:
@@ -475,7 +476,7 @@ class TrashTests(BackendTestCase):
         finally:
             await conn.close()
 
-        result = await trash_service.purge_expired_trash(db.DB_PATH, retention_seconds=60, now=200.0)
+        result = await trash_service.purge_expired_trash(catalog_path(), retention_seconds=60, now=200.0)
 
         self.assertEqual(result["deleted_count"], 0)
         self.assertEqual(result["skipped_offline"], 1)
@@ -489,7 +490,7 @@ class TrashTests(BackendTestCase):
         next_best, _ = await self._file_image(source, "next.tif", data=b"next", elo=1300)
         low, _ = await self._file_image(source, "low.jpg", data=b"low", elo=1200)
         await stack_repository.create_stack(
-            db.DB_PATH,
+            catalog_path(),
             kind="manual",
             representative_image_id=representative,
             member_rows=[
@@ -500,8 +501,8 @@ class TrashTests(BackendTestCase):
             auto=False,
         )
 
-        await trash_service.trash_images(db.DB_PATH, [representative])
-        stack = await stack_repository.stack_for_image(db.DB_PATH, next_best)
+        await trash_service.trash_images(catalog_path(), [representative])
+        stack = await stack_repository.stack_for_image(catalog_path(), next_best)
 
         self.assertIsNotNone(stack)
         self.assertEqual(stack["representative"]["id"], next_best)
@@ -513,7 +514,7 @@ class TrashTests(BackendTestCase):
         image_id, filepath = await self._file_image(source, "missing.jpg", data=b"gone")
         os.remove(filepath)
 
-        result = await trash_service.trash_images(db.DB_PATH, [image_id])
+        result = await trash_service.trash_images(catalog_path(), [image_id])
         row = await self._image_row(image_id)
 
         self.assertEqual(result["trashed"], [image_id])
@@ -569,7 +570,7 @@ class VirtualCopyTrashTests(BackendTestCase):
 
     async def test_trashing_master_takes_virtual_copies_catalog_only(self):
         master_id, copy_id, filepath = await self._master_with_copy()
-        result = await trash_service.trash_images(db.DB_PATH, [master_id])
+        result = await trash_service.trash_images(catalog_path(), [master_id])
         self.assertIn(master_id, result["trashed"])
         self.assertIn(copy_id, result["trashed"])
         conn = await db.get_db()
@@ -592,7 +593,7 @@ class VirtualCopyTrashTests(BackendTestCase):
         def fail_master_before_family_commit(_filepath, dest, _token):
             if dest is None:
                 return 0, ""
-            conn = sqlite3.connect(db.DB_PATH)
+            conn = sqlite3.connect(catalog_path())
             try:
                 observed_statuses.append(dict(conn.execute(
                     "SELECT id, status FROM images WHERE id IN (?, ?)",
@@ -603,7 +604,7 @@ class VirtualCopyTrashTests(BackendTestCase):
             return 0, "injected trash failure"
 
         with patch.object(trash_service, "_move_to_trash", fail_master_before_family_commit):
-            result = await trash_service.trash_images(db.DB_PATH, [master_id])
+            result = await trash_service.trash_images(catalog_path(), [master_id])
 
         # Nothing is committed until the master's file move succeeds.
         self.assertEqual(observed_statuses, [{master_id: "kept", copy_id: "kept"}])
@@ -625,7 +626,7 @@ class VirtualCopyTrashTests(BackendTestCase):
         await conn.execute("UPDATE images SET filepath = '' WHERE id = ?", (master_id,))
         await conn.commit()
 
-        result = await trash_service.trash_images(db.DB_PATH, [master_id])
+        result = await trash_service.trash_images(catalog_path(), [master_id])
 
         self.assertEqual(result["trashed"], [])
         master = await self._image_row(master_id)
@@ -636,7 +637,7 @@ class VirtualCopyTrashTests(BackendTestCase):
 
     async def test_trashing_a_virtual_copy_keeps_the_master_file(self):
         master_id, copy_id, filepath = await self._master_with_copy()
-        result = await trash_service.trash_images(db.DB_PATH, [copy_id])
+        result = await trash_service.trash_images(catalog_path(), [copy_id])
         self.assertEqual(result["errors"], [])
         self.assertIn(copy_id, result["trashed"])
         self.assertNotIn(master_id, result["trashed"])
@@ -649,9 +650,9 @@ class VirtualCopyTrashTests(BackendTestCase):
 
     async def test_restoring_a_virtual_copy_restores_its_master_and_file(self):
         master_id, copy_id, filepath = await self._master_with_copy()
-        await trash_service.trash_images(db.DB_PATH, [master_id])
+        await trash_service.trash_images(catalog_path(), [master_id])
         self.assertFalse(os.path.exists(filepath))
-        result = await trash_service.restore_images(db.DB_PATH, [copy_id])
+        result = await trash_service.restore_images(catalog_path(), [copy_id])
         self.assertIn(copy_id, result["restored"])
         self.assertIn(master_id, result["restored"])
         self.assertEqual(result["warnings"], [])
@@ -659,9 +660,9 @@ class VirtualCopyTrashTests(BackendTestCase):
 
     async def test_restoring_master_restores_its_virtual_copies(self):
         master_id, copy_id, filepath = await self._master_with_copy()
-        await trash_service.trash_images(db.DB_PATH, [master_id])
+        await trash_service.trash_images(catalog_path(), [master_id])
 
-        result = await trash_service.restore_images(db.DB_PATH, [master_id])
+        result = await trash_service.restore_images(catalog_path(), [master_id])
 
         self.assertEqual(set(result["restored"]), {master_id, copy_id})
         self.assertEqual(result["errors"], [])
@@ -682,12 +683,12 @@ class VirtualCopyTrashTests(BackendTestCase):
     @pytest.mark.contract
     async def test_master_restore_failure_reverts_entire_virtual_copy_family(self):
         master_id, copy_id, _filepath = await self._master_with_copy()
-        await trash_service.trash_images(db.DB_PATH, [master_id])
+        await trash_service.trash_images(catalog_path(), [master_id])
         trashed_master = await self._image_row(master_id)
         observed_statuses = []
 
         def fail_after_family_commit(_trash_path, _filepath):
-            conn = sqlite3.connect(db.DB_PATH)
+            conn = sqlite3.connect(catalog_path())
             try:
                 observed_statuses.append(dict(conn.execute(
                     "SELECT id, status FROM images WHERE id IN (?, ?)",
@@ -698,7 +699,7 @@ class VirtualCopyTrashTests(BackendTestCase):
             return None, "injected restore failure"
 
         with patch.object(trash_service, "_restore_from_trash", fail_after_family_commit):
-            result = await trash_service.restore_images(db.DB_PATH, [master_id])
+            result = await trash_service.restore_images(catalog_path(), [master_id])
 
         self.assertEqual(observed_statuses, [{master_id: "kept", copy_id: "kept"}])
         self.assertEqual(result["restored"], [])
@@ -712,8 +713,8 @@ class VirtualCopyTrashTests(BackendTestCase):
 
     async def test_empty_trash_purges_family_without_double_delete(self):
         master_id, copy_id, filepath = await self._master_with_copy()
-        await trash_service.trash_images(db.DB_PATH, [master_id])
-        result = await trash_service.empty_trash(db.DB_PATH, image_ids=[master_id, copy_id])
+        await trash_service.trash_images(catalog_path(), [master_id])
+        result = await trash_service.empty_trash(catalog_path(), image_ids=[master_id, copy_id])
         self.assertEqual(result["errors"], [])
         conn = await db.get_db()
         count = await (await conn.execute(
@@ -736,8 +737,8 @@ class VirtualCopyTrashTests(BackendTestCase):
         finally:
             await conn.close()
 
-        await trash_service.trash_images(db.DB_PATH, [master_id])
-        listing = await trash_service.list_trash(db.DB_PATH)
+        await trash_service.trash_images(catalog_path(), [master_id])
+        listing = await trash_service.list_trash(catalog_path())
         self.assertEqual(listing["edited_copy_count"], 0)
 
         conn = await db.get_db()
@@ -750,6 +751,6 @@ class VirtualCopyTrashTests(BackendTestCase):
             await conn.commit()
         finally:
             await conn.close()
-        listing = await trash_service.list_trash(db.DB_PATH)
+        listing = await trash_service.list_trash(catalog_path())
         self.assertEqual(listing["edited_copy_count"], 1)
 

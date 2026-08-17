@@ -90,7 +90,7 @@ async def _get_export_images(
     search = await query_constraints.resolve_configured_library_constraints(q, people=people, deep=deep)
     id_filter = search.get("id_filter")
     if import_batch > 0:
-        batch_ids = await import_repository.import_batch_image_ids(db.DB_PATH, import_batch)
+        batch_ids = await import_repository.import_batch_image_ids(catalog_path(), import_batch)
         if batch_ids is None:
             id_filter = set()
         elif id_filter is None:
@@ -134,8 +134,11 @@ async def _get_export_images(
     import asyncio
 
     import library
-    from data import connection
 
+    # `from data import connection` stood here and made the name local to the
+    # whole of `_get_export_images`, so the use 34 lines above raised
+    # UnboundLocalError the moment an export was narrowed by a collection. The
+    # module imports it at the top; once is enough.
     def _read() -> list[dict]:
         conn = connection.inline_reader(db_path)
         sql = (
