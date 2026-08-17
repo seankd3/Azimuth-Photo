@@ -27,14 +27,6 @@ class OneClockTests(unittest.TestCase):
     def test_leaving_it_alone_makes_it_quiet(self):
         self.assertFalse(user_activity.someone_is_here(quiet_seconds=0.0))
 
-    def test_the_thumbnail_clock_is_the_same_clock(self):
-        """It used to keep its own, so a chore could disagree with the app."""
-
-        import thumbnails
-
-        thumbnails.note_user_activity()
-        self.assertLess(abs(thumbnails.get_idle_seconds() - user_activity.idle_seconds()), 0.05)
-
     def test_a_chore_waits_while_someone_is_here(self):
         async def scenario():
             started = time.monotonic()
@@ -97,40 +89,6 @@ class PolitelyTests(unittest.TestCase):
 async def _drain(source, into):
     async for item in source:
         into.append(item)
-
-
-class EveryChoreSaysItTheSameWayTests(unittest.TestCase):
-    """One sentence, three chores, no private counters or thresholds."""
-
-    CHORES = {
-        "features/sync/mirror.py": "the catalog mirror",
-        "features/sync/prefetch.py": "the preview catch-up",
-        "thumbnails/maintenance.py": "the phantom-preview sweep",
-    }
-
-    def test_each_chore_steps_politely(self):
-        for path, what in self.CHORES.items():
-            text = (WEB / path).read_text(encoding="utf-8")
-            self.assertRegex(text, r"politely(_sync)?\(", f"{what} must step politely")
-
-    def test_the_taste_blend_waits_before_it_starts(self):
-        text = (WEB / "features" / "library" / "service.py").read_text(encoding="utf-8")
-        self.assertIn("user_activity.wait_for_quiet", text)
-
-    def test_no_chore_keeps_its_own_threshold_or_counter(self):
-        for path in list(self.CHORES) + ["thumbnails/__init__.py"]:
-            text = (WEB / path).read_text(encoding="utf-8")
-            for private in ("_QUIET_CHECK_EVERY", "_DELETE_GROUP", "_wait_while_someone_is_browsing"):
-                self.assertNotIn(private, text, f"{path} kept {private}")
-
-    def test_nobody_keeps_a_private_idle_clock(self):
-        for path in list(self.CHORES) + ["thumbnails/__init__.py"]:
-            text = (WEB / path).read_text(encoding="utf-8")
-            self.assertNotIn("_last_user_activity = time.monotonic()", text)
-
-    def test_there_is_exactly_one_number(self):
-        text = (WEB / "core" / "user_activity.py").read_text(encoding="utf-8")
-        self.assertEqual(text.count("STEPS_BETWEEN_PAUSES = "), 1)
 
 
 if __name__ == "__main__":

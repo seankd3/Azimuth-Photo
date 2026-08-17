@@ -361,12 +361,7 @@ def check_disk_library() -> dict[str, Any]:
 
 
 def check_disk_cache() -> dict[str, Any]:
-    try:
-        import thumbnails
-
-        root = thumbnails.SSD_CACHE_DIR or resolve_runtime_paths().thumb_cache_dir
-    except Exception:
-        root = resolve_runtime_paths().thumb_cache_dir
+    root = resolve_runtime_paths().thumb_cache_dir
     return _disk_check(id="disk_cache", label="Cache disk", root=root)
 
 

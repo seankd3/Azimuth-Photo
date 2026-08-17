@@ -11,7 +11,7 @@ from PIL import Image
 
 from test_support import BackendTestCase
 import db
-import thumbnails
+from core.runtime_paths import resolve_runtime_paths
 from features.quality import routes as quality_routes
 from features.quality import scorer as quality_scorer
 
@@ -127,7 +127,7 @@ class QualityRoutesTests(BackendTestCase):
             )
 
     async def _write_thumb(self, image_id: int, array: np.ndarray, size: str = "md") -> str:
-        root = thumbnails.SSD_CACHE_DIR
+        root = resolve_runtime_paths().thumb_cache_dir
         os.makedirs(os.path.join(root, size), exist_ok=True)
         path = os.path.join(root, size, f"{image_id}.jpg")
         data = _jpeg_bytes(array)
