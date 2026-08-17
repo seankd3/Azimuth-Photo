@@ -53,8 +53,8 @@ class SettingsStatusTests(BackendTestCase):
             "build_ai_status",
             new=mock.AsyncMock(return_value=ai),
         ), mock.patch.object(
-            settings_routes.cache_status_service,
-            "build_cache_status",
+            settings_routes.core_api,
+            "cache_status",
             new=mock.AsyncMock(return_value=cache),
         ), mock.patch.object(
             settings_routes.core_api,
