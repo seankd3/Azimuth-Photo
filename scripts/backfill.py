@@ -64,8 +64,6 @@ def main() -> int:
     done = failed = 0
     from_archive = 0
     unreachable: set[str] = set()
-    deferred: set[str] = set()
-    archive_now = False
     started = time.perf_counter()
 
     while True:
@@ -74,21 +72,11 @@ def main() -> int:
         # skipped in memory rather than recorded as failures: "not on this
         # machine" is a fact about the machine, and writing it into the cache
         # would tell a future run with the drive plugged in not to bother.
-        skip = unreachable if archive_now else (unreachable | deferred)
         rows = [r for r in work.owed(conn, search.EMBEDDING, recipe=recipe, limit=4000)
-                if r["hash"] not in skip]
+                if r["hash"] not in unreachable]
         if not rows:
-            if archive_now:
-                say("nothing left that this machine can reach; done")
-                break
-            # Everything with a rendition on the laptop is embedded. Search and
-            # ranking work over that much now; the rest needs the archive.
-            say(f"renditions done: {done:,} embedded in "
-                f"{(time.perf_counter() - started) / 3600:.1f} h."
-                f" Starting on {len(deferred):,} that need the archive.")
-            archive_now = True
-            deferred.clear()
-            continue
+            say("nothing left that this machine can reach; done")
+            break
 
         # In batches, for two reasons that cost 11x between them: the GPU is
         # idle through most of a single-image call, and `cache.make` commits to
@@ -104,18 +92,10 @@ def main() -> int:
                 if not os.path.exists(source):
                     source = tiles.path_for(digest, render.LOUPE)
                 if not os.path.exists(source):
-                    # Everything with a rendition already here goes first, and
-                    # the archive waits. Both have to happen, but one of them
-                    # is ten times faster per photograph, and doing them mixed
-                    # means nothing is searchable for two days instead of most
-                    # of the library being searchable this evening.
-                    if not archive_now:
-                        deferred.add(digest)
-                        continue
-                    # No rendition, so the original has to be read. Render the
-                    # tile from it first and embed from that: the decode is the
-                    # expensive part, so this pays it once for two answers and
-                    # leaves the photograph a preview on the laptop.
+                    # No rendition here, so the original has to be read. Render
+                    # the tile from it first and embed from that: the decode is
+                    # the expensive part, so this pays it once for two answers
+                    # and leaves the photograph a preview on the laptop.
                     original = photos.locate(conn, row["tail"], expected_size=row["file_size"])
                     if not original:
                         unreachable.add(digest)
