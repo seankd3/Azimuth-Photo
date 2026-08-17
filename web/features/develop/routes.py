@@ -574,19 +574,33 @@ async def _reset_settings(image_id: int) -> dict[str, Any]:
     return result
 
 
-async def _refresh_grid_previews(image_id: int) -> None:
-    """A saved edit owns its thumbnail.
+def _forget_tiles(conn, image_id: int) -> int:
+    """A saved edit owns its thumbnail, so the old one stops being an answer.
 
-    Purging the stale tiers makes the next request re-render them through the
-    Develop pipeline (thumbnails/develop_bridge.py), so the grid tile becomes
-    the edit without waiting for any sweep. Best-effort: a failed purge leaves
-    yesterday's tile, which the serve-side recipe check also catches.
+    This called `thumbnails.purge_image_cache`, a module deleted in d52cf6c7 --
+    so every develop save had been raising ModuleNotFoundError into the log and
+    leaving the grid showing the photograph as it was before the edit.
+
+    Tiles are cache rows now, and a cache row that no longer answers the
+    question is forgotten rather than purged: `work` remakes it, and `make_tile`
+    writes to the same path, so no orphan file is left behind.
     """
 
-    import thumbnails
+    from model import cache
 
+    row = conn.execute(
+        "SELECT content_hash FROM images WHERE id = ?", (int(image_id),)
+    ).fetchone()
+    if not row or not row["content_hash"]:
+        return 0
+    dropped = cache.forget(conn, row["content_hash"], kind="tile")
+    conn.commit()
+    return dropped
+
+
+async def _refresh_grid_previews(image_id: int) -> None:
     try:
-        await asyncio.to_thread(thumbnails.purge_image_cache, [int(image_id)])
+        await connection.writing(catalog_path(), _forget_tiles, int(image_id))
     except Exception:
         log.exception("develop save could not refresh previews image_id=%s", image_id)
 

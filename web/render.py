@@ -191,9 +191,8 @@ def encode(image: Image.Image, quality: int = QUALITY) -> bytes:
     return out.getvalue()
 
 
-def render(source: str, size: int = GRID, edits: dict | None = None,
-           rotate: int = 0) -> bytes:
-    """One photograph, at one size, with one set of edits. JPEG bytes.
+def render(source: str, size: int = GRID, rotate: int = 0) -> bytes:
+    """One photograph, at one size. JPEG bytes.
 
     The whole surface. Grid asks for GRID, loupe for LOUPE, export for FULL,
     and Develop asks for whichever it is showing — same code, same pixels.
@@ -203,16 +202,21 @@ def render(source: str, size: int = GRID, edits: dict | None = None,
     orientation tag, which no renderer can guess and every renderer therefore
     gets "wrong" in the same honest way. It is applied after decode and before
     the resize, so the tile is the right shape rather than a rotated crop.
+
+    There was an `edits` argument here that applied a develop recipe, reached
+    by `from develop import apply_edits`. No module named `develop` exists, no
+    function named `apply_edits` exists anywhere in the tree, and the sole
+    caller passed a literal `None` — so the branch was three ways dead and
+    could only ever have raised. Rendering an edited tile is a real thing to
+    want; when it comes back it comes back as a `tile` recipe that names the
+    edit, so an edited photograph's tile is a different cached answer rather
+    than the same one rendered differently.
     """
 
     image = decode(source, size)
     if rotate % 360:
         # PIL rotates counter-clockwise; the owner means clockwise.
         image = image.rotate(-int(rotate) % 360, expand=True)
-    if edits:
-        from develop import apply_edits  # imported late: the grid never needs it
-
-        image = apply_edits(image, edits)
     return encode(fit(image, size))
 
 

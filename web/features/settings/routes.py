@@ -224,11 +224,11 @@ async def api_save_settings(request: Request):
     )
     tiles.configure({**saved, "_replace_thumbnail_cache": replace_thumbnail_cache})
     if model_changed:
-        try:
-            import embedding_worker
-            embedding_worker._text_cache.clear()
-        except Exception:
-            pass
+        # Nothing to invalidate by hand any more. `search.space` keys its memo
+        # on the model's recipe, so a changed model misses it by construction
+        # -- which is the point of naming the model in the recipe. This used to
+        # reach for `embedding_worker._text_cache`, in a module deleted in
+        # 6fc7e31c, inside a bare `except: pass` that made the failure silent.
         try:
             import db
             await db.purge_retired_embedding_data()
@@ -260,9 +260,7 @@ async def api_reset_settings():
     tiles.configure(saved)
     try:
         import embed_cache
-        import embedding_worker
         embed_cache.invalidate()
-        embedding_worker._text_cache.clear()
     except Exception:
         pass
     if any(

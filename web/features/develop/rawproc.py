@@ -772,18 +772,21 @@ def ensure_base_cache(image_id: int, path: str | os.PathLike[str]) -> tuple[Base
         cached = cached_base_paths(image_id, path)
         if cached is not None:
             return cached, _upgrade_cached_metadata(cached, path)
-        # Open on the best rendition we already have when the original is still
-        # on the hub. Recording that proxy as source_path is what sharpens the
-        # edit later: _cached_source_matches rejects this base once the real
-        # original lands, and the next open decodes from it.
+        # Develop needs the original. It used to open on the best cached
+        # rendition instead, on the theory that the original was on the hub and
+        # would arrive later -- `thumbnails.best_cached_rendition`, a module
+        # deleted in d52cf6c7, so this raised ModuleNotFoundError rather than
+        # doing any of that.
+        #
+        # It should not come back. Originals live on the archive drive now, and
+        # that drive is plugged in *for* editing; nothing syncs it over later.
+        # Editing a 1920px proxy and calling the result a RAW develop is a
+        # worse answer than saying which drive to plug in.
         source = path
         if not original_is_local:
-            import thumbnails
-
-            best = thumbnails.best_cached_rendition(image_id)
-            if best is None:
-                raise RawDecodeError("Nothing of this photo has reached the laptop yet")
-            source = best[1]
+            raise RawDecodeError(
+                f"The original is not reachable at {path} -- plug in the drive that holds it"
+            )
         recent = _recent_decodes.pop(int(image_id), None)
         if recent is None:
             rgb, meta = decode_base(source)

@@ -147,7 +147,7 @@ def make_tile(source: str, hash: str, size: int = render.GRID,
     Same rule `put()` uses for photographs, for the same reason.
     """
 
-    body = render.render(source, size, None, rotate=rotate)
+    body = render.render(source, size, rotate=rotate)
     target = path_for(hash, size, rotate)
     os.makedirs(os.path.dirname(target), exist_ok=True)
     staging = f"{target}.writing"
