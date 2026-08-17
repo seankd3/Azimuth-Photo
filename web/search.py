@@ -193,7 +193,21 @@ def fuse(*lists: list[int], limit: int = 200) -> list[int]:
 
 
 def search(conn, query: str, *, query_vector=None, limit: int = 200) -> list[dict]:
-    """Find photographs. Always answers, with whatever it has."""
+    """Find photographs. Always answers, with whatever it has.
+
+    `query_vector` is the caller's to supply, and no caller supplies one yet --
+    `/api/search` passes only the words, so search is lexical and keyword today
+    and the 42,937 vectors sit unread. Embedding the query is the missing half.
+
+    Whoever adds it inherits one property, which two deleted tests
+    (`test_search_stability`) were the last record of: **the typing path must
+    never wait for a model.** Their mechanism -- a 192-line ladder with a
+    `deep` flag and eight injected callables -- is gone and should stay gone,
+    but the property is real and is now the argument's shape rather than a
+    ladder's: a caller that has a vector passes one, a caller that cannot
+    afford to wait passes None and gets words-only results immediately. Nothing
+    in here blocks, and nothing in here should learn how.
+    """
 
     query = (query or "").strip()
     if not query:
