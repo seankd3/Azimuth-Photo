@@ -9,10 +9,8 @@ import aiosqlite
 import asyncio
 import logging
 import os
-import time as _time  # noqa: F401  (test helpers reach for db._time)
 
 from core import cache_events
-from core.runtime_paths import resolve_runtime_paths
 from data import connection as data_connection
 from data import schema as data_schema
 from data.repositories import cache_entries as cache_entry_repository
@@ -21,7 +19,6 @@ from data.repositories import captions as caption_repository
 from data.repositories import embeddings as embedding_repository
 from data.repositories import images as image_repository
 from data.repositories import metadata_search as metadata_search_repository
-from data.repositories import ratings as rating_repository
 from data.repositories import stats as stats_repository
 import settings
 
@@ -337,97 +334,6 @@ async def batch_set_image_flags(image_ids: list[int], flag: str, chunk_size: int
     if updated:
         cache_events.invalidate_rankings_cache()
     return updated
-
-
-async def get_active_images_for_pairing():
-    return await rating_repository.get_active_images_for_pairing(
-        catalog_path(),
-        get_catalog_image_counts=get_catalog_image_counts,
-    )
-
-
-async def get_past_matchups() -> set[tuple[int, int]]:
-    return await rating_repository.get_past_matchups(
-        catalog_path(),
-        get_active_source_id_set=get_active_source_id_set,
-    )
-
-
-async def record_comparison(
-    winner_id: int,
-    loser_id: int,
-    mode: str,
-    elo_before_winner: float,
-    elo_before_loser: float,
-    new_winner_elo: float,
-    new_loser_elo: float,
-    action_id: str | None = None,
-):
-    await rating_repository.record_comparison(
-        catalog_path(),
-        winner_id=winner_id,
-        loser_id=loser_id,
-        mode=mode,
-        elo_before_winner=elo_before_winner,
-        elo_before_loser=elo_before_loser,
-        new_winner_elo=new_winner_elo,
-        new_loser_elo=new_loser_elo,
-        action_id=action_id,
-    )
-    _rankings_moved()
-
-
-async def record_active_comparison(
-    winner_id: int,
-    loser_id: int,
-    mode: str,
-    action_id: str | None = None,
-) -> dict | None:
-    """Validate active images and record a comparison in one DB round trip."""
-    counts = await get_catalog_image_counts()
-    result = await rating_repository.record_active_comparison(
-        catalog_path(),
-        winner_id=winner_id,
-        loser_id=loser_id,
-        mode=mode,
-        action_id=action_id,
-        catalog_counts=counts,
-    )
-    if result is None:
-        return None
-    result.pop("_rated_delta", None)
-    _rankings_moved()
-    return result
-
-
-async def record_active_mosaic_pick(
-    picked_id: int,
-    other_ids: list[int],
-    action_id: str,
-) -> dict:
-    """Validate active mosaic images and record the full pick action."""
-    counts = await get_catalog_image_counts()
-    result = await rating_repository.record_active_mosaic_pick(
-        catalog_path(),
-        picked_id=picked_id,
-        other_ids=other_ids,
-        action_id=action_id,
-        catalog_counts=counts,
-    )
-    if result.get("ok"):
-        result.pop("_rated_delta", None)
-        _rankings_moved()
-    return result
-
-
-async def undo_last_comparison():
-    """Undo the last comparison/action, restoring Elo ratings."""
-    result = await rating_repository.undo_last_comparison(catalog_path())
-    if result is not None:
-        _rankings_moved()
-    return result
-
-
 
 
 async def get_cached_image_ids(

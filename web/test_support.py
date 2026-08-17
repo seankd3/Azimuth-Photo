@@ -35,7 +35,7 @@ from core.static_assets import StaticAssetContext  # noqa: E402
 from data.repositories import cache_entries as cache_entry_repository  # noqa: E402
 from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
-from data.repositories import metadata_search, ratings, stats as stats_repository  # noqa: E402
+from data.repositories import metadata_search, stats as stats_repository  # noqa: E402
 from features.ai import routes as ai_routes  # noqa: E402
 from features.catalog import routes as catalog_routes  # noqa: E402
 from features.search import service as search_service  # noqa: E402

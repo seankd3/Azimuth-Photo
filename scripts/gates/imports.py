@@ -49,8 +49,25 @@ def _first_party(root) -> set[str]:
     return names
 
 
+def _bare_packages(root) -> set[str]:
+    """Our packages whose `__init__` re-exports nothing.
+
+    A name imported from one of these can only be a submodule, which makes it
+    checkable. A package that *does* re-export is not, without importing it —
+    and importing to check is how a checker acquires side effects.
+    """
+
+    bare = set()
+    for path in tracked(root, "web/**/__init__.py", tests=False):
+        body = ast.parse(read(root, path)).body
+        if all(isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant) for n in body):
+            bare.add(path[len("web/"):].removesuffix("/__init__.py").replace("/", "."))
+    return bare
+
+
 def run(root) -> list[str]:
     known = _first_party(root)
+    bare_packages = _bare_packages(root)
     roots = {name.split(".")[0] for name in known}
     found: list[str] = []
     for path in tracked(root, "web/*.py", "web/**/*.py", tests=True):
@@ -74,4 +91,19 @@ def run(root) -> list[str]:
                 except Exception:
                     pass
                 found.append(f"{path}:{node.lineno}: import {name} -- no such module")
+
+            # `from <our package> import name` — the module resolves, the name
+            # may not. `data/repositories/__init__.py` re-exports nothing, so a
+            # name imported from it can only be a submodule, and
+            # `from data.repositories import ratings` after ratings.py is
+            # deleted names a file that is not there. This is the gap that let a
+            # deletion take fourteen test modules down before `collects` caught
+            # it; catching the import itself says which line to fix.
+            if isinstance(node, ast.ImportFrom) and node.module in bare_packages:
+                for alias in node.names:
+                    if alias.name != "*" and f"{node.module}.{alias.name}" not in known:
+                        found.append(
+                            f"{path}:{node.lineno}: from {node.module} import {alias.name}"
+                            " -- no such module in that package"
+                        )
     return sorted(set(found))
