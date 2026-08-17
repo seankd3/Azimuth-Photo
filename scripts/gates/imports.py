@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import subprocess
 
 from common import read, tracked
 
@@ -46,6 +47,36 @@ def _first_party(root) -> set[str]:
         parts = dotted.split(".")
         for depth in range(1, len(parts)):
             names.add(".".join(parts[:depth]))
+    return names
+
+
+def _ours_once(root) -> set[str]:
+    """Module names that have ever been a file under `web/`.
+
+    The gap this closes: a module that is deleted *entirely* leaves no trace in
+    `_first_party`, so its name is no longer a known root and `import
+    thumbnails` reads exactly like `import numpy` -- third-party, allowed to be
+    absent. The gate passed while `features/develop/rawproc.py` and
+    `features/develop/routes.py` both imported a module deleted in d52cf6c7,
+    which is to say every develop save and every RAW open on a missing original
+    raised ModuleNotFoundError, and 26 tests failed on it.
+
+    History is the instrument that distinguishes the two cases, the same way it
+    distinguishes dead code from an unwired capability. If a file by that name
+    was ever ours, an import of it is ours to answer for.
+    """
+
+    out = subprocess.run(
+        ["git", "log", "--diff-filter=D", "--name-only", "--format=", "--", "web"],
+        cwd=root, capture_output=True, text=True, check=False,
+    ).stdout
+    names = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("web/") and line.endswith(".py"):
+            dotted = line[len("web/"):].removesuffix(".py").replace("/", ".")
+            names.add(dotted)
+            names.add(dotted.rsplit(".", 1)[-1])
     return names
 
 
@@ -69,6 +100,7 @@ def run(root) -> list[str]:
     known = _first_party(root)
     bare_packages = _bare_packages(root)
     roots = {name.split(".")[0] for name in known}
+    deleted = {name.split(".")[0] for name in _ours_once(root)} - roots
     found: list[str] = []
     for path in tracked(root, "web/*.py", "web/**/*.py", tests=True):
         try:
@@ -83,8 +115,10 @@ def run(root) -> list[str]:
             else:
                 continue
             for name in targets:
-                if name in known or name.split(".")[0] not in roots:
-                    continue  # resolvable, or third-party and allowed to be absent
+                if name in known:
+                    continue
+                if name.split(".")[0] not in roots and name.split(".")[0] not in deleted:
+                    continue  # third-party, and allowed to be absent
                 try:
                     if importlib.util.find_spec(name.split(".")[0]) is not None:
                         continue  # a real package that shares a name with ours
