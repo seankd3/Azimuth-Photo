@@ -20,9 +20,13 @@ os.environ.setdefault("AZIMUTH_DATA_DIR", r"C:\Azimuth Photo\data")
 os.environ.setdefault("HF_HOME", r"D:\azimuth-bench\models")
 
 
-# Eight fits the card beside 2.4 GB of resident weights and keeps the GPU busy
-# through the decode of the next one.
-BATCH = 8
+# Two, measured, not guessed. This card has 4,096 MiB and the weights hold
+# 2,237 of it, so the batch is the only free variable and it is a cliff rather
+# than a curve: 1 gives 0.80 img/s, 2 gives 1.37, and 8 gives 0.10 because the
+# activations no longer fit and Windows spills them to system RAM instead of
+# raising -- the same failure that made Qwen 2B unusable. A batch that does not
+# fit does not fail, it crawls.
+BATCH = 2
 
 
 def say(message: str) -> None:
