@@ -137,19 +137,24 @@ class HostProfile:
     # ---- model recommendations -------------------------------------------
 
     def recommended_embed_preset(self) -> str:
-        """Pick a search model that can load on this host with margin.
+        """The heaviest search model this host can actually run.
 
-        8GB consumer cards can load 8B-4bit *alone* but thrash or OOM once
-        captions/CUDA fragmentation appear. Prefer 2B below 12GB VRAM.
+        Three branches used to sit here, all of them choosing between a 2B and
+        an 8B on estimated cost. Measured on the 4 GB card both are fictional:
+        the 8B never loads, and the 2B loads at 3,901 MB of 4,096 and then makes
+        no forward progress at all — Windows spills the overflow to system RAM
+        rather than erroring, so it crawls at 0.03 img/s instead of failing.
+        A recommendation that returns something which cannot run is worse than
+        no recommendation.
+
+        SigLIP-2 is not the consolation prize either: on the owner's own
+        comparisons it ranks slightly better than the 8B's stored vectors
+        (+0.714 against +0.687) at a third of the dimensions.
         """
         vram = self.vram_total_bytes or 0
-        if not self.has_cuda or vram <= 0:
-            return "qwen3-vl-embedding-2b"
-        if vram < 12 * _GIB:
-            return "qwen3-vl-embedding-2b"
-        if vram < COST_EMBED_8B_VRAM + (1500 * _MIB):
-            return "qwen3-vl-embedding-2b"
-        return "qwen3-vl-embedding-8b"
+        if self.has_cuda and vram >= 20 * _GIB:
+            return "qwen3-vl-embedding-8b"
+        return "siglip2-so400m"
 
     def recommended_caption_preset(self) -> str:
         vram = self.vram_total_bytes or 0

@@ -26,7 +26,7 @@ units, so there is nothing to calibrate.
 
 from __future__ import annotations
 
-
+import os
 
 from model import cache, decisions
 
@@ -238,8 +238,30 @@ def search(conn, query: str, *, query_vector=None, limit: int = 200) -> list[dic
 # take hours to remake, and a machine that cannot make them (no model, no GPU)
 # must record nothing rather than a failure -- so the helper that can is not
 # looking at a row saying this photograph could not be embedded.
-def _needs_a_helper() -> bool:
-    return False
+def _make_embedding(source: str, hash: str, model: str) -> cache.Made:
+    """The vector, as bytes. `model` comes from the recipe and is not read here.
+
+    The recipe names the model so that `owed` schedules the right photographs
+    and `space` reads one model's vectors; the loaded model is whichever
+    `settings.active_embedding_config()` says, and those are the same answer by
+    construction. Passing it would let them disagree.
+
+    **Embedded from the loupe tile when there is one.** The model sees 384px
+    either way, so decoding a 50 MB RAW off the archive drive to get there buys
+    nothing and costs everything: measured, 0.56 img/s from originals against
+    6.6 from renditions -- 56 hours for the library rather than 5. It also
+    decides whether this work can happen at all with the drive unplugged, which
+    is the whole reason the tiles live on the laptop.
+    """
+
+    import embed
+    import render
+    import tiles
+
+    rendition = tiles.path_for(hash, render.LOUPE)
+    if not os.path.exists(rendition):
+        rendition = source
+    return cache.Made(value=embed.vector(rendition).tobytes(), bytes=1152 * 4)
 
 
 # An embedding's recipe is the model that made it.
@@ -262,11 +284,20 @@ def active_model() -> str:
     return str(settings.active_embedding_config()["model_key"])
 
 
+def _can_embed() -> bool:
+    import embed
+    return embed.ready()
+
+
 EMBEDDING_KIND = cache.register(cache.Kind(
     name=EMBEDDING,
-    compute=lambda source, hash, model: cache.Made(),
+    compute=_make_embedding,
     cost=2.0,
     params=("model",),
     evictable=False,
-    here=_needs_a_helper,
+    here=_can_embed,
+    # One recipe, and it is whichever model is configured now. Change the model
+    # and the work loop starts owing vectors for the new one without anything
+    # having to notice, because `owed` is an anti-join against this recipe.
+    ahead=lambda: ({"model": active_model()},),
 ))

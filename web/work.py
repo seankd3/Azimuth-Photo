@@ -276,7 +276,7 @@ def debt(conn) -> dict[str, int]:
     tally = {"identity": _unidentified_count(conn)}
     for name, kind in cache.kinds().items():
         try:
-            tally[name] = sum(owing(conn, name, recipe=recipe) for recipe in kind.ahead)
+            tally[name] = sum(owing(conn, name, recipe=recipe) for recipe in kind.ahead())
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
             log.debug("worker=debt kind=%s could not be counted", name)
     return tally
@@ -332,7 +332,7 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
         # meant a single away photo stalled every other kind of work behind it.
         # Trying a handful costs nothing and makes progress whenever *any* of
         # them is reachable.
-        for recipe in kind.ahead:
+        for recipe in kind.ahead():
             for row in owed(conn, name, recipe=recipe, on_screen=on_screen,
                             limit=CANDIDATES)[lane::lanes]:
                 source = photos.locate(conn, row["tail"], expected_size=row["file_size"])

@@ -62,7 +62,12 @@ class Kind:
     # `{"edits":null,"rotate":0,"size":400}`: 5,340 rows nothing would ever
     # read, the grid remaking on demand what the loop had just made, and 1920
     # and 3840 never made ahead at all.
-    ahead: tuple[dict[str, Any], ...] = ({},)
+    #
+    # Asked, never remembered, for the same reason `here` is: an embedding's
+    # recipe names the model in use, and the model is a setting the owner can
+    # change while the app is running. A tuple fixed at import would keep
+    # making vectors for the model they switched away from.
+    ahead: Callable[[], tuple[dict[str, Any], ...]] = lambda: ({},)
     evictable: bool = True
     # Which photos should have one, as a SQL condition over `images i`. This is
     # the half of "owed is a query" that a kind owns: the work layer asks

@@ -167,7 +167,7 @@ TILE = cache.register(cache.Kind(
     # and answers one question — "show me this one at full width" — which is a
     # deliberate act with a photograph already in front of you, so it can wait
     # the half second it takes to render.
-    ahead=(
+    ahead=lambda: (
         {"size": render.GRID, "edits": None, "rotate": 0},
         {"size": render.LOUPE, "edits": None, "rotate": 0},
     ),

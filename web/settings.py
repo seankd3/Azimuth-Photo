@@ -11,7 +11,7 @@ SETTINGS_PATH = resolve_runtime_paths().settings_file
 SETTINGS_VERSION = 2
 LEGACY_2B_PRESET_KEY = "qwen3-vl-embedding-2b"
 # Module-level strings kept for imports; real defaults resolve via host_profile.
-DEFAULT_EMBED_MODEL_PRESET_KEY = "qwen3-vl-embedding-8b"
+DEFAULT_EMBED_MODEL_PRESET_KEY = "siglip2-so400m"
 DEFAULT_CAPTION_MODEL_PRESET_KEY = "qwen2.5-vl-7b-instruct-bnb-4bit"
 
 
@@ -62,10 +62,10 @@ DEFAULT_SETTINGS = {
     "embed_batch_pause_ms": 250,
     "embed_batch_size": 1,
     "embed_model_preset": DEFAULT_EMBED_MODEL_PRESET_KEY,
-    "embed_model_id": "Qwen/Qwen3-VL-Embedding-8B",
+    "embed_model_id": "google/siglip2-so400m-patch14-384",
     "embed_model_revision": "main",
-    "embed_model_dir": _default_model_dir("Qwen/Qwen3-VL-Embedding-8B"),
-    "embed_model_dim": 4096,
+    "embed_model_dir": _default_model_dir("google/siglip2-so400m-patch14-384"),
+    "embed_model_dim": 1152,
     "search_similarity_threshold": 0.35,
     "ranking_taste_blend": True,
     "taste_blend_min_signal": 25,
@@ -131,20 +131,31 @@ PRIVATE_SETTING_KEYS = {
 # Server-side-only configuration: readable (masked) but never writable via the API.
 SERVER_ONLY_SETTING_KEYS = {"publish_hook"}
 
+# Every entry here has been run on this machine. A preset that cannot load is
+# not a choice, and both of the ones that used to be here were exactly that:
+# the 8B will not fit on a 4 GB card at all, and the 2B fits at 3,901 MB of
+# 4,096 and then makes no forward progress even at batch 1 with inputs capped
+# to 384x384 -- Windows spills the overflow to system RAM rather than failing,
+# so it crawls at 0.03 img/s instead of erroring. The default was the one that
+# could not load.
 EMBED_MODEL_PRESETS = {
+    "siglip2-so400m": {
+        "label": "SigLIP-2 so400m",
+        "model_id": "google/siglip2-so400m-patch14-384",
+        "revision": "main",
+        "dimension": 1152,
+        "description": "Measured here: 6.6 img/s, 2,352 MB, about 4.8 hours for the library. "
+                       "Ranks the owner's own comparisons slightly better than the 8B "
+                       "(+0.714 against +0.687) at a third of the dimensions.",
+    },
     "qwen3-vl-embedding-8b": {
-        "label": "Qwen3-VL Embedding 8B",
+        "label": "Qwen3-VL Embedding 8B (already embedded)",
         "model_id": "Qwen/Qwen3-VL-Embedding-8B",
         "revision": "main",
         "dimension": 4096,
-        "description": "Default local text-to-image search model. Heavier, smarter embeddings.",
-    },
-    "qwen3-vl-embedding-2b": {
-        "label": "Qwen3-VL Embedding 2B",
-        "model_id": "Qwen/Qwen3-VL-Embedding-2B",
-        "revision": "main",
-        "dimension": 2048,
-        "description": "Lighter fallback for lower-memory machines.",
+        "description": "Will not load on this card. Kept because 42,937 photographs already "
+                       "carry its vectors and the recipe names the model, so that space stays "
+                       "readable rather than being mixed or thrown away.",
     },
 }
 
@@ -381,7 +392,7 @@ def _settings_version(raw: dict) -> int:
 
 def _raw_uses_legacy_2b_default(raw: dict) -> bool:
     preset = str(raw.get("embed_model_preset") or LEGACY_2B_PRESET_KEY).strip()
-    model_id = str(raw.get("embed_model_id") or "Qwen/Qwen3-VL-Embedding-2B").strip()
+    model_id = str(raw.get("embed_model_id") or "google/siglip2-so400m-patch14-384").strip()
     revision = str(raw.get("embed_model_revision") or "main").strip()
     try:
         dimension = int(raw.get("embed_model_dim") or 2048)
