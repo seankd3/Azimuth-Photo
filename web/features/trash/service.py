@@ -16,7 +16,6 @@ import judgements
 
 
 Error = dict[str, int | str]
-DEFAULT_RETENTION_SECONDS = 30 * 24 * 60 * 60
 TRASH_WRITE_BUSY_TIMEOUT_SECONDS = 0.1
 TRASH_WRITE_RETRY_BACKOFF_SECONDS = 0.1
 
@@ -669,12 +668,7 @@ def _prune_empty_trash_dirs(paths: list[str]) -> None:
             current = os.path.dirname(current)
 
 
-async def _trash_rows(
-    db_path: str,
-    *,
-    older_than: float | None = None,
-    image_ids: list[int] | None = None,
-) -> list[dict]:
+async def _trash_rows(db_path: str, *, image_ids: list[int] | None = None) -> list[dict]:
     conn = await data_connection.open_async(db_path)
     try:
         base_query = """
@@ -684,21 +678,16 @@ async def _trash_rows(
             LEFT JOIN catalog_sources s ON s.id = i.source_id
             WHERE i.status = 'trashed'
         """
-        age_clause = ""
-        age_params: tuple = ()
-        if older_than is not None:
-            age_clause = " AND i.trashed_at IS NOT NULL AND i.trashed_at <= ?"
-            age_params = (float(older_than),)
         if image_ids is None:
-            cursor = await conn.execute(base_query + age_clause, age_params)
+            cursor = await conn.execute(base_query)
             return [dict(row) for row in await cursor.fetchall()]
         ids = unique_image_ids(image_ids)
         rows: list[dict] = []
         for chunk in catalog_repository._chunked(ids):
             placeholders = ",".join("?" for _ in chunk)
             cursor = await conn.execute(
-                base_query + age_clause + f" AND i.id IN ({placeholders})",
-                (*age_params, *chunk),
+                base_query + f" AND i.id IN ({placeholders})",
+                chunk,
             )
             rows.extend(dict(row) for row in await cursor.fetchall())
         return rows
@@ -706,13 +695,8 @@ async def _trash_rows(
         await data_connection.close_async(conn, db_path=db_path)
 
 
-async def _purge_trash_rows(
-    db_path: str,
-    *,
-    older_than: float | None = None,
-    image_ids: list[int] | None = None,
-) -> dict:
-    rows = await _trash_rows(db_path, older_than=older_than, image_ids=image_ids)
+async def _purge_trash_rows(db_path: str, *, image_ids: list[int] | None = None) -> dict:
+    rows = await _trash_rows(db_path, image_ids=image_ids)
     deletable_ids: list[int] = []
     rows_by_id: dict[int, dict] = {}
     errors: list[Error] = []
@@ -773,17 +757,6 @@ async def _purge_trash_rows(
 async def empty_trash(db_path: str, *, image_ids: list[int] | None = None) -> dict:
     """Permanently remove local files plus catalog-only trash entries."""
     return await _purge_trash_rows(db_path, image_ids=image_ids)
-
-
-async def purge_expired_trash(
-    db_path: str,
-    *,
-    retention_seconds: float = DEFAULT_RETENTION_SECONDS,
-    now: float | None = None,
-) -> dict:
-    """Purge expired entries when any source-local trash file is reachable."""
-    cutoff = (time.time() if now is None else float(now)) - max(0.0, float(retention_seconds))
-    return await _purge_trash_rows(db_path, older_than=cutoff)
 
 
 async def _delete_emptied_catalog_rows(db_path: str, image_ids: list[int]) -> tuple[list[int], list[Error]]:

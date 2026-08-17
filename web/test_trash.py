@@ -430,58 +430,6 @@ class TrashTests(BackendTestCase):
         self.assertEqual(result["freed_bytes"], 0)
         self.assertFalse(await self._image_exists(image_id))
 
-    async def test_retention_purges_only_expired_online_trash_and_never_originals(self):
-        source, root = await self._source_root()
-        expired_id, _ = await self._file_image(source, "expired.jpg", data=b"expired")
-        recent_id, recent_original = await self._file_image(source, "recent.jpg", data=b"recent")
-        unsafe_id, _ = await self._file_image(source, "unsafe.jpg", data=b"unsafe")
-        outside_original = os.path.join(root, "outside.jpg")
-        with open(outside_original, "wb") as handle:
-            handle.write(b"must remain")
-        await trash_service.trash_images(catalog_path(), [expired_id, recent_id, unsafe_id])
-        expired = await self._image_row(expired_id)
-        recent = await self._image_row(recent_id)
-        conn = await db.get_db()
-        try:
-            await conn.execute("UPDATE images SET trashed_at = ? WHERE id = ?", (100.0, expired_id))
-            await conn.execute("UPDATE images SET trashed_at = ?, trash_path = ? WHERE id = ?", (100.0, outside_original, unsafe_id))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-        result = await trash_service.purge_expired_trash(catalog_path(), retention_seconds=60, now=200.0)
-
-        self.assertEqual(result["deleted_count"], 1)
-        self.assertEqual(result["errors"], [{"id": unsafe_id, "reason": "trash path is outside source trash"}])
-        self.assertFalse(os.path.exists(expired["trash_path"]))
-        self.assertFalse(await self._image_exists(expired_id))
-        self.assertTrue(os.path.exists(recent["trash_path"]))
-        self.assertFalse(os.path.exists(recent_original))
-        self.assertTrue(os.path.exists(outside_original))
-        self.assertTrue(await self._image_exists(recent_id))
-        self.assertTrue(await self._image_exists(unsafe_id))
-
-    async def test_retention_skips_offline_source_without_error(self):
-        source, _root = await self._source_root()
-        image_id, _ = await self._file_image(source, "offline.jpg", data=b"offline")
-        await trash_service.trash_images(catalog_path(), [image_id])
-        trashed = await self._image_row(image_id)
-        conn = await db.get_db()
-        try:
-            await conn.execute("UPDATE images SET trashed_at = ? WHERE id = ?", (100.0, image_id))
-            await conn.execute("UPDATE catalog_sources SET online = 0 WHERE id = ?", (source["id"],))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-        result = await trash_service.purge_expired_trash(catalog_path(), retention_seconds=60, now=200.0)
-
-        self.assertEqual(result["deleted_count"], 0)
-        self.assertEqual(result["skipped_offline"], 1)
-        self.assertEqual(result["errors"], [])
-        self.assertTrue(os.path.exists(trashed["trash_path"]))
-        self.assertTrue(await self._image_exists(image_id))
-
     async def test_trashing_stack_representative_promotes_next_best_member(self):
         source, _root = await self._source_root()
         representative, _ = await self._file_image(source, "rep.jpg", data=b"rep", elo=1500)
