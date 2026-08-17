@@ -61,6 +61,17 @@ SORTS = {
     "best": "i.elo DESC, i.id DESC",
     "stars": "i.stars DESC, i.date_taken DESC",
     "folder": "i.tail ASC",
+    # The grid has offered these two since it was written and neither had an
+    # entry, so both fell through the caller's `.get(..., "newest")` and served
+    # date order under a control reading "Camera" or "Size". 121,755 rows carry
+    # a camera and every row carries a size, so both are real orders; what was
+    # missing was the row in this table.
+    "camera": "i.camera_model IS NULL, i.camera_model ASC, i.date_taken DESC",
+    "file_size": "i.file_size DESC, i.id DESC",
+    # "filename" was mapped to `folder`, which sorts by the whole path -- so a
+    # library organised by date sorted by date under a control reading
+    # "Filename". A filename sort sorts by filename.
+    "filename": "i.filename ASC, i.id ASC",
     # Recently added *is* id order -- ids are handed out in insertion order --
     # so this sort needs neither a column nor an index. Reading `created_at`
     # instead cost 233 ms against 0.2 ms, for the same answer.

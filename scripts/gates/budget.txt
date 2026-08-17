@@ -8,7 +8,7 @@
 # own commit. A number that is not the measurement describes a tree that is
 # not there.
 seam 16
-layers 30
+layers 27
 tables 47
 invokes 4
 routes 0

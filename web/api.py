@@ -31,7 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 import library
@@ -370,10 +370,18 @@ def _apply_rotation(conn, rows: list[dict]) -> None:
 # What the UI calls a sort, and what the library calls it. The UI's names are
 # the contract -- it is not being rewritten -- so the translation lives here
 # rather than leaking its vocabulary into `library.SORTS`.
+#
+# Every name the UI can send must appear, because a translation table read with
+# `.get(name, default)` is a silent substitution, and a silent substitution is
+# how the grid shipped three sorts that do not sort. `camera` and `file_size`
+# were absent and fell to date order; `filename` was pointed at `folder`, which
+# sorts by path. `library.SORTS` opens by warning about exactly this and this
+# table is where it happened anyway.
 _UI_SORTS = {
     "date_taken": "newest", "date_taken_asc": "oldest", "newest": "newest",
     "oldest": "oldest", "taste": "best", "elo": "best", "best": "best",
-    "rating": "stars", "stars": "stars", "filename": "folder", "folder": "folder",
+    "rating": "stars", "stars": "stars", "folder": "folder",
+    "filename": "filename", "camera": "camera", "file_size": "file_size",
     "added": "added", "": "newest",
 }
 
@@ -397,12 +405,26 @@ async def rankings(sort: str = "", limit: int = 100, offset: int = 0,
     return _page(sort, limit, offset, folder, min_stars)
 
 
+def _sort_or_400(sort: str) -> str:
+    """The library's name for a sort the UI asked for, or an error.
+
+    Refusing beats defaulting. A name this table does not know used to become
+    `newest`, so a control reading "Camera" produced date order and the only
+    way to notice was to already know what camera order looks like.
+    """
+
+    name = _UI_SORTS.get((sort or "").strip())
+    if name is None:
+        raise HTTPException(status_code=400, detail=f"unknown sort: {sort}")
+    return name
+
+
 def _page(sort: str, limit: int, offset: int, folder, min_stars) -> dict:
     conn = db()
     rows = library.photos(
         conn,
         scope=scope.all_of(scope.folder(folder), scope.starred(min_stars or 0)),
-        sort=_UI_SORTS.get(sort or "", "newest"), limit=limit, offset=offset,
+        sort=_sort_or_400(sort), limit=limit, offset=offset,
     )
     _apply_rotation(conn, rows)
     tally = library.counts(conn)
