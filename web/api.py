@@ -43,7 +43,7 @@ import work
 import xmp
 from core.catalog_path import catalog_path
 from data import connection
-from model import cache, decisions, photos
+from model import cache, decisions, photos, scope
 
 router = APIRouter()
 
@@ -399,8 +399,9 @@ async def rankings(sort: str = "", limit: int = 100, offset: int = 0,
 def _page(sort: str, limit: int, offset: int, folder, min_stars) -> dict:
     conn = db()
     rows = library.photos(
-        conn, folder=folder, sort=_UI_SORTS.get(sort or "", "newest"),
-        starred=min_stars or None, limit=limit, offset=offset,
+        conn,
+        scope=scope.all_of(scope.folder(folder), scope.starred(min_stars or 0)),
+        sort=_UI_SORTS.get(sort or "", "newest"), limit=limit, offset=offset,
     )
     _apply_rotation(conn, rows)
     tally = library.counts(conn)

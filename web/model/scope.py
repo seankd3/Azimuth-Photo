@@ -1,0 +1,114 @@
+"""Which photographs. One argument, for every surface that narrows the library.
+
+Before this there were six spellings of the same idea and no two agreed:
+
+    library.photos(folder=…, starred=…)      two keyword arguments
+    work.owed(kind)                          none at all — it could not be asked
+    cache.Kind.wants                         a bare SQL string, no arguments
+    export                                   `id_filter` plus a `collection_id`
+    smart collections                        a query resolved to a set of ids
+    keywords / stacks / trash                each its own table and join
+
+Adding the seventh would have been another keyword argument on `photos()`, whose
+docstring is already proudly refusing three of them. So the argument is one
+thing instead, and the shape was already in the tree: `Kind.wants` is documented
+as *"which photos should have one, as a SQL condition over `images i`"*. That is
+a scope with no parameters. This is that, with parameters.
+
+**A scope is a WHERE clause over `images i`, and its arguments.** It is not a
+list of ids — resolving to a list would drag 157,000 hashes through Python to
+ask a question SQLite can answer in place, and would make "everything" the most
+expensive case instead of the cheapest.
+
+They compose with `all_of`, which is why a caller can say *this folder, in this
+collection, starred* without anyone having written that combination.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+from model import decisions
+
+
+@dataclass(frozen=True)
+class Scope:
+    """A condition over `images i`, and the arguments it binds."""
+
+    sql: str = "1"
+    args: tuple = ()
+
+    def __bool__(self) -> bool:
+        """False only for the scope that narrows nothing."""
+
+        return self.sql != "1"
+
+
+EVERYTHING = Scope()
+NOTHING = Scope("0")
+
+
+def all_of(*scopes: Scope) -> Scope:
+    """Every scope at once. Narrowing nothing is the identity, so it drops out."""
+
+    live = [s for s in scopes if s and s.sql != "1"]
+    if not live:
+        return EVERYTHING
+    if any(s.sql == "0" for s in live):
+        return NOTHING
+    return Scope(
+        " AND ".join(f"({s.sql})" for s in live),
+        tuple(arg for s in live for arg in s.args),
+    )
+
+
+def folder(path: str) -> Scope:
+    """Everything filed under one folder, by tail prefix."""
+
+    if not path:
+        return EVERYTHING
+    prefix = str(path).replace("\\", "/").rstrip("/") + "/"
+    return Scope("substr(i.tail, 1, ?) = ?", (len(prefix), prefix))
+
+
+def starred(least: int) -> Scope:
+    """At least this many stars."""
+
+    return Scope("i.stars >= ?", (int(least),)) if least else EVERYTHING
+
+
+def in_set(set_id: str) -> Scope:
+    """Members of one set, as a subquery rather than a materialised list.
+
+    Membership is the latest decision in the set's family being true, which is
+    `decisions.LATEST_IN_FAMILY` — the same definition `current()` reads, so
+    there is one answer to "is it in" and not two that can drift.
+    """
+
+    from model import sets  # circular at import time: sets names the family
+
+    return Scope(
+        f"i.content_hash IN (SELECT subject FROM ({decisions.LATEST_IN_FAMILY}) WHERE value = 'true')",
+        (sets.family(set_id),),
+    )
+
+
+def ids(image_ids) -> Scope:
+    """An explicit list of image ids — the one case that cannot be a predicate.
+
+    Used where a caller already holds a set of rows, such as an export narrowed
+    by an import batch. Prefer a real scope where one exists: this one grows the
+    SQL with the number of ids.
+    """
+
+    wanted = [int(i) for i in image_ids if int(i) > 0]
+    if not wanted:
+        return NOTHING
+    return Scope(f"i.id IN ({','.join('?' * len(wanted))})", tuple(wanted))
+
+
+def where(scope: Scope | None) -> tuple[str, tuple]:
+    """The clause and arguments, for a caller assembling a query."""
+
+    scope = scope or EVERYTHING
+    return scope.sql, tuple(scope.args)

@@ -1,7 +1,11 @@
 import pytest
 import json
 import os
+import pathlib
+import re
 import sqlite3
+
+from model import photos, sets
 import time
 from contextlib import closing
 from unittest import mock
@@ -24,24 +28,32 @@ class LightroomCatalogImportTests(unittest.TestCase):
     def tearDown(self):
         self.tempdir.cleanup()
 
-    def _make_library(self):
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+    def _open(self, path=None):
+        # The model reads rows by name, as every connection from `data.connection`
+        # does. A fixture that opens sqlite3 raw is a fixture testing a
+        # connection the app never hands out.
+        conn = sqlite3.connect(path or self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _make_library(self, destination=None):
+        with closing(self._open(destination)) as conn, conn:
             conn.executescript("""
                 CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE,
-                    date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
+                    date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept',
+                    missing_at REAL, content_hash TEXT);
                 CREATE TABLE develop_settings (image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}',
                     origin TEXT NOT NULL DEFAULT 'user', xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL);
-                CREATE TABLE collections (id INTEGER PRIMARY KEY, uuid TEXT UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
-                    visibility TEXT NOT NULL DEFAULT 'private', status TEXT NOT NULL DEFAULT 'draft', query TEXT,
-                    cover_image_id INTEGER, created_at REAL NOT NULL, updated_at REAL NOT NULL);
-                CREATE TABLE collection_images (collection_id INTEGER, image_id INTEGER, position INTEGER NOT NULL DEFAULT 0,
-                    added_at REAL NOT NULL DEFAULT 0, PRIMARY KEY(collection_id, image_id));
-                CREATE TABLE collection_publishes (collection_id INTEGER, slug TEXT, published_at REAL, updated_at REAL);
             """)
-            conn.executemany("INSERT INTO images (id, filename, filepath, date_taken, flag) VALUES (?, ?, ?, ?, ?)", [
-                (1, "IMG_0001.DNG", "/mnt/expansion/Photos/RAWS/2023/2023-06-01/IMG_0001.DNG", "2023-06-01 10:00:00", "unflagged"),
-                (2, "IMG_0002.CR3", "/mnt/expansion/Photos/RAWS/2023/2023-06-02/IMG_0002.CR3", "2023-06-02 11:00:00", "picked"),
-                (3, "IMG_0003.DNG", "/mnt/expansion/Photos/RAWS/2023/2023-06-03/IMG_0003.DNG", "2023-06-03 12:00:00", "unflagged"),
+            # The core's own tables, from the file the running app applies at boot.
+            # A catalog assembled by hand here is a catalog the app never builds.
+            core = re.sub(r"--[^\n]*", "", (pathlib.Path(__file__).parent / "model" / "schema.sql").read_text(encoding="utf-8"))
+            for statement in [s.strip() for s in core.split(";") if "decisions" in s and s.strip()]:
+                conn.execute(statement)
+            conn.executemany("INSERT INTO images (id, filename, filepath, date_taken, flag, content_hash) VALUES (?, ?, ?, ?, ?, ?)", [
+                (1, "IMG_0001.DNG", "/mnt/expansion/Photos/RAWS/2023/2023-06-01/IMG_0001.DNG", "2023-06-01 10:00:00", "unflagged", "hash-1"),
+                (2, "IMG_0002.CR3", "/mnt/expansion/Photos/RAWS/2023/2023-06-02/IMG_0002.CR3", "2023-06-02 11:00:00", "picked", "hash-2"),
+                (3, "IMG_0003.DNG", "/mnt/expansion/Photos/RAWS/2023/2023-06-03/IMG_0003.DNG", "2023-06-03 12:00:00", "unflagged", "hash-3"),
             ])
 
     def _make_catalog(self):
@@ -86,11 +98,12 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['picks_protected'], 1)
         self.assertEqual(result['keywords_skipped'], 1)
         self.assertEqual(result['collections_created'], 1)
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+        with closing(self._open()) as conn, conn:
             flags = dict(conn.execute('SELECT id, flag FROM images'))
             settings = dict(conn.execute('SELECT image_id, settings FROM develop_settings'))
-            collection = conn.execute("SELECT id FROM collections WHERE name = 'LR 2023/Favorites'").fetchone()
-            members = [row[0] for row in conn.execute('SELECT image_id FROM collection_images WHERE collection_id = ? ORDER BY position', collection)]
+            named = [s for s in sets.all(conn) if s["name"] == 'LR 2023/Favorites']
+            self.assertEqual(len(named), 1)
+            members = photos.ids(conn, sets.members(conn, named[0]["id"]))
         self.assertEqual(flags, {1: 'picked', 2: 'picked', 3: 'unflagged'})
         self.assertEqual(json.loads(settings[1])['_lr_rating'], 5)
         self.assertEqual(json.loads(settings[2])['_lr_rating'], 3)
@@ -98,7 +111,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
 
     def test_imports_full_catalog_settings_and_respects_fresher_xmp_or_user_work(self):
         epoch = 978307200.0
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+        with closing(self._open()) as conn, conn:
             conn.executemany(
                 "INSERT INTO develop_settings (image_id, settings, origin, xmp_path, xmp_mtime, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
                 [
@@ -108,7 +121,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
                 ],
             )
         result = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+        with closing(self._open()) as conn, conn:
             stored = {
                 image_id: (json.loads(settings), origin)
                 for image_id, settings, origin in conn.execute(
@@ -134,7 +147,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
 
     @pytest.mark.contract
     def test_rating_import_does_not_advance_the_develop_clock(self):
-        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+        with closing(self._open()) as conn, conn:
             conn.execute(
                 "INSERT INTO develop_settings(image_id, settings, origin, updated_at) "
                 "VALUES (1, ?, 'user', 'develop-save')",
@@ -153,16 +166,16 @@ class LightroomCatalogImportTests(unittest.TestCase):
         first = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
         second = lrcat_import.import_lrcat(self.catalog_path, self.db_path)
         dry_db = os.path.join(self.tempdir.name, 'dry.db')
-        self._make_library_copy(dry_db)
+        self._make_library(dry_db)
         dry = lrcat_import.import_lrcat(self.catalog_path, dry_db, dry_run=True)
         self.assertEqual(first['collections_created'], 1)
         self.assertEqual(second['collections_created'], 0)
         self.assertEqual(second['picks_updated'], 0)
         self.assertEqual(second['ratings_updated'], 0)
         self.assertEqual(dry['matched'], 3)
-        with closing(sqlite3.connect(dry_db)) as conn, conn:
+        with closing(self._open(dry_db)) as conn, conn:
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM develop_settings').fetchone()[0], 0)
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM collections').fetchone()[0], 0)
+            self.assertEqual(sets.all(conn), [])
 
     def _wait_for_scan(self, client, timeout=15.0):
         deadline = time.monotonic() + timeout
@@ -203,8 +216,8 @@ class LightroomCatalogImportTests(unittest.TestCase):
         self.assertEqual(result['ratings_updated'], 3)
         self.assertEqual(result['develop_settings_updated'], 3)
         self.assertEqual(result['collections_created'], 1)
-        with closing(sqlite3.connect(self.db_path)) as conn:
-            self.assertEqual(conn.execute('SELECT COUNT(*) FROM collections').fetchone()[0], 0)
+        with closing(self._open()) as conn:
+            self.assertEqual(sets.all(conn), [])
             self.assertEqual(conn.execute('SELECT COUNT(*) FROM develop_settings').fetchone()[0], 0)
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM images WHERE flag != 'unflagged'").fetchone()[0], 1)
 
@@ -217,21 +230,7 @@ class LightroomCatalogImportTests(unittest.TestCase):
             self.assertFalse(started.json()['status']['dry_run'])
             status = self._wait_for_scan(client)
         self.assertEqual(status['results'][0]['collections_created'], 1)
-        with closing(sqlite3.connect(self.db_path)) as conn:
-            self.assertEqual(conn.execute("SELECT name FROM collections").fetchone()[0], 'LR 2023/Favorites')
+        with closing(self._open()) as conn:
+            self.assertEqual([s["name"] for s in sets.all(conn)], ['LR 2023/Favorites'])
             self.assertEqual(conn.execute("SELECT flag FROM images WHERE id = 1").fetchone()[0], 'picked')
 
-    def _make_library_copy(self, destination):
-        with closing(sqlite3.connect(destination)) as conn, conn:
-            conn.executescript("""
-                CREATE TABLE images (id INTEGER PRIMARY KEY, filename TEXT, filepath TEXT UNIQUE, date_taken TEXT, flag TEXT DEFAULT 'unflagged', status TEXT DEFAULT 'kept', missing_at REAL);
-                CREATE TABLE develop_settings (image_id INTEGER PRIMARY KEY, settings TEXT NOT NULL DEFAULT '{}', origin TEXT NOT NULL DEFAULT 'user', xmp_path TEXT, xmp_mtime REAL, updated_at TEXT NOT NULL);
-                CREATE TABLE collections (id INTEGER PRIMARY KEY, uuid TEXT UNIQUE, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', visibility TEXT NOT NULL DEFAULT 'private', status TEXT NOT NULL DEFAULT 'draft', query TEXT, cover_image_id INTEGER, created_at REAL NOT NULL, updated_at REAL NOT NULL);
-                CREATE TABLE collection_images (collection_id INTEGER, image_id INTEGER, position INTEGER NOT NULL DEFAULT 0, added_at REAL NOT NULL DEFAULT 0, PRIMARY KEY(collection_id, image_id));
-                CREATE TABLE collection_publishes (collection_id INTEGER, slug TEXT, published_at REAL, updated_at REAL);
-            """)
-            conn.executemany("INSERT INTO images (id, filename, filepath, date_taken, flag) VALUES (?, ?, ?, ?, ?)", [
-                (1, 'IMG_0001.DNG', '/mnt/expansion/Photos/RAWS/2023/2023-06-01/IMG_0001.DNG', '2023-06-01', 'unflagged'),
-                (2, 'IMG_0002.CR3', '/mnt/expansion/Photos/RAWS/2023/2023-06-02/IMG_0002.CR3', '2023-06-02', 'picked'),
-                (3, 'IMG_0003.DNG', '/mnt/expansion/Photos/RAWS/2023/2023-06-03/IMG_0003.DNG', '2023-06-03', 'unflagged'),
-            ])

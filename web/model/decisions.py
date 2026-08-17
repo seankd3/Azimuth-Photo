@@ -105,6 +105,19 @@ def history(conn, subject: str, *, family: str | None = None, limit: int = 200) 
     ]
 
 
+# What "true now" means, written once. An append-only log answers every
+# present-tense question with the same shape — last row wins, per subject — and
+# anything narrowing photographs by a decision needs that shape as a *subquery*,
+# not just as `current()`'s return value. One parameter: the family.
+LATEST_IN_FAMILY = """
+    SELECT subject, value FROM (
+        SELECT subject, value,
+               ROW_NUMBER() OVER (PARTITION BY subject ORDER BY at DESC, id DESC) AS rank
+        FROM decisions WHERE family = ?
+    ) WHERE rank = 1
+"""
+
+
 def current(conn, family: str) -> dict[str, Any]:
     """The latest decision in a family, for every subject that has one.
 
@@ -113,16 +126,7 @@ def current(conn, family: str) -> dict[str, Any]:
     rather than sorting 400,000 rows into Python.
     """
 
-    rows = conn.execute(
-        """
-        SELECT subject, value FROM (
-            SELECT subject, value,
-                   ROW_NUMBER() OVER (PARTITION BY subject ORDER BY at DESC, id DESC) AS rank
-            FROM decisions WHERE family = ?
-        ) WHERE rank = 1
-        """,
-        (str(family),),
-    ).fetchall()
+    rows = conn.execute(LATEST_IN_FAMILY, (str(family),)).fetchall()
     return {row["subject"]: loaded(row) for row in rows}
 
 

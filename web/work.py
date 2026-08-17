@@ -58,6 +58,7 @@ import time
 from typing import Callable, Iterable
 
 from model import cache, photos
+from model.scope import EVERYTHING, Scope, where
 
 log = logging.getLogger(__name__)
 
@@ -166,7 +167,7 @@ def set_paused(conn, stop: bool) -> bool:
 
 
 def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
-         limit: int = 200) -> list[dict]:
+         scope: Scope = EVERYTHING, limit: int = 200) -> list[dict]:
     """Photos that should have this answer and do not. The whole scheduler.
 
     A failed entry counts as answered: it is in `cache` with `state='failed'`,
@@ -190,6 +191,7 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
     # omitted entirely when nothing is on screen, so a background pass does not
     # pay for an empty IN list.
     nearest = f"i.id IN ({hole}) DESC, " if ids else ""
+    narrowed, scope_args = where(scope)
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.content_hash AS hash, i.tail, i.file_size
@@ -201,10 +203,11 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
           AND i.vc_of IS NULL
           AND c.hash IS NULL
           AND ({entry.wants})
+          AND ({narrowed})
         ORDER BY {nearest}i.date_taken DESC, i.id DESC
         LIMIT ?
         """,
-        (kind, recipe_text, *ids, int(limit)),
+        (kind, recipe_text, *ids, *scope_args, int(limit)),
     )]
 
 

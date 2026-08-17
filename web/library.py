@@ -34,6 +34,7 @@ scan of 157,064 rows.
 from __future__ import annotations
 
 from model import decisions
+from model.scope import EVERYTHING, Scope, where
 
 # The one predicate. Spelled once, imported everywhere, never inlined.
 #
@@ -67,8 +68,8 @@ SORTS = {
 }
 
 
-def photos(conn, *, folder: str | None = None, sort: str = "newest",
-           starred: int | None = None, limit: int = 200, offset: int = 0) -> list[dict]:
+def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
+           limit: int = 200, offset: int = 0) -> list[dict]:
     """One page of the grid.
 
     Deliberately has no `include_missing`, no `source`, no `online_only`. Those
@@ -76,32 +77,27 @@ def photos(conn, *, folder: str | None = None, sort: str = "newest",
     does not, and a photograph on an unplugged drive is listed exactly like any
     other. What it looks like when painted is `render`'s problem and `state()`'s
     answer.
+
+    `folder` and `starred` were the next two of those arguments and they are
+    gone the same way: **which photographs** is one argument, so a collection, a
+    folder, a rating and anything later are the same kind of thing and compose
+    without this function learning about any of them.
     """
 
     if sort not in SORTS:
         raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
 
-    where = [IN_LIBRARY]
-    args: list = []
-    if folder:
-        prefix = folder.replace("\\", "/").rstrip("/") + "/"
-        where.append("substr(i.tail, 1, ?) = ?")
-        args += [len(prefix), prefix]
-    if starred:
-        where.append("i.stars >= ?")
-        args.append(int(starred))
-
-    args += [int(limit), int(offset)]
+    clause, args = where(scope)
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.tail, i.date_taken, i.stars, i.elo, i.content_hash AS hash,
                i.width, i.height, i.file_size
         FROM images i
-        WHERE {' AND '.join(where)}
+        WHERE {IN_LIBRARY} AND ({clause})
         ORDER BY {SORTS[sort]}
         LIMIT ? OFFSET ?
         """,
-        args,
+        (*args, int(limit), int(offset)),
     )]
 
 
