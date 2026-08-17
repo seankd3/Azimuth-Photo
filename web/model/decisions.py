@@ -61,7 +61,7 @@ def decide(conn, subject: str, family: str, value: Any = None, *, at: float | No
     return int(cursor.lastrowid)
 
 
-def _loaded(row) -> Any:
+def loaded(row) -> Any:
     if row is None or row["value"] is None:
         return None
     try:
@@ -81,7 +81,7 @@ def latest(conn, subject: str, family: str) -> Any:
         "SELECT value FROM decisions WHERE subject = ? AND family = ? ORDER BY at DESC, id DESC LIMIT 1",
         (str(subject), str(family)),
     ).fetchone()
-    return _loaded(row)
+    return loaded(row)
 
 
 def history(conn, subject: str, *, family: str | None = None, limit: int = 200) -> list[dict]:
@@ -100,7 +100,7 @@ def history(conn, subject: str, *, family: str | None = None, limit: int = 200) 
     args.append(int(limit))
     return [
         {"id": row["id"], "subject": row["subject"], "family": row["family"],
-         "value": _loaded(row), "at": row["at"]}
+         "value": loaded(row), "at": row["at"]}
         for row in conn.execute(sql, args)
     ]
 
@@ -123,7 +123,7 @@ def current(conn, family: str) -> dict[str, Any]:
         """,
         (str(family),),
     ).fetchall()
-    return {row["subject"]: _loaded(row) for row in rows}
+    return {row["subject"]: loaded(row) for row in rows}
 
 
 def carry(conn, subject: str, to: str) -> int:
@@ -179,6 +179,6 @@ def undo(conn, subject: str, family: str) -> Any:
     ).fetchall()
     if len(rows) < 2:
         return None
-    previous = _loaded(rows[1])
+    previous = loaded(rows[1])
     decide(conn, subject, family, previous)
     return previous
