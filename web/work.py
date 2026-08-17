@@ -343,6 +343,14 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
     return None
 
 
+def tiles_ceiling() -> int:
+    """How much disk the cache may hold. Asked, so a settings change reaches it."""
+
+    import tiles
+
+    return tiles.CEILING_BYTES
+
+
 def sweep_cache(conn, ceiling_bytes: int) -> int:
     """Hold the cache under one ceiling and unlink what it dropped.
 
@@ -386,6 +394,26 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
             except Exception:
                 log.exception("worker=chores step failed")
                 did = None
+            if did is None:
+                # Nothing is owed, so this is the moment to hold the cache under
+                # its ceiling. `sweep_cache` had no caller at all: the ceiling
+                # was declared in `tiles`, reported to the owner by
+                # `tiles.status()`, and named in two comments as the thing that
+                # "covers them under the same ceiling as everything else" —
+                # while the previews grew without limit on a disk at 3% free.
+                #
+                # Here rather than on a timer, because a sweep is a chore and
+                # this loop is what does chores. Doing it only when nothing is
+                # owed means it never competes with making the thing the owner
+                # is waiting for, and `evict` returns immediately when the total
+                # is under the ceiling, so the idle cost is one SUM.
+                try:
+                    freed = sweep_cache(conn, tiles_ceiling())
+                    if freed:
+                        log.info("worker=chores swept=%s", freed)
+                except Exception:
+                    log.exception("worker=chores sweep failed")
+
             # Nothing owed, or standing down: look again shortly rather than
             # spinning. Nothing here accumulates, so a long sleep costs only
             # latency on the next item.
