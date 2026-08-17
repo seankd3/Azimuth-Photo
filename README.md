@@ -1,170 +1,223 @@
 # Azimuth Photo
 
-**Your own photo cloud — with Lightroom Classic instincts.**
+**Your archive, on your hardware — with Lightroom Classic instincts.**
 
 [![CI](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL--3.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-2.0.0--dev-f2b03d)](docs/CORE.md)
 
-Azimuth Photo is a self-hosted library for serious photographers — and it is
-**fast**. Where Lightroom chugs, Azimuth Photo flies: browse terabytes of photos
-at lightning speed from your own computer, NAS, or server. Cull, rank, search,
-and share tens of thousands of images without uploading a single byte to anyone
-else's cloud.
+Azimuth is a photo library for people with too many photographs. It browses
+terabytes from a sleepy USB drive without flinching, ranks your archive by
+asking *this one or that one?*, and opens any frame in a real non-destructive
+darkroom — all on your own machine, with nothing uploaded anywhere.
 
-It runs on your own hardware. Your originals stay under your control: scanning,
-AI, sharing, and publishing use catalog data and generated derivatives; the one
-explicit destructive library action is Trash, which moves originals into a
-restorable `.trash` area until you empty it. A laptop satellite can also offer
-**Free up space**, but only after the hub confirms the same complete file bytes
-immediately before the laptop copy is removed.
-
-> **▶ Try it live — no install: [azimuthphoto.com](https://azimuthphoto.com)**
-> The homepage isn't screenshots. It's the real library grid, the keyboard loupe, the Elo
-> Refine mosaic, and the fused search engine — running live in your browser on real catalog
-> data. Play with the app before you clone it.
+> **▶ Try it live, no install — [azimuthphoto.com](https://azimuthphoto.com)**
+> Not screenshots. The real library grid, the keyboard loupe, the Elo Refine
+> mosaic and the fused search engine, running in your browser on real catalog data.
 >
-> **📖 The full story: [the Field Log](https://azimuthphoto.com/log/)** — how a 2023 weekend
-> "which photo is better?" toy became this, across 1,562 commits, with interactive demos.
-
-## Built for speed
-
-- **A tiered preview cache** (small / medium / large / originals) with configurable size budgets pre-generates in the background, so browsing never waits on a slow external drive.
-- **An in-memory hot cache** serves the thumbnails you're actually looking at from RAM.
-- **A virtualized grid** keeps the DOM tiny no matter how deep you scroll — 50,000 photos feel like 50.
-- **Response caching** on heavy query paths means filters, counts, and date histograms come back quickly.
-
-Point it at terabytes on a sleepy USB drive and it still feels instant — the archive wakes the drive only when it truly needs original pixels.
+> **📖 Why it looks like this — [the Field Log](https://azimuthphoto.com/log/)**
+> The honest build history across 2,304 commits, with interactive demos: the
+> film engine's halation, the GL↔NumPy twin, and the month we deleted 42% of
+> the codebase.
 
 ![Library grid](docs/assets/screens/library-grid.jpg)
 
-## Why it exists
+---
 
-Google Photos is effortless but owns your library. Lightroom Classic is powerful but heavy, subscription-bound, and was never built to be your archive's home. Azimuth Photo takes the best instincts of both:
+## Azimuth 2.0 — smaller on purpose
 
-- **From Google Photos** — instant timeline, semantic search ("sunset over water"), face grouping, an installable phone app, shareable links.
-- **From Lightroom Classic** — a real folder tree, pick/reject culling, stacks, a keyboard-first loupe, filters that compose, and density you can feel.
-- **From neither** — Elo photo ranking. Instead of guessing star ratings, you make quick this-or-that picks and the archive *learns* which photos are your best, propagating results through visually similar images.
+Azimuth grew to **182,688 lines**, and it had two problems that more code was
+not fixing: a quarter of every commit was repair-shaped, and simple changes took
+days. So in August 2026 it was measured, gutted, and rebuilt on a core small
+enough to hold in your head.
 
-## The library
+The measurement that settled it: the live catalog was 2.4 GB across 84 tables —
+**41 of them empty** — and of every row in it, the part that could never be
+recomputed (your keeps, stars, edits and names) was **0.06%**. Everything else
+was a machine's opinion about bytes it could read again.
 
-A virtualized grid that stays smooth at 50,000 photos. Real folder tree with per-folder counts and instant scoping. Filter by camera, lens, file type, flag, rating floor, date — every facet composes. A timeline scrubber rides the right edge for date-sorted views. Zero-result scopes tell you *why* and offer the fix.
+So the machine's opinions were deleted, and the app got faster:
 
-**Stacks** group what belongs together, LR Classic-style: burst sequences, export variants of one edit, and cross-source duplicates (that Facebook re-upload of your original) are auto-detected by three builders and collapse behind a single cover with a count badge. Expand in place, promote a new cover, or resolve a whole stack with one action.
+| | before | after | |
+|---|---|---|---|
+| Grid page | 180 ms | **0.22 ms** | 86 indexes on one table became 5 |
+| Semantic search | 19,538 ms | **50 ms** | vectors keyed on content hashes |
+| Status counts | 188 ms | **8.3 ms** | computed, not stored |
+| The codebase | 182,688 lines | **105,632** | and still descending |
 
-**Trash is safe by design.** Deleting moves files to a `.trash` area on the same drive — fully restorable, byte-identical, with ratings and history intact. Nothing is permanently deleted until you empty the trash yourself.
+Not because anything was written tersely — the core is heavily commented — but
+because most of what was there had **stopped being asked**. Five separate
+subsystems for recovering a moved file didn't get fixed; they stopped having a
+reason to exist once a path was stored as *a drive plus a tail*.
 
-## The loupe
+The whole design is one document: **[docs/CORE.md](docs/CORE.md)** — four facts,
+five tables, seven functions. The reasoning, with the mistakes left in, is
+[Act II of the Field Log](https://azimuthphoto.com/log/#act2).
 
-![Loupe with live panels](docs/assets/screens/loupe.jpg)
-
-A full canvas view, not a modal: metadata, Elo ranking, and a live histogram stay alongside the image. Zoom to 100% with Space, flag with P/X/U, cycle the info overlay with I, and press **L** for lights-out when it's just you and the photograph.
-
-![Lights out](docs/assets/screens/loupe-lights-out.jpg)
+---
 
 ## Ranking, not rating
 
 ![Refine mosaic](docs/assets/screens/refine-mosaic.jpg)
 
-**Refine** shows you a mosaic — pick the best one. The winner is replaced with a fresh contender; the rest stay and keep competing. Behind it: an Elo system with uncertainty tracking, propagation through visually similar photos, and selectable strategies (Diverse, Explore, Compete). A quality meter tells you how *sorted* any scope is. Rank your whole archive, one two-second decision at a time.
+You cannot honestly star-rate ten thousand photos. But you can always answer
+*this one, or that one?*
+
+**Refine** shows a mosaic — pick the best one. The winner is replaced by a fresh
+contender; the rest stay and keep competing. Behind it is an Elo system with
+uncertainty tracking and propagation through visually similar photos, so one
+pick moves the frames that look like it. A quality meter tells you how *sorted*
+any scope actually is.
+
+Rank an entire archive, one two-second decision at a time. It's the oldest idea
+in the project — the 2023 version was 228 lines of Tkinter — and the only one
+that never changed.
 
 ## A darkroom, not just a manager
 
 ![The Develop editor](docs/assets/screens/develop.jpg)
 
-Press **D** and any photo opens in a full non-destructive **Develop** module — a live WebGL2
-editor with Lightroom-ordered panels: white balance, tone, presence, an interactive tone
-curve, HSL, masking (brush / linear / radial / luminance / color-range, plus AI subject and
-sky masks), heal, crop, and history.
+Press **D** and any photo opens in a full non-destructive **Develop** module: a
+live WebGL2 editor with Lightroom-ordered panels — white balance, tone,
+presence, an interactive tone curve, HSL, masking (brush / linear / radial /
+luminance / colour-range), heal, crop, and history.
 
-- **Its own RAW pipeline.** DNG color science pixel-matched to Lightroom, and a decoder for
-  the lossy JPEG-XL DNGs LibRaw can't even open — a 2048px base in 0.4s.
-- **The twin.** Every edit runs *twice* — a WebGL shader for the live preview and a NumPy
-  pipeline for export — pinned to a shared constants table so they stay identical to within
-  **0.4 of 255** on every pixel. What you see is exactly what you export.
-- **A physically-modeled film engine.** Not a LUT — it models the photochemistry: spectral
-  layer exposure, halation, H&D characteristic curves, DIR couplers, per-layer grain. Eight
-  stocks tuned against **53 real lab scans**; the CineStill 800T glow *emerges* from the
-  physics. [See it work in the Field Log](https://azimuthphoto.com/log/#ch-darkroom).
+- **Its own RAW pipeline.** DNG colour science pixel-matched to Lightroom, and a
+  decoder for the lossy JPEG-XL DNGs LibRaw cannot open — a 2048px base in 0.4 s.
+- **The twin.** Every edit runs *twice* — a WebGL shader for the live preview, a
+  NumPy pipeline for export — pinned to a shared constants table so they stay
+  identical to within **0.4 of 255** on every pixel. What you see is exactly
+  what you export.
+- **A physically-modeled film engine.** Not a LUT. It models the photochemistry:
+  spectral layer exposure, halation, H&D characteristic curves, DIR couplers,
+  per-layer grain. Eight stocks tuned against **53 real lab scans** — the
+  CineStill 800T glow *emerges* from the physics rather than being painted on.
+  [Play with the halation model →](https://azimuthphoto.com/log/#ch-darkroom)
 
-## Search that actually understands
+## The library
 
-Three engines answer every query and their results are fused:
+A virtualized grid that stays smooth at 50,000 photos. A real folder tree with
+per-folder counts and instant scoping. Filter by camera, lens, file type, flag,
+rating floor or date — every facet composes. A timeline scrubber rides the right
+edge on date-sorted views, and zero-result scopes tell you *why* and offer the fix.
 
-1. **Metadata** — filenames, folders, cameras, lenses, dates (trigram FTS).
-2. **Semantic embeddings** — a local vision model (Qwen3-VL 8B) indexes every photo on your own GPU; "night sky over trees" just works.
-3. **VLM captions** — a local vision-language model writes a rich description and tags for each photo into a full-text understanding index.
+**Stacks** group what belongs together, LR-Classic style — burst sequences,
+export variants of one edit, and cross-source duplicates (that re-uploaded copy
+of your original) collapse behind a single cover with a count badge.
 
-Reciprocal-rank fusion + reranking combine all three, and the omnibox shows live photo results, facet completions (`camera:`, `lens:`, `folder:`…), and natural date parsing as you type. All models run locally — search quality is measured by a built-in eval harness, not vibes.
+**Trash is safe by design.** Deleting moves files to a `.trash` area on the same
+drive — fully restorable, byte-identical, ratings and history intact. Nothing is
+permanently removed until you empty it yourself. The machine never deletes your
+last copy; only you do.
 
-## People, privately
+## The loupe
 
-Local face detection (InsightFace) clusters faces into people entirely on your machine. Name them, merge duplicates, filter any view by who's in the frame. No cloud, no face data leaving your network — the workers only ever read the app's own cached previews, never your originals.
+![Loupe with live panels](docs/assets/screens/loupe.jpg)
 
-## Sharing that beats a Google Photos link
+A full canvas view, not a modal — metadata, ranking and a live histogram stay
+beside the image. Zoom to 100% with Space, flag with P/X/U, cycle the info
+overlay with I, and press **L** for lights-out when it's just you and the
+photograph.
 
-Share any collection as a private gallery link:
+![Lights out](docs/assets/screens/loupe-lights-out.jpg)
 
-- **Password protection** with proper key-derivation hashing and signed cookies.
-- **View analytics** — know when and how often a client opened the gallery.
-- **Client proofing** — recipients favorite photos in the gallery; their picks flow back into your archive as flags, ready for export.
-- Public links serve resized previews only — originals never leave the archive.
+## Search
 
-Website publishing writes static gallery bundles and a `manifest.json` into your own site folder, then can run one optional hook command. See [Publishing Static Galleries](docs/publishing.md).
+Two engines answer every query and their results are fused: **metadata**
+(filenames, folders, cameras, lenses, dates via trigram FTS) and **semantic
+embeddings**, so "night sky over trees" finds the frame you meant. The omnibox
+shows live results, facet completions (`camera:`, `lens:`, `folder:`…) and
+natural date parsing as you type.
 
-Zip export of any filtered view (originals or previews) with symlink-safe path hardening, size budgets, and manifest reporting.
+Everything runs locally against vectors stored in your own catalog — nothing is
+sent anywhere, and search answers whether or not a model is loaded.
 
-## The phone app
+## Built for speed
 
-<img src="docs/assets/screens/mobile-library.jpg" width="360" alt="Mobile library" />
+- **A tiered preview cache** (small / medium / large / originals) with size
+  budgets, pre-generated in the background so browsing never waits on a slow
+  external drive.
+- **A virtualized grid** keeps the DOM tiny no matter how deep you scroll —
+  50,000 photos feel like 50.
+- **Work is a query, not a queue.** Everything computed — tiles, embeddings,
+  metadata — is found by a single anti-join of what exists against what's owed.
+  A worker that dies leaves nothing to expire.
 
-An installable PWA at `/m`: fast timeline with pinch density, pull-to-refresh, one-handed bottom action bars, haptics, offline-aware states, and an Android Back button that closes layers the way a native app would. Collections, search, refine duels, and people — all on your phone, over your own network (Tailscale pairs beautifully).
+Point it at terabytes on a sleepy USB drive and it still feels instant; the
+archive wakes the drive only when it truly needs original pixels.
 
 ## Architecture
 
-- **Backend**: FastAPI + SQLite (WAL). Feature-sliced modules with dependency-injected routes, additive-only schema migrations, and a contract-tested public API surface.
-- **Frontend**: browser-native ES modules. No bundler, no build step, no framework — the desktop app is plain modern JavaScript with a virtualized grid.
-- **Workers**: cache pregeneration, embedding indexer, face scanner, VLM captioner, and metadata indexing run as background jobs. GPU-heavy work is sequenced, and AI/People/caption paths work from app-generated derivatives rather than editing originals.
-- **Local-first**: the catalog, caches, and models live in platform-native
-  runtime directories, separate from the source checkout. Offline drives
-  degrade gracefully; cached views keep working and rescans wait for the drive
-  to return.
+Azimuth 2.0 is **a desktop application, not a server**. It binds to localhost,
+so there is no auth layer, no session machinery and no attack surface to
+harden — nothing outward can reach it.
+
+Azimuth knows exactly four things about a photograph: **what it is** (its bytes),
+**where copies are**, **what you decided**, and **what we computed**. Only your
+decisions are irreplaceable, so they live in an append-only log that is written
+to every record drive; everything else can be rebuilt from the photographs
+themselves.
+
+```
+core      four facts, seven functions  (~3,500 lines)
+work      one query, one worker — everything computed gets made here
+features  queries over the facts, plus the decisions they write
+ui        renders queries, calls verbs
+```
+
+- **Backend**: FastAPI + SQLite (WAL).
+- **Frontend**: browser-native ES modules. No bundler, no build step, no
+  framework — the desktop UI is plain modern JavaScript, and it is the one part
+  of v1 that was always good, so 2.0 does not rewrite it.
+- **Local-first**: catalog, caches and models live in platform-native runtime
+  directories, separate from the checkout. Offline drives degrade gracefully.
+
+Full design, with the reasoning and the mistakes: **[docs/CORE.md](docs/CORE.md)**.
+
+## What 2.0 does not have yet
+
+The rewrite deleted machinery faster than it rebuilt surfaces. These worked in
+v1 and are not in 2.0 today:
+
+- **Sharing and client galleries** — four overlapping systems for handing
+  someone a photo; to be rebuilt as one.
+- **Hub / satellite sync** — the laptop and its drive are the system now.
+- **People and face grouping**, and **VLM captions** — the derivation fleet was
+  removed; search serves the vectors that already exist.
+- **The phone web app** — being reconsidered rather than ported.
+
+If you need those today, the last full v1 build is commit
+[`d8aa7b8f`](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/commit/d8aa7b8f),
+immediately before the first deletion wave. Saying this out loud is cheaper than
+letting you discover it after an import.
 
 ## Quickstart
 
 ```bash
 git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
-cd azimuth-photo
-cd web
+cd azimuth-photo/web
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cd ..
-./scripts/azimuth-server start
+cd .. && ./scripts/azimuth-server start
 ```
 
-Open `http://localhost:8000`, add a source folder in the system drawer, and let the scanners run. AI features (semantic search, captions, faces) activate when you install the local models from Background Work — everything works without them, and gets smarter with them.
+Open `http://localhost:8000`, add a source folder, and let the scanner run.
+Semantic search activates when you install the local model — everything else
+works without it.
 
-## Get it
-
-Choose the install path that fits your library in [Install Azimuth Photo](docs/INSTALL.md), then use [Getting started](docs/getting-started.md) to build your first catalog.
+Longer paths (Docker, NAS, bare binary) are in
+[Install Azimuth Photo](docs/INSTALL.md); building your first catalog is in
+[Getting started](docs/getting-started.md).
 
 ## Docs
 
-- [Agent guide](AGENTS.md)
-- [Documentation index](docs/README.md)
-- [Code, machine, and storage topology](docs/TOPOLOGY.md)
-- [Features in depth](docs/features.md)
-- [Development guide](docs/development.md)
-- [Background work & AI model behavior](docs/background-work-behavior.md)
+- [**docs/CORE.md**](docs/CORE.md) — the 2.0 design. Start here.
+- [**The Field Log**](https://azimuthphoto.com/log/) — the build story, 2,304 commits, with live demos
+- [Documentation index](docs/README.md) · [Features in depth](docs/features.md)
+- [Development guide](docs/development.md) · [Agent guide](AGENTS.md)
 - [Data & privacy](docs/data-and-privacy.md)
-- [**The Field Log**](https://azimuthphoto.com/log/) — the full build story, 1,562 commits, with live demos
 
 ---
 
-*Azimuth Photo is developed against the author's own 47,000-photo working archive — every screenshot above is that real library running on a single machine with an RTX 2060 Super. Your photos are your own; the app ships empty and hungry.*
-
-## Where everything lives
-
-One repo, many faces — hub server, desktop web UI (`/d`), mobile PWA (`/m`),
-laptop satellite mode, native Windows shell (`desktop/`), Android app
-(`android/`).
-complete map of code, machine roles, data directories, and storage tiers is in
-[docs/TOPOLOGY.md](docs/TOPOLOGY.md).
+*Azimuth is developed against the author's own 150,000-photo working archive —
+every screenshot above is that real library, on one machine. Your photos are
+your own; the app ships empty and hungry.*
