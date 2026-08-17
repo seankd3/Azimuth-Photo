@@ -390,9 +390,6 @@ def _browse_dir(current: str) -> dict:
     return result
 
 
-@router.get("/api/catalog")
-async def api_catalog_summary():
-    return await db.get_catalog_summary()
 
 
 @router.post("/api/catalog/sources")
@@ -892,20 +889,6 @@ async def api_folders(max_depth: int | None = None):
     return result
 
 
-@router.get("/api/folders/tree")
-async def api_folders_tree():
-    cached = _folder_tree_cache.get("data")
-    if cached and _time.time() < _folder_tree_cache["expires"]:
-        return cached
-
-    counts = await db.get_catalog_image_counts()
-    if int(counts.get("active_images") or 0) <= 0:
-        result = {"sources": []}
-    else:
-        result = await asyncio.to_thread(build_folder_tree_payload)
-    _folder_tree_cache["data"] = result
-    _folder_tree_cache["expires"] = _time.time() + _folder_tree_cache_ttl_seconds
-    return result
 
 
 @router.post("/api/reveal")

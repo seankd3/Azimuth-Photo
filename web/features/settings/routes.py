@@ -96,24 +96,6 @@ async def api_background_work_status():
     }
 
 
-@router.post("/api/image/{image_id}/flag")
-async def api_set_image_flag(image_id: int, request: Request):
-    body, error = await json_object(request)
-    if error:
-        return error
-    flag = body.get("flag", "unflagged")
-    if flag not in ("picked", "unflagged", "rejected"):
-        return JSONResponse({"error": "Invalid flag"}, status_code=400)
-
-    image = await image_repository.get_image_by_id(catalog_path(), image_id)
-    if not image:
-        return JSONResponse({"error": "Image not found"}, status_code=404)
-
-    await image_repository.set_image_flag(catalog_path(), image_id, flag)
-    await judgements.flag(catalog_path(), [image_id], flag)
-    cache_events.invalidate_image_flag_caches()
-    cache_events.invalidate_pairing_cache()
-    return {"ok": True, "id": image_id, "flag": flag}
 
 
 @router.get("/api/image/{image_id}/rating")
