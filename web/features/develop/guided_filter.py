@@ -15,6 +15,7 @@ import math
 import numpy as np
 
 from . import ops_constants as C
+from .pipeline import gaussian_blur
 
 
 def box_mean(values: np.ndarray, radius: int) -> np.ndarray:
@@ -150,21 +151,6 @@ def feather_to_guided_params(feather: float, width: int, height: int) -> tuple[i
     return radius, float(epsilon)
 
 
-def _gaussian_soft(field: np.ndarray, sigma: float) -> np.ndarray:
-    """Separable reflect-padded gaussian — the pre-guided mask softener."""
-
-    if sigma <= 0.0:
-        return field.astype(np.float32, copy=True)
-    radius = max(1, int(math.ceil(C.GAUSSIAN_TRUNCATE * sigma)))
-    x = np.arange(-radius, radius + 1, dtype=np.float32)
-    kernel = np.exp(-0.5 * (x / sigma) ** 2)
-    kernel /= kernel.sum()
-    padded_x = np.pad(field, ((0, 0), (radius, radius)), mode="reflect")
-    horizontal = np.apply_along_axis(lambda row: np.convolve(row, kernel, mode="valid"), 1, padded_x)
-    padded_y = np.pad(horizontal, ((radius, radius), (0, 0)), mode="reflect")
-    return np.apply_along_axis(lambda column: np.convolve(column, kernel, mode="valid"), 0, padded_y).astype(np.float32)
-
-
 def soft_mask(
     mask: np.ndarray,
     radius: float | int,
@@ -181,7 +167,7 @@ def soft_mask(
     field = np.asarray(mask, dtype=np.float32)
     if guide is None:
         sigma = max(float(radius), 0.0) * C.GUIDED_GAUSSIAN_SIGMA_SCALE
-        return _gaussian_soft(field, sigma) if sigma > 0.0 else field.copy()
+        return gaussian_blur(field, sigma)
     radius_i = max(0, int(math.ceil(float(radius))))
     if radius_i <= 0:
         return field.copy()
