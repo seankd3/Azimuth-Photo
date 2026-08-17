@@ -183,18 +183,52 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
     owed work.
     """
 
-    entry = cache.kind_of(kind)
-    recipe_text = cache.canonical(kind, recipe)
     ids = [int(i) for i in on_screen]
     hole = ",".join("?" for _ in ids)
     # Closeness to your eyes, spelled as an ORDER BY. The on-screen clause is
     # omitted entirely when nothing is on screen, so a background pass does not
     # pay for an empty IN list.
     nearest = f"i.id IN ({hole}) DESC, " if ids else ""
-    narrowed, scope_args = where(scope)
+    source, args = _owed_from(kind, recipe, scope)
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.content_hash AS hash, i.tail, i.file_size
+        {source}
+        ORDER BY {nearest}i.date_taken DESC, i.id DESC
+        LIMIT ?
+        """,
+        # In SQL order: the join's kind and recipe, then the scope's arguments
+        # in the WHERE, then the on-screen ids in the ORDER BY. This bound the
+        # ids *before* the scope for as long as it has existed, which was
+        # invisible only because `EVERYTHING` carries no arguments — the first
+        # caller to pass a real scope and an on-screen list at once would have
+        # got them swapped.
+        (*args, *ids, int(limit)),
+    )]
+
+
+def owing(conn, kind: str, *, recipe: dict | None = None, scope: Scope = EVERYTHING) -> int:
+    """How many are owed. The same anti-join, counted instead of listed.
+
+    A status line wanted this and had to `len()` a list of up to 100,000 rows to
+    get it, which cost **731 ms and reported the clamp** — a backlog of 144,271
+    read as "100,000". Counting the same predicate is **362 ms and correct**, and
+    it takes the clamp with it: there is no ceiling to disclose because there is
+    no ceiling. The projection and the ordering were the whole expense; the
+    predicate is shared with `owed` so the two cannot drift.
+    """
+
+    source, args = _owed_from(kind, recipe, scope)
+    return int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
+
+
+def _owed_from(kind: str, recipe: dict | None, scope: Scope) -> tuple[str, tuple]:
+    """The anti-join itself: what is owed, before anyone says what to do with it."""
+
+    entry = cache.kind_of(kind)
+    narrowed, scope_args = where(scope)
+    return (
+        f"""
         FROM images i
         LEFT JOIN cache c
                ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
@@ -204,11 +238,9 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
           AND c.hash IS NULL
           AND ({entry.wants})
           AND ({narrowed})
-        ORDER BY {nearest}i.date_taken DESC, i.id DESC
-        LIMIT ?
         """,
-        (kind, recipe_text, *ids, *scope_args, int(limit)),
-    )]
+        (kind, cache.canonical(kind, recipe), *scope_args),
+    )
 
 
 def unidentified(conn, limit: int = 200) -> list[dict]:
@@ -225,22 +257,25 @@ def unidentified(conn, limit: int = 200) -> list[dict]:
     """
 
     return [dict(row) for row in conn.execute(
-        """
-        SELECT id, tail, file_size FROM images
-        WHERE content_hash IS NULL AND vc_of IS NULL AND tail IS NOT NULL
-        ORDER BY date_taken DESC, id DESC LIMIT ?
-        """,
+        f"SELECT id, tail, file_size {_UNIDENTIFIED} ORDER BY date_taken DESC, id DESC LIMIT ?",
         (int(limit),),
     )]
+
+
+_UNIDENTIFIED = "FROM images WHERE content_hash IS NULL AND vc_of IS NULL AND tail IS NOT NULL"
+
+
+def _unidentified_count(conn) -> int:
+    return int(conn.execute(f"SELECT COUNT(*) {_UNIDENTIFIED}").fetchone()[0])
 
 
 def debt(conn) -> dict[str, int]:
     """How much is owed, per kind. What a status line reads; nothing depends on it."""
 
-    tally = {"identity": len(unidentified(conn, limit=100_000))}
+    tally = {"identity": _unidentified_count(conn)}
     for name in cache.kinds():
         try:
-            tally[name] = len(owed(conn, name, limit=100_000))
+            tally[name] = owing(conn, name)
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
             log.debug("worker=debt kind=%s could not be counted", name)
     return tally

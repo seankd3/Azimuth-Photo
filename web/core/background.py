@@ -243,13 +243,10 @@ async def run_startup(
     from core import on_the_loop
 
     on_the_loop.remember_the_loop()
-    # Automatic house manners: bulk seats until serve is proven.
-    try:
-        from core import memory_pressure as _memory_pressure
-
-        _memory_pressure.note_process_start()
-    except Exception:
-        log.exception("worker=memory_pressure startup calm failed to arm")
+    # A 120-second "startup calm" was armed here, seating bulk work until serve
+    # was proven. Nothing consulted it: the flag it set was read only by
+    # `gate_bulk_work`, which had no callers. `work.step()` yields per item, so
+    # a boot under load is already interruptible without a timer to wait out.
 
     if smoke_mode_enabled():
         await asyncio.to_thread(warm_templates)

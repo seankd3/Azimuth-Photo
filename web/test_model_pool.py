@@ -152,15 +152,6 @@ class ModelPoolTests(unittest.TestCase):
         self.assertEqual(self.pool.resident_names(), [])
         self.assertEqual(sorted(self.unloads), ["a", "b"])
 
-        # memory_pressure shed path uses the same pool.unload_all contract.
-        self.pool.acquire(**self._fake("c"), interactive=False)
-        soft = memory_pressure.SOFT_WATERMARK_BYTES
-        with mock.patch.object(memory_pressure, "release_discardable_buffers", return_value={}):
-            pressure = memory_pressure.gate_bulk_work(rss_bytes=soft + 1)
-        self.assertTrue(pressure.unload_models)
-        self.assertEqual(self.pool.resident_names(), [])
-        self.assertIn("c", self.unloads)
-
     def test_pressure_unload_all_skips_pinned(self) -> None:
         self.pool.acquire(**self._fake("search", vram=40), interactive=True)
         self.pool.acquire(**self._fake("captions", vram=30), interactive=False)

@@ -22,8 +22,10 @@ Policy
    request just used.
 5. Single-flight: concurrent ``acquire`` of the same name shares one
    in-flight load (threading.Event).
-6. ``memory_pressure.request_model_unload`` calls ``unload_all`` — same
-   shed contract as before, one choke point.
+6. ``unload_all`` is the one shed contract. `memory_pressure` used to call it
+   under a watermark; nothing does now, and that module holds no verdicts at
+   all — its `request_model_unload` had had no caller for as long as the
+   watermarks had.
 """
 
 from __future__ import annotations
@@ -510,7 +512,8 @@ class ModelPool:
     def unload_all(self, *, force: bool = False) -> list[str]:
         """Shed residents. Skips pin-while-hot unless ``force=True``.
 
-        Used by memory_pressure (force=False) and process shutdown (force=True).
+        Process shutdown uses force=True; force=False is the polite variant that
+        leaves pinned interactive models alone.
         """
         with self._lock:
             now = self._clock()

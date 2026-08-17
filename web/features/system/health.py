@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import work
 from core import memory_pressure
 from core.runtime_paths import resolve_runtime_paths
+from data import connection
 from features.system import backups
 
 log = logging.getLogger(__name__)
@@ -366,135 +368,89 @@ def check_disk_cache() -> dict[str, Any]:
 
 
 def check_memory() -> dict[str, Any]:
+    """What this process holds, and how many chore workers that allows.
+
+    This read a soft/hard watermark verdict and told the owner "bulk work
+    paused". Nothing had paused bulk work on memory for as long as
+    `gate_bulk_work` had had no callers — the panel was reporting a mechanism
+    that no longer existed. A health check that describes machinery instead of
+    behaviour is worse than no check, because it is believed.
+
+    What is true is that `work.workers()` sizes the chore pool from the same
+    memory, so that is the number shown.
+    """
+
     checked_at = _now()
-    pressure = memory_pressure.evaluate_memory_pressure()
-    level = str(pressure.level or "ok")
-    rss = _bytes_phrase(pressure.rss_bytes)
-    swap = _bytes_phrase(pressure.swap_bytes)
-    combined = _bytes_phrase(pressure.pressure_bytes)
-    signal = str(pressure.signal or "rss")
-    if level == "hard":
-        status: Status = "bad"
-        detail = (
-            f"Hard pressure · {combined} ({signal}: RSS {rss} + swap {swap}) "
-            "— bulk work paused"
-        )
-    elif level == "soft" or pressure.pause_bulk:
-        status = "warn"
-        detail = (
-            f"Soft pressure · {combined} ({signal}: RSS {rss} + swap {swap}) "
-            "— bulk work paused"
-        )
+    reading = memory_pressure.read_memory()
+    available = memory_pressure.read_host_available_bytes()
+    slots = work.workers()
+    workers = f"{slots} chore worker{'s' if slots != 1 else ''}"
+    if reading is None:
+        held = "Usage unreadable on this platform"
     else:
-        status = "ok"
-        detail = (
-            f"{combined} ({signal}: RSS {rss} + swap {swap}) · within watermarks"
+        held = (
+            f"{_bytes_phrase(reading.pressure_bytes)} in use "
+            f"({reading.source}: RSS {_bytes_phrase(reading.rss_bytes)}"
+            f" + swap {_bytes_phrase(reading.swap_bytes)})"
         )
+    free = f"{_bytes_phrase(available)} free on this machine" if available is not None else ""
     return _check(
         id="memory",
-        label="Memory pressure",
-        status=status,
-        detail=detail,
+        label="Memory",
+        status="ok",
+        detail=" · ".join(part for part in (held, free, workers) if part),
         checked_at=checked_at,
-        level=level,
-        rss_bytes=pressure.rss_bytes,
-        swap_bytes=pressure.swap_bytes,
-        pressure_bytes=pressure.pressure_bytes,
-        signal=signal,
+        rss_bytes=reading.rss_bytes if reading else None,
+        swap_bytes=reading.swap_bytes if reading else None,
+        pressure_bytes=reading.pressure_bytes if reading else None,
+        host_available_bytes=available,
+        chore_workers=slots,
+        signal=reading.source if reading else "unreadable",
     )
 
 
-def check_pregen() -> dict[str, Any]:
+def check_background_work(db_path: str) -> dict[str, Any]:
+    """What the one chore loop owes, and whether it is allowed to run.
+
+    Two checks stood here. `check_pregen` read `thumbnails._pregen_status` and
+    `check_workers` polled `face_worker`, `caption_worker` and
+    `embedding_worker` — four modules deleted in 6fc7e31c, each ImportError
+    caught and rendered as "unavailable" or "Pregen status unavailable". The
+    panel had been describing four subsystems that do not exist, in a warning
+    tone, since the day they went.
+
+    There is one loop now, and its queue is a query, so its status is a count.
+    """
+
     checked_at = _now()
     try:
-        import thumbnails
-
-        # Read the in-memory worker state only — do not rebuild cache_stats.
-        pregen = dict(getattr(thumbnails, "_pregen_status", {}) or {})
+        conn = connection.reading(db_path)
+        paused = work.paused(conn)
+        owed = work.debt(conn)
     except Exception as exc:
         return _check(
-            id="pregen",
-            label="Preview pregen",
+            id="background_work",
+            label="Background work",
             status="warn",
-            detail=f"Pregen status unavailable ({exc})",
+            detail=f"Could not read what is owed ({exc})",
             checked_at=checked_at,
         )
-    state = str(pregen.get("state") or "idle").lower()
-    message = str(pregen.get("message") or pregen.get("last_error") or state)
-    if state == "error":
-        status: Status = "bad"
-    elif state == "paused" and "memory" in message.lower():
-        status = "warn"
-    elif state == "paused":
-        status = "ok"
-        message = message or "Paused"
+    outstanding = {kind: count for kind, count in sorted(owed.items()) if count}
+    total = sum(outstanding.values())
+    if paused:
+        detail = f"Paused · {total:,} owed" if total else "Paused · nothing owed"
+    elif not total:
+        detail = "Up to date"
     else:
-        status = "ok"
-        if not message:
-            message = state.replace("_", " ")
+        detail = " · ".join(f"{kind} {count:,}" for kind, count in outstanding.items())
     return _check(
-        id="pregen",
-        label="Preview pregen",
-        status=status,
-        detail=message,
-        checked_at=checked_at,
-        state=state,
-    )
-
-
-def check_workers() -> dict[str, Any]:
-    checked_at = _now()
-    parts: list[str] = []
-    worst: Status = "ok"
-
-    def _ingest(name: str, state: str, *, error: str = "") -> None:
-        nonlocal worst
-        cleaned = (state or "idle").replace("_", " ")
-        if error or cleaned == "error":
-            worst = _worst([worst, "bad"])
-            parts.append(f"{name}: error")
-        else:
-            parts.append(f"{name}: {cleaned}")
-
-    try:
-        import face_worker
-
-        people = face_worker.get_worker_status()
-        _ingest("People", str(people.get("state") or "idle"), error=str(people.get("last_error") or ""))
-    except Exception:
-        parts.append("People: unavailable")
-
-    try:
-        import caption_worker
-
-        captions = caption_worker.get_worker_status()
-        _ingest(
-            "Captions",
-            str(captions.get("state") or "idle"),
-            error=str(captions.get("last_error") or ""),
-        )
-    except Exception:
-        parts.append("Captions: unavailable")
-
-    try:
-        import embedding_worker
-
-        embed = embedding_worker.get_worker_status()
-        _ingest(
-            "Search",
-            str(embed.get("state") or embed.get("worker_state") or "idle"),
-            error=str(embed.get("last_error") or embed.get("worker_error") or ""),
-        )
-    except Exception:
-        parts.append("Search: unavailable")
-
-    detail = " · ".join(parts) if parts else "No background workers reported"
-    return _check(
-        id="workers",
-        label="Background workers",
-        status=worst,
+        id="background_work",
+        label="Background work",
+        status="ok",
         detail=detail,
         checked_at=checked_at,
+        paused=paused,
+        owed=outstanding,
     )
 
 
@@ -562,8 +518,7 @@ def collect_health(*, db_path: str | None = None) -> dict[str, Any]:
         check_disk_library(),
         check_disk_cache(),
         check_memory(),
-        check_pregen(),
-        check_workers(),
+        check_background_work(path),
         check_activity(path),
     ]
     overall = _worst([str(item.get("status") or "ok") for item in checks])
