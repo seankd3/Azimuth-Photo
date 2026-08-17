@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 from date_inference import infer_image_date
 import image_headers
 from core import cache_events
-from core import work_coordination
 from core import hdd_governor
 from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
@@ -256,8 +255,7 @@ async def classify_orientations_background():
                 continue
             started = time.perf_counter()
             _status.update(state="running", message=f"Classifying {len(rows)} image orientations.")
-            with work_coordination.manual_bulk("catalog_metadata"):
-                results, failures = await _run_catalog_work(_classify_batch, rows)
+            results, failures = await _run_catalog_work(_classify_batch, rows)
             for image_id, filepath, reason, source_root, source_online in failures:
                 if not source_online or os.path.exists(filepath):
                     _note_orientation_failure(
@@ -396,8 +394,7 @@ async def scan_metadata_background():
                 continue
             started = time.perf_counter()
             _status.update(state="running", message=f"Scanning metadata for {len(rows)} images.")
-            with work_coordination.manual_bulk("catalog_metadata"):
-                updates = await _run_catalog_work(_extract_batch, rows)
+            updates = await _run_catalog_work(_extract_batch, rows)
             await batch_update_metadata(updates)
             _status.update(
                 state="running",

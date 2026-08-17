@@ -7,7 +7,6 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(__file__))
 import helpers  # noqa: E402
 from core import responses as response_helpers  # noqa: E402
-from core import work_coordination  # noqa: E402
 
 
 class ImageHelperTests(unittest.TestCase):
@@ -182,37 +181,3 @@ class ImageHelperTests(unittest.TestCase):
         self.assertIn(("cached", (1, 2, 3), "sm", "/tmp/cache"), calls)
 
 
-class WorkCoordinationTests(unittest.TestCase):
-    def tearDown(self):
-        for kind in list(work_coordination.status()["manual_active"]):
-            work_coordination.finish_manual_bulk(kind)
-
-    def test_manual_bulk_marks_ambient_warming_as_waiting(self):
-        self.assertFalse(work_coordination.manual_bulk_active())
-        self.assertTrue(work_coordination.ambient_warming_allowed())
-
-        with work_coordination.manual_bulk("cache"):
-            status = work_coordination.status()
-
-            self.assertTrue(work_coordination.manual_bulk_active())
-            self.assertFalse(work_coordination.ambient_warming_allowed())
-            self.assertEqual(status["lanes"]["manual_bulk"]["state"], "running")
-            self.assertEqual(status["lanes"]["ambient_warming"]["state"], "waiting")
-            self.assertEqual(status["manual_active"], ["cache"])
-
-        self.assertFalse(work_coordination.manual_bulk_active())
-
-    def test_user_visible_lane_never_waits_for_manual_bulk(self):
-        async def run():
-            with work_coordination.manual_bulk("embeddings"):
-                await work_coordination.wait_for_lane(work_coordination.USER_VISIBLE)
-                return work_coordination.status()
-
-        status = asyncio.run(run())
-
-        self.assertEqual(status["lanes"]["user_visible"]["state"], "ready")
-        self.assertEqual(status["lanes"]["manual_bulk"]["active"], ["embeddings"])
-
-
-if __name__ == "__main__":
-    unittest.main()

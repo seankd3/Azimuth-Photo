@@ -31,7 +31,6 @@ from core import on_the_loop  # noqa: E402
 from core import cache_events  # noqa: E402
 from core import memory_pressure  # noqa: E402
 from core import query_constraints  # noqa: E402
-from core import work_coordination  # noqa: E402
 from core.static_assets import StaticAssetContext  # noqa: E402
 from data.repositories import cache_entries as cache_entry_repository  # noqa: E402
 from data.repositories import catalog as catalog_repository  # noqa: E402
