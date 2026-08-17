@@ -189,3 +189,35 @@ def state(conn, image_id: int) -> str:
         if drives.root_of(conn, drive["uuid"]) is None:
             return "away"
     return "lost"
+
+
+def hashes(conn, image_ids) -> list[str]:
+    """Image ids to the identities decisions are keyed on.
+
+    The API speaks ids because a row is what a client can point at; the log
+    speaks hashes because a decision has to outlive the row. This is that
+    translation, in the one place that owns a photograph's identity.
+    """
+
+    ids_ = [int(i) for i in image_ids if int(i) > 0]
+    if not ids_:
+        return []
+    marks = ",".join("?" * len(ids_))
+    rows = conn.execute(
+        f"SELECT content_hash FROM images WHERE id IN ({marks}) AND content_hash IS NOT NULL",
+        ids_,
+    ).fetchall()
+    return [r["content_hash"] for r in rows]
+
+
+def ids(conn, content_hashes) -> list[int]:
+    """Back the other way, skipping identities whose photograph is gone."""
+
+    wanted = [h for h in content_hashes if h]
+    if not wanted:
+        return []
+    marks = ",".join("?" * len(wanted))
+    rows = conn.execute(
+        f"SELECT id FROM images WHERE content_hash IN ({marks}) ORDER BY id", wanted
+    ).fetchall()
+    return [int(r["id"]) for r in rows]

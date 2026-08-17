@@ -1,203 +1,181 @@
-from core.catalog_path import catalog_path
-from core.requests import parse_exclude_sources
-from collections.abc import Awaitable, Callable
-from functools import partial
-from typing import Any
+"""Collections, as sets.
 
-import db
-from data.repositories import collections as collection_repository
-from data.repositories import images as image_repository
+Every route here was a repository call over `collections`, `collection_images`
+and `collection_links` — three tables holding zero rows on the live catalog,
+while the log beside them already carried the memberships. So the tables are
+gone and this file is `model.sets` with HTTP on the front.
+
+Two things the old shape got wrong, both fixed by the move rather than patched:
+
+* **Membership survived nothing.** `judgements.membership` filed every collection
+  under one `collection_member` family with the collection inside the value, and
+  `decisions.current()` keeps the latest row per subject — so a photograph in two
+  collections read back as being in one. One family per set makes them independent.
+* **Deleting cascaded.** `collection_images` rows had to be swept when a
+  collection went, and a photograph's removal had to be swept from every
+  collection. Neither exists now: membership is a row saying no, and forgetting a
+  set leaves its members readable.
+
+The API speaks image ids because the desktop does; the log speaks content hashes
+because a decision outlives a row. That translation is `model.photos.hashes` and
+`model.photos.ids` — it belongs with identity, not with collections, and search
+was already writing its own copy of half of it.
+"""
+
+from __future__ import annotations
+
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from features.collections import graph
-from features.collections import smart
+from core.catalog_path import catalog_path
+from core.requests import parse_exclude_sources
+from data import connection
 from features.collections import suggestions as collection_suggestions
-import judgements
-
-
-from core import query_constraints
-from features.collections import smart as smart_collections
-
-
-async def _smart_image_ids(query):
-    return await smart_collections.resolve_image_ids(
-        query,
-        resolve_library_constraints=query_constraints.resolve_configured_library_constraints,
-    )
-
+from model import photos, sets
 
 router = APIRouter()
-ResolveSmartImageIds = Callable[[dict], Awaitable[list[int]]]
 
-MAX_IMAGE_IDS_PER_REQUEST = 10000
-MAX_COLLECTION_NAME_LENGTH = 160
+
+def db():
+    return connection.inline_reader(catalog_path())
+
+
+def _writer():
+    return connection.open_sync(catalog_path())
 
 
 class CreateCollectionBody(BaseModel):
     name: str = ""
-    description: str = ""
-    image_ids: list[int] = Field(default_factory=list, max_length=MAX_IMAGE_IDS_PER_REQUEST)
-    visibility: str = "private"
-    status: str = "draft"
-    query: dict[str, Any] | None = None
-
-
-class CollectionImagesBody(BaseModel):
-    image_ids: list[int] = Field(default_factory=list, max_length=MAX_IMAGE_IDS_PER_REQUEST)
-
-
-class CollectionLinkBody(BaseModel):
-    child_id: int
-    position: int = 0
+    image_ids: list[int] = Field(default_factory=list)
 
 
 class RenameCollectionBody(BaseModel):
     name: str = ""
-    query: dict[str, Any] | None = None
-    materialize: bool = False
 
 
-class UpdateCollectionBody(BaseModel):
-    name: str | None = None
-    query: dict[str, Any] | None = None
-    materialize: bool = False
+class CollectionImagesBody(BaseModel):
+    image_ids: list[int] = Field(default_factory=list)
 
 
-def _clean_collection_name(name: str) -> str | None:
-    clean_name = (name or "").strip()
-    if not clean_name or len(clean_name) > MAX_COLLECTION_NAME_LENGTH:
-        return None
-    return clean_name
+def _card(conn, set_id: str, name: str) -> dict:
+    """The five fields the desktop reads off a collection, and no others.
 
+    `cover_image_id` is the first member rather than a stored choice: a cover
+    that is a column is a cover that can point at a photograph the collection no
+    longer contains.
+    """
 
-def _fields_set(payload) -> set[str]:
-    model_fields = getattr(payload, "model_fields_set", None)
-    if model_fields is not None:
-        return set(model_fields)
-    return set(getattr(payload, "__fields_set__", set()))
-
-
-def _invalid_query_response(exc: smart.SmartCollectionQueryError) -> JSONResponse:
-    return JSONResponse({"detail": str(exc)}, status_code=422)
-
-
-def _invalidate_suggestions_cache() -> None:
-    collection_suggestions.invalidate_cache()
-
-
-async def _append_collection_meta(collection_id: int) -> None:
-    await judgements.collection(catalog_path(), collection_id)
-
-
-async def _append_collection_memberships(collection_id: int, image_ids: list[int], *, member: bool) -> None:
-    await judgements.membership(catalog_path(), collection_id, image_ids, member=member)
-
-
-async def _smart_collection_conflict(collection_id: int) -> JSONResponse | None:
-    smart_state = await collection_repository.collection_is_smart(db.DB_PATH, collection_id)
-    if smart_state is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    if smart_state:
-        return JSONResponse(
-            {"error": "Smart collections are live queries; materialize before editing membership."},
-            status_code=409,
-        )
-    return None
-
-
-async def _with_smart_summary(collection: dict) -> dict:
-    if not collection.get("smart"):
-        return collection
-    summary = await smart_collections.resolve_summary(collection["query"] or {}, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
-    return {**collection, **summary, "smart": True}
-
-
-async def _collection_update(
-    collection_id: int,
-    payload,
-    *,
-    require_name: bool,
-):
-    fields = _fields_set(payload)
-    clean_name = None
-    if "name" in fields or require_name:
-        clean_name = _clean_collection_name(payload.name or "")
-        if clean_name is None:
-            return JSONResponse({"error": "Collection name is required"}, status_code=400)
-
-    query_json = None
-    query_supplied = "query" in fields
-    if query_supplied:
-        try:
-            query_json = smart.query_to_json(payload.query)
-        except smart.SmartCollectionQueryError as exc:
-            return _invalid_query_response(exc)
-
-    materialize_ids = None
-    if bool(payload.materialize):
-        current = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=1, offset=0)
-        if current is None:
-            return JSONResponse({"error": "Collection not found"}, status_code=404)
-        if current.get("smart"):
-            try:
-                materialize_ids = await smart_collections.resolve_materialized_image_ids(current["query"] or {}, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
-            except smart.SmartCollectionMaterializeTooLarge as exc:
-                return JSONResponse(
-                    {
-                        "error": "Smart collection is too large to materialize",
-                        "image_count": exc.count,
-                        "limit": exc.limit,
-                    },
-                    status_code=409,
-                )
-
-    collection = await collection_repository.rename_collection(
-        db.DB_PATH,
-        collection_id,
-        name=clean_name,
-        query=query_json if query_supplied else None,
-        query_supplied=query_supplied,
-        materialize_image_ids=materialize_ids,
-    )
-    if collection is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    if materialize_ids is None:
-        await _append_collection_meta(collection_id)
-    if materialize_ids is not None:
-        _invalidate_suggestions_cache()
-    return {"ok": True, "collection": await _with_smart_summary(collection)}
+    members = photos.ids(conn, sets.members(conn, set_id))
+    return {
+        "id": set_id,
+        "name": name,
+        "image_count": len(members),
+        "cover_image_id": members[0] if members else None,
+        "smart": False,
+    }
 
 
 @router.get("/api/user-collections")
 async def api_user_collections():
-    collections = []
-    for collection in await collection_repository.list_collections(db.DB_PATH):
-        collections.append(await _with_smart_summary(collection))
-    return {"collections": collections}
+    conn = db()
+    return {"collections": [_card(conn, s["id"], s["name"]) for s in sets.all(conn)]}
 
 
 @router.post("/api/user-collections")
 async def api_create_collection(payload: CreateCollectionBody):
-    try:
-        query_json = smart.query_to_json(payload.query)
-    except smart.SmartCollectionQueryError as exc:
-        return _invalid_query_response(exc)
-    collection = await collection_repository.create_collection(
-        db.DB_PATH,
-        name=payload.name,
-        description=payload.description,
-        image_ids=payload.image_ids,
-        visibility=payload.visibility,
-        status=payload.status,
-        query=query_json,
-    )
-    await _append_collection_meta(collection["id"])
-    if not collection.get("smart"):
-        await _append_collection_memberships(collection["id"], payload.image_ids, member=True)
-    _invalidate_suggestions_cache()
-    return {"ok": True, "collection": await _with_smart_summary(collection)}
+    name = (payload.name or "").strip()
+    if not name:
+        return JSONResponse({"error": "Collection name is required"}, status_code=400)
+    conn = _writer()
+    set_id = sets.create(conn, name)
+    sets.add(conn, set_id, photos.hashes(conn, payload.image_ids))
+    conn.commit()
+    return {"ok": True, "collection": _card(conn, set_id, name)}
+
+
+@router.get("/api/user-collections/{collection_id}")
+async def api_collection(collection_id: str, limit: int = 200, offset: int = 0):
+    conn = db()
+    name = sets.name_of(conn, collection_id)
+    if name is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    members = photos.ids(conn, sets.members(conn, collection_id))
+    card = _card(conn, collection_id, name)
+    return {"collection": {**card, "image_ids": members[offset:offset + limit]}}
+
+
+@router.post("/api/user-collections/{collection_id}/rename")
+async def api_rename_collection(collection_id: str, payload: RenameCollectionBody):
+    name = (payload.name or "").strip()
+    if not name:
+        return JSONResponse({"error": "Collection name is required"}, status_code=400)
+    conn = _writer()
+    if sets.name_of(conn, collection_id) is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    sets.rename(conn, collection_id, name)
+    conn.commit()
+    return {"ok": True, "collection": _card(conn, collection_id, name)}
+
+
+@router.post("/api/user-collections/{collection_id}")
+async def api_update_collection(collection_id: str, payload: RenameCollectionBody):
+    return await api_rename_collection(collection_id, payload)
+
+
+@router.post("/api/user-collections/{collection_id}/delete")
+async def api_delete_collection(collection_id: str):
+    conn = _writer()
+    if sets.name_of(conn, collection_id) is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    sets.forget(conn, collection_id)
+    conn.commit()
+    return {"ok": True}
+
+
+async def _membership(collection_id: str, image_ids, *, member: bool):
+    if not image_ids:
+        return JSONResponse({"error": "image_ids is required"}, status_code=400)
+    conn = _writer()
+    name = sets.name_of(conn, collection_id)
+    if name is None:
+        return JSONResponse({"error": "Collection not found"}, status_code=404)
+    say = sets.add if member else sets.remove
+    say(conn, collection_id, photos.hashes(conn, image_ids))
+    conn.commit()
+    return {"ok": True, "collection": _card(conn, collection_id, name)}
+
+
+@router.post("/api/user-collections/{collection_id}/images")
+async def api_add_collection_images(collection_id: str, payload: CollectionImagesBody):
+    return await _membership(collection_id, payload.image_ids, member=True)
+
+
+@router.post("/api/user-collections/{collection_id}/images/remove")
+async def api_remove_collection_images_post(collection_id: str, payload: CollectionImagesBody):
+    return await _membership(collection_id, payload.image_ids, member=False)
+
+
+@router.delete("/api/user-collections/{collection_id}/images")
+async def api_remove_collection_images(collection_id: str, payload: CollectionImagesBody):
+    # Both clients call POST /images/remove; this stays for proxies that strip
+    # DELETE bodies.
+    return await _membership(collection_id, payload.image_ids, member=False)
+
+
+@router.get("/api/collections/tree")
+async def api_collection_tree():
+    """The workspace tree, which is flat.
+
+    `collection_links` held zero rows, so there was never a tree — 254 lines of
+    graph walking, cycle detection and a `CollectionGraphConflict` existed for a
+    nesting nobody had created. Every set is a root until something asks
+    otherwise, and the desktop already defaults this shape to empty.
+    """
+
+    conn = db()
+    nodes = [_card(conn, s["id"], s["name"]) for s in sets.all(conn)]
+    return {"nodes": nodes, "links": [], "root_ids": [n["id"] for n in nodes]}
 
 
 @router.get("/api/collections/suggestions")
@@ -209,143 +187,26 @@ async def api_collection_suggestions(exclude_sources: str = ""):
     if not excluded:
         return payload
     return await collection_suggestions.filter_suggestions_excluding_sources(
-        catalog_path(),
-        payload,
-        excluded,
+        catalog_path(), payload, excluded
     )
 
 
-@router.post("/api/collections/{collection_id}/links")
-async def api_add_collection_link(collection_id: int, payload: CollectionLinkBody):
-    try:
-        link = await graph.add_link(
-            catalog_path(),
-            collection_id,
-            payload.child_id,
-            payload.position,
-        )
-    except graph.CollectionGraphConflict as exc:
-        return JSONResponse({"error": str(exc)}, status_code=409)
-    if link is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    await _append_collection_meta(payload.child_id)
-    return {"ok": True, "link": link}
-
-
-@router.delete("/api/collections/{collection_id}/links")
-async def api_delete_collection_link(
-    collection_id: int,
-    payload: CollectionLinkBody | None = None,
-    child_id: int | None = None,
-):
-    target_child_id = child_id if child_id is not None else payload.child_id if payload else None
-    if target_child_id is None:
-        return JSONResponse({"error": "child_id is required"}, status_code=422)
-    deleted = await graph.delete_link(catalog_path(), collection_id, target_child_id)
-    if deleted is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    if not deleted:
-        return JSONResponse({"error": "Collection link not found"}, status_code=404)
-    await _append_collection_meta(target_child_id)
-    return {"ok": True}
-
-
-@router.get("/api/collections/tree")
-async def api_collection_tree():
-    return await graph.workspace_tree(catalog_path())
-
-
 @router.get("/api/collections/{collection_id}/images")
-async def api_collection_graph_images(collection_id: int, recursive: int = 0):
-    try:
-        result = await graph.recursive_images(
-            catalog_path(),
-            collection_id,
-            recursive=bool(recursive),
-            resolve_smart_image_ids=_smart_image_ids,
-            get_images_by_ids=partial(image_repository.get_active_images_by_ids, catalog_path()),
-        )
-    except graph.CollectionGraphConflict as exc:
-        return JSONResponse({"error": str(exc)}, status_code=409)
-    if result is None:
+async def api_collection_images(collection_id: str, recursive: int = 0):
+    """Was the collection graph: nesting, recursion, and a conflict class.
+
+    Nothing in the desktop asks for a nested collection, and `collection_links`
+    held zero rows, so recursion had no tree to walk. The parameter is accepted
+    and ignored rather than 400ing a caller that still sends it.
+    """
+
+    conn = db()
+    if sets.name_of(conn, collection_id) is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    image_ids, images = result
+    image_ids = photos.ids(conn, sets.members(conn, collection_id))
     return {
-        "collection_id": int(collection_id),
-        "recursive": bool(recursive),
+        "collection_id": collection_id,
+        "recursive": False,
         "count": len(image_ids),
         "image_ids": image_ids,
-        "images": images,
     }
-
-
-@router.get("/api/user-collections/{collection_id}")
-async def api_collection(collection_id: int, limit: int = 200, offset: int = 0):
-    collection = await collection_repository.get_collection(db.DB_PATH, collection_id, limit=limit, offset=offset)
-    if collection is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    if collection.get("smart"):
-        detail = await smart_collections.resolve_detail(collection["query"] or {}, limit=limit, offset=offset, resolve_library_constraints=query_constraints.resolve_configured_library_constraints)
-        collection = {**collection, **detail, "smart": True}
-    return {"collection": collection}
-
-
-@router.post("/api/user-collections/{collection_id}/rename")
-async def api_rename_collection(collection_id: int, payload: RenameCollectionBody):
-    return await _collection_update(collection_id, payload, require_name=True)
-
-
-@router.post("/api/user-collections/{collection_id}")
-async def api_update_collection(collection_id: int, payload: UpdateCollectionBody):
-    return await _collection_update(collection_id, payload, require_name=False)
-
-
-@router.post("/api/user-collections/{collection_id}/delete")
-async def api_delete_collection(collection_id: int):
-    # Read the uuid before the row goes: the judgement that it was deleted is
-    # about the collection's identity, and identity is what outlives the row.
-    state = await judgements.collection_state(catalog_path(), collection_id)
-    deleted = await collection_repository.delete_collection(db.DB_PATH, collection_id)
-    if not deleted:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    if state:
-        await judgements.forget_collection(catalog_path(), state["collection_uuid"])
-    _invalidate_suggestions_cache()
-    return {"ok": True}
-
-
-@router.post("/api/user-collections/{collection_id}/images")
-async def api_add_collection_images(collection_id: int, payload: CollectionImagesBody):
-    if not payload.image_ids:
-        return JSONResponse({"error": "image_ids is required"}, status_code=400)
-    conflict = await _smart_collection_conflict(collection_id)
-    if conflict is not None:
-        return conflict
-    collection = await collection_repository.add_images(db.DB_PATH, collection_id, payload.image_ids)
-    if collection is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    await _append_collection_memberships(collection_id, payload.image_ids, member=True)
-    _invalidate_suggestions_cache()
-    return {"ok": True, "collection": collection}
-
-
-@router.post("/api/user-collections/{collection_id}/images/remove")
-async def api_remove_collection_images_post(collection_id: int, payload: CollectionImagesBody):
-    if not payload.image_ids:
-        return JSONResponse({"error": "image_ids is required"}, status_code=400)
-    conflict = await _smart_collection_conflict(collection_id)
-    if conflict is not None:
-        return conflict
-    collection = await collection_repository.remove_images(db.DB_PATH, collection_id, payload.image_ids)
-    if collection is None:
-        return JSONResponse({"error": "Collection not found"}, status_code=404)
-    await _append_collection_memberships(collection_id, payload.image_ids, member=False)
-    _invalidate_suggestions_cache()
-    return {"ok": True, "collection": collection}
-
-
-@router.delete("/api/user-collections/{collection_id}/images")
-async def api_remove_collection_images(collection_id: int, payload: CollectionImagesBody):
-    # Kept for compatibility; both clients call POST /images/remove, and proxies
-    # that strip DELETE bodies must.
-    return await api_remove_collection_images_post(collection_id, payload)

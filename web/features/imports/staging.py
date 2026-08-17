@@ -13,12 +13,13 @@ from pathlib import Path
 
 from core.dates import safe_datetime_fromtimestamp
 import db
+from data import connection
+from model import photos, sets
 import scanner
 import settings
 import render
 import tiles
 from data.repositories import catalog as catalog_repository
-from data.repositories import collections as collection_repository
 from data.repositories import imports as import_repository
 from features.catalog import routes as catalog_routes
 from features.imports import card
@@ -727,8 +728,15 @@ async def _apply_during_import(job: ImportJob) -> None:
         keyword = await keywords.resolve_keyword_path(path)
         if keyword:
             await keywords.assign_keyword(ids, int(keyword["id"]), origin="import")
-    if job.collection_id is not None:
-        await collection_repository.add_images(db.DB_PATH, int(job.collection_id), ids)
+    if job.collection_id:
+        def put():
+            conn = connection.open_sync(db.DB_PATH)
+            try:
+                sets.add(conn, str(job.collection_id), photos.hashes(conn, ids))
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(put)
 
 
 def job_for_id(job_id: str) -> ImportJob | None:

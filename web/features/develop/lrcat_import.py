@@ -26,7 +26,7 @@ from typing import Any
 from urllib.parse import quote
 
 from data import connection
-from data.repositories import collections as collections_repository
+from model import photos, sets
 from features.develop.discovery import lightroom_catalog_roots
 from features.develop.lua_table import LuaTableError, parse_lua_table
 
@@ -396,23 +396,41 @@ def _catalog_collections(catalog: sqlite3.Connection, matched_ids: dict[int, int
 
 
 async def _persist_collections(db_path: str, pending: dict[str, list[int]], *, dry_run: bool) -> tuple[int, int]:
-    existing = {row["name"]: row for row in await collections_repository.list_collections(db_path)}
-    created = 0
-    updated = 0
-    for name, image_ids in pending.items():
-        unique_ids = list(dict.fromkeys(image_ids))
-        if not unique_ids:
-            continue
-        collection = existing.get(name)
-        if collection is None:
-            if not dry_run:
-                await collections_repository.create_collection(db_path, name=name, image_ids=unique_ids)
-            created += 1
-        else:
-            if not dry_run:
-                await collections_repository.add_images(db_path, int(collection["id"]), unique_ids)
-            updated += 1
-    return created, updated
+    """File Lightroom's collections as sets, matched by name.
+
+    Was three repository calls over a table; a collection is a name and its
+    members, so it is `sets.create` and `sets.add`. Matching on name is what the
+    old code did too — Lightroom has no identity we could carry across.
+    """
+
+    def job(conn) -> tuple[int, int]:
+        existing = {s["name"]: s["id"] for s in sets.all(conn)}
+        created = updated = 0
+        for name, image_ids in pending.items():
+            unique_ids = list(dict.fromkeys(image_ids))
+            if not unique_ids:
+                continue
+            set_id = existing.get(name)
+            if set_id is None:
+                if not dry_run:
+                    set_id = sets.create(conn, name)
+                    sets.add(conn, set_id, photos.hashes(conn, unique_ids))
+                created += 1
+            else:
+                if not dry_run:
+                    sets.add(conn, set_id, photos.hashes(conn, unique_ids))
+                updated += 1
+        conn.commit()
+        return created, updated
+
+    def run():
+        conn = connection.open_sync(db_path)
+        try:
+            return job(conn)
+        finally:
+            conn.close()
+
+    return await asyncio.to_thread(run)
 
 
 def import_lrcat(catalog_path: str, db_path: str, dry_run: bool = False) -> dict[str, Any]:

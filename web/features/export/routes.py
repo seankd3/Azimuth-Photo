@@ -23,7 +23,8 @@ import settings
 
 import db
 from core import query_constraints
-from features.collections import smart as smart_collections
+from data import connection
+from model import photos, sets
 router = APIRouter()
 
 EXPORT_FIELD_NAMES = (
@@ -77,7 +78,7 @@ async def _get_export_images(
     deep: bool,
     people: str,
     import_batch: int = 0,
-    collection_id: int = 0,
+    collection_id: str = "",
     stacks: str = "expanded",
 ):
     db_path = catalog_path()
@@ -96,7 +97,13 @@ async def _get_export_images(
             id_filter = set(batch_ids)
         else:
             id_filter = {int(image_id) for image_id in id_filter}.intersection(batch_ids)
-    id_filter, collection_id = await smart_collections.resolve_scope(id_filter, collection_id)
+    # A collection is an enumerated set, so narrowing by one is an intersection
+    # here rather than a scope threaded down into the ranking query.
+    if collection_id:
+        conn = connection.inline_reader(catalog_path())
+        members = set(photos.ids(conn, sets.members(conn, str(collection_id))))
+        id_filter = members if id_filter is None else {int(i) for i in id_filter} & members
+        collection_id = 0
     # The computed orders need the service's search/blend context, which an
     # export of raw rows does not carry. Elo is taste's own backbone, stated
     # here rather than left to a silent registry fallback.
@@ -323,7 +330,7 @@ async def export_rankings(
     orientation: str = "", compared: str = "", min_stars: int = 0,
     folder: FolderScope = "", flag: str = "", date_taken: str = "", file_type: str = "",
     camera: str = "", lens: str = "", tag: str = "", q: str = "", deep: bool = False, people: str = "",
-    import_batch: int = 0, collection_id: int = 0, stacks: str = "expanded",
+    import_batch: int = 0, collection_id: str = "", stacks: str = "expanded",
     size: str = "original",
 ):
     normalized_format = (format or "json").lower()

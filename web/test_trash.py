@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 
 from test_support import *  # noqa: F401,F403
-from data.repositories import collections as collection_repository
 from data.repositories import stacks as stack_repository
 from features.develop import virtual_copies
 from features.trash import service as trash_service
@@ -508,35 +507,6 @@ class TrashTests(BackendTestCase):
         self.assertEqual(stack["representative"]["id"], next_best)
         self.assertEqual(stack["member_count"], 2)
         self.assertNotIn(representative, [member["id"] for member in stack["members"]])
-
-    async def test_trashing_collection_cover_hides_member_and_reassigns_cover(self):
-        source, _root = await self._source_root()
-        cover, _ = await self._file_image(source, "cover.jpg", data=b"cover")
-        remaining, _ = await self._file_image(source, "remaining.jpg", data=b"remaining")
-        collection = await collection_repository.create_collection(
-            db.DB_PATH,
-            name="Trash-safe collection",
-            image_ids=[cover, remaining],
-        )
-
-        await trash_service.trash_images(db.DB_PATH, [cover])
-        detail = await collection_repository.get_collection(db.DB_PATH, collection["id"])
-
-        self.assertEqual(detail["image_count"], 1)
-        self.assertEqual(detail["cover_image_id"], remaining)
-        self.assertEqual([image["id"] for image in detail["images"]], [remaining])
-
-    async def test_restoring_only_collection_member_restores_cover(self):
-        source, _root = await self._source_root()
-        image_id, _ = await self._file_image(source, "only.jpg", data=b"only")
-        collection = await collection_repository.create_collection(db.DB_PATH, name="Only", image_ids=[image_id])
-        await trash_service.trash_images(db.DB_PATH, [image_id])
-
-        await trash_service.restore_images(db.DB_PATH, [image_id])
-        detail = await collection_repository.get_collection(db.DB_PATH, collection["id"])
-
-        self.assertEqual(detail["image_count"], 1)
-        self.assertEqual(detail["cover_image_id"], image_id)
 
     async def test_missing_file_trash_still_marks_row(self):
         source, _root = await self._source_root()
