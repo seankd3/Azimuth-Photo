@@ -49,7 +49,12 @@ def main() -> int:
     say(f"model {model}")
     say(f"owed {work.owing(conn, search.EMBEDDING, recipe=recipe):,}")
 
-    tile_recipe = {"size": render.LOUPE, "edits": None, "rotate": 0}
+    # Render the *grid* tile from an original, not the loupe one. The model
+    # sees 384px and a grid tile is 400, so it is the whole of what the
+    # embedding needs, it is the size the grid actually shows, and it costs a
+    # fraction of a 1920px render off a RAW. Rendering the loupe size here was
+    # measured at roughly 0.1 img/s -- a week for the archive.
+    tile_recipe = {"size": render.GRID, "edits": None, "rotate": 0}
     done = failed = 0
     from_archive = 0
     unreachable: set[str] = set()
