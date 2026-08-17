@@ -32,6 +32,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import JSONResponse
 
 import library
 import lightroom
@@ -487,6 +488,97 @@ async def storage():
         "disk_total_bytes": first.get("disk_total_bytes", 0),
         "disk_label": first.get("label", ""),
     }
+
+
+@router.get("/api/storage/reclaimable")
+async def reclaimable():
+    """What the archive already holds, and therefore what the SSD could give back.
+
+    Two counts, both queries. `unprotected` is the backup queue — photographs
+    with no copy on a drive allowed to hold the last one. Everything else with a
+    working-disk copy is reclaimable, because the archive has it.
+
+    Nothing here is a promise. `backup.reclaim` re-reads both files and compares
+    full digests at the moment it deletes, so this number is what to *offer*,
+    never what to act on.
+    """
+
+    from model import backup
+
+    conn = db()
+    drive = backup.record_drive(conn)
+    queue = backup.unprotected(conn)
+    row = conn.execute(
+        "SELECT COUNT(*) n, COALESCE(SUM(i.file_size), 0) b FROM images i "
+        "JOIN copies c ON c.photo_id = i.id "
+        "JOIN drives d ON d.id = c.drive_id AND d.is_record = 0 "
+        "WHERE i.vc_of IS NULL AND EXISTS ("
+        "  SELECT 1 FROM copies c2 JOIN drives d2 ON d2.id = c2.drive_id "
+        "  WHERE c2.photo_id = i.id AND d2.is_record = 1)"
+    ).fetchone()
+    return {
+        "archive_attached": drive is not None,
+        "archive_label": (drive or {}).get("label", ""),
+        "unprotected_photos": len(queue),
+        "unprotected_bytes": sum(int(p["file_size"] or 0) for p in queue),
+        "reclaimable_photos": int(row["n"] or 0),
+        "reclaimable_bytes": int(row["b"] or 0),
+    }
+
+
+@router.post("/api/storage/archive")
+async def archive(body: dict | None = None):
+    """Copy photographs to the archive drive. Adds only; removes nothing.
+
+    Given `ids`, back up exactly those. Given nothing, work the whole queue —
+    the worst outcome either way is that a photograph stays unprotected, which
+    is where it already was.
+    """
+
+    ids = [int(i) for i in (body or {}).get("ids") or []]
+    return await _writing(_archive_now, ids, bool((body or {}).get("dry_run")))
+
+
+def _archive_now(conn, ids: list[int], dry_run: bool) -> dict:
+    from model import backup
+
+    if not ids:
+        return backup.back_up_all(conn, dry_run=dry_run)
+    tally: dict[str, int] = {}
+    for photo_id in ids:
+        outcome = backup.back_up(conn, photo_id, dry_run=dry_run)
+        tally[outcome] = tally.get(outcome, 0) + 1
+    return {"queued": len(ids), "outcomes": tally}
+
+
+@router.post("/api/storage/reclaim")
+async def reclaim(body: dict | None = None):
+    """Give the working disk back, for photographs the archive already holds.
+
+    This is the only route in the app that deletes an original, so it does not
+    take a scope, a filter or an "all" — a caller names the photographs. The
+    proving is `backup.reclaim`'s: both files re-read now, full digests
+    compared, deletion only ever from a drive that may not hold the last copy,
+    and the archive's marker re-read afterwards.
+    """
+
+    ids = [int(i) for i in (body or {}).get("ids") or []]
+    if not ids:
+        return JSONResponse({"error": "name the photographs to reclaim"}, status_code=400)
+    return await _writing(_reclaim_now, ids, bool((body or {}).get("dry_run")))
+
+
+def _reclaim_now(conn, ids: list[int], dry_run: bool) -> dict:
+    from model import backup
+
+    tally: dict[str, int] = {}
+    freed = 0
+    for photo_id in ids:
+        outcome = backup.reclaim(conn, photo_id, dry_run=dry_run)
+        tally[outcome] = tally.get(outcome, 0) + 1
+        if outcome == "freed":
+            freed += 1
+    return {"asked": len(ids), "freed": freed, "outcomes": tally}
 
 
 @router.get("/api/similar/{image_id}")

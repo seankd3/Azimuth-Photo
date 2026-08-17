@@ -24,6 +24,8 @@ stops mid-run has lost nothing.
 from __future__ import annotations
 
 import os
+import re
+import time
 
 import render
 from model import cache
@@ -57,6 +59,71 @@ def configure(settings: dict | None = None) -> None:
     global CACHE_DIR
     chosen = str((settings or {}).get("ssd_cache_dir") or "").strip()
     CACHE_DIR = chosen or _default_cache_dir()
+
+
+NAMED = re.compile(r"^([0-9a-f]{16,})-(\d+)(?:r(\d+))?\.jpg$")
+
+
+def adopt(conn) -> dict[str, int]:
+    """Tell the catalog about the tiles already on disk. Reads; makes nothing.
+
+    The `cache` table is an *index* of this directory, and an index can always
+    be rebuilt, because a tile is named by what it shows. That is worth having
+    as an operation rather than as a one-off repair: the two part company on a
+    catalog restore, on a rebuild, and on any move of the preview folder — and
+    they had already, badly. 150,442 tiles sat here in the current naming and
+    the current three sizes while `cache` held 5,861 rows, 5,340 of them
+    spelling their recipe `{}`, a shape this module has not written in some
+    time. `work.owed` is an anti-join against that table, so it reported
+    138,105 tiles owed and would have spent nights remaking files already here.
+
+    Stale-recipe rows are dropped rather than left beside the new ones. A
+    spelling nothing queries satisfies no read and prevents no work; keeping it
+    only means counting the same tile twice.
+    """
+
+    from model import cache
+
+    recipes: dict[tuple[int, int], str] = {}
+    already = {
+        (row["hash"], row["recipe"])
+        for row in conn.execute("SELECT hash, recipe FROM cache WHERE kind = 'tile'")
+    }
+    tally = {"recorded": 0, "already": 0, "stale_dropped": 0}
+    rows = []
+    for folder, _dirs, files in os.walk(CACHE_DIR):
+        for name in files:
+            match = NAMED.match(name)
+            if not match:
+                continue
+            digest, size, rotate = match.group(1), int(match.group(2)), int(match.group(3) or 0)
+            recipe = recipes.get((size, rotate))
+            if recipe is None:
+                recipe = cache.canonical("tile", {"size": size, "edits": None, "rotate": rotate})
+                recipes[(size, rotate)] = recipe
+            if (digest, recipe) in already:
+                tally["already"] += 1
+                continue
+            path = os.path.join(folder, name)
+            try:
+                on_disk = os.path.getsize(path)
+            except OSError:
+                continue
+            already.add((digest, recipe))
+            tally["recorded"] += 1
+            rows.append((digest, recipe, path, on_disk, time.time()))
+
+    if rows:
+        conn.executemany(
+            "INSERT OR REPLACE INTO cache(hash, kind, recipe, state, path, bytes, at)"
+            " VALUES (?, 'tile', ?, 'ready', ?, ?, ?)",
+            rows,
+        )
+    tally["stale_dropped"] = conn.execute(
+        "DELETE FROM cache WHERE kind = 'tile' AND recipe = '{}'"
+    ).rowcount
+    conn.commit()
+    return tally
 
 
 def path_for(hash: str, size: int, rotate: int = 0) -> str:
