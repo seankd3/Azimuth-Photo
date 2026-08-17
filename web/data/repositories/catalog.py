@@ -1043,36 +1043,17 @@ def folder_directory_counts_by_source(db_path: str, source_ids: list[int]) -> di
                 "GROUP BY source_id, directory",
                 # Trim both separators: a mirrored library stores the paths of
                 # the machine that holds the originals, which need not match
-                # this one.
+                # this one. The Python half of this computation split on
+                # `os.sep` alone and so returned an empty folder for 142,024 of
+                # this catalog's 144,157 photographs -- every POSIX path the hub
+                # wrote. One implementation knowing something the other does not
+                # is what having two costs, so there is one now.
                 ("/\\", *chunk),
             ).fetchall()
             for source_id, directory, count in rows:
                 directory_counts = counts_by_source.setdefault(int(source_id), {})
                 directory_counts[directory or os.sep] = int(count or 0)
         return counts_by_source
-    finally:
-        connection.close_sync(conn, db_path=db_path)
-
-
-def folder_image_filepaths_by_source(db_path: str, source_ids: list[int]) -> dict[int, list[str]]:
-    ids = list(dict.fromkeys(int(source_id) for source_id in source_ids if int(source_id) > 0))
-    if not ids:
-        return {}
-    conn = connection.open_sync(db_path)
-    try:
-        paths_by_source: dict[int, list[str]] = {source_id: [] for source_id in ids}
-        for chunk in _chunked(ids, 900):
-            placeholders = ",".join("?" for _ in chunk)
-            rows = conn.execute(
-                "SELECT source_id, filepath FROM images "
-                f"WHERE source_id IN ({placeholders}) "
-                "AND status IN ('kept', 'maybe') "
-                "AND missing_at IS NULL",
-                chunk,
-            ).fetchall()
-            for source_id, filepath in rows:
-                paths_by_source.setdefault(int(source_id), []).append(filepath)
-        return paths_by_source
     finally:
         connection.close_sync(conn, db_path=db_path)
 
