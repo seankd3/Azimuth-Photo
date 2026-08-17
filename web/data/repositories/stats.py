@@ -1,23 +1,23 @@
-"""Aggregate count queries and caches for catalog and AI status surfaces."""
+"""Aggregate counts for the catalog and AI status surfaces. Each one is a query.
 
-from core.numbers import increment_cached_int as _increment_cached_int
-import asyncio
+Measured on the 157,236-photograph catalog: the source sums are 0.01 ms over a
+three-row table, and `full_stats` — the slowest thing here — is 27 ms. Around
+those sat three TTL dictionaries, a stale-while-revalidate scheduler, an
+inflight-task global, and twelve functions to expire and patch them, none of
+which the numbers ever justified. The desktop already holds these for 15-60 s
+of its own accord, so the second cache behind it could only ever be wrong.
+"""
+
 import logging
-import time as _time
 
-from core.background import track_background_task
 from data import connection
-from data.repositories.catalog import active_image_condition, visible_image_condition
+from data.repositories.catalog import (
+    active_image_condition,
+    get_catalog_sources,
+    visible_image_condition,
+)
 
 log = logging.getLogger(__name__)
-
-CATALOG_IMAGE_COUNTS_TTL_SECONDS = 10.0
-FULL_STATS_CACHE_TTL_SECONDS = 30.0
-AI_STATUS_COUNTS_CACHE_TTL_SECONDS = 30.0
-_catalog_image_counts_cache = {"data": None, "expires": 0}
-_stats_cache = {"data": None, "expires": 0}
-_stats_inflight_task = None
-_ai_status_counts_cache = {"data": None, "expires": 0}
 
 
 async def catalog_image_counts(db_path: str) -> dict:
@@ -46,25 +46,6 @@ async def catalog_image_counts(db_path: str) -> dict:
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
-
-
-def invalidate_catalog_image_counts_cache() -> None:
-    _catalog_image_counts_cache["data"] = None
-    _catalog_image_counts_cache["expires"] = 0
-
-
-async def catalog_image_counts_cached(
-    db_path: str,
-    *,
-    ttl_seconds: float = CATALOG_IMAGE_COUNTS_TTL_SECONDS,
-) -> dict:
-    now = _time.time()
-    if _catalog_image_counts_cache["data"] and now < _catalog_image_counts_cache["expires"]:
-        return dict(_catalog_image_counts_cache["data"])
-    result = await catalog_image_counts(db_path)
-    _catalog_image_counts_cache["data"] = result
-    _catalog_image_counts_cache["expires"] = _time.time() + ttl_seconds
-    return dict(result)
 
 
 async def full_stats(db_path: str) -> dict:
@@ -244,95 +225,6 @@ async def full_stats(db_path: str) -> dict:
         await connection.close_async(conn, db_path=db_path)
 
 
-def invalidate_full_stats_cache() -> None:
-    _stats_cache["data"] = None
-    _stats_cache["expires"] = 0
-
-
-def invalidate_ai_status_counts_cache() -> None:
-    _ai_status_counts_cache["data"] = None
-    _ai_status_counts_cache["expires"] = 0
-
-
-def full_stats_cache_expired(now: float | None = None) -> bool:
-    checked_at = _time.time() if now is None else now
-    return _stats_cache["data"] is not None and checked_at >= _stats_cache["expires"]
-
-
-async def refresh_full_stats_cache(
-    db_path: str,
-    *,
-    ttl_seconds: float = FULL_STATS_CACHE_TTL_SECONDS,
-) -> dict:
-    if _stats_cache["data"] and _time.time() < _stats_cache["expires"]:
-        return _stats_cache["data"]
-    result = await full_stats(db_path)
-    _stats_cache["data"] = result
-    _stats_cache["expires"] = _time.time() + ttl_seconds
-    return result
-
-
-async def _do_full_stats_refresh(db_path: str, ttl_seconds: float, refresh):
-    if refresh is not None:
-        return await refresh()
-    return await refresh_full_stats_cache(db_path, ttl_seconds=ttl_seconds)
-
-
-async def _swr_full_stats_refresh(db_path: str, ttl_seconds: float, refresh):
-    try:
-        return await _do_full_stats_refresh(db_path, ttl_seconds, refresh)
-    except Exception:
-        log.exception("full stats background refresh failed")
-
-
-def schedule_full_stats_refresh(
-    db_path: str,
-    *,
-    ttl_seconds: float = FULL_STATS_CACHE_TTL_SECONDS,
-    refresh=None,
-):
-    global _stats_inflight_task
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        return None
-    task = _stats_inflight_task
-    if task is None or task.done() or task.get_loop() is not loop:
-        _stats_inflight_task = track_background_task(
-            _swr_full_stats_refresh(db_path, ttl_seconds, refresh)
-        )
-    return _stats_inflight_task
-
-
-async def full_stats_cached(
-    db_path: str,
-    *,
-    ttl_seconds: float = FULL_STATS_CACHE_TTL_SECONDS,
-    refresh=None,
-) -> dict:
-    global _stats_inflight_task
-    cached_data = _stats_cache["data"]
-    if cached_data and _time.time() < _stats_cache["expires"]:
-        return cached_data
-    loop = asyncio.get_running_loop()
-    task = _stats_inflight_task
-    if cached_data:
-        if task is None or task.done() or task.get_loop() is not loop:
-            _stats_inflight_task = track_background_task(
-                _swr_full_stats_refresh(db_path, ttl_seconds, refresh)
-            )
-        return cached_data
-    if task is not None and not task.done() and task.get_loop() is loop:
-        return await task
-    task = track_background_task(_do_full_stats_refresh(db_path, ttl_seconds, refresh))
-    _stats_inflight_task = task
-    try:
-        return await task
-    finally:
-        if _stats_inflight_task is task:
-            _stats_inflight_task = None
-
-
 async def ai_status_source_counts(db_path: str) -> dict:
     conn = await connection.open_async(db_path)
     try:
@@ -356,89 +248,23 @@ async def ai_status_source_counts(db_path: str) -> dict:
 
 
 
-def patch_ai_status_direct_rating_counts(
-    pair_delta: int,
-    rated_image_delta: int,
-    *,
-    active_cap: int | None = None,
-) -> bool:
-    """Keep the AI status cache valid after direct Compare/Mosaic writes."""
-    if not (
-        _ai_status_counts_cache["data"]
-        and _time.time() < _ai_status_counts_cache["expires"]
-    ):
-        invalidate_ai_status_counts_cache()
-        return False
+async def ai_status(db_path: str, *, get_embedding_count, get_active_source_ids) -> dict:
+    """The AI panel's counts: gather what `ai_status_counts` needs, then ask it.
 
-    ai_counts = _ai_status_counts_cache["data"]
-    if active_cap is None:
-        active_cap = int(ai_counts.get("total_images") or 0)
-    for key in ("direct_comparison_rows", "ranking_signal_count"):
-        _increment_cached_int(ai_counts, key, int(pair_delta or 0))
-    _increment_cached_int(
-        ai_counts,
-        "rated_images",
-        int(rated_image_delta or 0),
-        cap=active_cap,
-    )
-    return True
-
-
-async def ai_status_counts_cached(
-    db_path: str,
-    *,
-    get_embedding_count,
-    get_active_source_ids,
-    active_embedding_config,
-    count_embeddings_for_model,
-    ttl_seconds: float = AI_STATUS_COUNTS_CACHE_TTL_SECONDS,
-    stats_ttl_seconds: float = FULL_STATS_CACHE_TTL_SECONDS,
-    refresh_full_stats=None,
-    on_stats_refresh_scheduled=None,
-) -> dict:
-    now = _time.time()
-    if _ai_status_counts_cache["data"] and now < _ai_status_counts_cache["expires"]:
-        return dict(_ai_status_counts_cache["data"])
-
-    if _stats_cache["data"]:
-        stats = _stats_cache["data"]
-        if full_stats_cache_expired(now):
-            schedule_full_stats_refresh(
-                db_path,
-                ttl_seconds=stats_ttl_seconds,
-                refresh=refresh_full_stats,
-            )
-            if on_stats_refresh_scheduled is not None:
-                on_stats_refresh_scheduled()
-        result = {
-            "embedded": await get_embedding_count(),
-            "total_images": int(stats.get("active_images") or stats.get("total_images") or 0),
-            "rated_images": int(stats.get("rated_images") or 0),
-            "direct_comparison_rows": int(stats.get("direct_comparison_rows") or 0),
-            "ranking_signal_count": int(stats.get("ranking_signal_count") or stats.get("total_comparisons") or 0),
-            "imported_ranking_without_history": int(stats.get("imported_ranking_without_history") or 0),
-        }
-        _ai_status_counts_cache["data"] = result
-        _ai_status_counts_cache["expires"] = now + ttl_seconds
-        return dict(result)
+    An empty catalog is not a special case being handled — with no active
+    images there are no sources to list and nothing to have embedded, so both
+    reads are skipped because their answer is already known, not to protect a
+    query from a zero.
+    """
 
     source_counts = await ai_status_source_counts(db_path)
     active = int(source_counts["active_images"] or 0)
-    active_source_ids = sorted(await get_active_source_ids()) if active > 0 else []
-    embedded = (
-        0
-        if active <= 0
-        else await get_embedding_count()
-    )
-    result = await ai_status_counts(
+    return await ai_status_counts(
         db_path,
         source_counts=source_counts,
-        active_source_ids=active_source_ids,
-        embedded=embedded,
+        active_source_ids=sorted(await get_active_source_ids()) if active > 0 else [],
+        embedded=await get_embedding_count() if active > 0 else 0,
     )
-    _ai_status_counts_cache["data"] = result
-    _ai_status_counts_cache["expires"] = _time.time() + ttl_seconds
-    return dict(result)
 
 
 async def browser_original_summary(
@@ -642,3 +468,20 @@ async def ai_status_counts(
         }
     finally:
         await connection.close_async(conn, db_path=db_path)
+
+
+async def catalog_summary(db_path: str) -> dict:
+    """The sources and their counts — what every catalog surface displays.
+
+    There were two of these. The "light" one existed because the full one was
+    thought to be expensive; it is 27 ms, and both returned the same shape over
+    the same three-row table. `refresh_source_online_states` used to be threaded
+    in as a parameter and run on every read, which is why the answer had to be
+    cached: a read that writes cannot be repeated freely. Startup and rescan
+    refresh online state; this only reports it.
+    """
+
+    return {
+        "sources": [dict(row) for row in await get_catalog_sources(db_path)],
+        "stats": await full_stats(db_path),
+    }

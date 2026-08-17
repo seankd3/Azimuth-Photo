@@ -21,8 +21,6 @@ from features.trash import service as trash_service
 
 def _invalidate_after_stack_change() -> None:
     cache_events.invalidate_rankings_cache()
-    cache_events.invalidate_ranking_count_cache()
-    cache_events.invalidate_facet_caches()
 
 from core import cache_events
 router = APIRouter()

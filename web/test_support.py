@@ -33,7 +33,6 @@ from core import memory_pressure  # noqa: E402
 from core import query_constraints  # noqa: E402
 from core import work_coordination  # noqa: E402
 from core.static_assets import StaticAssetContext  # noqa: E402
-from data.repositories import filter_options as filter_options_repository  # noqa: E402
 from data.repositories import cache_entries as cache_entry_repository  # noqa: E402
 from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
@@ -149,10 +148,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             desired_path=os.path.join(self.tempdir.name, "bulk_desired.json")
         )
         self._reset_shared_runtime_state()
-        cache_events.invalidate_stats_cache()
-        cache_events.invalidate_cached_image_ids_cache()
-        cache_events.invalidate_past_matchups_cache()
-        db.clear_filter_options_cache()
         await db.init_db()
         cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
@@ -172,10 +167,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
         settings._settings = self.old_settings_state
         bulk_scheduler.reset_for_tests()
         catalog_path_use(self.old_db_path)
-        cache_events.invalidate_stats_cache()
-        cache_events.invalidate_cached_image_ids_cache()
-        cache_events.invalidate_past_matchups_cache()
-        db.clear_filter_options_cache()
         cache_events.invalidate_rankings_cache()
         catalog_routes.clear_folders_cache()
         settings_status.invalidate_settings_response_cache()
@@ -261,7 +252,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
                 await conn.commit()
             finally:
                 await conn.close()
-            cache_events.invalidate_stats_cache()
         return source
 
     async def _image(
@@ -293,7 +283,6 @@ class BackendTestCase(unittest.IsolatedAsyncioTestCase):
             image_id = cursor.lastrowid
         finally:
             await conn.close()
-        cache_events.invalidate_stats_cache()
         return image_id
 
     async def _image_row(self, image_id):

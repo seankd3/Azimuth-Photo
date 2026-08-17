@@ -133,7 +133,6 @@ async def api_film_roll_rename(body: RollRenameRequest):
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     catalog_routes.invalidate_folders_cache()
-    cache_events.invalidate_catalog_cache()
     cache_events.invalidate_rankings_cache()
     return {"ok": True, **result}
 
@@ -315,7 +314,6 @@ async def api_create_import(
         raise
 
     cache_events.invalidate_rankings_cache()
-    cache_events.invalidate_pairing_cache(matchups=True)
     catalog_routes.invalidate_folders_cache()
     return {
         "ok": True,
@@ -382,6 +380,5 @@ async def api_import_taxonomy_reclassify(body: ReclassifyRequest):
     )
     if result.get("updated"):
         catalog_routes.invalidate_folders_cache()
-        cache_events.invalidate_catalog_cache()
         cache_events.invalidate_rankings_cache()
     return result

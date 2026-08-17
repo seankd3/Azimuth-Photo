@@ -142,7 +142,6 @@ class TrashTests(BackendTestCase):
             image_id = int(cursor.lastrowid)
         finally:
             await conn.close()
-        cache_events.invalidate_stats_cache()
         return image_id, filepath
 
     async def _cache_entry(self, image_id):
@@ -554,7 +553,6 @@ class VirtualCopyTrashTests(BackendTestCase):
             image_id = int(cursor.lastrowid)
         finally:
             await conn.close()
-        cache_events.invalidate_stats_cache()
         return image_id, filepath
 
     async def _master_with_copy(self):

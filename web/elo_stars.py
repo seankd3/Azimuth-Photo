@@ -275,8 +275,6 @@ def _invalidate_star_dependent_caches() -> None:
     try:
         from core import cache_events
 
-        cache_events.invalidate_rating_facet_caches()
-        cache_events.invalidate_rating_ranking_count_cache()
         cache_events.invalidate_rankings_cache()
     except Exception:
         log.debug("Star-dependent cache invalidation skipped", exc_info=True)

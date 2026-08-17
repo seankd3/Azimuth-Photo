@@ -10,7 +10,6 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory(dir=os.path.dirname(__file__)) as tempdir:
             clean_path = os.path.join(tempdir, "clean-catalog.db")
             catalog_path_use(clean_path)
-            cache_events.invalidate_stats_cache()
             try:
                 await db.init_db()
                 conn = sqlite3.connect(clean_path)
@@ -27,7 +26,6 @@ class CleanInstallSchemaTests(unittest.IsolatedAsyncioTestCase):
                     conn.close()
             finally:
                 catalog_path_use(original_path)
-                cache_events.invalidate_stats_cache()
 
         self.assertEqual(version, data_schema.SCHEMA_VERSION)
         self.assertEqual(journal_mode, "wal")
@@ -57,7 +55,6 @@ class BackendIntegrationTests(BackendTestCase):
             conn.close()
 
         catalog_path_use(legacy_path)
-        cache_events.invalidate_stats_cache()
         try:
             await db.init_db()
             conn = sqlite3.connect(legacy_path)
@@ -68,7 +65,6 @@ class BackendIntegrationTests(BackendTestCase):
                 conn.close()
         finally:
             catalog_path_use(original_path)
-            cache_events.invalidate_stats_cache()
 
         self.assertIn("action_id", columns)
         self.assertIn("idx_comparisons_action_id", indexes)

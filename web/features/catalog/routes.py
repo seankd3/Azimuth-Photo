@@ -75,7 +75,6 @@ def _catalog_changed(*, matchups: bool = True) -> None:
     to decide what to pass.
     """
 
-    cache_events.invalidate_pairing_cache(matchups=matchups)
     invalidate_folders_cache()
     _invalidate_embedding_cache()
 
@@ -113,7 +112,6 @@ async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> 
     # rankings response, so the first landing after an import shows 0 photos.
     _catalog_changed(matchups=True)
     cache_events.invalidate_rankings_cache()
-    cache_events.invalidate_stats_cache()
     error = str(scanner.scan_state.get("error") or "").strip()
     if error:
         log.error(
@@ -473,7 +471,6 @@ async def api_remove_catalog_source(source_id: int, request: Request):
     else:
         return JSONResponse({"error": "Invalid removal mode"}, status_code=400)
 
-    cache_events.invalidate_pairing_cache(matchups=True)
     invalidate_folders_cache()
     return {"ok": True, "source_id": source_id, **action, "catalog": await db.get_catalog_summary()}
 

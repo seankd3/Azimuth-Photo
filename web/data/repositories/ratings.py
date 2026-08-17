@@ -8,7 +8,6 @@ from data import connection
 from data.repositories.common import chunked as _chunked
 from photo.visibility import visible_image_condition
 
-VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS = 30.0
 # Sampler-only orders: the caller wants a bounded window that moves between
 # calls, not a stable page of a ranking. Never use them for grid pagination.
 PAIRING_SAMPLE_ORDERS = ("least_compared_shuffled", "random", "near_elo")
@@ -17,38 +16,13 @@ PAIRING_SAMPLE_OVERSAMPLE = 2.0
 PAIRING_SAMPLE_MAX_OVERSAMPLE = 20.0
 PAIRING_SAMPLE_MAX_DRAW = 20000
 _PAIRING_ID_CHUNK = 900
-_visible_pairing_pool_counts_cache: dict[tuple, dict] = {}
+
+# Keyed on `(COUNT(*), MAX(id))` of `comparisons`, not on a clock: a matchup set
+# computed from a signature cannot disagree with the table it came from, so
+# nothing has to remember to expire it. The TTL caches that used to sit beside
+# this one, and the invalidators that swept them, are what the signature makes
+# unnecessary.
 _past_matchups_cache = {"data": None, "signature": None}
-
-
-def _cache_scope_matches(
-    cache_root: str,
-    size: str,
-    target_root: str | None,
-    target_size: str | None,
-) -> bool:
-    return (
-        (target_root is None or cache_root == target_root)
-        and (target_size is None or size == target_size)
-    )
-
-
-def invalidate_visible_pairing_pool_counts_cache(
-    cache_root: str | None = None,
-    size: str | None = None,
-) -> None:
-    if cache_root is None and size is None:
-        _visible_pairing_pool_counts_cache.clear()
-        return
-    for key in list(_visible_pairing_pool_counts_cache.keys()):
-        key_root, key_size = key[:2]
-        if _cache_scope_matches(key_root, key_size, cache_root, size):
-            _visible_pairing_pool_counts_cache.pop(key, None)
-
-
-def invalidate_past_matchups_cache() -> None:
-    _past_matchups_cache["data"] = None
-    _past_matchups_cache["signature"] = None
 
 
 def _was_rated(row: dict) -> bool:
@@ -407,168 +381,6 @@ async def visible_images_for_pairing(
         return await cursor.fetchall()
     finally:
         await connection.close_async(conn, db_path=db_path)
-
-
-
-async def visible_pairing_pool_counts(
-    db_path: str,
-    *,
-    catalog_counts: dict,
-    size: str,
-    cache_root: str,
-) -> dict:
-    active_images = int(catalog_counts.get("active_images") or 0)
-    all_catalog_images_active = _all_catalog_images_active(catalog_counts)
-    all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-    conn = await connection.open_async(db_path)
-    try:
-        if all_catalog_images_active or all_sources_available:
-            cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries c "
-                "JOIN images i ON i.id = c.image_id "
-                "WHERE c.cache_root = ? AND c.size = ? "
-                f"AND {visible_image_condition()}",
-                (cache_root, size),
-            )
-        else:
-            cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries c "
-                "JOIN images i ON i.id = c.image_id "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE c.cache_root = ? AND c.size = ? "
-                "AND s.included = 1 "
-                f"AND {visible_image_condition()}",
-                (cache_root, size),
-            )
-        visible_images = min(active_images, int((await cursor.fetchone())["count"] or 0))
-        return {"active_images": active_images, "visible_images": visible_images}
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def visible_pairing_pool_counts_cached(
-    db_path: str,
-    *,
-    get_catalog_image_counts,
-    size: str,
-    cache_root: str,
-    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-) -> dict:
-    if not size or not cache_root:
-        counts = await get_catalog_image_counts()
-        return {"active_images": int(counts.get("active_images") or 0), "visible_images": 0}
-    cache_key = (cache_root, size)
-    now = _time.time()
-    cached = _visible_pairing_pool_counts_cache.get(cache_key)
-    if cached and cached["expires"] > now:
-        return dict(cached["data"])
-    counts = await get_catalog_image_counts()
-    result = await visible_pairing_pool_counts(
-        db_path,
-        catalog_counts=counts,
-        size=size,
-        cache_root=cache_root,
-    )
-    _visible_pairing_pool_counts_cache[cache_key] = {
-        "data": result,
-        "expires": _time.time() + ttl_seconds,
-    }
-    return dict(result)
-
-
-
-async def visible_orientation_pairing_pool_counts(
-    db_path: str,
-    *,
-    catalog_counts: dict,
-    size: str,
-    cache_root: str,
-    orientation: str,
-) -> dict:
-    all_catalog_images_active = _all_catalog_images_active(catalog_counts)
-    all_sources_available = int(catalog_counts.get("removed_images") or 0) == 0
-    conn = await connection.open_async(db_path)
-    try:
-        if all_catalog_images_active or all_sources_available:
-            active_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM images INDEXED BY idx_images_active_orientation_count "
-                f"WHERE orientation = ? AND {visible_image_condition("")}",
-                (orientation,),
-            )
-            visible_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
-                "CROSS JOIN images i "
-                "WHERE c.cache_root = ? AND c.size = ? "
-                "AND i.id = c.image_id "
-                f"AND i.orientation = ? AND {visible_image_condition()}",
-                (cache_root, size, orientation),
-            )
-        else:
-            active_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM images i "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE s.included = 1 "
-                f"AND i.orientation = ? AND {visible_image_condition()}",
-                (orientation,),
-            )
-            visible_cursor = await conn.execute(
-                "SELECT COUNT(*) AS count FROM cache_entries c INDEXED BY sqlite_autoindex_cache_entries_1 "
-                "CROSS JOIN images i "
-                "JOIN catalog_sources s ON s.id = i.source_id "
-                "WHERE c.cache_root = ? AND c.size = ? "
-                "AND i.id = c.image_id "
-                "AND s.included = 1 "
-                f"AND i.orientation = ? AND {visible_image_condition()}",
-                (cache_root, size, orientation),
-            )
-        return {
-            "active_images": int((await active_cursor.fetchone())["count"] or 0),
-            "visible_images": int((await visible_cursor.fetchone())["count"] or 0),
-        }
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def visible_orientation_pairing_pool_counts_cached(
-    db_path: str,
-    *,
-    get_catalog_image_counts,
-    count_rankings,
-    size: str,
-    cache_root: str,
-    orientation: str,
-    ttl_seconds: float = VISIBLE_PAIRING_POOL_COUNTS_TTL_SECONDS,
-) -> dict:
-    orientation = (orientation or "").strip()
-    if not orientation:
-        return await visible_pairing_pool_counts_cached(
-            db_path,
-            get_catalog_image_counts=get_catalog_image_counts,
-            size=size,
-            cache_root=cache_root,
-            ttl_seconds=ttl_seconds,
-        )
-    if not size or not cache_root:
-        active = await count_rankings(orientation=orientation)
-        return {"active_images": int(active), "visible_images": 0}
-    cache_key = (cache_root, size, "orientation", orientation)
-    now = _time.time()
-    cached = _visible_pairing_pool_counts_cache.get(cache_key)
-    if cached and cached["expires"] > now:
-        return dict(cached["data"])
-    counts = await get_catalog_image_counts()
-    result = await visible_orientation_pairing_pool_counts(
-        db_path,
-        catalog_counts=counts,
-        size=size,
-        cache_root=cache_root,
-        orientation=orientation,
-    )
-    _visible_pairing_pool_counts_cache[cache_key] = {
-        "data": result,
-        "expires": _time.time() + ttl_seconds,
-    }
-    return dict(result)
 
 
 

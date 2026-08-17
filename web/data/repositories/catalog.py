@@ -15,12 +15,6 @@ from data.repositories.common import chunked as _chunked
 from core.path_groups import safe_commonpath
 
 
-CATALOG_CACHE_TTL_SECONDS = 10.0
-_catalog_sources_cache = {"data": None, "expires": 0}
-_catalog_summary_cache = {"data": None, "expires": 0}
-_catalog_light_summary_cache = {"data": None, "expires": 0}
-_active_source_ids_cache = {"ids": frozenset(), "expires": 0}
-ACTIVE_SOURCE_IDS_TTL_SECONDS = 5.0
 MISSING_MARK_BATCH_SIZE = 128
 MISSING_MARK_BUSY_TIMEOUT_SECONDS = 0.1
 MISSING_MARK_RETRY_BACKOFF_SECONDS = 0.1
@@ -83,38 +77,6 @@ async def active_source_id_set(db_path: str) -> frozenset[int]:
         return frozenset(int(row["id"]) for row in await cursor.fetchall())
     finally:
         await connection.close_async(conn, db_path=db_path)
-
-
-def invalidate_active_source_ids_cache() -> None:
-    _active_source_ids_cache["ids"] = frozenset()
-    _active_source_ids_cache["expires"] = 0
-
-
-def invalidate_catalog_summary_cache() -> None:
-    _catalog_summary_cache["data"] = None
-    _catalog_summary_cache["expires"] = 0
-    _catalog_light_summary_cache["data"] = None
-    _catalog_light_summary_cache["expires"] = 0
-
-
-def invalidate_catalog_cache() -> None:
-    _catalog_sources_cache["data"] = None
-    _catalog_sources_cache["expires"] = 0
-    invalidate_catalog_summary_cache()
-
-
-async def active_source_id_set_cached(
-    db_path: str,
-    *,
-    ttl_seconds: float = ACTIVE_SOURCE_IDS_TTL_SECONDS,
-) -> frozenset[int]:
-    now = _time.time()
-    if now < _active_source_ids_cache["expires"]:
-        return _active_source_ids_cache["ids"]
-    frozen = await active_source_id_set(db_path)
-    _active_source_ids_cache["ids"] = frozen
-    _active_source_ids_cache["expires"] = _time.time() + ttl_seconds
-    return frozen
 
 
 def insert_row_with_file_metadata(row):
@@ -1021,83 +983,6 @@ async def get_catalog_sources(db_path: str):
         return await cursor.fetchall()
     finally:
         await connection.close_async(conn, db_path=db_path)
-
-
-async def catalog_sources_cached(
-    db_path: str,
-    *,
-    refresh_source_online_states,
-    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
-):
-    now = _time.time()
-    if _catalog_sources_cache["data"] and now < _catalog_sources_cache["expires"]:
-        return _catalog_sources_cache["data"]
-    await refresh_source_online_states()
-    rows = await get_catalog_sources(db_path)
-    _catalog_sources_cache["data"] = rows
-    _catalog_sources_cache["expires"] = _time.time() + ttl_seconds
-    return rows
-
-
-async def catalog_summary_cached(
-    db_path: str,
-    *,
-    get_stats,
-    refresh_source_online_states,
-    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
-) -> dict:
-    now = _time.time()
-    if _catalog_summary_cache["data"] and now < _catalog_summary_cache["expires"]:
-        return _catalog_summary_cache["data"]
-    sources = [
-        dict(row)
-        for row in await catalog_sources_cached(
-            db_path,
-            refresh_source_online_states=refresh_source_online_states,
-            ttl_seconds=ttl_seconds,
-        )
-    ]
-    stats = await get_stats()
-    result = {"sources": sources, "stats": stats}
-    _catalog_summary_cache["data"] = result
-    _catalog_summary_cache["expires"] = _time.time() + ttl_seconds
-    return result
-
-
-async def catalog_light_summary_cached(
-    db_path: str,
-    *,
-    get_catalog_image_counts,
-    refresh_source_online_states,
-    ttl_seconds: float = CATALOG_CACHE_TTL_SECONDS,
-) -> dict:
-    now = _time.time()
-    if _catalog_light_summary_cache["data"] and now < _catalog_light_summary_cache["expires"]:
-        return _catalog_light_summary_cache["data"]
-    sources, counts = await asyncio.gather(
-        catalog_sources_cached(
-            db_path,
-            refresh_source_online_states=refresh_source_online_states,
-            ttl_seconds=ttl_seconds,
-        ),
-        get_catalog_image_counts(),
-    )
-    active = int(counts.get("active_images") or 0)
-    total = int(counts.get("total_catalog_images") or 0)
-    stats = {
-        **counts,
-        "total_images": active,
-        "active_images": active,
-        "kept": active,
-        "maybe": 0,
-        "removed_images": int(counts.get("removed_images") or 0),
-        "offline_images": int(counts.get("offline_images") or 0),
-        "total_catalog_images": total,
-    }
-    result = {"sources": [dict(row) for row in sources], "stats": stats}
-    _catalog_light_summary_cache["data"] = result
-    _catalog_light_summary_cache["expires"] = _time.time() + ttl_seconds
-    return result
 
 
 def folder_source_rows(db_path: str) -> list[tuple[int, str, int]]:

@@ -10,51 +10,12 @@ from unittest import mock
 
 from core import background as background_runtime
 from data.repositories import catalog as catalog_repository
-from data.repositories import filter_options as filter_options_repository
 from features.catalog import routes as catalog_routes
 
 
 class BackgroundRefreshHygieneTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await background_runtime._fire_and_forget.cancel_all()
-        filter_options_repository.clear_filter_options_cache()
-
-    async def test_filter_options_swr_refresh_logs_and_clears_inflight_flag(self):
-        filter_options_repository._filter_options_cache["data"] = {
-            "years": [],
-            "file_types": [],
-            "undated": 0,
-            "cameras": [],
-            "lenses": [],
-            "people": [],
-        }
-        filter_options_repository._filter_options_cache["expires"] = 0
-        filter_options_repository._filter_options_refreshing = False
-
-        async def boom(*_args, **_kwargs):
-            raise RuntimeError("refresh exploded")
-
-        with mock.patch.object(
-            filter_options_repository,
-            "load_filter_options_uncached",
-            side_effect=boom,
-        ):
-            with self.assertLogs(filter_options_repository.log, level="ERROR") as captured:
-                result = await filter_options_repository.filter_options_cached(
-                    "/tmp/unused.db",
-                    get_catalog_image_counts=mock.AsyncMock(),
-                    get_active_source_id_set=mock.AsyncMock(),
-                )
-                for _ in range(50):
-                    if not filter_options_repository._filter_options_refreshing:
-                        break
-                    await asyncio.sleep(0)
-
-        self.assertEqual(result["years"], [])
-        self.assertFalse(filter_options_repository._filter_options_refreshing)
-        self.assertTrue(
-            any("filter options background refresh failed" in line for line in captured.output)
-        )
 
     async def test_tracked_background_task_retrieves_exception(self):
         """Done-callback must retrieve the exception (no 'never retrieved' leak)."""

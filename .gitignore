@@ -52,3 +52,7 @@ node_modules/
 
 # local pregen diagnosis artifacts
 .diag/
+
+# scratch run dumps
+now*.txt
+baseline.txt

@@ -9,7 +9,7 @@ import ai_models
 import settings
 from core.background import track_background_task as track_route_background_task
 from core import responses as response_helpers
-from data.repositories import catalog as catalog_repository
+from data.repositories import stats as stats_repository
 import db
 from features.ai import routes as ai_routes
 import api as core_api
@@ -32,11 +32,7 @@ _status_component_timeout_seconds = 1.2
 
 
 async def catalog_light_summary_payload() -> dict:
-    return await catalog_repository.catalog_light_summary_cached(
-        catalog_path(),
-        get_catalog_image_counts=db.get_catalog_image_counts,
-        refresh_source_online_states=db.refresh_source_online_states,
-    )
+    return await stats_repository.catalog_summary(catalog_path())
 
 
 def _stale_cache_status(latency_ms: float) -> dict:

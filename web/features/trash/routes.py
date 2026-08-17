@@ -14,12 +14,6 @@ from features.trash import service as trash_service
 
 def _invalidate_after_trash() -> None:
     cache_events.invalidate_rankings_cache()
-    cache_events.invalidate_stats_cache()
-    cache_events.invalidate_ranking_count_cache()
-    cache_events.invalidate_facet_caches()
-    cache_events.invalidate_pairing_cache(matchups=True)
-    cache_events.invalidate_cached_image_ids_cache()
-    cache_events.invalidate_filter_options_cache()
     settings_status.invalidate_settings_response_cache()
 
 from core import cache_events

@@ -5,11 +5,11 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
 from date_inference import infer_image_date
 import image_headers
+from core import cache_events
 from core import work_coordination
 from core import hdd_governor
 from data.repositories import catalog as catalog_repository
@@ -41,10 +41,6 @@ async def _run_catalog_work(func, /, *args, **kwargs):
     return await loop.run_in_executor(_get_catalog_executor(), lambda: func(*args, **kwargs))
 
 
-Invalidator = Callable[[], None]
-
-_invalidate_filter_options_cache: Invalidator | None = None
-_invalidate_rankings_cache: Invalidator | None = None
 _metadata_manual_pause = True
 _orientation_retry_ledger: dict[int, dict] = {}
 _status = {
@@ -60,23 +56,6 @@ _status = {
     "orientation_poisoned_count": 0,
     "next_retry_at": None,
 }
-
-
-def configure(
-    *,
-    invalidate_filter_options_cache: Invalidator,
-    invalidate_rankings_cache: Invalidator,
-) -> None:
-    global _invalidate_filter_options_cache, _invalidate_rankings_cache
-    _invalidate_filter_options_cache = invalidate_filter_options_cache
-    _invalidate_rankings_cache = invalidate_rankings_cache
-
-
-def _invalidate_filter_options() -> None:
-    if _invalidate_filter_options_cache is None or _invalidate_rankings_cache is None:
-        raise RuntimeError("Catalog metadata workers are not configured")
-    _invalidate_filter_options_cache()
-    _invalidate_rankings_cache()
 
 
 def pause_catalog_metadata() -> dict:
@@ -114,7 +93,7 @@ async def get_unclassified_images(limit: int = 200):
 
 async def batch_set_orientations(updates: list[tuple[str, float, int]]):
     await image_repository.batch_set_orientations(catalog_path(), updates)
-    _invalidate_filter_options()
+    cache_events.invalidate_rankings_cache()
 
 
 async def get_images_needing_metadata(limit: int = 100, metadata_version: int = 1):
@@ -129,7 +108,7 @@ async def batch_update_metadata(updates: list[tuple]):
     if not updates:
         return
     await image_repository.batch_update_metadata(catalog_path(), updates)
-    _invalidate_filter_options()
+    cache_events.invalidate_rankings_cache()
 
 
 def _note_orientation_failure(

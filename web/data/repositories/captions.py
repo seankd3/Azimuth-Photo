@@ -13,8 +13,6 @@ from photo.visibility import visible_image_condition
 
 
 ERROR_RETRY_AFTER_SECONDS = 24 * 60 * 60
-TAGS_CACHE_TTL_SECONDS = 2.0
-_tags_cache: dict[tuple, dict] = {}
 
 
 def normalize_tags(tags) -> list[str]:
@@ -64,16 +62,8 @@ def understanding_search_text(understanding: dict) -> str:
     return " ".join(str(value) for value in values if value)
 
 
-def _tags_signature_key(db_path: str, model_key: str, q: str, limit: int, signature: int) -> tuple:
-    return (db_path, model_key, q.casefold(), int(limit), int(signature))
-
-
 def escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-
-
-def invalidate_tags_cache() -> None:
-    _tags_cache.clear()
 
 
 async def ensure_active_caption_fts_model(db_path: str, model_key: str) -> None:
@@ -257,7 +247,6 @@ async def owner_update_caption(
         raise
     finally:
         await connection.close_async(conn, db_path=db_path)
-    invalidate_tags_cache()
     return await get_image_caption(db_path, image_id=image_id, model_key=model_key)
 
 
@@ -335,60 +324,6 @@ async def image_caption_summaries(db_path: str, *, model_key: str, image_ids) ->
     finally:
         await connection.close_async(conn, db_path=db_path)
     return result
-
-
-async def tag_signature(db_path: str, *, model_key: str) -> int:
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT COUNT(*) AS c FROM image_tags WHERE model_key = ?",
-            (model_key,),
-        )
-        row = await cursor.fetchone()
-        return int(row["c"] if row else 0)
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-
-
-async def list_tags(
-    db_path: str,
-    *,
-    model_key: str,
-    q: str = "",
-    limit: int = 100,
-    signature: int | None = None,
-    ttl_seconds: float = TAGS_CACHE_TTL_SECONDS,
-) -> list[dict]:
-    query = str(q or "").strip().lower()
-    capped_limit = max(1, min(int(limit or 100), 500))
-    sig = await tag_signature(db_path, model_key=model_key) if signature is None else int(signature)
-    cache_key = _tags_signature_key(db_path, model_key, query, capped_limit, sig)
-    now = time.time()
-    cached = _tags_cache.get(cache_key)
-    if cached and cached["expires"] > now:
-        return [dict(item) for item in cached["data"]]
-    where = ["it.model_key = ?", "i.status IN ('kept', 'maybe')", "i.missing_at IS NULL", "s.included = 1"]
-    params: list = [model_key]
-    if query:
-        where.append("it.tag LIKE ? ESCAPE '\\'")
-        params.append(f"{escape_like(query)}%")
-    params.append(capped_limit)
-    conn = await connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT it.tag, COUNT(DISTINCT it.image_id) AS count "
-            "FROM image_tags it "
-            "JOIN images i ON i.id = it.image_id "
-            "JOIN catalog_sources s ON s.id = i.source_id "
-            f"WHERE {' AND '.join(where)} "
-            "GROUP BY it.tag ORDER BY count DESC, it.tag ASC LIMIT ?",
-            params,
-        )
-        rows = [{"tag": row["tag"], "count": int(row["count"] or 0)} for row in await cursor.fetchall()]
-    finally:
-        await connection.close_async(conn, db_path=db_path)
-    _tags_cache[cache_key] = {"data": [dict(item) for item in rows], "expires": now + ttl_seconds}
-    return rows
 
 
 async def get_images_needing_captions(

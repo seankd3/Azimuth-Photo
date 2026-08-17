@@ -10,7 +10,7 @@ import ai_models
 import settings
 import tiles
 from core.requests import json_object
-from data.repositories import catalog as catalog_repository
+from data.repositories import stats as stats_repository
 from data.repositories import images as image_repository
 from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
@@ -42,11 +42,7 @@ InvalidatePairing = Callable[..., None]
 
 
 async def _catalog_summary_payload() -> dict:
-    return await catalog_repository.catalog_summary_cached(
-        catalog_path(),
-        get_stats=db.get_stats,
-        refresh_source_online_states=db.refresh_source_online_states,
-    )
+    return await stats_repository.catalog_summary(catalog_path())
 
 
 @router.get("/api/settings")
@@ -169,8 +165,7 @@ async def api_batch_set_flag(request: Request):
     count = await image_repository.batch_set_image_flags(catalog_path(), normalized_ids, flag)
     await judgements.flag(catalog_path(), normalized_ids, flag)
     if count:
-        cache_events.invalidate_image_flag_caches()
-    cache_events.invalidate_pairing_cache()
+        cache_events.invalidate_rankings_cache()
     return {"ok": True, "count": count, "flag": flag}
 
 
