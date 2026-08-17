@@ -28,12 +28,24 @@ import os
 import render
 from model import cache
 
-# Where tiles are kept. One directory, set once. The old module carried a
-# tier-allocation profile that split a budget between four sizes; a single
-# ceiling and oldest-first eviction does the same job in `cache.evict`.
-CACHE_DIR = os.environ.get("AZIMUTH_THUMB_CACHE_DIR") or os.path.join(
-    os.environ.get("AZIMUTH_HOME") or os.path.expanduser("~"), "thumbs"
-)
+# Where tiles are kept, asked of the one resolver that answers it for every
+# other derivative too — previews, embeddings, develop caches all hang off
+# `runtime_paths`, so `AZIMUTH_CACHE_DIR` moves the lot with one word.
+#
+# This used to carry its own default (`AZIMUTH_THUMB_CACHE_DIR` or `~/thumbs`)
+# and `configure` read a settings key named `thumb_cache_dir`. **No such key
+# exists** — the setting is `ssd_cache_dir` — so configure() had never once
+# moved the cache, and tiles were written to `~/thumbs` (1,140 files) while the
+# settings screen, the health check's disk warning and the runtime paths all
+# reported `<cache>/previews` (33 files). Three names for one directory, and
+# the one the owner could edit was the one nothing read.
+def _default_cache_dir() -> str:
+    from core.runtime_paths import resolve_runtime_paths
+
+    return resolve_runtime_paths().thumb_cache_dir
+
+
+CACHE_DIR = _default_cache_dir()
 
 # How much disk tiles may hold before the oldest are dropped.
 CEILING_BYTES = int(os.environ.get("AZIMUTH_THUMB_CACHE_BYTES") or 20 * 1024**3)
@@ -43,8 +55,8 @@ def configure(settings: dict | None = None) -> None:
     """Point the cache somewhere else. The only knob, and it is a path."""
 
     global CACHE_DIR
-    if settings and settings.get("thumb_cache_dir"):
-        CACHE_DIR = str(settings["thumb_cache_dir"])
+    chosen = str((settings or {}).get("ssd_cache_dir") or "").strip()
+    CACHE_DIR = chosen or _default_cache_dir()
 
 
 def path_for(hash: str, size: int, rotate: int = 0) -> str:
