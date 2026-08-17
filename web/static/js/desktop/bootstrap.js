@@ -23,7 +23,6 @@ import { initGridContextMenu } from './context_menu.js';
 import { initExportMenu } from './export_menu.js';
 import { mountIconSprite } from '../icons.js';
 import { initPanelSections } from './panel_sections.js';
-import { initCullBrief } from './cull_brief.js';
 import { initQuickGuide } from './quick_guide.js';
 import { initLrRankingChip } from './lr_ranking_chip.js';
 
@@ -50,7 +49,6 @@ async function boot() {
     initContextbar();
     initFilters();
     initImportStage();
-    initCullBrief();
     initKeywordsPanel();
     initSimilar();
     initGridContextMenu();

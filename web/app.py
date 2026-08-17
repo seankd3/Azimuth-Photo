@@ -27,7 +27,6 @@ from features.export import routes as export_routes
 from features.imports import routes as imports_routes
 from features.library import keyword_routes, saved_views, watched_routes
 from features.pages import routes as page_routes
-from features.quality import routes as quality_routes
 from features.settings import routes as settings_routes
 from features.stacks import routes as stack_routes
 from features.system import backup_routes, health_routes, quit_routes, version_routes
@@ -80,7 +79,6 @@ for router in (
     health_routes.router,
     quit_routes.router,
     version_routes.router,
-    quality_routes.router,
     watched_routes.router,
 ):
     app.include_router(router)

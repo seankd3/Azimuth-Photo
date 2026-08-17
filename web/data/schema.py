@@ -2211,9 +2211,6 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await backfill_relative_paths(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
-        # PATCH: quality lane — additive image_quality table (CREATE IF NOT EXISTS; no version bump)
-        from features.quality.scorer import ensure_image_quality
-        await ensure_image_quality(conn)
         await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)

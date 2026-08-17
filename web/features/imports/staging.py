@@ -25,7 +25,6 @@ from features.imports import card
 from features.imports import film
 from features.imports import taxonomy
 from features.library import geodata, keywords
-from features.quality import routes as quality_routes
 from image_headers import read_header_dimensions
 
 
@@ -454,8 +453,6 @@ async def _commit_worker(job: ImportJob) -> None:
             skipped_files=job.skipped_duplicates,
             collision_count=max(0, len(job.image_rows) - len({row["original_name"] for row in job.image_rows})),
         )
-        if job.image_rows:
-            await quality_routes.scan_image_ids([int(row["image_id"]) for row in job.image_rows])
         catalog_routes.invalidate_folders_cache()
         await _reclaim_film_staging(job)
     except Exception as exc:
