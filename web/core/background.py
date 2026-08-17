@@ -198,11 +198,19 @@ async def run_shutdown(
     # delete, failing a different test each run.
     await background_task_tracker.cancel_all()
     await _fire_and_forget.cancel_all()
-    # media_warm's cancel stood here. Nothing schedules prefetch or memory-warm
-    # tasks any more -- the chore loop is the only background work -- so the
-    # trackers above are the whole of it. The *ordering* is the lesson and it
-    # is unchanged: stop everything database-touching before releasing handles.
-    # Only now can nothing reopen what we are about to release.
+    # The chore loop is threads, not tasks, so neither tracker above ever
+    # reached it. It said so here — "the chore loop is the only background work,
+    # so the trackers above are the whole of it" — and that was the one thing in
+    # this comment that was wrong: `work.start` spawns daemon threads holding
+    # their own catalog connections, and they kept stepping straight through the
+    # release below. Exactly the failure the paragraph describes, left in place
+    # by a sentence asserting it could not happen.
+    stopped = await asyncio.to_thread(work.stop)
+    if stopped:
+        log.info("worker=chores stopped=%s", stopped)
+    # The *ordering* is the lesson and it is unchanged: stop everything
+    # database-touching before releasing handles. Only now can nothing reopen
+    # what we are about to release.
     await data_connection.close_shared_readers()
 
     # Last act: earn the next boot its instant start.

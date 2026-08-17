@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from typing import Callable, Iterable
 
@@ -379,7 +380,7 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
 
     conn = open_conn()
     try:
-        while True:
+        while not _stopped.is_set():
             try:
                 did = step(conn, on_screen=on_screen(), lane=lane, lanes=lanes)
             except Exception:
@@ -388,12 +389,42 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
             # Nothing owed, or standing down: look again shortly rather than
             # spinning. Nothing here accumulates, so a long sleep costs only
             # latency on the next item.
-            time.sleep(0.05 if did else 5.0)
+            #
+            # Waiting on the stop flag rather than sleeping on a clock is what
+            # makes shutdown immediate: a quit during the idle five seconds
+            # would otherwise keep the catalog open for the rest of them.
+            _stopped.wait(0.05 if did else 5.0)
     finally:
         try:
             conn.close()
         except Exception:
             pass
+
+
+# Set when the app is shutting down. The loop owns its own connection, so
+# nothing else can close it for us — and `run_shutdown` releasing the shared
+# readers while these threads still held theirs is exactly the failure its own
+# comment warns about: on Windows the app keeps the library file after saying it
+# is finished, and in the suite a temporary catalog will not delete, failing a
+# different test each run. The trackers there never covered these threads.
+_stopped = threading.Event()
+_threads: list[threading.Thread] = []
+
+
+def stop(timeout: float = 5.0) -> int:
+    """Ask the chore threads to finish the item in hand and let the catalog go.
+
+    Returns how many were still running. No cancellation and no lease: a worker
+    that stops between items leaves nothing half-done, which is the property the
+    whole design turns on.
+    """
+
+    _stopped.set()
+    alive = [t for t in _threads if t.is_alive()]
+    for thread in alive:
+        thread.join(timeout)
+    _threads.clear()
+    return len(alive)
 
 
 def start(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> int:
@@ -413,13 +444,14 @@ def start(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> 
     never coordinate.
     """
 
-    import threading
-
+    _stopped.clear()
     count = workers()
     for lane in range(count):
-        threading.Thread(
+        thread = threading.Thread(
             target=run, args=(open_conn,),
             kwargs={"on_screen": on_screen, "lane": lane, "lanes": count},
             name=f"chores-{lane}", daemon=True,
-        ).start()
+        )
+        _threads.append(thread)
+        thread.start()
     return count
