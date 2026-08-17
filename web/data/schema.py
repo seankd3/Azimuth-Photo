@@ -41,7 +41,6 @@ CREATE TABLE IF NOT EXISTS images (
     row_version INTEGER NOT NULL DEFAULT 0,
     hub_image_id INTEGER DEFAULT NULL,
     hub_remote INTEGER NOT NULL DEFAULT 0,
-    trash_pending_hub INTEGER NOT NULL DEFAULT 0,
     elo REAL DEFAULT 1200.0,
     comparisons INTEGER DEFAULT 0,
     propagated_updates INTEGER DEFAULT 0,
@@ -892,7 +891,6 @@ IMAGE_COMPAT_COLUMNS = (
     ("row_version", "INTEGER NOT NULL DEFAULT 0"),
     ("hub_image_id", "INTEGER DEFAULT NULL"),
     ("hub_remote", "INTEGER NOT NULL DEFAULT 0"),
-    ("trash_pending_hub", "INTEGER NOT NULL DEFAULT 0"),
     ("width", "INTEGER DEFAULT NULL"),
     ("height", "INTEGER DEFAULT NULL"),
     ("metadata_scanned_at", "REAL DEFAULT NULL"),
@@ -1137,7 +1135,6 @@ COMPAT_INDEX_SQL = (
     ),
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_images_hub_image_id ON images(hub_image_id) WHERE hub_image_id IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS idx_images_hub_remote ON images(hub_remote, hub_image_id)",
-    "CREATE INDEX IF NOT EXISTS idx_images_trash_pending_hub ON images(trash_pending_hub) WHERE trash_pending_hub = 1",
     "CREATE INDEX IF NOT EXISTS idx_cache_entries_root_image_size ON cache_entries(cache_root, image_id, size)",
     (
         "CREATE INDEX IF NOT EXISTS idx_people_unknown_review "
@@ -1208,7 +1205,6 @@ REQUIRED_COLUMNS = {
         "row_version",
         "hub_image_id",
         "hub_remote",
-        "trash_pending_hub",
         "orientation",
         "flag",
         "propagated_updates",

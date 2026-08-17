@@ -15,7 +15,7 @@ from features.trash import service as trash_service
 
 
 class TrashTests(BackendTestCase):
-    async def test_explicit_empty_hub_purge_is_immediate_with_busy_writer(self):
+    async def test_explicit_empty_purge_is_immediate_with_busy_writer(self):
         def probe():
             with TestClient(app_module.app) as client:
                 writer = sqlite3.connect(catalog_path(), timeout=0.1)
@@ -24,8 +24,7 @@ class TrashTests(BackendTestCase):
                     started = time.perf_counter()
                     response = client.post(
                         "/api/trash/empty",
-                        json={"hub_image_ids": []},
-                        headers={"X-AzimuthPhoto-Trash-Forwarded": "1"},
+                        json={"ids": []},
                     )
                     elapsed = time.perf_counter() - started
                 finally:

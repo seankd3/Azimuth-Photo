@@ -21,15 +21,6 @@ TRASH_WRITE_BUSY_TIMEOUT_SECONDS = 0.1
 TRASH_WRITE_RETRY_BACKOFF_SECONDS = 0.1
 
 
-_pending_hub_trash_refs_cache: dict[str, tuple[int, tuple[int, ...], tuple[int, ...]]] = {}
-_pending_hub_trash_refs_versions: dict[str, int] = {}
-
-
-def invalidate_pending_hub_trash_refs(db_path: str) -> None:
-    _pending_hub_trash_refs_cache.pop(db_path, None)
-    _pending_hub_trash_refs_versions[db_path] = _pending_hub_trash_refs_versions.get(db_path, 0) + 1
-
-
 
 
 def _error(image_id: int, reason: str) -> Error:
@@ -401,7 +392,7 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
                 )
                 await conn.execute("BEGIN")
                 await conn.executemany(
-                    "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ?, trash_pending_hub = 0 WHERE id = ?",
+                    "UPDATE images SET status = 'trashed', trashed_at = ?, trash_path = ? WHERE id = ?",
                     [(now, plan["trash_path"], plan["id"]) for plan in successful],
                 )
                 source_ids = sorted({
@@ -420,7 +411,6 @@ async def trash_images(db_path: str, image_ids: list[int]) -> dict:
         raise
     finally:
         await data_connection.close_async(conn, db_path=db_path)
-    invalidate_pending_hub_trash_refs(db_path)
     # Trashing is a judgement, so it goes in the log beside the column write.
     # It used to converge through an operation log, which existed because a
     # hub could revert it. There is no hub, and the log is the record.
@@ -488,7 +478,7 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
             for chunk in catalog_repository._chunked(update_ids):
                 placeholders = ",".join("?" for _ in chunk)
                 await conn.execute(
-                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL, trash_pending_hub = 0 "
+                    f"UPDATE images SET status = 'kept', trashed_at = NULL, trash_path = NULL "
                     f"WHERE id IN ({placeholders})",
                     chunk,
                 )
@@ -533,7 +523,6 @@ async def restore_images(db_path: str, image_ids: list[int]) -> dict:
         raise
     finally:
         await data_connection.close_async(conn, db_path=db_path)
-    invalidate_pending_hub_trash_refs(db_path)
     if restored:
         await judgements.status(db_path, restored, "kept")
 
@@ -576,8 +565,7 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
     conn = await data_connection.open_async(db_path)
     try:
         total_cursor = await conn.execute(
-            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes, "
-            "COALESCE(SUM(CASE WHEN COALESCE(trash_pending_hub, 0) = 1 THEN 1 ELSE 0 END), 0) AS pending_hub_count "
+            "SELECT COUNT(*) AS total, COALESCE(SUM(COALESCE(file_size, 0)), 0) AS total_bytes "
             "FROM images WHERE status = 'trashed'"
         )
         total_row = await total_cursor.fetchone()
@@ -599,13 +587,11 @@ async def list_trash(db_path: str, *, limit: int = 100, offset: int = 0) -> dict
             card = app_helpers.image_card(dict(row))
             card["trashed_at"] = row["trashed_at"]
             card["file_size"] = row["file_size"]
-            card["pending_hub"] = bool(row["trash_pending_hub"])
             images.append(card)
         return {
             "images": images,
             "total": int(total_row["total"] or 0),
             "total_bytes": int(total_row["total_bytes"] or 0),
-            "pending_hub_count": int(total_row["pending_hub_count"] or 0),
             # Sean-signed decision: Empty Trash warns when edited virtual
             # copies would be destroyed alongside their masters.
             "edited_copy_count": int(edited_row["edited"] or 0),
@@ -776,8 +762,6 @@ async def _purge_trash_rows(
         deleted_ids, delete_errors = await _delete_emptied_catalog_rows(db_path, removed_ids)
         errors.extend(delete_errors)
     await __to_thread_prune_empty_trash_dirs(paths_to_prune)
-    if deleted_ids:
-        invalidate_pending_hub_trash_refs(db_path)
     return {
         "deleted_count": len(deleted_ids),
         "freed_bytes": int(freed_bytes),
@@ -789,81 +773,6 @@ async def _purge_trash_rows(
 async def empty_trash(db_path: str, *, image_ids: list[int] | None = None) -> dict:
     """Permanently remove local files plus catalog-only trash entries."""
     return await _purge_trash_rows(db_path, image_ids=image_ids)
-
-
-async def hub_mirror_trash_refs(db_path: str) -> dict:
-    """Return local mirror count and the corresponding hub catalog IDs."""
-    conn = await data_connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT id, hub_image_id FROM images "
-            "WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 1"
-        )
-        rows = await cursor.fetchall()
-        hub_image_ids = unique_image_ids(row["hub_image_id"] for row in rows)
-        return {
-            "count": len(rows),
-            "image_ids": [int(row["id"]) for row in rows],
-            "hub_image_ids": hub_image_ids,
-        }
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-
-
-async def local_trash_ids(db_path: str) -> list[int]:
-    conn = await data_connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT id FROM images WHERE status = 'trashed' AND COALESCE(hub_remote, 0) = 0"
-        )
-        return [int(row["id"]) for row in await cursor.fetchall()]
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-
-
-async def mark_hub_trash_pending(db_path: str, image_ids: list[int]) -> None:
-    ids = unique_image_ids(image_ids)
-    if not ids:
-        return
-    conn = await data_connection.open_async(db_path)
-    try:
-        for chunk in catalog_repository._chunked(ids):
-            placeholders = ",".join("?" for _ in chunk)
-            await conn.execute(
-                f"UPDATE images SET trash_pending_hub = 1 WHERE status = 'trashed' "
-                f"AND COALESCE(hub_remote, 0) = 1 AND id IN ({placeholders})",
-                chunk,
-            )
-        await conn.commit()
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-    invalidate_pending_hub_trash_refs(db_path)
-
-
-async def pending_hub_trash_refs(db_path: str) -> dict:
-    cached = _pending_hub_trash_refs_cache.get(db_path)
-    if cached is not None:
-        count, image_ids, hub_image_ids = cached
-        return {"count": count, "image_ids": list(image_ids), "hub_image_ids": list(hub_image_ids)}
-    version = _pending_hub_trash_refs_versions.get(db_path, 0)
-    conn = await data_connection.open_async(db_path)
-    try:
-        cursor = await conn.execute(
-            "SELECT id, hub_image_id FROM images WHERE status = 'trashed' "
-            "AND COALESCE(hub_remote, 0) = 1 AND COALESCE(trash_pending_hub, 0) = 1"
-        )
-        rows = await cursor.fetchall()
-        result = (
-            len(rows),
-            tuple(int(row["id"]) for row in rows),
-            tuple(unique_image_ids(row["hub_image_id"] for row in rows)),
-        )
-    finally:
-        await data_connection.close_async(conn, db_path=db_path)
-    if version == _pending_hub_trash_refs_versions.get(db_path, 0):
-        _pending_hub_trash_refs_cache[db_path] = result
-    count, image_ids, hub_image_ids = result
-    return {"count": count, "image_ids": list(image_ids), "hub_image_ids": list(hub_image_ids)}
 
 
 async def purge_expired_trash(

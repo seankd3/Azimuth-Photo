@@ -21,7 +21,6 @@ let images = [];
 let total = 0;
 let editedCopies = 0;
 let totalBytes = 0;
-let pendingHub = 0;
 let loading = false;
 let loadGeneration = 0;
 let loadError = false;
@@ -157,22 +156,20 @@ function flagGlyph(flag) {
 function cellHtml(img, index) {
     const id = Number(img.id);
     const flag = img.flag || 'unflagged';
-    const pending = Boolean(img.pending_hub);
     const previewSrc = previewThumbUrl(img);
-    return `<figure class="cell trash-cell ${pending ? 'pending-hub' : ''} ${selection.has(id) ? 'sel' : ''} ${index === trashFocusIndex ? 'kb-focus' : ''}" data-id="${id}" data-idx="${index}" tabindex="${index === trashFocusIndex ? '0' : '-1'}" style="--ar:${aspect(img)}">`
+    return `<figure class="cell trash-cell ${selection.has(id) ? 'sel' : ''} ${index === trashFocusIndex ? 'kb-focus' : ''}" data-id="${id}" data-idx="${index}" tabindex="${index === trashFocusIndex ? '0' : '-1'}" style="--ar:${aspect(img)}">`
         + (previewSrc ? `<img src="${esc(previewSrc)}" loading="lazy" decoding="async" alt="${esc(img.filename || '')}">` : '<span class="preview-thumb-pending" aria-hidden="true"></span>')
         + `<span class="trash-thumb-fallback" hidden>${icon('image')}<span>${esc(img.filename || 'Photo preview unavailable')}</span></span>`
         + `<button class="c-check" aria-label="Select photo">${icon('check')}</button>`
         + `<span class="c-flag ${flag}">${flagGlyph(flag)}</span>`
         + `<span class="c-elo"><span class="elo-chip">${Math.round(Number(img.elo) || 0)}</span></span>`
-        + (pending ? '<span class="trash-pending-badge">Removing from hub…</span>' : '')
         + '</figure>';
 }
 
 function viewHtml() {
     return '<div id="trash" hidden>'
         + '<header id="trash-head">'
-        + '<div><b>Trash</b><span id="trash-count" class="num"></span><span id="trash-pending-count" class="chip" hidden></span></div>'
+        + '<div><b>Trash</b><span id="trash-count" class="num"></span></div>'
         + '<button class="btn" id="trash-select-all" disabled>Select all</button>'
         + '<button class="btn" id="trash-restore" disabled>Restore selected</button>'
         + '<button class="btn btn-danger" id="trash-empty" disabled>Empty trash</button>'
@@ -219,9 +216,6 @@ function ensureView() {
 function render() {
     ensureView();
     root.querySelector('#trash-count').textContent = `${fmt(total)} photos · ${bytesLabel(totalBytes)}`;
-    const pendingChip = root.querySelector('#trash-pending-count');
-    pendingChip.textContent = `${fmt(pendingHub)} waiting for hub`;
-    pendingChip.hidden = pendingHub === 0;
     root.querySelector('#trash-select-all').disabled = !images.length || loading;
     root.querySelector('#trash-restore').disabled = !selection.size || loading;
     root.querySelector('#trash-empty').disabled = !total || loading;
@@ -282,7 +276,6 @@ async function loadTrash() {
         images = [];
         total = 0;
         totalBytes = 0;
-        pendingHub = 0;
         loading = false;
         loadError = true;
         render();
@@ -294,7 +287,6 @@ async function loadTrash() {
         images = [];
         total = 0;
         totalBytes = 0;
-        pendingHub = 0;
         loading = false;
         loadError = true;
         render();
@@ -305,7 +297,6 @@ async function loadTrash() {
     total = Number(data?.total) || images.length;
     editedCopies = Number(data?.edited_copy_count) || 0;
     totalBytes = Number(data?.total_bytes) || 0;
-    pendingHub = Number(data?.pending_hub_count) || images.filter((image) => image.pending_hub).length;
     for (const img of images) byId.set(Number(img.id), img);
     loading = false;
     render();

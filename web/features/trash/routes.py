@@ -29,7 +29,15 @@ class ImageIdsBody(BaseModel):
 
 
 class EmptyTrashBody(BaseModel):
-    hub_image_ids: list[int] | None = Field(default=None, max_length=MAX_IMAGE_IDS_PER_REQUEST)
+    """Which trashed photographs to purge. Absent means all of them.
+
+    The field was `hub_image_ids`, from when a satellite forwarded a purge to
+    the hub that held the originals. There is no hub; the name outlived it. The
+    property it guards is real and unchanged: an explicitly empty list means
+    *nothing*, never *everything*.
+    """
+
+    ids: list[int] | None = Field(default=None, max_length=MAX_IMAGE_IDS_PER_REQUEST)
 
 
 
@@ -58,9 +66,9 @@ async def api_trash(limit: int = 100, offset: int = 0):
 async def api_empty_trash(request: Request, _payload: EmptyTrashBody | None = None):
     # Explicitly-empty id lists are a no-op: never let an ambiguous request
     # fall through to a full purge, and never touch the DB for it.
-    if _payload is not None and not _payload.hub_image_ids:
+    if _payload is not None and not _payload.ids:
         return {"deleted_count": 0, "freed_bytes": 0, "errors": [], "skipped_offline": 0}
-    target_ids = _payload.hub_image_ids if _payload is not None else None
+    target_ids = _payload.ids if _payload is not None else None
     result = await trash_service.empty_trash(catalog_path(), image_ids=target_ids)
     if result["deleted_count"]:
         _invalidate_after_trash()
