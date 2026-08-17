@@ -1,6 +1,7 @@
 """Schema contract checks for the SQLite catalog database."""
 
 import asyncio
+import json
 import logging
 import os
 import sqlite3
@@ -1591,6 +1592,31 @@ async def backfill_legacy_aspect_ratios(conn) -> None:
     )
 
 
+async def backfill_embedding_recipes(conn) -> int:
+    """Name every embedding for the model that made it.
+
+    Embeddings were written before a recipe could say which model produced
+    them, so 42,937 of them sit under `''` while everything that asks for one
+    asks for a named model. The consequence was not a missing label: the
+    scheduler's anti-join matched none of them, so a catalog with 42,937
+    vectors reported 144,271 owed and would have recomputed the lot.
+
+    Only 4,096-float rows are named, because only the 8B produces those. A row
+    of any other length is left alone rather than mislabelled -- a wrong name
+    here is worse than no name, since it would put two models' vectors in one
+    space.
+    """
+
+    legacy = "Qwen--Qwen3-VL-Embedding-8B@main:4096"
+    cursor = await conn.execute(
+        "UPDATE cache SET recipe = ? "
+        "WHERE kind = 'embedding' AND (recipe IS NULL OR recipe IN ('', '{}')) "
+        "AND LENGTH(value) = 4096 * 4",
+        (json.dumps({"model": legacy}, separators=(",", ":"), sort_keys=True),),
+    )
+    return max(int(cursor.rowcount or 0), 0)
+
+
 async def backfill_image_date_sources(conn) -> int:
     """Populate date_source and infer missing dates for legacy rows."""
 
@@ -1726,6 +1752,7 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await ensure_develop_presets(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
+        await backfill_embedding_recipes(conn)
         if previous_schema_version < 30:
             await backfill_people_query_aggregates(conn)
             await backfill_cache_image_presence(conn)

@@ -52,11 +52,17 @@ def _chore_state() -> tuple[bool, int] | None:
     caller degrades instead.
     """
 
-    from search import EMBEDDING
+    import search
 
     try:
         conn = connection.reading(catalog_path())
-        return work.paused(conn), work.owing(conn, EMBEDDING)
+        # Owed under the model actually in use. Asked without one it counted
+        # every photograph in the catalog -- 144,271, more than the catalog
+        # holds -- because the 42,937 vectors already there were stored under a
+        # recipe naming no model and matched nothing.
+        return work.paused(conn), work.owing(
+            conn, search.EMBEDDING, recipe={"model": search.active_model()}
+        )
     except Exception:
         return None
 

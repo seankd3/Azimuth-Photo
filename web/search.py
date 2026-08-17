@@ -117,26 +117,35 @@ def space(conn):
     global _space
     import numpy as np
 
+    # One model's vectors, never a mixture. Without this the reshape below is a
+    # loaded gun: vectors of two lengths concatenate happily and then fail to
+    # divide into `(rows, -1)`.
+    recipe = cache.canonical(EMBEDDING, {"model": active_model()})
+
     # Count before fetching. Reading 703 MB out of SQLite and *then* noticing
     # the memo was warm cost 5 s per query -- the load was never the expensive
-    # part once it was memoised, the SELECT was.
+    # part once it was memoised, the SELECT was. The memo is keyed on the model
+    # too, or switching to one with the same number of vectors would hand back
+    # the other one's space.
     have = conn.execute(
-        "SELECT COUNT(*) FROM cache WHERE kind = ? AND state = 'ready'", (EMBEDDING,)
+        "SELECT COUNT(*) FROM cache WHERE kind = ? AND recipe = ? AND state = 'ready'",
+        (EMBEDDING, recipe),
     ).fetchone()[0]
     if not have:
         return [], None
-    if _space is not None and _space[0] == have:
+    if _space is not None and _space[0] == (recipe, have):
         return _space[1], _space[2]
 
     rows = conn.execute(
-        "SELECT hash, value FROM cache WHERE kind = ? AND state = 'ready' ORDER BY hash",
-        (EMBEDDING,),
+        "SELECT hash, value FROM cache WHERE kind = ? AND recipe = ? AND state = 'ready'"
+        " ORDER BY hash",
+        (EMBEDDING, recipe),
     ).fetchall()
     matrix = np.frombuffer(b"".join(r["value"] for r in rows), dtype=np.float32)
     matrix = matrix.reshape(len(rows), -1).copy()
     matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
     hashes = [r["hash"] for r in rows]
-    _space = (have, hashes, matrix)
+    _space = ((recipe, have), hashes, matrix)
     return hashes, matrix
 
 
@@ -219,10 +228,31 @@ def _needs_a_helper() -> bool:
     return False
 
 
+# An embedding's recipe is the model that made it.
+#
+# It had none, and the cost of that was not theoretical. Two vectors from two
+# models are not comparable and are not even the same length -- SigLIP-2 is
+# 1,152 numbers, the Qwen 8B that made the 42,937 vectors in this catalog is
+# 4,096 -- yet `_space` concatenated every ready row and reshaped the result to
+# `(rows, -1)`. One vector from a second model and that reshape raises, so
+# changing the model would have taken search down rather than degrading it.
+#
+# Naming the model in the recipe makes the mixed space unrepresentable instead
+# of guarded, and hands three other things over for free: `owed` schedules
+# exactly the photographs missing a vector *from the model in use*, the old
+# vectors keep their identity instead of being silently mixed or thrown away,
+# and changing model becomes a thing the catalog can hold two of rather than a
+# migration.
+def active_model() -> str:
+    import settings
+    return str(settings.active_embedding_config()["model_key"])
+
+
 EMBEDDING_KIND = cache.register(cache.Kind(
     name=EMBEDDING,
-    compute=lambda source, hash: cache.Made(),
+    compute=lambda source, hash, model: cache.Made(),
     cost=2.0,
+    params=("model",),
     evictable=False,
     here=_needs_a_helper,
 ))
