@@ -43,6 +43,20 @@ and a metric that does not know that reports every router as dead.
 | 288 | 63 | 5 / 7 | `features/library/keywords.py` | **sweep** |
 | 204 | 42 | 2 / 10 | `core/responses.py` | **sweep** |
 
+## Found by running the suite, 2026-08-17
+
+The suite was 55 red out of 745, which had been invisible because every check
+until then ran `-k` over a subset. Two of those clusters were product bugs, not
+test rot — see the commits. What is left, ranked:
+
+| count | cause | the call |
+|---:|---|---|
+| ~9 | **`catalog is not WAL`** | **untangle** — `enable_wal()` deliberately skips WAL for any path under the temp dir, and `inline_reader()` refuses any non-WAL catalog. Both rules are in `data/connection.py`, and together they mean no test that reads on the loop can pass. `is_ephemeral_db_path` is threaded through 8 sites (skip WAL, skip pooling, skip background work, checkpoint temp WAL — which by the first rule should not exist). This is one concept, "behave differently under test", and it is the special case CLAUDE.md names. Fix it as a shape, not as nine test edits. |
+| 12 | `playwright` not installed | **skip, do not fail** — an optional tool's absence is a supported state; the develop-parity tests should skip like the other optional packs. |
+| ~14 | `FileNotFoundError` on static assets | **check each** — `static/js/desktop/sync_chip.js` and friends. A test asserting a deleted file exists is rot; a *build* naming it is the `invokes` gate's business. |
+| 4 | `track_idle_activity(thumbnails=...)` | **stale signature** — the argument went with the workers. |
+| 2 | `no such column: content_hash` | **fixture drift** — a hand-built test table that the schema left behind. Same shape as the `tables` gate's rule. |
+
 ## Two standing traps
 
 **Route modules are not dead.** Fifteen files came back "0 of N public names
