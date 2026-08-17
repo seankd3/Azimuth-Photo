@@ -338,3 +338,35 @@ async def _close_async(conn, *, db_path: str | None = None) -> None:
             pass
     await _checkpoint_temp_wal_async(conn, db_path)
     await conn.close()
+
+
+def reading(db_path: str) -> sqlite3.Connection:
+    """The connection a route reads on. Shared, WAL, never holds a write lock."""
+
+    return inline_reader(db_path)
+
+
+async def writing(db_path: str, job, *args, **kwargs):
+    """Run a writer off the loop, on a connection opened where it is used.
+
+    A sqlite3 connection belongs to the thread that opened it, so making one on
+    the loop and handing it to `to_thread` is a 500 that waits for the route to
+    be exercised — which is exactly how it survived once:
+    `POST /api/folder/synchronize` had the defect from the day it was written
+    and nobody pressed the button until a Lightroom metadata save gave it 149
+    files to refresh.
+
+    The `finally` is the other half and it is not optional. Four route modules
+    opened a writer and returned without closing it, which leaks a handle per
+    request and, on Windows, is a temp catalog that cannot be deleted — the
+    shape a test teardown finds before a user does.
+    """
+
+    def run():
+        conn = open_sync(db_path)
+        try:
+            return job(conn, *args, **kwargs)
+        finally:
+            close_sync(conn, db_path=db_path)
+
+    return await asyncio.to_thread(run)

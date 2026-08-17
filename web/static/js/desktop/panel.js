@@ -159,7 +159,7 @@ function closeCollectionMenu() {
 }
 
 function collectionById(collectionId) {
-    return collections.find((item) => Number(item.id) === Number(collectionId)) || null;
+    return collections.find((item) => String(item.id) === String(collectionId)) || null;
 }
 
 function openCollectionMenu(row, anchor) {
@@ -435,7 +435,7 @@ function renderSavedViews() {
         + '<button class="saved-view-delete" type="button" aria-label="Delete saved view">×</button></div>'
     ).join('') : emptyState('bookmark', 'No saved views yet.');
     for (const row of host.querySelectorAll('[data-saved-view]')) {
-        const view = savedViews.find((item) => Number(item.id) === Number(row.dataset.savedView));
+        const view = savedViews.find((item) => String(item.id) === String(row.dataset.savedView));
         row.querySelector('button')?.addEventListener('click', () => restoreSavedView(view));
         row.querySelector('.saved-view-delete')?.addEventListener('click', async () => {
             const confirmed = await confirmAction({
@@ -488,7 +488,7 @@ function scheduleChromeRefresh() {
 }
 
 function patchCollectionCount(collectionId, delta) {
-    const collection = collections.find((item) => Number(item.id) === Number(collectionId));
+    const collection = collections.find((item) => String(item.id) === String(collectionId));
     if (!collection) return () => {};
     const previous = Number(collection.image_count) || 0;
     collection.image_count = Math.max(0, previous + delta);
@@ -543,7 +543,7 @@ export async function removeImagesFromCollection(collectionId, imageIds, name = 
         showToast("Couldn't remove photos from this collection");
         return false;
     }
-    const label = name || collections.find((collection) => Number(collection.id) === Number(collectionId))?.name || 'collection';
+    const label = name || collections.find((collection) => String(collection.id) === String(collectionId))?.name || 'collection';
     await loadCollections();
     emit('scope', scope);
     showToast(`Removed ${ids.length} photo${ids.length === 1 ? '' : 's'} from “${label}”`, {

@@ -142,7 +142,7 @@ function openCollection(collection) {
 
 function bindCollectionCards(root) {
     for (const card of root.querySelectorAll('.collection-card[data-collection-id]')) {
-        const collection = collections.find((item) => Number(item.id) === Number(card.dataset.collectionId));
+        const collection = collections.find((item) => String(item.id) === String(card.dataset.collectionId));
         if (!collection) continue;
         card.querySelector('.collection-card-open')?.addEventListener('click', () => openCollection(collection));
         card.querySelector('.collection-card-menu')?.addEventListener('click', (event) => {

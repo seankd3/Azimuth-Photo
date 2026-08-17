@@ -724,10 +724,21 @@ async def _apply_during_import(job: ImportJob) -> None:
     ids = [int(row["image_id"]) for row in job.image_rows]
     if not ids:
         return
-    for path in job.keywords:
-        keyword = await keywords.resolve_keyword_path(path)
-        if keyword:
-            await keywords.assign_keyword(ids, int(keyword["id"]), origin="import")
+    if job.keywords:
+        def tag():
+            conn = connection.open_sync(db.DB_PATH)
+            try:
+                digests = photos.hashes(conn, ids)
+                known = {s["name"]: s["id"] for s in sets.all(conn, kind=sets.KEYWORD)}
+                for path in job.keywords:
+                    name = keywords.clean_path(path)
+                    set_id = known.get(name) or sets.create(conn, name, kind=sets.KEYWORD)
+                    known[name] = set_id
+                    sets.add(conn, set_id, digests)
+                conn.commit()
+            finally:
+                conn.close()
+        await asyncio.to_thread(tag)
     if job.collection_id:
         def put():
             conn = connection.open_sync(db.DB_PATH)

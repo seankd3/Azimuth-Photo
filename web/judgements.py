@@ -132,23 +132,6 @@ async def develop(db_path: str, image_id: int) -> int:
     return await _off_loop(db_path, job)
 
 
-async def iptc(db_path: str, image_id: int) -> int:
-    """Title, caption, copyright, creator."""
-
-    def job(conn) -> int:
-        row = conn.execute(
-            "SELECT i.content_hash AS hash, p.title, p.caption, p.copyright, p.creator"
-            " FROM images i JOIN iptc_fields p ON p.image_id = i.id WHERE i.id = ?",
-            (int(image_id),),
-        ).fetchone()
-        if not row or not row["hash"]:
-            return 0
-        decisions.decide(conn, str(row["hash"]), IPTC,
-                         {key: row[key] or "" for key in
-                          ("title", "caption", "copyright", "creator")})
-        return 1
-
-    return await _off_loop(db_path, job)
 
 
 async def keywords(db_path: str, image_ids: Sequence[int]) -> int:

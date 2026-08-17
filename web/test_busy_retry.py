@@ -10,7 +10,6 @@ import db
 from data import connection
 from data.repositories import images as image_repository
 from features.develop import routes as develop_routes
-from features.library import keywords
 from test_support import BackendTestCase
 
 
@@ -68,28 +67,6 @@ class UserFacingBusyRetryTests(BackendTestCase):
         finally:
             await conn.close()
 
-    async def test_keyword_assign_retries_transient_lock(self):
-        source = await self._source("busy-kw")
-        image_id = await self._image(source["id"], "b.jpg")
-        created = await keywords.create_keyword("Busy")
-        keyword_id = int(created["id"])
-        attempts = {"n": 0}
-        real_get_db = db.get_db
-
-        async def flaky_get_db():
-            attempts["n"] += 1
-            if attempts["n"] == 1:
-                raise sqlite3.OperationalError("database is locked")
-            return await real_get_db()
-
-        with (
-            mock.patch.object(db, "get_db", side_effect=flaky_get_db),
-            mock.patch.object(connection.asyncio, "sleep", new=mock.AsyncMock()),
-        ):
-            assigned = await keywords.assign_keyword([image_id], keyword_id)
-
-        self.assertGreaterEqual(assigned, 0)
-        self.assertEqual(attempts["n"], 2)
 
     async def test_develop_settings_put_retries_transient_lock(self):
         source = await self._source("busy-dev")

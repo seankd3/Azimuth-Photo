@@ -38,11 +38,7 @@ router = APIRouter()
 
 
 def db():
-    return connection.inline_reader(catalog_path())
-
-
-def _writer():
-    return connection.open_sync(catalog_path())
+    return connection.reading(catalog_path())
 
 
 class CreateCollectionBody(BaseModel):
@@ -79,7 +75,7 @@ def _card(conn, set_id: str, name: str) -> dict:
 @router.get("/api/user-collections")
 async def api_user_collections():
     conn = db()
-    return {"collections": [_card(conn, s["id"], s["name"]) for s in sets.all(conn)]}
+    return {"collections": [_card(conn, s["id"], s["name"]) for s in sets.all(conn, kind=sets.COLLECTION)]}
 
 
 @router.post("/api/user-collections")
@@ -87,18 +83,20 @@ async def api_create_collection(payload: CreateCollectionBody):
     name = (payload.name or "").strip()
     if not name:
         return JSONResponse({"error": "Collection name is required"}, status_code=400)
-    conn = _writer()
-    set_id = sets.create(conn, name)
-    sets.add(conn, set_id, photos.hashes(conn, payload.image_ids))
-    conn.commit()
-    return {"ok": True, "collection": _card(conn, set_id, name)}
+    def job(conn):
+        set_id = sets.create(conn, name, kind=sets.COLLECTION)
+        sets.add(conn, set_id, photos.hashes(conn, payload.image_ids))
+        conn.commit()
+        return _card(conn, set_id, name)
+
+    return {"ok": True, "collection": await connection.writing(catalog_path(), job)}
 
 
 @router.get("/api/user-collections/{collection_id}")
 async def api_collection(collection_id: str, limit: int = 200, offset: int = 0):
     conn = db()
-    name = sets.name_of(conn, collection_id)
-    if name is None:
+    said = sets.describe(conn, collection_id)
+    if said is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     members = photos.ids(conn, sets.members(conn, collection_id))
     card = _card(conn, collection_id, name)
@@ -110,12 +108,16 @@ async def api_rename_collection(collection_id: str, payload: RenameCollectionBod
     name = (payload.name or "").strip()
     if not name:
         return JSONResponse({"error": "Collection name is required"}, status_code=400)
-    conn = _writer()
-    if sets.name_of(conn, collection_id) is None:
+    def job(conn):
+        if sets.amend(conn, collection_id, name=name) is None:
+            return None
+        conn.commit()
+        return _card(conn, collection_id, name)
+
+    card = await connection.writing(catalog_path(), job)
+    if card is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    sets.rename(conn, collection_id, name)
-    conn.commit()
-    return {"ok": True, "collection": _card(conn, collection_id, name)}
+    return {"ok": True, "collection": card}
 
 
 @router.post("/api/user-collections/{collection_id}")
@@ -125,25 +127,34 @@ async def api_update_collection(collection_id: str, payload: RenameCollectionBod
 
 @router.post("/api/user-collections/{collection_id}/delete")
 async def api_delete_collection(collection_id: str):
-    conn = _writer()
-    if sets.name_of(conn, collection_id) is None:
+    def job(conn):
+        if sets.describe(conn, collection_id) is None:
+            return False
+        sets.forget(conn, collection_id)
+        conn.commit()
+        return True
+
+    if not await connection.writing(catalog_path(), job):
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    sets.forget(conn, collection_id)
-    conn.commit()
     return {"ok": True}
 
 
 async def _membership(collection_id: str, image_ids, *, member: bool):
     if not image_ids:
         return JSONResponse({"error": "image_ids is required"}, status_code=400)
-    conn = _writer()
-    name = sets.name_of(conn, collection_id)
-    if name is None:
+    def job(conn):
+        said = sets.describe(conn, collection_id)
+        if said is None:
+            return None
+        say = sets.add if member else sets.remove
+        say(conn, collection_id, photos.hashes(conn, image_ids))
+        conn.commit()
+        return _card(conn, collection_id, said["name"])
+
+    card = await connection.writing(catalog_path(), job)
+    if card is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
-    say = sets.add if member else sets.remove
-    say(conn, collection_id, photos.hashes(conn, image_ids))
-    conn.commit()
-    return {"ok": True, "collection": _card(conn, collection_id, name)}
+    return {"ok": True, "collection": card}
 
 
 @router.post("/api/user-collections/{collection_id}/images")
@@ -174,7 +185,7 @@ async def api_collection_tree():
     """
 
     conn = db()
-    nodes = [_card(conn, s["id"], s["name"]) for s in sets.all(conn)]
+    nodes = [_card(conn, s["id"], s["name"]) for s in sets.all(conn, kind=sets.COLLECTION)]
     return {"nodes": nodes, "links": [], "root_ids": [n["id"] for n in nodes]}
 
 
@@ -201,7 +212,7 @@ async def api_collection_images(collection_id: str, recursive: int = 0):
     """
 
     conn = db()
-    if sets.name_of(conn, collection_id) is None:
+    if sets.describe(conn, collection_id) is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     image_ids = photos.ids(conn, sets.members(conn, collection_id))
     return {

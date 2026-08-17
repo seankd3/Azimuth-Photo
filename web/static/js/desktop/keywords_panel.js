@@ -42,11 +42,11 @@ function remember(keywordId) {
 }
 
 function keywordById(keywordId) {
-    return keywords.find((keyword) => Number(keyword.id) === Number(keywordId)) || null;
+    return keywords.find((keyword) => String(keyword.id) === String(keywordId)) || null;
 }
 
 function mutationKey(imageId, keywordId) {
-    return `${Number(imageId)}:${Number(keywordId)}`;
+    return `${Number(imageId)}:${keywordId}`;
 }
 
 function beginKeywordMutation(imageId, keywordId) {
@@ -69,7 +69,7 @@ function renderPanel(image) {
 
 function patchAttachedKeyword(imageId, keyword, direct) {
     if (Number(imageId) !== renderedImageId) return null;
-    const index = attachedKeywords.findIndex((item) => Number(item.id) === Number(keyword.id));
+    const index = attachedKeywords.findIndex((item) => String(item.id) === String(keyword.id));
     const previousDirect = index >= 0 && Boolean(Number(attachedKeywords[index].direct));
     if (direct) {
         if (index >= 0) attachedKeywords[index] = { ...attachedKeywords[index], ...keyword, direct: 1 };
@@ -87,7 +87,7 @@ function assignOptimistically(keyword, imageIds, direct) {
         return { imageId, version, previousDirect: patchAttachedKeyword(imageId, keyword, direct) };
     });
     const endpoint = direct ? '/api/keywords/assign' : '/api/keywords/unassign';
-    const commit = post(endpoint, { keyword_id: Number(keyword.id), image_ids: imageIds }).catch((error) => {
+    const commit = post(endpoint, { keyword_id: keyword.id, image_ids: imageIds }).catch((error) => {
         for (const mutation of mutations) {
             if (!keywordMutationIsLatest(mutation.imageId, keyword.id, mutation.version)) continue;
             if (mutation.previousDirect != null) patchAttachedKeyword(mutation.imageId, keyword, mutation.previousDirect);
@@ -120,7 +120,7 @@ async function assign(keyword, imageIds = targetIds()) {
     if (!imageIds.length) return showToast('Focus or select photos first');
     const mutation = assignOptimistically(keyword, imageIds, true);
     armedKeyword = keyword;
-    remember(Number(keyword.id));
+    remember(keyword.id);
     await mutation.commit;
     showToast(`${keyword.path} · ${imageIds.length} photo${imageIds.length === 1 ? '' : 's'}`);
 }
@@ -286,15 +286,15 @@ export async function paintImage(imageId) {
     const keyword = armedKeyword;
     try {
         const payload = await request(`/api/images/${imageId}/keywords`);
-        const direct = (payload.keywords || []).some((item) => Number(item.id) === Number(keyword.id) && Number(item.direct));
+        const direct = (payload.keywords || []).some((item) => String(item.id) === String(keyword.id) && Number(item.direct));
         await post(direct ? '/api/keywords/unassign' : '/api/keywords/assign', {
-            keyword_id: Number(keyword.id), image_ids: [Number(imageId)],
+            keyword_id: keyword.id, image_ids: [Number(imageId)],
         });
         if (Number(imageId) === renderedImageId) await render();
         showToast(`${direct ? 'Removed' : 'Added'} · ${keyword.path}`, direct ? {
             undo: async () => {
                 try {
-                    await post('/api/keywords/assign', { keyword_id: Number(keyword.id), image_ids: [Number(imageId)] });
+                    await post('/api/keywords/assign', { keyword_id: keyword.id, image_ids: [Number(imageId)] });
                     if (Number(imageId) === renderedImageId) await render();
                     showToast(`Restored ${keyword.path}`);
                 } catch (error) { showToast(error.message || "Couldn't restore keyword"); }
