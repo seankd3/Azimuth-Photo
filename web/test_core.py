@@ -471,22 +471,55 @@ class DecodingRefuses(unittest.TestCase):
 
 
 class RankingIsDerived(CoreCase):
-    def _beat(self, winner, loser, at):
-        decisions.decide(self.conn, winner, decisions.COMPARE, {"beat": loser, "mode": "mosaic"}, at=at)
+    def _round(self, winner, over, at):
+        decisions.decide(self.conn, winner, decisions.COMPARE, {"over": list(over)}, at=at)
 
-    def test_an_even_matchup_moves_the_loser_six_points(self):
-        # K=12 from a 1200 base over the standard 400-point logistic, recovered
-        # from the archive's own ledger. Its first 41 pairs replay exactly.
-        self._beat("a", "b", 1.0)
-        scores = rank.ratings(self.conn)
-        self.assertAlmostEqual(scores["a"], 1206.0, places=6)
-        self.assertAlmostEqual(scores["b"], 1194.0, places=6)
+    def test_the_same_rounds_in_any_order_give_the_same_answer(self):
+        # The whole reason strength is fitted rather than folded. Elo is
+        # path-dependent by construction, and this archive proved what that
+        # costs: replaying its own ledger matched the stored numbers exactly
+        # for 41 comparisons and then diverged for good. A fit cannot do that.
+        import random
+        pairs = [(f"w{i}", [f"l{i}"]) for i in range(12)] + [("w0", ["w1"]), ("w2", ["w0"])]
+        for at, (winner, over) in enumerate(pairs):
+            self._round(winner, over, 1.0 + at)
+        first = rank.strength(self.conn)
+
+        shuffled = list(self.conn.execute(
+            "SELECT subject, value FROM decisions WHERE family = 'compare'").fetchall())
+        random.Random(11).shuffle(shuffled)
+
+        class Reordered:
+            def execute(self, *args, **kwargs):
+                return shuffled
+
+        again = rank.strength(Reordered())
+        for photo, score in first.items():
+            self.assertAlmostEqual(score, again[photo], places=9)
+
+    def test_beating_eleven_says_more_than_beating_one(self):
+        # Set size is not a mode, it is evidence: the model reads a round as
+        # one softmax over whatever was on screen, so a grid and a duel are the
+        # same statement at different strengths.
+        self._round("grid", [f"other{i}" for i in range(11)], 1.0)
+        self._round("duel", ["someone"], 2.0)
+        scores = rank.strength(self.conn)
+        self.assertGreater(scores["grid"], scores["duel"])
+
+    def test_a_photo_that_only_ever_won_does_not_run_away(self):
+        # Its likelihood is unbounded -- nothing in the data pulls it back --
+        # so the prior is the only thing standing between one lucky frame and
+        # the top of the library.
+        for at in range(30):
+            self._round("lucky", [f"other{at}"], 1.0 + at)
+        scores = rank.strength(self.conn)
+        self.assertLess(scores["lucky"], rank.BASE + 6 * rank.SPREAD)
 
     def test_a_judged_photo_takes_its_own_rating_never_its_neighbours(self):
         # The guarantee the old MAX_DIRECT_COMPARISONS cap was trying to buy.
         import numpy as np
-        self._beat("a", "b", 1.0)
-        judged = rank.ratings(self.conn)
+        self._round("a", ["b"], 1.0)
+        judged = rank.strength(self.conn)
         out = rank.propagate(judged, ["a", "b", "c"], np.eye(3, dtype=np.float32))
         self.assertAlmostEqual(out["a"], judged["a"], places=6)
         self.assertAlmostEqual(out["b"], judged["b"], places=6)
@@ -496,8 +529,8 @@ class RankingIsDerived(CoreCase):
         # drift past all of them; an average cannot.
         import numpy as np
         for i in range(20):
-            self._beat(f"win{i}", f"lose{i}", 1.0 + i)
-        judged = rank.ratings(self.conn)
+            self._round(f"win{i}", [f"lose{i}"], 1.0 + i)
+        judged = rank.strength(self.conn)
         subjects = list(judged) + ["newcomer"]
         vectors = np.ones((len(subjects), 2), dtype=np.float32)
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
@@ -505,10 +538,10 @@ class RankingIsDerived(CoreCase):
         spread = max(judged.values()) - rank.BASE
         self.assertLessEqual(abs(out["newcomer"] - rank.BASE), spread)
 
-    def test_with_no_vectors_it_is_plain_elo_not_a_failure(self):
+    def test_with_no_vectors_it_is_the_fit_not_a_failure(self):
         # Ranking works at zero embedding coverage and sharpens as they land.
-        self._beat("a", "b", 1.0)
-        self.assertEqual(rank.ranking(self.conn), rank.ratings(self.conn))
+        self._round("a", ["b"], 1.0)
+        self.assertEqual(rank.ranking(self.conn), rank.strength(self.conn))
 
 
 if __name__ == "__main__":

@@ -560,8 +560,11 @@ export async function mosaicNext(n, params, exclude = '', strategy = 'explore', 
     return fetchJson(`/api/mosaic/next?${query.toString()}`, { defaultValue: null });
 }
 
-export async function mosaicPick(winnerId, loserIds) {
-    return postJson('/api/mosaic/pick', { winner_id: winnerId, loser_ids: loserIds });
+// One photograph chosen over the others it was shown with. Two of these
+// existed -- a duel and a grid pick -- and they were the same round at
+// different sizes, so there is one now and it takes any number.
+export async function recordRound(winnerId, loserIds) {
+    return postJson('/api/compare', { winner_id: winnerId, loser_ids: loserIds });
 }
 
 export async function compareUndo() {

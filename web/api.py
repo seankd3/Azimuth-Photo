@@ -33,6 +33,7 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 import library
 import lightroom
@@ -265,41 +266,57 @@ async def mosaic(n: int = 12, folder: str | None = None):
     return {"images": rank.candidates(db(), n=n, folder=folder)}
 
 
-@router.post("/api/compare")
-async def compare(winner: int, loser: int, mode: str = "mosaic"):
-    """Record which of two photographs is better. The whole ranking write path.
+class Round(BaseModel):
+    """One photograph chosen over the others it was shown with.
 
-    Nothing is propagated here and no Elo is written. A comparison is a
-    decision; the ranking is recomputed from the log and the vectors, so this
-    handler cannot leave a partial state behind and needs no lock, no retry and
-    no undo journal.
+    A body, not query parameters, and that is the bug this class exists to make
+    impossible: the handler here used to declare `winner: int, losers: str`,
+    which FastAPI reads from the query string, while the UI has always posted
+    JSON. Every pick answered 422 and `postJson` returned null without saying
+    so, which is why the comparison log stops dead on 2026-08-04 while every
+    other kind of decision continues. A declared body either matches or fails
+    loudly.
     """
 
+    winner_id: int
+    loser_ids: list[int] = []
+
+
+@router.post("/api/compare")
+async def compare(round: Round):
+    """Record a round. The whole ranking write path.
+
+    Size is not a mode. One against one, one against eleven, one against a
+    hundred — the same record, because the same thing happened: you looked at a
+    set and chose from it. The two endpoints this replaces (`/api/compare` for
+    a duel, `/api/mosaic/pick` for a grid) were one operation wearing two
+    names, and the grid one shredded the round into N separate pairwise rows —
+    losing which photographs were on screen together, writing N times, and
+    leaving undo to remove one Nth of a click.
+
+    Nothing is propagated here and no rating is written. A round is a decision;
+    strength is fitted from the log, so this handler cannot leave a partial
+    state behind and needs no lock, no retry and no undo journal.
+    """
+
+    wanted = [int(round.winner_id), *(int(x) for x in round.loser_ids)]
     conn = _writer()
     try:
-        rows = {
+        holes = ",".join("?" for _ in wanted)
+        known = {
             int(r["id"]): r["hash"] for r in conn.execute(
-                "SELECT id, content_hash AS hash FROM images WHERE id IN (?, ?)", (winner, loser)
-            )
+                f"SELECT id, content_hash AS hash FROM images WHERE id IN ({holes})", wanted
+            ) if r["hash"]
         }
-        if rows.get(winner) is None or rows.get(loser) is None:
-            return {"ok": False, "reason": "both photos need an identity first"}
-        decisions.decide(conn, rows[winner], decisions.COMPARE,
-                         {"beat": rows[loser], "mode": mode})
+        winner = known.get(int(round.winner_id))
+        over = [known[i] for i in round.loser_ids if i in known and known[i] != winner]
+        if winner is None or not over:
+            return {"ok": False, "reason": "every photograph in a round needs an identity first"}
+        decisions.decide(conn, winner, decisions.COMPARE, {"over": over})
         conn.commit()
-        return {"ok": True, "winner": winner, "loser": loser}
+        return {"ok": True, "winner": round.winner_id, "over": len(over)}
     finally:
         connection.close_sync(conn, db_path=catalog_path())
-
-
-@router.post("/api/mosaic/pick")
-async def pick(winner: int, losers: str = ""):
-    """One winner over several others — a mosaic click is several comparisons."""
-
-    beaten = [int(x) for x in losers.split(",") if x.strip().isdigit()]
-    for loser in beaten:
-        await compare(winner, loser, mode="mosaic")
-    return {"ok": True, "winner": winner, "compared": len(beaten)}
 
 
 @router.post("/api/compare/undo")

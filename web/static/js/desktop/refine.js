@@ -2,7 +2,7 @@ import {
     describeScope, on, refineParams, scope, setActiveLens, setRankingsMeta,
 } from './state.js';
 import {
-    compareUndo, getPropagationLast, getRankings, mosaicNext, mosaicPick, thumbUrl,
+    compareUndo, getPropagationLast, getRankings, mosaicNext, recordRound, thumbUrl,
 } from './api.js';
 import { showToast } from './toast.js';
 import { escapeHtml as esc, photoAspect } from '../lib.js';
@@ -596,7 +596,7 @@ function holdWinnerThenReplace(index, token) {
 }
 
 function enqueuePickSave(winnerId, loserIds) {
-    const run = () => mosaicPick(winnerId, loserIds)
+    const run = () => recordRound(winnerId, loserIds)
         .then((result) => ({ ok: Boolean(result && result.ok), result }))
         .catch((error) => ({ ok: false, error }));
     const queued = saveQueueActive ? saveQueue.then(run, run) : run();
