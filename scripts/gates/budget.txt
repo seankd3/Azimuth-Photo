@@ -9,7 +9,7 @@
 # not there.
 seam 16
 layers 30
-tables 61
+tables 47
 invokes 4
 routes 0
 names 0

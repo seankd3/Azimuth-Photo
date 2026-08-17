@@ -302,25 +302,6 @@ async def _delete_owned_dependents(
             )
 
 
-async def _delete_share_favorites(conn, image_ids: list[int]) -> None:
-    """Clean the legacy image reference that intentionally lacks an FK."""
-
-    table = await (
-        await conn.execute(
-            "SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'share_favorites'"
-        )
-    ).fetchone()
-    if table is None:
-        return
-
-    for ids in chunked(image_ids):
-        placeholders, params = _target_image_ids(ids)
-        await conn.execute(
-            f"DELETE FROM share_favorites WHERE image_id IN ({placeholders})",
-            params,
-        )
-
-
 async def expand_image_deletion_ids(conn, image_ids: list[int]) -> list[int]:
     graph = await dependency_graph(conn)
     return await _expand_owned_image_ids(conn, image_ids, graph.image_self_references)
@@ -334,4 +315,3 @@ async def prepare_image_deletion(conn, expanded_image_ids: list[int]) -> None:
     await _repair_stacks(conn, expanded_image_ids)
     await _null_set_null_references(conn, expanded_image_ids, graph.image_set_null_references)
     await _delete_owned_dependents(conn, expanded_image_ids, graph.owned_paths)
-    await _delete_share_favorites(conn, expanded_image_ids)

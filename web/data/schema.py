@@ -135,13 +135,6 @@ CREATE TABLE IF NOT EXISTS oplog_cursors (
     origin TEXT PRIMARY KEY,
     last_seen_origin_seq INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS oplog_pending (
-    origin TEXT NOT NULL,
-    origin_seq INTEGER NOT NULL,
-    reason TEXT NOT NULL,
-    recorded_at REAL NOT NULL,
-    PRIMARY KEY (origin, origin_seq)
-);
 
 CREATE TABLE IF NOT EXISTS devices (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -755,79 +748,6 @@ CREATE TABLE IF NOT EXISTS collection_links (
     PRIMARY KEY (parent_id, child_id)
 );
 
-CREATE TABLE IF NOT EXISTS published_nodes (
-    id INTEGER PRIMARY KEY,
-    area TEXT NOT NULL CHECK(area IN ('website', 'private')),
-    parent_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
-    slug TEXT NOT NULL,
-    title TEXT NOT NULL,
-    source_collection_id INTEGER DEFAULT NULL REFERENCES collections(id) ON DELETE SET NULL,
-    position INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS published_node_images (
-    node_id INTEGER NOT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
-    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL DEFAULT 0,
-    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (node_id, image_id)
-);
-
-CREATE TABLE IF NOT EXISTS collection_shares (
-    id INTEGER PRIMARY KEY,
-    collection_id INTEGER DEFAULT NULL REFERENCES collections(id),
-    published_node_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
-    token TEXT NOT NULL UNIQUE,
-    created_at REAL NOT NULL,
-    expires_at REAL DEFAULT NULL,
-    revoked_at REAL DEFAULT NULL,
-    password_hash TEXT DEFAULT NULL,
-    view_count INTEGER NOT NULL DEFAULT 0,
-    first_viewed_at REAL DEFAULT NULL,
-    last_viewed_at REAL DEFAULT NULL,
-    client_finished_at REAL DEFAULT NULL,
-    CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
-);
-
-CREATE TABLE IF NOT EXISTS share_images (
-    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
-    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    position INTEGER NOT NULL DEFAULT 0,
-    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (share_id, image_id)
-);
-
-CREATE TABLE IF NOT EXISTS share_favorites (
-    id INTEGER PRIMARY KEY,
-    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
-    visitor_id TEXT NOT NULL DEFAULT 'legacy',
-    image_id INTEGER NOT NULL,
-    client_name TEXT NULL,
-    created_at REAL NOT NULL,
-    UNIQUE(share_id, visitor_id, image_id)
-);
-
-CREATE TABLE IF NOT EXISTS collection_publishes (
-    id INTEGER PRIMARY KEY,
-    collection_id INTEGER NOT NULL UNIQUE REFERENCES collections(id),
-    slug TEXT NOT NULL UNIQUE,
-    title TEXT NOT NULL,
-    published_at REAL NOT NULL,
-    updated_at REAL NOT NULL,
-    image_count INTEGER NOT NULL DEFAULT 0,
-    bundle_bytes INTEGER NOT NULL DEFAULT 0,
-    last_commit TEXT DEFAULT NULL,
-    hook_exit_code INTEGER DEFAULT NULL,
-    hook_output TEXT NOT NULL DEFAULT '',
-    hook_ran_at REAL DEFAULT NULL,
-    hook_pending INTEGER NOT NULL DEFAULT 0,
-    hook_attempts INTEGER NOT NULL DEFAULT 0,
-    hook_next_retry_at REAL DEFAULT NULL,
-    hook_pending_operation TEXT NOT NULL DEFAULT ''
-);
-
 CREATE INDEX IF NOT EXISTS idx_collections_updated
 ON collections(updated_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_collections_uuid
@@ -840,33 +760,6 @@ CREATE INDEX IF NOT EXISTS idx_collection_links_child
 ON collection_links(child_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_collection_links_parent_position
 ON collection_links(parent_id, position, added_at, child_id);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_published_nodes_root_slug
-ON published_nodes(area, slug) WHERE parent_id IS NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_published_nodes_child_slug
-ON published_nodes(area, parent_id, slug) WHERE parent_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_published_nodes_tree
-ON published_nodes(area, parent_id, position, id);
-CREATE INDEX IF NOT EXISTS idx_published_nodes_source
-ON published_nodes(source_collection_id);
-CREATE INDEX IF NOT EXISTS idx_published_node_images_position
-ON published_node_images(node_id, position, added_at, image_id);
-CREATE INDEX IF NOT EXISTS idx_published_node_images_image
-ON published_node_images(image_id, node_id);
-CREATE INDEX IF NOT EXISTS idx_collection_shares_active
-ON collection_shares(collection_id, revoked_at);
-CREATE INDEX IF NOT EXISTS idx_collection_shares_published_active
-ON collection_shares(published_node_id, revoked_at);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_shares_one_active_published
-ON collection_shares(published_node_id)
-WHERE revoked_at IS NULL AND published_node_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_share_images_image
-ON share_images(image_id, share_id);
-CREATE INDEX IF NOT EXISTS idx_share_images_position
-ON share_images(share_id, position, added_at);
-CREATE INDEX IF NOT EXISTS idx_share_favorites_share_visitor
-ON share_favorites(share_id, visitor_id);
-CREATE INDEX IF NOT EXISTS idx_collection_publishes_updated
-ON collection_publishes(updated_at DESC);
 
 CREATE TABLE IF NOT EXISTS people (
     id INTEGER PRIMARY KEY,
@@ -900,14 +793,6 @@ CREATE TABLE IF NOT EXISTS face_detections (
     updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
-CREATE TABLE IF NOT EXISTS face_assignments (
-    face_id INTEGER PRIMARY KEY REFERENCES face_detections(id) ON DELETE CASCADE,
-    person_id INTEGER NOT NULL REFERENCES people(id),
-    source TEXT NOT NULL DEFAULT 'worker',
-    active INTEGER NOT NULL DEFAULT 1,
-    assigned_at REAL NOT NULL DEFAULT (strftime('%s', 'now'))
-);
-
 CREATE TABLE IF NOT EXISTS person_image_membership (
     person_id INTEGER NOT NULL REFERENCES people(id) ON DELETE CASCADE,
     image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
@@ -917,42 +802,14 @@ CREATE TABLE IF NOT EXISTS person_image_membership (
     PRIMARY KEY (person_id, image_id)
 );
 
-CREATE TABLE IF NOT EXISTS people_merge_suggestions (
-    id INTEGER PRIMARY KEY,
-    source_person_id INTEGER NOT NULL REFERENCES people(id),
-    target_person_id INTEGER NOT NULL REFERENCES people(id),
-    confidence REAL NOT NULL DEFAULT 0,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    updated_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-    UNIQUE(source_person_id, target_person_id)
-);
-
-CREATE TABLE IF NOT EXISTS face_scan_images (
-    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-    model_id TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    face_count INTEGER NOT NULL DEFAULT 0,
-    cache_path TEXT NOT NULL DEFAULT '',
-    last_error TEXT NOT NULL DEFAULT '',
-    scanned_at REAL NOT NULL DEFAULT 0,
-    PRIMARY KEY (image_id, model_id)
-);
-
 CREATE INDEX IF NOT EXISTS idx_people_status_seen
 ON people(status, updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_face_detections_image_model
 ON face_detections(image_id, embedding_model);
 CREATE INDEX IF NOT EXISTS idx_face_detections_status_model
 ON face_detections(ignored, embedding_model, quality DESC);
-CREATE INDEX IF NOT EXISTS idx_face_assignments_person
-ON face_assignments(person_id, active);
 CREATE INDEX IF NOT EXISTS idx_person_image_membership_image
 ON person_image_membership(image_id, person_id);
-CREATE INDEX IF NOT EXISTS idx_people_merge_suggestions_pending
-ON people_merge_suggestions(status, confidence DESC);
-CREATE INDEX IF NOT EXISTS idx_face_scan_images_status
-ON face_scan_images(model_id, status, scanned_at);
 -- v24: original-file integrity checksums (bit-rot audit). Additive only.
 CREATE TABLE IF NOT EXISTS image_checksums (
     image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
@@ -1079,32 +936,7 @@ COLLECTION_COMPAT_COLUMNS = (
     ("uuid", "TEXT"),
 )
 
-COLLECTION_SHARE_COMPAT_COLUMNS = (
-    ("published_node_id", "INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE"),
-    ("password_hash", "TEXT DEFAULT NULL"),
-    ("view_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("first_viewed_at", "REAL DEFAULT NULL"),
-    ("last_viewed_at", "REAL DEFAULT NULL"),
-    ("client_finished_at", "REAL DEFAULT NULL"),
-)
 
-COLLECTION_PUBLISH_COMPAT_COLUMNS = (
-    ("collection_id", "INTEGER REFERENCES collections(id)"),
-    ("slug", "TEXT DEFAULT ''"),
-    ("title", "TEXT DEFAULT ''"),
-    ("published_at", "REAL DEFAULT 0"),
-    ("updated_at", "REAL DEFAULT 0"),
-    ("image_count", "INTEGER NOT NULL DEFAULT 0"),
-    ("bundle_bytes", "INTEGER NOT NULL DEFAULT 0"),
-    ("last_commit", "TEXT DEFAULT NULL"),
-    ("hook_exit_code", "INTEGER DEFAULT NULL"),
-    ("hook_output", "TEXT NOT NULL DEFAULT ''"),
-    ("hook_ran_at", "REAL DEFAULT NULL"),
-    ("hook_pending", "INTEGER NOT NULL DEFAULT 0"),
-    ("hook_attempts", "INTEGER NOT NULL DEFAULT 0"),
-    ("hook_next_retry_at", "REAL DEFAULT NULL"),
-    ("hook_pending_operation", "TEXT NOT NULL DEFAULT ''"),
-)
 
 IMAGE_CAPTION_COMPAT_COLUMNS = (
     ("user_edited", "INTEGER NOT NULL DEFAULT 0"),
@@ -1333,7 +1165,6 @@ REQUIRED_TABLES = {
     "oplog_family_state",
     "oplog_settings",
     "oplog_cursors",
-    "oplog_pending",
     "devices",
     "images_metadata_fts",
     "comparisons",
@@ -1358,12 +1189,6 @@ REQUIRED_TABLES = {
     "collections",
     "collection_images",
     "collection_links",
-    "published_nodes",
-    "published_node_images",
-    "collection_shares",
-    "share_images",
-    "share_favorites",
-    "collection_publishes",
     "image_checksums",
 }
 
@@ -1433,44 +1258,6 @@ REQUIRED_COLUMNS = {
     "stack_members": {"stack_id", "image_id", "score", "added_at"},
     "collections": {"query", "uuid"},
     "collection_links": {"parent_id", "child_id", "position", "added_at"},
-    "published_nodes": {
-        "area",
-        "parent_id",
-        "slug",
-        "title",
-        "source_collection_id",
-        "position",
-        "created_at",
-        "updated_at",
-    },
-    "published_node_images": {"node_id", "image_id", "position", "added_at"},
-    "collection_shares": {
-        "collection_id",
-        "published_node_id",
-        "password_hash",
-        "view_count",
-        "first_viewed_at",
-        "last_viewed_at",
-        "client_finished_at",
-    },
-    "share_favorites": {"visitor_id"},
-    "collection_publishes": {
-        "collection_id",
-        "slug",
-        "title",
-        "published_at",
-        "updated_at",
-        "image_count",
-        "bundle_bytes",
-        "last_commit",
-        "hook_exit_code",
-        "hook_output",
-        "hook_ran_at",
-        "hook_pending",
-        "hook_attempts",
-        "hook_next_retry_at",
-        "hook_pending_operation",
-    },
     "image_captions": {"user_edited"},
     "image_checksums": {"image_id", "sha256", "bytes", "checked_at"},
 }
@@ -1513,28 +1300,12 @@ REQUIRED_INDEXES = {
     "idx_collection_images_position",
     "idx_collection_links_child",
     "idx_collection_links_parent_position",
-    "idx_published_nodes_root_slug",
-    "idx_published_nodes_child_slug",
-    "idx_published_nodes_tree",
-    "idx_published_nodes_source",
-    "idx_published_node_images_position",
-    "idx_published_node_images_image",
-    "idx_collection_shares_active",
-    "idx_collection_shares_published_active",
-    "idx_collection_shares_one_active_published",
-    "idx_share_images_image",
-    "idx_share_images_position",
-    "idx_share_favorites_share_visitor",
-    "idx_collection_publishes_updated",
     "idx_people_status_seen",
     "idx_people_unknown_review",
     "idx_people_named_review",
     "idx_face_detections_image_model",
     "idx_face_detections_status_model",
-    "idx_face_assignments_person",
     "idx_person_image_membership_image",
-    "idx_people_merge_suggestions_pending",
-    "idx_face_scan_images_status",
     "idx_face_scan_backlog_ready",
     "idx_face_scan_backlog_retry",
     "idx_image_checksums_checked",
@@ -1628,13 +1399,8 @@ async def prepare_existing_database_for_schema(conn) -> None:
     await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "people", PEOPLE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
     await migrate_stack_kind_for_versions(conn)
-    await migrate_collection_shares_for_published_nodes(conn)
-    await migrate_share_owner_cascades(conn)
-    await migrate_share_favorites_per_visitor(conn)
 
 
 async def migrate_stack_kind_for_versions(conn) -> None:
@@ -1685,203 +1451,6 @@ async def migrate_stack_kind_for_versions(conn) -> None:
         await conn.execute("PRAGMA foreign_keys=ON")
 
 
-async def migrate_collection_shares_for_published_nodes(conn) -> None:
-    """Relax the legacy collection-only share owner without losing share state."""
-
-    if not await table_exists(conn, "collection_shares"):
-        return
-    cursor = await conn.execute("PRAGMA table_info(collection_shares)")
-    columns = {row["name"]: row for row in await cursor.fetchall()}
-    collection_id = columns.get("collection_id")
-    if "published_node_id" in columns and collection_id is not None and not bool(collection_id["notnull"]):
-        await _ensure_collection_share_indexes(conn)
-        return
-
-    await conn.commit()
-    await _backup_before_v20_rebuild(conn)
-    await conn.execute("PRAGMA foreign_keys=OFF")
-    try:
-        await conn.executescript(
-            """
-            BEGIN;
-            DROP TABLE IF EXISTS collection_shares_new;
-            CREATE TABLE collection_shares_new (
-                id INTEGER PRIMARY KEY,
-                collection_id INTEGER DEFAULT NULL REFERENCES collections(id),
-                published_node_id INTEGER DEFAULT NULL REFERENCES published_nodes(id) ON DELETE CASCADE,
-                token TEXT NOT NULL UNIQUE,
-                created_at REAL NOT NULL,
-                expires_at REAL DEFAULT NULL,
-                revoked_at REAL DEFAULT NULL,
-                password_hash TEXT DEFAULT NULL,
-                view_count INTEGER NOT NULL DEFAULT 0,
-                first_viewed_at REAL DEFAULT NULL,
-                last_viewed_at REAL DEFAULT NULL,
-                client_finished_at REAL DEFAULT NULL,
-                CHECK ((collection_id IS NOT NULL) != (published_node_id IS NOT NULL))
-            );
-            INSERT INTO collection_shares_new (
-                id, collection_id, published_node_id, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, client_finished_at
-            )
-            SELECT
-                id, collection_id, NULL, token, created_at, expires_at,
-                revoked_at, password_hash, view_count, first_viewed_at, last_viewed_at, NULL
-            FROM collection_shares;
-            DROP TABLE collection_shares;
-            ALTER TABLE collection_shares_new RENAME TO collection_shares;
-            CREATE INDEX idx_collection_shares_active
-            ON collection_shares(collection_id, revoked_at);
-            CREATE INDEX idx_collection_shares_published_active
-            ON collection_shares(published_node_id, revoked_at);
-            CREATE UNIQUE INDEX idx_collection_shares_one_active_published
-            ON collection_shares(published_node_id)
-            WHERE revoked_at IS NULL AND published_node_id IS NOT NULL;
-            COMMIT;
-            """
-        )
-    except Exception:
-        try:
-            await conn.rollback()
-        except Exception:
-            pass
-        raise
-    finally:
-        await conn.execute("PRAGMA foreign_keys=ON")
-
-
-async def migrate_share_owner_cascades(conn) -> None:
-    """Make deleting a share cascade through both snapshot child tables."""
-
-    rebuild_images = await table_exists(conn, "share_images") and not await _has_cascade_fk(
-        conn,
-        "share_images",
-        from_column="share_id",
-        target_table="collection_shares",
-    )
-    rebuild_favorites = await table_exists(conn, "share_favorites") and not await _has_cascade_fk(
-        conn,
-        "share_favorites",
-        from_column="share_id",
-        target_table="collection_shares",
-    )
-    if not rebuild_images and not rebuild_favorites:
-        return
-
-    statements = ["BEGIN;"]
-    if rebuild_images:
-        statements.extend(
-            [
-                "DROP TABLE IF EXISTS share_images_new;",
-                """
-                CREATE TABLE share_images_new (
-                    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
-                    image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
-                    position INTEGER NOT NULL DEFAULT 0,
-                    added_at REAL NOT NULL DEFAULT (strftime('%s', 'now')),
-                    PRIMARY KEY (share_id, image_id)
-                );
-                """,
-                """
-                INSERT INTO share_images_new (share_id, image_id, position, added_at)
-                SELECT share_id, image_id, position, added_at FROM share_images;
-                """,
-                "DROP TABLE share_images;",
-                "ALTER TABLE share_images_new RENAME TO share_images;",
-                "CREATE INDEX idx_share_images_image ON share_images(image_id, share_id);",
-                """
-                CREATE INDEX idx_share_images_position
-                ON share_images(share_id, position, added_at);
-                """,
-            ]
-        )
-    if rebuild_favorites:
-        statements.extend(
-            [
-                "DROP TABLE IF EXISTS share_favorites_new;",
-                """
-                CREATE TABLE share_favorites_new (
-                    id INTEGER PRIMARY KEY,
-                    share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
-                    image_id INTEGER NOT NULL,
-                    client_name TEXT NULL,
-                    created_at REAL NOT NULL,
-                    UNIQUE(share_id, image_id)
-                );
-                """,
-                """
-                INSERT INTO share_favorites_new (id, share_id, image_id, client_name, created_at)
-                SELECT id, share_id, image_id, client_name, created_at FROM share_favorites;
-                """,
-                "DROP TABLE share_favorites;",
-                "ALTER TABLE share_favorites_new RENAME TO share_favorites;",
-                "CREATE INDEX idx_share_favorites_share ON share_favorites(share_id);",
-            ]
-        )
-    statements.append("COMMIT;")
-
-    await conn.commit()
-    await backup_before_table_rebuild(conn, "share-owner-cascades")
-    await conn.execute("PRAGMA foreign_keys=OFF")
-    try:
-        await conn.executescript("\n".join(statements))
-    except Exception:
-        try:
-            await conn.rollback()
-        except Exception:
-            pass
-        raise
-    finally:
-        await conn.execute("PRAGMA foreign_keys=ON")
-
-
-async def migrate_share_favorites_per_visitor(conn) -> None:
-    """Give legacy share picks their own stable anonymous visitor bucket."""
-
-    if not await table_exists(conn, "share_favorites"):
-        return
-    if "visitor_id" in await table_columns(conn, "share_favorites"):
-        return
-
-    await conn.commit()
-    await backup_before_table_rebuild(conn, "share-favorites-visitors")
-    await conn.execute("PRAGMA foreign_keys=OFF")
-    try:
-        await conn.executescript(
-            """
-            BEGIN;
-            DROP TABLE IF EXISTS share_favorites_new;
-            CREATE TABLE share_favorites_new (
-                id INTEGER PRIMARY KEY,
-                share_id INTEGER NOT NULL REFERENCES collection_shares(id) ON DELETE CASCADE,
-                visitor_id TEXT NOT NULL DEFAULT 'legacy',
-                image_id INTEGER NOT NULL,
-                client_name TEXT NULL,
-                created_at REAL NOT NULL,
-                UNIQUE(share_id, visitor_id, image_id)
-            );
-            INSERT INTO share_favorites_new (
-                id, share_id, visitor_id, image_id, client_name, created_at
-            )
-            SELECT id, share_id, 'legacy', image_id, client_name, created_at
-            FROM share_favorites;
-            DROP TABLE share_favorites;
-            ALTER TABLE share_favorites_new RENAME TO share_favorites;
-            CREATE INDEX idx_share_favorites_share_visitor
-            ON share_favorites(share_id, visitor_id);
-            COMMIT;
-            """
-        )
-    except Exception:
-        try:
-            await conn.rollback()
-        except Exception:
-            pass
-        raise
-    finally:
-        await conn.execute("PRAGMA foreign_keys=ON")
-
-
 async def _has_cascade_fk(
     conn,
     table: str,
@@ -1895,37 +1464,6 @@ async def _has_cascade_fk(
         and row["table"] == target_table
         and str(row["on_delete"] or "").upper() == "CASCADE"
         for row in await cursor.fetchall()
-    )
-
-
-async def _ensure_collection_share_indexes(conn) -> None:
-    now_sql = "strftime('%s', 'now')"
-    await conn.execute(
-        f"""
-        UPDATE collection_shares
-        SET revoked_at = {now_sql}
-        WHERE published_node_id IS NOT NULL
-          AND revoked_at IS NULL
-          AND id NOT IN (
-              SELECT MAX(id)
-              FROM collection_shares
-              WHERE published_node_id IS NOT NULL AND revoked_at IS NULL
-              GROUP BY published_node_id
-          )
-        """
-    )
-    await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_collection_shares_active "
-        "ON collection_shares(collection_id, revoked_at)"
-    )
-    await conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_collection_shares_published_active "
-        "ON collection_shares(published_node_id, revoked_at)"
-    )
-    await conn.execute(
-        "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_shares_one_active_published "
-        "ON collection_shares(published_node_id) "
-        "WHERE revoked_at IS NULL AND published_node_id IS NOT NULL"
     )
 
 
@@ -1944,8 +1482,6 @@ async def ensure_compatibility_columns(conn) -> None:
     await _add_columns_if_missing(conn, "comparisons", COMPARISON_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "catalog_sources", CATALOG_SOURCE_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "collections", COLLECTION_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "collection_shares", COLLECTION_SHARE_COMPAT_COLUMNS)
-    await _add_columns_if_missing(conn, "collection_publishes", COLLECTION_PUBLISH_COMPAT_COLUMNS)
     await _add_columns_if_missing(conn, "image_captions", IMAGE_CAPTION_COMPAT_COLUMNS)
 
 
@@ -2097,25 +1633,6 @@ async def backfill_image_date_sources(conn) -> int:
     return changed
 
 
-async def backfill_share_images(conn) -> None:
-    await conn.execute(
-        """
-        INSERT OR IGNORE INTO share_images (share_id, image_id, position, added_at)
-        SELECT
-            s.id,
-            ci.image_id,
-            ci.position,
-            COALESCE(ci.added_at, s.created_at)
-        FROM collection_shares s
-        JOIN collection_images ci ON ci.collection_id = s.collection_id
-        WHERE NOT EXISTS (
-            SELECT 1 FROM share_images existing WHERE existing.share_id = s.id
-        )
-        ORDER BY s.id, ci.position ASC, ci.added_at ASC, ci.image_id ASC
-        """
-    )
-
-
 async def backfill_image_tags(conn) -> None:
     await conn.execute(
         """
@@ -2211,7 +1728,6 @@ async def apply_schema_and_migrations(conn, *, db_exists: bool) -> None:
         await backfill_relative_paths(conn)
         from features.develop.presets import ensure_develop_presets
         await ensure_develop_presets(conn)
-        await backfill_share_images(conn)
         await backfill_image_tags(conn)
         await backfill_legacy_aspect_ratios(conn)
         if previous_schema_version < 30:
