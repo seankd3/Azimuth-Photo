@@ -56,10 +56,7 @@ def invalidate_vector_derived_caches(*, invalidate_embedding_matrix: bool = True
 
 
 def embedding_batch_stored(_model_key: str, _image_ids: list[int]) -> None:
-    from features.ai.routes import invalidate_ai_status_response_cache
-
     invalidate_rankings_cache()
-    invalidate_ai_status_response_cache()
     invalidate_vector_derived_caches(invalidate_embedding_matrix=False)
 
 

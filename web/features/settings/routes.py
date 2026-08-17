@@ -187,9 +187,14 @@ async def api_save_settings(request: Request):
         )
     current = settings.get_settings()
     saved = settings.save_settings({**current, **body})
-    from core.intelligence_campaign import apply_saved_worker_intent
-
-    apply_saved_worker_intent(current, saved)
+    # `apply_saved_worker_intent(current, saved)` stood here and started or
+    # stopped four workers when their toggles changed. `core/intelligence_campaign`
+    # went with those workers in 10e29ebd, and this import is not guarded — so
+    # **saving settings has raised ModuleNotFoundError ever since**.
+    #
+    # Nothing replaces it, deliberately. There is one loop and its queue is a
+    # query, so it reads the settings on the next pass: a preference that takes
+    # effect by being true does not need anyone told about it.
     model_changed = any(
         current.get(field) != saved.get(field)
         for field in ("embed_model_id", "embed_model_revision", "embed_model_dir", "embed_model_dim")
@@ -235,7 +240,6 @@ async def api_save_settings(request: Request):
         cache_events.invalidate_vector_derived_caches()
     if search_runtime_changed:
         cache_events.invalidate_rankings_cache()
-    ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
     return {
         "ok": True,
@@ -274,7 +278,6 @@ async def api_reset_settings():
                 exc_info=True,
             )
     cache_events.invalidate_rankings_cache()
-    ai_routes.invalidate_ai_status_response_cache()
     settings_status.invalidate_settings_response_cache()
     return {
         "ok": True,

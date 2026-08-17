@@ -1,6 +1,4 @@
 from collections.abc import Awaitable, Callable
-import asyncio
-import time
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -8,26 +6,18 @@ from fastapi.responses import JSONResponse
 import ai_models
 import db
 import settings
+import work
 from core import capabilities
-from core import responses as response_helpers
+from core.catalog_path import catalog_path
 
 
+from data import connection
 from features.settings import status as settings_status
 router = APIRouter()
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
 AsyncListBuilder = Callable[..., Awaitable[list]]
 InvalidateStatus = Callable[[], None]
-_ai_status_response_cache: dict[str, dict | tuple | float | None] = {"data": None, "key": None, "expires": 0}
-_ai_status_response_cache_ttl_seconds = 5.0
 _ai_status_response_refreshing = False
-
-
-def invalidate_ai_status_response_cache() -> None:
-    global _ai_status_response_refreshing
-    _ai_status_response_cache["data"] = None
-    _ai_status_response_cache["key"] = None
-    _ai_status_response_cache["expires"] = 0
-    _ai_status_response_refreshing = False
 
 
 def embedding_runtime_status(capability: dict | None = None) -> dict:
@@ -53,73 +43,29 @@ def embedding_runtime_status(capability: dict | None = None) -> dict:
     }
 
 
-def _ai_model_status_cache_key(
-    model_status: dict,
-    capability: dict | None = None,
-    runtime: dict | None = None,
-) -> tuple:
-    capability = capability or capabilities.capability_status("search")
-    runtime = runtime or embedding_runtime_status(capability)
-    install = model_status.get("install") or {}
-    return (
-        bool(model_status.get("installed")),
-        str(model_status.get("model_id") or ""),
-        str(model_status.get("model_dir") or ""),
-        int(model_status.get("dimension") or 0),
-        str(model_status.get("model_key") or ""),
-        bool(install.get("running")),
-        str(install.get("status") or ""),
-        str(install.get("message") or ""),
-        bool(capability["available"]),
-        tuple(capability["missing"]),
-        bool(runtime["ready"]),
-    )
+def _chore_state() -> tuple[bool, int] | None:
+    """Whether chores are paused and how many embeddings are owed, or None.
 
+    None means the catalog could not be read — an unwritable or non-WAL file, a
+    library that is not there yet. A status panel that raises because it could
+    not read a status is worse than one that says it does not know, so the
+    caller degrades instead.
+    """
 
-def _copy_ai_status_response(response: dict) -> dict:
-    return response_helpers.copy_ai_status_response(response)
-
-
-def _refresh_ai_status_response_cache(model_status: dict) -> bool:
-    global _ai_status_response_refreshing
-    if _ai_status_response_refreshing:
-        return False
-    _ai_status_response_refreshing = True
-
-    async def _refresh():
-        global _ai_status_response_refreshing
-        try:
-            # Let the stale response flush before refresh work competes for the event loop.
-            await asyncio.sleep(0.25)
-            await build_ai_status(model_status, force=True)
-        except Exception as exc:
-            print(f"AI status refresh error: {exc}")
-        finally:
-            _ai_status_response_refreshing = False
+    from search import EMBEDDING
 
     try:
-        asyncio.create_task(_refresh())
-        return True
+        conn = connection.reading(catalog_path())
+        return work.paused(conn), work.owing(conn, EMBEDDING)
     except Exception:
-        _ai_status_response_refreshing = False
-        raise
+        return None
 
 
-async def build_ai_status(model_status: dict | None = None, *, force: bool = False):
+async def build_ai_status(model_status: dict | None = None):
     """Embedding worker + model install status for UI surfaces."""
     capability = capabilities.capability_status("search")
     runtime = embedding_runtime_status(capability)
     model_status = model_status or ai_models.get_model_status()
-    cache_key = _ai_model_status_cache_key(model_status, capability, runtime)
-    if not force:
-        cached = _ai_status_response_cache.get("data")
-        if (
-            cached is not None
-            and _ai_status_response_cache.get("key") == cache_key
-        ):
-            if float(_ai_status_response_cache.get("expires") or 0) <= time.monotonic():
-                _refresh_ai_status_response_cache(model_status)
-            return _copy_ai_status_response(cached)
     counts = await db.get_ai_status_counts()
     embedded = counts["embedded"]
     total_images = counts["total_images"]
@@ -140,54 +86,30 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
             "install_message": str(install.get("message") or "") if install_applies else "",
         }
 
-    worker_status = {}
-    try:
-        if not runtime["ready"]:
-            raise ImportError(runtime["message"])
-        import embedding_worker
-        worker_status = embedding_worker.get_worker_status()
-    except Exception:
-        worker_status = {
-            "state": "unavailable",
-            "message": runtime["message"],
-            "ready": False,
-            "manual_pause": False,
-            "model_id": "",
-            "model_dir": "",
-            "last_error": "",
-            "last_batch_size": 0,
-            "last_batch_seconds": 0.0,
-            "last_embedded_at": None,
-            "session_embedded": 0,
-            "session_started_at": None,
-            "session_embed_seconds": 0.0,
-            "session_wall_seconds": 0.0,
-            "recent_images_per_min": 0.0,
-            "recent_wall_images_per_min": 0.0,
-            "overall_images_per_min": 0.0,
-            "overall_wall_images_per_min": 0.0,
-            "active_batch_size": 0,
-            "target_batch_size": 0,
-            "successful_batches_at_size": 0,
-            "last_batch_failures": 0,
-            "last_batch_stage_seconds": {},
-            "last_candidate_query_seconds": 0.0,
-            "last_candidate_count": 0,
-            "last_candidate_window_size": 0,
-            "last_ready_count": 0,
-            "last_cooled_down_count": 0,
-            "next_retry_at": None,
-            "oom_backoffs": 0,
-            "last_oom_at": None,
-            "batch_growth_paused_until": None,
-        }
-
+    # `embedding_worker.get_worker_status()` stood here, behind a try that
+    # turned its ImportError into a thirty-field dict of zeros — batch growth,
+    # OOM backoffs, candidate window sizes, session throughput. The module went
+    # with the other three workers in 6fc7e31c, so the panel had been reading
+    # that dict ever since, and `eta_seconds` was computed from its zero rate
+    # and so was always None.
+    #
+    # There is one loop now and its queue is a query, so its state is a fact
+    # about the catalog rather than telemetry a worker has to keep: paused if
+    # the owner paused chores, running while anything is owed, idle otherwise.
+    chores = _chore_state()
+    manual_pause = bool(chores and chores[0])
+    if not runtime["ready"]:
+        state, message = "unavailable", runtime["message"]
+    elif chores is None:
+        state, message = "unknown", "The catalog could not be read."
+    elif manual_pause:
+        state, message = "paused", "Chores are paused."
+    elif chores[1]:
+        state, message = "running", f"{chores[1]:,} to embed."
+    else:
+        state, message = "idle", "Everything is embedded."
     compared = int(counts.get("rated_images") or 0)
 
-    recent_rate = float(worker_status.get("recent_images_per_min") or 0.0)
-    overall_rate = float(worker_status.get("overall_images_per_min") or 0.0)
-    effective_rate = recent_rate if recent_rate > 0 else overall_rate
-    eta_seconds = int((remaining / effective_rate) * 60) if remaining > 0 and effective_rate > 0 else None
     progress_pct = round((embedded / total_images) * 100, 1) if total_images > 0 else 0.0
     embedding_index = {
         "role": "active",
@@ -202,9 +124,9 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
         "total_images": total_images,
         "remaining": remaining,
         "progress_pct": progress_pct,
-        "worker_state": worker_status["state"],
-        "worker_message": worker_status["message"],
-        "manual_pause": bool(worker_status.get("manual_pause")),
+        "worker_state": state,
+        "worker_message": message,
+        "manual_pause": manual_pause,
         "capability": capability,
         "runtime": runtime,
     }
@@ -214,82 +136,44 @@ async def build_ai_status(model_status: dict | None = None, *, force: bool = Fal
         "runtime": runtime,
         "embedded": embedded,
         "total_images": total_images,
-        "total_kept": total_images,
         "remaining": remaining,
         "progress_pct": progress_pct,
         "compared": compared,
-        "rated_images": compared,
-        "direct_comparison_rows": int(counts.get("direct_comparison_rows") or 0),
-        "ranking_signal_count": int(counts.get("ranking_signal_count") or 0),
-        "imported_ranking_without_history": int(counts.get("imported_ranking_without_history") or 0),
         "model_installed": model_status["installed"],
         "installing": model_status["install"]["running"],
         "install_status": model_status["install"]["status"],
         "install_message": model_status["install"]["message"],
         "model_id": model_status["model_id"],
         "model_dir": model_status["model_dir"],
-        "model_key": model_status.get("model_key", ""),
         "model_dimension": int(model_status.get("dimension") or 0),
-        "worker_state": worker_status["state"],
-        "worker_message": worker_status["message"],
-        "worker_ready": worker_status["ready"],
-        "embedding_manual_pause": bool(worker_status.get("manual_pause")),
-        "automatic": bool(settings.get_settings()["embedding_scan_enabled"]),
-        "worker_error": worker_status["last_error"],
-        "last_batch_size": worker_status.get("last_batch_size", 0),
-        "last_batch_seconds": worker_status.get("last_batch_seconds", 0.0),
-        "last_embedded_at": worker_status.get("last_embedded_at"),
-        "session_embedded": worker_status.get("session_embedded", 0),
-        "session_started_at": worker_status.get("session_started_at"),
-        "session_embed_seconds": worker_status.get("session_embed_seconds", 0.0),
-        "session_wall_seconds": worker_status.get("session_wall_seconds", 0.0),
-        "recent_images_per_min": recent_rate,
-        "recent_wall_images_per_min": float(worker_status.get("recent_wall_images_per_min") or 0.0),
-        "overall_images_per_min": overall_rate,
-        "overall_wall_images_per_min": float(worker_status.get("overall_wall_images_per_min") or 0.0),
-        "active_batch_size": worker_status.get("active_batch_size", 0),
-        "target_batch_size": worker_status.get("target_batch_size", 0),
-        "successful_batches_at_size": worker_status.get("successful_batches_at_size", 0),
-        "last_batch_failures": worker_status.get("last_batch_failures", 0),
-        "last_batch_stage_seconds": worker_status.get("last_batch_stage_seconds") or {},
-        "last_candidate_query_seconds": worker_status.get("last_candidate_query_seconds", 0.0),
-        "last_candidate_count": worker_status.get("last_candidate_count", 0),
-        "last_candidate_window_size": worker_status.get("last_candidate_window_size", 0),
-        "last_ready_count": worker_status.get("last_ready_count", 0),
-        "last_cooled_down_count": worker_status.get("last_cooled_down_count", 0),
-        "next_retry_at": worker_status.get("next_retry_at"),
-        "oom_backoffs": worker_status.get("oom_backoffs", 0),
-        "last_oom_at": worker_status.get("last_oom_at"),
-        "batch_growth_paused_until": worker_status.get("batch_growth_paused_until"),
+        "worker_state": state,
+        "worker_message": message,
+        "embedding_manual_pause": manual_pause,
+        "worker_error": "",
         "embedding_index": embedding_index,
-        "eta_seconds": eta_seconds,
     }
-    _ai_status_response_cache["data"] = _copy_ai_status_response(response)
-    _ai_status_response_cache["key"] = cache_key
-    _ai_status_response_cache["expires"] = time.monotonic() + _ai_status_response_cache_ttl_seconds
     return response
 
 
 @router.post("/api/ai/embeddings/pause")
 async def api_pause_embeddings():
-    capability = capabilities.capability_status("search")
-    if not capability["available"]:
-        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
-    try:
-        import embedding_worker
-    except ImportError:
-        return JSONResponse({"error": "Embeddings not available"}, status_code=503)
-    embedding_worker.pause_embedding_worker()
-    invalidate_ai_status_response_cache()
-    settings_status.invalidate_settings_response_cache()
-    return {"ok": True, "ai_status": await build_ai_status(force=True)}
+    """Stop making embeddings — which is to say, stop chores.
+
+    This imported `embedding_worker` and 503'd when it was not there, which it
+    has not been since 6fc7e31c. The drawer's pause button has been calling it
+    the whole time. There is no separate embedding worker to pause now: one
+    loop makes every kind of missing thing, so pausing embeddings *is* pausing
+    chores, and that is a decision in the log — it survives a restart, because
+    someone who paused work to save battery would not thank us for resuming it
+    on the next launch.
+    """
+
+    return await _set_chores(paused=True)
 
 
 @router.post("/api/ai/embeddings/resume")
 async def api_resume_embeddings():
     capability = capabilities.capability_status("search")
-    if not capability["available"]:
-        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
     runtime = embedding_runtime_status(capability)
     if not runtime["ready"]:
         return JSONResponse(
@@ -301,21 +185,16 @@ async def api_resume_embeddings():
             },
             status_code=409,
         )
-    try:
-        import embedding_worker
-        import db
-    except ImportError:
-        return JSONResponse({"error": "Embeddings not available"}, status_code=503)
-    try:
-        import thumbnails
-        thumbnails.start_pregeneration()
-    except ImportError:
-        pass
-    await db.clear_embedding_poison_ledger(settings.active_embedding_config())
-    embedding_worker.resume_embedding_worker()
-    invalidate_ai_status_response_cache()
+    return await _set_chores(paused=False)
+
+
+async def _set_chores(*, paused: bool) -> dict:
+    capability = capabilities.capability_status("search")
+    if not capability["available"]:
+        return JSONResponse(capabilities.unavailable_response("search"), status_code=409)
+    await connection.writing(catalog_path(), work.set_paused, paused)
     settings_status.invalidate_settings_response_cache()
-    return {"ok": True, "ai_status": await build_ai_status(force=True)}
+    return {"ok": True, "ai_status": await build_ai_status()}
 
 
 @router.post("/api/ai/model/install")
@@ -334,7 +213,7 @@ async def api_install_ai_model(role: str = "fast"):
             "already_installed": True,
             "install": existing_status.get("install", {}),
             "model_status": existing_status,
-            "ai_status": await build_ai_status(force=True),
+            "ai_status": await build_ai_status(),
         }
     state = ai_models.start_model_install(install_config)
     active_install_dir = str(state.get("model_dir") or "")
@@ -352,7 +231,7 @@ async def api_install_ai_model(role: str = "fast"):
                 "error": f"Another model install is already running: {state.get('model_id') or active_install_dir}",
                 "install": state,
                 "model_status": ai_models.get_model_status(install_config),
-                "ai_status": await build_ai_status(force=True),
+                "ai_status": await build_ai_status(),
             },
             status_code=409,
         )
@@ -361,7 +240,7 @@ async def api_install_ai_model(role: str = "fast"):
         "role": selected_role,
         "install": state,
         "model_status": ai_models.get_model_status(install_config),
-        "ai_status": await build_ai_status(force=True),
+        "ai_status": await build_ai_status(),
     }
 
 

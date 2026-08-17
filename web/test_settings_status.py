@@ -378,9 +378,8 @@ class SettingsStatusTests(BackendTestCase):
         active_config = settings.active_embedding_config()
 
         await db.store_embeddings_batch([(image_id, b"active-vector")], embedding_config=active_config)
-        ai_routes.invalidate_ai_status_response_cache()
 
-        status = await ai_routes.build_ai_status(force=True)
+        status = await ai_routes.build_ai_status()
         index = status["embedding_index"]
 
         self.assertNotIn("embedding_indexes", status)
@@ -419,12 +418,10 @@ class SettingsStatusTests(BackendTestCase):
             }
 
         ai_models.get_model_status = fake_get_model_status
-        ai_routes.invalidate_ai_status_response_cache()
         try:
-            status = await ai_routes.build_ai_status(force=True)
+            status = await ai_routes.build_ai_status()
         finally:
             ai_models.get_model_status = old_get_model_status
-            ai_routes.invalidate_ai_status_response_cache()
 
         index = status["embedding_index"]
         self.assertTrue(index["installing"])
@@ -466,13 +463,11 @@ class SettingsStatusTests(BackendTestCase):
 
         ai_models.get_model_status = fake_get_model_status
         ai_models.start_model_install = fail_start_model_install
-        ai_routes.invalidate_ai_status_response_cache()
         try:
             response = await ai_routes.api_install_ai_model(role="deep")
         finally:
             ai_models.get_model_status = old_get_model_status
             ai_models.start_model_install = old_start_model_install
-            ai_routes.invalidate_ai_status_response_cache()
 
         self.assertTrue(response["ok"])
         self.assertTrue(response["already_installed"])
@@ -570,51 +565,5 @@ class SettingsStatusTests(BackendTestCase):
         self.assertNotIn({"id": 999999}, second["catalog"]["sources"])
 
 
-    async def test_ai_status_response_cache_protects_nested_responses(self):
-        first = await ai_routes.build_ai_status()
-        self.assertIsNotNone(ai_routes._ai_status_response_cache["data"])
-
-        first["last_batch_stage_seconds"]["db"] = 999999
-        first["embedding_index"]["worker_message"] = "mutated"
-
-        second = await ai_routes.build_ai_status()
-
-        self.assertNotEqual(second["last_batch_stage_seconds"].get("db"), 999999)
-        self.assertNotEqual(second["embedding_index"].get("worker_message"), "mutated")
-
-    async def test_ai_status_response_cache_returns_stale_while_refreshing(self):
-        model_status = ai_models.get_model_status()
-        ai_routes._ai_status_response_cache.update({
-            "data": {
-                "embedded": 1,
-                "last_batch_stage_seconds": {"db": 1},
-                "embedding_index": {"worker_message": "cached"},
-            },
-            "key": ai_routes._ai_model_status_cache_key(model_status),
-            "expires": ai_routes.time.monotonic() - 1,
-        })
-        old_create_task = ai_routes.asyncio.create_task
-        scheduled = []
-
-        def fake_create_task(coro):
-            scheduled.append(coro)
-            coro.close()
-            return object()
-
-        try:
-            ai_routes.asyncio.create_task = fake_create_task
-            ai_routes._ai_status_response_refreshing = False
-
-            first = await ai_routes.build_ai_status(model_status)
-            second = await ai_routes.build_ai_status(model_status)
-
-            self.assertEqual(first["embedded"], 1)
-            self.assertEqual(second["embedding_index"]["worker_message"], "cached")
-            self.assertEqual(len(scheduled), 1)
-            self.assertTrue(ai_routes._ai_status_response_refreshing)
-        finally:
-            ai_routes.asyncio.create_task = old_create_task
-            ai_routes._ai_status_response_refreshing = False
-            ai_routes.invalidate_ai_status_response_cache()
 
 
