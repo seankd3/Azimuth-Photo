@@ -99,7 +99,7 @@ async def api_collection(collection_id: str, limit: int = 200, offset: int = 0):
     if said is None:
         return JSONResponse({"error": "Collection not found"}, status_code=404)
     members = photos.ids(conn, sets.members(conn, collection_id))
-    card = _card(conn, collection_id, name)
+    card = _card(conn, collection_id, said.get("name") or "")
     return {"collection": {**card, "image_ids": members[offset:offset + limit]}}
 
 

@@ -311,7 +311,7 @@ async def run_startup(
         try:
             import db as _db
             from features.collections import suggestions as _suggestions
-            await _suggestions.collection_suggestions(_catalog_path())
+            await _suggestions.collection_suggestions(catalog_path())
         except Exception:
             log.debug("collection suggestions warmup skipped", exc_info=True)
 
@@ -325,7 +325,7 @@ async def run_startup(
         try:
             import db as _db
             import elo_stars as _elo_stars
-            await _elo_stars.refresh_stored_stars(_catalog_path())
+            await _elo_stars.refresh_stored_stars(catalog_path())
         except Exception:
             log.debug("stored star reconcile skipped", exc_info=True)
 
@@ -347,11 +347,11 @@ async def run_startup(
         from data import connection as data_connection
         from features.catalog import synchronize
 
-        if data_connection.is_ephemeral_db_path(app_catalog_path()):
+        if data_connection.is_ephemeral_db_path(catalog_path()):
             # A temp catalog belongs to a test, and a worker still holding it
             # when the fixture tears down is a Windows deletability failure.
             return
-        await synchronize.run_reconcile_worker(lambda: app_catalog_path())
+        await synchronize.run_reconcile_worker(catalog_path)
 
     track_background_task(_start_background_daemon(_reconcile_folders, delay=30.0))
 
@@ -397,7 +397,7 @@ async def run_startup(
 
         track_background_task(
             _start_background_daemon(
-                lambda: _catalog_backups.run_daily_backup_scheduler(lambda: _catalog_path()),
+                lambda: _catalog_backups.run_daily_backup_scheduler(catalog_path),
                 delay=15.0,
             )
         )
@@ -416,7 +416,7 @@ async def run_startup(
             try:
                 await asyncio.to_thread(
                     _cloud_backup.start_sync,
-                    _catalog_path(),
+                    catalog_path(),
                     manual_override=False,
                 )
             except Exception:
@@ -424,7 +424,7 @@ async def run_startup(
 
         track_background_task(
             _start_background_daemon(
-                lambda: _cloud_backup.run_nightly_scheduler(lambda: _catalog_path()),
+                lambda: _cloud_backup.run_nightly_scheduler(catalog_path),
                 delay=25.0,
             )
         )
@@ -439,7 +439,7 @@ async def run_startup(
         from features.library import watched_folders
         track_background_task(
             _start_background_daemon(
-                lambda: watched_folders.run_poller(lambda: _catalog_path()),
+                lambda: watched_folders.run_poller(catalog_path),
                 delay=35.0,
             )
         )

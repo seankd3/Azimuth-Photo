@@ -430,94 +430,6 @@ async def undo_last_comparison():
 
 
 
-async def store_face_scan_result(
-    *,
-    image_id: int,
-    model_id: str,
-    cache_path: str = "",
-    faces: list[dict] | None = None,
-    status: str = "scanned",
-    error: str = "",
-) -> dict:
-    result = await people_repository.store_face_scan_result(
-        catalog_path(),
-        image_id=image_id,
-        model_id=model_id,
-        cache_path=cache_path,
-        faces=faces,
-        status=status,
-        error=error,
-    )
-    # Backlog scans store one result every few hundred ms; only a scan that
-    # actually touched person memberships may clear the facet/count caches,
-    # or the People worker keeps every warm path cold for hours.
-    result.pop("_affected_people", None)
-    return result
-
-
-async def cluster_unassigned_faces(
-    *,
-    model_id: str,
-    similarity_threshold: float = 0.52,
-    merge_threshold: float = 0.62,
-    limit: int = 500,
-) -> dict:
-    result = await people_repository.cluster_unassigned_faces(
-        catalog_path(),
-        model_id=model_id,
-        similarity_threshold=similarity_threshold,
-        merge_threshold=merge_threshold,
-        limit=limit,
-    )
-    result.pop("_affected_people", None)
-    return result
-
-
-async def get_people_review(limit: int = 24, long_tail_threshold: int = 1) -> dict:
-    current_settings = settings.get_settings()
-    return await people_repository.get_people_review(
-        catalog_path(),
-        limit=limit,
-        long_tail_threshold=long_tail_threshold,
-        face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
-        cache_root=str(current_settings.get("ssd_cache_dir") or ""),
-    )
-
-
-async def get_people_status_counts(long_tail_threshold: int = 1) -> dict:
-    current_settings = settings.get_settings()
-    return await people_repository.get_people_status_counts(
-        catalog_path(),
-        long_tail_threshold=long_tail_threshold,
-        face_model_id=str(current_settings.get("face_model_id") or "buffalo_l"),
-        cache_root=str(current_settings.get("ssd_cache_dir") or ""),
-    )
-
-
-async def label_person(person_id: int, name: str) -> dict:
-    return await people_repository.label_person(catalog_path(), person_id, name)
-
-
-async def merge_people(source_person_id: int, target_person_id: int) -> dict:
-    result = await people_repository.merge_people(catalog_path(), source_person_id, target_person_id)
-    return result
-
-
-async def assign_face(face_id: int, person_id: int | None = None, name: str = "") -> dict:
-    result = await people_repository.assign_face(catalog_path(), face_id, person_id=person_id, name=name)
-    return result
-
-
-async def ignore_face(face_id: int) -> dict:
-    result = await people_repository.ignore_face(catalog_path(), face_id)
-    return result
-
-
-async def ignore_person(person_id: int) -> dict:
-    result = await people_repository.ignore_person(catalog_path(), person_id)
-    return result
-
-
 async def get_cached_image_ids(
     image_ids: list[int],
     size: str,
@@ -531,7 +443,6 @@ async def get_cached_image_ids(
         image_ids,
         size,
         cache_root,
-        ttl_seconds=CACHED_IMAGE_IDS_TTL_SECONDS,
     )
 
 

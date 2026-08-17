@@ -886,7 +886,7 @@ async def api_save_snapshot(image_id: int, body: DevelopSnapshotBody):
             conn, image_id, json.dumps(body.settings, separators=(",", ":")), entry["label"]
         )
         await conn.commit()
-        return {"id": int(cursor.lastrowid), **entry}
+        return entry
     finally:
         await connection.close_async(conn, db_path=catalog_path())
 

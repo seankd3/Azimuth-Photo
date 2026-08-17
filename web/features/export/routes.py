@@ -18,7 +18,9 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from data.repositories import stats as stats_repository
+import render
 import settings
+import tiles
 
 
 import db
@@ -145,7 +147,7 @@ async def _get_export_images(
             "SELECT i.id, i.filename, i.filepath, i.tail, i.elo, i.comparisons,"
             " i.propagated_updates, i.status, i.flag, i.date_taken, i.camera_make,"
             " i.camera_model, i.lens, i.file_ext, i.file_size, i.file_modified_at,"
-            " i.width, i.height, i.latitude, i.longitude"
+            " i.width, i.height, i.latitude, i.longitude, i.content_hash"
             f" FROM images i WHERE {library.IN_LIBRARY}"
             " ORDER BY i.elo DESC, i.id DESC"
         )
@@ -212,10 +214,15 @@ def _zip_source_for_image(image: dict, size: str) -> tuple[str | None, str]:
         if not os.path.exists(path):
             return None, "source file unavailable"
         return path, ""
-    entry = cache_entries.fast_disk_path_entry(size, image_id)
-    if entry is None:
-        return None, f"{size} cache entry missing"
-    _signature, path = entry
+    # `cache_entries.fast_disk_path_entry(size, image_id)` stood here until
+    # 6fc7e31c deleted the module with the rest of thumbnails/. Tiles are named
+    # by what they show, so the id is not the key any more -- the hash is.
+    content_hash = image.get("content_hash") or ""
+    if not content_hash:
+        return None, "content hash missing"
+    path = tiles.path_for(content_hash, render.SIZES[size])
+    if not os.path.exists(path):
+        return None, f"{size} tile not generated yet"
     return path, ""
 
 

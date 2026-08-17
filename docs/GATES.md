@@ -30,11 +30,18 @@ code produces more of them, never fewer.
 | Gate | Counts | Today | Command |
 |---|---|---:|---|
 | `seam` | UI `/api/` literals no handler serves | **16** | `python scripts/gates/check.py` |
-| `layers` | imports pointing up the stack | **21** | " |
-| `tables` | table DDL outside `web/model/schema.sql` | **68** | " |
+| `layers` | imports pointing up the stack | **33** | " |
+| `tables` | table DDL outside `web/model/schema.sql` | **61** | " |
 | `invokes` | paths a workflow names that are not tracked | **4** | " |
+| `routes` | a path served twice, stranded, or shadowed | **0** | " |
+| `names` | a name that is called and defined nowhere | **0** | " |
 
-Whole set: **0.79 s** warm, stdlib only, no network, no database.
+Whole set: **2.3 s** warm, no network, no database. Five gates are stdlib only;
+`names` shells out to **pyflakes**, which must be importable by whichever Python
+runs `check.py` (`python -m pip install pyflakes`). It is the one dependency any
+gate has, and it is deliberate: Python's scoping rules are involved enough that a
+hand-rolled undefined-name check would be subtly wrong, and a checker that is
+subtly wrong does not merely miss things — it certifies them.
 
 ```
 $ for i in 1 2 3; do s=$(date +%s%N); python scripts/gates/check.py >/dev/null; \

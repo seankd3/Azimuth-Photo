@@ -317,23 +317,19 @@ def thumbnail_bytes(scan: Scan, entry: dict) -> bytes:
         os.utime(cached, None)
         return cached.read_bytes()
     cached.parent.mkdir(parents=True, exist_ok=True)
-    # Deferred like every generation caller: Pillow stays off boot, and the
-    # submodule is imported by name rather than hoped-for as a package
-    # attribute someone else materialized. A stale third positional argument
-    # also survived a load_source_image signature change here and 500'd every
-    # canvas preview — nothing tested this route, so it broke silently until
-    # a real lab roll hit the import canvas.
-    # render.decode is the one decoder: RAW-ness by content, draft before load,
-    # orientation applied exactly once. The comment that stood here warned that
-    # a stale third positional argument had 500'd every canvas preview because
-    # nothing tested this route -- a keyword-free call into one function cannot
-    # drift that way.
+    # decode, fit, encode -- `render` is the one decoder and the one encoder.
+    # This block called `generation.*`, a module deleted with thumbnails/ in
+    # 6fc7e31c, so every canvas preview has raised NameError since. It is the
+    # third time this exact route has broken on a stale call into a moved
+    # helper, which is why the two warnings about it were still sitting here in
+    # duplicate. Prose does not hold an invariant: the `undefined-names` gate
+    # added alongside this fix does.
     image = render.decode(entry["path"], THUMB_MAX_EDGE)
     try:
-        resized = generation.resize_to_long_side(image, THUMB_MAX_EDGE)
+        resized = render.fit(image, THUMB_MAX_EDGE)
         if resized.mode not in ("RGB", "L"):
             resized = resized.convert("RGB")  # alpha PNG/HEIC cannot encode as JPEG
-        data = generation.thumbnail_jpeg_bytes(resized, "sm", 85)
+        data = render.encode(resized, 85)
         resized.close()
     finally:
         image.close()
