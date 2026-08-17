@@ -122,6 +122,46 @@ def vector(source: str):
         image.close()
 
 
+def vectors(sources: list[str]):
+    """Several photographs at once. Same answer as `vector`, far less overhead.
+
+    The GPU is idle most of a single-image call: decode, one small forward
+    pass, copy back. Handing it eight at a time keeps it busy and costs the
+    same memory, because a 384px batch of eight is small beside the 2.4 GB of
+    weights already resident.
+
+    Returns one row per source, with None where the file would not decode --
+    positional, so the caller can still tell which photograph failed.
+    """
+
+    import numpy as np
+    import torch
+    import render
+
+    model, processor = _model()
+    images, keep = [], []
+    for index, source in enumerate(sources):
+        try:
+            images.append(render.decode(source, INPUT))
+            keep.append(index)
+        except Exception:
+            continue
+    out: list = [None] * len(sources)
+    if not images:
+        return out
+    try:
+        with torch.inference_mode():
+            batch = processor(images=images, return_tensors="pt").to("cuda", torch.float16)
+            got = _tensor(model.get_image_features(**batch))
+            got = torch.nn.functional.normalize(got.float(), dim=-1).cpu().numpy()
+        for slot, index in enumerate(keep):
+            out[index] = got[slot].astype(np.float32)
+        return out
+    finally:
+        for image in images:
+            image.close()
+
+
 def text(query: str):
     """A query in the same space, so a dot product means something.
 

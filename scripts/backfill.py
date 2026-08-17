@@ -20,6 +20,11 @@ os.environ.setdefault("AZIMUTH_DATA_DIR", r"C:\Azimuth Photo\data")
 os.environ.setdefault("HF_HOME", r"D:\azimuth-bench\models")
 
 
+# Eight fits the card beside 2.4 GB of resident weights and keeps the GPU busy
+# through the decode of the next one.
+BATCH = 8
+
+
 def say(message: str) -> None:
     print(f"{time.strftime('%H:%M:%S')}  {message}", flush=True)
 
@@ -29,6 +34,7 @@ def main() -> int:
     from data import connection
     from model import cache, photos
     import render
+    import embed
     import search
     import tiles
     import work
@@ -72,31 +78,55 @@ def main() -> int:
             say("nothing left that this machine can reach; done")
             break
 
-        for row in rows:
-            digest = row["hash"]
-            source = tiles.path_for(digest, render.LOUPE)
-            if not os.path.exists(source):
+        # In batches, for two reasons that cost 11x between them: the GPU is
+        # idle through most of a single-image call, and `cache.make` commits to
+        # a 3.9 GB catalog per photograph. One forward pass and one transaction
+        # for eight of them turns 0.55 img/s into something that finishes.
+        recipe_text = cache.canonical(search.EMBEDDING, recipe)
+        for start in range(0, len(rows), BATCH):
+            group = rows[start:start + BATCH]
+            sources, digests = [], []
+            for row in group:
+                digest = row["hash"]
                 source = tiles.path_for(digest, render.GRID)
-            if not os.path.exists(source):
-                # No rendition here, so the original has to be read. Render the
-                # tile from it first and embed from that: the decode is the
-                # expensive part and this way it is paid once for two answers,
-                # and the photograph gets a preview that lives on the laptop.
-                original = photos.locate(conn, row["tail"], expected_size=row["file_size"])
-                if not original:
-                    unreachable.add(digest)
-                    continue
-                from_archive += 1
-                made = cache.make(conn, digest, "tile", original, tile_recipe)
-                source = (made or {}).get("path") or original
+                if not os.path.exists(source):
+                    source = tiles.path_for(digest, render.LOUPE)
+                if not os.path.exists(source):
+                    # No rendition here, so the original has to be read. Render
+                    # the tile from it first and embed from that: the decode is
+                    # the expensive part, so this pays it once for two answers
+                    # and leaves the photograph a preview on the laptop.
+                    original = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+                    if not original:
+                        unreachable.add(digest)
+                        continue
+                    from_archive += 1
+                    made = cache.make(conn, digest, "tile", original, tile_recipe)
+                    source = (made or {}).get("path") or original
+                sources.append(source)
+                digests.append(digest)
+            if not sources:
+                continue
+
             try:
-                got = cache.make(conn, digest, search.EMBEDDING, source, recipe)
-                done += 1 if got else 0
-                failed += 0 if got else 1
-            except Exception as error:  # keep going; the row records the reason
-                failed += 1
-                say(f"  {type(error).__name__}: {error}"[:160])
-            if (done + failed) and (done + failed) % 250 == 0:
+                made = embed.vectors(sources)
+            except Exception as error:
+                failed += len(sources)
+                say(f"  batch {type(error).__name__}: {error}"[:160])
+                continue
+
+            now = time.time()
+            written = [(d, recipe_text, v.tobytes(), len(v) * 4, now)
+                       for d, v in zip(digests, made) if v is not None]
+            failed += len(sources) - len(written)
+            if written:
+                conn.executemany(
+                    "INSERT OR REPLACE INTO cache(hash, kind, recipe, state, value, bytes, at)"
+                    " VALUES (?, 'embedding', ?, 'ready', ?, ?, ?)", written)
+                conn.commit()
+                done += len(written)
+
+            if done and (done // BATCH) % 30 == 0:
                 rate = done / max(time.perf_counter() - started, 1e-9)
                 left = work.owing(conn, search.EMBEDDING, recipe=recipe) - len(unreachable)
                 say(f"{done:,} embedded ({from_archive:,} needed the archive)  {failed} failed"
