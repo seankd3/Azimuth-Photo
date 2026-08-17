@@ -515,28 +515,39 @@ class RankingIsDerived(CoreCase):
         scores = rank.strength(self.conn)
         self.assertLess(scores["lucky"], rank.BASE + 6 * rank.SPREAD)
 
-    def test_a_judged_photo_takes_its_own_rating_never_its_neighbours(self):
-        # The guarantee the old MAX_DIRECT_COMPARISONS cap was trying to buy.
+    def test_your_verdict_outweighs_the_prediction_once_you_have_looked(self):
+        # The guarantee the old MAX_DIRECT_COMPARISONS cap was trying to buy,
+        # now a weight rather than a threshold: a photograph you have judged
+        # many times is almost entirely its own strength, whatever the
+        # direction thinks of it.
         import numpy as np
-        self._round("a", ["b"], 1.0)
-        judged = rank.strength(self.conn)
-        out = rank.propagate(judged, ["a", "b", "c"], np.eye(3, dtype=np.float32))
-        self.assertAlmostEqual(out["a"], judged["a"], places=6)
-        self.assertAlmostEqual(out["b"], judged["b"], places=6)
+        import taste
+        for at in range(40):
+            self._round("often", [f"other{at}"], 1.0 + at)
+        measured = rank.strength(self.conn)
+        seen = rank.seen(self.conn)
+        subjects = sorted(measured)
+        vectors = np.eye(len(subjects), dtype=np.float64)[:, :8]
+        out = taste.scores(measured, seen, subjects, vectors)
+        drift = abs(out["often"] - measured["often"])
+        self.assertLess(drift, abs(measured["often"] - rank.BASE) * 0.25)
 
-    def test_propagation_is_bounded_however_many_neighbours_agree(self):
-        # Summing deltas is what made a frame resembling fifty judged photos
-        # drift past all of them; an average cannot.
+    def test_a_photograph_you_never_judged_still_gets_a_score(self):
+        # What the neighbour propagation could not do: a photograph far from
+        # everything judged got nothing and sat at base forever. A direction is
+        # a function of the vector, so coverage is total the moment it has one.
         import numpy as np
+        import taste
         for i in range(20):
             self._round(f"win{i}", [f"lose{i}"], 1.0 + i)
-        judged = rank.strength(self.conn)
-        subjects = list(judged) + ["newcomer"]
-        vectors = np.ones((len(subjects), 2), dtype=np.float32)
+        measured = rank.strength(self.conn)
+        subjects = sorted(measured) + ["stranger"]
+        rng = np.random.default_rng(3)
+        vectors = rng.normal(size=(len(subjects), 6))
         vectors /= np.linalg.norm(vectors, axis=1, keepdims=True)
-        out = rank.propagate(judged, subjects, vectors)
-        spread = max(judged.values()) - rank.BASE
-        self.assertLessEqual(abs(out["newcomer"] - rank.BASE), spread)
+        out = taste.scores(measured, rank.seen(self.conn), subjects, vectors)
+        self.assertIn("stranger", out)
+        self.assertTrue(np.isfinite(out["stranger"]))
 
     def test_with_no_vectors_it_is_the_fit_not_a_failure(self):
         # Ranking works at zero embedding coverage and sharpens as they land.
