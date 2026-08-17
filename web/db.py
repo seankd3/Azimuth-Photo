@@ -838,5 +838,4 @@ async def get_ai_status_counts() -> dict:
     return await stats_repository.ai_status(
         catalog_path(),
         get_embedding_count=get_embedding_count,
-        get_active_source_ids=get_active_source_id_set,
     )
