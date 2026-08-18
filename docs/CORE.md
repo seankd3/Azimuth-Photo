@@ -252,6 +252,13 @@ the same pixels. Eviction is by age against one ceiling, never touching
 originals or never-evict kinds. Painting a smaller tile while the right one
 renders is UI behaviour, not a cache concept.
 
+**Embedded metadata.** Dimensions, capture date, camera, and lens are one
+cached answer keyed by complete content identity. Ready answers project into
+the `images` columns used for sorting and facets; boot can rebuild those query
+indexes from cache. Folder names, mtimes, JSON companions, and XMP are excluded
+from this answer because they can change without changing the keyed bytes.
+Your corrected capture date is a decision and overrides the embedded read.
+
 **Collections and keywords.** Both are named sets of photo identities recorded
 as decisions; they differ only in where the desktop presents them. Renaming a
 set never moves its membership. Saved views wait for a real typed query

@@ -249,7 +249,9 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
                 source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
                 if source is None:
                     continue
-                cache.make(conn, row["hash"], kind, source, recipe)
+                entry = cache.make(conn, row["hash"], kind, source, recipe)
+                if entry is not None and kind.project is not None:
+                    cache.project(conn, row["hash"], row["id"], kind, entry, recipe)
                 return {"did": kind.name, "photo": row["id"], "recipe": recipe}
     return None
 

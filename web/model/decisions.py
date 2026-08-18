@@ -38,6 +38,7 @@ COMPARE = "compare"    # one photo beat another
 DEVELOP = "develop"    # an edit
 NAME = "name"          # a person, a roll, a folder
 ROTATE = "rotate"      # 0/90/180/270, when the file itself is filed sideways
+DATE = "date"          # a corrected capture date
 FORGET = "forget"      # this subject is no longer wanted
 
 YOU = "you"

@@ -8,6 +8,7 @@ reads is a suite nobody runs.
 
 import os
 import shutil
+import struct
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -19,8 +20,10 @@ import model
 import tiles
 import boot
 import library as library_surface
+import metadata as embedded_metadata
 from PIL import Image
 from model import backup, cache, copies, decisions, drives, photos, scope, sets
+from photo import exif as raw_exif
 
 TAIL = "Raws/Digital/2026/x.CR3"
 
@@ -123,6 +126,75 @@ class FreshCatalogTests(unittest.TestCase):
         self.assertEqual(len(page), 1)
         self.assertEqual(body, cached)
         self.assertTrue(body.startswith(b"\xff\xd8"))
+
+    def test_embedded_metadata_is_cached_projected_and_overridden_by_your_date(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "catalog.db")
+            tile_root = os.path.join(directory, "tiles")
+            photo_root = os.path.join(directory, "Photos")
+            source = os.path.join(photo_root, "portrait.jpg")
+            os.makedirs(photo_root)
+            exif = Image.Exif()
+            exif[0x010F] = "Canon"
+            exif[0x0110] = "Canon EOS R5"
+            exif[0x0112] = 6
+            exif[0x9003] = "2026:08:17 03:34:08"
+            exif[0xA434] = "RF 50mm F1.2 L"
+            Image.new("RGB", (900, 600), "maroon").save(source, "JPEG", exif=exif)
+
+            with boot.Library(catalog, tile_root) as product:
+                product.attach(photo_root)
+                photo = product.browse()[0]
+                identified = work.step(product.conn, (embedded_metadata.KIND,))
+                enriched = work.step(product.conn, (embedded_metadata.KIND,))
+                answer = product.details(photo["id"])
+                projected = product.browse()[0]
+                corrected_date = product.set_date(photo["id"], "2020-01-02 04:05:06")
+                with self.assertRaises(ValueError):
+                    product.set_date(photo["id"], "2020-19-40")
+                corrected = product.browse()[0]
+                product.conn.execute(
+                    "UPDATE images SET date_taken = NULL, camera_make = NULL, width = NULL"
+                )
+                product.conn.commit()
+
+            with boot.Library(catalog, tile_root) as reopened:
+                repaired = reopened.browse()[0]
+
+        self.assertEqual((answer["width"], answer["height"]), (600, 900))
+        self.assertEqual(identified["did"], "identity")
+        self.assertEqual(enriched["did"], "metadata")
+        self.assertEqual(answer["camera_make"], "Canon")
+        self.assertEqual(answer["camera_model"], "EOS R5")
+        self.assertEqual(answer["lens"], "RF 50mm F1.2 L")
+        self.assertEqual(projected["date_taken"], "2026-08-17 03:34:08")
+        self.assertEqual(corrected_date, "2020-01-02 04:05:06")
+        self.assertEqual(corrected["date_taken"], "2020-01-02 04:05:06")
+        self.assertEqual(repaired["date_taken"], "2020-01-02 04:05:06")
+        self.assertEqual(repaired["width"], 600)
+
+    def test_a_damaged_disposable_metadata_answer_cannot_stop_boot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "catalog.db")
+            digest = "f" * 64
+            conn = model.connect(catalog)
+            conn.execute(
+                "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
+                ("Raws/frame.jpg", digest),
+            )
+            cache.put(
+                conn,
+                digest,
+                embedded_metadata.KIND,
+                cache.Made(value="not json", bytes=8),
+            )
+            conn.commit()
+            conn.close()
+
+            with boot.Library(catalog, os.path.join(directory, "tiles")) as product:
+                repaired = cache.get(product.conn, digest, embedded_metadata.KIND)
+
+        self.assertIsNone(repaired)
 
 
 class CoreCase(unittest.TestCase):
@@ -741,6 +813,30 @@ class CacheRefuses(CoreCase):
         self.assertEqual(cache.evict(self.conn, 0, (self.kind, embedding)), [("test_thumb", "/t.jpg")])
         self.assertIsNotNone(cache.get(self.conn, "h1", embedding))
 
+    def test_a_projection_failure_becomes_one_recorded_answer(self):
+        photo_id = self.photo()
+
+        def break_after_writing(conn, projected_id, _entry):
+            conn.execute("UPDATE images SET stars = 5 WHERE id = ?", (projected_id,))
+            raise ZeroDivisionError("broken projection")
+
+        projected = cache.Kind(
+            name="projected",
+            compute=lambda source, digest: cache.Made(value="answer"),
+            project=break_after_writing,
+        )
+        cache.put(self.conn, "h1", projected, cache.Made(value="answer"))
+        entry = cache.get(self.conn, "h1", projected)
+
+        self.assertFalse(cache.project(self.conn, "h1", photo_id, projected, entry))
+        failed = cache.get(self.conn, "h1", projected)
+        self.assertEqual(failed["state"], cache.FAILED)
+        self.assertIn("ProjectionError", failed["note"])
+        self.assertEqual(
+            self.conn.execute("SELECT stars FROM images WHERE id = ?", (photo_id,)).fetchone()[0],
+            0,
+        )
+
 
 class OwedIsAQuery(CoreCase):
     def setUp(self):
@@ -825,6 +921,39 @@ class DecodingRefuses(unittest.TestCase):
     Ported rather than dropped, because deleting a test file is how a guard
     goes quiet -- which happened once already today with the symlink refusal.
     """
+
+    def test_a_bounded_raw_header_read_finds_camera_date_and_lens(self):
+        make, camera = b"Canon\0", b"Canon R5\0"
+        taken, lens = b"2026:08:17 03:34:08\0", b"RF 50mm\0"
+        ifd0, values = 8, 50
+        exif_ifd = values + len(make) + len(camera)
+        exif_values = exif_ifd + 30
+        data = bytearray(exif_values + len(taken) + len(lens))
+        struct.pack_into("<2sHI", data, 0, b"II", 42, ifd0)
+        struct.pack_into("<H", data, ifd0, 3)
+        struct.pack_into("<HHII", data, 10, 0x010F, 2, len(make), values)
+        struct.pack_into("<HHII", data, 22, 0x0110, 2, len(camera), values + len(make))
+        struct.pack_into("<HHII", data, 34, 0x8769, 4, 1, exif_ifd)
+        data[values:values + len(make)] = make
+        data[values + len(make):exif_ifd] = camera
+        struct.pack_into("<H", data, exif_ifd, 2)
+        struct.pack_into("<HHII", data, exif_ifd + 2, 0x9003, 2, len(taken), exif_values)
+        struct.pack_into(
+            "<HHII", data, exif_ifd + 14, 0xA434, 2, len(lens), exif_values + len(taken)
+        )
+        data[exif_values:exif_values + len(taken)] = taken
+        data[exif_values + len(taken):] = lens
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "frame.dng")
+            with open(path, "wb") as handle:
+                handle.write(data)
+            found = raw_exif.read(path)
+
+        self.assertEqual(found["make"], "Canon")
+        self.assertEqual(found["model"], "Canon R5")
+        self.assertEqual(found["date_taken"], "2026:08:17 03:34:08")
+        self.assertEqual(found["lens"], "RF 50mm")
 
     def test_raw_ness_is_decided_by_the_first_three_bytes(self):
         # This archive holds 1,306 files named .CR2 that are full-resolution

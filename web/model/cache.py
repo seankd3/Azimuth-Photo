@@ -85,6 +85,10 @@ class Kind:
     # costs and whether it can be made; how to throw one away belongs beside
     # them rather than as a special case inside the evictor.
     remove: Callable[[str], None] | None = None
+    # Some disposable answers also maintain columns used as query indexes.
+    # Projection is explicitly downstream of a ready cache row; compute stays
+    # a pure function of source bytes and recipe.
+    project: Callable[[Any, int, dict], None] | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +183,32 @@ def make(conn, hash: str, kind: Kind, source: str, recipe: dict[str, Any] | None
     put(conn, hash, kind, made, recipe)
     conn.commit()
     return get(conn, hash, kind, recipe)
+
+
+def project(
+    conn,
+    hash: str,
+    photo_id: int,
+    kind: Kind,
+    entry: dict,
+    recipe: dict[str, Any] | None = None,
+) -> bool:
+    """Apply a ready answer to its query index, recording a refusal once."""
+
+    if kind.project is None:
+        return True
+    conn.execute("SAVEPOINT cache_projection")
+    try:
+        kind.project(conn, int(photo_id), entry)
+    except Exception as error:  # noqa: BLE001 - projection failure is an answer
+        conn.execute("ROLLBACK TO cache_projection")
+        conn.execute("RELEASE cache_projection")
+        failed(conn, hash, kind, f"ProjectionError: {type(error).__name__}: {error}", recipe)
+        conn.commit()
+        return False
+    conn.execute("RELEASE cache_projection")
+    conn.commit()
+    return True
 
 
 def forget(conn, hash: str, *, kind: Kind | None = None) -> int:

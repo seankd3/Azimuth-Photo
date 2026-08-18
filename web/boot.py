@@ -10,11 +10,12 @@ from __future__ import annotations
 import os
 
 import library as queries
+import metadata as embedded_metadata
 import model
 import render
 import tiles
 import work
-from model import cache, copies, drives, photos
+from model import cache, copies, decisions, drives, photos
 from model.scope import EVERYTHING, Scope
 
 TILE_SIZES = frozenset((render.GRID, render.LOUPE, 3840))
@@ -29,9 +30,14 @@ class Library:
         os.makedirs(os.path.dirname(self.catalog_path), exist_ok=True)
         self.tiles = tiles.Store(tile_root)
         self.conn = model.connect(self.catalog_path)
+        try:
+            embedded_metadata.reindex(self.conn)
+        except Exception:
+            self.conn.close()
+            raise
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
-            (self.tiles.kind,),
+            (embedded_metadata.KIND, self.tiles.kind),
             ceiling_bytes=self.tiles.ceiling_bytes,
         )
         self._closed = False
@@ -97,23 +103,10 @@ class Library:
         if rotate not in ROTATIONS:
             raise ValueError(f"rotation is one of {sorted(ROTATIONS)}")
 
-        row = self.conn.execute(
-            "SELECT id, content_hash AS hash FROM images WHERE id = ?",
-            (int(photo_id),),
-        ).fetchone()
-        if row is None:
+        found = self._source_identity(photo_id)
+        if found is None:
             return None
-        source = photos.open_photo(self.conn, photo_id)
-        if source is None:
-            return None
-        digest = row["hash"]
-        if digest is None:
-            digest = photos.content_hash(source)
-            self.conn.execute(
-                "UPDATE images SET content_hash = ? WHERE id = ? AND content_hash IS NULL",
-                (digest, int(photo_id)),
-            )
-            self.conn.commit()
+        source, digest = found
 
         recipe = {"size": size, "rotate": rotate}
         entry = cache.get(self.conn, digest, self.tiles.kind, recipe)
@@ -132,9 +125,69 @@ class Library:
         )
         return self.tiles.read(entry)
 
+    def details(self, photo_id: int) -> dict | None:
+        """Return and project embedded browse metadata for one photograph."""
+
+        self._open()
+        found = self._source_identity(photo_id)
+        if found is None:
+            return None
+        source, digest = found
+        entry = cache.make(
+            self.conn, digest, embedded_metadata.KIND, source
+        )
+        if entry is None:
+            return None
+        if not cache.project(
+            self.conn, digest, photo_id, embedded_metadata.KIND, entry
+        ):
+            return None
+        return embedded_metadata.decoded(entry)
+
+    def set_date(self, photo_id: int, value: str) -> str:
+        """Correct one capture date as an owner decision and reproject it."""
+
+        self._open()
+        normalized = embedded_metadata.normalize_date(value)
+        if normalized is None:
+            raise ValueError(f"invalid capture date: {value!r}")
+        found = self._source_identity(photo_id)
+        if found is None:
+            raise ValueError(f"no available photo: {photo_id}")
+        _source, digest = found
+        decisions.decide(self.conn, digest, decisions.DATE, normalized)
+        entry = cache.get(self.conn, digest, embedded_metadata.KIND)
+        if entry is not None and entry["state"] == cache.READY:
+            if cache.project(self.conn, digest, photo_id, embedded_metadata.KIND, entry):
+                return normalized
+        cache.forget(self.conn, digest, kind=embedded_metadata.KIND)
+        self.conn.commit()
+        if self.details(photo_id) is None:
+            raise RuntimeError("capture date was saved but metadata could not be reprojected")
+        return normalized
+
     def debt(self) -> dict[str, int]:
         self._open()
-        return work.debt(self.conn, (self.tiles.kind,))
+        return work.debt(self.conn, (embedded_metadata.KIND, self.tiles.kind))
+
+    def _source_identity(self, photo_id: int) -> tuple[str, str] | None:
+        row = self.conn.execute(
+            "SELECT content_hash AS hash FROM images WHERE id = ?", (int(photo_id),)
+        ).fetchone()
+        if row is None:
+            return None
+        source = photos.open_photo(self.conn, photo_id)
+        if source is None:
+            return None
+        digest = row["hash"]
+        if digest is None:
+            digest = photos.content_hash(source)
+            self.conn.execute(
+                "UPDATE images SET content_hash = ? WHERE id = ? AND content_hash IS NULL",
+                (digest, int(photo_id)),
+            )
+            self.conn.commit()
+        return source, digest
 
     def _open(self) -> None:
         if self._closed:

@@ -240,4 +240,6 @@ def dimensions(path: str) -> tuple[int, int]:
             width, height = int(raw.sizes.width), int(raw.sizes.height)
             return (height, width) if raw.sizes.flip in (5, 6) else (width, height)
     with Image.open(path) as image:
-        return int(image.width), int(image.height)
+        width, height = int(image.width), int(image.height)
+        orientation = int(image.getexif().get(0x0112, 1) or 1)
+        return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
