@@ -26,6 +26,7 @@ collection, starred* without anyone having written that combination.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 
 from model import decisions
@@ -74,7 +75,10 @@ def folder(path: str) -> Scope:
 def starred(least: int) -> Scope:
     """At least this many stars."""
 
-    return Scope("i.stars >= ?", (int(least),)) if least else EVERYTHING
+    least = int(least)
+    if not 0 <= least <= 5:
+        raise ValueError("stars are between zero and five")
+    return Scope("i.stars >= ?", (least,)) if least else EVERYTHING
 
 
 def in_set(set_id: str) -> Scope:
@@ -94,17 +98,17 @@ def in_set(set_id: str) -> Scope:
 
 
 def ids(image_ids) -> Scope:
-    """An explicit list of image ids — the one case that cannot be a predicate.
+    """An explicit list of image ids as one JSON-bound argument.
 
     Used where a caller already holds a set of rows, such as an export narrowed
-    by an import batch. Prefer a real scope where one exists: this one grows the
-    SQL with the number of ids.
+    by an import batch. The SQL stays one fixed shape, so selecting the whole
+    library cannot exceed SQLite's parameter limit.
     """
 
-    wanted = [int(i) for i in image_ids if int(i) > 0]
+    wanted = sorted({int(i) for i in image_ids if int(i) > 0})
     if not wanted:
         return NOTHING
-    return Scope(f"i.id IN ({','.join('?' * len(wanted))})", tuple(wanted))
+    return Scope("i.id IN (SELECT value FROM json_each(?))", (json.dumps(wanted),))
 
 
 def where(scope: Scope | None) -> tuple[str, tuple]:

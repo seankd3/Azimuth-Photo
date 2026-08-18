@@ -252,6 +252,11 @@ the same pixels. Eviction is by age against one ceiling, never touching
 originals or never-evict kinds. Painting a smaller tile while the right one
 renders is UI behaviour, not a cache concept.
 
+**Collections and keywords.** Both are named sets of photo identities recorded
+as decisions; they differ only in where the desktop presents them. Renaming a
+set never moves its membership. Saved views wait for a real typed query
+language—V2 does not store an opaque query payload that nothing can execute.
+
 **Ranking.** You make comparisons; everything else is computed from them. A
 comparison is a decision, Elo and taste are derivations, the mosaic is a
 candidate query. One sort registry — a sort not in it is rejected, never

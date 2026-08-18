@@ -10,22 +10,17 @@ zero rows**, while the log beside them carried `keyword` 296 and
 `collection_meta` 5. Every one of them was already working in the one place
 nobody had built a table for.
 
-They differ in exactly one way, and it is not enough to be a second feature:
-
-    a collection   you say which photographs are in it
-    a keyword      you say which photographs are in it
-    a saved view   a query says which photographs are in it
-
-So a set is **a named scope**, and the axis is enumerated-or-computed. A set
-with a `query` computes its members; one without remembers them. `kind` exists
-only because the desktop shows the three in three places — it names a surface,
-not a mechanism.
+Collections and keywords differ only in where the desktop presents them. Both
+are named sets whose membership the owner chooses. A saved query does not live
+here until V2 has a real query language; the previous `query: Any` field stored
+opaque values that no code could execute and therefore described a feature
+that did not exist.
 
 `decisions.py` wrote the design before this module existed: *"a collection had
 to be some photo to be decided about"* — it does not, a set is a subject like
 any other. Two kinds of row and no table:
 
-* **the set is**, one decision holding its kind, name and query;
+* **the set is**, one decision holding its kind and name;
 * **a photograph is in it**, one decision per photograph, under the set's family.
 
 Identity is stable and the name is not, so renaming touches no membership row.
@@ -42,8 +37,8 @@ what `test_trash_schema_deletion.py` was 297 lines of.
 
 from __future__ import annotations
 
+import re
 import uuid
-from typing import Any
 
 from model import decisions
 
@@ -52,22 +47,22 @@ from model import decisions
 # own subject, so the log reads the same either way round.
 IN = "in:"
 
-# The descriptor: kind, name and query, in one decision. Three families would
-# mean three reads to answer "what is this", and a rename that had to know
-# about queries.
+# The descriptor: kind and name in one decision. Two families would mean two
+# reads to answer "what is this" and a rename that could be applied halfway.
 SET = "set"
 
-COLLECTION, KEYWORD, VIEW = "collection", "keyword", "view"
+COLLECTION, KEYWORD = "collection", "keyword"
+KINDS = frozenset((COLLECTION, KEYWORD))
+SET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+PHOTO_HASH = re.compile(r"^[0-9a-f]{64}$")
 
 
 def family(set_id: str) -> str:
     """The decision family carrying membership of one set."""
 
     set_id = str(set_id).strip()
-    if not set_id:
-        raise ValueError("a set needs an id")
-    if set_id.startswith(IN):
-        raise ValueError(f"{set_id!r} is a family, not a set id")
+    if not SET_ID.fullmatch(set_id):
+        raise ValueError("a set id uses only letters, numbers, hyphens, and underscores")
     return IN + set_id
 
 
@@ -83,40 +78,50 @@ def describe(conn, set_id: str) -> dict | None:
     return {"id": set_id, **said}
 
 
-def create(conn, name: str, *, kind: str = COLLECTION, query: Any = None,
-           set_id: str | None = None) -> str:
+def create(conn, name: str, *, kind: str = COLLECTION, set_id: str | None = None) -> str:
     """Mint a set and return its id. The id never changes; the name may."""
 
     name = str(name).strip()
     if not name:
         raise ValueError("a set needs a name")
+    if kind not in KINDS:
+        raise ValueError(f"a set kind is one of {sorted(KINDS)}")
     set_id = str(set_id or uuid.uuid4().hex[:12])
-    decisions.decide(conn, family(set_id), SET,
-                     {"kind": str(kind), "name": name, "query": query})
+    family(set_id)
+    if decisions.latest(conn, family(set_id), SET) is not None:
+        raise ValueError(f"set id was already used: {set_id}")
+    decisions.decide(conn, family(set_id), SET, {"kind": kind, "name": name})
     return set_id
 
 
-def amend(conn, set_id: str, **fields) -> dict | None:
-    """Change the name or the query. One more descriptor, no membership touched."""
+def rename(conn, set_id: str, name: str) -> dict | None:
+    """Change the display name. Membership and identity do not move."""
 
     said = describe(conn, set_id)
     if said is None:
         return None
-    said = {**said, **{k: v for k, v in fields.items() if v is not None}}
-    decisions.decide(conn, family(set_id), SET,
-                     {"kind": said["kind"], "name": said["name"], "query": said.get("query")})
+    name = str(name).strip()
+    if not name:
+        raise ValueError("a set needs a name")
+    said = {**said, "name": name}
+    decisions.decide(conn, family(set_id), SET, {"kind": said["kind"], "name": name})
     return said
 
 
-def forget(conn, set_id: str) -> None:
+def forget(conn, set_id: str) -> bool:
     """Stop offering this set. Its members' rows stay readable in the log."""
 
+    if describe(conn, set_id) is None:
+        return False
     decisions.decide(conn, family(set_id), decisions.FORGET, True)
+    return True
 
 
 def all(conn, *, kind: str | None = None) -> list[dict]:
     """Every set that still exists, by name."""
 
+    if kind is not None and kind not in KINDS:
+        raise ValueError(f"a set kind is one of {sorted(KINDS)}")
     out = []
     for subject, said in decisions.current(conn, SET).items():
         if not str(subject).startswith(IN) or not said:
@@ -131,11 +136,14 @@ def all(conn, *, kind: str | None = None) -> list[dict]:
 
 def _say(conn, set_id: str, subjects, yes: bool) -> int:
     kind = family(set_id)
-    written = 0
-    for subject in subjects:
+    if describe(conn, set_id) is None:
+        raise ValueError(f"no such set: {set_id}")
+    wanted = sorted({str(subject) for subject in subjects})
+    if any(not PHOTO_HASH.fullmatch(subject) for subject in wanted):
+        raise ValueError("set membership requires a BLAKE2b-256 photo identity")
+    for subject in wanted:
         decisions.decide(conn, subject, kind, yes)
-        written += 1
-    return written
+    return len(wanted)
 
 
 def add(conn, set_id: str, subjects) -> int:
@@ -154,9 +162,7 @@ def members(conn, set_id: str) -> list[str]:
     """Everything currently in the set, by content hash.
 
     `decisions.current` picks the last row per subject in one pass, so this is
-    one indexed query however many times the set has been edited. A computed
-    set has no membership rows — ask `scope.of_set` instead, which knows which
-    sort it is.
+    one indexed query however many times the set has been edited.
     """
 
     return sorted(s for s, yes in decisions.current(conn, family(set_id)).items() if yes is True)
@@ -189,6 +195,10 @@ def counts(conn) -> dict[str, int]:
 def sets_of(conn, subject: str, *, kind: str | None = None) -> list[str]:
     """The ids of every set one photograph is in — a reverse index, unindexed."""
 
+    subject = str(subject)
+    if not PHOTO_HASH.fullmatch(subject):
+        raise ValueError("set membership requires a BLAKE2b-256 photo identity")
+
     rows = conn.execute(
         f"""
         SELECT family, value FROM (
@@ -198,7 +208,7 @@ def sets_of(conn, subject: str, *, kind: str | None = None) -> list[str]:
             FROM decisions WHERE subject = ? AND family LIKE ?
         ) WHERE rank = 1
         """,
-        (str(subject), IN + "%"),
+        (subject, IN + "%"),
     ).fetchall()
     ids = [r["family"][len(IN):] for r in rows if decisions.loaded(r) is True]
     if kind is None:

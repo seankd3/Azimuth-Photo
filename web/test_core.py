@@ -19,7 +19,7 @@ import model
 import tiles
 import library as library_surface
 from PIL import Image
-from model import backup, cache, copies, decisions, drives, photos
+from model import backup, cache, copies, decisions, drives, photos, scope, sets
 
 TAIL = "Raws/Digital/2026/x.CR3"
 
@@ -577,6 +577,62 @@ class DecisionsSurvive(CoreCase):
         # order to be a row it could decide about.
         decisions.decide(self.conn, "Raws/Digital/2026", decisions.NAME, "Iceland")
         self.assertEqual(decisions.latest(self.conn, "Raws/Digital/2026", decisions.NAME), "Iceland")
+
+
+class SetsAreDecisions(CoreCase):
+    FIRST = "a" * 64
+    SECOND = "b" * 64
+
+    def setUp(self):
+        super().setUp()
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash, stars) VALUES (?, ?, ?)",
+            (("Raws/a.jpg", self.FIRST, 5), ("Raws/b.jpg", self.SECOND, 1)),
+        )
+        self.set_id = sets.create(self.conn, "Keepers", set_id="keepers")
+
+    def test_membership_is_hash_stable_and_rename_moves_nothing(self):
+        self.assertEqual(
+            sets.add(self.conn, self.set_id, (self.FIRST, self.FIRST, self.SECOND)),
+            2,
+        )
+        before = sets.members(self.conn, self.set_id)
+
+        renamed = sets.rename(self.conn, self.set_id, "Portfolio")
+
+        self.assertEqual(renamed["name"], "Portfolio")
+        self.assertEqual(sets.members(self.conn, self.set_id), before)
+        self.assertEqual(sets.all(self.conn)[0]["name"], "Portfolio")
+
+    def test_one_set_scope_composes_with_every_other_scope(self):
+        sets.add(self.conn, self.set_id, (self.FIRST, self.SECOND))
+        narrowed = scope.all_of(scope.in_set(self.set_id), scope.starred(4))
+
+        self.assertEqual(
+            [row["hash"] for row in library_surface.photos(self.conn, scope=narrowed)],
+            [self.FIRST],
+        )
+
+    def test_an_explicit_large_selection_is_still_one_sql_argument(self):
+        selected = scope.ids(range(1, 40_001))
+        self.assertEqual(len(selected.args), 1)
+        self.assertEqual(len(library_surface.photos(self.conn, scope=selected)), 2)
+
+    def test_ambiguous_identifiers_and_non_photo_members_are_refused(self):
+        with self.assertRaises(ValueError):
+            sets.create(self.conn, "Bad", set_id="wild%card")
+        with self.assertRaises(ValueError):
+            sets.add(self.conn, self.set_id, (self.FIRST, "row-12"))
+        self.assertEqual(sets.members(self.conn, self.set_id), [])
+        with self.assertRaises(ValueError):
+            scope.starred(6)
+
+    def test_create_never_silently_redefines_an_existing_set(self):
+        with self.assertRaises(ValueError):
+            sets.create(self.conn, "Replacement", set_id=self.set_id)
+        self.assertTrue(sets.forget(self.conn, self.set_id))
+        with self.assertRaises(ValueError):
+            sets.create(self.conn, "Reused", set_id=self.set_id)
 
 
 class CacheRefuses(CoreCase):
