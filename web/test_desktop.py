@@ -55,6 +55,8 @@ class DesktopTests(unittest.TestCase):
                 trashed = product.trash([page[0]["id"]])
                 hidden = product.photos()
                 trash_count = product.trash_count()
+                trash_page = product.trash_photos()
+                empty_preview = product.empty_trash(trash_count, True)
                 product.undo_trash(trashed["changed"])
                 restored = product.photos()
             finally:
@@ -73,6 +75,8 @@ class DesktopTests(unittest.TestCase):
         self.assertTrue(base64.b64decode(encoded).startswith(b"\xff\xd8\xff"))
         self.assertEqual(hidden, [])
         self.assertEqual(trash_count, 1)
+        self.assertEqual(trash_page[0]["id"], page[0]["id"])
+        self.assertEqual(empty_preview["files"], 1)
         self.assertEqual(restored[0]["id"], page[0]["id"])
         self.assertTrue(catalog_released)
 

@@ -117,6 +117,18 @@ class Library:
         self._open()
         return trash.count(self.conn)
 
+    def browse_trash(self, *, limit: int = 200, offset: int = 0) -> list[dict]:
+        self._open()
+        return trash.browse(self.conn, limit=limit, offset=offset)
+
+    def empty_trash(self, expected_count: int, *, dry_run: bool = False) -> dict:
+        self._open()
+        return trash.empty(
+            self.conn,
+            expected_count=int(expected_count),
+            dry_run=bool(dry_run),
+        )
+
     def tile(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> bytes | None:
         """Return one real tile, making it once when it is absent."""
 

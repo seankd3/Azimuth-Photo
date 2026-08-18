@@ -720,6 +720,22 @@ class TrashIsAReversibleDecision(CoreCase):
             ).lastrowid
         )
 
+    def copied(self, body=b"one complete photograph"):
+        hot_path = self.write(self.hot_root, body=body)
+        cold_path = self.write(self.cold_root, body=body)
+        digest = photos.content_hash(hot_path)
+        photo_id = int(
+            self.conn.execute(
+                "INSERT INTO images(filename, tail, content_hash) VALUES (?, ?, ?)",
+                ("x.CR3", TAIL, digest),
+            ).lastrowid
+        )
+        copies.saw(self.conn, photo_id, int(self.hot["id"]))
+        copies.saw(self.conn, photo_id, int(self.cold["id"]))
+        self.conn.commit()
+        trash.put(self.conn, (photo_id,))
+        return photo_id, hot_path, cold_path
+
     def test_trash_restore_and_undo_preserve_the_previous_answer(self):
         maybe = self.add("maybe.jpg", "a" * 64, status="maybe")
         kept = self.add("kept.jpg", "b" * 64)
@@ -730,6 +746,10 @@ class TrashIsAReversibleDecision(CoreCase):
 
         self.assertEqual(trash.count(self.conn), 2)
         self.assertEqual(library_surface.photos(self.conn), [])
+        self.assertEqual(
+            [photo["id"] for photo in trash.browse(self.conn)],
+            [kept, maybe],
+        )
         restored = trash.restore(self.conn, (maybe,))
         self.assertEqual(restored["changed"][0]["after"], "maybe")
         self.assertEqual(trash.count(self.conn), 1)
@@ -764,6 +784,9 @@ class TrashIsAReversibleDecision(CoreCase):
 
         self.assertEqual(trash.count(self.conn), 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
+        for limit, offset in ((0, 0), (501, 0), (20, -1)):
+            with self.assertRaises(ValueError):
+                trash.browse(self.conn, limit=limit, offset=offset)
 
     def test_a_large_selection_is_one_bound_argument_and_one_transaction(self):
         total = 5_000
@@ -792,6 +815,83 @@ class TrashIsAReversibleDecision(CoreCase):
 
         self.assertEqual(len(action["changed"]), 1)
         self.assertEqual(trash.count(self.conn), 2)
+
+    def test_empty_trash_reverifies_and_removes_every_known_copy(self):
+        _photo, hot_path, cold_path = self.copied()
+
+        preview = trash.empty(self.conn, expected_count=1, dry_run=True)
+        result = trash.empty(self.conn, expected_count=1)
+
+        self.assertEqual(preview, {"count": 1, "identities": 1, "files": 2})
+        self.assertEqual(result, {"emptied": [1], "errors": [], "remaining": 0})
+        self.assertFalse(os.path.exists(hot_path))
+        self.assertFalse(os.path.exists(cold_path))
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 0)
+        self.assertGreater(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
+
+    def test_empty_trash_refuses_an_away_drive_before_deleting_anything(self):
+        _photo, hot_path, cold_path = self.copied()
+        os.remove(os.path.join(self.cold_root, drives.MARKER_NAME))
+
+        with self.assertRaisesRegex(ValueError, "away"):
+            trash.empty(self.conn, expected_count=1)
+
+        self.assertTrue(os.path.exists(hot_path))
+        self.assertTrue(os.path.exists(cold_path))
+        self.assertEqual(trash.count(self.conn), 1)
+
+    def test_empty_trash_finds_canonical_copies_even_when_every_hint_is_missing(self):
+        photo, hot_path, cold_path = self.copied()
+        self.conn.execute("DELETE FROM copies WHERE photo_id = ?", (photo,))
+        self.conn.commit()
+
+        preview = trash.empty(self.conn, expected_count=1, dry_run=True)
+        result = trash.empty(self.conn, expected_count=1)
+
+        self.assertEqual(preview["files"], 2)
+        self.assertEqual(result["remaining"], 0)
+        self.assertFalse(os.path.exists(hot_path))
+        self.assertFalse(os.path.exists(cold_path))
+
+    def test_empty_trash_refuses_changed_bytes_and_a_stale_visible_count(self):
+        _photo, hot_path, cold_path = self.copied()
+        with open(cold_path, "wb") as handle:
+            handle.write(b"changed after it was catalogued")
+
+        with self.assertRaisesRegex(ValueError, "changed|differ"):
+            trash.empty(self.conn, expected_count=1)
+        self.assertTrue(os.path.exists(hot_path))
+        self.assertTrue(os.path.exists(cold_path))
+
+        with open(cold_path, "wb") as handle:
+            handle.write(b"one complete photograph")
+        with self.assertRaisesRegex(ValueError, "count changed"):
+            trash.empty(self.conn, expected_count=2)
+        self.assertTrue(os.path.exists(hot_path))
+        self.assertTrue(os.path.exists(cold_path))
+
+    def test_an_interrupted_empty_keeps_the_record_copy_and_can_resume(self):
+        photo, hot_path, cold_path = self.copied()
+        real_remove = trash.os.remove
+
+        def fail_on_record(path):
+            if os.path.normcase(path) == os.path.normcase(cold_path):
+                raise OSError("archive became read-only")
+            real_remove(path)
+
+        with patch.object(trash.os, "remove", side_effect=fail_on_record):
+            result = trash.empty(self.conn, expected_count=1)
+
+        self.assertFalse(os.path.exists(hot_path))
+        self.assertTrue(os.path.exists(cold_path))
+        self.assertEqual(result["remaining"], 1)
+        self.assertEqual(
+            [row["id"] for row in copies.drives_holding(self.conn, photo)],
+            [self.cold["id"]],
+        )
+        resumed = trash.empty(self.conn, expected_count=1)
+        self.assertEqual(resumed["remaining"], 0)
+        self.assertFalse(os.path.exists(cold_path))
 
 
 class SetsAreDecisions(CoreCase):

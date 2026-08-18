@@ -89,6 +89,24 @@ class Desktop:
     def trash_count(self) -> int:
         return self._wait(self._product.run(lambda library: library.trash_count()))
 
+    def trash_photos(self, limit: int = 200, offset: int = 0) -> list[dict]:
+        return self._wait(
+            self._product.run(
+                lambda library: library.browse_trash(
+                    limit=int(limit), offset=int(offset)
+                )
+            )
+        )
+
+    def empty_trash(self, expected_count: int, dry_run: bool = False) -> dict:
+        return self._wait(
+            self._product.run(
+                lambda library: library.empty_trash(
+                    int(expected_count), dry_run=bool(dry_run)
+                )
+            )
+        )
+
     def tile(self, photo_id: int, size: int = 400) -> str:
         body = self._wait(
             self._product.run(
