@@ -45,17 +45,19 @@ function loadTile(image, photo, actions) {
   tileObserver.observe(image);
 }
 
-function emptyState(onAdd) {
+function emptyState(actions) {
   const empty = element('div', 'empty-state');
   const mark = element('div', 'empty-mark');
   mark.setAttribute('aria-hidden', 'true');
   mark.append(element('i'), element('i'), element('i'));
-  empty.append(mark, element('h2', '', 'No photos here yet.'));
-  empty.append(element('p', '', 'Add a folder to start your library.'));
-  const button = element('button', 'primary-button', 'Add a folder');
-  button.type = 'button';
-  button.addEventListener('click', onAdd);
-  empty.append(button);
+  empty.append(mark, element('h2', '', actions.emptyTitle));
+  empty.append(element('p', '', actions.emptyCopy));
+  if (actions.emptyAction) {
+    const button = element('button', 'primary-button', actions.emptyAction.label);
+    button.type = 'button';
+    button.addEventListener('click', actions.emptyAction.run);
+    empty.append(button);
+  }
   return empty;
 }
 
@@ -142,7 +144,7 @@ function renderGrid(grid, state, actions) {
   if (state.total === 0 && !state.loading) {
     for (const cell of grid.children) forgetCell(cell);
     grid.style.height = '';
-    grid.replaceChildren(emptyState(actions.addDrive));
+    grid.replaceChildren(emptyState(actions));
     return;
   }
 

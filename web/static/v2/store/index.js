@@ -1,5 +1,5 @@
 const state = {
-  counts: { photos: 0, starred: 0, unidentified: 0 },
+  counts: { photos: 0, starred: 0, unidentified: 0, trash: 0 },
   drives: [],
   photos: new Map(),
   total: 0,
@@ -8,6 +8,7 @@ const state = {
   selected: null,
   selectedIndex: null,
   sort: 'newest',
+  view: 'library',
 };
 
 const listeners = new Set();

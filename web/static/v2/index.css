@@ -15,6 +15,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
 button, input, select { font: inherit; }
 button { color: inherit; }
@@ -75,6 +76,16 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .quiet-button:hover { border-color: #454850; }
+.danger-button {
+  border: 1px solid #8c4d4a;
+  border-radius: 7px;
+  background: #5d302f;
+  color: #fff;
+  padding: 7px 12px;
+  cursor: pointer;
+}
+.danger-button:hover { border-color: #c06a65; }
+.danger-button:disabled { opacity: .4; cursor: not-allowed; }
 
 .sidebar, .inspector {
   min-height: 0;
@@ -189,7 +200,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 dialog { color: var(--text); }
 dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
-.drive-dialog {
+.drive-dialog, .confirm-dialog {
   width: min(480px, calc(100vw - 40px));
   padding: 0;
   border: 1px solid #383b42;
@@ -197,9 +208,9 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   background: #1a1b1f;
   box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
 }
-.drive-dialog form { position: relative; padding: 34px; }
-.drive-dialog .eyebrow { margin-left: 0; }
-.drive-dialog h1 { margin: 0 0 10px; font-size: 26px; letter-spacing: -.03em; }
+.drive-dialog form, .confirm-dialog form { position: relative; padding: 34px; }
+.drive-dialog .eyebrow, .confirm-dialog .eyebrow { margin-left: 0; }
+.drive-dialog h1, .confirm-dialog h1 { margin: 0 0 10px; font-size: 26px; letter-spacing: -.03em; }
 .dialog-copy { margin: 0 0 26px; color: var(--text-2); line-height: 1.55; }
 .dialog-close, .loupe-close {
   position: absolute;
@@ -218,6 +229,27 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .check-row { display: flex; gap: 9px; align-items: center; margin: 16px 0 22px; color: var(--text-2); font-size: 13px; }
 .check-row input { accent-color: var(--accent); }
 .form-error { min-height: 18px; margin: -8px 0 10px; color: #ee9c92; font-size: 12px; }
+.confirm-field { display: grid; gap: 8px; margin-bottom: 18px; color: var(--text-2); font-size: 13px; }
+.confirm-field input { border: 1px solid var(--line); border-radius: 7px; background: #111216; color: var(--text); padding: 9px; }
+
+.toast {
+  position: fixed;
+  z-index: 8;
+  left: 50%;
+  bottom: 22px;
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  transform: translateX(-50%);
+  border: 1px solid #3a3d44;
+  border-radius: 9px;
+  background: #202227;
+  padding: 10px 12px 10px 15px;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 55%);
+  font-size: 13px;
+}
+.toast[hidden] { display: none; }
+.toast button { border: 0; background: transparent; color: var(--accent); font-weight: 650; cursor: pointer; }
 
 .loupe { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; }
 .loupe img { display: block; width: 100%; height: 100%; object-fit: contain; }

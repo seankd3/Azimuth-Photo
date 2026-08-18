@@ -1,6 +1,7 @@
 import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
+import { createTrashWorkflow } from './trash.js';
 
 const PAGE = 200;
 const CONTEXTBAR_HEIGHT = 46;
@@ -22,16 +23,29 @@ let scrollFrame = null;
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 const pages = new PageCache({
   pageSize: PAGE,
-  load: (offset, limit) => product.photos({ sort: read().sort, limit, offset }),
+  load: (offset, limit) => read().view === 'trash'
+    ? product.trashPhotos({ limit, offset })
+    : product.photos({ sort: read().sort, limit, offset }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
     status.textContent = `Some photos could not be loaded. ${error.message}`;
   },
 });
+const trashWorkflow = createTrashWorkflow({
+  product,
+  read,
+  reload: () => loadView(),
+  status,
+});
 
 function visibleGrid() {
+  const inTrash = read().view === 'trash';
   library.renderGrid(grid, read(), {
-    addDrive: openDriveDialog,
+    emptyTitle: inTrash ? 'Trash is empty.' : 'No photos here yet.',
+    emptyCopy: inTrash
+      ? 'Rejected photographs stay recoverable here until you empty Trash.'
+      : 'Add a folder to start your library.',
+    emptyAction: inTrash ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
     tile: product.tile,
@@ -62,6 +76,7 @@ function closeDriveDialog() {
   driveError.textContent = '';
 }
 
+
 function closeLoupe() {
   if (loupe.open) loupe.close();
   loupeImage.removeAttribute('src');
@@ -72,21 +87,25 @@ function closeLoupe() {
   }
 }
 
-async function loadLibrary() {
+async function loadView() {
   const requestGeneration = pages.reset();
   update({ loading: true, photos: new Map(), total: 0, selected: null, selectedIndex: null });
   try {
-    const sort = read().sort;
-    const [counts, drives, page] = await Promise.all([
+    const { sort, view } = read();
+    const [counts, drives, trashCount, page] = await Promise.all([
       product.counts(),
       product.drives(),
-      product.photos({ sort, limit: PAGE, offset: 0 }),
+      product.trashCount(),
+      view === 'trash'
+        ? product.trashPhotos({ limit: PAGE, offset: 0 })
+        : product.photos({ sort, limit: PAGE, offset: 0 }),
     ]);
-    if (!pages.isCurrent(requestGeneration)) return;
-    pages.seed(requestGeneration, page, counts.photos);
-    update({ counts, drives, loading: false });
+    if (!pages.isCurrent(requestGeneration) || read().view !== view) return;
+    const total = view === 'trash' ? trashCount : counts.photos;
+    pages.seed(requestGeneration, page, total);
+    update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
     if (!read().scanning) status.textContent = '';
-    if (!drives.length && !counts.photos) openDriveDialog();
+    if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
   } catch (error) {
     if (!pages.isCurrent(requestGeneration)) return;
     update({ loading: false });
@@ -102,10 +121,10 @@ async function scanDrive(drive) {
     const scan = product.refresh(drive.uuid).finally(() => { finished = true; });
     while (!finished) {
       await delay(500);
-      await loadLibrary();
+      await loadView();
     }
     const result = await scan;
-    await loadLibrary();
+    await loadView();
     status.textContent = result.applied
       ? `${result.photos_added.toLocaleString()} photos added.`
       : result.reason || 'The folder could not be fully read.';
@@ -169,15 +188,24 @@ async function openPhoto(photo, index) {
   await showPhoto(photo);
 }
 
+
 function renderChrome(state) {
   library.renderInspector(inspector, state.selected);
   const count = state.counts.photos.toLocaleString();
-  document.querySelector('[data-photo-count]').textContent = `${count} photos`;
+  const viewCount = state.view === 'trash' ? state.counts.trash : state.counts.photos;
+  document.querySelector('[data-photo-count]').textContent = `${viewCount.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
+  document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   document.querySelector('[data-result-label]').textContent = state.loading
     ? 'Loading your library…'
     : `${state.photos.size.toLocaleString()} of ${state.total.toLocaleString()} loaded`;
   if (state.scanning) status.textContent = 'Reading your photos…';
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash';
+  document.querySelector('[data-action="restore"]').hidden = state.view !== 'trash' || !state.selected;
+  document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
+  document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library');
+  document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
+  document.querySelector('.view-title strong').textContent = state.view === 'trash' ? 'Trash' : 'All photos';
 
   driveList.replaceChildren(...state.drives.map((drive) => {
     const row = document.createElement('div');
@@ -218,10 +246,20 @@ document.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'add-drive') openDriveDialog();
   if (action === 'all-photos') {
+    update({ view: 'library' });
     workspace.scrollTo({ top: 0 });
-    loadLibrary();
+    loadView();
   }
+  if (action === 'trash-view') {
+    update({ view: 'trash' });
+    workspace.scrollTo({ top: 0 });
+    loadView();
+  }
+  if (action === 'restore') trashWorkflow.restoreSelected();
+  if (action === 'empty-trash') trashWorkflow.openDialog();
+  if (action === 'undo-toast') trashWorkflow.undo();
   if (action === 'close-drive') closeDriveDialog();
+  if (action === 'close-empty') trashWorkflow.closeDialog();
   if (action === 'close-loupe') closeLoupe();
 });
 
@@ -230,13 +268,14 @@ document.addEventListener('keydown', (event) => {
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
   if (event.key === 'Escape') {
     if (loupe.open) closeLoupe();
+    else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected) update({ selected: null, selectedIndex: null });
     else return;
     event.preventDefault();
     return;
   }
-  if (isTyping || driveDialog.open) return;
+  if (isTyping || driveDialog.open || trashWorkflow.isOpen()) return;
 
   const current = read().selectedIndex;
   const columns = Number(grid.dataset.columns) || 1;
@@ -264,7 +303,7 @@ document.addEventListener('keydown', (event) => {
 document.querySelector('[data-sort]').addEventListener('change', (event) => {
   update({ sort: event.target.value });
   workspace.scrollTo({ top: 0 });
-  loadLibrary();
+  loadView();
 });
 
 document.querySelector('[data-density]').addEventListener('input', (event) => {
@@ -286,4 +325,4 @@ loupe.addEventListener('close', () => {
 });
 
 subscribe(render);
-loadLibrary();
+loadView();

@@ -29,6 +29,9 @@
         <button class="nav-row is-active" type="button" data-action="all-photos">
           <span>All photos</span><span data-sidebar-count>—</span>
         </button>
+        <button class="nav-row" type="button" data-action="trash-view">
+          <span>Trash</span><span data-trash-count>—</span>
+        </button>
       </section>
       <section>
         <div class="section-heading"><p class="eyebrow">Folders</p></div>
@@ -51,6 +54,8 @@
         <label>Size
           <input data-density type="range" min="150" max="320" value="220" step="10">
         </label>
+        <button class="quiet-button" type="button" data-action="restore" hidden>Restore</button>
+        <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
       <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
     </main>
@@ -76,6 +81,22 @@
     <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
     <img data-loupe-image alt="">
   </dialog>
+
+  <dialog class="confirm-dialog" data-empty-dialog aria-labelledby="empty-title">
+    <form data-empty-form>
+      <button class="dialog-close" type="button" data-action="close-empty" aria-label="Close">×</button>
+      <p class="eyebrow">Permanent deletion</p>
+      <h1 id="empty-title">Empty Trash?</h1>
+      <p class="dialog-copy">This permanently deletes <strong data-empty-count></strong> photographs from every attached drive. Type the number to continue.</p>
+      <label class="confirm-field">Photo count <input name="count" inputmode="numeric" autocomplete="off"></label>
+      <p class="form-error" data-empty-error role="alert"></p>
+      <button class="danger-button" type="submit" disabled>Permanently delete</button>
+    </form>
+  </dialog>
+
+  <div class="toast" data-toast hidden role="status">
+    <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
+  </div>
 
   <script type="module" src="/static/index.js"></script>
 </body>
