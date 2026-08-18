@@ -90,6 +90,11 @@ async def photos(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/api/library/counts")
+async def counts(request: Request):
+    return await request.app.state.library.run(lambda product: product.counts())
+
+
 @router.get("/api/drives")
 async def drives(request: Request):
     return await request.app.state.library.run(lambda product: product.attached())

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Azimuth Photo</title>
+  <link rel="stylesheet" href="/static/index.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand" type="button" data-action="all-photos" aria-label="Show all photos">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Azimuth</span>
+      </button>
+      <div class="view-title">
+        <strong>All photos</strong>
+        <span data-photo-count aria-live="polite">—</span>
+      </div>
+      <div class="top-actions">
+        <button class="quiet-button" type="button" data-action="add-drive">Add folder</button>
+      </div>
+    </header>
+
+    <aside class="sidebar" aria-label="Library navigation">
+      <section>
+        <p class="eyebrow">Library</p>
+        <button class="nav-row is-active" type="button" data-action="all-photos">
+          <span>All photos</span><span data-sidebar-count>—</span>
+        </button>
+      </section>
+      <section>
+        <div class="section-heading"><p class="eyebrow">Folders</p></div>
+        <div class="drive-list" data-drive-list></div>
+      </section>
+      <p class="sidebar-status" data-status aria-live="polite"></p>
+    </aside>
+
+    <main class="workspace">
+      <div class="contextbar">
+        <span data-result-label>Loading your library…</span>
+        <label>Sort
+          <select data-sort>
+            <option value="newest">Newest</option>
+            <option value="oldest">Oldest</option>
+            <option value="added">Recently added</option>
+            <option value="filename">Filename</option>
+          </select>
+        </label>
+        <label>Size
+          <input data-density type="range" min="150" max="320" value="220" step="10">
+        </label>
+      </div>
+      <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
+      <button class="load-more" type="button" data-load-more hidden>Load more</button>
+    </main>
+
+    <aside class="inspector" aria-label="Photo information" data-inspector>
+      <div class="inspector-empty">Select a photo to see its details.</div>
+    </aside>
+  </div>
+
+  <dialog class="drive-dialog" data-drive-dialog aria-labelledby="drive-title">
+    <form data-drive-form>
+      <button class="dialog-close" type="button" data-action="close-drive" aria-label="Close">×</button>
+      <p class="eyebrow">Your library</p>
+      <h1 id="drive-title">Point me at your photos.</h1>
+      <p class="dialog-copy">Choose one folder. Azimuth will read it in place and never move or alter your photographs.</p>
+      <label class="field">Folder path
+        <input name="root" type="text" required autocomplete="off" placeholder="C:\Pictures">
+      </label>
+      <label class="check-row"><input name="is_record" type="checkbox"> This is an archive drive</label>
+      <p class="form-error" data-drive-error role="alert"></p>
+      <button class="primary-button" type="submit">Add to library</button>
+    </form>
+  </dialog>
+
+  <dialog class="loupe" data-loupe aria-label="Photo preview">
+    <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
+    <img data-loupe-image alt="">
+  </dialog>
+
+  <script type="module" src="/static/index.js"></script>
+</body>
+</html>

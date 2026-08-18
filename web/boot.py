@@ -97,6 +97,10 @@ class Library:
             self.conn, scope=scope, sort=sort, limit=limit, offset=offset
         )
 
+    def counts(self) -> dict[str, int]:
+        self._open()
+        return queries.counts(self.conn)
+
     def tile(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> bytes | None:
         """Return one real tile, making it once when it is absent."""
 

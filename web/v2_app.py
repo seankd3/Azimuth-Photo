@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 import boot
 from core.runtime_paths import resolve_runtime_paths
@@ -47,6 +48,11 @@ def create_app(*, catalog_path: str | None = None, tile_root: str | None = None)
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
+    )
+    app.mount(
+        "/static",
+        StaticFiles(directory=Path(__file__).with_name("static") / "v2"),
+        name="static",
     )
     app.include_router(system.router)
     app.include_router(library.router)

@@ -217,6 +217,7 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
                     drive_uuid = attached.json()["uuid"]
                     refreshed = client.post(f"/api/drives/{drive_uuid}/refresh")
                     drives = client.get("/api/drives")
+                    counts = client.get("/api/library/counts")
                     response = client.get(
                         "/api/photos",
                         params={"scope": json.dumps({"folder": "Trips"})},
@@ -237,6 +238,7 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed.json()["photos_added"], 2)
         self.assertEqual(drives.json()[0]["label"], "Working")
         self.assertTrue(drives.json()[0]["attached"])
+        self.assertEqual(counts.json()["photos"], 2)
         self.assertEqual([photo["tail"] for photo in response.json()], ["Trips/lake.jpg"])
         self.assertEqual(details.status_code, 200)
         self.assertEqual((details.json()["width"], details.json()["height"]), (640, 480))

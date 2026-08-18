@@ -1,9 +1,13 @@
 """Local lifecycle and route truth for the V2 desktop."""
 
+from pathlib import Path
+
 from fastapi import APIRouter, Request, Response
+from fastapi.responses import FileResponse
 
 
 router = APIRouter()
+_SHELL = Path(__file__).parents[1] / "templates" / "v2.html"
 
 
 def _ready(request: Request) -> bool:
@@ -17,6 +21,11 @@ async def health(request: Request, response: Response):
     if not ready:
         response.status_code = 503
     return {"ready": ready}
+
+
+@router.get("/d", include_in_schema=False)
+async def desktop():
+    return FileResponse(_SHELL)
 
 
 @router.get("/api/routes")

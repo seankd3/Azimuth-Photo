@@ -410,6 +410,14 @@ directions: a missed `esc` is an injection, a doubled `esc` is a visible `&amp;`
 | `shell/` | toast, contextMenu, **keymap** (one document keydown listener over a chord→verb registry, against 38 today), layers, emptyState, jobs, cell, lensRouter | `kit/`, `net/`, `store/` |
 | `lens/<name>/` | one surface, exporting exactly `query`, `cell`, `keys`, `mount/unmount` | everything above, and its own directory. **Never another lens.** |
 
+The first landed V2 slice uses the same boundary in its smallest useful form:
+`net/` owns every API literal and the only `fetch`; `store/` owns state and the
+lens registry; the Library lens registers its renderers; a two-line composition
+root loads registrations before `shell/`. The shell asks the registry for a
+lens and never imports one. Markup is built with DOM nodes, so this slice needs
+neither an HTML-string helper nor a remembered escaping step. `kit/` is owed
+only when a second lens reveals a real shared primitive.
+
 ### One way to do each recurring thing
 
 | Thing | Today | The one way |

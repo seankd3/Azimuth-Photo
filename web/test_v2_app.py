@@ -34,6 +34,9 @@ class V2AppTests(unittest.TestCase):
             app = v2_app.create_app(catalog_path=catalog, tile_root=tile_root)
             with TestClient(app) as client:
                 health = client.get("/")
+                desktop = client.get("/d")
+                stylesheet = client.get("/static/index.css")
+                shell = client.get("/static/index.js")
                 manifest = client.get("/api/routes")
                 photos = client.get("/api/photos")
                 prepared = client.post("/api/system/prepare-quit")
@@ -43,7 +46,12 @@ class V2AppTests(unittest.TestCase):
             os.replace(catalog, renamed)
 
         self.assertEqual(health.json(), {"ready": True})
+        self.assertEqual(desktop.status_code, 200)
+        self.assertEqual(stylesheet.headers["content-type"], "text/css; charset=utf-8")
+        self.assertIn("javascript", shell.headers["content-type"])
         self.assertIn("/api/photos", manifest.json())
+        self.assertIn("/api/drives", manifest.json())
+        self.assertIn("/api/library/counts", manifest.json())
         self.assertIn("/api/photos/{photo_id}/tile", manifest.json())
         self.assertEqual(photos.json()[0]["tail"], "lake.jpg")
         self.assertEqual(prepared.json(), {"ok": True})
