@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Azimuth Photo server entrypoint.
+"""Start the private V2 engine used by the desktop app.
 
 Azimuth is one person's app on one machine, so it binds loopback and only
 loopback. That is not a default -- there is no flag, no environment variable
@@ -24,7 +24,7 @@ def bundle_root() -> Path:
 
 
 def ensure_sys_path() -> Path:
-    """Make `import app` work for source, Docker, and frozen layouts."""
+    """Make the V2 web modules importable from source and frozen layouts."""
     root = bundle_root()
     if getattr(sys, "frozen", False):
         # PyInstaller onedir places modules + datas under _MEIPASS.
@@ -74,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
 
     import uvicorn
 
-    # Import after sys.path + env defaults so apply_environment_defaults() sees them.
-    from app import app  # noqa: WPS433 — intentional late import
+    # Import after sys.path and environment defaults select the private catalog.
+    from v2_app import app  # noqa: WPS433 — intentional late import
 
     # Single process: the catalog is SQLite. Do not raise workers here.
     uvicorn.run(

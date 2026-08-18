@@ -23,7 +23,6 @@ fn main() {
                 .title("Azimuth Photo")
                 .inner_size(1500.0, 950.0)
                 .min_inner_size(900.0, 600.0)
-                .disable_drag_drop_handler() // let the web app own drag & drop (publishing, masks)
                 .on_navigation(|url| {
                     // Stay on the local archive (and the bundled splash page);
                     // anything external opens in the default browser instead.

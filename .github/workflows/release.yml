@@ -39,6 +39,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Install the V2 engine build dependencies
+        run: python -m pip install -r web/requirements-v2.txt
       - name: Build the Linux onedir server
         run: python scripts/build_server.py
       - name: Package the server artifact

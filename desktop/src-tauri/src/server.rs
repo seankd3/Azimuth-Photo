@@ -27,10 +27,20 @@ fn agent(timeout: Duration) -> ureq::Agent {
 }
 
 fn alive() -> bool {
-    agent(Duration::from_secs(2))
-        .get(format!("{BASE_URL}/").as_str())
-        .call()
-        .is_ok()
+    let response = agent(Duration::from_secs(2))
+        .get(format!("{BASE_URL}/api/system/health").as_str())
+        .call();
+    let Ok(mut response) = response else {
+        return false;
+    };
+    response
+        .body_mut()
+        .read_json::<serde_json::Value>()
+        .ok()
+        .is_some_and(|body| {
+            body.get("product").and_then(|value| value.as_str()) == Some("azimuth-v2")
+                && body.get("ready").and_then(|value| value.as_bool()) == Some(true)
+        })
 }
 
 fn spawn_server(app: &AppHandle) -> Result<Child, String> {

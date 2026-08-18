@@ -1,11 +1,13 @@
-param(
-    [string]$Python = "python"
-)
+param([string]$Python = "")
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
+$BundledPython = Join-Path $RepoRoot "web/.venv/Scripts/python.exe"
+if (-not $Python) {
+    $Python = if (Test-Path $BundledPython -PathType Leaf) { $BundledPython } else { "python" }
+}
 $Version = (Get-Content (Join-Path $RepoRoot "VERSION") -Raw).Trim()
 $TauriConfig = Get-Content (Join-Path $RepoRoot "desktop/src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json
 $CargoVersion = (
@@ -35,6 +37,11 @@ if ($LASTEXITCODE -ne 0) {
 
 Push-Location $RepoRoot
 try {
+    & $Python -m pip install -r "web/requirements-v2.txt"
+    if ($LASTEXITCODE -ne 0) {
+        throw "The V2 engine build dependencies could not be installed."
+    }
+
     & $Python "scripts/build_server.py"
     if ($LASTEXITCODE -ne 0) {
         throw "The bundled Azimuth Photo engine build failed."

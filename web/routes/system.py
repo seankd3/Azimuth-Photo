@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse
 
 router = APIRouter()
 _SHELL = Path(__file__).parents[1] / "templates" / "v2.html"
+PRODUCT = "azimuth-v2"
 
 
 def _ready(request: Request) -> bool:
@@ -20,7 +21,7 @@ async def health(request: Request, response: Response):
     ready = _ready(request)
     if not ready:
         response.status_code = 503
-    return {"ready": ready}
+    return {"product": PRODUCT, "ready": ready}
 
 
 @router.get("/d", include_in_schema=False)

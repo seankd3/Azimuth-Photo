@@ -45,7 +45,7 @@ class V2AppTests(unittest.TestCase):
             renamed = catalog + ".closed"
             os.replace(catalog, renamed)
 
-        self.assertEqual(health.json(), {"ready": True})
+        self.assertEqual(health.json(), {"product": "azimuth-v2", "ready": True})
         self.assertEqual(desktop.status_code, 200)
         self.assertEqual(stylesheet.headers["content-type"], "text/css; charset=utf-8")
         self.assertIn("javascript", shell.headers["content-type"])

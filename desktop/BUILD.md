@@ -1,21 +1,20 @@
 # Build the Azimuth Photo Windows app
 
-> **Transitional implementation guide.** This builds the current V1 Tauri
-> shell. V2 intends one desktop process and does not preserve Tauri or the local
-> HTTP boundary as product architecture.
+The Windows app is a self-contained V2 package. It includes the frozen private
+engine, opens the first-folder experience, and stores its catalog and generated
+data in the normal Windows application-data folders. A person installing it
+does not install Python or configure a server.
 
-The Windows app is a self-contained Tauri package. It includes the frozen
-Azimuth Photo engine, opens the real first-run experience, and stores its
-catalog and generated data in the normal Windows application-data folders.
-Customers do not install Python or configure a URL.
+This package is real but not yet the final desktop architecture: Tauri owns one
+private loopback engine process. `CORE.md` requires that transport to disappear
+before Desktop packaging becomes Proven. Until that collapse lands, this build
+is the executable V2 integration path and nothing in it may call V1.
 
 ## Build an unsigned test installer
 
-On Windows, install the MSVC desktop toolchain, Rust, and the Tauri CLI:
-
-```powershell
-cargo install tauri-cli --locked
-```
+On Windows, install Python 3.12, the MSVC desktop toolchain, and Rust. The build
+script installs the pinned V2 Python build set and the pinned Tauri CLI when
+they are absent.
 
 From the repository root:
 
@@ -50,31 +49,11 @@ Use a Windows account with no existing Azimuth Photo data:
    is shown.
 3. Choose a local photo folder; confirm scanning begins and the library opens.
 4. Repeat with a mapped NAS drive.
-5. Type or choose a UNC share such as `\\NAS\Photos`; confirm photos appear.
+5. Enter a UNC share such as `\\NAS\Photos`; confirm photos appear.
 6. Quit and relaunch; confirm the same library opens without setup repeating.
 
 App data belongs under `%LOCALAPPDATA%\Azimuth Photo` and
 `%APPDATA%\Azimuth Photo`. Originals remain in the selected folders.
-
-## Open an existing library
-
-A first install keeps its own data under `%LOCALAPPDATA%\Azimuth Photo`. A
-person who already has a library keeps that library instead: write a pointer
-file at `%APPDATA%\Azimuth Photo\library.json` before the first launch.
-
-```json
-{
-  "data_root": "C:\\Azimuth Photo",
-  "mode": "satellite",
-  "preview_root": "C:\\Azimuth Photo\\thumbs"
-}
-```
-
-All three fields are optional. Each field that is present replaces one engine
-default: `data_root` selects the library folder, `mode` selects `standalone`,
-`satellite`, or `hub`, and `preview_root` selects the preview cache. A missing,
-empty, or damaged pointer file keeps the packaged defaults, so a bad edit can
-never stop the app from starting.
 
 ## Developer override
 
