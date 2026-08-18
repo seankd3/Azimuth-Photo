@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS images (
     filename         TEXT    NOT NULL DEFAULT '',
     tail             TEXT,
     file_size        INTEGER,
-    file_modified_at REAL,
+    file_modified_ns INTEGER,
     content_hash     TEXT,
     date_taken       TEXT,
     camera_make      TEXT,

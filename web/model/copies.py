@@ -18,6 +18,7 @@ exception class. The three things it does need are all about not lying:
 from __future__ import annotations
 
 import os
+import stat
 import time
 
 from model import drives
@@ -84,6 +85,7 @@ def walk_tails(root: str) -> tuple[set[str], bool]:
 
     seen: set[str] = set()
     complete = True
+    from model import photos
 
     def failed(_error: OSError) -> None:
         nonlocal complete
@@ -94,7 +96,17 @@ def walk_tails(root: str) -> tuple[set[str], bool]:
         for name in filenames:
             if name.startswith("."):
                 continue
-            tail = drives.tail_for(root, os.path.join(dirpath, name))
+            path = os.path.join(dirpath, name)
+            try:
+                entry = os.lstat(path)
+            except OSError:
+                complete = False
+                continue
+            if not stat.S_ISREG(entry.st_mode) or entry.st_size <= 0:
+                continue
+            if not photos.supported(path):
+                continue
+            tail = drives.tail_for(root, path)
             if tail:
                 seen.add(tail)
     return seen, complete
@@ -118,24 +130,65 @@ def sweep(conn, drive_uuid: str) -> dict:
 
     drive = conn.execute("SELECT id FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone()
     drive_id = int(drive["id"])
-    known = {
-        row["tail"]: int(row["id"])
-        for row in conn.execute("SELECT id, tail FROM images WHERE tail IS NOT NULL AND vc_of IS NULL")
-    }
+    from model import photos
+
+    known: dict[str, list[dict]] = {}
+    for row in conn.execute(
+        "SELECT id, tail, file_size, file_modified_ns FROM images "
+        "WHERE tail IS NOT NULL AND vc_of IS NULL ORDER BY id"
+    ):
+        known.setdefault(row["tail"], []).append(dict(row))
 
     now = time.time()
-    added = 0
+    recorded = 0
+    admitted = 0
+    changed: list[str] = []
     for tail in seen:
-        photo_id = known.get(tail)
-        if photo_id is not None:
-            saw(conn, photo_id, drive_id, when=now)
-            added += 1
+        path = drives.path_for(conn, drive_uuid, tail)
+        if path is None:
+            continue
+        try:
+            entry = os.lstat(path)
+        except OSError:
+            continue
+        candidates = known.get(tail, [])
+        match = next(
+            (
+                row for row in candidates
+                if (row["file_size"] is None or int(row["file_size"]) == entry.st_size)
+                and (
+                    row["file_modified_ns"] is None
+                    or int(row["file_modified_ns"]) == entry.st_mtime_ns
+                )
+            ),
+            None,
+        )
+        if candidates and match is None:
+            changed.append(tail)
+            continue
+        photo_id = int(match["id"]) if match else photos.admit(conn, path, tail)
+        if photo_id is None:
+            continue
+        saw(conn, photo_id, drive_id, when=now)
+        recorded += 1
+        if match is None:
+            admitted += 1
+            known.setdefault(tail, []).append({
+                "id": photo_id,
+                "tail": tail,
+                "file_size": entry.st_size,
+                "file_modified_ns": entry.st_mtime_ns,
+            })
 
     held = {
         int(row["photo_id"]): row["tail"]
         for row in conn.execute("SELECT photo_id, tail FROM copies WHERE drive_id = ?", (drive_id,))
     }
-    tail_of = {photo_id: tail for tail, photo_id in known.items()}
+    tail_of = {
+        int(row["id"]): tail
+        for tail, rows in known.items()
+        for row in rows
+    }
     retired = 0
     for photo_id in held:
         tail = held[photo_id] or tail_of.get(photo_id)
@@ -148,7 +201,9 @@ def sweep(conn, drive_uuid: str) -> dict:
         "drive": drive_uuid,
         "applied": True,
         "files_seen": len(seen),
-        "copies_recorded": added,
+        "copies_recorded": recorded,
         "copies_retired": retired,
-        "unknown_files": len(seen) - added,
+        "photos_added": admitted,
+        "changed": changed,
+        "unknown_files": len(seen) - recorded,
     }

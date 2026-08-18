@@ -15,6 +15,7 @@ from unittest.mock import patch
 import rank
 import work
 import model
+import library as library_surface
 from model import backup, cache, copies, decisions, drives, photos
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -155,6 +156,35 @@ class OpeningAPhoto(CoreCase):
 
 
 class SweepingRefuses(CoreCase):
+    def test_a_fresh_sweep_is_a_browsable_library(self):
+        photo = self.write(self.hot_root, "Raws/2026/new.jpg", b"jpeg bytes")
+        self.write(self.hot_root, "Raws/2026/edit.xmp", b"sidecar")
+        self.write(self.hot_root, "Raws/2026/empty.jpg", b"")
+
+        result = copies.sweep(self.conn, self.hot["uuid"])
+
+        self.assertEqual(result["photos_added"], 1)
+        row = self.conn.execute("SELECT * FROM images").fetchone()
+        self.assertEqual(row["tail"], "Raws/2026/new.jpg")
+        self.assertEqual(row["file_size"], os.path.getsize(photo))
+        self.assertEqual(row["file_modified_ns"], os.stat(photo).st_mtime_ns)
+        self.assertEqual(len(copies.drives_holding(self.conn, row["id"])), 1)
+        self.assertEqual(library_surface.photos(self.conn, sort="added")[0]["id"], row["id"])
+        self.assertEqual(library_surface.folders(self.conn), [{"folder": "Raws/2026", "photos": 1}])
+
+    def test_a_changed_file_is_reported_without_replacing_its_identity(self):
+        path = self.write(self.hot_root, "Raws/2026/change.jpg", b"before")
+        copies.sweep(self.conn, self.hot["uuid"])
+        photo_id = self.conn.execute("SELECT id FROM images").fetchone()["id"]
+        with open(path, "wb") as handle:
+            handle.write(b"after and a different size")
+
+        result = copies.sweep(self.conn, self.hot["uuid"])
+
+        self.assertEqual(result["changed"], ["Raws/2026/change.jpg"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
+        self.assertIsNone(photos.open_photo(self.conn, photo_id))
+
     def test_an_incomplete_walk_changes_nothing(self):
         # "I could not read the folder" and "the folder is empty" are the same
         # sight from inside a scan and opposite facts.

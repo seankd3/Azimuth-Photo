@@ -31,6 +31,38 @@ from model import drives
 
 READ_CHUNK_BYTES = 1024 * 1024
 HASH_DIGEST_BYTES = 32
+SUPPORTED_EXTENSIONS = frozenset({
+    ".arw", ".cr2", ".cr3", ".dng", ".heic", ".heif", ".jpeg", ".jpg",
+    ".nef", ".orf", ".png", ".raf", ".rw2", ".tif", ".tiff", ".webp",
+})
+
+
+def supported(path: str) -> bool:
+    return os.path.splitext(path)[1].lower() in SUPPORTED_EXTENSIONS
+
+
+def admit(conn, path: str, tail: str) -> int | None:
+    """Add one real photograph to the catalog without reading its pixels yet."""
+
+    try:
+        entry = os.lstat(path)
+        tail = drives.safe_tail(tail)
+    except (OSError, ValueError):
+        return None
+    if not _stat.S_ISREG(entry.st_mode) or entry.st_size <= 0 or not supported(path):
+        return None
+    cursor = conn.execute(
+        "INSERT INTO images(filename, tail, file_size, file_modified_ns, file_ext) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (
+            os.path.basename(path),
+            tail,
+            int(entry.st_size),
+            int(entry.st_mtime_ns),
+            os.path.splitext(path)[1].lower(),
+        ),
+    )
+    return int(cursor.lastrowid)
 
 
 def content_hash(path: str) -> str:
@@ -123,7 +155,11 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     return {"outcome": "written", "path": target, **identify(conn, target)}
 
 
-def _verified(path: str, expected_size: int | None) -> bool:
+def _verified(
+    path: str,
+    expected_size: int | None,
+    expected_modified_ns: int | None = None,
+) -> bool:
     """Is this a real file on this drive, of the size we recorded?
 
     `lstat`, not `stat`, and the symlink check is the point: a catalogued tail
@@ -139,7 +175,9 @@ def _verified(path: str, expected_size: int | None) -> bool:
         return False
     if not _stat.S_ISREG(entry.st_mode):
         return False
-    return not expected_size or entry.st_size == int(expected_size)
+    if expected_size is not None and entry.st_size != int(expected_size):
+        return False
+    return expected_modified_ns is None or entry.st_mtime_ns == int(expected_modified_ns)
 
 
 def _by_preference(conn) -> list[dict]:
@@ -154,7 +192,13 @@ def _by_preference(conn) -> list[dict]:
     )]
 
 
-def locate(conn, tail: str, *, expected_size: int | None = None) -> str | None:
+def locate(
+    conn,
+    tail: str,
+    *,
+    expected_size: int | None = None,
+    expected_modified_ns: int | None = None,
+) -> str | None:
     """A path this machine can open for `tail`, or None if no drive has it."""
 
     if not tail:
@@ -165,7 +209,7 @@ def locate(conn, tail: str, *, expected_size: int | None = None) -> str | None:
         return None
     for drive in _by_preference(conn):
         path = drives.path_for(conn, drive["uuid"], tail)
-        if path and _verified(path, expected_size):
+        if path and _verified(path, expected_size, expected_modified_ns):
             return path
     return None
 
@@ -174,7 +218,7 @@ def open_photo(conn, image_id: int) -> str | None:
     """The path of a catalogued photo, wherever it currently lives."""
 
     row = conn.execute(
-        "SELECT tail, file_size FROM images WHERE id = ?", (int(image_id),)
+        "SELECT tail, file_size, file_modified_ns FROM images WHERE id = ?", (int(image_id),)
     ).fetchone()
     if row is None or not row["tail"]:
         return None
@@ -193,9 +237,14 @@ def open_photo(conn, image_id: int) -> str | None:
             path = drives.path_for(conn, copy["uuid"], copy["tail"])
         except ValueError:
             continue
-        if path and _verified(path, row["file_size"]):
+        if path and _verified(path, row["file_size"], row["file_modified_ns"]):
             return path
-    return locate(conn, row["tail"], expected_size=row["file_size"])
+    return locate(
+        conn,
+        row["tail"],
+        expected_size=row["file_size"],
+        expected_modified_ns=row["file_modified_ns"],
+    )
 
 
 def state(conn, image_id: int) -> str:

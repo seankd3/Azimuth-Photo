@@ -131,7 +131,8 @@ def folders(conn) -> list[dict]:
         {"folder": row["folder"], "photos": row["photos"]}
         for row in conn.execute(
             f"""
-            SELECT rtrim(i.tail, replace(i.tail, '/', '')) AS folder, COUNT(*) AS photos
+            SELECT rtrim(rtrim(i.tail, replace(i.tail, '/', '')), '/') AS folder,
+                   COUNT(*) AS photos
             FROM images i
             WHERE {IN_LIBRARY} AND i.tail IS NOT NULL AND i.tail GLOB '*/*'
             GROUP BY folder
