@@ -86,7 +86,7 @@ until its exact path earns a register entry.
 
 | File | Status | Product area | Commit | Proof and reason it earns the status |
 |---|---|---|---|---|
-| `scripts/rewrite_status.py` | Proven | Verification | this ledger change | Its Git-derived inventory reports itself and every other executable/configuration path; normal mode reports, `--all` enumerates, and `--check` remains red while any path is unclassified |
+| `scripts/rewrite_status.py` | Proven | Verification | this ledger change | Its Git-derived inventory reports every executable/configuration path; `--check` stays red for Legacy/Rebuilt files, rejects missing active entries, and now rejects a Removed path that still exists while accepting one physically deleted |
 | `web/model/__init__.py` | Rebuilt | Core | `da1ccd7e` | One constructor opens SQLite, applies the complete core schema, and closes on failure; fresh on-disk proof is in `test_core.py` |
 | `web/model/schema.sql` | Rebuilt | Core | `284ba3f2`, `da1ccd7e` | Owns all five core tables and decision provenance without requiring V1 schema first; transitional `vc_of` keeps it below Proven until Develop is rebuilt |
 | `web/model/drives.py` | Rebuilt | Core | `284ba3f2` | Explicit attach is the only discovery path; reads no longer probe drive letters or disconnected mappings |
@@ -99,9 +99,15 @@ until its exact path earns a register entry.
 | `web/model/sets.py` | Rebuilt | Organise | `d33c655e` | Collections and keywords are named decision families with validated stable ids and atomic hash-membership writes; nonexistent computed-query storage was deleted rather than preserved |
 | `web/work.py` | Rebuilt | Work and cache | `0639ab8d`, `bce1178f` | Owed work and debt are queries over explicit kinds; one owned worker starts once and releases its connection without global lifecycle state; 62 focused tests pass |
 | `web/tiles.py` | Rebuilt | Browse, disk, and tiles | `0639ab8d` | Replaces V1 adoption, mutable configuration, prefetch, and pregeneration shims with one owned store, atomic no-overwrite publication, exact-row clearing, and a truthful two-parameter recipe |
-| `web/library.py` | Rebuilt | Browse, disk, and tiles | this change | One bounded query serves every grid scope and sort; counts, folders, facets, dates, decision reindex, and folder safety derive from core rows without a repository or source visibility rule |
-| `web/render.py` | Rebuilt | Computation | this change | One decode, orientation, resize, and JPEG encode path serves tiles; paid RAW/JPEG/memory refusals remain in the focused suite and it imports no product state |
-| `web/photo/kind.py` | Rebuilt | Computation | this change | RAW decoding is selected by bytes rather than extension alone, while Develop capability and camera provenance remain separate explicit questions |
+| `web/library.py` | Rebuilt | Browse, disk, and tiles | `84d832f2` | One bounded query serves every grid scope and sort; counts, folders, facets, dates, decision reindex, and folder safety derive from core rows without a repository or source visibility rule |
+| `web/render.py` | Rebuilt | Computation | `84d832f2` | One decode, orientation, resize, and JPEG encode path serves tiles; paid RAW/JPEG/memory refusals remain in the focused suite and it imports no product state |
+| `web/photo/kind.py` | Rebuilt | Computation | `84d832f2` | RAW decoding is selected by bytes rather than extension alone, while Develop capability and camera provenance remain separate explicit questions |
+| `web/photo/identity.py` | Removed | Core | this change | Prefix hashing, async backfill state, V1 schema queries, and the HDD governor are replaced by full-byte `model.photos.content_hash` plus the query-driven V2 worker |
+| `web/photo/location.py` | Removed | Core | this change | Drive-letter probing and mutable guessed mappings are replaced by explicit marker-backed drives, safe tails, and verified copy addresses |
+| `web/photo/visibility.py` | Removed | Browse, disk, and tiles | this change | Source joins and `missing_at` filtering contradict the V2 invariant that unplugging a drive never removes a photo from the library; `library.IN_LIBRARY` is the sole rule |
+| `web/test_photo_identity.py` | Removed | Core proof | this change | Exercised the deleted prefix-hash/V1 backfill rather than the complete-byte identity protected in `test_core.py` |
+| `web/test_location.py` | Removed | Core proof | this change | Exercised the deleted drive-letter guesser; marker relocation and same-named-stranger refusals live in `test_core.py` |
+| `web/test_visibility_rule_is_one_rule.py` | Removed | Core proof | this change | Asserted the rejected source/missing visibility rule; the V2 away-versus-lost and library visibility invariants live in `test_core.py` |
 | `web/boot.py` | Rebuilt | Verification and fresh boot | `e331be8f` | One owned `Library` is the V2 product boundary: explicit catalog and tile paths, folder attach/refresh, browse, on-demand tile, debt, one worker, and deterministic close; no environment bootstrap or V1 import graph |
 | `web/test_core.py` | Rebuilt | Core proof | `284ba3f2`, `da1ccd7e`, `0639ab8d`, `bce1178f`, `7227545d`, `d33c655e`, `e331be8f`, this change | Proves the complete fresh `Library` path plus pagination, duplicate-identity reindex, malformed decisions/dates, decode limits, and persisted tiles; 76 tests and 4 subtests pass on Windows, but native desktop proof is still owed |
 

@@ -44,7 +44,11 @@ def tracked_files() -> list[str]:
         check=True,
         capture_output=True,
     )
-    return [path for path in result.stdout.decode().split("\0") if path]
+    return [
+        path
+        for path in result.stdout.decode().split("\0")
+        if path and (ROOT / path).is_file()
+    ]
 
 
 def is_code_file(path: str) -> bool:
@@ -99,8 +103,11 @@ def main() -> int:
 
     code = set(filter(is_code_file, tracked_files()))
     registered = registered_files()
-    stale = sorted(set(registered) - code)
-    remaining = sorted(code - set(registered))
+    active = {path for path, status in registered.items() if status != "Removed"}
+    removed = {path for path, status in registered.items() if status == "Removed"}
+    stale = sorted(active - code)
+    undeleted = sorted(removed & code)
+    remaining = sorted(code - active)
     rebuilt = sorted(path for path, status in registered.items() if status == "Rebuilt")
 
     print(f"Code files: {len(code)}")
@@ -122,7 +129,12 @@ def main() -> int:
         for path in stale:
             print(f"  {path}")
 
-    return 1 if stale or (args.check and (remaining or rebuilt)) else 0
+    if undeleted:
+        print("\nFiles marked Removed but still present:")
+        for path in undeleted:
+            print(f"  {path}")
+
+    return 1 if stale or undeleted or (args.check and (remaining or rebuilt)) else 0
 
 
 if __name__ == "__main__":

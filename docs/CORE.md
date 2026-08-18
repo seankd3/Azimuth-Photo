@@ -898,7 +898,7 @@ deleted. Handled, not preserved — most of these end up somewhere better.
 
 | Do not delete until | Because |
 |---|---|
-| `photo/location.py` | 12,793 rows still have no tail, and `locate()` returns None for a falsy tail. Deleting the old resolver first makes those photographs unopenable. |
+| ~~`photo/location.py`~~ **Discharged** | A fresh V2 sweep admits only real files with safe tails and explicit copy facts; tail-less V1 rows are user-data adoption work, never a reason for normal reads to probe drive letters. The resolver and its tests are deleted. |
 | `catalog_sources` · `images.source_id` | `included = 0, removed_at` on source 4 is an **owner decision**: 10,689 photographs deliberately removed. Now carried by *"a photo with no tail is not in the library yet"*, which needs no join. |
 | `features/sync/oplog.py` | It is already an append-only decision log keyed on content hash — 311 rows of keywords, flags, edits and statuses existing nowhere else. **Adopted `550e6bd6`.** |
 | `develop_settings.origin` | 79,482 rows are `origin='xmp'` and **5 are `origin='user'`**. It is what stops an XMP re-import overwriting an edit the owner made here. |
