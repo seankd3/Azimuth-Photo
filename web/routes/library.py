@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 
+import render
 from model import scope as scopes
 
 
@@ -78,3 +79,35 @@ async def photos(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/photos/{photo_id}")
+async def photo(request: Request, photo_id: int):
+    answer = await request.app.state.library.run(
+        lambda product: product.details(photo_id)
+    )
+    if answer is None:
+        raise HTTPException(status_code=404, detail="photo is unavailable")
+    return answer
+
+
+@router.get("/api/photos/{photo_id}/tile")
+async def tile(
+    request: Request,
+    photo_id: int,
+    size: int = render.GRID,
+    rotate: int = 0,
+):
+    try:
+        body = await request.app.state.library.run(
+            lambda product: product.tile(photo_id, size=size, rotate=rotate)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if body is None:
+        raise HTTPException(status_code=404, detail="photo is unavailable")
+    return Response(
+        body,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )

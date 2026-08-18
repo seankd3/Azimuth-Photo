@@ -176,12 +176,27 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
                         "/api/photos",
                         params={"scope": json.dumps({"folder": "Trips"})},
                     )
+                    photo_id = response.json()[0]["id"]
+                    details = client.get(f"/api/photos/{photo_id}")
+                    tile = client.get(f"/api/photos/{photo_id}/tile")
+                    absent = client.get("/api/photos/999999/tile")
+                    bad_size = client.get(
+                        f"/api/photos/{photo_id}/tile", params={"size": 513}
+                    )
                     bad_sort = client.get("/api/photos", params={"sort": "plausible"})
             finally:
                 await owned.close()
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual([photo["tail"] for photo in response.json()], ["Trips/lake.jpg"])
+        self.assertEqual(details.status_code, 200)
+        self.assertEqual((details.json()["width"], details.json()["height"]), (640, 480))
+        self.assertEqual(tile.status_code, 200)
+        self.assertEqual(tile.headers["content-type"], "image/jpeg")
+        self.assertEqual(tile.headers["cache-control"], "private, max-age=31536000, immutable")
+        self.assertTrue(tile.content.startswith(b"\xff\xd8"))
+        self.assertEqual(absent.status_code, 404)
+        self.assertEqual(bad_size.status_code, 400)
         self.assertEqual(bad_sort.status_code, 400)
 
 
