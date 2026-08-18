@@ -17,6 +17,7 @@ import sqlite3
 import threading
 import tempfile
 import unittest
+from unittest import mock
 
 from data import connection as data_connection
 
@@ -128,40 +129,34 @@ class AbandonedWorkTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_file_can_still_be_deleted(self):
         """The symptom, stated as itself: Windows refuses while a handle is open.
 
-        Cancelled once the connection is up and its PRAGMAs are running — the
-        window a real abandoned request lands in. Cancelling inside aiosqlite's
-        own connect has a residual moment this code cannot reach from the event
-        loop thread, and the connection there is thread-affine; the two
-        thread-count tests above cover what is guaranteed.
+        Pause at a known PRAGMA so cancellation lands after SQLite is open but
+        before the caller owns the connection. Timing this with a sleep could
+        instead cancel an already-completed task and leak the discarded return
+        value created by the test itself.
         """
 
-        task = asyncio.create_task(data_connection.open_async(self.path))
-        await asyncio.sleep(0.05)
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
-        await asyncio.sleep(0.3)
+        reached_pragma = asyncio.Event()
+        original_execute = data_connection.aiosqlite.Connection.execute
 
-        conn = await data_connection.open_async(self.path)
-        await data_connection.close_async(conn, db_path=self.path)
+        async def pause_during_setup(connection, sql, parameters=None):
+            if str(sql).startswith("PRAGMA busy_timeout"):
+                reached_pragma.set()
+                await asyncio.Event().wait()
+            return await original_execute(connection, sql, parameters)
+
+        with mock.patch.object(
+            data_connection.aiosqlite.Connection,
+            "execute",
+            pause_during_setup,
+        ):
+            task = asyncio.create_task(data_connection.open_async(self.path))
+            await reached_pragma.wait()
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
         await data_connection.close_shared_readers()
-
-        # The claim is that the handle is released, not that the worker thread
-        # has already been scheduled out — so wait for it rather than asserting
-        # on the operating system's timing.
-        #
-        # Two seconds was not waiting; it was a timing assertion with a generous
-        # constant, and it failed about one run in three on a busy machine. That
-        # is worse than no test: a suite that cries wolf teaches people to scroll
-        # past red. Ten seconds still fails in bounded time if a handle is really
-        # held, and stops failing when Windows is merely slow.
-        for _ in range(200):
-            try:
-                os.unlink(self.path)
-                return
-            except PermissionError:
-                await asyncio.sleep(0.05)
-        self.fail("the catalog was still held ten seconds after every close")
+        os.unlink(self.path)
 
     async def test_a_cancelled_reader_still_hands_its_connection_back(self):
         """`finally` runs, but its awaits are cancelled too — hence the shield."""

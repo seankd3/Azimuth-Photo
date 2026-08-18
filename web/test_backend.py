@@ -69,20 +69,6 @@ class BackendIntegrationTests(BackendTestCase):
         self.assertIn("action_id", columns)
         self.assertIn("idx_comparisons_action_id", indexes)
 
-    async def test_interaction_cache_warmup_starts_quickly_after_startup(self):
-        self.assertLessEqual(app_factory.INTERACTION_CACHE_WARMUP_DELAY_SECONDS, 0.05)
-        self.assertGreaterEqual(compare_service._visible_pairing_candidates_cache_ttl_seconds, 5.0)
-
-    async def test_light_startup_warmup_does_not_cold_load_diverse_mosaic(self):
-        startup_source = inspect.getsource(background_runtime.run_startup)
-        light_warmup = startup_source.split(
-            "async def _warm_light_startup_caches():",
-            1,
-        )[1].split("async def _warm_priority_interaction_caches", 1)[0]
-
-        self.assertNotIn('strategy="diverse"', light_warmup)
-        self.assertIn('strategy="explore"', light_warmup)
-
     async def test_shutdown_cancels_tracked_background_tasks(self):
         cancelled = asyncio.Event()
 

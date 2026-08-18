@@ -64,8 +64,9 @@ class AiFailureResilienceTests(unittest.TestCase):
 
 class CaptionLedgerResilienceTests(unittest.IsolatedAsyncioTestCase):
     async def test_oom_is_persisted_as_retryable_pending_work(self):
-        with tempfile.NamedTemporaryFile(suffix=".db") as database:
-            conn = sqlite3.connect(database.name)
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = os.path.join(directory, "catalog.db")
+            conn = sqlite3.connect(database_path)
             conn.executescript(
                 """
                 CREATE TABLE image_captions (
@@ -91,7 +92,7 @@ class CaptionLedgerResilienceTests(unittest.IsolatedAsyncioTestCase):
             conn.close()
 
             await captions.store_caption_result(
-                database.name,
+                database_path,
                 image_id=7,
                 model_key="caption@test",
                 caption="",
@@ -100,7 +101,7 @@ class CaptionLedgerResilienceTests(unittest.IsolatedAsyncioTestCase):
                 error="CUDA out of memory",
             )
 
-            conn = sqlite3.connect(database.name)
+            conn = sqlite3.connect(database_path)
             row = conn.execute(
                 "SELECT status, last_error FROM caption_scan_images"
             ).fetchone()
