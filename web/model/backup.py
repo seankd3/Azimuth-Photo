@@ -138,7 +138,12 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
     drive = record_drive(conn)
     if drive is None:
         return "no record drive attached"
-    archived = drives.path_for(conn, drive["uuid"], row["tail"])
+    recorded = conn.execute(
+        "SELECT tail FROM copies WHERE photo_id = ? AND drive_id = ?",
+        (int(photo_id), int(drive["id"])),
+    ).fetchone()
+    archived_tail = recorded["tail"] if recorded and recorded["tail"] else row["tail"]
+    archived = drives.path_for(conn, drive["uuid"], archived_tail)
     if archived is None or not os.path.exists(archived):
         return "not archived"
 
@@ -146,8 +151,7 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
     for holder in copies.drives_holding(conn, photo_id):
         if int(holder["is_record"]):
             continue
-        here = drives.path_for(conn, holder["uuid"], holder["tail"] if "tail" in holder.keys() else row["tail"])
-        here = here or drives.path_for(conn, holder["uuid"], row["tail"])
+        here = drives.path_for(conn, holder["uuid"], holder["copy_tail"] or row["tail"])
         if not here or not os.path.exists(here) or os.path.normcase(here) == os.path.normcase(archived):
             continue
 

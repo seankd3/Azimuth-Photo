@@ -165,6 +165,20 @@ def open_photo(conn, image_id: int) -> str | None:
     ).fetchone()
     if row is None or not row["tail"]:
         return None
+
+    # A copy normally shares the photo's filed tail, but collision-safe imports
+    # may give one drive a different one. The copy row is a hint, so try its
+    # explicit address first and still fall back to the canonical tail across
+    # every attached drive if the hint is stale or absent.
+    for copy in conn.execute(
+        "SELECT d.uuid, COALESCE(c.tail, ?) AS tail FROM copies c "
+        "JOIN drives d ON d.id = c.drive_id WHERE c.photo_id = ? "
+        "ORDER BY d.is_record ASC, d.id ASC",
+        (row["tail"], int(image_id)),
+    ):
+        path = drives.path_for(conn, copy["uuid"], copy["tail"])
+        if path and _verified(path, row["file_size"]):
+            return path
     return locate(conn, row["tail"], expected_size=row["file_size"])
 
 

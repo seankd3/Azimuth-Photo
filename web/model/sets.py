@@ -172,10 +172,11 @@ def counts(conn) -> dict[str, int]:
     """
 
     rows = conn.execute(
-        """
+        f"""
         SELECT family, COUNT(*) AS n FROM (
             SELECT subject, family, value,
-                   ROW_NUMBER() OVER (PARTITION BY subject, family ORDER BY at DESC, id DESC) AS rank
+                   ROW_NUMBER() OVER (PARTITION BY subject, family ORDER BY
+                       {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC) AS rank
             FROM decisions WHERE family LIKE ?
         ) WHERE rank = 1 AND value = 'true'
         GROUP BY family
@@ -189,10 +190,11 @@ def sets_of(conn, subject: str, *, kind: str | None = None) -> list[str]:
     """The ids of every set one photograph is in — a reverse index, unindexed."""
 
     rows = conn.execute(
-        """
+        f"""
         SELECT family, value FROM (
             SELECT family, value,
-                   ROW_NUMBER() OVER (PARTITION BY family ORDER BY at DESC, id DESC) AS rank
+                   ROW_NUMBER() OVER (PARTITION BY family ORDER BY
+                       {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC) AS rank
             FROM decisions WHERE subject = ? AND family LIKE ?
         ) WHERE rank = 1
         """,

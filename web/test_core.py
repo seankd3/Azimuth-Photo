@@ -67,8 +67,9 @@ class DrivesAreNotLetters(CoreCase):
     def test_a_drive_back_on_a_different_letter_is_the_same_drive(self):
         moved = os.path.join(self.tmp, "Elsewhere")
         shutil.move(self.cold_root, moved)
-        with patch.object(drives, "_candidate_roots", return_value=[self.tmp]):
-            self.assertEqual(drives.root_of(self.conn, self.cold["uuid"]), os.path.normpath(moved))
+        self.assertIsNone(drives.root_of(self.conn, self.cold["uuid"]))
+        drives.attach(self.conn, moved)
+        self.assertEqual(drives.root_of(self.conn, self.cold["uuid"]), os.path.normpath(moved))
         # One row updated, not 144,000 paths rewritten.
         self.assertEqual(
             self.conn.execute("SELECT root FROM drives WHERE uuid = ?", (self.cold["uuid"],)).fetchone()["root"],
@@ -78,8 +79,7 @@ class DrivesAreNotLetters(CoreCase):
     def test_a_letter_reused_by_a_stranger_is_not_our_drive(self):
         shutil.rmtree(self.cold_root)
         os.makedirs(self.cold_root)  # same path, no marker: somebody else's disk
-        with patch.object(drives, "_candidate_roots", return_value=[]):
-            self.assertIsNone(drives.root_of(self.conn, self.cold["uuid"]))
+        self.assertIsNone(drives.root_of(self.conn, self.cold["uuid"]))
 
     def test_a_tail_is_posix_and_case_folded_but_keeps_the_disk_s_spelling(self):
         # Tails travel between drives; one carrying a backslash stops matching
@@ -90,6 +90,14 @@ class DrivesAreNotLetters(CoreCase):
 
 
 class OpeningAPhoto(CoreCase):
+    def test_a_copy_at_an_alternate_tail_can_be_opened(self):
+        alternate = "Raws/2026/x-2.CR3"
+        path = self.write(self.cold_root, alternate)
+        image = self.photo(size=os.path.getsize(path))
+        copies.saw(self.conn, image, int(self.cold["id"]), tail=alternate)
+        self.conn.commit()
+        self.assertEqual(photos.open_photo(self.conn, image), path)
+
     def test_the_working_disk_wins_and_the_archive_still_answers(self):
         cold = self.write(self.cold_root)
         image = self.photo(size=os.path.getsize(cold))
@@ -123,8 +131,7 @@ class OpeningAPhoto(CoreCase):
         path = self.write(self.cold_root)
         image = self.photo(size=os.path.getsize(path))
         shutil.rmtree(self.cold_root)
-        with patch.object(drives, "_candidate_roots", return_value=[]):
-            self.assertEqual(photos.state(self.conn, image), "away")
+        self.assertEqual(photos.state(self.conn, image), "away")
 
         # Only with every drive attached and empty-handed is it lost.
         os.makedirs(self.cold_root)
@@ -192,8 +199,7 @@ class SynchronizeRefuses(CoreCase):
         self.photo(size=os.path.getsize(path))
         shutil.rmtree(self.cold_root)
 
-        with patch.object(drives, "_candidate_roots", return_value=[]):
-            found = synchronize.plan(self.conn, "")
+        found = synchronize.plan(self.conn, "")
         self.assertEqual(found["missing"], [])
         self.assertIn("away", found["note"])
 
@@ -245,8 +251,7 @@ class BackupRefuses(CoreCase):
     def test_no_record_drive_is_a_refusal_not_a_crash(self):
         image, _ = self._queued()
         shutil.rmtree(self.cold_root)
-        with patch.object(drives, "_candidate_roots", return_value=[]):
-            self.assertEqual(backup.back_up(self.conn, image), "no record drive attached")
+        self.assertEqual(backup.back_up(self.conn, image), "no record drive attached")
 
     def test_reclaim_frees_the_working_copy_and_never_the_archive_s(self):
         image, source = self._queued()
@@ -272,6 +277,16 @@ class BackupRefuses(CoreCase):
         self.assertEqual(backup.reclaim(self.conn, image), "copies differ")
         self.assertTrue(os.path.exists(source))
 
+    def test_reclaim_verifies_an_archive_copy_at_its_actual_tail(self):
+        image, source = self._queued()
+        alternate = "Raws/Digital/2026/x-2.CR3"
+        self.write(self.cold_root, alternate)
+        copies.saw(self.conn, image, int(self.cold["id"]), tail=alternate)
+        self.conn.commit()
+        self.assertEqual(backup.reclaim(self.conn, image), "freed")
+        self.assertFalse(os.path.exists(source))
+        self.assertTrue(os.path.exists(os.path.join(self.cold_root, alternate.replace("/", os.sep))))
+
 
 class PuttingAFileDown(CoreCase):
     def test_put_writes_verifies_and_identifies(self):
@@ -296,6 +311,19 @@ class PuttingAFileDown(CoreCase):
 
 
 class DecisionsSurvive(CoreCase):
+    def test_your_decision_outweighs_later_imported_metadata(self):
+        decisions.decide(self.conn, "abc", decisions.DEVELOP, {"crop": "mine"}, at=1, by="you")
+        decisions.decide(self.conn, "abc", decisions.DEVELOP, {"crop": "file"}, at=2, by="file")
+        self.assertEqual(decisions.latest(self.conn, "abc", decisions.DEVELOP), {"crop": "mine"})
+
+    def test_partial_updates_preserve_fields_the_caller_did_not_send(self):
+        decisions.decide(self.conn, "abc", decisions.DEVELOP, {"crop": 1, "masks": [2]})
+        decisions.amend(self.conn, "abc", decisions.DEVELOP, {"crop": 3})
+        self.assertEqual(
+            decisions.latest(self.conn, "abc", decisions.DEVELOP),
+            {"crop": 3, "masks": [2]},
+        )
+
     def test_two_decisions_in_one_instant_keep_their_order(self):
         # A millisecond clock hands out the same timestamp twice under a fast
         # keyboard; `at` alone would make the answer a coin toss.
@@ -381,7 +409,8 @@ class OwedIsAQuery(CoreCase):
 
     def test_making_it_is_what_removes_it_from_the_queue(self):
         self._catalogued()
-        work.step(self.conn, yield_to=lambda: False)
+        row = work.owed(self.conn, "thumb")[0]
+        cache.make(self.conn, row["hash"], "thumb", self.write(self.hot_root))
         self.assertEqual(work.owed(self.conn, "thumb"), [])
 
     def test_one_unreachable_photo_cannot_stall_the_queue(self):

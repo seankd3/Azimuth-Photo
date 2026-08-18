@@ -52,7 +52,8 @@ def forget(conn, photo_id: int, drive_id: int) -> None:
 
 def drives_holding(conn, photo_id: int) -> list[dict]:
     return [dict(row) for row in conn.execute(
-        "SELECT d.* FROM copies c JOIN drives d ON d.id = c.drive_id WHERE c.photo_id = ? "
+        "SELECT d.*, c.tail AS copy_tail FROM copies c "
+        "JOIN drives d ON d.id = c.drive_id WHERE c.photo_id = ? "
         "ORDER BY d.is_record ASC, d.id ASC",
         (int(photo_id),),
     )]

@@ -42,7 +42,11 @@ CREATE TABLE IF NOT EXISTS decisions (
     subject TEXT NOT NULL,
     family  TEXT NOT NULL,
     value   TEXT,
-    at      REAL NOT NULL
+    at      REAL NOT NULL,
+    -- Who made the decision. Your own answer outranks imported metadata no
+    -- matter which was observed last; this column makes that one rule rather
+    -- than a WHERE clause copied into every importer.
+    by      TEXT NOT NULL DEFAULT 'you'
 );
 
 CREATE INDEX IF NOT EXISTS idx_decisions_subject

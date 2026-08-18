@@ -5,11 +5,10 @@ again: a hash, a thumbnail, a date, an embedding. Lose them and you wait. Lose
 a decision — a keep, a star, a crop, a name — and it is simply gone, because
 the only copy was in your head a year ago.
 
-So decisions are an **append-only log**, and the columns that carry a decision
-on `images` are an index over that log rather than the truth itself. A column
-can be overwritten by a bad migration, a merge, or a worker that thought it
-knew better; all three have happened here. A log cannot: the wrong write is one
-more row, and the row before it is still readable.
+So decisions are an **append-only log**. A projected column can be overwritten
+by a bad migration or a worker that thought it knew better; both have happened
+here. A log cannot: the wrong write is one more row, and the row before it is
+still readable.
 
 Two shapes fall out of that, and both delete machinery:
 
@@ -41,8 +40,26 @@ NAME = "name"          # a person, a roll, a folder
 ROTATE = "rotate"      # 0/90/180/270, when the file itself is filed sideways
 FORGET = "forget"      # this subject is no longer wanted
 
+YOU = "you"
+FILE = "file"
+LRCAT = "lrcat"
+OPLOG = "oplog"
+AUTHORS = {YOU, FILE, LRCAT, OPLOG}
 
-def decide(conn, subject: str, family: str, value: Any = None, *, at: float | None = None) -> int:
+# Your explicit answer always wins over imported metadata. `oplog` is your
+# answer arriving from another copy of Azimuth, so it has the same authority.
+AUTHORITY_SQL = f"CASE by WHEN '{YOU}' THEN 2 WHEN '{OPLOG}' THEN 2 ELSE 1 END"
+
+
+def decide(
+    conn,
+    subject: str,
+    family: str,
+    value: Any = None,
+    *,
+    at: float | None = None,
+    by: str = YOU,
+) -> int:
     """Append a decision. Returns its id.
 
     Never updates, never deletes. Changing your mind is a later row, and
@@ -54,9 +71,12 @@ def decide(conn, subject: str, family: str, value: Any = None, *, at: float | No
         raise ValueError("a decision needs a subject")
     if not family:
         raise ValueError("a decision needs a family")
+    by = str(by).strip().lower()
+    if by not in AUTHORS:
+        raise ValueError(f"unknown decision author: {by!r}")
     cursor = conn.execute(
-        "INSERT INTO decisions(subject, family, value, at) VALUES (?, ?, ?, ?)",
-        (subject, str(family), json.dumps(value), at if at is not None else time.time()),
+        "INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, ?)",
+        (subject, str(family), json.dumps(value), at if at is not None else time.time(), by),
     )
     return int(cursor.lastrowid)
 
@@ -78,7 +98,8 @@ def latest(conn, subject: str, family: str) -> Any:
     """
 
     row = conn.execute(
-        "SELECT value FROM decisions WHERE subject = ? AND family = ? ORDER BY at DESC, id DESC LIMIT 1",
+        f"SELECT value FROM decisions WHERE subject = ? AND family = ? "
+        f"ORDER BY {AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 1",
         (str(subject), str(family)),
     ).fetchone()
     return loaded(row)
@@ -91,7 +112,7 @@ def history(conn, subject: str, *, family: str | None = None, limit: int = 200) 
     were three features because the log did not exist.
     """
 
-    sql = "SELECT id, subject, family, value, at FROM decisions WHERE subject = ?"
+    sql = "SELECT id, subject, family, value, at, by FROM decisions WHERE subject = ?"
     args: list[Any] = [str(subject)]
     if family:
         sql += " AND family = ?"
@@ -100,7 +121,7 @@ def history(conn, subject: str, *, family: str | None = None, limit: int = 200) 
     args.append(int(limit))
     return [
         {"id": row["id"], "subject": row["subject"], "family": row["family"],
-         "value": loaded(row), "at": row["at"]}
+         "value": loaded(row), "at": row["at"], "by": row["by"]}
         for row in conn.execute(sql, args)
     ]
 
@@ -109,10 +130,13 @@ def history(conn, subject: str, *, family: str | None = None, limit: int = 200) 
 # present-tense question with the same shape — last row wins, per subject — and
 # anything narrowing photographs by a decision needs that shape as a *subquery*,
 # not just as `current()`'s return value. One parameter: the family.
-LATEST_IN_FAMILY = """
+LATEST_IN_FAMILY = f"""
     SELECT subject, value FROM (
         SELECT subject, value,
-               ROW_NUMBER() OVER (PARTITION BY subject ORDER BY at DESC, id DESC) AS rank
+               ROW_NUMBER() OVER (
+                   PARTITION BY subject
+                   ORDER BY {AUTHORITY_SQL} DESC, at DESC, id DESC
+               ) AS rank
         FROM decisions WHERE family = ?
     ) WHERE rank = 1
 """
@@ -152,10 +176,13 @@ def carry(conn, subject: str, to: str) -> int:
     if subject == to or not to:
         return 0
     rows = conn.execute(
-        """
-        SELECT family, value FROM (
-            SELECT family, value,
-                   ROW_NUMBER() OVER (PARTITION BY family ORDER BY at DESC, id DESC) AS rank
+        f"""
+        SELECT family, value, by FROM (
+            SELECT family, value, by,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY family
+                       ORDER BY {AUTHORITY_SQL} DESC, at DESC, id DESC
+                   ) AS rank
             FROM decisions WHERE subject = ?
         ) WHERE rank = 1
         """,
@@ -164,8 +191,8 @@ def carry(conn, subject: str, to: str) -> int:
     now = time.time()
     for row in rows:
         conn.execute(
-            "INSERT INTO decisions(subject, family, value, at) VALUES (?, ?, ?, ?)",
-            (str(to), row["family"], row["value"], now),
+            "INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, ?)",
+            (str(to), row["family"], row["value"], now, row["by"]),
         )
     return len(rows)
 
@@ -178,7 +205,8 @@ def undo(conn, subject: str, family: str) -> Any:
     """
 
     rows = conn.execute(
-        "SELECT value FROM decisions WHERE subject = ? AND family = ? ORDER BY at DESC, id DESC LIMIT 2",
+        f"SELECT value FROM decisions WHERE subject = ? AND family = ? "
+        f"ORDER BY {AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 2",
         (str(subject), str(family)),
     ).fetchall()
     if len(rows) < 2:
@@ -186,3 +214,18 @@ def undo(conn, subject: str, family: str) -> Any:
     previous = loaded(rows[1])
     decide(conn, subject, family, previous)
     return previous
+
+
+def amend(conn, subject: str, family: str, patch: dict, *, by: str = YOU) -> int:
+    """Merge a partial object into the current answer, then append it.
+
+    Partial edits have one safe spelling. Callers cannot accidentally replace
+    masks, local adjustments, or metadata fields they did not send.
+    """
+
+    current_value = latest(conn, subject, family)
+    if current_value is None:
+        current_value = {}
+    if not isinstance(current_value, dict) or not isinstance(patch, dict):
+        raise ValueError("amend needs an object decision and an object patch")
+    return decide(conn, subject, family, {**current_value, **patch}, by=by)

@@ -88,20 +88,13 @@ def attach(conn, root: str, *, label: str = "", is_record: bool = False) -> dict
     return dict(conn.execute("SELECT * FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone())
 
 
-def _candidate_roots() -> list[str]:
-    """Places a drive could have reappeared. Patchable seam for tests."""
-
-    import string
-
-    return [f"{letter}:{os.sep}" for letter in string.ascii_uppercase if os.path.isdir(f"{letter}:{os.sep}")]
-
-
 def root_of(conn, drive_uuid: str) -> str | None:
     """Where this drive is right now, or None if it is not attached.
 
-    The remembered root is checked first because that is nearly always the
-    answer. When its marker no longer agrees, the letters are probed once and
-    the row follows the drive — the only write a moved drive costs.
+    The remembered root either presents the right marker or it does not. Drive
+    discovery belongs to the desktop's device events and folder picker, which
+    call `attach()` with an explicit root. A file read must never synchronously
+    probe twenty-six drive letters or a disconnected network mapping.
     """
 
     row = conn.execute("SELECT root FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone()
@@ -111,26 +104,7 @@ def root_of(conn, drive_uuid: str) -> str | None:
     remembered = str(row["root"])
     if read_marker(remembered) == drive_uuid:
         return remembered
-
-    for candidate in _candidate_roots():
-        # A marker sits at a library root, which is usually one level down.
-        for root in (candidate, *_child_dirs(candidate)):
-            if read_marker(root) == drive_uuid:
-                conn.execute(
-                    "UPDATE drives SET root = ?, seen_at = ? WHERE uuid = ?",
-                    (os.path.normpath(root), time.time(), drive_uuid),
-                )
-                conn.commit()
-                return os.path.normpath(root)
     return None
-
-
-def _child_dirs(root: str) -> list[str]:
-    try:
-        with os.scandir(root) as entries:
-            return [entry.path for entry in entries if not entry.name.startswith(".") and entry.is_dir()]
-    except OSError:
-        return []
 
 
 def online(conn, drive_uuid: str) -> bool:
