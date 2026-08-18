@@ -252,7 +252,7 @@ membership, and counts—and adds no table or alternate source of truth.
 ### One primitive on the seam, and it is three lines
 
 ```
-GET /api/routes  ->  [path]      # over app.routes
+GET /api/routes  ->  [path]      # over the mounted app's OpenAPI paths
 ```
 
 CI asserts that `net/routes.js` is a subset of that list, and that no `/api/`
