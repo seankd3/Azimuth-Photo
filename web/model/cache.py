@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass
+from collections.abc import Iterable
 from typing import Any, Callable
 
 READY = "ready"
@@ -95,34 +96,7 @@ class Made:
     bytes: int = 0
 
 
-_KINDS: dict[str, Kind] = {}
-
-
-def register(kind: Kind) -> Kind:
-    """Declare a kind. One registry, so an unknown kind is an error, not a guess."""
-
-    _KINDS[kind.name] = kind
-    return kind
-
-
-def unregister(name: str) -> None:
-    _KINDS.pop(str(name), None)
-
-
-def kinds() -> dict[str, Kind]:
-    """A copy, so iterating cannot be disturbed by a kind registering late."""
-
-    return dict(_KINDS)
-
-
-def kind_of(name: str) -> Kind:
-    try:
-        return _KINDS[str(name)]
-    except KeyError:
-        raise KeyError(f"no such cache kind: {name!r}") from None
-
-
-def canonical(kind: str, recipe: dict[str, Any] | None) -> str:
+def canonical(kind: Kind, recipe: dict[str, Any] | None) -> str:
     """The recipe, spelled one way.
 
     Sorted keys so `{a,b}` and `{b,a}` are one entry, and restricted to the
@@ -131,35 +105,35 @@ def canonical(kind: str, recipe: dict[str, Any] | None) -> str:
     """
 
     recipe = dict(recipe or {})
-    declared = set(kind_of(kind).params)
+    declared = set(kind.params)
     unknown = sorted(set(recipe) - declared)
     if unknown:
-        raise ValueError(f"{kind} takes {sorted(declared)}; refused {unknown}")
+        raise ValueError(f"{kind.name} takes {sorted(declared)}; refused {unknown}")
     return json.dumps({k: recipe[k] for k in sorted(recipe)}, separators=(",", ":"), sort_keys=True)
 
 
-def get(conn, hash: str, kind: str, recipe: dict[str, Any] | None = None) -> dict | None:
+def get(conn, hash: str, kind: Kind, recipe: dict[str, Any] | None = None) -> dict | None:
     """The stored answer, ready or failed, or None if we never asked."""
 
     row = conn.execute(
         "SELECT * FROM cache WHERE hash = ? AND kind = ? AND recipe = ?",
-        (str(hash), str(kind), canonical(kind, recipe)),
+        (str(hash), kind.name, canonical(kind, recipe)),
     ).fetchone()
     return dict(row) if row is not None else None
 
 
-def put(conn, hash: str, kind: str, made: Made, recipe: dict[str, Any] | None = None) -> None:
-    _write(conn, hash, kind, canonical(kind, recipe), READY, made.path, made.value, made.bytes, None)
+def put(conn, hash: str, kind: Kind, made: Made, recipe: dict[str, Any] | None = None) -> None:
+    _write(conn, hash, kind.name, canonical(kind, recipe), READY, made.path, made.value, made.bytes, None)
 
 
-def failed(conn, hash: str, kind: str, note: str, recipe: dict[str, Any] | None = None) -> None:
+def failed(conn, hash: str, kind: Kind, note: str, recipe: dict[str, Any] | None = None) -> None:
     """Remember that this could not be made, and why.
 
     Once. A pass that rediscovers the same unreadable file is a pass that never
     reaches the readable ones behind it.
     """
 
-    _write(conn, hash, kind, canonical(kind, recipe), FAILED, None, None, 0, str(note)[:500])
+    _write(conn, hash, kind.name, canonical(kind, recipe), FAILED, None, None, 0, str(note)[:500])
 
 
 def _write(conn, hash, kind, recipe, state, path, value, size, note) -> None:
@@ -173,7 +147,7 @@ def _write(conn, hash, kind, recipe, state, path, value, size, note) -> None:
     )
 
 
-def make(conn, hash: str, kind: str, source: str, recipe: dict[str, Any] | None = None,
+def make(conn, hash: str, kind: Kind, source: str, recipe: dict[str, Any] | None = None,
          *, remake: bool = False) -> dict | None:
     """The answer, from cache or by computing it. None if it cannot be made.
 
@@ -183,21 +157,20 @@ def make(conn, hash: str, kind: str, source: str, recipe: dict[str, Any] | None 
     fact about the photo, poisoning the entry for the helper that can.
     """
 
-    entry = kind_of(kind)
     recipe_text = canonical(kind, recipe)
     if not remake:
         row = conn.execute(
             "SELECT * FROM cache WHERE hash = ? AND kind = ? AND recipe = ?",
-            (str(hash), kind, recipe_text),
+            (str(hash), kind.name, recipe_text),
         ).fetchone()
         if row is not None:
             return dict(row) if row["state"] == READY else None
 
-    if not entry.here():
+    if not kind.here():
         return None
 
     try:
-        made = entry.compute(source, hash, **(recipe or {}))
+        made = kind.compute(source, hash, **(recipe or {}))
     except Exception as error:  # noqa: BLE001 - the note is the whole point
         failed(conn, hash, kind, f"{type(error).__name__}: {error}", recipe)
         conn.commit()
@@ -208,26 +181,30 @@ def make(conn, hash: str, kind: str, source: str, recipe: dict[str, Any] | None 
     return get(conn, hash, kind, recipe)
 
 
-def forget(conn, hash: str, *, kind: str | None = None) -> int:
+def forget(conn, hash: str, *, kind: Kind | None = None) -> int:
     """Drop cached answers so they are made again. Never touches decisions."""
 
     if kind:
-        cursor = conn.execute("DELETE FROM cache WHERE hash = ? AND kind = ?", (str(hash), str(kind)))
+        cursor = conn.execute("DELETE FROM cache WHERE hash = ? AND kind = ?", (str(hash), kind.name))
     else:
         cursor = conn.execute("DELETE FROM cache WHERE hash = ?", (str(hash),))
     return cursor.rowcount
 
 
-def size(conn, *, kind: str | None = None) -> int:
+def size(conn, *, kind: Kind | None = None) -> int:
     sql = "SELECT COALESCE(SUM(bytes), 0) AS total FROM cache"
     args: tuple = ()
     if kind:
         sql += " WHERE kind = ?"
-        args = (str(kind),)
+        args = (kind.name,)
     return int(conn.execute(sql, args).fetchone()["total"])
 
 
-def evict(conn, ceiling_bytes: int) -> list[tuple[str, str]]:
+def evict(
+    conn,
+    ceiling_bytes: int,
+    kinds: Iterable[Kind],
+) -> list[tuple[str, str]]:
     """Bring the cache under one ceiling, oldest first. Returns (kind, path).
 
     One number, one order. Not a tier policy, not a per-kind budget, not a
@@ -239,7 +216,7 @@ def evict(conn, ceiling_bytes: int) -> list[tuple[str, str]]:
     deletes the embeddings it takes hours to remake.
     """
 
-    keepers = [name for name, kind in _KINDS.items() if not kind.evictable]
+    keepers = [kind.name for kind in kinds if not kind.evictable]
     hole = ",".join("?" for _ in keepers)
     where = f"WHERE kind NOT IN ({hole})" if keepers else ""
     total = int(conn.execute(
@@ -248,7 +225,7 @@ def evict(conn, ceiling_bytes: int) -> list[tuple[str, str]]:
     if total <= ceiling_bytes:
         return []
 
-    dropped: list[str] = []
+    dropped: list[tuple[str, str]] = []
     for row in conn.execute(
         f"SELECT hash, kind, recipe, path, bytes FROM cache {where} ORDER BY at ASC", keepers
     ).fetchall():

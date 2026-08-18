@@ -153,16 +153,17 @@ dies"* executable rather than aspirational.
 ### L2 — `web/work.py` (385 lines today)
 
 Owed is a query — the anti-join. One worker. Lanes as an integer. The politeness
-gate. The cache-kind registry. `cache.evict` against one ceiling. **This is the
-only file in the tree permitted a module-global mutable registry, and it should
-hold none.**
+gate. Cache kinds are explicit immutable capabilities passed in by boot;
+importing a feature cannot silently alter the work graph. `cache.evict` uses
+those same capabilities against one ceiling. **This file may own a running
+worker instance, but no process-global work or kind registry.**
 
 *May import:* `model`, `compute`.
 
 R6 is the highest-yield rule in the set, and the reason is one signature:
 
 ```python
-def owed(conn, kind: str, *, recipe: dict | None = None,
+def owed(conn, kind: cache.Kind, *, recipe: dict | None = None,
          on_screen: Iterable[int] = (), limit: int = 200) -> list[dict]:
 ```
 

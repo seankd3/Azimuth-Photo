@@ -167,7 +167,7 @@ def set_paused(conn, stop: bool) -> bool:
     return stop
 
 
-def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
+def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
          scope: Scope = EVERYTHING, limit: int = 200) -> list[dict]:
     """Photos that should have this answer and do not. The whole scheduler.
 
@@ -208,7 +208,7 @@ def owed(conn, kind: str, *, recipe: dict | None = None, on_screen: Iterable[int
     )]
 
 
-def owing(conn, kind: str, *, recipe: dict | None = None, scope: Scope = EVERYTHING) -> int:
+def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = EVERYTHING) -> int:
     """How many are owed. The same anti-join, counted instead of listed.
 
     A status line wanted this and had to `len()` a list of up to 100,000 rows to
@@ -223,10 +223,9 @@ def owing(conn, kind: str, *, recipe: dict | None = None, scope: Scope = EVERYTH
     return int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
 
 
-def _owed_from(kind: str, recipe: dict | None, scope: Scope) -> tuple[str, tuple]:
+def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope) -> tuple[str, tuple]:
     """The anti-join itself: what is owed, before anyone says what to do with it."""
 
-    entry = cache.kind_of(kind)
     narrowed, scope_args = where(scope)
     return (
         f"""
@@ -237,10 +236,10 @@ def _owed_from(kind: str, recipe: dict | None, scope: Scope) -> tuple[str, tuple
           AND i.tail IS NOT NULL
           AND i.vc_of IS NULL
           AND c.hash IS NULL
-          AND ({entry.wants})
+          AND ({kind.wants})
           AND ({narrowed})
         """,
-        (kind, cache.canonical(kind, recipe), *scope_args),
+        (kind.name, cache.canonical(kind, recipe), *scope_args),
     )
 
 
@@ -270,15 +269,15 @@ def _unidentified_count(conn) -> int:
     return int(conn.execute(f"SELECT COUNT(*) {_UNIDENTIFIED}").fetchone()[0])
 
 
-def debt(conn) -> dict[str, int]:
+def debt(conn, kinds: Iterable[cache.Kind]) -> dict[str, int]:
     """How much is owed, per kind. What a status line reads; nothing depends on it."""
 
     tally = {"identity": _unidentified_count(conn)}
-    for name, kind in cache.kinds().items():
+    for kind in kinds:
         try:
-            tally[name] = sum(owing(conn, name, recipe=recipe) for recipe in kind.ahead())
+            tally[kind.name] = sum(owing(conn, kind, recipe=recipe) for recipe in kind.ahead())
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
-            log.debug("worker=debt kind=%s could not be counted", name)
+            log.debug("worker=debt kind=%s could not be counted", kind.name)
     return tally
 
 
@@ -293,7 +292,8 @@ def _identify_one(conn, row) -> bool:
     return True
 
 
-def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = None,
+def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
+         yield_to: Callable[[], bool] = None,
          lane: int = 0, lanes: int = 1) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
@@ -313,7 +313,7 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
     simply owed again, which is the property the whole design turns on.
     """
 
-    if paused(conn):
+    if paused(conn) or (yield_to is not None and yield_to()):
         return None
 
     for row in unidentified(conn, limit=1):
@@ -324,7 +324,7 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
         # the next pass will find it if the drive comes back.
         return None
 
-    for name, kind in cache.kinds().items():
+    for kind in kinds:
         if not kind.here():
             continue
         # A window rather than one row. Being unable to locate a photograph is
@@ -333,25 +333,17 @@ def step(conn, *, on_screen: Iterable[int] = (), yield_to: Callable[[], bool] = 
         # Trying a handful costs nothing and makes progress whenever *any* of
         # them is reachable.
         for recipe in kind.ahead():
-            for row in owed(conn, name, recipe=recipe, on_screen=on_screen,
+            for row in owed(conn, kind, recipe=recipe, on_screen=on_screen,
                             limit=CANDIDATES)[lane::lanes]:
                 source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
                 if source is None:
                     continue
-                cache.make(conn, row["hash"], name, source, recipe)
-                return {"did": name, "photo": row["id"], "recipe": recipe}
+                cache.make(conn, row["hash"], kind, source, recipe)
+                return {"did": kind.name, "photo": row["id"], "recipe": recipe}
     return None
 
 
-def tiles_ceiling() -> int:
-    """How much disk the cache may hold. Asked, so a settings change reaches it."""
-
-    import tiles
-
-    return tiles.CEILING_BYTES
-
-
-def sweep_cache(conn, ceiling_bytes: int) -> int:
+def sweep_cache(conn, ceiling_bytes: int, kinds: Iterable[cache.Kind]) -> int:
     """Hold the cache under one ceiling and unlink what it dropped.
 
     Eviction is by age against one number. Not a tier policy, not a per-kind
@@ -359,9 +351,11 @@ def sweep_cache(conn, ceiling_bytes: int) -> int:
     not a question worth a subsystem.
     """
 
-    dropped = cache.evict(conn, ceiling_bytes)
-    for kind, path in dropped:
-        remove = getattr(cache.kinds().get(kind), "remove", None) or _unlink
+    kinds = tuple(kinds)
+    by_name = {kind.name: kind for kind in kinds}
+    dropped = cache.evict(conn, ceiling_bytes, kinds)
+    for name, path in dropped:
+        remove = by_name[name].remove or _unlink
         try:
             remove(path)
         except OSError:
@@ -373,7 +367,9 @@ def _unlink(path: str) -> None:
     os.remove(path)
 
 
-def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
+def run(open_conn, kinds: Iterable[cache.Kind], *,
+        on_screen: Callable[[], Iterable[int]] = lambda: (),
+        ceiling_bytes: int | None = None,
         lane: int = 0, lanes: int = 1) -> None:
     """The chore loop. Runs until the process ends; owns everything it touches.
 
@@ -390,11 +386,11 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
     try:
         while not _stopped.is_set():
             try:
-                did = step(conn, on_screen=on_screen(), lane=lane, lanes=lanes)
+                did = step(conn, kinds, on_screen=on_screen(), lane=lane, lanes=lanes)
             except Exception:
                 log.exception("worker=chores step failed")
                 did = None
-            if did is None:
+            if did is None and ceiling_bytes is not None:
                 # Nothing is owed, so this is the moment to hold the cache under
                 # its ceiling. `sweep_cache` had no caller at all: the ceiling
                 # was declared in `tiles`, reported to the owner by
@@ -408,7 +404,7 @@ def run(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: (),
                 # is waiting for, and `evict` returns immediately when the total
                 # is under the ceiling, so the idle cost is one SUM.
                 try:
-                    freed = sweep_cache(conn, tiles_ceiling())
+                    freed = sweep_cache(conn, ceiling_bytes, kinds)
                     if freed:
                         log.info("worker=chores swept=%s", freed)
                 except Exception:
@@ -455,7 +451,9 @@ def stop(timeout: float = 5.0) -> int:
     return len(alive)
 
 
-def start(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> int:
+def start(open_conn, kinds: Iterable[cache.Kind], *,
+          on_screen: Callable[[], Iterable[int]] = lambda: (),
+          ceiling_bytes: int | None = None) -> int:
     """Run the chore loop on as many threads as this machine can afford.
 
     Threads rather than processes, and the reason is worth stating because the
@@ -473,11 +471,17 @@ def start(open_conn, *, on_screen: Callable[[], Iterable[int]] = lambda: ()) -> 
     """
 
     _stopped.clear()
+    kinds = tuple(kinds)
     count = workers()
     for lane in range(count):
         thread = threading.Thread(
-            target=run, args=(open_conn,),
-            kwargs={"on_screen": on_screen, "lane": lane, "lanes": count},
+            target=run, args=(open_conn, kinds),
+            kwargs={
+                "on_screen": on_screen,
+                "ceiling_bytes": ceiling_bytes,
+                "lane": lane,
+                "lanes": count,
+            },
             name=f"chores-{lane}", daemon=True,
         )
         _threads.append(thread)

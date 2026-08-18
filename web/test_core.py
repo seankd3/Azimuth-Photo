@@ -13,9 +13,12 @@ import unittest
 from unittest.mock import patch
 
 import rank
+import render
 import work
 import model
+import tiles
 import library as library_surface
+from PIL import Image
 from model import backup, cache, copies, decisions, drives, photos
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -39,6 +42,48 @@ class FreshCatalogTests(unittest.TestCase):
 
         self.assertEqual(tables, {"images", "drives", "copies", "decisions", "cache"})
         self.assertEqual(mode, "wal")
+
+    def test_a_fresh_drive_becomes_a_browseable_tiled_library(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "catalog.db")
+            drive_root = os.path.join(directory, "Photos")
+            tile_root = os.path.join(directory, "Tiles")
+            source = os.path.join(drive_root, "Trips", "lake.jpg")
+            os.makedirs(os.path.dirname(source))
+            Image.new("RGB", (800, 600), "navy").save(source, "JPEG")
+
+            conn = model.connect(catalog)
+            try:
+                drive = drives.attach(conn, drive_root, label="Photos")
+                swept = copies.sweep(conn, drive["uuid"])
+                listed = library_surface.photos(conn)
+                store = tiles.Store(tile_root)
+
+                identified = work.step(conn, (store.kind,), yield_to=lambda: False)
+                made = work.step(conn, (store.kind,), yield_to=lambda: False)
+                listed_after = library_surface.photos(conn)
+                entry = cache.get(
+                    conn,
+                    listed_after[0]["hash"],
+                    store.kind,
+                    {"size": render.GRID, "rotate": 0},
+                )
+                with Image.open(entry["path"]) as tile:
+                    tile_size = tile.size
+                tile_path = entry["path"]
+                freed = work.sweep_cache(conn, 0, (store.kind,))
+                tile_survived = os.path.exists(tile_path)
+            finally:
+                conn.close()
+
+        self.assertEqual(swept["photos_added"], 1)
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(identified, {"did": "identity", "photo": listed[0]["id"]})
+        self.assertEqual(made["did"], "tile")
+        self.assertEqual(max(tile_size), render.GRID)
+        self.assertTrue(tile_path.startswith(tile_root))
+        self.assertEqual(freed, 1)
+        self.assertFalse(tile_survived)
 
 
 class CoreCase(unittest.TestCase):
@@ -476,51 +521,49 @@ class DecisionsSurvive(CoreCase):
 class CacheRefuses(CoreCase):
     def setUp(self):
         super().setUp()
-        self.kind = cache.register(cache.Kind(
+        self.kind = cache.Kind(
             name="test_thumb",
             compute=lambda source, hash, size=0: cache.Made(path=f"{source}@{size}", bytes=10),
             params=("size",),
-        ))
-        self.addCleanup(cache.unregister, "test_thumb")
+        )
 
     def test_a_recipe_refuses_anything_the_kind_did_not_declare(self):
         # This is "recipe is never a timestamp", made mechanical. Feeding
         # updated_at in is how reset-then-redo re-rendered identical pixels and
         # two machines never shared an entry.
         with self.assertRaises(ValueError):
-            cache.canonical("test_thumb", {"size": 400, "updated_at": 1.0})
+            cache.canonical(self.kind, {"size": 400, "updated_at": 1.0})
 
     def test_a_failure_is_recorded_once_with_why(self):
-        cache.register(cache.Kind(name="boom", compute=lambda source, hash: 1 / 0))
-        self.addCleanup(cache.unregister, "boom")
-        self.assertIsNone(cache.make(self.conn, "hash1", "boom", "x.CR3"))
-        stored = cache.get(self.conn, "hash1", "boom")
+        boom = cache.Kind(name="boom", compute=lambda source, hash: 1 / 0)
+        self.assertIsNone(cache.make(self.conn, "hash1", boom, "x.CR3"))
+        stored = cache.get(self.conn, "hash1", boom)
         self.assertEqual(stored["state"], cache.FAILED)
         self.assertIn("ZeroDivisionError", stored["note"])
 
     def test_a_machine_that_cannot_make_it_records_nothing(self):
         # "Not here" is a fact about this machine. Stored, it would poison the
         # entry for the helper that can make it.
-        cache.register(cache.Kind(name="gpu", compute=lambda source, hash: cache.Made(), here=lambda: False))
-        self.addCleanup(cache.unregister, "gpu")
-        self.assertIsNone(cache.make(self.conn, "hash1", "gpu", "x.CR3"))
-        self.assertIsNone(cache.get(self.conn, "hash1", "gpu"))
+        gpu = cache.Kind(name="gpu", compute=lambda source, hash: cache.Made(), here=lambda: False)
+        self.assertIsNone(cache.make(self.conn, "hash1", gpu, "x.CR3"))
+        self.assertIsNone(cache.get(self.conn, "hash1", gpu))
 
     def test_eviction_never_takes_what_it_cannot_remake_cheaply(self):
-        cache.register(cache.Kind(name="embedding", compute=lambda source, hash: cache.Made(), evictable=False))
-        self.addCleanup(cache.unregister, "embedding")
-        cache.put(self.conn, "h1", "embedding", cache.Made(value=b"vector", bytes=3000))
-        cache.put(self.conn, "h1", "test_thumb", cache.Made(path="/t.jpg", bytes=3000), {"size": 400})
+        embedding = cache.Kind(name="embedding", compute=lambda source, hash: cache.Made(), evictable=False)
+        cache.put(self.conn, "h1", embedding, cache.Made(value=b"vector", bytes=3000))
+        cache.put(self.conn, "h1", self.kind, cache.Made(path="/t.jpg", bytes=3000), {"size": 400})
         self.conn.commit()
-        self.assertEqual(cache.evict(self.conn, 0), [("test_thumb", "/t.jpg")])
-        self.assertIsNotNone(cache.get(self.conn, "h1", "embedding"))
+        self.assertEqual(cache.evict(self.conn, 0, (self.kind, embedding)), [("test_thumb", "/t.jpg")])
+        self.assertIsNotNone(cache.get(self.conn, "h1", embedding))
 
 
 class OwedIsAQuery(CoreCase):
     def setUp(self):
         super().setUp()
-        cache.register(cache.Kind(name="thumb", compute=lambda source, hash: cache.Made(path="/t.jpg", bytes=1)))
-        self.addCleanup(cache.unregister, "thumb")
+        self.thumb = cache.Kind(
+            name="thumb",
+            compute=lambda source, hash: cache.Made(path="/t.jpg", bytes=1),
+        )
         work.touched.__globals__["_last_touch"] = 0.0
 
     def _catalogued(self, tail=TAIL, *, hashed=True):
@@ -534,13 +577,13 @@ class OwedIsAQuery(CoreCase):
 
     def test_a_new_photo_is_owed_without_anything_enqueuing_it(self):
         image = self._catalogued()
-        self.assertEqual([row["id"] for row in work.owed(self.conn, "thumb")], [image])
+        self.assertEqual([row["id"] for row in work.owed(self.conn, self.thumb)], [image])
 
     def test_making_it_is_what_removes_it_from_the_queue(self):
         self._catalogued()
-        row = work.owed(self.conn, "thumb")[0]
-        cache.make(self.conn, row["hash"], "thumb", self.write(self.hot_root))
-        self.assertEqual(work.owed(self.conn, "thumb"), [])
+        row = work.owed(self.conn, self.thumb)[0]
+        cache.make(self.conn, row["hash"], self.thumb, self.write(self.hot_root))
+        self.assertEqual(work.owed(self.conn, self.thumb), [])
 
     def test_one_unreachable_photo_cannot_stall_the_queue(self):
         # This livelocked tile generation on the live library at 95 tiles with
@@ -553,21 +596,20 @@ class OwedIsAQuery(CoreCase):
         )
         self.conn.commit()
         reachable = self._catalogued("Raws/reachable.CR3")
-        self.assertNotIn("no-tail", [row["hash"] for row in work.owed(self.conn, "thumb")])
-        self.assertEqual(work.step(self.conn, yield_to=lambda: False)["photo"], reachable)
+        self.assertNotIn("no-tail", [row["hash"] for row in work.owed(self.conn, self.thumb)])
+        self.assertEqual(work.step(self.conn, (self.thumb,), yield_to=lambda: False)["photo"], reachable)
 
     def test_a_failure_is_not_rediscovered_every_pass(self):
-        cache.register(cache.Kind(name="boom", compute=lambda source, hash: 1 / 0))
-        self.addCleanup(cache.unregister, "boom")
+        boom = cache.Kind(name="boom", compute=lambda source, hash: 1 / 0)
         self._catalogued()
-        self.assertEqual(len(work.owed(self.conn, "boom")), 1)
-        cache.make(self.conn, TAIL, "boom", "whatever")
-        self.assertEqual(work.owed(self.conn, "boom"), [])
+        self.assertEqual(len(work.owed(self.conn, boom)), 1)
+        cache.make(self.conn, TAIL, boom, "whatever")
+        self.assertEqual(work.owed(self.conn, boom), [])
 
     def test_what_is_on_screen_is_served_first(self):
         self._catalogued("Raws/a.CR3")
         watching = self._catalogued("Raws/b.CR3")
-        owed = work.owed(self.conn, "thumb", on_screen=[watching])
+        owed = work.owed(self.conn, self.thumb, on_screen=[watching])
         self.assertEqual(owed[0]["id"], watching)
 
     def test_chores_keep_running_while_you_use_the_app_but_take_less_room(self):
@@ -577,7 +619,7 @@ class OwedIsAQuery(CoreCase):
         # the request path.
         self._catalogued()
         work.touched()
-        self.assertIsNotNone(work.step(self.conn))
+        self.assertIsNotNone(work.step(self.conn, (self.thumb,)))
         self.assertLess(work.workers(interactive=True), work.workers(interactive=False) + 1)
         self.assertGreaterEqual(work.workers(interactive=True), 1)
 
@@ -587,14 +629,21 @@ class OwedIsAQuery(CoreCase):
         # to save battery would most mind them resuming.
         image = self._catalogued()
         work.set_paused(self.conn, True)
-        self.assertIsNone(work.step(self.conn))
+        self.assertIsNone(work.step(self.conn, (self.thumb,)))
         self.assertTrue(work.paused(self.conn))
         work.set_paused(self.conn, False)
-        self.assertIsNotNone(work.step(self.conn))
+        self.assertIsNotNone(work.step(self.conn, (self.thumb,)))
+
+    def test_a_caller_can_yield_before_starting_an_item(self):
+        self._catalogued()
+        self.assertIsNone(work.step(self.conn, (self.thumb,), yield_to=lambda: True))
 
     def test_identity_is_owed_before_anything_keyed_on_it(self):
         image = self._catalogued(hashed=False)
-        self.assertEqual(work.step(self.conn, yield_to=lambda: False), {"did": "identity", "photo": image})
+        self.assertEqual(
+            work.step(self.conn, (self.thumb,), yield_to=lambda: False),
+            {"did": "identity", "photo": image},
+        )
 
 
 class DecodingRefuses(unittest.TestCase):

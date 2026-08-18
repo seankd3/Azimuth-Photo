@@ -239,14 +239,18 @@ cached*: an anti-join, not a queue. New photos are not special; they sort first
 because they are newest. Order is closeness to your eyes — on screen now, then
 the rest of this view, then newest, then oldest debt. One gate: chores yield
 while you are using the app (measured: browsing was 23 ms quiet, minutes with
-chores running). One small registry per kind: how to compute it, what it costs,
-whether this machine can do it, whether it is evictable. Failures record *why*
-once instead of being rediscovered every pass.
+chores running). One immutable capability per kind says how to compute it, what
+it costs, whether this machine can do it, and whether it is evictable. Boot
+passes the capabilities it owns explicitly; import order is never product
+configuration. Failures record *why* once instead of being rediscovered every
+pass.
 
-**Cache and thumbnails.** A thumbnail is a cached answer to *what does this photo
-look like, at this size, with these edits*. Tiers are kinds. Eviction is by age
-against one ceiling, never touching originals or never-evict kinds. Painting a
-smaller tile while the right one renders is UI behaviour, not a cache concept.
+**Cache and thumbnails.** A tile is a cached answer to *what do these photo bytes
+look like at this size and rotation*. An edit is not a recipe parameter until
+the renderer really applies it; otherwise two different questions would cache
+the same pixels. Eviction is by age against one ceiling, never touching
+originals or never-evict kinds. Painting a smaller tile while the right one
+renders is UI behaviour, not a cache concept.
 
 **Ranking.** You make comparisons; everything else is computed from them. A
 comparison is a decision, Elo and taste are derivations, the mosaic is a
