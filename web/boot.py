@@ -68,11 +68,10 @@ class Library:
         return self.chores.start()
 
     def attach(self, root: str, *, label: str = "", is_record: bool = False) -> dict:
-        """Attach one chosen folder and perform its first truthful sweep."""
+        """Remember one chosen folder immediately; scanning is a separate verb."""
 
         self._open()
-        drive = drives.attach(self.conn, root, label=label, is_record=is_record)
-        return {"drive": drive, "sweep": copies.sweep(self.conn, drive["uuid"])}
+        return drives.attach(self.conn, root, label=label, is_record=is_record)
 
     def refresh(self, drive_uuid: str) -> dict:
         self._open()
@@ -204,6 +203,7 @@ class OwnedLibrary:
 
     def __init__(self, catalog_path: str, tile_root: str):
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="library")
+        self._scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sweep")
         self._state = threading.Lock()
         self._closed = False
         self._close_future = None
@@ -211,6 +211,7 @@ class OwnedLibrary:
         try:
             self._library = self._executor.submit(Library, catalog_path, tile_root).result()
         except BaseException:
+            self._scan_executor.shutdown(wait=True, cancel_futures=True)
             self._executor.shutdown(wait=True, cancel_futures=True)
             raise
 
@@ -223,13 +224,34 @@ class OwnedLibrary:
             future = self._executor.submit(operation, self._library)
         return await asyncio.wrap_future(future)
 
+    async def refresh(self, drive_uuid: str) -> dict:
+        """Sweep on its own connection so the library remains browseable."""
+
+        def sweep() -> dict:
+            conn = model.connect(self._library.catalog_path)
+            try:
+                return copies.sweep(conn, drive_uuid)
+            finally:
+                conn.close()
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._scan_executor.submit(sweep)
+        return await asyncio.wrap_future(future)
+
     async def close(self) -> None:
         """Drain earlier operations, close the product, and release its thread."""
 
         with self._state:
             if self._close_future is None:
                 self._closed = True
-                self._close_future = self._executor.submit(self._library.close)
+
+                def finish() -> None:
+                    self._scan_executor.shutdown(wait=True, cancel_futures=False)
+                    self._library.close()
+
+                self._close_future = self._executor.submit(finish)
             future = self._close_future
         try:
             await asyncio.shield(asyncio.wrap_future(future))

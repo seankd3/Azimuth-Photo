@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict
 
 import render
 from model import scope as scopes
@@ -13,6 +14,14 @@ from model import scope as scopes
 router = APIRouter()
 _SCOPE_KEYS = frozenset(("folder", "stars", "set", "ids"))
 _MAX_IDS = 10_000
+
+
+class DriveInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    root: str
+    label: str = ""
+    is_record: bool = False
 
 
 def parse_scope(value: str | None) -> scopes.Scope:
@@ -79,6 +88,30 @@ async def photos(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/drives")
+async def drives(request: Request):
+    return await request.app.state.library.run(lambda product: product.attached())
+
+
+@router.post("/api/drives")
+async def attach_drive(request: Request, chosen: DriveInput):
+    try:
+        return await request.app.state.library.run(
+            lambda product: product.attach(
+                chosen.root,
+                label=chosen.label,
+                is_record=chosen.is_record,
+            )
+        )
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/drives/{drive_uuid}/refresh")
+async def refresh_drive(request: Request, drive_uuid: str):
+    return await request.app.state.library.refresh(drive_uuid)
 
 
 @router.get("/api/photos/{photo_id}")

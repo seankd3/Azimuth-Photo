@@ -9,9 +9,11 @@ What the sweep is *not* allowed to do is decide a photograph is gone. It never
 writes a verdict, so it needs no ratio, no floor, no override switch, and no
 exception class. The three things it does need are all about not lying:
 
-* the marker is re-read afterwards — a pass whose drive vanished mid-walk
-  changes nothing at all;
-* a walk that could not be completed changes nothing, for the same reason;
+* a walk that could not be completed changes nothing;
+* newly observed photographs publish in bounded batches, because admitting
+  real bytes is safe and lets the grid fill while a large drive is indexed;
+* the marker is re-read before every published batch, and stale copy hints are
+  retired only after the complete marked drive stayed present;
 * everything else is just what it saw.
 """
 
@@ -20,6 +22,7 @@ from __future__ import annotations
 import os
 import stat
 import time
+from collections.abc import Callable
 
 from model import drives
 
@@ -28,6 +31,7 @@ from model import drives
 # resurrect every photo the owner ever threw away.
 SKIP_DIRS = {".trash", "astrophotography", "previewcache", "__macosx", ".thumbnails", ".lrt"}
 SKIP_SUFFIXES = (".lrdata", ".lrcat-data")
+SWEEP_BATCH = 200
 
 
 def _skip(name: str) -> bool:
@@ -112,8 +116,18 @@ def walk_tails(root: str) -> tuple[set[str], bool]:
     return seen, complete
 
 
-def sweep(conn, drive_uuid: str) -> dict:
-    """Bring one drive's copy rows in line with what is actually on it."""
+def sweep(
+    conn,
+    drive_uuid: str,
+    *,
+    batch_size: int = SWEEP_BATCH,
+    progress: Callable[[dict], None] | None = None,
+) -> dict:
+    """Admit observed photos progressively, then retire stale copy hints."""
+
+    batch_size = int(batch_size)
+    if batch_size < 1:
+        raise ValueError("a sweep batch contains at least one file")
 
     root = drives.root_of(conn, drive_uuid)
     if root is None:
@@ -153,6 +167,30 @@ def sweep(conn, drive_uuid: str) -> dict:
     recorded = 0
     admitted = 0
     changed: list[str] = []
+    processed = 0
+
+    def result(*, applied: bool, reason: str = "", retired: int = 0) -> dict:
+        return {
+            "drive": drive_uuid,
+            "applied": applied,
+            **({"reason": reason} if reason else {}),
+            "files_seen": len(seen),
+            "copies_recorded": recorded,
+            "copies_retired": retired,
+            "photos_added": admitted,
+            "changed": changed,
+            "unknown_files": len(seen) - recorded,
+        }
+
+    def publish() -> bool:
+        if drives.read_marker(root) != drive_uuid:
+            conn.rollback()
+            return False
+        conn.commit()
+        if progress is not None:
+            progress(result(applied=False, reason="sweep in progress"))
+        return True
+
     for tail in sorted(seen):
         path = drives.path_for(conn, drive_uuid, tail)
         if path is None:
@@ -189,6 +227,19 @@ def sweep(conn, drive_uuid: str) -> dict:
                 "file_size": entry.st_size,
                 "file_modified_ns": entry.st_mtime_ns,
             })
+        processed += 1
+        if processed % batch_size == 0 and not publish():
+            return result(applied=False, reason="drive changed during sweep")
+
+    if processed % batch_size and not publish():
+        return result(applied=False, reason="drive changed during sweep")
+
+    # Admissions are durable facts about bytes we observed and may paint as
+    # soon as each batch commits. Retiring a hint is different: it is deferred
+    # until the complete walk and every admission batch have stayed on the
+    # same marked drive.
+    if drives.read_marker(root) != drive_uuid:
+        return result(applied=False, reason="drive changed during sweep")
 
     held = {
         int(row["photo_id"]): row["tail"]
@@ -207,13 +258,4 @@ def sweep(conn, drive_uuid: str) -> dict:
             retired += 1
 
     conn.commit()
-    return {
-        "drive": drive_uuid,
-        "applied": True,
-        "files_seen": len(seen),
-        "copies_recorded": recorded,
-        "copies_retired": retired,
-        "photos_added": admitted,
-        "changed": changed,
-        "unknown_files": len(seen) - recorded,
-    }
+    return result(applied=True, retired=retired)

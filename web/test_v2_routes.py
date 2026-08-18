@@ -6,6 +6,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -76,6 +77,43 @@ class ScopeTransportTests(unittest.TestCase):
 
 
 class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_browsing_does_not_wait_behind_a_drive_sweep(self):
+        with tempfile.TemporaryDirectory() as directory:
+            photo_root = os.path.join(directory, "Photos")
+            os.makedirs(photo_root)
+            Image.new("RGB", (32, 24), "navy").save(
+                os.path.join(photo_root, "lake.jpg"), "JPEG"
+            )
+            owned = boot.OwnedLibrary(
+                os.path.join(directory, "catalog.db"),
+                os.path.join(directory, "tiles"),
+            )
+            drive = await owned.run(lambda product: product.attach(photo_root))
+            started = threading.Event()
+            release = threading.Event()
+            real_sweep = boot.copies.sweep
+
+            def held_sweep(conn, drive_uuid):
+                started.set()
+                release.wait(timeout=2)
+                return real_sweep(conn, drive_uuid)
+
+            try:
+                with patch.object(boot.copies, "sweep", held_sweep):
+                    sweeping = asyncio.create_task(owned.refresh(drive["uuid"]))
+                    await asyncio.to_thread(started.wait, 2)
+                    page = await asyncio.wait_for(
+                        owned.run(lambda product: product.browse()), timeout=0.5
+                    )
+                    release.set()
+                    result = await sweeping
+            finally:
+                release.set()
+                await owned.close()
+
+        self.assertEqual(page, [])
+        self.assertEqual(result["photos_added"], 1)
+
     async def test_cancelled_close_still_releases_the_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
             catalog = os.path.join(directory, "catalog.db")
@@ -140,7 +178,8 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
             try:
                 caller = threading.get_ident()
                 first = await owned.run(lambda product: threading.get_ident())
-                await owned.run(lambda product: product.attach(photo_root))
+                drive = await owned.run(lambda product: product.attach(photo_root))
+                await owned.refresh(drive["uuid"])
                 page = await owned.run(lambda product: product.browse())
                 second = await owned.run(lambda product: threading.get_ident())
             finally:
@@ -167,11 +206,17 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
                 os.path.join(directory, "tiles"),
             )
             try:
-                await owned.run(lambda product: product.attach(photo_root))
                 app = FastAPI()
                 app.state.library = owned
                 app.include_router(library_routes.router)
                 with TestClient(app) as client:
+                    attached = client.post(
+                        "/api/drives",
+                        json={"root": photo_root, "label": "Working"},
+                    )
+                    drive_uuid = attached.json()["uuid"]
+                    refreshed = client.post(f"/api/drives/{drive_uuid}/refresh")
+                    drives = client.get("/api/drives")
                     response = client.get(
                         "/api/photos",
                         params={"scope": json.dumps({"folder": "Trips"})},
@@ -188,6 +233,10 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
                 await owned.close()
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(attached.status_code, 200)
+        self.assertEqual(refreshed.json()["photos_added"], 2)
+        self.assertEqual(drives.json()[0]["label"], "Working")
+        self.assertTrue(drives.json()[0]["attached"])
         self.assertEqual([photo["tail"] for photo in response.json()], ["Trips/lake.jpg"])
         self.assertEqual(details.status_code, 200)
         self.assertEqual((details.json()["width"], details.json()["height"]), (640, 480))

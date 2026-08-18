@@ -29,6 +29,35 @@ TAIL = "Raws/Digital/2026/x.CR3"
 
 
 class FreshCatalogTests(unittest.TestCase):
+    def test_a_sweep_publishes_real_photos_one_bounded_batch_at_a_time(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "catalog.db")
+            photo_root = os.path.join(directory, "Photos")
+            os.makedirs(photo_root)
+            for name, color in (("one.jpg", "navy"), ("two.jpg", "gold")):
+                Image.new("RGB", (32, 24), color).save(
+                    os.path.join(photo_root, name), "JPEG"
+                )
+            writer = model.connect(catalog)
+            observer = model.connect(catalog)
+            try:
+                drive = drives.attach(writer, photo_root)
+                visible = []
+                result = copies.sweep(
+                    writer,
+                    drive["uuid"],
+                    batch_size=1,
+                    progress=lambda _status: visible.append(
+                        observer.execute("SELECT COUNT(*) FROM images").fetchone()[0]
+                    ),
+                )
+            finally:
+                observer.close()
+                writer.close()
+
+        self.assertEqual(visible, [1, 2])
+        self.assertEqual(result["photos_added"], 2)
+
     def test_an_empty_file_is_the_whole_core(self):
         with tempfile.TemporaryDirectory() as directory:
             path = os.path.join(directory, "catalog.db")
@@ -111,6 +140,7 @@ class FreshCatalogTests(unittest.TestCase):
 
             product = boot.Library(catalog, tile_root)
             attached = product.attach(photo_root)
+            swept = product.refresh(attached["uuid"])
             page = product.browse()
             body = product.tile(page[0]["id"])
             self.assertTrue(product.start())
@@ -122,7 +152,7 @@ class FreshCatalogTests(unittest.TestCase):
                 again = reopened.browse()
                 cached = reopened.tile(again[0]["id"])
 
-        self.assertEqual(attached["sweep"]["photos_added"], 1)
+        self.assertEqual(swept["photos_added"], 1)
         self.assertEqual(len(page), 1)
         self.assertEqual(body, cached)
         self.assertTrue(body.startswith(b"\xff\xd8"))
@@ -143,7 +173,8 @@ class FreshCatalogTests(unittest.TestCase):
             Image.new("RGB", (900, 600), "maroon").save(source, "JPEG", exif=exif)
 
             with boot.Library(catalog, tile_root) as product:
-                product.attach(photo_root)
+                drive = product.attach(photo_root)
+                product.refresh(drive["uuid"])
                 photo = product.browse()[0]
                 identified = work.step(product.conn, (embedded_metadata.KIND,))
                 enriched = work.step(product.conn, (embedded_metadata.KIND,))

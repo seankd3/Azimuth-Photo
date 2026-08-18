@@ -28,7 +28,8 @@ class V2AppTests(unittest.TestCase):
                 os.path.join(photo_root, "lake.jpg"), "JPEG"
             )
             with boot.Library(catalog, tile_root) as product:
-                product.attach(photo_root)
+                drive = product.attach(photo_root)
+                product.refresh(drive["uuid"])
 
             app = v2_app.create_app(catalog_path=catalog, tile_root=tile_root)
             with TestClient(app) as client:

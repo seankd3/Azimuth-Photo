@@ -945,8 +945,9 @@ Target: **~5,000 lines**, full suite under a minute.
 
 ## First run
 
-"Point me at your photos." Pick a folder → attach it as a drive → sweep → the
-grid fills while you watch. Then one optional question: *do you have an archive
+"Point me at your photos." Pick a folder → attach it as a drive immediately →
+sweep on its own bounded connection while the grid fills in committed batches.
+Then one optional question: *do you have an archive
 drive?* → attach, mark as record. **First run and "add a drive later" are the
 same code path**, so no wizard duplicates settings. Today's `setup.html` is 309
 lines, ~125 of them hub-era pairing against routes that no longer exist.
