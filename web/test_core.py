@@ -663,6 +663,46 @@ class SetsAreDecisions(CoreCase):
             sets.create(self.conn, "Reused", set_id=self.set_id)
 
 
+class LibraryQueriesRefuse(CoreCase):
+    def test_pagination_cannot_accidentally_request_the_whole_catalog(self):
+        for limit, offset in ((0, 0), (501, 0), (20, -1)):
+            with self.assertRaises(ValueError):
+                library_surface.photos(self.conn, limit=limit, offset=offset)
+
+    def test_reindex_updates_every_row_with_the_same_photo_identity(self):
+        digest = "c" * 64
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
+            (("Raws/one.jpg", digest), ("Raws/two.jpg", digest)),
+        )
+        decisions.decide(self.conn, digest, decisions.STAR, 5)
+
+        rebuilt = library_surface.reindex(self.conn)
+
+        stars = [row[0] for row in self.conn.execute("SELECT stars FROM images ORDER BY id")]
+        self.assertEqual(stars, [5, 5])
+        self.assertEqual(rebuilt[decisions.STAR], 2)
+
+    def test_an_invalid_decision_cannot_partially_rebuild_the_read_index(self):
+        first, second = "d" * 64, "e" * 64
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
+            (("Raws/one.jpg", first), ("Raws/two.jpg", second)),
+        )
+        decisions.decide(self.conn, first, decisions.STATUS, "trashed")
+        decisions.decide(self.conn, second, decisions.STAR, 9)
+
+        with self.assertRaises(ValueError):
+            library_surface.reindex(self.conn)
+
+        statuses = [row[0] for row in self.conn.execute("SELECT status FROM images ORDER BY id")]
+        self.assertEqual(statuses, ["kept", "kept"])
+
+    def test_malformed_calendar_values_never_wrap_into_plausible_labels(self):
+        self.assertEqual(library_surface.month_label("2026-00"), "2026-00")
+        self.assertIsNone(library_surface.date_range("9999"))
+
+
 class CacheRefuses(CoreCase):
     def setUp(self):
         super().setUp()

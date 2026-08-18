@@ -97,6 +97,11 @@ def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
 
     if sort not in SORTS:
         raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
+    limit, offset = int(limit), int(offset)
+    if not 1 <= limit <= 500:
+        raise ValueError("a library page contains between 1 and 500 photos")
+    if offset < 0:
+        raise ValueError("a library offset cannot be negative")
 
     clause, args = where(scope)
     return [dict(row) for row in conn.execute(
@@ -108,7 +113,7 @@ def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
         ORDER BY {SORTS[sort]}
         LIMIT ? OFFSET ?
         """,
-        (*args, int(limit), int(offset)),
+        (*args, limit, offset),
     )]
 
 
@@ -194,7 +199,10 @@ def month_label(month: str) -> str:
 
     try:
         year, number = month.split("-")
-        return f"{_MONTHS[int(number) - 1]} {year}"
+        index = int(number) - 1
+        if not 0 <= index < len(_MONTHS):
+            return month
+        return f"{_MONTHS[index]} {year}"
     except (ValueError, IndexError):
         return month
 
@@ -268,25 +276,30 @@ def reindex(conn) -> dict[str, int]:
     repair is to stop having duplicate rows, not to key decisions on `id`.
     """
 
+    plans: list[tuple[str, str, object, str]] = []
     counts: dict[str, int] = {}
-    subject_id = {
-        row["content_hash"]: row["id"]
-        for row in conn.execute("SELECT id, content_hash FROM images WHERE content_hash IS NOT NULL")
-    }
-
     for family, column, default in (
         (decisions.STATUS, "status", "kept"),
         (decisions.STAR, "stars", 0),
     ):
         latest = decisions.current(conn, family)
-        applied = 0
         for subject, value in latest.items():
-            image_id = subject_id.get(subject)
-            if image_id is None:
-                continue
-            conn.execute(f"UPDATE images SET {column} = ? WHERE id = ?", (value or default, image_id))
-            applied += 1
-        counts[family] = applied
+            value = default if value is None else value
+            if family == decisions.STATUS and value not in {"kept", "maybe", "trashed"}:
+                raise ValueError(f"invalid photo status: {value!r}")
+            if family == decisions.STAR and (
+                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 5
+            ):
+                raise ValueError(f"invalid star decision: {value!r}")
+            plans.append((family, column, value, subject))
+        counts[family] = 0
+
+    for family, column, value, subject in plans:
+        cursor = conn.execute(
+            f"UPDATE images SET {column} = ? WHERE content_hash = ?",
+            (value, subject),
+        )
+        counts[family] += cursor.rowcount
 
     conn.commit()
     return counts
@@ -353,13 +366,16 @@ def date_range(date_taken: str) -> tuple[str, str] | None:
             start = _dt.datetime.strptime(value, precision)
         except ValueError:
             continue
-        if precision == "%Y":
-            end = start.replace(year=start.year + 1)
-        elif precision == "%Y-%m":
-            end = (start.replace(year=start.year + 1, month=1) if start.month == 12
-                   else start.replace(month=start.month + 1))
-        else:
-            end = start + _dt.timedelta(days=1)
+        try:
+            if precision == "%Y":
+                end = start.replace(year=start.year + 1)
+            elif precision == "%Y-%m":
+                end = (start.replace(year=start.year + 1, month=1) if start.month == 12
+                       else start.replace(month=start.month + 1))
+            else:
+                end = start + _dt.timedelta(days=1)
+        except (OverflowError, ValueError):
+            return None
         stamp = "%Y-%m-%d %H:%M:%S"
         return start.strftime(stamp), end.strftime(stamp)
     return None

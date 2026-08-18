@@ -49,11 +49,9 @@ would have been silent:
 from __future__ import annotations
 
 import io
-import os
 
 from PIL import Image, ImageOps
 
-from model import cache
 from photo import kind
 
 # Truncated JPEGs are the norm here, not the exception.
