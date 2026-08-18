@@ -169,7 +169,7 @@ def copy_rankings_response(response: dict) -> dict:
 
 def copy_settings_response(response: dict, *, copy_ai_status, copy_cache_status) -> dict:
     copied = dict(response)
-    for key in ("settings", "model_status", "catalog", "defaults", "metadata_status"):
+    for key in ("settings", "model_status", "catalog", "defaults"):
         if isinstance(response.get(key), dict):
             copied[key] = copy.deepcopy(response[key])
     if isinstance(response.get("ai_status"), dict):

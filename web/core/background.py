@@ -231,7 +231,6 @@ async def run_startup(
     import db
     import settings
     from features.ai import routes as ai_routes
-    from features.catalog import metadata as catalog_metadata
     from features.catalog import routes as catalog_routes
     from features.settings import routes as settings_routes
 
@@ -240,8 +239,6 @@ async def run_startup(
     get_catalog_summary = db.get_catalog_summary
     build_ai_status = ai_routes.build_ai_status
     api_folders = catalog_routes.api_folders
-    classify_orientations_background = catalog_metadata.classify_orientations_background
-    scan_metadata_background = catalog_metadata.scan_metadata_background
 
     def cache_root() -> str:
         import tiles
@@ -383,8 +380,6 @@ async def run_startup(
     # own INDEXED BY hint and its own skip cursor. Identity is the first thing
     # work.step() asks for -- it has to be, since every cache row is keyed on
     # the hash -- so the chore loop already does it, cursor-free.
-    track_background_task(_start_background_daemon(classify_orientations_background))
-    track_background_task(_start_background_daemon(scan_metadata_background))
     schedule_optional_workers(
         track_background_task=track_background_task,
         settings=settings,

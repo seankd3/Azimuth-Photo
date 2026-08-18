@@ -231,18 +231,6 @@ export async function stopCloudBackup() {
     return postJsonWithStatus('/api/backup/cloud/stop');
 }
 
-export async function getMetadataStatus() {
-    return fetchJson('/api/catalog/metadata/status', { defaultValue: null });
-}
-
-export async function startMetadataScan() {
-    return postJson('/api/catalog/metadata/start');
-}
-
-export async function stopMetadataScan() {
-    return postJson('/api/catalog/metadata/stop');
-}
-
 export async function getImageExif(imageId) {
     return fetchJson(`/api/image/${imageId}/exif`, { defaultValue: null });
 }

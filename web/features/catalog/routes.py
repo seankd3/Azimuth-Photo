@@ -23,7 +23,6 @@ from data.repositories import catalog as catalog_repository
 from data.repositories import images as image_repository
 from data.repositories import imports as import_repository
 from features.catalog.folder_roots import quick_browse_roots
-from features.catalog import metadata as catalog_metadata
 from features.catalog import reveal as catalog_reveal
 
 
@@ -100,7 +99,6 @@ async def _is_first_run_import() -> bool:
 
 def _start_first_run_pipeline() -> None:
     tiles.start_pregeneration()
-    catalog_metadata.resume_catalog_metadata()
 
 
 async def _run_scan(folder: str, source_id: int, *, first_run: bool = False) -> None:
@@ -148,23 +146,6 @@ async def start_scan(request: Request):
 @router.get("/api/scan/status")
 async def scan_status():
     return scanner.scan_state
-
-
-@router.get("/api/catalog/metadata/status")
-async def catalog_metadata_status():
-    return catalog_metadata.catalog_metadata_status()
-
-
-@router.post("/api/catalog/metadata/start")
-async def catalog_metadata_start():
-    return {"ok": True, "metadata_status": catalog_metadata.resume_catalog_metadata()}
-
-
-@router.post("/api/catalog/metadata/stop")
-async def catalog_metadata_stop():
-    return {"ok": True, "metadata_status": catalog_metadata.pause_catalog_metadata()}
-
-
 
 
 def folder_picker_start(path: str = "") -> str:

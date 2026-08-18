@@ -307,9 +307,9 @@ surface.
 What each rebuild deletes, with the measured line counts:
 
 **library** — `features/catalog/synchronize.py` 504 (superseded by
-`web/synchronize.py` 242, already live), `features/catalog/metadata.py` 439 (a
-ThreadPoolExecutor, pause and resume verbs, a status dict and an
-orientation-failure retry ledger — exactly *owed is a query*),
+`web/synchronize.py` 242, already live). `features/catalog/metadata.py` is now
+deleted: its ThreadPoolExecutor, pause and resume verbs, status dict, and
+orientation-failure retry ledger all violated *owed is a query*. Remaining debt:
 `repositories/catalog.py` 1,307, `repositories/images.py` 336,
 `core/query_constraints.py` 432, `repositories/filter_options.py` 95,
 `features/library/storage.py` 71 and `preview_priority.py` 52 (**both have zero

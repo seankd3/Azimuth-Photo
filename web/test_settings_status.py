@@ -3,7 +3,6 @@ import os
 from unittest import mock
 
 from data.repositories import embeddings as embedding_repository
-from features.catalog import metadata as catalog_metadata
 
 
 class SettingsStatusTests(BackendTestCase):
@@ -44,7 +43,6 @@ class SettingsStatusTests(BackendTestCase):
         cache = {"pregen": {"state": "running"}}
         people = {"worker": {"state": "idle"}}
         captions = {"worker": {"state": "paused"}}
-        metadata = {"state": "done"}
 
         # The route calls these modules directly now, so the stubs go on them
         # rather than on injected copies held by settings_routes.
@@ -64,10 +62,6 @@ class SettingsStatusTests(BackendTestCase):
             settings_routes.core_api,
             "captions_status",
             new=mock.AsyncMock(return_value=captions),
-        ), mock.patch.object(
-            catalog_metadata,
-            "catalog_metadata_status",
-            return_value=metadata,
         ):
             result = await settings_routes.api_background_work_status()
 
@@ -75,163 +69,6 @@ class SettingsStatusTests(BackendTestCase):
         self.assertEqual(result["cache"], cache)
         self.assertEqual(result["people"], people)
         self.assertEqual(result["captions"], captions)
-        self.assertEqual(result["metadata"], metadata)
-
-    async def test_orientation_worker_leaves_raws_for_preview_decoder(self):
-        source = await self._source("mixed-formats")
-        raw_id = await self._image(source["id"], "photo.cr3")
-        jpeg_id = await self._image(source["id"], "photo.jpg")
-        conn = await db.get_db()
-        try:
-            await conn.execute("UPDATE images SET file_ext = '.cr3' WHERE id = ?", (raw_id,))
-            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (jpeg_id,))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-        rows = await catalog_metadata.get_unclassified_images()
-
-        self.assertEqual([int(row["id"]) for row in rows], [jpeg_id])
-
-    async def test_orientation_worker_keeps_existing_unreadable_jpeg_visible(self):
-        source = await self._source("unreadable-jpeg")
-        image_id = await self._image(source["id"], "broken.jpg")
-        with open(os.path.join(source["path"], "broken.jpg"), "wb") as handle:
-            handle.write(b"not a jpeg")
-        conn = await db.get_db()
-        try:
-            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (image_id,))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-        rows = await catalog_metadata.get_unclassified_images()
-        batches = iter((rows,))
-
-        async def one_batch_then_stop(limit=200):
-            del limit
-            try:
-                return next(batches)
-            except StopIteration:
-                raise asyncio.CancelledError from None
-
-        catalog_metadata.resume_catalog_metadata()
-        try:
-            with mock.patch.object(
-                catalog_metadata,
-                "get_unclassified_images",
-                one_batch_then_stop,
-            ):
-                with self.assertRaises(asyncio.CancelledError):
-                    await catalog_metadata.classify_orientations_background()
-        finally:
-            catalog_metadata.pause_catalog_metadata()
-
-        self.assertIsNone((await self._image_row(image_id))["missing_at"])
-
-    async def test_orientation_worker_marks_only_absent_jpeg_missing(self):
-        source = await self._source("absent-jpeg")
-        image_id = await self._image(source["id"], "gone.jpg")
-        conn = await db.get_db()
-        try:
-            await conn.execute("UPDATE images SET file_ext = '.jpg' WHERE id = ?", (image_id,))
-            await conn.commit()
-        finally:
-            await conn.close()
-
-        rows = await catalog_metadata.get_unclassified_images()
-        batches = iter((rows,))
-
-        async def one_batch_then_stop(limit=200):
-            del limit
-            try:
-                return next(batches)
-            except StopIteration:
-                raise asyncio.CancelledError from None
-
-        catalog_metadata.resume_catalog_metadata()
-        try:
-            with mock.patch.object(
-                catalog_metadata,
-                "get_unclassified_images",
-                one_batch_then_stop,
-            ):
-                with self.assertRaises(asyncio.CancelledError):
-                    await catalog_metadata.classify_orientations_background()
-        finally:
-            catalog_metadata.pause_catalog_metadata()
-
-        self.assertIsNotNone((await self._image_row(image_id))["missing_at"])
-
-    def test_restored_source_clears_all_orientation_poison_entries(self):
-        old_ledger = dict(catalog_metadata._orientation_retry_ledger)
-        catalog_metadata._orientation_retry_ledger.clear()
-        source_root = os.path.join(self.tempdir.name, "restored-source")
-        try:
-            for image_id in (1, 2):
-                for attempt in range(catalog_metadata.ORIENTATION_POISON_THRESHOLD):
-                    catalog_metadata._note_orientation_failure(
-                        image_id,
-                        "FileNotFoundError",
-                        now=float(attempt),
-                        source_root=source_root,
-                    )
-
-            offline_ready, _cooled, _retry_at = catalog_metadata._ready_orientation_rows(
-                [{"id": 1, "source_root": source_root}],
-                now=10_000.0,
-            )
-            self.assertEqual(offline_ready, [])
-
-            os.makedirs(source_root)
-            online_ready, _cooled, _retry_at = catalog_metadata._ready_orientation_rows(
-                [{"id": 1, "source_root": source_root}],
-                now=10_000.0,
-            )
-
-            self.assertEqual([row["id"] for row in online_ready], [1])
-            self.assertEqual(catalog_metadata._orientation_retry_ledger, {})
-        finally:
-            catalog_metadata._orientation_retry_ledger.clear()
-            catalog_metadata._orientation_retry_ledger.update(old_ledger)
-
-    def test_orientation_retry_ledger_cools_then_poisons_unreadable_images(self):
-        old_ledger = dict(catalog_metadata._orientation_retry_ledger)
-        catalog_metadata._orientation_retry_ledger.clear()
-        try:
-            first_retry = catalog_metadata._note_orientation_failure(
-                1,
-                "FileNotFoundError",
-                now=100.0,
-            )
-            ready, cooled, next_retry_at = catalog_metadata._ready_orientation_rows(
-                [{"id": 1}, {"id": 2}],
-                now=101.0,
-            )
-
-            self.assertEqual([row["id"] for row in ready], [2])
-            self.assertEqual(cooled, 1)
-            self.assertEqual(next_retry_at, first_retry)
-
-            catalog_metadata._note_orientation_failure(1, "OSError", now=first_retry)
-            catalog_metadata._note_orientation_failure(
-                1,
-                "OSError",
-                now=first_retry + catalog_metadata.ORIENTATION_RETRY_SECONDS,
-            )
-            summary = catalog_metadata._orientation_retry_summary()
-            self.assertEqual(summary["poisoned"], 1)
-            self.assertEqual(
-                catalog_metadata._ready_orientation_rows([{"id": 1}], now=10_000.0)[0],
-                [],
-            )
-
-            catalog_metadata.resume_catalog_metadata()
-            self.assertEqual(catalog_metadata._orientation_retry_ledger, {})
-        finally:
-            catalog_metadata.pause_catalog_metadata()
-            catalog_metadata._orientation_retry_ledger.clear()
-            catalog_metadata._orientation_retry_ledger.update(old_ledger)
 
     async def test_ai_status_counts_only_count_active_embeddings(self):
         active_source = await self._source("active")
@@ -519,13 +356,11 @@ class SettingsStatusTests(BackendTestCase):
         self.assertFalse(body["ok"])
         self.assertIn("already running", body["error"])
 
-    async def test_save_settings_reports_manual_metadata_status(self):
+    async def test_save_settings_returns_saved_quality(self):
         response = await settings_routes.api_save_settings(JsonRequest({"thumb_quality": 83}))
 
         self.assertTrue(response["ok"])
         self.assertEqual(response["settings"]["thumb_quality"], 83)
-        self.assertIn("metadata_status", response)
-        self.assertTrue(response["metadata_status"]["manual_pause"])
 
     async def test_settings_reads_do_not_expose_cached_state(self):
         first = settings.get_settings()
@@ -563,7 +398,6 @@ class SettingsStatusTests(BackendTestCase):
         self.assertNotEqual(second["settings"]["thumb_quality"], 40)
         self.assertNotEqual(second["cache_stats"]["disk"]["tiers"]["sm"]["count"], 999999)
         self.assertNotIn({"id": 999999}, second["catalog"]["sources"])
-
 
 
 

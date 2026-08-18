@@ -12,7 +12,6 @@ import tiles
 from core.requests import json_object
 from data.repositories import stats as stats_repository
 from data.repositories import images as image_repository
-from features.catalog import metadata as catalog_metadata
 from features.settings import status as settings_status
 import judgements
 
@@ -88,7 +87,6 @@ async def api_background_work_status():
         "cache": cache_status,
         "people": people_status,
         "captions": captions,
-        "metadata": catalog_metadata.catalog_metadata_status(),
     }
 
 
@@ -248,7 +246,6 @@ async def api_save_settings(request: Request):
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
         "people_status": await core_api.people_status(),
-        "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }
 
@@ -284,6 +281,5 @@ async def api_reset_settings():
         "model_status": ai_models.get_model_status(),
         "ai_status": await ai_routes.build_ai_status(),
         "people_status": await core_api.people_status(),
-        "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": await _catalog_summary_payload(),
     }

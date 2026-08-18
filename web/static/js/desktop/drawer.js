@@ -1,13 +1,13 @@
 import { bytes, esc, formatCount as fmt } from '../lib.js';
 import {
     addCatalogSource, applyRemoteAccessServe, clearCache, connectLightroom,
-    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect, getMetadataStatus,
+    disconnectLightroom, getAiStatus, getBackgroundWorkStatus, getCacheStatus, getCaptionStatus, getCatalog, getLrcatCatalogs, getLrcatStatus, getLrConnect,
     getPeopleStatus, getRemoteAccess, getScanStatus, getSettings, getVersion,
     installAiModel,
     pauseAiEmbeddings,
     pauseCaptionScan, pausePeopleScan, removeCatalogSource, rescanCatalogSource, resumeAiEmbeddings,
-    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, startMetadataScan, stopCachePregen,
-    stopMetadataScan, startLrcatScan, getStorageOverview, revealFolder,
+    resumeCaptionScan, resumePeopleScan, saveSettings, startCachePregen, stopCachePregen,
+    startLrcatScan, getStorageOverview, revealFolder,
 } from './api.js';
 import {
     emit, on, patchPrefs, scope, setActiveLens, setThumbSize, viewState,
@@ -46,7 +46,6 @@ let aiStatus = null;
 let cacheStatus = null;
 let peopleStatus = null;
 let captionStatus = null;
-let metadataStatus = null;
 let remoteAccess = null;
 let lrConnectStatus = null;
 let lrcatCatalogs = null;
@@ -128,11 +127,6 @@ function cachePregenStateIsActive(status) {
     return !pregen.manual_pause && workerStateIsActive({ worker: pregen });
 }
 
-function metadataStateIsActive(status) {
-    return !status?.manual_pause && workerStateIsActive(status);
-}
-
-
 function applySettingsData(data) {
     if (!data) return;
     settingsPageData = data;
@@ -140,7 +134,6 @@ function applySettingsData(data) {
     aiStatus = data.ai_status || aiStatus;
     cacheStatus = data.cache_stats || cacheStatus;
     peopleStatus = data.people_status || peopleStatus;
-    metadataStatus = data.metadata_status || metadataStatus;
     catalog = data.catalog || catalog;
 }
 
@@ -266,8 +259,7 @@ function activeProgress() {
     const cache = cachePregenStateIsActive(cacheStatus) && cacheProgress <= 0 ? 50 : cacheProgress;
     const people = peopleProgress(peopleStatus);
     const caption = captionProgress(captionStatus);
-    const metadata = metadataStateIsActive(metadataStatus) ? 50 : 0;
-    return { ai, cache, people, captions: caption, metadata };
+    return { ai, cache, people, captions: caption };
 }
 
 function modelStateLine(status = aiStatus || {}) {
@@ -320,14 +312,6 @@ function captionLine() {
     return `${active ? 'enabled' : 'paused'} · ${fmt(captioned)} captioned${pending ? ` · ${fmt(pending)} pending` : ''} · ${worker.state || 'idle'}`;
 }
 
-function metadataLine() {
-    if (!metadataStatus) return 'Status unknown';
-    const worker = metadataStatus.worker || {};
-    const state = metadataStatus.manual_pause ? 'paused' : worker.state || (metadataStatus.active ? 'running' : 'idle');
-    const count = Number(metadataStatus.pending || metadataStatus.remaining || 0);
-    return `${state}${count ? ` · ${fmt(count)} pending` : ''}`;
-}
-
 function statusText(name, data) {
     if (name === 'AI') {
         return `${fmt(data.embedded)} / ${fmt(data.total_images)} · ${data.worker_state || 'idle'}`;
@@ -342,9 +326,6 @@ function statusText(name, data) {
         const worker = (data && data.worker) || {};
         const counts = (data && data.counts) || {};
         return `${fmt(counts.captioned || 0)} captioned · ${fmt(counts.pending_cached_images || 0)} pending · ${worker.state || 'idle'}`;
-    }
-    if (name === 'Metadata') {
-        return metadataLine();
     }
     const worker = (data && data.worker) || {};
     const counts = (data && data.counts) || {};
@@ -373,12 +354,6 @@ function activityStatusText(name, data) {
         const counts = (data && data.counts) || {};
         return `${fmtCompact(counts.captioned)} done · ${fmtCompact(counts.pending_cached_images)} left · ${worker.state || 'idle'}`;
     }
-    if (name === 'Metadata') {
-        const worker = (data && data.worker) || {};
-        const state = data && data.manual_pause ? 'paused' : worker.state || (data && data.active ? 'running' : 'idle');
-        const pending = Number((data && (data.pending || data.remaining)) || 0);
-        return `${state}${pending ? ` · ${fmtCompact(pending)} left` : ''}`;
-    }
     const worker = (data && data.worker) || {};
     const counts = (data && data.counts) || {};
     return `${fmtCompact(counts.detected_faces || counts.people)} faces · ${worker.state || 'idle'}`;
@@ -397,20 +372,17 @@ function renderActivity() {
     const cachePaused = cacheStatus && cacheStatus.pregen && cacheStatus.pregen.manual_pause;
     const peoplePaused = peopleStatus && peopleStatus.worker && peopleStatus.worker.manual_pause;
     const captionsPaused = captionStatus && !captionStatus.active;
-    const metadataPaused = metadataStatus && metadataStatus.manual_pause;
     const workerActive = workerStateIsActive(aiStatus)
         || cachePregenStateIsActive(cacheStatus)
         || workerStateIsActive(peopleStatus)
-        || workerStateIsActive(captionStatus)
-        || metadataStateIsActive(metadataStatus);
-    widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused || metadataPaused));
+        || workerStateIsActive(captionStatus);
+    widget.classList.toggle('paused', Boolean(aiPaused || cachePaused || peoplePaused || captionsPaused));
     widget.classList.toggle('active', workerActive || Object.values(values).some((value) => value > 0 && value < 100));
     pop.innerHTML = [
         ['AI', values.ai, aiStatus || {}],
         ['Cache', values.cache, cacheStatus || {}],
         ['People', values.people, peopleStatus || {}],
         ['Captions', values.captions, captionStatus || {}],
-        ['Metadata', values.metadata, metadataStatus || {}],
     ].map(([name, value, data]) => (
         `<div class="ap-row"><span>${name}</span><span class="ap-track"><i style="width:${value}%"></i></span><span class="ap-val">${esc(activityStatusText(name, data))}</span></div>`
     )).join('');
@@ -423,7 +395,6 @@ async function refreshActivity() {
     cacheStatus = status?.cache || cacheStatus;
     peopleStatus = status?.people || peopleStatus;
     captionStatus = status?.captions || captionStatus;
-    metadataStatus = status?.metadata || metadataStatus;
     renderActivity();
     if (open) patchDrawerStatus();
 }
@@ -537,14 +508,11 @@ function workItems() {
     const worker = (peopleStatus && peopleStatus.worker) || {};
     const peoplePct = peopleProgress(peopleStatus);
     const captionPct = captionProgress(captionStatus);
-    const metadataPaused = metadataStatus && metadataStatus.manual_pause;
-    const metadataActive = metadataStateIsActive(metadataStatus);
     return [
         ['ai', 'Visual search index', aiStatus ? aiStatus.progress_pct : 0, aiStatus ? statusText('AI', aiStatus) : 'Status unknown', aiStatus && aiStatus.embedding_manual_pause, null, 'Resume also wakes the preview cache.'],
         ['cache', 'Preview cache', (preview.progress_pct || pregen.progress_pct || 0), cacheStatus ? statusText('Cache', cacheStatus) : 'Status unknown', pregen.manual_pause || pregen.state === 'paused', pregen.manual_pause || pregen.state === 'paused' ? 'Resume' : 'Pause', 'Pause also pauses the visual search index and People scan.'],
         ['people', 'People scan', peoplePct, peopleStatus ? statusText('People', peopleStatus) : 'Status unknown', worker.manual_pause || !settingValue('people_scan_enabled'), null, 'Resume also wakes the preview cache.'],
         ['captions', 'Captions', captionPct, captionStatus ? statusText('Captions', captionStatus) : 'Status unknown', captionStatus && !captionStatus.active],
-        ['metadata', 'Metadata', metadataActive ? 50 : 0, metadataLine(), metadataPaused],
     ].map(([key, label, value, detail, paused, actionLabel, note = '']) => ({
         key, label, value, detail, paused: Boolean(paused), actionLabel, note,
     }));
@@ -897,12 +865,6 @@ function renderCaptionSettings() {
         + settingInput('caption_batch_size', 'Batch size'));
 }
 
-function renderMetadataSettings() {
-    return detailsSection('Metadata', 'Keep camera, lens, and file details ready for search and filtering.',
-        `<div class="setting-status" data-setting-status="metadata">${esc(metadataLine())}</div>`
-        + '<div class="setting-hint">Metadata indexing keeps searchable file details current in the background.</div>');
-}
-
 function checkbox(key, label) {
     return `<div class="pref-row"><label for="pref-${key}">${esc(label)}</label><input id="pref-${key}" type="checkbox" data-pref="${key}" ${viewState.prefs[key] ? 'checked' : ''}></div>`;
 }
@@ -950,7 +912,7 @@ function renderCurrentSystemSurface() {
 export function renderSystemSections() {
     return {
         library: renderArchiveOverview() + renderSources() + renderSystemHealth() + renderLibraryHealth(catalog) + (hubComputeSettingsVisible() ? renderCloudBackup(catalog) : '') + renderAbout(),
-        processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderMetadataSettings() + renderWork(),
+        processing: renderAiSettings() + renderPeopleSettings() + renderCaptionSettings() + renderWork(),
         performance: renderImageCacheSettings() + renderThumbnailSettings() + renderStorage(),
         import: renderImportSettings(),
         connectivity: renderConnectLightroom() + renderRemote(),
@@ -1016,7 +978,6 @@ function patchDrawerStatus(workerGenerations = null) {
         cache: cacheUsageLine(),
         people: peopleLine(),
         captions: captionLine(),
-        metadata: metadataLine(),
     };
     for (const [key, value] of Object.entries(settingLines)) {
         patchNodeText(body, `[data-setting-status="${key}"]`, value);
@@ -1045,13 +1006,12 @@ function patchSettingSurface(field) {
 
 async function refreshDrawer({ initial = false } = {}) {
     const workerGenerations = new Map(workerActionGenerations);
-    const [nextCatalog, ai, cache, people, captions, metadata, remote, settingsData, version, overview, lrConnect] = await Promise.all([
+    const [nextCatalog, ai, cache, people, captions, remote, settingsData, version, overview, lrConnect] = await Promise.all([
         getCatalog().catch(() => null),
         getAiStatus().catch(() => null),
         getCacheStatus().catch(() => null),
         getPeopleStatus().catch(() => null),
         getCaptionStatus().catch(() => null),
-        getMetadataStatus().catch(() => null),
         getRemoteAccess().catch(() => null),
         getSettings().catch(() => null),
         versionData ? Promise.resolve(versionData) : getVersion().catch(() => null),
@@ -1067,7 +1027,6 @@ async function refreshDrawer({ initial = false } = {}) {
     cacheStatus = cache || cacheStatus;
     peopleStatus = people || peopleStatus;
     captionStatus = captions || captionStatus;
-    metadataStatus = metadata || metadataStatus || (settingsData && settingsData.metadata_status);
     remoteAccess = remote || remoteAccess;
     versionData = version || versionData;
     lrConnectStatus = lrConnect || lrConnectStatus;
@@ -1627,7 +1586,6 @@ function bindDrawerActions(body = document.getElementById('drawer-body')) {
                     result = worker.manual_pause ? await resumePeopleScan() : await pausePeopleScan();
                 }
                 if (key === 'captions') result = captionStatus && captionStatus.active ? await pauseCaptionScan() : await resumeCaptionScan();
-                if (key === 'metadata') result = metadataStatus && metadataStatus.manual_pause ? await startMetadataScan() : await stopMetadataScan();
                 if (!result) showToast('Couldn’t update background work');
             } catch {
                 showToast('Couldn’t update background work');

@@ -13,7 +13,6 @@ from data.repositories import stats as stats_repository
 import db
 from features.ai import routes as ai_routes
 import api as core_api
-from features.catalog import metadata as catalog_metadata
 
 
 AsyncDictBuilder = Callable[..., Awaitable[dict]]
@@ -134,7 +133,6 @@ async def build_settings_response() -> dict:
         "model_status": model_status,
         "ai_status": ai_status,
         "people_status": people_status,
-        "metadata_status": catalog_metadata.catalog_metadata_status(),
         "catalog": catalog,
         **settings.settings_metadata(),
     }

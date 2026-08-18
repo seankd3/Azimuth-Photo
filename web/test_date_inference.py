@@ -10,7 +10,6 @@ from data import connection, schema as data_schema  # noqa: E402
 from data.repositories import catalog as catalog_repository  # noqa: E402
 from data.repositories import images as image_repository  # noqa: E402
 from date_inference import infer_image_date  # noqa: E402
-from features.catalog import metadata as catalog_metadata  # noqa: E402
 
 
 class DateInferenceTests(unittest.IsolatedAsyncioTestCase):
@@ -83,31 +82,6 @@ class DateInferenceTests(unittest.IsolatedAsyncioTestCase):
     async def _row(self, image_id: int) -> dict:
         rows = await image_repository.get_images_by_ids(self.db_path, [image_id])
         return rows[image_id]
-
-    async def test_exif_date_overwrites_inferred_date(self):
-        filepath = os.path.join(self.source_root, "SKD-Film-2026-06-01-01.jpg")
-        await catalog_repository.insert_images_batch(
-            self.db_path,
-            [("SKD-Film-2026-06-01-01.jpg", filepath, ".jpg", 100, None)],
-            source_id=self.source_id,
-        )
-        row = next(iter((await image_repository.get_images_by_ids(self.db_path, [1])).values()))
-        self.assertEqual(row["date_source"], "filename")
-
-        update = catalog_metadata.metadata_update_tuple(
-            row["id"],
-            {
-                "filename": row["filename"],
-                "filepath": row["filepath"],
-                "date_taken": "2026-06-02 08:09:10",
-                "date_source": "exif",
-            },
-        )
-        await image_repository.batch_update_metadata(self.db_path, [update])
-
-        refreshed = await self._row(row["id"])
-        self.assertEqual(refreshed["date_taken"], "2026-06-02 08:09:10")
-        self.assertEqual(refreshed["date_source"], "exif")
 
     async def test_backfill_is_idempotent(self):
         dated_path = os.path.join(self.source_root, "already-dated.jpg")
