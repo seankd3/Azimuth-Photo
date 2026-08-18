@@ -1,8 +1,29 @@
--- The core's tables. Five when it is finished; each arrives with the step that
--- needs it, so this file never describes something that is not yet true.
---
--- Steps 1 and 4: drives, copies. Then decisions and cache, the two halves of
--- "what you decided" and "what we computed".
+-- The whole durable core. An empty file plus this schema is a valid catalog;
+-- nothing in data/, features/, or a migration has to exist first.
+
+CREATE TABLE IF NOT EXISTS images (
+    id               INTEGER PRIMARY KEY,
+    filename         TEXT    NOT NULL DEFAULT '',
+    tail             TEXT,
+    file_size        INTEGER,
+    file_modified_at REAL,
+    content_hash     TEXT,
+    date_taken       TEXT,
+    camera_make      TEXT,
+    camera_model     TEXT,
+    lens             TEXT,
+    file_ext         TEXT,
+    width            INTEGER,
+    height           INTEGER,
+    status           TEXT    NOT NULL DEFAULT 'kept',
+    stars            INTEGER NOT NULL DEFAULT 0,
+    elo              REAL    NOT NULL DEFAULT 1200.0,
+    version_of       INTEGER REFERENCES images(id) ON DELETE SET NULL,
+    -- Transitional only. A V1 virtual copy has no file of its own; it leaves
+    -- when Develop is rebuilt as decisions plus cached pixels.
+    vc_of            INTEGER REFERENCES images(id) ON DELETE CASCADE,
+    created_at       REAL    NOT NULL DEFAULT (unixepoch())
+);
 
 CREATE TABLE IF NOT EXISTS drives (
     id         INTEGER PRIMARY KEY,

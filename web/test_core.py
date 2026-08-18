@@ -8,31 +8,41 @@ reads is a suite nobody runs.
 
 import os
 import shutil
-import sqlite3
 import tempfile
 import unittest
 from unittest.mock import patch
 
 import rank
 import work
+import model
 from model import backup, cache, copies, decisions, drives, photos
 
 TAIL = "Raws/Digital/2026/x.CR3"
 
 
+class FreshCatalogTests(unittest.TestCase):
+    def test_an_empty_file_is_the_whole_core(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "catalog.db")
+            conn = model.connect(path)
+            try:
+                tables = {
+                    row["name"]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertEqual(tables, {"images", "drives", "copies", "decisions", "cache"})
+        self.assertEqual(mode, "wal")
+
+
 class CoreCase(unittest.TestCase):
     def setUp(self):
-        self.conn = sqlite3.connect(":memory:")
-        self.conn.row_factory = sqlite3.Row
-        # The photo table first: schema.sql declares the indexes over it, so it
-        # is a real dependency here and in any catalog the core is applied to.
-        self.conn.execute(
-            "CREATE TABLE images (id INTEGER PRIMARY KEY, tail TEXT, file_size INTEGER,"
-            " content_hash TEXT, date_taken TEXT, stars INTEGER DEFAULT 0, elo REAL DEFAULT 1200.0,"
-            " status TEXT DEFAULT 'kept', vc_of INTEGER)"
-        )
-        with open(os.path.join(os.path.dirname(drives.__file__), "schema.sql"), encoding="utf-8") as handle:
-            self.conn.executescript(handle.read())
+        self.conn = model.connect()
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.addCleanup(self.conn.close)
