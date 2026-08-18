@@ -1,5 +1,9 @@
 # INVISIBLE_IMPORT — local-first ingest, silent drain (design, 2026-07-16)
 
+> **Behavior reference awaiting V2 adoption.** The local-first, silent, honest
+> product intent remains valuable. Satellite, hub, route, and Tauri mechanisms
+> below describe the rejected V1 implementation and are not V2 architecture.
+
 ## The goal (Sean, verbatim intent)
 "Quickly ingest locally and begin working, and then have the app quietly move them
 over in the background — all invisible to the user." Satellite mode already IS this

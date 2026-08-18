@@ -24,6 +24,8 @@ preserve useful V1 behavior without preserving V1 architecture.
   the rewrite.
 - [Development](development.md) — local setup and verification; commands must
   be checked against the current branch before use.
+- [Install](INSTALL.md), [distribution](DISTRIBUTION_SPEC.md), and
+  [releasing](RELEASING.md) — the current one-process Windows artifact.
 - [Performance budgets](PERF_BUDGETS.md) — user-visible latency constraints.
 - [Recovery](recovery.md) — catalog recovery behavior.
 - [Stacks](STACKS_V2.md) — duplicate-safety distinctions and cleanup rules.
@@ -41,6 +43,7 @@ document in the same commit.
 
 - [Feature guide](features.md)
 - [Import](IMPORT_SPEC.md) and [card import](CARD_IMPORT_SPEC.md)
+- [Invisible import](INVISIBLE_IMPORT.md) — local-first, silent ingest intent.
 - [Develop](DEVELOP_SPEC.md)
 - [Lightroom bridge](LR_BRIDGE_SPEC.md)
 - [Background work](background-work-behavior.md)
@@ -55,10 +58,8 @@ modes and user expectations, not V2 instructions:
 
 - [Authentication](AUTH_SPEC.md)
 - [Hub/satellite sync](FIELD_SPEC_V2.md)
-- [Distribution](DISTRIBUTION_SPEC.md)
 - [Client updates](CLIENT_AUTOUPDATE_SPEC.md)
 - [Tailscale HTTPS](FIELD_HTTPS.md)
-- [V1 installation](INSTALL.md) and [release procedure](RELEASING.md)
 - [`archive/`](archive/) — quality programs, release waves, and superseded UX
   specifications.
 

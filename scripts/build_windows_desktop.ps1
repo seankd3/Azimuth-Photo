@@ -8,69 +8,33 @@ $BundledPython = Join-Path $RepoRoot "web/.venv/Scripts/python.exe"
 if (-not $Python) {
     $Python = if (Test-Path $BundledPython -PathType Leaf) { $BundledPython } else { "python" }
 }
-$Version = (Get-Content (Join-Path $RepoRoot "VERSION") -Raw).Trim()
-$TauriConfig = Get-Content (Join-Path $RepoRoot "desktop/src-tauri/tauri.conf.json") -Raw | ConvertFrom-Json
-$CargoVersion = (
-    Select-String -Path (Join-Path $RepoRoot "desktop/src-tauri/Cargo.toml") `
-        -Pattern '^version\s*=\s*"([^"]+)"' |
-    Select-Object -First 1
-).Matches.Groups[1].Value
 
 if ($env:OS -ne "Windows_NT") {
-    throw "The Azimuth Photo Windows installer must be built on Windows."
-}
-if ($TauriConfig.version -ne $Version -or $CargoVersion -ne $Version) {
-    throw "Version mismatch: VERSION=$Version, Tauri=$($TauriConfig.version), Cargo=$CargoVersion"
-}
-
-# `cargo tauri` is supplied by the Tauri CLI rather than the Rust toolchain.
-# Bootstrap the pinned major line on a clean Windows builder so the documented
-# installer command works without a separate developer-only setup step.
-cmd /c "cargo tauri --version >nul 2>nul"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "Installing the Tauri build CLI..."
-    & cargo install tauri-cli --version 2.11.4 --locked
-    if ($LASTEXITCODE -ne 0) {
-        throw "The Tauri build CLI could not be installed."
-    }
+    throw "The Azimuth Photo desktop app must be built on Windows."
 }
 
 Push-Location $RepoRoot
 try {
     & $Python -m pip install -r "web/requirements-v2.txt"
     if ($LASTEXITCODE -ne 0) {
-        throw "The V2 engine build dependencies could not be installed."
+        throw "The V2 desktop dependencies could not be installed."
     }
 
-    & $Python "scripts/build_server.py"
+    & npm ci
     if ($LASTEXITCODE -ne 0) {
-        throw "The bundled Azimuth Photo engine build failed."
+        throw "The desktop UI build dependencies could not be installed."
     }
 
-    $Engine = Join-Path $RepoRoot "dist/azimuth-server/azimuth-server.exe"
-    if (-not (Test-Path $Engine -PathType Leaf)) {
-        throw "The bundled Azimuth Photo engine was not created at $Engine"
+    & $Python "scripts/build_desktop.py"
+    if ($LASTEXITCODE -ne 0) {
+        throw "The Azimuth Photo desktop build failed."
     }
 
-    Push-Location (Join-Path $RepoRoot "desktop/src-tauri")
-    try {
-        & cargo tauri build --bundles nsis
-        if ($LASTEXITCODE -ne 0) {
-            throw "The Azimuth Photo desktop installer build failed."
-        }
+    $Executable = Join-Path $RepoRoot "dist/azimuth-photo/azimuth-photo.exe"
+    if (-not (Test-Path $Executable -PathType Leaf)) {
+        throw "The Azimuth Photo executable was not created at $Executable"
     }
-    finally {
-        Pop-Location
-    }
-
-    $BundleDir = Join-Path $RepoRoot "desktop/src-tauri/target/release/bundle/nsis"
-    $Installer = Get-ChildItem $BundleDir -Filter "*-setup.exe" |
-        Sort-Object LastWriteTime -Descending |
-        Select-Object -First 1
-    if (-not $Installer) {
-        throw "The NSIS installer was not found in $BundleDir"
-    }
-    Write-Host "Azimuth Photo test installer: $($Installer.FullName)"
+    Write-Host "Azimuth Photo desktop app: $Executable"
 }
 finally {
     Pop-Location

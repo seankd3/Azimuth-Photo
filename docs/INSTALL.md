@@ -1,101 +1,65 @@
-# Install Azimuth Photo
+# Run Azimuth Photo V2
 
-> **Historical V1 installation guide.** V2 is not released. These commands are
-> useful only for reconstructing the existing server-based application.
+V2 is currently a Windows desktop development build, not a public release. It
+is one local process with no server, port, browser login, Docker container, or
+mobile companion.
 
-One always-on library server. Point it at your photos, open the web page.
+## Build the app
 
-## Docker (recommended on a NAS)
+Install Python 3.12 and Node 22, then run from the repository root:
 
-### Docker Compose
-
-```bash
-git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
-cd azimuth-photo
-mkdir -p photos data
-# Put originals in ./photos (or edit docker-compose.yml to mount your real folder)
-docker compose up -d --build
+```powershell
+.\scripts\build_windows_desktop.ps1
 ```
 
-Open `http://<that-machine>:8000`.
+The command installs the exact V2 build dependencies and creates:
 
-- **Photos** live in the folder you mount at `/photos` (your originals stay yours).
-- **Catalog + caches + settings** live under `/data` (`AZIMUTH_HOME`).
-
-### Synology Container Manager
-
-1. Container Manager → Project → Create from `docker-compose.yml`.
-2. Map your photo share to `/photos`, and a folder for app data to `/data`.
-3. Publish port `8000`.
-4. Open `http://<nas>:8000`.
-
-### Unraid
-
-There is no published registry image yet — build `azimuth-photo:latest` on the
-server first (`docker compose build` in this repo, or `docker load` a saved
-image). Then import `deploy/unraid-template.xml` (or add the image manually):
-
-| Path / port | Maps to |
-|---|---|
-| Host photo share | `/photos` |
-| `appdata/azimuth` | `/data` |
-| Host `8000` | Container `8000` |
-
-### TrueNAS
-
-Use a custom app / Compose with the same two mounts (`/photos`, `/data`) and port `8000`. Same image as above.
-
-### Phone discovery on the LAN
-
-Azimuth Photo can announce itself on the local network. That needs **host networking** (not bridge). In Compose, set `network_mode: host` and drop the `ports:` section — see comments in `docker-compose.yml`. On Synology/Unraid/TrueNAS, pick host network if you want “Found on your network” from other devices. Tailscale still works either way.
-
----
-
-## Bare binary (no Docker)
-
-Build on the machine (or copy the folder from a matching OS/CPU):
-
-```bash
-python3.12 scripts/build_server.py
-./dist/azimuth-server/azimuth-server
+```text
+dist\azimuth-photo\azimuth-photo.exe
 ```
 
-The builder uses a separate venv (default `~/.cache/azimuth-pkg-venv`) and
-never touches `web/.venv`. Build scratch uses the platform temporary directory;
-override it via `AZIMUTH_BUILD_WORK`.
+Run that executable from its containing directory. The directory is a complete
+unsigned test artifact; Python and Node are not required on the machine that
+runs it. It is not yet an installer.
 
-Opens on `http://127.0.0.1:8000`. Useful env vars:
+## First launch
 
-| Variable | Meaning |
-|---|---|
-| `AZIMUTH_HOST` | Bind address (default `127.0.0.1`; use `0.0.0.0` on a NAS) |
-| `AZIMUTH_PORT` | Port (default `8000`) |
-| `AZIMUTH_HOME` | One folder for catalog, caches, settings |
-| `AZIMUTH_MODE` | `hub` (always-on library) is the usual server choice |
+Azimuth opens a native folder chooser. Select a folder containing photographs.
+The folder is attached immediately and the library fills progressively while
+it is read. Select “This is an archive drive” only for a durable archive copy.
 
-The Windows build of this folder is what the desktop app can ship as its sidecar.
+Azimuth reads originals in place. Attaching a folder never moves, renames, or
+deletes its photographs.
 
----
+## Data locations
 
-## Where data lives
+On Windows, the V2 catalog lives at:
 
-| What | Docker | Bare binary (Linux, no overrides) |
-|---|---|---|
-| Originals | Your `/photos` mount | Wherever you add as a source folder |
-| Catalog DB | `/data/data/catalog/` | `~/.local/share/azimuth-photo/` |
-| Settings | `/data/config/` | `~/.config/azimuth-photo/` |
-| Previews / caches | `/data/cache/` | `~/.cache/azimuth-photo/` |
+```text
+%LOCALAPPDATA%\Azimuth Photo\catalog\azimuth-v2.db
+```
 
-A source checkout is never used as runtime storage: older developer installs that kept `web/azimuth.db` inside the repo must set `AZIMUTH_DB_PATH` (or `AZIMUTH_HOME`) to that data — or move it into the paths above — to keep their catalog. Azimuth Photo never moves your photos.
+Generated tiles live under:
 
----
+```text
+%LOCALAPPDATA%\Azimuth Photo\cache\v2-tiles\
+```
 
-## First five minutes
+Set `AZIMUTH_HOME` before launch to isolate all V2 data under another directory.
+This is useful for development and clean-catalog proof; it does not select a V1
+catalog or compatibility mode.
 
-1. Open the web UI.
-2. Add your photos folder (in Docker that is often `/photos`).
-3. Let the scan run — the grid fills as it goes.
-4. Optional later: AI features need extra packages or the AI image docs; the base install stays light on purpose.
+## Run from source
 
-More detail: [getting-started.md](getting-started.md), [DISTRIBUTION_SPEC.md](DISTRIBUTION_SPEC.md).
-For the preserved release procedure, see [RELEASING.md](RELEASING.md).
+After installing `web/requirements-v2.txt` into `web/.venv` and running
+`npm ci`, use:
+
+```powershell
+.\scripts\start_azimuth_windows.ps1
+```
+
+Pass `-DataRoot C:\some\empty\folder` for an isolated source run. The launcher
+builds the current modular UI and opens the same one-process desktop boundary
+used by the frozen app.
+
+The complete build and smoke procedure is in [`desktop/BUILD.md`](../desktop/BUILD.md).

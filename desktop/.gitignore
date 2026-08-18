@@ -1,6 +1,0 @@
-/src-tauri/target/
-/src-tauri/gen/
-*.pdb
-*.log
-.DS_Store
-Thumbs.db

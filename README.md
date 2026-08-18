@@ -36,8 +36,10 @@ The model is described in [the core](docs/CORE.md): drives, photographs, copies,
 decisions, and cache entries, with seven operations around them. The surrounding
 code shape lives in [the architecture](docs/ARCHITECTURE.md).
 
-The current implementation still contains V1 FastAPI, Tauri, route, and worker
-residue while surfaces are rebuilt. Those are implementation facts, not product
+The V2 executable is now one native process with a direct in-process bridge;
+its temporary FastAPI and Tauri path has been deleted. The repository still
+contains inherited V1 server, route, UI, and worker code while each remaining
+surface is rebuilt or removed. Those are rewrite inventory, not product
 concepts to preserve.
 
 ## Documentation

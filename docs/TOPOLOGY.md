@@ -9,8 +9,8 @@ the current product architecture.
 
 ```text
 azimuth-photo/
-├── web/              Python engine and browser-native product UI
-├── desktop/          Desktop shell; subject to replacement during V2
+├── web/              V2 model, product boundary, native edge, and modular UI
+├── desktop/          Desktop build guidance and canonical executable icon
 ├── android/          Parked client, not a V2 dependency
 ├── scripts/          Repeatable development and operating commands
 └── docs/             Current guidance and preserved behavior references
@@ -51,11 +51,11 @@ in ignored `AGENTS.local.md`, not this portable document.
 
 ## Application boundary
 
-The current implementation still contains FastAPI, Tauri, routes, and other V1
-transport residue. They describe code awaiting replacement, not the product's
-conceptual architecture. V2's target is one installed desktop application in
-which the UI calls the core without exposing servers, modes, ports, pairing, or
-sync concepts to the user.
+The V2 application is one native process. Its UI calls the Python product
+boundary directly; the temporary FastAPI routes, loopback server, Tauri parent,
+and child engine are deleted. Inherited V1 server and route modules elsewhere
+in the repository are unreachable from the V2 executable and remain explicit
+rewrite debt, not an alternative runtime mode.
 
 See [CORE.md](CORE.md) for data and safety invariants,
 [ARCHITECTURE.md](ARCHITECTURE.md) for the intended code layers, and

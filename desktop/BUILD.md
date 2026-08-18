@@ -1,20 +1,17 @@
 # Build the Azimuth Photo Windows app
 
-The Windows app is a self-contained V2 package. It includes the frozen private
-engine, opens the first-folder experience, and stores its catalog and generated
-data in the normal Windows application-data folders. A person installing it
-does not install Python or configure a server.
+Azimuth Photo is one local desktop process. Python owns the catalog and product
+verbs; pywebview supplies the native WebView2 window and direct JavaScript
+bridge. There is no server, port, child engine, or browser address.
 
-This package is real but not yet the final desktop architecture: Tauri owns one
-private loopback engine process. `CORE.md` requires that transport to disappear
-before Desktop packaging becomes Proven. Until that collapse lands, this build
-is the executable V2 integration path and nothing in it may call V1.
+The frozen directory includes the Python runtime, the one inlined UI document,
+the V2 schema, and its native dependencies. A person running it does not install
+Python, Node, Rust, or a web server.
 
-## Build an unsigned test installer
+## Build the unsigned app
 
-On Windows, install Python 3.12, the MSVC desktop toolchain, and Rust. The build
-script installs the pinned V2 Python build set and the pinned Tauri CLI when
-they are absent.
+Build on Windows with Python 3.12 and Node 22 available. The script installs the
+pinned Python packages and exact JavaScript dependency before freezing the app.
 
 From the repository root:
 
@@ -22,41 +19,27 @@ From the repository root:
 .\scripts\build_windows_desktop.ps1
 ```
 
-The script:
-
-1. verifies `VERSION`, Cargo, and Tauri versions agree;
-2. builds `dist\azimuth-server\azimuth-server.exe` and its supporting
-   onedir files;
-3. bundles that complete directory into the desktop app;
-4. creates a per-user NSIS installer without requiring administrator access.
-
-The final line prints the installer path under:
+The final line prints the executable path:
 
 ```text
-desktop\src-tauri\target\release\bundle\nsis\
+dist\azimuth-photo\azimuth-photo.exe
 ```
 
-This lane intentionally does not enable signing or automatic updates. Those
-belong after the unsigned install-to-library flow passes on a clean Windows
-machine.
+The folder is a testable unsigned artifact, not an installer. Signing, an
+installer, and automatic updates belong after the clean-machine flow passes.
 
 ## First-install smoke
 
 Use a Windows account with no existing Azimuth Photo data:
 
-1. Install and launch Azimuth Photo without a terminal.
+1. Launch `azimuth-photo.exe` without a terminal.
 2. Confirm the welcome screen appears and no browser address or engine window
    is shown.
-3. Choose a local photo folder; confirm scanning begins and the library opens.
-4. Repeat with a mapped NAS drive.
-5. Enter a UNC share such as `\\NAS\Photos`; confirm photos appear.
-6. Quit and relaunch; confirm the same library opens without setup repeating.
+3. Use the native chooser to select a local photo folder; confirm scanning
+   begins and the library opens.
+4. Quit; confirm no Azimuth process remains and the catalog can be renamed.
+5. Relaunch; confirm the same library opens without setup repeating.
+6. Repeat with a mapped drive and then a UNC-backed folder.
 
-App data belongs under `%LOCALAPPDATA%\Azimuth Photo` and
-`%APPDATA%\Azimuth Photo`. Originals remain in the selected folders.
-
-## Developer override
-
-A developer may run the shell against another frozen engine by setting
-`AZIMUTH_DESKTOP_ENGINE_PATH` to the executable before `cargo run`. This is a
-development seam only; installed builds resolve the bundled engine resource.
+App data belongs under the platform paths resolved by `core/runtime_paths.py`.
+Originals remain in the selected folders.

@@ -1,5 +1,18 @@
-import { paths } from '../net/index.js';
 import { registerLens } from '../store/index.js';
+
+const rendered = new WeakMap();
+const pendingTiles = new WeakMap();
+const tileObserver = 'IntersectionObserver' in window
+  ? new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      tileObserver.unobserve(entry.target);
+      const load = pendingTiles.get(entry.target);
+      pendingTiles.delete(entry.target);
+      load?.();
+    }
+  }, { rootMargin: '500px' })
+  : null;
 
 function element(tag, className = '', text = '') {
   const node = document.createElement(tag);
@@ -9,12 +22,32 @@ function element(tag, className = '', text = '') {
 }
 
 function skeletons(grid) {
-  grid.replaceChildren();
+  replaceGrid(grid);
   for (let index = 0; index < 18; index += 1) {
     const skeleton = element('div', 'photo-skeleton');
     skeleton.style.aspectRatio = index % 4 === 0 ? '4 / 5' : '3 / 2';
     grid.append(skeleton);
   }
+}
+
+function replaceGrid(grid, ...children) {
+  if (tileObserver) {
+    for (const image of grid.querySelectorAll('img')) tileObserver.unobserve(image);
+  }
+  grid.replaceChildren(...children);
+}
+
+function loadTile(image, photo, actions) {
+  const load = () => actions.tile(photo.id).then(
+    (source) => { image.src = source; },
+    () => { image.remove(); },
+  );
+  if (!tileObserver) {
+    load();
+    return;
+  }
+  pendingTiles.set(image, load);
+  tileObserver.observe(image);
 }
 
 function emptyState(onAdd) {
@@ -31,7 +64,7 @@ function emptyState(onAdd) {
   return empty;
 }
 
-function photoCell(photo, selected, onSelect, onOpen) {
+function photoCell(photo, selected, actions) {
   const cell = element('button', 'photo-cell');
   cell.type = 'button';
   cell.dataset.photoId = photo.id;
@@ -39,13 +72,13 @@ function photoCell(photo, selected, onSelect, onOpen) {
   cell.setAttribute('aria-label', photo.tail || `Photo ${photo.id}`);
 
   const image = element('img');
-  image.src = paths.tile(photo.id);
   image.alt = '';
   image.loading = 'lazy';
   image.decoding = 'async';
   cell.append(image);
-  cell.addEventListener('click', () => onSelect(photo));
-  cell.addEventListener('dblclick', () => onOpen(photo));
+  loadTile(image, photo, actions);
+  cell.addEventListener('click', () => actions.select(photo));
+  cell.addEventListener('dblclick', () => actions.open(photo));
   return cell;
 }
 
@@ -53,19 +86,25 @@ function renderGrid(grid, state, actions) {
   grid.style.setProperty('--cell-size', `${actions.cellSize}px`);
   grid.setAttribute('aria-busy', String(state.loading));
   if (state.loading && state.photos.length === 0) {
+    rendered.delete(grid);
     skeletons(grid);
     return;
   }
   if (state.photos.length === 0) {
-    grid.replaceChildren(emptyState(actions.addDrive));
+    rendered.delete(grid);
+    replaceGrid(grid, emptyState(actions.addDrive));
     return;
   }
-  grid.replaceChildren(...state.photos.map((photo) => photoCell(
-    photo,
-    state.selected && state.selected.id,
-    actions.select,
-    actions.open,
-  )));
+
+  const signature = state.photos.map((photo) => `${photo.id}:${photo.tail}`).join('\n');
+  if (rendered.get(grid) !== signature) {
+    replaceGrid(grid, ...state.photos.map((photo) => photoCell(photo, null, actions)));
+    rendered.set(grid, signature);
+  }
+  const selected = String(state.selected?.id ?? '');
+  for (const cell of grid.children) {
+    cell.classList.toggle('is-selected', cell.dataset.photoId === selected);
+  }
 }
 
 function renderInspector(panel, selected) {

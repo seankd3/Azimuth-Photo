@@ -1,30 +1,24 @@
-const paths = Object.freeze({
-  counts: '/api/library/counts',
-  drives: '/api/drives',
-  photos: '/api/photos',
-  photo: (id) => `/api/photos/${id}`,
-  tile: (id, size = 400) => `/api/photos/${id}/tile?size=${size}`,
-  refresh: (uuid) => `/api/drives/${encodeURIComponent(uuid)}/refresh`,
+const ready = new Promise((resolve) => {
+  if (window.pywebview?.api) resolve(window.pywebview.api);
+  else window.addEventListener('pywebviewready', () => resolve(window.pywebview.api), { once: true });
 });
 
-export { paths };
-
-export async function call(path, options = {}) {
-  const response = await fetch(path, options);
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({}));
-    const detail = Array.isArray(body.detail)
-      ? body.detail.map((item) => item.msg).filter(Boolean).join(' ')
-      : body.detail;
-    throw new Error(detail || `Azimuth could not complete that (${response.status}).`);
+async function invoke(method, ...arguments_) {
+  const bridge = await ready;
+  try {
+    return await bridge[method](...arguments_);
+  } catch (error) {
+    throw new Error(error?.message || 'Azimuth could not complete that.');
   }
-  return response.json();
 }
 
-export function json(body) {
-  return {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  };
-}
+export const library = Object.freeze({
+  counts: () => invoke('counts'),
+  drives: () => invoke('drives'),
+  photos: ({ sort, limit, offset }) => invoke('photos', sort, limit, offset),
+  photo: (id) => invoke('photo', id),
+  tile: (id, size = 400) => invoke('tile', id, size),
+  attach: (root, isRecord) => invoke('attach', root, isRecord),
+  refresh: (uuid) => invoke('refresh', uuid),
+  chooseFolder: () => invoke('choose_folder'),
+});

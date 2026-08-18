@@ -219,33 +219,19 @@ fixtures and are not counted. Moved on 12 of 400 commits, rose on 5.
 ### `invokes` — a build may not name a file that is not there
 
 Every repository-relative path a workflow names, in a command or in a comment,
-must be a tracked file. **4 are not, measured 2026-08-16:**
+must be a tracked file. The V2 release workflow now names only the one-process
+desktop build and its real inputs. **3 inherited CI benchmark references remain:**
 
 ```
 .github/workflows/ci.yml:45: web/perf/standing.py
 .github/workflows/ci.yml:48: web/perf/baseline.json
 .github/workflows/ci.yml:53: scripts/bench.py
-.github/workflows/release.yml:43: scripts/build_server.py
 ```
 
-`ci.yml` runs `python scripts/bench.py --check` and `release.yml` runs `python
-scripts/build_server.py`. `0c259f93` *"Delete 6,251 lines of provably dead
-tooling"* deleted both on 2026-08-16 — **66 commits ago** (`git rev-list --count
-0c259f93..HEAD`). `9670f11f` deleted `web/perf/` on 2026-08-14. The perf job and
-the release build cannot have passed since. **Nothing said so, because the
-workflow has never run at all:**
-
-```
-$ gh api repos/:owner/:repo/actions/runs --jq .total_count
-0
-```
-
-That is the standing condition every other gate in this document has to live
-with: **run them locally or they do not run.** `python scripts/gates/check.py`
-is the whole instrument; the CI job below is a copy of it.
-
-This gate is 34 lines and is the only one whose entire hit list is fixable in a
-single commit that touches nothing but YAML.
+Those paths were deleted before the CI job that names them was rebuilt. The
+gate keeps that workflow debt explicit rather than allowing a green-looking job
+that cannot start. Run `python scripts/gates/check.py` locally; a workflow file
+is not evidence that a workflow has run.
 
 ---
 
@@ -254,18 +240,25 @@ single commit that touches nothing but YAML.
 ```
 $ python scripts/gates/check.py
 seam        16 of   16  ok   The UI may not call a path the backend does not serve.
-layers      21 of   21  ok   Imports point down.
-tables      68 of   68  ok   A table created once by hand is a table that does not exist.
-invokes      4 of    4  ok   A build may not name a file that is not there.
-gates ok in 0.6s
+layers      26 of   26  ok   Imports point down.
+tables      47 of   47  ok   A table created once by hand is a table that does not exist.
+invokes      3 of    3  ok   A build may not name a file that is not there.
+routes       0 of    0  ok   A route is served once, and reachable.
+names        0 of    0  ok   A name that is called is a name that exists.
+collects    45 of    0  ROSE The suite can be collected.
+imports     12 of    0  ROSE A first-party import names a file that is there.
+2 GATES FAILED in 12.2s
 $ echo $?
-0
+1
 ```
 
-`--list` prints what each number counts. The first run is green by
-construction: `scripts/gates/budget.txt` was seeded with today's measurement,
-so the gates measure drift from here and claim no credit for the backlog they
-name.
+`--list` prints what each number counts. Budgets measure drift and claim no
+credit for inherited debt. The two red gates are intentional rewrite pressure:
+the physically deleted V1 identity, location, and visibility modules still
+have twelve inherited importers and forty-five inherited tests that collect
+through them. V2 does not restore compatibility shims; each owning surface must
+be rebuilt or removed until those counts reach zero. The focused V2 suite is a
+separate green proof, not permission to hide this whole-tree debt.
 
 ---
 

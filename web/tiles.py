@@ -88,14 +88,19 @@ class Store:
     def read(self, entry) -> bytes | None:
         """Read a recorded tile; absence means it may be made again."""
 
+        path = self.present(entry)
+        if path is None:
+            return None
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    def present(self, entry) -> str | None:
+        """Return the owned path only while the recorded answer exists."""
+
         if not entry or not entry.get("path"):
             return None
         path = self._owned(entry["path"])
-        try:
-            with open(path, "rb") as handle:
-                return handle.read()
-        except FileNotFoundError:
-            return None
+        return path if os.path.isfile(path) else None
 
     def remove(self, path: str) -> None:
         """Remove exactly one file owned by this store."""

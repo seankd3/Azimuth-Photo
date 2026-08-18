@@ -41,10 +41,8 @@ bench/
 # Server packaging scratch (never the shared web/.venv)
 .pkg-venv/
 
-# DB backups and desktop build output
+# DB backups and generated desktop output
 web/*.bak
-desktop/src-tauri/target/
-desktop/src-tauri/gen/
 
 android/local.properties
 

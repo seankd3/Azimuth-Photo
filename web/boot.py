@@ -104,6 +104,15 @@ class Library:
     def tile(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> bytes | None:
         """Return one real tile, making it once when it is absent."""
 
+        path = self.tile_path(photo_id, size=size, rotate=rotate)
+        if path is None:
+            return None
+        with open(path, "rb") as handle:
+            return handle.read()
+
+    def tile_path(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> str | None:
+        """Return one real tile path, making the immutable answer once."""
+
         self._open()
         size, rotate = int(size), int(rotate)
         if size not in TILE_SIZES:
@@ -120,9 +129,9 @@ class Library:
         entry = cache.get(self.conn, digest, self.tiles.kind, recipe)
         if entry is not None and entry["state"] == cache.FAILED:
             return None
-        body = self.tiles.read(entry)
-        if body is not None:
-            return body
+        path = self.tiles.present(entry)
+        if path is not None:
+            return path
         entry = cache.make(
             self.conn,
             digest,
@@ -131,7 +140,7 @@ class Library:
             recipe,
             remake=entry is not None,
         )
-        return self.tiles.read(entry)
+        return self.tiles.present(entry)
 
     def details(self, photo_id: int) -> dict | None:
         """Return and project embedded browse metadata for one photograph."""

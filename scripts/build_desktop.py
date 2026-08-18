@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Freeze the V2 desktop engine and only the files it can serve."""
+"""Freeze the one-process V2 desktop app."""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
+import subprocess
 import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB = ROOT / "web"
-ENTRY = ROOT / "scripts" / "server_entry.py"
+ENTRY = WEB / "desktop.py"
+DOCUMENT = ROOT / "build" / "desktop" / "index.html"
+ICON = ROOT / "desktop" / "icon.ico"
 
 
 def data(source: Path, destination: str) -> str:
@@ -27,21 +30,28 @@ def main() -> int:
         )
         return 2
 
+    subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build_desktop_ui.py")],
+        cwd=ROOT,
+        check=True,
+    )
     PyInstaller.__main__.run(
         [
             str(ENTRY),
-            "--name=azimuth-server",
+            "--name=azimuth-photo",
             "--onedir",
+            "--windowed",
             "--noconfirm",
             "--clean",
+            f"--icon={ICON}",
             f"--paths={WEB}",
             f"--distpath={ROOT / 'dist'}",
-            f"--workpath={ROOT / 'build' / 'azimuth-server'}",
+            f"--workpath={ROOT / 'build' / 'azimuth-photo'}",
             f"--specpath={ROOT / 'build'}",
             f"--add-data={data(WEB / 'model' / 'schema.sql', 'model')}",
-            f"--add-data={data(WEB / 'templates' / 'v2.html', 'templates')}",
-            f"--add-data={data(WEB / 'static' / 'v2', 'static/v2')}",
+            f"--add-data={data(DOCUMENT, 'desktop')}",
             "--hidden-import=rawpy",
+            "--hidden-import=webview.platforms.edgechromium",
         ]
     )
     return 0

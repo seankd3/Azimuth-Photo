@@ -1,4 +1,4 @@
-import { call, json, paths } from '../net/index.js';
+import { library as product } from '../net/index.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 
 const PAGE = 200;
@@ -17,7 +17,7 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 
 function openDriveDialog() {
   driveDialog.showModal();
-  driveForm.elements.root.focus();
+  driveForm.querySelector('[type="submit"]').focus();
 }
 
 function closeDriveDialog() {
@@ -32,9 +32,9 @@ async function loadLibrary({ append = false } = {}) {
   if (!append) update({ loading: true });
   try {
     const [counts, drives, photos] = await Promise.all([
-      call(paths.counts),
-      call(paths.drives),
-      call(`${paths.photos}?sort=${encodeURIComponent(state.sort)}&limit=${PAGE}&offset=${offset}`),
+      product.counts(),
+      product.drives(),
+      product.photos({ sort: state.sort, limit: PAGE, offset }),
     ]);
     update({
       counts,
@@ -53,34 +53,40 @@ async function loadLibrary({ append = false } = {}) {
 
 async function scanDrive(drive) {
   update({ scanning: true });
-  let finished = false;
-  const scan = call(paths.refresh(drive.uuid), { method: 'POST' }).finally(() => {
-    finished = true;
-  });
-  while (!finished) {
-    await delay(500);
+  try {
+    let finished = false;
+    const scan = product.refresh(drive.uuid).finally(() => {
+      finished = true;
+    });
+    while (!finished) {
+      await delay(500);
+      await loadLibrary();
+    }
+    const result = await scan;
     await loadLibrary();
+    status.textContent = result.applied
+      ? `${result.photos_added.toLocaleString()} photos added.`
+      : result.reason || 'The folder could not be fully read.';
+  } catch (error) {
+    status.textContent = error.message;
+    throw error;
+  } finally {
+    update({ scanning: false });
   }
-  const result = await scan;
-  update({ scanning: false });
-  await loadLibrary();
-  status.textContent = result.applied
-    ? `${result.photos_added.toLocaleString()} photos added.`
-    : result.reason || 'The folder could not be fully read.';
 }
 
 async function selectPhoto(photo) {
   update({ selected: photo });
   try {
-    const details = await call(paths.photo(photo.id));
+    const details = await product.photo(photo.id);
     update({ selected: { ...photo, ...details } });
   } catch (error) {
     status.textContent = error.message;
   }
 }
 
-function openPhoto(photo) {
-  loupeImage.src = paths.tile(photo.id, 1920);
+async function openPhoto(photo) {
+  loupeImage.src = await product.tile(photo.id, 1920);
   loupeImage.alt = photo.tail || 'Selected photo';
   loupe.showModal();
 }
@@ -90,6 +96,7 @@ function render(state) {
     addDrive: openDriveDialog,
     select: selectPhoto,
     open: openPhoto,
+    tile: product.tile,
     cellSize,
   });
   library.renderInspector(inspector, state.selected);
@@ -122,10 +129,9 @@ driveForm.addEventListener('submit', async (event) => {
   submit.disabled = true;
   error.textContent = '';
   try {
-    const drive = await call(paths.drives, json({
-      root: driveForm.elements.root.value.trim(),
-      is_record: driveForm.elements.is_record.checked,
-    }));
+    const root = await product.chooseFolder();
+    if (!root) return;
+    const drive = await product.attach(root, driveForm.elements.is_record.checked);
     closeDriveDialog();
     await scanDrive(drive);
   } catch (reason) {

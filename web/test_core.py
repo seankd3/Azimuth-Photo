@@ -7,6 +7,7 @@ reads is a suite nobody runs.
 """
 
 import os
+from pathlib import Path
 import shutil
 import struct
 import tempfile
@@ -483,15 +484,15 @@ class BackupRefuses(CoreCase):
         image, source = self._queued()
         self.assertEqual(backup.back_up(self.conn, image), "copied")
         target = os.path.join(self.cold_root, TAIL.replace("/", os.sep))
-        self.assertEqual(open(target, "rb").read(), b"the-photograph")
-        self.assertEqual(open(source, "rb").read(), b"the-photograph")
+        self.assertEqual(Path(target).read_bytes(), b"the-photograph")
+        self.assertEqual(Path(source).read_bytes(), b"the-photograph")
         self.assertTrue(copies.is_backed_up(self.conn, image))
 
     def test_it_refuses_when_a_different_file_holds_that_tail(self):
         image, _ = self._queued()
         stranger = self.write(self.cold_root, body=b"a completely different photograph")
         self.assertEqual(backup.back_up(self.conn, image), "different file at that tail")
-        self.assertEqual(open(stranger, "rb").read(), b"a completely different photograph")
+        self.assertEqual(Path(stranger).read_bytes(), b"a completely different photograph")
         self.assertFalse(copies.is_backed_up(self.conn, image))
 
     def test_a_failed_verify_leaves_nothing_behind(self):
@@ -588,7 +589,7 @@ class PuttingAFileDown(CoreCase):
             handle.write(b"straight-off-the-card")
         result = photos.put(self.conn, source, self.hot["uuid"], TAIL)
         self.assertEqual(result["outcome"], "written")
-        self.assertEqual(open(result["path"], "rb").read(), b"straight-off-the-card")
+        self.assertEqual(Path(result["path"]).read_bytes(), b"straight-off-the-card")
         self.assertEqual(result["hash"], photos.content_hash(source))
         self.assertIsInstance(result["id"], int)
         self.assertEqual(
@@ -605,7 +606,7 @@ class PuttingAFileDown(CoreCase):
             photos.put(self.conn, source, self.hot["uuid"], TAIL)["outcome"],
             "different file at that tail",
         )
-        self.assertEqual(open(existing, "rb").read(), b"something already here")
+        self.assertEqual(Path(existing).read_bytes(), b"something already here")
 
 
 class MovingAPhoto(CoreCase):
@@ -622,7 +623,7 @@ class MovingAPhoto(CoreCase):
         self.assertEqual(photos.move(self.conn, image, self.cold["uuid"], new_tail), "moved")
         target = os.path.join(self.cold_root, new_tail.replace("/", os.sep))
         self.assertFalse(os.path.exists(source))
-        self.assertEqual(open(target, "rb").read(), b"the-photograph")
+        self.assertEqual(Path(target).read_bytes(), b"the-photograph")
         self.assertEqual(photos.open_photo(self.conn, image), target)
 
     def test_move_refuses_a_collision_before_changing_anything(self):
@@ -634,7 +635,7 @@ class MovingAPhoto(CoreCase):
             "destination exists",
         )
         self.assertTrue(os.path.exists(source))
-        self.assertEqual(open(stranger, "rb").read(), b"somebody else")
+        self.assertEqual(Path(stranger).read_bytes(), b"somebody else")
         self.assertEqual(
             self.conn.execute("SELECT tail FROM images WHERE id = ?", (image,)).fetchone()["tail"],
             TAIL,
@@ -662,7 +663,7 @@ class MovingAPhoto(CoreCase):
                 photos.move(self.conn, image, self.cold["uuid"], new_tail).startswith("move failed:")
             )
         self.assertTrue(os.path.exists(source))
-        self.assertEqual(open(target, "rb").read(), b"arrived during the move")
+        self.assertEqual(Path(target).read_bytes(), b"arrived during the move")
 
 
 class VersionFamilies(CoreCase):
@@ -748,6 +749,21 @@ class SetsAreDecisions(CoreCase):
         selected = scope.ids(range(1, 40_001))
         self.assertEqual(len(selected.args), 1)
         self.assertEqual(len(library_surface.photos(self.conn, scope=selected)), 2)
+
+    def test_star_scope_keeps_the_library_query_on_its_index(self):
+        clause, args = scope.where(scope.starred(4))
+        plan = " ".join(
+            str(column)
+            for row in self.conn.execute(
+                f"EXPLAIN QUERY PLAN SELECT i.id FROM images i "
+                f"WHERE {library_surface.IN_LIBRARY} AND ({clause}) "
+                f"ORDER BY {library_surface.SORTS['stars']} LIMIT ?",
+                (*args, 200),
+            )
+            for column in row
+        )
+
+        self.assertIn("idx_photos_stars", plan)
 
     def test_ambiguous_identifiers_and_non_photo_members_are_refused(self):
         with self.assertRaises(ValueError):
@@ -927,7 +943,7 @@ class OwedIsAQuery(CoreCase):
         # A preference is a decision, so it is a row in the log rather than a
         # flag -- a flag forgets itself exactly when someone who paused chores
         # to save battery would most mind them resuming.
-        image = self._catalogued()
+        self._catalogued()
         work.set_paused(self.conn, True)
         self.assertIsNone(work.step(self.conn, (self.thumb,)))
         self.assertTrue(work.paused(self.conn))
