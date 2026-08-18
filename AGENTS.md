@@ -80,12 +80,12 @@ changes the contract.
   Match whatever spelling readdir reports and never create a root that does not
   already exist. Case behaviour is per-volume (an exFAT archive may be
   case-insensitive; an ext4 archive is not) — never normalise or guess casing.
-- A photo row's `status` vocabulary is `kept`, `maybe`, and `trashed`, and
-  nothing else. Startup rewrites every other value back to `kept`, so a repair
-  that parks rows under an invented status silently undoes itself at the next
-  restart. To take a row out of the library without deleting it, set
-  `missing_at` (the file is not at that path) or exclude its source — both
-  survive a restart.
+- A V2 photo row's `status` vocabulary is `unflagged`, `picked`, and `trashed`,
+  and nothing else. It is a browse projection of the append-only decision log:
+  Pick writes `picked`, U clears to `unflagged`, and Reject writes `trashed`.
+  The inherited V1 `kept` / `maybe` startup normalizer is historical evidence,
+  not a V2 contract. Missing files and excluded sources remain storage facts;
+  never overload culling status to represent either one.
 - Destructive photo operations require collision-proof destinations,
   full-byte verification, and a recoverable Trash/Undo path.
 - Exact duplicate cleanup keeps the oldest filesystem-modified file; the

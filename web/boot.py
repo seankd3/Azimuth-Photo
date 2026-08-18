@@ -19,7 +19,7 @@ import model
 import render
 import tiles
 import work
-from model import cache, copies, decisions, drives, photos, trash
+from model import cache, copies, cull, decisions, drives, photos, trash
 from model.scope import EVERYTHING, Scope
 
 TILE_SIZES = frozenset((render.GRID, render.LOUPE, 3840))
@@ -101,17 +101,25 @@ class Library:
         self._open()
         return queries.counts(self.conn)
 
-    def trash(self, photo_ids) -> dict:
+    def pick(self, photo_ids) -> dict:
         self._open()
-        return trash.put(self.conn, photo_ids)
+        return cull.pick(self.conn, photo_ids)
+
+    def clear_pick(self, photo_ids) -> dict:
+        self._open()
+        return cull.clear(self.conn, photo_ids)
+
+    def reject(self, photo_ids) -> dict:
+        self._open()
+        return cull.reject(self.conn, photo_ids)
 
     def restore(self, photo_ids) -> dict:
         self._open()
-        return trash.restore(self.conn, photo_ids)
+        return cull.restore(self.conn, photo_ids)
 
-    def undo_trash(self, changes) -> dict:
+    def undo_cull(self, changes) -> dict:
         self._open()
-        return trash.undo(self.conn, changes)
+        return cull.undo(self.conn, changes)
 
     def trash_count(self) -> int:
         self._open()

@@ -71,9 +71,19 @@ class Desktop:
             raise ValueError("photo is unavailable")
         return answer
 
-    def trash(self, photo_ids: list[int]) -> dict:
+    def pick(self, photo_ids: list[int]) -> dict:
         return self._wait(
-            self._product.run(lambda library: library.trash(photo_ids))
+            self._product.run(lambda library: library.pick(photo_ids))
+        )
+
+    def clear_pick(self, photo_ids: list[int]) -> dict:
+        return self._wait(
+            self._product.run(lambda library: library.clear_pick(photo_ids))
+        )
+
+    def reject(self, photo_ids: list[int]) -> dict:
+        return self._wait(
+            self._product.run(lambda library: library.reject(photo_ids))
         )
 
     def restore(self, photo_ids: list[int]) -> dict:
@@ -81,9 +91,9 @@ class Desktop:
             self._product.run(lambda library: library.restore(photo_ids))
         )
 
-    def undo_trash(self, changes: list[dict]) -> dict:
+    def undo_cull(self, changes: list[dict]) -> dict:
         return self._wait(
-            self._product.run(lambda library: library.undo_trash(changes))
+            self._product.run(lambda library: library.undo_cull(changes))
         )
 
     def trash_count(self) -> int:

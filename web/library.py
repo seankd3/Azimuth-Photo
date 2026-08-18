@@ -106,7 +106,7 @@ def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
     clause, args = where(scope)
     return [dict(row) for row in conn.execute(
         f"""
-        SELECT i.id, i.tail, i.date_taken, i.stars, i.elo, i.content_hash AS hash,
+        SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.elo, i.content_hash AS hash,
                i.width, i.height, i.file_size
         FROM images i
         WHERE {IN_LIBRARY} AND ({clause})
@@ -279,13 +279,13 @@ def reindex(conn) -> dict[str, int]:
     plans: list[tuple[str, str, object, str]] = []
     counts: dict[str, int] = {}
     for family, column, default in (
-        (decisions.STATUS, "status", "kept"),
+        (decisions.STATUS, "status", "unflagged"),
         (decisions.STAR, "stars", 0),
     ):
         latest = decisions.current(conn, family)
         for subject, value in latest.items():
             value = default if value is None else value
-            if family == decisions.STATUS and value not in {"kept", "maybe", "trashed"}:
+            if family == decisions.STATUS and value not in {"unflagged", "picked", "trashed"}:
                 raise ValueError(f"invalid photo status: {value!r}")
             if family == decisions.STAR and (
                 isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 5

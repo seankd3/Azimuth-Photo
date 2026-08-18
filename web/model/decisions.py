@@ -32,7 +32,7 @@ from typing import Any
 # Families in use. Not a constraint — the table takes any string, because a new
 # kind of decision must never need a migration — but naming them here is how a
 # reader learns what the log holds.
-STATUS = "status"      # kept / maybe / trashed
+STATUS = "status"      # unflagged / picked / trashed
 STAR = "star"          # 0-5
 COMPARE = "compare"    # one photo beat another
 DEVELOP = "develop"    # an edit

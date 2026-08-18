@@ -23,7 +23,7 @@ import boot
 import library as library_surface
 import metadata as embedded_metadata
 from PIL import Image
-from model import backup, cache, copies, decisions, drives, photos, scope, sets, trash
+from model import backup, cache, copies, cull, decisions, drives, photos, scope, sets, trash
 from photo import exif as raw_exif
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -694,14 +694,14 @@ class DecisionsSurvive(CoreCase):
     def test_two_decisions_in_one_instant_keep_their_order(self):
         # A millisecond clock hands out the same timestamp twice under a fast
         # keyboard; `at` alone would make the answer a coin toss.
-        decisions.decide(self.conn, "abc", decisions.STATUS, "maybe", at=7.0)
-        decisions.decide(self.conn, "abc", decisions.STATUS, "kept", at=7.0)
-        self.assertEqual(decisions.latest(self.conn, "abc", decisions.STATUS), "kept")
+        decisions.decide(self.conn, "abc", decisions.STATUS, "picked", at=7.0)
+        decisions.decide(self.conn, "abc", decisions.STATUS, "unflagged", at=7.0)
+        self.assertEqual(decisions.latest(self.conn, "abc", decisions.STATUS), "unflagged")
 
     def test_undo_appends_so_the_log_never_lies(self):
-        decisions.decide(self.conn, "abc", decisions.STATUS, "kept", at=1.0)
+        decisions.decide(self.conn, "abc", decisions.STATUS, "unflagged", at=1.0)
         decisions.decide(self.conn, "abc", decisions.STATUS, "trashed", at=2.0)
-        self.assertEqual(decisions.undo(self.conn, "abc", decisions.STATUS), "kept")
+        self.assertEqual(decisions.undo(self.conn, "abc", decisions.STATUS), "unflagged")
         self.assertEqual(len(decisions.history(self.conn, "abc")), 3)
 
     def test_a_subject_is_any_stable_identity(self):
@@ -711,8 +711,8 @@ class DecisionsSurvive(CoreCase):
         self.assertEqual(decisions.latest(self.conn, "Raws/Digital/2026", decisions.NAME), "Iceland")
 
 
-class TrashIsAReversibleDecision(CoreCase):
-    def add(self, name: str, digest: str, *, status: str = "kept") -> int:
+class CullIsAReversibleDecision(CoreCase):
+    def add(self, name: str, digest: str, *, status: str = "unflagged") -> int:
         return int(
             self.conn.execute(
                 "INSERT INTO images(filename, tail, content_hash, status) VALUES (?, ?, ?, ?)",
@@ -733,54 +733,75 @@ class TrashIsAReversibleDecision(CoreCase):
         copies.saw(self.conn, photo_id, int(self.hot["id"]))
         copies.saw(self.conn, photo_id, int(self.cold["id"]))
         self.conn.commit()
-        trash.put(self.conn, (photo_id,))
+        cull.reject(self.conn, (photo_id,))
         return photo_id, hot_path, cold_path
 
+    def test_pick_clear_and_undo_are_one_status_dimension(self):
+        photo = self.add("frame.jpg", "f" * 64)
+
+        picked = cull.pick(self.conn, (photo,))
+        self.assertEqual(
+            self.conn.execute("SELECT status FROM images WHERE id = ?", (photo,)).fetchone()[0],
+            "picked",
+        )
+        cleared = cull.clear(self.conn, (photo,))
+        self.assertEqual(cleared["changed"][0]["before"], "picked")
+
+        cull.undo(self.conn, cleared["changed"])
+        self.assertEqual(
+            self.conn.execute("SELECT status FROM images WHERE id = ?", (photo,)).fetchone()[0],
+            "picked",
+        )
+        self.assertEqual(picked["changed"][0]["before"], "unflagged")
+
     def test_trash_restore_and_undo_preserve_the_previous_answer(self):
-        maybe = self.add("maybe.jpg", "a" * 64, status="maybe")
-        kept = self.add("kept.jpg", "b" * 64)
-        decisions.decide(self.conn, "a" * 64, decisions.STATUS, "maybe")
+        picked = self.add("picked.jpg", "a" * 64, status="picked")
+        unflagged = self.add("unflagged.jpg", "b" * 64)
+        decisions.decide(self.conn, "a" * 64, decisions.STATUS, "picked")
         self.conn.commit()
 
-        action = trash.put(self.conn, (maybe, kept))
+        action = cull.reject(self.conn, (picked, unflagged))
 
         self.assertEqual(trash.count(self.conn), 2)
         self.assertEqual(library_surface.photos(self.conn), [])
         self.assertEqual(
             [photo["id"] for photo in trash.browse(self.conn)],
-            [kept, maybe],
+            [unflagged, picked],
         )
-        restored = trash.restore(self.conn, (maybe,))
-        self.assertEqual(restored["changed"][0]["after"], "maybe")
+        restored = cull.restore(self.conn, (picked,))
+        self.assertEqual(restored["changed"][0]["after"], "picked")
         self.assertEqual(trash.count(self.conn), 1)
 
-        trash.undo(self.conn, restored["changed"])
+        cull.undo(self.conn, restored["changed"])
         self.assertEqual(trash.count(self.conn), 2)
-        trash.undo(self.conn, action["changed"][1:])
+        cull.undo(self.conn, action["changed"][1:])
         statuses = {
             row["filename"]: row["status"]
             for row in self.conn.execute("SELECT filename, status FROM images")
         }
-        self.assertEqual(statuses, {"maybe.jpg": "trashed", "kept.jpg": "kept"})
+        self.assertEqual(
+            statuses,
+            {"picked.jpg": "trashed", "unflagged.jpg": "unflagged"},
+        )
 
     def test_a_later_decision_makes_an_old_undo_stale(self):
         photo = self.add("frame.jpg", "c" * 64)
-        action = trash.put(self.conn, (photo,))
-        decisions.decide(self.conn, "c" * 64, decisions.STATUS, "kept")
-        self.conn.execute("UPDATE images SET status = 'kept' WHERE id = ?", (photo,))
+        action = cull.reject(self.conn, (photo,))
+        decisions.decide(self.conn, "c" * 64, decisions.STATUS, "unflagged")
+        self.conn.execute("UPDATE images SET status = 'unflagged' WHERE id = ?", (photo,))
         self.conn.commit()
 
         with self.assertRaisesRegex(ValueError, "stale"):
-            trash.undo(self.conn, action["changed"])
+            cull.undo(self.conn, action["changed"])
 
         self.assertEqual(trash.count(self.conn), 0)
-        self.assertEqual(decisions.latest(self.conn, "c" * 64, decisions.STATUS), "kept")
+        self.assertEqual(decisions.latest(self.conn, "c" * 64, decisions.STATUS), "unflagged")
 
     def test_an_invalid_member_refuses_the_whole_selection(self):
         photo = self.add("frame.jpg", "d" * 64)
 
         with self.assertRaisesRegex(ValueError, "missing"):
-            trash.put(self.conn, (photo, 999_999))
+            cull.reject(self.conn, (photo, 999_999))
 
         self.assertEqual(trash.count(self.conn), 0)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
@@ -799,11 +820,11 @@ class TrashIsAReversibleDecision(CoreCase):
         )
         self.conn.commit()
 
-        action = trash.put(self.conn, range(1, total + 1))
+        action = cull.reject(self.conn, range(1, total + 1))
 
         self.assertEqual(len(action["changed"]), total)
         self.assertEqual(trash.count(self.conn), total)
-        trash.undo(self.conn, action["changed"])
+        cull.undo(self.conn, action["changed"])
         self.assertEqual(trash.count(self.conn), 0)
 
     def test_one_identity_updates_every_matching_catalog_row(self):
@@ -811,7 +832,7 @@ class TrashIsAReversibleDecision(CoreCase):
         first = self.add("one.jpg", digest)
         self.add("two.jpg", digest)
 
-        action = trash.put(self.conn, (first,))
+        action = cull.reject(self.conn, (first,))
 
         self.assertEqual(len(action["changed"]), 1)
         self.assertEqual(trash.count(self.conn), 2)
@@ -998,7 +1019,7 @@ class LibraryQueriesRefuse(CoreCase):
             library_surface.reindex(self.conn)
 
         statuses = [row[0] for row in self.conn.execute("SELECT status FROM images ORDER BY id")]
-        self.assertEqual(statuses, ["kept", "kept"])
+        self.assertEqual(statuses, ["unflagged", "unflagged"])
 
     def test_malformed_calendar_values_never_wrap_into_plausible_labels(self):
         self.assertEqual(library_surface.month_label("2026-00"), "2026-00")

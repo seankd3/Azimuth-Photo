@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS images (
     file_ext         TEXT,
     width            INTEGER,
     height           INTEGER,
-    status           TEXT    NOT NULL DEFAULT 'kept',
+    status           TEXT    NOT NULL DEFAULT 'unflagged'
+                     CHECK (status IN ('unflagged', 'picked', 'trashed')),
     stars            INTEGER NOT NULL DEFAULT 0,
     elo              REAL    NOT NULL DEFAULT 1200.0,
     version_of       INTEGER REFERENCES images(id) ON DELETE SET NULL,
