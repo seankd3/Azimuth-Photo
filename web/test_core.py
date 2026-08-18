@@ -17,6 +17,7 @@ import render
 import work
 import model
 import tiles
+import boot
 import library as library_surface
 from PIL import Image
 from model import backup, cache, copies, decisions, drives, photos, scope, sets
@@ -95,6 +96,33 @@ class FreshCatalogTests(unittest.TestCase):
             self.assertFalse(chores.start())
             self.assertTrue(chores.stop())
             self.assertFalse(chores.running)
+
+    def test_the_v2_product_opens_browses_tiles_closes_and_reopens(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "Library", "catalog.db")
+            tile_root = os.path.join(directory, "Cache", "tiles")
+            photo_root = os.path.join(directory, "Photos")
+            source = os.path.join(photo_root, "2026", "lake.jpg")
+            os.makedirs(os.path.dirname(source))
+            Image.new("RGB", (900, 600), "teal").save(source, "JPEG")
+
+            product = boot.Library(catalog, tile_root)
+            attached = product.attach(photo_root)
+            page = product.browse()
+            body = product.tile(page[0]["id"])
+            self.assertTrue(product.start())
+            product.close()
+            with self.assertRaises(RuntimeError):
+                product.browse()
+
+            with boot.Library(catalog, tile_root) as reopened:
+                again = reopened.browse()
+                cached = reopened.tile(again[0]["id"])
+
+        self.assertEqual(attached["sweep"]["photos_added"], 1)
+        self.assertEqual(len(page), 1)
+        self.assertEqual(body, cached)
+        self.assertTrue(body.startswith(b"\xff\xd8"))
 
 
 class CoreCase(unittest.TestCase):
