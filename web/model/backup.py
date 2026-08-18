@@ -22,6 +22,7 @@ import uuid
 
 from model import copies, drives, photos
 
+
 def unprotected(conn, limit: int | None = None) -> list[dict]:
     """Photos with no copy on any record drive. The backup queue."""
 
@@ -71,10 +72,10 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
         return "invalid tail"
     if target is None:
         return "no record drive attached"
-    if os.path.exists(target):
+    if os.path.lexists(target):
         # Already there under the same tail. Confirm it really is this photo
         # before claiming the photograph is protected.
-        if photos.same_bytes(target, source):
+        if photos.is_file(target, row["file_size"]) and photos.same_bytes(target, source):
             if not dry_run:
                 copies.saw(conn, photo_id, int(drive["id"]))
                 conn.commit()
@@ -135,10 +136,9 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
         archived = drives.path_for(conn, drive["uuid"], archived_tail)
     except ValueError:
         return "invalid tail"
-    if archived is None or not os.path.exists(archived):
+    if archived is None or not photos.is_file(archived, None):
         return "not archived"
 
-    freed = []
     for holder in copies.drives_holding(conn, photo_id):
         if int(holder["is_record"]):
             continue
@@ -146,7 +146,11 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
             here = drives.path_for(conn, holder["uuid"], holder["copy_tail"] or row["tail"])
         except ValueError:
             return "invalid tail"
-        if not here or not os.path.exists(here) or os.path.normcase(here) == os.path.normcase(archived):
+        if (
+            not here
+            or not photos.is_file(here, None)
+            or os.path.normcase(here) == os.path.normcase(archived)
+        ):
             continue
 
         if not photos.same_bytes(here, archived):
@@ -155,14 +159,18 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
             return "record drive changed while verifying"
         if dry_run:
             return "would free"
+        # The first comparison proves the candidate. This second one is the
+        # destructive gate, immediately before unlink, so bytes changed during
+        # the decision window are preserved rather than mistaken for the copy
+        # we just proved.
+        if not photos.same_bytes(here, archived):
+            return "copies changed while verifying"
         os.remove(here)
         copies.forget(conn, photo_id, int(holder["id"]))
-        freed.append(here)
+        conn.commit()
+        return "freed"
 
-    if not freed:
-        return "nothing to free"
-    conn.commit()
-    return "freed"
+    return "nothing to free"
 
 
 def back_up_all(conn, *, limit: int | None = None, dry_run: bool = False, on_step=None) -> dict:

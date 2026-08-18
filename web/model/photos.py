@@ -86,7 +86,9 @@ def same_bytes(left: str, right: str) -> bool:
     """
 
     with open(left, "rb") as first, open(right, "rb") as second:
-        if os.fstat(first.fileno()).st_size != os.fstat(second.fileno()).st_size:
+        before_first = os.fstat(first.fileno())
+        before_second = os.fstat(second.fileno())
+        if before_first.st_size != before_second.st_size:
             return False
         while True:
             a = first.read(READ_CHUNK_BYTES)
@@ -94,7 +96,15 @@ def same_bytes(left: str, right: str) -> bool:
             if a != b:
                 return False
             if not a:
-                return True
+                after_first = os.fstat(first.fileno())
+                after_second = os.fstat(second.fileno())
+                return _fingerprint(before_first) == _fingerprint(after_first) and (
+                    _fingerprint(before_second) == _fingerprint(after_second)
+                )
+
+
+def _fingerprint(entry) -> tuple[int, int, int]:
+    return entry.st_size, entry.st_mtime_ns, entry.st_ctime_ns
 
 
 def identify(conn, path: str) -> dict:
@@ -125,15 +135,26 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     """
 
     try:
+        source_entry = os.lstat(source)
+        if not _stat.S_ISREG(source_entry.st_mode) or source_entry.st_size <= 0:
+            return {"outcome": "source unreadable"}
         target = drives.path_for(conn, drive_uuid, tail)
+    except OSError:
+        return {"outcome": "source unreadable"}
     except ValueError:
         return {"outcome": "invalid tail"}
     if target is None:
         return {"outcome": "drive not attached"}
+    if not supported(target):
+        return {"outcome": "unsupported photo"}
 
     if os.path.lexists(target):
-        if _verified(target, os.path.getsize(source)) and same_bytes(target, source):
-            return {"outcome": "already there", "path": target, **identify(conn, target)}
+        if is_file(target, source_entry.st_size) and same_bytes(target, source):
+            return {
+                "outcome": "already there",
+                "path": target,
+                **_record(conn, target, drive_uuid, tail),
+            }
         return {"outcome": "different file at that tail", "path": target}
 
     os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -152,10 +173,42 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
             except OSError:
                 pass
 
-    return {"outcome": "written", "path": target, **identify(conn, target)}
+    return {
+        "outcome": "written",
+        "path": target,
+        **_record(conn, target, drive_uuid, tail),
+    }
 
 
-def _verified(
+def _record(conn, path: str, drive_uuid: str, tail: str) -> dict:
+    """Make a verified file a photo and a copy fact in one transaction."""
+
+    from model import copies
+
+    known = identify(conn, path)
+    photo_id = known["id"]
+    if photo_id is None:
+        photo_id = admit(conn, path, tail)
+        if photo_id is None:
+            raise ValueError(f"not an admissible photo: {path}")
+        conn.execute(
+            "UPDATE images SET content_hash = ? WHERE id = ?",
+            (known["hash"], photo_id),
+        )
+        copy_tail = None
+    else:
+        row = conn.execute("SELECT tail FROM images WHERE id = ?", (photo_id,)).fetchone()
+        copy_tail = None if row["tail"] == tail else tail
+
+    drive = conn.execute("SELECT id FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone()
+    if drive is None:
+        raise ValueError(f"unknown drive: {drive_uuid}")
+    copies.saw(conn, photo_id, int(drive["id"]), tail=copy_tail)
+    conn.commit()
+    return {"hash": known["hash"], "size": known["size"], "id": photo_id}
+
+
+def is_file(
     path: str,
     expected_size: int | None,
     expected_modified_ns: int | None = None,
@@ -209,7 +262,7 @@ def locate(
         return None
     for drive in _by_preference(conn):
         path = drives.path_for(conn, drive["uuid"], tail)
-        if path and _verified(path, expected_size, expected_modified_ns):
+        if path and is_file(path, expected_size, expected_modified_ns):
             return path
     return None
 
@@ -237,7 +290,7 @@ def open_photo(conn, image_id: int) -> str | None:
             path = drives.path_for(conn, copy["uuid"], copy["tail"])
         except ValueError:
             continue
-        if path and _verified(path, row["file_size"], row["file_modified_ns"]):
+        if path and is_file(path, row["file_size"], row["file_modified_ns"]):
             return path
     return locate(
         conn,
@@ -257,15 +310,17 @@ def state(conn, image_id: int) -> str:
     is involved in saying so.
     """
 
-    row = conn.execute(
-        "SELECT tail, file_size FROM images WHERE id = ?", (int(image_id),)
-    ).fetchone()
+    row = conn.execute("SELECT id FROM images WHERE id = ?", (int(image_id),)).fetchone()
     if row is None:
         return "lost"
-    if row["tail"] and locate(conn, row["tail"], expected_size=row["file_size"]):
+    if open_photo(conn, image_id) is not None:
         return "available"
-    for drive in _by_preference(conn):
-        if drives.root_of(conn, drive["uuid"]) is None:
+    for holder in conn.execute(
+        "SELECT d.uuid FROM copies c JOIN drives d ON d.id = c.drive_id "
+        "WHERE c.photo_id = ?",
+        (int(image_id),),
+    ):
+        if drives.root_of(conn, holder["uuid"]) is None:
             return "away"
     return "lost"
 

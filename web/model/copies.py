@@ -138,12 +138,22 @@ def sweep(conn, drive_uuid: str) -> dict:
         "WHERE tail IS NOT NULL AND vc_of IS NULL ORDER BY id"
     ):
         known.setdefault(row["tail"], []).append(dict(row))
+    # One drive may hold a photo under a collision-safe alternate tail. That
+    # address is just as known as the photo's canonical tail; failing to add it
+    # here admits the archive copy as a second photograph on the next sweep.
+    for row in conn.execute(
+        "SELECT i.id, c.tail, i.file_size, i.file_modified_ns FROM copies c "
+        "JOIN images i ON i.id = c.photo_id "
+        "WHERE c.drive_id = ? AND c.tail IS NOT NULL",
+        (drive_id,),
+    ):
+        known.setdefault(row["tail"], []).append(dict(row))
 
     now = time.time()
     recorded = 0
     admitted = 0
     changed: list[str] = []
-    for tail in seen:
+    for tail in sorted(seen):
         path = drives.path_for(conn, drive_uuid, tail)
         if path is None:
             continue

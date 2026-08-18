@@ -202,12 +202,24 @@ class OpeningAPhoto(CoreCase):
         # nothing can ever be declared missing -- no ratio, no override switch.
         path = self.write(self.cold_root)
         image = self.photo(size=os.path.getsize(path))
+        copies.saw(self.conn, image, int(self.cold["id"]))
+        self.conn.commit()
         shutil.rmtree(self.cold_root)
         self.assertEqual(photos.state(self.conn, image), "away")
 
         # Only with every drive attached and empty-handed is it lost.
         os.makedirs(self.cold_root)
         drives.write_marker(self.cold_root, self.cold["uuid"])
+        self.assertEqual(photos.state(self.conn, image), "lost")
+
+    def test_an_unrelated_away_drive_does_not_hide_a_lost_copy(self):
+        path = self.write(self.hot_root)
+        image = self.photo(size=os.path.getsize(path))
+        copies.saw(self.conn, image, int(self.hot["id"]))
+        self.conn.commit()
+        os.remove(path)
+        shutil.rmtree(self.cold_root)
+
         self.assertEqual(photos.state(self.conn, image), "lost")
 
 
@@ -240,6 +252,18 @@ class SweepingRefuses(CoreCase):
         self.assertEqual(result["changed"], ["Raws/2026/change.jpg"])
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
         self.assertIsNone(photos.open_photo(self.conn, photo_id))
+
+    def test_a_known_alternate_copy_tail_is_not_admitted_as_a_second_photo(self):
+        alternate = "Raws/2026/lake-2.jpg"
+        path = self.write(self.cold_root, alternate, b"jpeg bytes")
+        image = self.photo("Raws/2026/lake.jpg", size=os.path.getsize(path))
+        copies.saw(self.conn, image, int(self.cold["id"]), tail=alternate)
+        self.conn.commit()
+
+        result = copies.sweep(self.conn, self.cold["uuid"])
+
+        self.assertEqual(result["photos_added"], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
 
     def test_an_incomplete_walk_changes_nothing(self):
         # "I could not read the folder" and "the folder is empty" are the same
@@ -376,6 +400,20 @@ class BackupRefuses(CoreCase):
         self.assertEqual(backup.reclaim(self.conn, image), "not archived")
         self.assertTrue(os.path.exists(source))
 
+    def test_reclaim_refuses_a_symlink_that_only_points_back_to_the_source(self):
+        image, source = self._queued()
+        archived = os.path.join(self.cold_root, TAIL.replace("/", os.sep))
+        os.makedirs(os.path.dirname(archived), exist_ok=True)
+        try:
+            os.symlink(source, archived)
+        except (OSError, NotImplementedError):
+            self.skipTest("this platform will not make symlinks unprivileged")
+        copies.saw(self.conn, image, int(self.cold["id"]))
+        self.conn.commit()
+
+        self.assertEqual(backup.reclaim(self.conn, image), "not archived")
+        self.assertTrue(os.path.exists(source))
+
     def test_reclaim_refuses_when_the_two_copies_differ(self):
         image, source = self._queued()
         self.write(self.cold_root, body=b"not the same photograph at all")
@@ -393,6 +431,13 @@ class BackupRefuses(CoreCase):
         self.assertEqual(backup.reclaim(self.conn, image), "freed")
         self.assertFalse(os.path.exists(source))
         self.assertTrue(os.path.exists(os.path.join(self.cold_root, alternate.replace("/", os.sep))))
+
+    def test_reclaim_rechecks_bytes_immediately_before_deletion(self):
+        image, source = self._queued()
+        backup.back_up(self.conn, image)
+        with patch.object(photos, "same_bytes", side_effect=(True, False)):
+            self.assertEqual(backup.reclaim(self.conn, image), "copies changed while verifying")
+        self.assertTrue(os.path.exists(source))
 
 
 class PuttingAFileDown(CoreCase):
@@ -414,6 +459,11 @@ class PuttingAFileDown(CoreCase):
         self.assertEqual(result["outcome"], "written")
         self.assertEqual(open(result["path"], "rb").read(), b"straight-off-the-card")
         self.assertEqual(result["hash"], photos.content_hash(source))
+        self.assertIsInstance(result["id"], int)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1
+        )
+        self.assertEqual(len(copies.drives_holding(self.conn, result["id"])), 1)
 
     def test_put_never_overwrites_a_different_photograph(self):
         source = os.path.join(self.tmp, "card.CR3")
