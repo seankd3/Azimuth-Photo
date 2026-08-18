@@ -52,6 +52,11 @@ class DesktopTests(unittest.TestCase):
                 page = product.photos()
                 details = product.photo(page[0]["id"])
                 tile_uri = product.tile(page[0]["id"])
+                trashed = product.trash([page[0]["id"]])
+                hidden = product.photos()
+                trash_count = product.trash_count()
+                product.undo_trash(trashed["changed"])
+                restored = product.photos()
             finally:
                 product.close()
 
@@ -66,6 +71,9 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual((details["width"], details["height"]), (640, 480))
         self.assertEqual(prefix, "data:image/jpeg;base64")
         self.assertTrue(base64.b64decode(encoded).startswith(b"\xff\xd8\xff"))
+        self.assertEqual(hidden, [])
+        self.assertEqual(trash_count, 1)
+        self.assertEqual(restored[0]["id"], page[0]["id"])
         self.assertTrue(catalog_released)
 
     def test_folder_choice_is_a_native_window_verb(self):

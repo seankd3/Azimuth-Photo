@@ -19,7 +19,7 @@ import model
 import render
 import tiles
 import work
-from model import cache, copies, decisions, drives, photos
+from model import cache, copies, decisions, drives, photos, trash
 from model.scope import EVERYTHING, Scope
 
 TILE_SIZES = frozenset((render.GRID, render.LOUPE, 3840))
@@ -100,6 +100,22 @@ class Library:
     def counts(self) -> dict[str, int]:
         self._open()
         return queries.counts(self.conn)
+
+    def trash(self, photo_ids) -> dict:
+        self._open()
+        return trash.put(self.conn, photo_ids)
+
+    def restore(self, photo_ids) -> dict:
+        self._open()
+        return trash.restore(self.conn, photo_ids)
+
+    def undo_trash(self, changes) -> dict:
+        self._open()
+        return trash.undo(self.conn, changes)
+
+    def trash_count(self) -> int:
+        self._open()
+        return trash.count(self.conn)
 
     def tile(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> bytes | None:
         """Return one real tile, making it once when it is absent."""

@@ -23,7 +23,7 @@ import boot
 import library as library_surface
 import metadata as embedded_metadata
 from PIL import Image
-from model import backup, cache, copies, decisions, drives, photos, scope, sets
+from model import backup, cache, copies, decisions, drives, photos, scope, sets, trash
 from photo import exif as raw_exif
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -709,6 +709,89 @@ class DecisionsSurvive(CoreCase):
         # order to be a row it could decide about.
         decisions.decide(self.conn, "Raws/Digital/2026", decisions.NAME, "Iceland")
         self.assertEqual(decisions.latest(self.conn, "Raws/Digital/2026", decisions.NAME), "Iceland")
+
+
+class TrashIsAReversibleDecision(CoreCase):
+    def add(self, name: str, digest: str, *, status: str = "kept") -> int:
+        return int(
+            self.conn.execute(
+                "INSERT INTO images(filename, tail, content_hash, status) VALUES (?, ?, ?, ?)",
+                (name, f"Raws/{name}", digest, status),
+            ).lastrowid
+        )
+
+    def test_trash_restore_and_undo_preserve_the_previous_answer(self):
+        maybe = self.add("maybe.jpg", "a" * 64, status="maybe")
+        kept = self.add("kept.jpg", "b" * 64)
+        decisions.decide(self.conn, "a" * 64, decisions.STATUS, "maybe")
+        self.conn.commit()
+
+        action = trash.put(self.conn, (maybe, kept))
+
+        self.assertEqual(trash.count(self.conn), 2)
+        self.assertEqual(library_surface.photos(self.conn), [])
+        restored = trash.restore(self.conn, (maybe,))
+        self.assertEqual(restored["changed"][0]["after"], "maybe")
+        self.assertEqual(trash.count(self.conn), 1)
+
+        trash.undo(self.conn, restored["changed"])
+        self.assertEqual(trash.count(self.conn), 2)
+        trash.undo(self.conn, action["changed"][1:])
+        statuses = {
+            row["filename"]: row["status"]
+            for row in self.conn.execute("SELECT filename, status FROM images")
+        }
+        self.assertEqual(statuses, {"maybe.jpg": "trashed", "kept.jpg": "kept"})
+
+    def test_a_later_decision_makes_an_old_undo_stale(self):
+        photo = self.add("frame.jpg", "c" * 64)
+        action = trash.put(self.conn, (photo,))
+        decisions.decide(self.conn, "c" * 64, decisions.STATUS, "kept")
+        self.conn.execute("UPDATE images SET status = 'kept' WHERE id = ?", (photo,))
+        self.conn.commit()
+
+        with self.assertRaisesRegex(ValueError, "stale"):
+            trash.undo(self.conn, action["changed"])
+
+        self.assertEqual(trash.count(self.conn), 0)
+        self.assertEqual(decisions.latest(self.conn, "c" * 64, decisions.STATUS), "kept")
+
+    def test_an_invalid_member_refuses_the_whole_selection(self):
+        photo = self.add("frame.jpg", "d" * 64)
+
+        with self.assertRaisesRegex(ValueError, "missing"):
+            trash.put(self.conn, (photo, 999_999))
+
+        self.assertEqual(trash.count(self.conn), 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
+
+    def test_a_large_selection_is_one_bound_argument_and_one_transaction(self):
+        total = 5_000
+        self.conn.executemany(
+            "INSERT INTO images(filename, tail, content_hash) VALUES (?, ?, ?)",
+            (
+                (f"{index}.jpg", f"Raws/{index}.jpg", f"{index:064x}")
+                for index in range(1, total + 1)
+            ),
+        )
+        self.conn.commit()
+
+        action = trash.put(self.conn, range(1, total + 1))
+
+        self.assertEqual(len(action["changed"]), total)
+        self.assertEqual(trash.count(self.conn), total)
+        trash.undo(self.conn, action["changed"])
+        self.assertEqual(trash.count(self.conn), 0)
+
+    def test_one_identity_updates_every_matching_catalog_row(self):
+        digest = "e" * 64
+        first = self.add("one.jpg", digest)
+        self.add("two.jpg", digest)
+
+        action = trash.put(self.conn, (first,))
+
+        self.assertEqual(len(action["changed"]), 1)
+        self.assertEqual(trash.count(self.conn), 2)
 
 
 class SetsAreDecisions(CoreCase):

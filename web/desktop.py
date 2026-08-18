@@ -71,6 +71,24 @@ class Desktop:
             raise ValueError("photo is unavailable")
         return answer
 
+    def trash(self, photo_ids: list[int]) -> dict:
+        return self._wait(
+            self._product.run(lambda library: library.trash(photo_ids))
+        )
+
+    def restore(self, photo_ids: list[int]) -> dict:
+        return self._wait(
+            self._product.run(lambda library: library.restore(photo_ids))
+        )
+
+    def undo_trash(self, changes: list[dict]) -> dict:
+        return self._wait(
+            self._product.run(lambda library: library.undo_trash(changes))
+        )
+
+    def trash_count(self) -> int:
+        return self._wait(self._product.run(lambda library: library.trash_count()))
+
     def tile(self, photo_id: int, size: int = 400) -> str:
         body = self._wait(
             self._product.run(
