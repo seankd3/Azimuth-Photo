@@ -7,6 +7,11 @@ The documentation has four owners. Read them in this order:
 3. [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the code shape around the core.
 4. [`AGENTS.md`](../AGENTS.md) owns how work is performed and verified.
 
+[`REWRITE_LEDGER.md`](REWRITE_LEDGER.md) is the exhaustive V2 completion gate.
+It does not own design; it records whether each area and exact code file
+has satisfied the authorities above. Anything absent from its proven register
+is legacy by default.
+
 When documents disagree, the owner for that kind of fact wins. A document may
 preserve useful V1 behavior without preserving V1 architecture.
 
@@ -24,6 +29,8 @@ preserve useful V1 behavior without preserving V1 architecture.
 - [Stacks](STACKS_V2.md) — duplicate-safety distinctions and cleanup rules.
 - [Gate study](GATES.md) — evidence behind the architecture's mechanical
   constraints; the architecture owns the rules themselves.
+- [Rewrite ledger](REWRITE_LEDGER.md) — exact rebuilt, proven, legacy, and
+  removed inventory.
 
 ## Behavior references awaiting V2 adoption
 
@@ -65,6 +72,6 @@ Re-run its instruments before using any ranked item.
 ## Documentation rule
 
 Do not add another overview, handoff, status report, or competing source of
-truth. Update the owner above. Preserve a historical document when it contains
-learning the code cannot reveal, but label it historical and remove it from the
-current path.
+truth. Update the owner above or the rewrite ledger. Preserve a historical
+document when it contains learning the code cannot reveal, but label it
+historical and remove it from the current path.
