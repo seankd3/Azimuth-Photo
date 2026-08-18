@@ -237,13 +237,13 @@ outside `model/schema.sql`.
 **Work — one query, one worker.** Owed = *what should exist* minus *what is
 cached*: an anti-join, not a queue. New photos are not special; they sort first
 because they are newest. Order is closeness to your eyes — on screen now, then
-the rest of this view, then newest, then oldest debt. One gate: chores yield
-while you are using the app (measured: browsing was 23 ms quiet, minutes with
-chores running). One immutable capability per kind says how to compute it, what
-it costs, whether this machine can do it, and whether it is evictable. Boot
-passes the capabilities it owns explicitly; import order is never product
-configuration. Failures record *why* once instead of being rediscovered every
-pass.
+the rest of this view, then newest, then oldest debt. One owned worker does one
+bounded item at a time on its own connection; a caller may yield before an item
+for an explicit product reason such as battery saver. One immutable capability
+per kind says how to compute it, what it costs, whether this machine can do it,
+and whether it is evictable. Boot passes the capabilities it owns explicitly;
+import order is never product configuration. Failures record *why* once instead
+of being rediscovered every pass.
 
 **Cache and thumbnails.** A tile is a cached answer to *what do these photo bytes
 look like at this size and rotation*. An edit is not a recipe parameter until

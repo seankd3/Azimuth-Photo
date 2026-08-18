@@ -23,31 +23,14 @@ Three consequences, all free:
 **Order is closeness to your eyes**: what is on screen now, then the rest of
 this view, then newest, then the oldest debt.
 
-## Staying out of the way without stopping
+## Staying out of the way
 
-Browsing was 23 ms with chores quiet and *minutes* with them running. The first
-reading of that was "chores must stop while you are using the app", and it is
-the wrong lesson — it leaves the machine idle exactly when someone is sitting
-in front of it, which is when there is most to do.
-
-The right lesson is that the measurement was never about *whether* work ran. It
-was about **what it shared with the request path**. Three separations, and
-after them chores can run flat out:
-
-* **Its own connection.** A chore holding a write transaction is a grid query
-  waiting on a lock. The worker opens its own and never borrows the reader the
-  routes use.
-* **Its own process for decode.** `rawpy.postprocess` holds the GIL, so a
-  thread pool adds contention without parallelism — the measured trap. Bulk
-  rendering goes to a process pool; the interpreter serving the UI never blocks
-  on a demosaic.
-* **A slot kept free.** Chores use every core but one. The one left is what
-  answers a tile the owner is looking at *right now*, which must never queue
-  behind a hundred it has not asked for.
-
-What remains of politeness is one sentence: **chores run one item at a time and
-check between items.** That is enough, because an item is bounded — and it
-means stopping is instant and costs nothing, since the queue is a query.
+The background path owns one connection and one worker. It does one bounded
+item, then checks whether to continue. There is no pool capable of filling the
+machine and no borrowed request connection capable of stalling the grid. A
+caller may yield before an item for an explicit product reason such as battery
+saver; otherwise debt continues to shrink. Stopping between items loses
+nothing, because the queue is the query itself.
 """
 
 from __future__ import annotations
@@ -55,7 +38,6 @@ from __future__ import annotations
 import logging
 import os
 import threading
-import time
 from typing import Callable, Iterable
 
 from model import cache, photos
@@ -63,79 +45,10 @@ from model.scope import EVERYTHING, Scope, where
 
 log = logging.getLogger(__name__)
 
-# How long the app stays "in use" after the last thing you did. Long enough
-# that a pause between keystrokes is not an invitation to start a demosaic.
-QUIET_AFTER_SECONDS = 2.0
-
 # How many owed photographs to consider before giving up on this pass. Not a
 # batch -- one item is still done per step. It is the number of away or
 # unreadable photographs the worker will step over to find one it can do.
 CANDIDATES = 64
-
-_last_touch = 0.0
-
-
-def touched() -> None:
-    """You did something. Chores make room -- they do not stop."""
-
-    global _last_touch
-    _last_touch = time.monotonic()
-
-
-def busy() -> bool:
-    """Is the owner doing something right now?
-
-    Read to decide how *hard* to work, never whether to work at all. Chores
-    keep going while the app is in use; they simply leave more of the machine
-    alone while someone is watching.
-    """
-
-    return (time.monotonic() - _last_touch) < QUIET_AFTER_SECONDS
-
-
-def workers(*, interactive: bool | None = None) -> int:
-    """How many chore processes to run. Never every core, and never zero.
-
-    Two constraints, both measured rather than guessed:
-
-    * **Memory, priced at what a decode may actually cost.** The famous number
-      here is 9 GB peak per demosaic worker — a 15 GB box sized for two workers
-      wanting 17 GB was OOM-killed every four minutes. But that is the price of
-      a *full-resolution* demosaic, and `render` refuses any decode over
-      `DECODE_CEILING_BYTES` outright. Sizing the pool against the ceiling that
-      is actually enforced rather than against the worst frame ever seen is the
-      difference between 2 workers and 6 on this machine.
-    * **One core stays free** so a tile the owner is looking at is rendered
-      immediately instead of queueing behind a hundred they have not asked for.
-
-    The two guards protect different things, which is why neither has to be
-    conservative on the other's behalf: `render` refuses any single frame whose
-    decode would exceed its ceiling, so no one item can be too big, and this
-    only has to bound how many run at once. When memory cannot be measured —
-    psutil is optional and is not installed here — falling back to a flat 2 on
-    a sixteen-core machine left most of it idle for a risk the per-item ceiling
-    had already taken care of.
-
-    While the app is in use this halves again — not to be polite, but because
-    the interactive render and the UI itself want the room.
-    """
-
-    import render
-
-    cores = os.cpu_count() or 2
-    ceiling = min(cores - 1, 6)
-    try:
-        import psutil
-
-        # Half the machine's memory, divided by what one decode may cost.
-        affordable = int(psutil.virtual_memory().total // 2 // render.DECODE_CEILING_BYTES)
-        ceiling = min(ceiling, max(1, affordable))
-    except Exception:
-        pass
-    slots = max(1, ceiling)
-    if interactive if interactive is not None else busy():
-        slots = max(1, slots // 2)
-    return slots
 
 
 # Whether chores should run at all is a *preference*, and a preference is a
@@ -293,8 +206,7 @@ def _identify_one(conn, row) -> bool:
 
 
 def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
-         yield_to: Callable[[], bool] = None,
-         lane: int = 0, lanes: int = 1) -> dict | None:
+         yield_to: Callable[[], bool] | None = None) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
     One item, then return. Concurrency lives *above* this function — in how
@@ -306,11 +218,9 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     battery saver, a test). It defaults to never, because chores running is the
     normal state.
 
-    **`lane` is how several workers share one query without coordinating.**
-    Each takes every `lanes`-th candidate from the same window, so two workers
-    never pick the same photograph and nothing has to claim, lock or lease a
-    row. A worker that dies mid-item leaves no claim to expire — its item is
-    simply owed again, which is the property the whole design turns on.
+    One worker owns this loop. A worker that dies mid-item leaves no claim to
+    expire — its item is simply owed again, which is the property the whole
+    design turns on.
     """
 
     if paused(conn) or (yield_to is not None and yield_to()):
@@ -333,8 +243,9 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
         # Trying a handful costs nothing and makes progress whenever *any* of
         # them is reachable.
         for recipe in kind.ahead():
-            for row in owed(conn, kind, recipe=recipe, on_screen=on_screen,
-                            limit=CANDIDATES)[lane::lanes]:
+            for row in owed(
+                conn, kind, recipe=recipe, on_screen=on_screen, limit=CANDIDATES
+            ):
                 source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
                 if source is None:
                     continue
@@ -367,123 +278,83 @@ def _unlink(path: str) -> None:
     os.remove(path)
 
 
-def run(open_conn, kinds: Iterable[cache.Kind], *,
+class Chores:
+    """One owned background worker with no process-global lifecycle."""
+
+    def __init__(
+        self,
+        open_conn,
+        kinds: Iterable[cache.Kind],
+        *,
         on_screen: Callable[[], Iterable[int]] = lambda: (),
+        yield_to: Callable[[], bool] = lambda: False,
         ceiling_bytes: int | None = None,
-        lane: int = 0, lanes: int = 1) -> None:
-    """The chore loop. Runs until the process ends; owns everything it touches.
+    ):
+        self._open_conn = open_conn
+        self._kinds = tuple(kinds)
+        self._on_screen = on_screen
+        self._yield_to = yield_to
+        self._ceiling_bytes = ceiling_bytes
+        self._stopped = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    Deliberately a plain `while` in a thread rather than a task on the event
-    loop. A chore that blocks — a 45 MP demosaic, a cold archive read — would
-    stall every request sharing that loop, and the whole point of this design
-    is that it cannot.
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
-    It opens its own connection and never borrows the reader the routes use, so
-    the longest a grid query can wait on a chore is zero.
-    """
+    def start(self) -> bool:
+        """Start once. Return false when this instance is already running."""
 
-    conn = open_conn()
-    try:
-        while not _stopped.is_set():
-            try:
-                did = step(conn, kinds, on_screen=on_screen(), lane=lane, lanes=lanes)
-            except Exception:
-                log.exception("worker=chores step failed")
-                did = None
-            if did is None and ceiling_bytes is not None:
-                # Nothing is owed, so this is the moment to hold the cache under
-                # its ceiling. `sweep_cache` had no caller at all: the ceiling
-                # was declared in `tiles`, reported to the owner by
-                # `tiles.status()`, and named in two comments as the thing that
-                # "covers them under the same ceiling as everything else" —
-                # while the previews grew without limit on a disk at 3% free.
-                #
-                # Here rather than on a timer, because a sweep is a chore and
-                # this loop is what does chores. Doing it only when nothing is
-                # owed means it never competes with making the thing the owner
-                # is waiting for, and `evict` returns immediately when the total
-                # is under the ceiling, so the idle cost is one SUM.
-                try:
-                    freed = sweep_cache(conn, ceiling_bytes, kinds)
-                    if freed:
-                        log.info("worker=chores swept=%s", freed)
-                except Exception:
-                    log.exception("worker=chores sweep failed")
-
-            # Nothing owed, or standing down: look again shortly rather than
-            # spinning. Nothing here accumulates, so a long sleep costs only
-            # latency on the next item.
-            #
-            # Waiting on the stop flag rather than sleeping on a clock is what
-            # makes shutdown immediate: a quit during the idle five seconds
-            # would otherwise keep the catalog open for the rest of them.
-            _stopped.wait(0.05 if did else 5.0)
-    finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
-
-
-# Set when the app is shutting down. The loop owns its own connection, so
-# nothing else can close it for us — and `run_shutdown` releasing the shared
-# readers while these threads still held theirs is exactly the failure its own
-# comment warns about: on Windows the app keeps the library file after saying it
-# is finished, and in the suite a temporary catalog will not delete, failing a
-# different test each run. The trackers there never covered these threads.
-_stopped = threading.Event()
-_threads: list[threading.Thread] = []
-
-
-def stop(timeout: float = 5.0) -> int:
-    """Ask the chore threads to finish the item in hand and let the catalog go.
-
-    Returns how many were still running. No cancellation and no lease: a worker
-    that stops between items leaves nothing half-done, which is the property the
-    whole design turns on.
-    """
-
-    _stopped.set()
-    alive = [t for t in _threads if t.is_alive()]
-    for thread in alive:
-        thread.join(timeout)
-    _threads.clear()
-    return len(alive)
-
-
-def start(open_conn, kinds: Iterable[cache.Kind], *,
-          on_screen: Callable[[], Iterable[int]] = lambda: (),
-          ceiling_bytes: int | None = None) -> int:
-    """Run the chore loop on as many threads as this machine can afford.
-
-    Threads rather than processes, and the reason is worth stating because the
-    appendix warns the other way: `rawpy.postprocess` holds the GIL, so RAW
-    decode does not parallelise here. But most of this library is JPEG and
-    TIFF, and Pillow releases the GIL for both decode and encode — so the
-    threads are real parallelism for the common case and merely harmless for
-    the RAW one. A process pool would parallelise RAW too, at the cost of
-    shipping frames over a pipe and giving each child its own catalog
-    connection; that trade is worth making when RAW is the bottleneck and not
-    before.
-
-    Each thread takes its own lane of the same query, so they never collide and
-    never coordinate.
-    """
-
-    _stopped.clear()
-    kinds = tuple(kinds)
-    count = workers()
-    for lane in range(count):
-        thread = threading.Thread(
-            target=run, args=(open_conn, kinds),
-            kwargs={
-                "on_screen": on_screen,
-                "ceiling_bytes": ceiling_bytes,
-                "lane": lane,
-                "lanes": count,
-            },
-            name=f"chores-{lane}", daemon=True,
+        if self.running:
+            return False
+        self._stopped.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="chores", daemon=True
         )
-        _threads.append(thread)
-        thread.start()
-    return count
+        self._thread.start()
+        return True
+
+    def stop(self, timeout: float = 5.0) -> bool:
+        """Finish the item in hand, close the catalog, and report success."""
+
+        self._stopped.set()
+        thread = self._thread
+        if thread is None:
+            return True
+        thread.join(timeout)
+        stopped = not thread.is_alive()
+        if stopped:
+            self._thread = None
+        return stopped
+
+    def _run(self) -> None:
+        conn = None
+        try:
+            conn = self._open_conn()
+            while not self._stopped.is_set():
+                try:
+                    did = step(
+                        conn,
+                        self._kinds,
+                        on_screen=self._on_screen(),
+                        yield_to=self._yield_to,
+                    )
+                except Exception:
+                    log.exception("worker=chores step failed")
+                    did = None
+
+                if did is None and self._ceiling_bytes is not None:
+                    try:
+                        freed = sweep_cache(conn, self._ceiling_bytes, self._kinds)
+                        if freed:
+                            log.info("worker=chores swept=%s", freed)
+                    except Exception:
+                        log.exception("worker=chores sweep failed")
+
+                # Waiting on the stop event makes idle shutdown immediate.
+                self._stopped.wait(0.05 if did else 5.0)
+        except Exception:
+            log.exception("worker=chores stopped unexpectedly")
+        finally:
+            if conn is not None:
+                conn.close()

@@ -85,6 +85,17 @@ class FreshCatalogTests(unittest.TestCase):
         self.assertEqual(freed, 1)
         self.assertFalse(tile_survived)
 
+    def test_one_owned_worker_starts_once_and_releases_its_catalog(self):
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = os.path.join(directory, "catalog.db")
+            model.connect(catalog).close()
+            chores = work.Chores(lambda: model.connect(catalog), ())
+
+            self.assertTrue(chores.start())
+            self.assertFalse(chores.start())
+            self.assertTrue(chores.stop())
+            self.assertFalse(chores.running)
+
 
 class CoreCase(unittest.TestCase):
     def setUp(self):
@@ -564,7 +575,6 @@ class OwedIsAQuery(CoreCase):
             name="thumb",
             compute=lambda source, hash: cache.Made(path="/t.jpg", bytes=1),
         )
-        work.touched.__globals__["_last_touch"] = 0.0
 
     def _catalogued(self, tail=TAIL, *, hashed=True):
         path = self.write(self.hot_root, tail)
@@ -611,17 +621,6 @@ class OwedIsAQuery(CoreCase):
         watching = self._catalogued("Raws/b.CR3")
         owed = work.owed(self.conn, self.thumb, on_screen=[watching])
         self.assertEqual(owed[0]["id"], watching)
-
-    def test_chores_keep_running_while_you_use_the_app_but_take_less_room(self):
-        # Browsing was 23 ms with chores quiet and minutes with them running.
-        # The fix is not to stop -- that idles the machine exactly when someone
-        # is sitting at it -- but to take fewer workers and share nothing with
-        # the request path.
-        self._catalogued()
-        work.touched()
-        self.assertIsNotNone(work.step(self.conn, (self.thumb,)))
-        self.assertLess(work.workers(interactive=True), work.workers(interactive=False) + 1)
-        self.assertGreaterEqual(work.workers(interactive=True), 1)
 
     def test_the_owner_can_stop_chores_and_it_survives_a_restart(self):
         # A preference is a decision, so it is a row in the log rather than a
