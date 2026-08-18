@@ -57,7 +57,7 @@ settings, or network protocols.
 | Area | Status | V2 outcome required | Current truth |
 |---|---|---|---|
 | Verification and fresh boot | Designing | One trustworthy cross-platform check; a fresh catalog opens the real desktop product | Collection works, but the old Bash-only check is broken on this Windows machine and the broad suite still contains ordinary failures and one import-path stall |
-| Core model and schema | Designing | Photos, copies, drives, decisions, sets, scope, and cache are the whole durable model | V2-shaped `web/model/` exists beside the legacy schema and repositories; the area is not rebuilt until the legacy ownership is gone |
+| Core model and schema | Designing | Photos, copies, drives, decisions, sets, scope, and cache are the whole durable model | A fresh five-table catalog now opens through `model.connect`; decisions own provenance and partial amendment, drive reads never probe the machine, and alternate copy tails are honored. Photos, cache/work registration, scope, and V1 adoption remain before the area is Proven |
 | Computation | Legacy | Pure decode, metadata, colour, hashing, and rendering functions with no product state | Pure mathematics is scattered through V1 feature packages |
 | Work and cache | Designing | Owed work is a query; one bounded executor; one cache contract | `web/work.py` exists, while multiple legacy schedulers, ledgers, and workers remain reachable |
 | Browse, disk, and tiles | Designing | One merged library view, truthful disk state, responsive thumbnails | First implementation priority; current routes, repositories, scanners, and thumbnail machinery are mixed V1/V2 |
@@ -87,6 +87,11 @@ until its exact path earns a register entry.
 | File | Status | Product area | Commit | Proof and reason it earns the status |
 |---|---|---|---|---|
 | `scripts/rewrite_status.py` | Proven | Verification | this ledger change | Its Git-derived inventory reports itself and every other executable/configuration path; normal mode reports, `--all` enumerates, and `--check` remains red while any path is unclassified |
+| `web/model/__init__.py` | Rebuilt | Core | `da1ccd7e` | One constructor opens SQLite, applies the complete core schema, and closes on failure; fresh on-disk proof is in `test_core.py` |
+| `web/model/schema.sql` | Rebuilt | Core | `284ba3f2`, `da1ccd7e` | Owns all five core tables and decision provenance without requiring V1 schema first; transitional `vc_of` keeps it below Proven until Develop is rebuilt |
+| `web/model/drives.py` | Rebuilt | Core | `284ba3f2` | Explicit attach is the only discovery path; reads no longer probe drive letters or disconnected mappings |
+| `web/model/decisions.py` | Rebuilt | Core | `284ba3f2` | Append-only decisions now record provenance, apply one authority rule, preserve provenance when carried, and expose one safe partial-amend primitive |
+| `web/test_core.py` | Rebuilt | Core proof | `284ba3f2`, `da1ccd7e` | Opens an empty catalog through the core and holds the paid safety refusals; 51 tests pass on Windows, but real desktop proof is still owed |
 
 ## How each rewrite change closes
 

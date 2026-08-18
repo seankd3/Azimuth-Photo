@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "docs" / "REWRITE_LEDGER.md"
 REGISTERED_ROW = re.compile(
-    r"^\| `(?P<path>[^`]+)` \| (?P<status>Proven|Removed) \|"
+    r"^\| `(?P<path>[^`]+)` \| (?P<status>Rebuilt|Proven|Removed) \|"
 )
 
 CODE_SUFFIXES = {
@@ -101,8 +101,10 @@ def main() -> int:
     registered = registered_files()
     stale = sorted(set(registered) - code)
     remaining = sorted(code - set(registered))
+    rebuilt = sorted(path for path, status in registered.items() if status == "Rebuilt")
 
     print(f"Code files: {len(code)}")
+    print(f"Rebuilt: {len(rebuilt)}")
     print(f"Proven: {sum(status == 'Proven' for status in registered.values())}")
     print(f"Removed: {sum(status == 'Removed' for status in registered.values())}")
     print(f"Legacy: {len(remaining)}")
@@ -120,7 +122,7 @@ def main() -> int:
         for path in stale:
             print(f"  {path}")
 
-    return 1 if stale or (args.check and remaining) else 0
+    return 1 if stale or (args.check and (remaining or rebuilt)) else 0
 
 
 if __name__ == "__main__":
