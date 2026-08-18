@@ -1,5 +1,9 @@
 # Data And Privacy
 
+> **Behavior reference awaiting V2 adoption.** Original safety and privacy are
+> current invariants. Satellite, hub, token, and server instructions below are
+> historical until rewritten on the V2 core.
+
 Azimuth Photo is built for local personal archives. It does not need a hosted
 account or a cloud photo service to catalog, browse, compare, flag, and export
 your library.

@@ -1,5 +1,8 @@
 # Field HTTPS — Tailscale Serve for PWA / service worker
 
+> **Historical V1 deployment guide.** V2 does not depend on a phone PWA,
+> Tailscale serving, or a service worker.
+
 Goal: phone and laptop field clients open `/m` as an installable app on flaky
 links. Service workers and `beforeinstallprompt` require a **secure context**
 (HTTPS on the tailnet, or `localhost`). Plain HTTP still works for browsing and

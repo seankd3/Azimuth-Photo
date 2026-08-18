@@ -1,5 +1,8 @@
 # Client Auto-Update — "The hub carries its clients" (frozen spec, Fable 2026-07-17)
 
+> **Historical V1 architecture.** The hub no longer carries clients. Retain the
+> version-skew incidents as release learning, not as a V2 mechanism.
+
 ## Product intent
 
 A satellite install must never be stale and must never ask the user about versions. One deploy to the hub updates the entire fleet on next contact. Version skew stops existing as a user-visible concept. (Origin: the XPS field install silently drifted 4 commits behind and nobody noticed — that class dies here.)

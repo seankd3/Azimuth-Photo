@@ -1,5 +1,9 @@
 # Lightroom Bridge — cull anywhere, edit in LR, rank in Azimuth (frozen spec, Fable 2026-07-19)
 
+> **Behavior reference awaiting V2 adoption.** Lightroom is a source of
+> decisions to adopt, not a satellite peer. The current shape lives in
+> `CORE.md` under “Alongside Lightroom.”
+
 ## Product intent (Sean)
 
 Use LR Classic and Azimuth synergistically: cull in Azimuth (any device), edit in LR, rank exported edits in Azimuth. Picks/rejects shared both ways. LR stars tied to Elo — without corrupting the Taste↔Elo model.

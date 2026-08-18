@@ -1,5 +1,9 @@
 # Development
 
+> **Transitional implementation guide.** The commands describe the current
+> branch while V1 transport and feature packages are being replaced. `CORE.md`
+> and `ARCHITECTURE.md` own the target shape.
+
 Azimuth Photo is a FastAPI app with a browser-native frontend. There is no Vite,
 TypeScript, or bundled build step.
 

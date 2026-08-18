@@ -6,6 +6,10 @@ describes everything around it — the layers, the eight surfaces, the data laye
 the 31,795-line UI that CORE.md never designs, and the gate CORE.md asks for and
 does not have.
 
+This document owns the intended V2 code shape. It is not proof that a surface
+is complete: completion requires the running-product evidence named in
+`CORE.md`, and release status lives nowhere in this document.
+
 Every number here was measured on 2026-08-16 against this tree, or against the
 live catalog at `C:\Azimuth Photo\data\catalog\azimuth.db` opened `mode=ro`. No
 file in the repository was modified. The commands are in the appendix so any
@@ -225,7 +229,7 @@ as the backend.
 
 Seven, of which one is a keyword argument rather than a new function. Two more
 that were proposed are cut, because a plan whose first move is seven simultaneous
-changes to a core the master document calls *done* is not the low-risk path.
+changes to a core that `CORE.md` calls *done* is not the low-risk path.
 
 | Primitive | Signature | What it makes unnecessary | Freed |
 |---|---|---|---:|
@@ -490,7 +494,7 @@ android        +9,551
 impossible against the 21 files CORE.md itself names, which measure 5,605; and
 **+3,700** because a 25,000-line UI target is a 21% cut of code the same document
 says not to rewrite. **CORE.md's "≈40k total" and its "develop/ 3,500" row must
-be amended in the same commit that lands this document.** A master document
+be amended in the same commit that lands this document.** A core document
 carrying one known-false number teaches the next reader that its numbers are
 aspirational, and that is how doctrine decays.
 

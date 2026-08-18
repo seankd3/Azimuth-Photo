@@ -1,5 +1,9 @@
 # Lightroom Bridge setup
 
+> **Historical V1 setup guide.** The satellite plugin transport is retired.
+> Preserve the Lightroom workflow lessons; V2 adoption is described in
+> `CORE.md` under “Alongside Lightroom.”
+
 Cull in Azimuth, edit in Lightroom Classic, rank exports back in Azimuth. Picks/rejects move both ways. Stars from Azimuth are an Elo projection — your own LR stars always win locally and flow back as taste evidence, never into Elo.
 
 ## One-click connect (Windows laptop)

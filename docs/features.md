@@ -1,5 +1,9 @@
 # Feature Guide
 
+> **V1 behavior inventory.** This describes what the prior product attempted,
+> not what V2 has completed. Each surface must be re-adopted through the core
+> and verified in the running desktop app.
+
 Azimuth Photo opens into one desktop shell at `/` or `/d`. The current scope is
 shared across the grid, lenses, overlays, panels, exports, and background work.
 

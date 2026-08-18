@@ -1,5 +1,8 @@
 # Getting Started
 
+> **Transitional implementation guide.** This starts the current FastAPI-based
+> application for development; it is not the finished V2 installation flow.
+
 This guide gets Azimuth Photo from a fresh clone to a usable local catalog.
 
 ## Install

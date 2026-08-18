@@ -1,5 +1,9 @@
 # What to carve next, and how the list was made
 
+> **Point-in-time diagnostic, not a roadmap.** These measurements belong to the
+> commit that produced them. Re-run the commands before acting; current rewrite
+> order lives in `product-roadmap.md`.
+
 Measured 2026-08-17 against `46,749` lines of backend Python (`web/`, tests
 excluded). Every number here came out of a script, not a reading. Re-run it
 before trusting any row — a stale roadmap is worse than none, which is why the

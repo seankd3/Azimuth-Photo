@@ -1,5 +1,8 @@
 # Releasing Azimuth Photo
 
+> **Historical V1 release procedure.** V2 has not settled its final desktop
+> packaging or update mechanism.
+
 `VERSION` at the repository root is the release version source of truth for the
 server, release artifact, and API handshake. It must contain one strict SemVer
 value such as `0.1.0`, with no leading `v`. The desktop bundle metadata mirrors

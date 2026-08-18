@@ -1,5 +1,8 @@
 # DISTRIBUTION_SPEC v1 — installers, first run, pairing, remote access
 
+> **Historical V1 architecture.** Server distribution, pairing, discovery, and
+> remote access are not part of the current V2 product.
+
 Goal: someone downloads one installer, answers one question ("where are your
 photos?"), and has the full product. The server is a graduation, not a
 prerequisite. Frozen 2026-07-12.

@@ -1,5 +1,9 @@
 # Publishing Static Galleries
 
+> **Behavior reference awaiting V2 adoption.** Publishing is parked until the
+> installed desktop core is finished; its privacy and reproducibility lessons
+> remain requirements if the surface returns.
+
 Azimuth Photo publishes website galleries by writing static files into a folder you control. It does not know about git, npm, Wrangler, Hugo, Next, nginx, or any other site toolchain.
 
 ## Where to configure

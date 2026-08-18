@@ -1,5 +1,8 @@
 # Azimuth Photo — Windows satellite
 
+> **Historical V1 deployment guide.** V2 is laptop-first and has no satellite
+> role. Preserve this only for diagnosing the old installation.
+
 A Windows computer can run the full app locally in satellite mode: its catalog
 and previews stay fast on the laptop while changes and verified originals sync
 to a hub.

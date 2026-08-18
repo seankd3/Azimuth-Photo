@@ -1,5 +1,8 @@
 # Install Azimuth Photo
 
+> **Historical V1 installation guide.** V2 is not released. These commands are
+> useful only for reconstructing the existing server-based application.
+
 One always-on library server. Point it at your photos, open the web page.
 
 ## Docker (recommended on a NAS)
@@ -95,4 +98,4 @@ A source checkout is never used as runtime storage: older developer installs tha
 4. Optional later: AI features need extra packages or the AI image docs; the base install stays light on purpose.
 
 More detail: [getting-started.md](getting-started.md), [DISTRIBUTION_SPEC.md](DISTRIBUTION_SPEC.md).
-For a direct Linux service, see [deploy/README.md](../deploy/README.md).
+For the preserved release procedure, see [RELEASING.md](RELEASING.md).

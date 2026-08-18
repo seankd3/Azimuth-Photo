@@ -1,5 +1,8 @@
 # Azimuth Photo — Android
 
+> **Parked client.** Android records valuable product behavior but is not a V2
+> dependency or current rewrite priority. Its hub protocol is historical.
+
 A native Google-Photos replacement for a self-hosted Azimuth Photo library. It is
 your phone's photo app: it shows your camera roll, quietly backs every shot up to your
 own server over Tailscale, lets you browse your entire archive (years of DSLR RAWs,

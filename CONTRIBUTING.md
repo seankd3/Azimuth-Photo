@@ -1,5 +1,8 @@
 # Contributing to Azimuth Photo
 
+> **Transitional contributor guide.** V2 is under active reconstruction; read
+> `AGENTS.md` and `docs/README.md` before relying on the V1 run commands below.
+
 Thanks for helping make a self-hosted photo app people can trust with their archives.
 
 ## Run it

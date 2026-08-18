@@ -1,5 +1,7 @@
 # Changelog
 
+> Entries below describe V1 and prerelease work. V2 has not been released.
+
 All notable changes to Azimuth Photo are documented here.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and releases follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).

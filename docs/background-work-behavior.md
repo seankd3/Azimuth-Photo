@@ -1,5 +1,9 @@
 # Background Work Behavior Anchor
 
+> **Behavior reference awaiting V2 adoption.** The honesty and responsiveness
+> requirements survive; the named V1 workers, rows, hub roles, and schedulers do
+> not.
+
 This document is the product anchor for Azimuth Photo background work. Code,
 tests, and UI should be audited against it.
 

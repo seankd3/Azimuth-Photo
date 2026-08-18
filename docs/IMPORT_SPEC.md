@@ -1,5 +1,8 @@
 # IMPORT_SPEC — Lightroom-Classic-grade import (v1, 2026-07-12)
 
+> **Behavior reference awaiting V2 adoption.** Preserve the custody and UX
+> guarantees, not the V1 routes, tables, jobs, or module layout.
+
 Supersedes the upload-modal UX in `web/static/js/desktop/importer.js` and absorbs the UX
 section of `docs/CARD_IMPORT_SPEC.md` (whose **engine** section — stream-copy + hash-verify +
 never-overwrite + clear-card pipeline — remains authoritative and is generalized here).

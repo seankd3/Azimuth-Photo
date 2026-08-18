@@ -1,5 +1,8 @@
 # The gates
 
+> **Supporting study.** This records measurements and rejected instruments.
+> `ARCHITECTURE.md` owns the V2 rules; a number here is evidence, not authority.
+
 *Measured 2026-08-16 at `c9f253c9`, on this tree and on the live catalog at
 `C:\Azimuth Photo\data\catalog\azimuth.db` (`mode=ro`). Every number below is
 followed by the command that produced it. Nothing in the repository was

@@ -22,20 +22,25 @@ overlay, stop and reconcile the discrepancy before coding.
 
 ## Source and runtime boundaries
 
-- GitHub `main` is the product source of truth.
+- GitHub `main` is the released product source of truth. An owner-approved
+  rewrite may live on a named branch until its deliberate review and merge; do
+  not create additional branches or move production to it implicitly.
 - Runtime data never belongs inside a source checkout.
 - Do not add personal usernames, home directories, private addresses, mount
   points, catalog paths, or secrets to tracked defaults or documentation.
-- Product defaults must support a fresh standalone install. Hub and satellite
-  deployments are selected through environment variables or launcher options.
+- Azimuth 2.0 is a laptop-first desktop application. Attached drives are
+  working or record/archive storage; being unplugged is normal. The former
+  hub/satellite/server design is historical and must not shape new V2 code.
+- Product defaults must support a fresh local install without a server,
+  network, account, or external service.
 - Retired checkouts and worktrees are preservation material, not development
   sources. Do not revive them unless the task explicitly calls for recovery.
 
 ## How to work
 
-- Commit owned changes directly to `main` in small, atomic commits.
-- Do not create branches, worktrees, lanes, or parallel editing sessions unless
-  the user explicitly requests them.
+- Commit owned changes in small, atomic commits on the current owner-approved
+  branch. Do not create branches, worktrees, lanes, or parallel editing
+  sessions unless the user explicitly requests them.
 - Never change a production checkout's branch or restart a long-running service
   as a side effect of development.
 - Stage explicit paths. Never use `git add -A` in a shared or dirty tree.
@@ -73,7 +78,7 @@ changes the contract.
   under it.
 - The archive roots are `Edits/`, `Raws/`, and `Snapshots/`, spelled exactly so.
   Match whatever spelling readdir reports and never create a root that does not
-  already exist. Case behaviour is per-volume (the hub's exFAT archive is
+  already exist. Case behaviour is per-volume (an exFAT archive may be
   case-insensitive; an ext4 archive is not) — never normalise or guess casing.
 - A photo row's `status` vocabulary is `kept`, `maybe`, and `trashed`, and
   nothing else. Startup rewrites every other value back to `kept`, so a repair
@@ -92,10 +97,19 @@ changes the contract.
   caches. Serialize bulk reads and prefer SSD/RAM previews.
 - Never run tests against a real catalog unless the task explicitly requires a
   read-only live check. Use isolated test homes and fixtures for writes.
-- `AZIMUTH_SMOKE_MODE=1` is test-only. Never use it for a real hub or satellite.
+- `AZIMUTH_SMOKE_MODE=1` is test-only. Never use it for the real desktop app.
 
 ## Simplicity
 
+- Elegant code has the same structure as the problem. Smallness is a
+  consequence, not the objective; a shorter implementation that does less or
+  remains entangled has not improved the product.
+- Judge architectural weight by coupling: how many concepts and files must
+  change together to add or repair one behavior. File length and polish are not
+  substitutes for that measurement.
+- Static reachability is not permission to delete. Before removing a surface,
+  inspect operational commands, checks, documentation, and git change history;
+  hand-run and externally invoked behavior is invisible to an import graph.
 - Reliability comes from having one of each thing, not from more checks. One
   rule for whether a photo is in the library, in one place, used everywhere. A
   rule copied into two hundred queries is two hundred chances to disagree, and
@@ -123,7 +137,8 @@ risk:
 - Docs-only: `git diff --check`, link/path review, and instruction-conflict
   search.
 - Focused change: quick checks plus the owning test module or named area.
-- Browser behavior: verify the actual workflow against an isolated server.
+- Desktop behavior: verify the actual workflow in the running app against an
+  isolated application home.
 - Sync, deletion, imports, recovery, or catalog changes: add focused safety
   tests and verify final persisted state.
 - Deployment: verify listener, working directory, health endpoint, catalog,
@@ -143,6 +158,10 @@ Each durable fact has one owner:
 - `docs/development.md` — setup, edit map, and verification commands.
 - `docs/README.md` — documentation index.
 - Feature specifications — expensive-to-rediscover product behavior.
+
+`docs/README.md` classifies every document as current V2 guidance, a behavior
+reference awaiting V2 adoption, or historical V1 evidence. A historical
+document never overrides the four owners above.
 
 Update the owning document instead of adding a new summary. Do not commit
 one-off audits, plans, handoff reports, generated receipts, scratch notes, or

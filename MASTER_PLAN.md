@@ -210,6 +210,10 @@ global `CLAUDE.md`.
 - `open` "there are still aloy of older film photos that are all being displayed in landscape but these photos should all have rotation data from lrc" / "C:\Pictures" — 08-16 · **a bug report that overturned a design decision, and the second message is why.** I searched three roots for `.lrcat`, found one, and concluded the rotations did not exist. There are **three** catalogs; the others sit under `C:\Pictures\Lightroom\Catalogs\`. 2,953 photographs are turned in Lightroom with no orientation in the file at all, so "read the photograph, not the catalog" was losing real decisions. The reader returns as a one-time *adoption* rather than a runtime coupling. Standing lesson: **a search that covers three of four places reports absence with the same confidence as a complete one.**
 - `open` "astro awards is not astrohphotography" — 08-16 · **a name is not a namespace.** The astrophotography exclusion is the `Astro/` tree specifically; "AstroAwards" is an event and ordinary photography. Matching the substring dropped 1,770 rows and 460 real rotations from the adoption. A standing rule expressed as a keyword match will eventually exclude something that merely shares a word.
 - `open` "lets keep refining the ideas for elegance and first principles thinking" — 08-15 · the standing mode for 2.0. Design is adjudicated by whether a feature *falls out* of the shapes or has to be built: Develop history stopped needing a table, move detection stopped needing code, the 10,750-duplicate merge stopped existing.
+- `open` "we dont have to do all the embedding work right away, I want to focus on the erwrite and refactoring the codebase into very elegant, simple and robust forms, the old version was a buggy nightmare and this version has to be the polished finished product, that we take our time on every single line." — 08-18 · **the current priority and release bar.** Embedding coverage is not a prerequisite for the rewrite. The work is the deliberate core-outward reconstruction of a dependable finished product; speed of implementation and background completion counts do not compete with architectural clarity, robustness, or product polish.
+- `live` "sounds good but also take a look over all the .md files and the learning etc including claudes internal notes and memories." — 08-18 · repository documentation, Claude's plans, and the Azimuth/refactoring memories were audited before further implementation. Their contradictions are being resolved into the ownership model in `AGENTS.md` and `docs/README.md`.
+- `live` "theres also an elegancy study somewhere" — 08-18 · located and reviewed; its operative correction is that elegance is fit rather than polish, coupling rather than size is the useful risk measure, and static-reference deletion is unsafe evidence by itself. Those conclusions now live in the authoritative `AGENTS.md` simplicity rules.
+- `open` "great lets consolidate and unify the documentation" — 08-18 · **documentation is part of the rewrite.** Four documents own current truth: this ledger owns Sean's words, `docs/CORE.md` owns invariants, `docs/ARCHITECTURE.md` owns code shape, and `AGENTS.md` owns working rules. Other documents are current references only when the documentation index says so; historical V1 specifications remain evidence, not authority.
 
 ### 1.10 Non-goals
 
@@ -289,6 +293,10 @@ goal — it is permission to stop.
   - Recorded as Fable's recommendation answering Sean's direct "what do you think?" — the date default is his, the no-duplication architecture is the proposal. Reversible if it feels wrong in use.
 
 ## 2. Derived queue
+
+> **Historical pre-V2 queue.** Statuses and evidence below are preserved because
+> they explain product decisions and prior incidents. They do not set the V2
+> execution order. Current rewrite order lives in `docs/product-roadmap.md`.
 
 Consolidated 07-31 after the design pass. Ordered by leverage. `fleet-1` rows are
 in tonight's overnight wave; each lands on its own branch and is merged only

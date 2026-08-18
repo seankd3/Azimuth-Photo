@@ -1,5 +1,9 @@
 # Build the Azimuth Photo Windows app
 
+> **Transitional implementation guide.** This builds the current V1 Tauri
+> shell. V2 intends one desktop process and does not preserve Tauri or the local
+> HTTP boundary as product architecture.
+
 The Windows app is a self-contained Tauri package. It includes the frozen
 Azimuth Photo engine, opens the real first-run experience, and stores its
 catalog and generated data in the normal Windows application-data folders.

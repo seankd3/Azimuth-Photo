@@ -1,5 +1,8 @@
 # AUTH_SPEC v1 — Owner authentication (frozen 2026-07-15)
 
+> **Historical V1 architecture.** V2 is a single-user local desktop app and
+> does not preserve network authentication, pairing, or accounts.
+
 Closes the three open criticals from the hardening audit: owner APIs unauthenticated,
 LAN pairing-code minting, and the API-writable `publish_hook` RCE. One design, no accounts,
 no cloud, share visitors untouched.

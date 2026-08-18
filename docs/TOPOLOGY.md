@@ -1,93 +1,62 @@
-# Azimuth Photo topology
+# Azimuth Photo V2 topology
 
-Azimuth Photo is one product and one repository with three runtime roles. A
-single machine can run standalone, or several devices can form a private photo
-cloud without changing the source code.
+Azimuth Photo V2 is a laptop-first desktop application. The laptop owns the
+catalog, settings, decisions, indexes, previews, and interactive experience.
+Attached folders and drives hold photographs. A network service is not part of
+the current product architecture.
 
 ## Product layout
 
 ```text
 azimuth-photo/
-├── web/              FastAPI engine, desktop web UI, and mobile PWA
-├── desktop/          Windows Tauri shell
-├── android/          Native Android client
-├── clients/          External integrations
-├── site/             Public website
-├── scripts/          Build, check, run, and deployment commands
-├── deploy/           Configurable Linux service templates
-└── docs/             Product and operating documentation
+├── web/              Python engine and browser-native product UI
+├── desktop/          Desktop shell; subject to replacement during V2
+├── android/          Parked client, not a V2 dependency
+├── scripts/          Repeatable development and operating commands
+└── docs/             Current guidance and preserved behavior references
 ```
 
-Runtime databases, caches, models, logs, backups, and photos stay outside this
-tree. GitHub `main` is the source of truth; deployment-specific facts belong in
-the ignored `AGENTS.local.md` overlay.
+Runtime databases, caches, models, logs, backups, and photographs stay outside
+the source checkout. GitHub `main` is released source; an explicitly approved
+rewrite branch may precede a deliberate merge.
 
 ## Runtime roles
 
-| Role | Purpose |
-| --- | --- |
-| Standalone | Complete local library with no server dependency |
-| Hub | Always-on authoritative catalog, indexing, sync intake, and durable originals |
-| Satellite | Interactive catalog mirror, fast local caches, imports, and a recent-original working set |
-| Client | Android or browser UI connected to a configured hub |
-
-`AZIMUTH_MODE` selects `standalone`, `hub`, or `satellite`. Android asks for the
-hub URL during onboarding rather than shipping a maintainer-specific address.
-
-## Storage tiers
-
-Keep these concerns separate:
-
-| Tier | Typical contents | Placement |
+| Role | Owns | Availability |
 | --- | --- | --- |
-| Source | Git checkout and virtual environment | Developer-selected project directory |
-| Fast state | Catalog, indexes, models, settings, logs | Platform-native application data on SSD |
-| Fast cache | Previews, embeddings, active Develop results | SSD with explicit byte budgets |
-| Durable originals | RAWs, images, videos, intake | User-selected library root, often NAS/HDD |
-| Recovery | Verified catalog backups and transfer receipts | Separate durable location |
+| Laptop | Catalog, decisions, previews, embeddings, settings, UI | Always |
+| Working storage | Recently imported and actively edited originals | Usually attached |
+| Record/archive storage | Durable cold originals | Often unplugged |
+| Optional share/helper | Files or owed derivative work | Never awaited |
 
-Without overrides, Azimuth uses platform-native application data directories.
-`AZIMUTH_HOME` provides a portable all-in-one runtime root. Fine-grained
-variables such as `AZIMUTH_DATA_DIR`, `AZIMUTH_CACHE_DIR`,
-`AZIMUTH_THUMB_CACHE_DIR`, and `AZIMUTH_BACKUP_DIR` support tiered servers.
+A drive is identified by its marker, not its drive letter. A path is a drive
+plus a tail. A drive being absent is a normal state: cached browsing, search,
+ranking, organization, and decisions continue without it. Opening uncached
+original pixels states plainly that the drive is needed.
 
-For a slow archive disk:
+## Storage contract
 
-- keep catalog, indexes, models, previews, and active Develop cache on SSD;
-- serialize bulk reads with `AZIMUTH_BULK_HDD_CONCURRENCY=1`;
-- serve interactive browsing from SSD/RAM previews;
-- cache recently viewed full-resolution files;
-- never reorganize originals during a code deployment.
+- The catalog and all interactive caches live on SSD.
+- A record drive may hold the last durable original; working storage may not.
+- Backup adds a verified copy. Reclaim removes only a working copy after a
+  fresh full-byte comparison with the record copy.
+- Code deployment never moves or reorganizes photographs.
+- A share carrying the same drive marker is the same drive at another address.
+- SQLite never lives on a network share.
+- An optional helper may compute owed cache entries against shared storage, but
+  the laptop never asks it a synchronous question.
 
-## Hub and satellite safety
+On Sean's current installation, deployment-specific letters and paths belong
+in ignored `AGENTS.local.md`, not this portable document.
 
-Catalog changes converge through the sync log. Original files upload by content
-identity and are byte-verified before a satellite may offer to remove its local
-copy. **Free up space** must confirm the same complete bytes immediately before
-local deletion.
+## Application boundary
 
-Library migrations are separate, resumable operations with collision-proof
-destinations and durable per-file receipts. A code update never implies a bulk
-photo transfer.
+The current implementation still contains FastAPI, Tauri, routes, and other V1
+transport residue. They describe code awaiting replacement, not the product's
+conceptual architecture. V2's target is one installed desktop application in
+which the UI calls the core without exposing servers, modes, ports, pairing, or
+sync concepts to the user.
 
-## Configuration
-
-The Windows PowerShell launcher defaults to a fresh standalone library in the
-current user's local application-data directory. Existing or portable
-libraries can be pinned explicitly:
-
-```powershell
-.\scripts\start_azimuth_windows.ps1 `
-  -DataRoot "D:\Azimuth Photo" `
-  -Mode satellite `
-  -RequireExistingCatalog
-```
-
-Linux deployments start from `deploy/azimuth-photo.service` and
-`deploy/azimuth-photo.env.example`. Copy the environment example outside the
-repository and adapt addresses, users, photo roots, and cache budgets to the
-installation.
-
-See [getting-started.md](getting-started.md) for local setup,
-[development.md](development.md) for checks, and [recovery.md](recovery.md) for
-catalog restoration.
+See [CORE.md](CORE.md) for data and safety invariants,
+[ARCHITECTURE.md](ARCHITECTURE.md) for the intended code layers, and
+[development.md](development.md) for branch-specific commands.

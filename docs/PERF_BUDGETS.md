@@ -1,5 +1,9 @@
 # Performance budgets
 
+> **Current behavior constraints with historical measurements.** Latency and
+> responsiveness budgets survive V2. Omarchy, hub, and satellite measurements
+> below are baselines only, not the current topology.
+
 Azimuth Photo treats browse speed as a product invariant. `web/test_perf_budgets.py`
 runs in the default pytest suite, so `scripts/deploy.sh` cannot ship a regression
 that exceeds one of these budgets.

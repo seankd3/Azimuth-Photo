@@ -1,5 +1,8 @@
 # FIELD_SPEC v2 addendum — one library everywhere (frozen 2026-07-11 evening)
 
+> **Historical V1 architecture.** The hub/satellite mirror was retired. This
+> document preserves failure modes and offline UX expectations only.
+
 Extends FIELD_SPEC v1. Goal: the satellite shows the ENTIRE hub library, browsable instantly and
 offline; edits made anywhere converge everywhere. Magic bar: the user never thinks about where a
 photo lives.

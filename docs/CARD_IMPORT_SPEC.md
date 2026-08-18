@@ -1,5 +1,8 @@
 # CARD_IMPORT_SPEC — card → satellite ingest (v1, addendum to FIELD_SPEC, 2026-07-11)
 
+> **Behavior reference awaiting V2 adoption.** Preserve verified-copy and
+> clear-card safety, not the satellite job architecture.
+
 Goal: insert a camera card into the satellite laptop; one click imports everything new,
 verifies every byte, frees the card as fast as physically possible, and the photos are
 browsable/cullable/editable locally immediately. Offload to the hub is FIELD_SPEC's job —

@@ -1,6 +1,8 @@
 # Azimuth 2.0 — the core
 
-**Status (08-16):** the core is complete and most of the app runs on it.
+**Status (08-18):** the core has landed on the `v2-carve` rewrite branch. The
+rewrite is in progress, has not been merged or installed as the finished
+product, and does not inherit a release claim from the old application.
 
 | | |
 |---|---|
@@ -19,9 +21,10 @@ ranking repository, the people stack, and the phone's web surface.
 **Method (08-16):** gut it and rebuild from first principles. Surfaces are not
 adapted, wrapped or threaded through — they are rewritten on the core and their
 old machinery is deleted in the same commit.
-**This is the master document.** Design, order, proofs and lessons. If a change
-needs a special case to fit here, the shape is wrong — fix the shape, not the
-caller.
+**This document owns the core invariants.** If a change needs a special case to
+fit them, the shape is wrong — fix the shape, not the caller. Product decisions
+live in `MASTER_PLAN.md`, code layering in `ARCHITECTURE.md`, and current rewrite
+order in `product-roadmap.md`.
 
 ---
 
@@ -375,8 +378,9 @@ the tree. Two hard lines: **the catalog never lives on a share** (SQLite over SM
 corrupts), and **nobody ever asks a helper a question and waits.** The first
 synchronous call is the hub coming back.
 
-**First use:** omarchy finishes the ~131k owed embeddings when it is next
-powered on. The Qwen3-VL-8B model stays; nothing is recomputed with a weaker one.
+Embedding coverage is deliberately outside the critical path for the rewrite.
+The laptop may fill owed derivatives over time, but incomplete AI work must not
+delay the core, browsing, storage, safety, or product-polish work.
 
 ---
 

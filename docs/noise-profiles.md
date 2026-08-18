@@ -1,5 +1,8 @@
 # Camera noise profiles (dt-noise)
 
+> **Behavior reference awaiting V2 adoption.** Preserve measured profile data;
+> do not infer that the V1 Develop integration is complete.
+
 Profile-aware denoise for Develop, per `darktable-study/SYNTHESIS.md` P1 #6.
 
 ## What landed

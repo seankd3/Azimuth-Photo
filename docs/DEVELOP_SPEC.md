@@ -1,5 +1,9 @@
 # Azimuth Photo Develop Module — Architecture Spec (v1, frozen)
 
+> **Behavior and color-math reference awaiting V2 adoption.** This is no longer
+> the source of truth for repository architecture. V2 keeps only behavior that
+> can be accepted against explicit photographs and output.
+
 Branch: `main`, checkout `/home/photographer/Projects/azimuth-photo`. Goal: a Lightroom-Classic-class
 non-destructive RAW develop module inside Azimuth Photo. This spec is the single source of
 truth; the WebGL renderer and the Python export renderer MUST implement the same math.
