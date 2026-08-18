@@ -14,6 +14,7 @@ distinguishes them, and it means one thing: may this drive hold the last copy?
 from __future__ import annotations
 
 import os
+import posixpath
 import time
 import uuid as uuid_module
 
@@ -127,7 +128,24 @@ def path_for(conn, drive_uuid: str, tail: str) -> str | None:
     root = root_of(conn, drive_uuid)
     if root is None:
         return None
-    return os.path.join(root, tail.replace("/", os.sep))
+    return os.path.join(root, safe_tail(tail).replace("/", os.sep))
+
+
+def safe_tail(tail: str) -> str:
+    """One portable relative path, or a refusal.
+
+    Tails are catalog data and may arrive from a file, an import, or another
+    machine. None may turn drive-plus-tail into a path outside the drive.
+    """
+
+    raw = str(tail or "").replace("\\", "/")
+    clean = posixpath.normpath(raw)
+    if not raw or raw.startswith("/") or clean in {"", ".", ".."} or clean.startswith("../"):
+        raise ValueError(f"unsafe tail: {tail!r}")
+    # `C:/x` is relative to POSIX and absolute to Windows.
+    if len(clean) >= 2 and clean[1] == ":":
+        raise ValueError(f"unsafe tail: {tail!r}")
+    return clean
 
 
 def tail_for(root: str, path: str) -> str | None:

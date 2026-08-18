@@ -25,6 +25,7 @@ import hashlib
 import os
 import stat as _stat
 import shutil
+import uuid
 
 from model import drives
 
@@ -83,33 +84,35 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     knows whether that is expected.
     """
 
-    target = drives.path_for(conn, drive_uuid, tail)
+    try:
+        target = drives.path_for(conn, drive_uuid, tail)
+    except ValueError:
+        return {"outcome": "invalid tail"}
     if target is None:
         return {"outcome": "drive not attached"}
 
-    if os.path.exists(target):
-        if os.path.getsize(target) == os.path.getsize(source) and content_hash(target) == content_hash(source):
+    from model import backup
+
+    if os.path.lexists(target):
+        if _verified(target, os.path.getsize(source)) and backup.digest(target) == backup.digest(source):
             return {"outcome": "already there", "path": target, **identify(conn, target)}
         return {"outcome": "different file at that tail", "path": target}
 
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    staging = f"{target}.importing"
+    staging = f"{target}.importing-{uuid.uuid4().hex}"
     try:
         shutil.copy2(source, staging)
-        # Proved before it is visible: a partial copy that took the real name
-        # would be indexed as the photograph, and the original may already be
-        # off the card by then.
-        if content_hash(staging) != content_hash(source):
-            os.remove(staging)
+        if backup.digest(staging) != backup.digest(source):
             return {"outcome": "verify failed"}
-        os.replace(staging, target)
+        _publish_without_overwrite(staging, target)
     except OSError as error:
+        return {"outcome": f"copy failed: {error}"}
+    finally:
         if os.path.exists(staging):
             try:
                 os.remove(staging)
             except OSError:
                 pass
-        return {"outcome": f"copy failed: {error}"}
 
     return {"outcome": "written", "path": target, **identify(conn, target)}
 
@@ -150,6 +153,10 @@ def locate(conn, tail: str, *, expected_size: int | None = None) -> str | None:
 
     if not tail:
         return None
+    try:
+        tail = drives.safe_tail(tail)
+    except ValueError:
+        return None
     for drive in _by_preference(conn):
         path = drives.path_for(conn, drive["uuid"], tail)
         if path and _verified(path, expected_size):
@@ -176,7 +183,10 @@ def open_photo(conn, image_id: int) -> str | None:
         "ORDER BY d.is_record ASC, d.id ASC",
         (row["tail"], int(image_id)),
     ):
-        path = drives.path_for(conn, copy["uuid"], copy["tail"])
+        try:
+            path = drives.path_for(conn, copy["uuid"], copy["tail"])
+        except ValueError:
+            continue
         if path and _verified(path, row["file_size"]):
             return path
     return locate(conn, row["tail"], expected_size=row["file_size"])
@@ -235,3 +245,148 @@ def ids(conn, content_hashes) -> list[int]:
         f"SELECT id FROM images WHERE content_hash IN ({marks}) ORDER BY id", wanted
     ).fetchall()
     return [int(r["id"]) for r in rows]
+
+
+def move(conn, photo_id: int, drive_uuid: str, tail: str) -> str:
+    """Relocate one photograph without ever overwriting or risking its last copy.
+
+    The destination becomes visible only after a full-byte verification. The
+    catalog changes next. The source is removed last, when both the bytes and
+    the durable addresses are already safe.
+    """
+
+    from model import backup, copies
+
+    photo = conn.execute(
+        "SELECT tail FROM images WHERE id = ?", (int(photo_id),)
+    ).fetchone()
+    if photo is None or not photo["tail"]:
+        return "no photo"
+    source = open_photo(conn, photo_id)
+    if source is None:
+        return "source unreadable"
+    target_root = drives.root_of(conn, drive_uuid)
+    if target_root is None:
+        return "drive not attached"
+    try:
+        tail = drives.safe_tail(tail)
+        target = drives.path_for(conn, drive_uuid, tail)
+    except ValueError:
+        return "invalid tail"
+    if target is None:
+        return "drive not attached"
+    if os.path.normcase(os.path.abspath(source)) == os.path.normcase(os.path.abspath(target)):
+        return "already there"
+    if os.path.lexists(target):
+        return "destination exists"
+
+    drive = conn.execute("SELECT id FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone()
+    if drive is None:
+        return "unknown drive"
+    source_drive_id = _drive_holding_path(conn, source)
+    old_tail = str(photo["tail"])
+
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    staging = f"{target}.moving-{uuid.uuid4().hex}"
+    published = False
+    try:
+        shutil.copy2(source, staging)
+        source_digest = backup.digest(source)
+        if backup.digest(staging) != source_digest:
+            return "verify failed"
+        if drives.read_marker(target_root) != drive_uuid:
+            return "drive changed while verifying"
+        _publish_without_overwrite(staging, target)
+        published = True
+
+        conn.execute(
+            "UPDATE copies SET tail = ? WHERE photo_id = ? AND tail IS NULL",
+            (old_tail, int(photo_id)),
+        )
+        conn.execute("UPDATE images SET tail = ? WHERE id = ?", (tail, int(photo_id)))
+        copies.saw(conn, photo_id, int(drive["id"]), tail=None)
+        if source_drive_id is not None and source_drive_id != int(drive["id"]):
+            copies.forget(conn, photo_id, source_drive_id)
+        conn.commit()
+    except Exception as error:
+        conn.rollback()
+        if published and os.path.exists(target):
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+        return f"move failed: {error}"
+    finally:
+        if os.path.exists(staging):
+            try:
+                os.remove(staging)
+            except OSError:
+                pass
+
+    try:
+        if backup.digest(source) != backup.digest(target):
+            return "moved; source changed after verification"
+        os.remove(source)
+    except OSError as error:
+        return f"moved; source cleanup failed: {error}"
+    return "moved"
+
+
+def _publish_without_overwrite(staging: str, target: str) -> None:
+    """Give verified bytes their final name while refusing a collision.
+
+    A hardlink is the clean atomic operation on NTFS and ordinary Linux
+    filesystems. FAT-family camera media cannot hardlink, so the fallback
+    atomically claims the unused name with an exclusive create and replaces
+    only that placeholder. It can expose an empty claim after a machine crash,
+    but it can never overwrite somebody else's photograph.
+    """
+
+    try:
+        os.link(staging, target)
+    except OSError:
+        descriptor = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(descriptor)
+        try:
+            os.replace(staging, target)
+        except BaseException:
+            try:
+                os.remove(target)
+            except OSError:
+                pass
+            raise
+    else:
+        os.remove(staging)
+
+
+def _drive_holding_path(conn, path: str) -> int | None:
+    for drive in conn.execute("SELECT id, uuid FROM drives ORDER BY id"):
+        root = drives.root_of(conn, drive["uuid"])
+        if root and drives.tail_for(root, path):
+            return int(drive["id"])
+    return None
+
+
+def group(conn, photo_id: int) -> list[int]:
+    """The original and every version descended from it, once each."""
+
+    root = int(photo_id)
+    seen: set[int] = set()
+    while root not in seen:
+        seen.add(root)
+        row = conn.execute("SELECT version_of FROM images WHERE id = ?", (root,)).fetchone()
+        if row is None:
+            return []
+        if row["version_of"] is None:
+            break
+        root = int(row["version_of"])
+
+    return [
+        int(row["id"])
+        for row in conn.execute(
+            "WITH RECURSIVE family(id) AS ("
+            " SELECT ? UNION SELECT i.id FROM images i JOIN family f ON i.version_of = f.id"
+            ") SELECT id FROM family ORDER BY id",
+            (root,),
+        )
+    ]

@@ -80,7 +80,10 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
     if drive is None:
         return "no record drive attached"
 
-    target = drives.path_for(conn, drive["uuid"], row["tail"])
+    try:
+        target = drives.path_for(conn, drive["uuid"], row["tail"])
+    except ValueError:
+        return "invalid tail"
     if target is None:
         return "no record drive attached"
     if os.path.exists(target):
@@ -143,7 +146,10 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
         (int(photo_id), int(drive["id"])),
     ).fetchone()
     archived_tail = recorded["tail"] if recorded and recorded["tail"] else row["tail"]
-    archived = drives.path_for(conn, drive["uuid"], archived_tail)
+    try:
+        archived = drives.path_for(conn, drive["uuid"], archived_tail)
+    except ValueError:
+        return "invalid tail"
     if archived is None or not os.path.exists(archived):
         return "not archived"
 
@@ -151,7 +157,10 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
     for holder in copies.drives_holding(conn, photo_id):
         if int(holder["is_record"]):
             continue
-        here = drives.path_for(conn, holder["uuid"], holder["copy_tail"] or row["tail"])
+        try:
+            here = drives.path_for(conn, holder["uuid"], holder["copy_tail"] or row["tail"])
+        except ValueError:
+            return "invalid tail"
         if not here or not os.path.exists(here) or os.path.normcase(here) == os.path.normcase(archived):
             continue
 

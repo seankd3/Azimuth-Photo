@@ -98,6 +98,11 @@ class DrivesAreNotLetters(CoreCase):
         self.assertEqual(drives.tail_for(self.hot_root.upper(), path), "Raws/Digital/x.CR3")
         self.assertIsNone(drives.tail_for(self.cold_root, path))
 
+    def test_a_tail_can_never_escape_its_drive(self):
+        for tail in ("../outside.CR3", "/outside.CR3", r"C:\outside.CR3", ""):
+            with self.subTest(tail=tail), self.assertRaises(ValueError):
+                drives.path_for(self.conn, self.hot["uuid"], tail)
+
 
 class OpeningAPhoto(CoreCase):
     def test_a_copy_at_an_alternate_tail_can_be_opened(self):
@@ -318,6 +323,74 @@ class PuttingAFileDown(CoreCase):
             "different file at that tail",
         )
         self.assertEqual(open(existing, "rb").read(), b"something already here")
+
+
+class MovingAPhoto(CoreCase):
+    def _on_working_drive(self):
+        source = self.write(self.hot_root)
+        image = self.photo(size=os.path.getsize(source))
+        copies.saw(self.conn, image, int(self.hot["id"]))
+        self.conn.commit()
+        return image, source
+
+    def test_move_proves_the_destination_before_removing_the_source(self):
+        image, source = self._on_working_drive()
+        new_tail = "Raws/Digital/2026/Filed/x.CR3"
+        self.assertEqual(photos.move(self.conn, image, self.cold["uuid"], new_tail), "moved")
+        target = os.path.join(self.cold_root, new_tail.replace("/", os.sep))
+        self.assertFalse(os.path.exists(source))
+        self.assertEqual(open(target, "rb").read(), b"the-photograph")
+        self.assertEqual(photos.open_photo(self.conn, image), target)
+
+    def test_move_refuses_a_collision_before_changing_anything(self):
+        image, source = self._on_working_drive()
+        new_tail = "Raws/Digital/2026/Filed/x.CR3"
+        stranger = self.write(self.cold_root, new_tail, b"somebody else")
+        self.assertEqual(
+            photos.move(self.conn, image, self.cold["uuid"], new_tail),
+            "destination exists",
+        )
+        self.assertTrue(os.path.exists(source))
+        self.assertEqual(open(stranger, "rb").read(), b"somebody else")
+        self.assertEqual(
+            self.conn.execute("SELECT tail FROM images WHERE id = ?", (image,)).fetchone()["tail"],
+            TAIL,
+        )
+
+    def test_move_remains_safe_on_a_drive_without_hardlinks(self):
+        image, source = self._on_working_drive()
+        new_tail = "Raws/Digital/2026/Filed/x.CR3"
+        with patch.object(photos.os, "link", side_effect=OSError("unsupported")):
+            self.assertEqual(photos.move(self.conn, image, self.cold["uuid"], new_tail), "moved")
+        self.assertFalse(os.path.exists(source))
+
+    def test_a_racing_collision_is_never_removed_as_ours(self):
+        image, source = self._on_working_drive()
+        new_tail = "Raws/Digital/2026/Filed/x.CR3"
+        target = os.path.join(self.cold_root, new_tail.replace("/", os.sep))
+
+        def race(_staging, _target):
+            with open(target, "wb") as handle:
+                handle.write(b"arrived during the move")
+            raise FileExistsError(target)
+
+        with patch.object(photos.os, "link", side_effect=race):
+            self.assertTrue(
+                photos.move(self.conn, image, self.cold["uuid"], new_tail).startswith("move failed:")
+            )
+        self.assertTrue(os.path.exists(source))
+        self.assertEqual(open(target, "rb").read(), b"arrived during the move")
+
+
+class VersionFamilies(CoreCase):
+    def test_group_reaches_the_original_and_every_descendant(self):
+        original = self.photo("Raws/original.CR3")
+        export = self.photo("Edits/export.jpg")
+        second_export = self.photo("Edits/export-2.jpg")
+        self.conn.execute("UPDATE images SET version_of = ? WHERE id = ?", (original, export))
+        self.conn.execute("UPDATE images SET version_of = ? WHERE id = ?", (export, second_export))
+        self.conn.commit()
+        self.assertEqual(photos.group(self.conn, second_export), [original, export, second_export])
 
 
 class DecisionsSurvive(CoreCase):
