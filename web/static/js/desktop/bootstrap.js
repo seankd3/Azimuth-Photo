@@ -12,7 +12,6 @@ import { initLenses } from './lenses.js';
 import { initLoupe } from './loupe.js';
 import { initRefine } from './refine.js';
 import { initDuplicates } from './duplicates.js';
-import { initTrash } from './trash.js';
 import { initKeyboard } from './keyboard.js';
 import { initShortcutSheet } from './shortcut_sheet.js';
 import { initWatchedFolders } from './watched_folders.js';
@@ -57,7 +56,6 @@ async function boot() {
     initLoupe();
     initRefine();
     initDuplicates();
-    initTrash();
     initRightPanel();
     initPanelSections();
     initDrawer();

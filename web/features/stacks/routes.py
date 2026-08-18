@@ -16,7 +16,6 @@ from pydantic import BaseModel, Field
 from data.repositories import stacks as stack_repository
 from features.stacks import builders
 from features.stacks import identical
-from features.trash import service as trash_service
 
 
 def _invalidate_after_stack_change() -> None:
@@ -48,10 +47,6 @@ class RepresentativeBody(BaseModel):
 
 class RebuildBody(BaseModel):
     kinds: list[str] | None = Field(default=None, max_length=16)
-
-
-class IdenticalCleanupBody(BaseModel):
-    token: str = Field(min_length=1, max_length=64)
 
 
 
@@ -138,29 +133,6 @@ async def api_verify_identical_stacks(background_tasks: BackgroundTasks):
         return JSONResponse({"error": "Identical-file verification is already running"}, status_code=409)
     background_tasks.add_task(identical.run_verification, catalog_path(), token)
     return {"accepted": True, "verification_status": identical.verification_status()}
-
-
-@router.post("/api/stacks/identical/cleanup")
-async def api_cleanup_identical_stacks(body: IdenticalCleanupBody):
-    try:
-        image_ids, skipped_groups = await asyncio.to_thread(
-            identical.validated_cleanup_ids,
-            body.token,
-        )
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=409)
-    if not image_ids:
-        return JSONResponse(
-            {"error": "No verified copies are still safe to move", "skipped_groups": skipped_groups},
-            status_code=409,
-        )
-    result = await trash_service.trash_images(catalog_path(), image_ids)
-    result["skipped_groups"] = skipped_groups
-    result["requested"] = len(image_ids)
-    if result.get("trashed"):
-        _invalidate_after_stack_change()
-    identical.finish_cleanup(body.token)
-    return result
 
 
 @router.get("/api/stacks/representatives")

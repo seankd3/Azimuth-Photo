@@ -31,7 +31,6 @@ from features.pages import routes as page_routes
 from features.settings import routes as settings_routes
 from features.stacks import routes as stack_routes
 from features.system import backup_routes, health_routes, quit_routes, version_routes
-from features.trash import routes as trash_routes
 
 _ROOT = os.path.dirname(__file__)
 
@@ -61,7 +60,6 @@ for router in (
     catalog_routes.router,
     collection_routes.router,
     stack_routes.router,
-    trash_routes.router,
     export_routes.router,
     imports_routes.router,
     settings_routes.router,
