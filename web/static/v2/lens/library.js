@@ -1,6 +1,10 @@
+import {
+  measureGrid,
+  placeGridCell,
+  visibleGridRange,
+} from '../kit/virtual-grid.js';
 import { registerLens } from '../store/index.js';
 
-const rendered = new WeakMap();
 const pendingTiles = new WeakMap();
 const tileObserver = 'IntersectionObserver' in window
   ? new IntersectionObserver((entries) => {
@@ -21,20 +25,11 @@ function element(tag, className = '', text = '') {
   return node;
 }
 
-function skeletons(grid) {
-  replaceGrid(grid);
-  for (let index = 0; index < 18; index += 1) {
-    const skeleton = element('div', 'photo-skeleton');
-    skeleton.style.aspectRatio = index % 4 === 0 ? '4 / 5' : '3 / 2';
-    grid.append(skeleton);
-  }
-}
-
-function replaceGrid(grid, ...children) {
-  if (tileObserver) {
-    for (const image of grid.querySelectorAll('img')) tileObserver.unobserve(image);
-  }
-  grid.replaceChildren(...children);
+function forgetCell(cell) {
+  const image = cell?.querySelector?.('img');
+  if (!image) return;
+  tileObserver?.unobserve(image);
+  pendingTiles.delete(image);
 }
 
 function loadTile(image, photo, actions) {
@@ -64,12 +59,22 @@ function emptyState(onAdd) {
   return empty;
 }
 
-function photoCell(photo, selected, actions) {
+function skeletonCell(index) {
+  const cell = element('div', 'photo-skeleton');
+  cell.dataset.index = index;
+  cell.dataset.kind = 'skeleton';
+  return cell;
+}
+
+function photoCell(photo, index, actions) {
   const cell = element('button', 'photo-cell');
   cell.type = 'button';
+  cell.dataset.index = index;
+  cell.dataset.kind = 'photo';
   cell.dataset.photoId = photo.id;
-  cell.classList.toggle('is-selected', selected === photo.id);
+  cell.dataset.photoKey = `${photo.id}:${photo.tail}`;
   cell.setAttribute('aria-label', photo.tail || `Photo ${photo.id}`);
+  cell.setAttribute('aria-pressed', 'false');
 
   const image = element('img');
   image.alt = '';
@@ -77,34 +82,86 @@ function photoCell(photo, selected, actions) {
   image.decoding = 'async';
   cell.append(image);
   loadTile(image, photo, actions);
-  cell.addEventListener('click', () => actions.select(photo));
-  cell.addEventListener('dblclick', () => actions.open(photo));
+  cell.addEventListener('click', () => actions.select(photo, index));
+  cell.addEventListener('dblclick', () => actions.open(photo, index));
   return cell;
 }
 
-function renderGrid(grid, state, actions) {
-  grid.style.setProperty('--cell-size', `${actions.cellSize}px`);
-  grid.setAttribute('aria-busy', String(state.loading));
-  if (state.loading && state.photos.length === 0) {
-    rendered.delete(grid);
-    skeletons(grid);
-    return;
+function positionCell(cell, layout, index) {
+  const place = placeGridCell(layout, index);
+  cell.style.left = `${place.left}px`;
+  cell.style.top = `${place.top}px`;
+  cell.style.width = `${place.width}px`;
+  cell.style.height = `${place.width}px`;
+}
+
+function reconcileGrid(grid, state, actions, layout, range) {
+  const current = new Map(
+    [...grid.children]
+      .filter((cell) => cell.dataset.index !== undefined)
+      .map((cell) => [cell.dataset.index, cell]),
+  );
+  const leftovers = new Set(grid.children);
+  const desired = [];
+  let firstMissing = null;
+  let lastMissing = null;
+
+  for (let index = range.start; index < range.end; index += 1) {
+    const photo = state.photos.get(index);
+    const key = String(index);
+    let cell = current.get(key);
+    const matches = photo
+      ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}`
+      : cell?.dataset.kind === 'skeleton';
+    if (!matches) {
+      forgetCell(cell);
+      leftovers.delete(cell);
+      cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
+    }
+    if (!photo) {
+      firstMissing ??= index;
+      lastMissing = index + 1;
+    }
+    positionCell(cell, layout, index);
+    cell.classList.toggle('is-selected', index === state.selectedIndex);
+    if (cell.dataset.kind === 'photo') {
+      cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
+    }
+    desired.push(cell);
+    leftovers.delete(cell);
   }
-  if (state.photos.length === 0) {
-    rendered.delete(grid);
-    replaceGrid(grid, emptyState(actions.addDrive));
+
+  for (const cell of leftovers) forgetCell(cell);
+  grid.replaceChildren(...desired);
+  if (firstMissing !== null) actions.need(firstMissing, lastMissing);
+}
+
+function renderGrid(grid, state, actions) {
+  grid.setAttribute('aria-busy', String(state.loading));
+
+  if (state.total === 0 && !state.loading) {
+    for (const cell of grid.children) forgetCell(cell);
+    grid.style.height = '';
+    grid.replaceChildren(emptyState(actions.addDrive));
     return;
   }
 
-  const signature = state.photos.map((photo) => `${photo.id}:${photo.tail}`).join('\n');
-  if (rendered.get(grid) !== signature) {
-    replaceGrid(grid, ...state.photos.map((photo) => photoCell(photo, null, actions)));
-    rendered.set(grid, signature);
+  const count = state.total || 18;
+  const layout = measureGrid(grid.clientWidth, actions.cellSize, count);
+  const range = visibleGridRange(layout, actions.scrollTop, actions.viewportHeight);
+  grid.style.height = `${layout.height}px`;
+  grid.dataset.columns = layout.columns;
+  grid.dataset.cell = layout.cell;
+  grid.dataset.pitch = layout.cell + layout.gap;
+  grid.dataset.start = range.start;
+  grid.dataset.end = range.end;
+
+  if (state.loading && state.total === 0) {
+    const loadingState = { ...state, photos: new Map(), selectedIndex: null };
+    reconcileGrid(grid, loadingState, { ...actions, need: () => {} }, layout, range);
+    return;
   }
-  const selected = String(state.selected?.id ?? '');
-  for (const cell of grid.children) {
-    cell.classList.toggle('is-selected', cell.dataset.photoId === selected);
-  }
+  reconcileGrid(grid, state, actions, layout, range);
 }
 
 function renderInspector(panel, selected) {

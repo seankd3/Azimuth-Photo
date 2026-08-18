@@ -1,13 +1,13 @@
 const state = {
   counts: { photos: 0, starred: 0, unidentified: 0 },
   drives: [],
-  photos: [],
+  photos: new Map(),
+  total: 0,
   loading: true,
   scanning: false,
   selected: null,
+  selectedIndex: null,
   sort: 'newest',
-  offset: 0,
-  exhausted: false,
 };
 
 const listeners = new Set();
