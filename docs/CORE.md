@@ -45,9 +45,11 @@ head. What carries forward is the **appendix** — lessons already paid for — 
 nothing else. Where a lesson and an old implementation disagree, keep the lesson
 and write the code new.
 
-The UI is not being rewritten — 39k lines of grid, loupe and keyboard work is
-the product, and it is the one part that was ever good. The **backend goes from
-107k to about 12k**.
+HTML and CSS remain the right rendering tools; the inherited 39k-line browser
+application does not. V2 rebuilds each desktop surface on the small serverless
+UI boundary, carries forward only demonstrated interaction lessons, and deletes
+the old surface as its jobs are replaced. Native widgets are not the objective;
+one polished native-window product without inherited application machinery is.
 
 ### The measurement that settles the argument
 

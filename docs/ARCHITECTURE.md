@@ -112,6 +112,12 @@ The shell obtains lenses through the registry rather than importing their
 implementations. A lens may render and emit product intent; it may not call the
 bridge directly. UI modules never import inherited `web/static/js` code.
 
+Whole-library browsing is a sparse window, not an ever-growing array. The grid
+computes positions from total count and viewport geometry, `kit/page-cache.js`
+owns deduplicated pages and rejects stale generations, and the lens keeps only
+the visible overscan neighborhood in the document. Sorting begins a new
+generation; a late answer from the old order cannot repaint it.
+
 `web/templates/v2.html` is semantic structure, not a hidden application. The
 build bundles the modules and inlines the CSS and JavaScript into one serverless
 document because a frozen pywebview app has no static-file server.

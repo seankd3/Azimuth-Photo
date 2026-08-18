@@ -12,11 +12,15 @@ without pretending signing or updates are finished.
    .\.venv\Scripts\python.exe -W error::ResourceWarning -m unittest test_core.py test_owned_library.py test_desktop.py
    ```
 
-2. Run `npm audit` and the reviewed Python lint set.
+2. Run `npm audit` and the reviewed Python lint set. From the repository root,
+   run `node web/test_v2_virtual_grid.mjs` and
+   `node web/test_v2_page_cache.mjs`.
 3. Run `.\scripts\build_windows_desktop.ps1`.
 4. Launch the frozen executable with an empty `AZIMUTH_HOME`.
 5. Open the native folder chooser, attach a real photo folder, and verify the
-   progressive grid, selection, details, and loupe.
+   progressive grid, direct first-to-last keyboard navigation, details, and
+   keyboard navigation inside the loupe. A realistic large-catalog proof must
+   keep the rendered photo controls bounded rather than accumulating pages.
 6. Quit and verify no Azimuth process remains and the catalog can be renamed.
 7. Perform the same flow on a clean Windows machine before calling the artifact
    releasable.
