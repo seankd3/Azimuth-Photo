@@ -7,7 +7,11 @@ operations from whichever native surface replaces the current shell.
 
 from __future__ import annotations
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import os
+import threading
+from typing import Callable, TypeVar
 
 import library as queries
 import metadata as embedded_metadata
@@ -20,6 +24,7 @@ from model.scope import EVERYTHING, Scope
 
 TILE_SIZES = frozenset((render.GRID, render.LOUPE, 3840))
 ROTATIONS = frozenset((0, 90, 180, 270))
+Result = TypeVar("Result")
 
 
 class Library:
@@ -192,3 +197,44 @@ class Library:
     def _open(self) -> None:
         if self._closed:
             raise RuntimeError("library is closed")
+
+
+class OwnedLibrary:
+    """Keep one ``Library`` and all access to its connection on one thread."""
+
+    def __init__(self, catalog_path: str, tile_root: str):
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="library")
+        self._state = threading.Lock()
+        self._closed = False
+        self._close_future = None
+        self._executor_shutdown = False
+        try:
+            self._library = self._executor.submit(Library, catalog_path, tile_root).result()
+        except BaseException:
+            self._executor.shutdown(wait=True, cancel_futures=True)
+            raise
+
+    async def run(self, operation: Callable[[Library], Result]) -> Result:
+        """Run one product operation without moving its SQLite connection."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._executor.submit(operation, self._library)
+        return await asyncio.wrap_future(future)
+
+    async def close(self) -> None:
+        """Drain earlier operations, close the product, and release its thread."""
+
+        with self._state:
+            if self._close_future is None:
+                self._closed = True
+                self._close_future = self._executor.submit(self._library.close)
+            future = self._close_future
+        try:
+            await asyncio.shield(asyncio.wrap_future(future))
+        finally:
+            with self._state:
+                if not self._executor_shutdown:
+                    self._executor.shutdown(wait=True, cancel_futures=False)
+                    self._executor_shutdown = True
