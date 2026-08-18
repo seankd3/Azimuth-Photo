@@ -373,6 +373,22 @@ So with the archive unplugged, nothing can ever be declared missing. More correc
 than a 5% ratio, no threshold, no override switch, and it cannot be defeated by
 an interrupted scan. **`preparing` is not an error and must never look like one.**
 
+### Trash is a decision; Empty Trash is deletion
+
+Putting a photograph in Trash appends `status = trashed` for its content
+identity and updates the browse projection. It moves no bytes. Restore repeats
+the status that preceded Trash; Undo repeats the exact answer replaced by one
+action and refuses if a newer decision has intervened.
+
+Empty Trash is the separate irreversible boundary. Its typed count must still
+match, every registered drive must be attached, missing copy hints are repaired
+by inspecting each canonical drive address, every path must be a regular file,
+and all copies are compared byte-for-byte. Working copies leave first and the
+record copy last. Each successful unlink is committed immediately, so an
+interruption reports honest remaining work and preserves the safest remaining
+copy instead of rolling catalog truth back over a deletion that already
+happened.
+
 ---
 
 ## Helpers
