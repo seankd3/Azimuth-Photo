@@ -7,35 +7,20 @@ last copy, proves the copy byte for byte, and records it. If anything is wrong
 it leaves both sides untouched — the worst case is that a photo stays
 unprotected, which is where it already was.
 
-`reclaim` **removes**, and therefore proves far more before it acts. It re-reads
-both files at the moment of deletion and compares full digests. A copy row is a
-hint written some time ago; it is enough to *report* that a photo is backed up
-and never enough to delete on. The prefix hash that identifies photos elsewhere
-is not permission either: a roll of film scans can share both a size and a first
-8 MiB.
+`reclaim` **removes**, and therefore proves far more before it acts. It compares
+the actual byte streams at the moment of deletion. A copy row and even a full
+content hash are enough to *report* that a photo is backed up and never enough
+to authorize deleting one.
 """
 
 from __future__ import annotations
 
-import hashlib
 import os
 import shutil
 import time
+import uuid
 
 from model import copies, drives, photos
-
-CHUNK = 1024 * 1024
-
-
-def digest(path: str) -> str:
-    """A full-file digest. Not the prefix hash — this one authorises deletion."""
-
-    out = hashlib.blake2b(digest_size=16)
-    with open(path, "rb") as handle:
-        while chunk := handle.read(CHUNK):
-            out.update(chunk)
-    return out.hexdigest()
-
 
 def unprotected(conn, limit: int | None = None) -> list[dict]:
     """Photos with no copy on any record drive. The backup queue."""
@@ -89,7 +74,7 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
     if os.path.exists(target):
         # Already there under the same tail. Confirm it really is this photo
         # before claiming the photograph is protected.
-        if digest(target) == digest(source):
+        if photos.same_bytes(target, source):
             if not dry_run:
                 copies.saw(conn, photo_id, int(drive["id"]))
                 conn.commit()
@@ -100,20 +85,20 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
         return "would copy"
 
     os.makedirs(os.path.dirname(target), exist_ok=True)
-    staging = f"{target}.copying"
+    staging = f"{target}.copying-{uuid.uuid4().hex}"
     try:
         shutil.copy2(source, staging)
-        if digest(staging) != digest(source):
-            os.remove(staging)
+        if not photos.same_bytes(staging, source):
             return "verify failed"
-        os.replace(staging, target)
+        photos.publish_without_overwrite(staging, target)
     except OSError as exc:
+        return f"copy failed: {exc}"
+    finally:
         if os.path.exists(staging):
             try:
                 os.remove(staging)
             except OSError:
                 pass
-        return f"copy failed: {exc}"
 
     copies.saw(conn, photo_id, int(drive["id"]))
     conn.commit()
@@ -124,11 +109,11 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
     """Free the working disk's copy, having just proved the archive's is identical.
 
     Everything expensive about this function is deliberate. It re-opens both
-    files *now* and compares full digests, because a copy row is a hint written
+    files *now* and compares their bytes, because a copy row is a hint written
     some time ago and a hint may not authorise a deletion. It deletes only from
     a drive whose `is_record` is 0, so the archive's copy is unreachable from
     here no matter what a caller passes. And it re-reads the record drive's
-    marker after the digest, so a drive pulled mid-compare cannot be the one
+    marker after the comparison, so a drive pulled mid-read cannot be the one
     that vouched for what we are about to remove.
 
     A guess may be wrong. A consequence may not.
@@ -164,7 +149,7 @@ def reclaim(conn, photo_id: int, *, dry_run: bool = False) -> str:
         if not here or not os.path.exists(here) or os.path.normcase(here) == os.path.normcase(archived):
             continue
 
-        if digest(here) != digest(archived):
+        if not photos.same_bytes(here, archived):
             return "copies differ"
         if drives.read_marker(drives.root_of(conn, drive["uuid"]) or "") != drive["uuid"]:
             return "record drive changed while verifying"

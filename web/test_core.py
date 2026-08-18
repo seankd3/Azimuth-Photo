@@ -255,12 +255,18 @@ class BackupRefuses(CoreCase):
 
     def test_a_failed_verify_leaves_nothing_behind(self):
         image, _ = self._queued()
-        real = backup.digest
-        with patch.object(backup, "digest", side_effect=lambda p: "0" * 32 if p.endswith(".copying") else real(p)):
+        real = photos.same_bytes
+        with patch.object(
+            photos,
+            "same_bytes",
+            side_effect=lambda left, right: False if ".copying-" in left else real(left, right),
+        ):
             self.assertEqual(backup.back_up(self.conn, image), "verify failed")
         target = os.path.join(self.cold_root, TAIL.replace("/", os.sep))
         self.assertFalse(os.path.exists(target))
-        self.assertFalse(os.path.exists(target + ".copying"))
+        self.assertFalse(
+            any(name.startswith("x.CR3.copying-") for name in os.listdir(os.path.dirname(target)))
+        )
         self.assertFalse(copies.is_backed_up(self.conn, image))
 
     def test_no_record_drive_is_a_refusal_not_a_crash(self):
@@ -304,6 +310,16 @@ class BackupRefuses(CoreCase):
 
 
 class PuttingAFileDown(CoreCase):
+    def test_identity_reads_past_the_old_eight_megabyte_prefix(self):
+        first = os.path.join(self.tmp, "first.tif")
+        second = os.path.join(self.tmp, "second.tif")
+        prefix = b"0" * (8 * 1024 * 1024)
+        with open(first, "wb") as handle:
+            handle.write(prefix + b"A")
+        with open(second, "wb") as handle:
+            handle.write(prefix + b"B")
+        self.assertNotEqual(photos.content_hash(first), photos.content_hash(second))
+
     def test_put_writes_verifies_and_identifies(self):
         source = os.path.join(self.tmp, "card.CR3")
         with open(source, "wb") as handle:

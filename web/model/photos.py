@@ -12,7 +12,7 @@ the tail is stored, so there is nothing to recover and nothing to guess.
 Two properties keep the answer honest, and both are about not serving the
 wrong photograph:
 
-* a candidate must exist, and when the catalog knows the file's size it must
+* a path must be a real file and, when the catalog knows its size, it must
   match — so a same-named stranger on another drive can never stand in;
 * a drive that is not attached is skipped in silence. It is *away*, which is a
   different word from *lost*, and the difference is why unplugging the archive
@@ -29,40 +29,48 @@ import uuid
 
 from model import drives
 
-# The identity digest: the first 8 MiB of the file, then its size as eight
-# little-endian bytes. Cheap enough to run on a cold archive drive, and the
-# size suffix is what stops two files that share an 8 MiB header — a roll of
-# film scans, a burst of the same frame — from colliding for free.
-HASH_PREFIX_BYTES = 8 * 1024 * 1024
-HASH_DIGEST_BYTES = 16
+READ_CHUNK_BYTES = 1024 * 1024
+HASH_DIGEST_BYTES = 32
 
 
 def content_hash(path: str) -> str:
-    """What photo is this, as far as a cheap read can tell.
+    """Stable identity derived from every byte, or a refusal if bytes change."""
 
-    Names candidates and nothing more. Never identity, never permission to
-    delete, and never permission to merge — a merge that drops the loser's
-    decisions breaks the one promise this design makes. When the answer must be
-    load-bearing, `backup.digest` reads every byte instead.
-    """
-
-    size = os.stat(path).st_size
     digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
     with open(path, "rb") as handle:
-        digest.update(handle.read(HASH_PREFIX_BYTES))
-    digest.update(int(size).to_bytes(8, byteorder="little", signed=False))
+        before = os.fstat(handle.fileno())
+        while chunk := handle.read(READ_CHUNK_BYTES):
+            digest.update(chunk)
+        after = os.fstat(handle.fileno())
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        raise OSError(f"file changed while hashing: {path}")
     return digest.hexdigest()
+
+
+def same_bytes(left: str, right: str) -> bool:
+    """Whether two files contain exactly the same bytes.
+
+    Destructive work asks this instead of trusting any digest, cheap or full.
+    """
+
+    with open(left, "rb") as first, open(right, "rb") as second:
+        if os.fstat(first.fileno()).st_size != os.fstat(second.fileno()).st_size:
+            return False
+        while True:
+            a = first.read(READ_CHUNK_BYTES)
+            b = second.read(READ_CHUNK_BYTES)
+            if a != b:
+                return False
+            if not a:
+                return True
 
 
 def identify(conn, path: str) -> dict:
     """What photo is this, and do we already know it?
 
-    Returns the hash and size always, and an `id` when some catalogued photo
-    shares that hash. A caller that finds one has found a *candidate* — the
-    same photo on another drive, most often, but possibly a different frame
-    that shares a header. What it may do with that is add a copy row. What it
-    may never do is merge two rows, because the loser's decisions are the only
-    thing here that cannot be recomputed.
+    Returns the full-content hash and size always, and an `id` when a catalogued
+    photo shares that identity. Matching bytes may add a copy; rows are never
+    silently merged because each may already carry irreplaceable decisions.
     """
 
     digest = content_hash(path)
@@ -91,10 +99,8 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     if target is None:
         return {"outcome": "drive not attached"}
 
-    from model import backup
-
     if os.path.lexists(target):
-        if _verified(target, os.path.getsize(source)) and backup.digest(target) == backup.digest(source):
+        if _verified(target, os.path.getsize(source)) and same_bytes(target, source):
             return {"outcome": "already there", "path": target, **identify(conn, target)}
         return {"outcome": "different file at that tail", "path": target}
 
@@ -102,9 +108,9 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     staging = f"{target}.importing-{uuid.uuid4().hex}"
     try:
         shutil.copy2(source, staging)
-        if backup.digest(staging) != backup.digest(source):
+        if not same_bytes(staging, source):
             return {"outcome": "verify failed"}
-        _publish_without_overwrite(staging, target)
+        publish_without_overwrite(staging, target)
     except OSError as error:
         return {"outcome": f"copy failed: {error}"}
     finally:
@@ -255,7 +261,7 @@ def move(conn, photo_id: int, drive_uuid: str, tail: str) -> str:
     the durable addresses are already safe.
     """
 
-    from model import backup, copies
+    from model import copies
 
     photo = conn.execute(
         "SELECT tail FROM images WHERE id = ?", (int(photo_id),)
@@ -291,12 +297,11 @@ def move(conn, photo_id: int, drive_uuid: str, tail: str) -> str:
     published = False
     try:
         shutil.copy2(source, staging)
-        source_digest = backup.digest(source)
-        if backup.digest(staging) != source_digest:
+        if not same_bytes(staging, source):
             return "verify failed"
         if drives.read_marker(target_root) != drive_uuid:
             return "drive changed while verifying"
-        _publish_without_overwrite(staging, target)
+        publish_without_overwrite(staging, target)
         published = True
 
         conn.execute(
@@ -324,7 +329,7 @@ def move(conn, photo_id: int, drive_uuid: str, tail: str) -> str:
                 pass
 
     try:
-        if backup.digest(source) != backup.digest(target):
+        if not same_bytes(source, target):
             return "moved; source changed after verification"
         os.remove(source)
     except OSError as error:
@@ -332,7 +337,7 @@ def move(conn, photo_id: int, drive_uuid: str, tail: str) -> str:
     return "moved"
 
 
-def _publish_without_overwrite(staging: str, target: str) -> None:
+def publish_without_overwrite(staging: str, target: str) -> None:
     """Give verified bytes their final name while refusing a collision.
 
     A hardlink is the clean atomic operation on NTFS and ordinary Linux

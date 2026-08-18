@@ -168,10 +168,9 @@ Four rules make them honest:
 - **`recipe` is an argument and a pure function of its inputs — never a
   timestamp.** Feeding `updated_at` in means reset-then-redo re-renders identical
   pixels and two machines never share a cache entry.
-- **The hash names candidates.** Never identity, never permission to delete, and
-  **never permission to merge** — a merge that drops the loser's decisions breaks
-  the one promise this design makes. Proof is a full-file digest whose read
-  starts and ends on the same file.
+- **The hash reads every byte and gives content a stable identity.** It still
+  never authorizes deletion or silently merges rows carrying decisions. A
+  deletion compares the two byte streams at the moment it acts.
 
 **One walker owns admission**: `.trash/`, `Astrophotography/` (case-blind, on the
 resolved path), junk directories, dotfiles, `.lrdata`, zero-length files and
@@ -773,12 +772,14 @@ digest. That invalidates more than it looks like:
 * the tiles, which were computed from bytes that no longer exist;
 * `width`/`height`, which is what the grid sizes each cell from;
 * the **content hash — which is the subject of every decision.** 88,809 of
-  them, 79,512 develop edits among them. The digest covers the first 8 MiB,
-  and in a TIFF or DNG that is exactly where metadata lives.
+  them, 79,512 develop edits among them. At the time this was measured the
+  digest covered the first 8 MiB; V2 now hashes the complete file, and metadata
+  changes still change that identity as they should.
 
-That last one is the sharp edge, and it is a real tension in the design:
-`content_hash` is documented as *"never identity"* and is nonetheless what
-`decisions.subject` holds.
+That last one was the sharp edge: the prefix hash was documented as *"never
+identity"* and was nonetheless what `decisions.subject` held. Full-content
+identity removes that contradiction; `decisions.carry` still preserves the
+owner's history when another application deliberately changes the file.
 
 All of it is paid by one word. `synchronize` reports **`changed`** beside
 `new` and `missing` — a photograph whose file is present but is no longer the
@@ -1033,8 +1034,8 @@ exactly the thing that reintroduces them.
 - An unplugged drive and an emptied library look identical from inside a scan.
   Hence the *lost* rule above.
 - `os.walk(onerror=…)` must raise rather than silently yield a partial tree.
-- The content hash covers 8 MiB + size: excellent for candidates, **never
-  permission to remove a file**.
+- The content hash reads the complete file and names its content; destructive
+  work still compares the actual byte streams immediately before removal.
 - `Astrophotography/` is fenced case-blind on the *resolved* path, everywhere —
   over-fencing skips a file, under-fencing loses one.
 - Junk directories (`previewcache`, `__macosx`, `*.lrdata`, `.lrt`, …) are
