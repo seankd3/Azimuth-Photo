@@ -28,7 +28,16 @@ from common import read, tracked
 # prose that happens to contain a slash.
 TOP = ("scripts/", "web/", "clients/", "android/", "desktop/", "tools/", "docs/", "bench/", ".github/")
 
-INSTRUCTIONS = (".github/*", "AGENTS.md", "CLAUDE.md", "README.md", "CONTRIBUTING.md", "docs/*.md")
+INSTRUCTIONS = (
+    ".github/*",
+    ".claude/skills/*",
+    ".claude/workflows/*",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README.md",
+    "CONTRIBUTING.md",
+    "docs/*.md",
+)
 
 RECORDS = ("MASTER_PLAN.md", "docs/SIMPLIFY_LOG.md", "docs/REWRITE_LEDGER.md", "docs/archive/")
 

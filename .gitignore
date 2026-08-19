@@ -25,7 +25,13 @@ android/app/build/
 # Tools
 .codex
 .gstack/
-.claude/
+# Agent-facing source travels with the repository; the rest of .claude/ is
+# this machine's runtime (worktrees, launch configuration). A directory that
+# is itself excluded cannot have its contents re-included, so exclude the
+# children and name the two that are source.
+.claude/*
+!.claude/skills/
+!.claude/workflows/
 AGENTS.local.md
 
 # Local audits and build outputs

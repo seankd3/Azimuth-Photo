@@ -52,15 +52,20 @@ overlay, stop and reconcile the discrepancy before coding.
 
 ## Code ownership
 
-Routes are their own map: `web/harness/goldens/routes.json` is recorded from the
-running app, so it cannot drift the way a hand-written list did.
+This map is checked, not trusted: `scripts/gates/paths.py` fails the build when
+any instruction here names a folder or file that is not tracked. If a line below
+is wrong, the gate is the thing to satisfy -- correct the line, do not recreate
+the folder.
 
+- `web/model/` owns the V2 core: the tables and the small vocabulary every
+  other layer derives from. Read it first.
+- `web/work.py` owns owed work -- what should exist minus what is cached.
+- `web/tiles.py` and `web/render.py` own preview generation.
 - `web/features/<surface>/` owns backend behavior and routes.
 - `web/data/repositories/` owns SQL and persistent queries.
 - `web/core/` owns application wiring and cross-cutting runtime code.
-- `web/static/js/desktop/` owns focused desktop ES modules.
-- `web/static/js/mobile/` owns the PWA.
-- `web/thumbnails/` owns preview generation and cache maintenance.
+- `web/static/v2/` owns the V2 shell; `web/static/js/desktop/` owns the
+  inherited desktop ES modules it is replacing.
 - `desktop/` is the Windows shell; `android/` is the native Android client.
 - `scripts/` contains repeatable developer/operator entry points only.
 
