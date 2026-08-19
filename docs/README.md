@@ -42,8 +42,6 @@ surface adopts the behavior it still needs through the core, then updates the
 document in the same commit.
 
 - [Feature guide](features.md)
-- [Import](IMPORT_SPEC.md) and [card import](CARD_IMPORT_SPEC.md)
-- [Invisible import](INVISIBLE_IMPORT.md) — local-first, silent ingest intent.
 - [Develop](DEVELOP_SPEC.md)
 - [Lightroom bridge](LR_BRIDGE_SPEC.md)
 - [Background work](background-work-behavior.md)
@@ -57,6 +55,10 @@ These describe the retired networked product. They are evidence about failure
 modes and user expectations, not V2 instructions:
 
 - [Authentication](AUTH_SPEC.md)
+- [Import](IMPORT_SPEC.md), [card import](CARD_IMPORT_SPEC.md) and
+  [invisible import](INVISIBLE_IMPORT.md) — the V1 import and drain designs;
+  their custody and UX lessons were adopted on 08-19 by `model/intake.py`,
+  the sweep, and the import overlay, and the rest is evidence.
 - [Hub/satellite sync](FIELD_SPEC_V2.md)
 - [Client updates](CLIENT_AUTOUPDATE_SPEC.md)
 - [Tailscale HTTPS](FIELD_HTTPS.md)
