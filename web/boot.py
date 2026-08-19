@@ -50,6 +50,9 @@ class Library:
             (embedded_metadata.KIND, *self.tiles.kinds),
             on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
+            # A decode is one core for a third of a second; a quarter of the
+            # machine's threads keeps the interactive lane and the disk free.
+            lanes=max(1, (os.cpu_count() or 4) // 4),
         )
         self._closed = False
 
@@ -81,7 +84,10 @@ class Library:
 
     def refresh(self, drive_uuid: str) -> dict:
         self._open()
-        return copies.sweep(self.conn, drive_uuid)
+        try:
+            return copies.sweep(self.conn, drive_uuid)
+        finally:
+            self.chores.nudge()
 
     def attached(self) -> list[dict]:
         self._open()
@@ -110,6 +116,7 @@ class Library:
 
         wanted = tuple(int(i) for i in photo_ids if int(i) > 0)[:LOOKING_AT_MOST]
         self._looking = wanted
+        self.chores.nudge()
         return len(wanted)
 
     def _with_urls(self, rows: list[dict]) -> list[dict]:
@@ -276,6 +283,7 @@ class OwnedLibrary:
                 return copies.sweep(conn, drive_uuid)
             finally:
                 conn.close()
+                self._library.chores.nudge()
 
         with self._state:
             if self._closed:

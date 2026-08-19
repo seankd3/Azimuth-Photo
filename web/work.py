@@ -41,7 +41,7 @@ import threading
 from typing import Callable, Iterable
 
 from model import cache, photos
-from model.scope import EVERYTHING, Scope, ids as only, where
+from model.scope import EVERYTHING, Scope, all_of, ids as only, where
 
 log = logging.getLogger(__name__)
 
@@ -208,7 +208,8 @@ def _identify_one(conn, row) -> bool:
 
 
 def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
-         yield_to: Callable[[], bool] | None = None) -> dict | None:
+         yield_to: Callable[[], bool] | None = None,
+         share: tuple[int, int] = (0, 1)) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
     Most-owed is decided by photograph, not by kind: what is on screen comes
@@ -222,7 +223,10 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     One item, then return. Concurrency lives *above* this function — in how
     many workers call it and where they run — rather than inside it, which is
     what keeps this readable and what makes stopping instant: there is never a
-    batch half-finished, because the queue is a query.
+    batch half-finished, because the queue is a query. `share` is how several
+    workers divide the library without a lock or a claim: `(lane, lanes)`
+    keeps a worker to the photographs whose id leaves that remainder, so two
+    lanes never want the same one and each is newest-first within its part.
 
     `yield_to` is accepted for callers that want to stand down entirely (a
     battery saver, a test). It defaults to never, because chores running is the
@@ -236,10 +240,12 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     if paused(conn) or (yield_to is not None and yield_to()):
         return None
 
+    lane, lanes = int(share[0]), max(1, int(share[1]))
+    part = Scope("i.id % ? = ?", (lanes, lane)) if lanes > 1 else EVERYTHING
     looked = [int(i) for i in on_screen]
     scopes = (only(looked), EVERYTHING) if looked else (EVERYTHING,)
     for scope in scopes:
-        did = _most_owed(conn, tuple(kinds), scope)
+        did = _most_owed(conn, tuple(kinds), all_of(scope, part))
         if did is not None:
             return did
     return None
@@ -316,7 +322,14 @@ def _unlink(path: str) -> None:
 
 
 class Chores:
-    """One owned background worker with no process-global lifecycle."""
+    """One owned background worker with no process-global lifecycle.
+
+    It may run several lanes -- threads each stepping its own share of the
+    library on its own connection -- because a decode is CPU and the machine
+    has cores to spare; measured on one lane, a fresh library of 157,000
+    photographs would take a day to tile. Lanes share nothing but the stop
+    event and the done counter.
+    """
 
     def __init__(
         self,
@@ -326,14 +339,17 @@ class Chores:
         on_screen: Callable[[], Iterable[int]] = lambda: (),
         yield_to: Callable[[], bool] = lambda: False,
         ceiling_bytes: int | None = None,
+        lanes: int = 1,
     ):
         self._open_conn = open_conn
         self._kinds = tuple(kinds)
         self._on_screen = on_screen
         self._yield_to = yield_to
         self._ceiling_bytes = ceiling_bytes
+        self._lanes = max(1, int(lanes))
         self._stopped = threading.Event()
-        self._thread: threading.Thread | None = None
+        self._wake = threading.Event()
+        self._threads: list[threading.Thread] = []
         # Items finished since start. A window asks for this number and re-reads
         # what it holds only when it moved -- the whole of how the grid learns
         # that identity, metadata or a tile landed behind it.
@@ -341,7 +357,7 @@ class Chores:
 
     @property
     def running(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return any(thread.is_alive() for thread in self._threads)
 
     def start(self) -> bool:
         """Start once. Return false when this instance is already running."""
@@ -349,26 +365,33 @@ class Chores:
         if self.running:
             return False
         self._stopped.clear()
-        self._thread = threading.Thread(
-            target=self._run, name="chores", daemon=True
-        )
-        self._thread.start()
+        self._threads = [
+            threading.Thread(target=self._run, args=(lane,), name=f"chores-{lane}", daemon=True)
+            for lane in range(self._lanes)
+        ]
+        for thread in self._threads:
+            thread.start()
         return True
 
+    def nudge(self) -> None:
+        """Something is newly owed -- a sweep admitted photographs, the window
+        looked elsewhere -- so an idle lane should not sleep out its wait."""
+
+        self._wake.set()
+
     def stop(self, timeout: float = 5.0) -> bool:
-        """Finish the item in hand, close the catalog, and report success."""
+        """Finish the items in hand, close the catalogs, and report success."""
 
         self._stopped.set()
-        thread = self._thread
-        if thread is None:
-            return True
-        thread.join(timeout)
-        stopped = not thread.is_alive()
+        self._wake.set()
+        for thread in self._threads:
+            thread.join(timeout)
+        stopped = not self.running
         if stopped:
-            self._thread = None
+            self._threads = []
         return stopped
 
-    def _run(self) -> None:
+    def _run(self, lane: int = 0) -> None:
         conn = None
         try:
             conn = self._open_conn()
@@ -379,6 +402,7 @@ class Chores:
                         self._kinds,
                         on_screen=self._on_screen(),
                         yield_to=self._yield_to,
+                        share=(lane, self._lanes),
                     )
                 except Exception:
                     log.exception("worker=chores step failed")
@@ -386,7 +410,7 @@ class Chores:
                 if did:
                     self.done += 1
 
-                if did is None and self._ceiling_bytes is not None:
+                if did is None and lane == 0 and self._ceiling_bytes is not None:
                     try:
                         freed = sweep_cache(conn, self._ceiling_bytes, self._kinds)
                         if freed:
@@ -394,8 +418,13 @@ class Chores:
                     except Exception:
                         log.exception("worker=chores sweep failed")
 
-                # Waiting on the stop event makes idle shutdown immediate.
-                self._stopped.wait(0.05 if did else 5.0)
+                # Idle lanes wait to be nudged, and stop wakes them too, so
+                # both new work and shutdown are immediate.
+                if did:
+                    self._stopped.wait(0.05)
+                else:
+                    self._wake.wait(5.0)
+                    self._wake.clear()
         except Exception:
             log.exception("worker=chores stopped unexpectedly")
         finally:
