@@ -19,6 +19,8 @@
         <span data-photo-count aria-live="polite">—</span>
       </div>
       <div class="top-actions">
+        <button class="card-chip" type="button" data-action="import-card" hidden>Card · <span data-card-label></span></button>
+        <button class="quiet-button" type="button" data-action="import-folder">Import…</button>
         <button class="quiet-button" type="button" data-action="add-drive">Add folder</button>
       </div>
     </header>
@@ -118,7 +120,45 @@
 
   <menu class="context-menu" data-folder-menu hidden>
     <button type="button" data-action="synchronize-folder">Synchronize folder</button>
+    <button type="button" data-action="forget-missing">Forget missing photos</button>
   </menu>
+
+  <dialog class="import-dialog" data-import-dialog aria-labelledby="import-title">
+    <header class="import-head">
+      <div>
+        <p class="eyebrow">Import</p>
+        <h1 id="import-title" data-import-title>Import</h1>
+        <p class="dialog-copy" data-import-source></p>
+      </div>
+      <button class="dialog-close" type="button" data-action="close-import" aria-label="Close">×</button>
+    </header>
+    <div class="import-body">
+      <section class="import-stage" data-import-stage aria-label="Photographs to import"></section>
+      <aside class="import-side">
+        <p class="eyebrow">These are</p>
+        <div class="kind-choice" data-kind-choice>
+          <button type="button" data-kind="raws">Camera raws</button>
+          <button type="button" data-kind="snapshots">Snapshots</button>
+          <button type="button" data-kind="edits">Edits</button>
+        </div>
+        <p class="eyebrow">They will go to</p>
+        <ul class="destinations" data-destinations></ul>
+        <label class="check-row" data-clear-row hidden><input type="checkbox" data-clear> Clear the card as each file is verified</label>
+        <p class="eyebrow">Choose</p>
+        <div class="import-choose">
+          <button class="quiet-button" type="button" data-action="check-new">New only</button>
+          <button class="quiet-button" type="button" data-action="check-all">All</button>
+          <button class="quiet-button" type="button" data-action="check-none">None</button>
+        </div>
+      </aside>
+    </div>
+    <footer class="import-foot">
+      <span data-import-summary></span>
+      <span class="import-progress" data-import-progress hidden></span>
+      <button class="quiet-button" type="button" data-action="stop-import" hidden>Stop</button>
+      <button class="primary-button" type="button" data-action="start-import">Import</button>
+    </footer>
+  </dialog>
 
   <div class="toast" data-toast hidden role="status">
     <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>

@@ -169,3 +169,13 @@ def tail_for(root: str, path: str) -> str | None:
         if os.path.normcase(mine) != os.path.normcase(theirs):
             return None
     return "/".join(path_parts[len(root_parts):])
+
+
+def receiving(conn) -> dict | None:
+    """Where imports land: the working drive that is here, else the archive
+    that is here, else nowhere."""
+
+    for row in conn.execute("SELECT * FROM drives ORDER BY is_record ASC, id ASC"):
+        if online(conn, row["uuid"]):
+            return dict(row)
+    return None

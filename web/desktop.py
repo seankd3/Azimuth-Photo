@@ -87,7 +87,9 @@ class Desktop:
         return self._run(lambda library: library.attached())
 
     def pulse(self) -> dict:
-        return self._run(lambda library: library.pulse())
+        pulse = self._run(lambda library: library.pulse())
+        pulse["cards"] = len(self._product.cards)
+        return pulse
 
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0,
                folder: str | None = None) -> list[dict]:
@@ -129,6 +131,38 @@ class Desktop:
 
     def forget(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.forget(photo_ids))
+
+    def forget_missing(self, folder: str = "") -> dict:
+        return self._run(lambda library: library.forget_missing(str(folder or "")))
+
+    # ---- bringing photographs in ----
+
+    def cards(self) -> list[dict]:
+        return list(self._product.cards) if self._product else []
+
+    def stage(self, source: str) -> dict:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.stage(str(source)))
+
+    def bring(self, source: str, keys: list[str], kind: str, clear_source: bool = False,
+              roll: str = "") -> dict:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.bring(str(source), list(keys), str(kind),
+                                              clear_source=bool(clear_source), roll=str(roll or "")))
+
+    def intake_status(self) -> dict:
+        return self._product.intake_status() if self._product else {"phase": "idle"}
+
+    def stop_intake(self) -> None:
+        if self._product:
+            self._product.stop_intake()
+
+    def thumb(self, source: str, key: str) -> str | None:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._product.thumb(str(source), str(key))
 
     def synchronize(self, folder: str = "") -> list[dict]:
         if self._product is None:

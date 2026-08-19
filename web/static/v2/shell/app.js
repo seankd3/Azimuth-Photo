@@ -2,6 +2,7 @@ import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCullWorkflow } from './cull.js';
+import { createIntakeWorkflow } from './intake.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
 
@@ -61,6 +62,16 @@ const trashWorkflow = createTrashWorkflow({
   reload: () => loadView(),
   notify,
   undo,
+});
+const intakeWorkflow = createIntakeWorkflow({
+  product,
+  notify,
+  afterImport: async () => {
+    // What just came in is what the person wants to see: Recently added.
+    update({ view: 'library', folder: null, sort: 'added' });
+    document.querySelector('[data-sort]').value = 'added';
+    await Promise.all([loadView(), loadFolders()]);
+  },
 });
 const cullWorkflow = createCullWorkflow({
   product,
@@ -245,6 +256,7 @@ async function followLibrary() {
     }
     const moved = last !== null && pulse.done !== last.done;
     const swept = last !== null && pulse.swept !== last.swept;
+    if (last === null || pulse.cards !== last.cards) showCards();
     last = pulse;
     if ((moved || swept) && !read().loading && !read().scanning) {
       try {
@@ -271,6 +283,34 @@ async function forgetSelected() {
     }
   } catch (error) {
     notify(error.message);
+  }
+}
+
+async function forgetMissing(folder) {
+  folderMenu.hidden = true;
+  try {
+    const result = await product.forgetMissing(folder || '');
+    await Promise.all([loadView(), loadFolders()]);
+    notify(`${result.forgotten} missing photograph${result.forgotten === 1 ? '' : 's'} forgotten. They come back, with their decisions, if the files ever do.`);
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function showCards() {
+  // A card that is here is one quiet chip; the follower notices it within
+  // seconds and the pulse says how many there are.
+  let cards = [];
+  try {
+    cards = await product.cards();
+  } catch {
+    cards = [];
+  }
+  const chip = document.querySelector('[data-action="import-card"]');
+  chip.hidden = cards.length === 0;
+  if (cards.length) {
+    chip.dataset.root = cards[0].root;
+    chip.querySelector('[data-card-label]').textContent = cards[0].label;
   }
 }
 
@@ -561,6 +601,20 @@ document.addEventListener('click', (event) => {
   if (action === 'restore') trashWorkflow.restoreSelected();
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
+  if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
+  if (action === 'import-folder') {
+    product.chooseFolder().then((chosen) => { if (chosen) intakeWorkflow.open(chosen); }).catch((error) => notify(error.message));
+  }
+  if (action === 'import-card') {
+    const root = document.querySelector('[data-action="import-card"]').dataset.root;
+    if (root) intakeWorkflow.open(root, { isCard: true });
+  }
+  if (action === 'start-import') intakeWorkflow.finish();
+  if (action === 'stop-import') intakeWorkflow.stop();
+  if (action === 'close-import') intakeWorkflow.close();
+  if (action === 'check-new') intakeWorkflow.checkNew();
+  if (action === 'check-all') intakeWorkflow.checkAll();
+  if (action === 'check-none') intakeWorkflow.checkNone();
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'reject') cullWorkflow.apply('reject');
@@ -575,6 +629,10 @@ document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
   if (homeDialog.open) return;
+  if (intakeWorkflow.isOpen()) {
+    if (event.key === 'Escape') intakeWorkflow.close();
+    return;
+  }
   if (event.key === 'Escape') {
     if (loupe.open) closeLoupe();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();

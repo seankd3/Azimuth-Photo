@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import threading
+import time
 from typing import Callable, TypeVar
 
 import library as queries
@@ -19,8 +20,8 @@ import metadata as embedded_metadata
 import model
 import tiles
 import work
-from model import cache, copies, cull, decisions, drives, photos, trash
-from model.scope import EVERYTHING, Scope, folder as in_folder
+from model import cache, copies, cull, decisions, drives, intake, photos, trash
+from model.scope import EVERYTHING, Scope, folder as in_folder, where as scope_where
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -176,6 +177,18 @@ class Library:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
 
+    def forget_missing(self, folder: str = "") -> dict:
+        """Forget every photograph under a folder (or anywhere) that no drive
+        holds -- Lightroom's remove-missing, scoped to the tree."""
+
+        self._open()
+        clause, args = scope_where(in_folder(folder) if folder else EVERYTHING)
+        cursor = self.conn.execute(
+            f"DELETE FROM images WHERE id IN (SELECT i.id FROM images i WHERE {queries.IN_LIBRARY} AND ({clause})"
+            f" AND NOT EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id))", args)
+        self.conn.commit()
+        return {"forgotten": int(cursor.rowcount)}
+
     def forget(self, photo_ids) -> dict:
         """Drop rows that no drive holds. A row is an address; its decisions
         live under the identity and come back with the file if it ever does."""
@@ -307,6 +320,13 @@ class OwnedLibrary:
         self._executor_shutdown = False
         self._stop_following = threading.Event()
         self._follower: threading.Thread | None = None
+        # Bringing photographs in has its own lane: a card takes minutes, and
+        # neither browsing nor the minute sweep may wait behind it.
+        self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
+        self._intake = {"phase": "idle"}
+        self._intake_stop = threading.Event()
+        self._staged: dict[str, list[dict]] = {}
+        self.cards: list[dict] = []
         try:
             self._library = self._executor.submit(Library, catalog_path, tile_root).result()
         except BaseException:
@@ -363,6 +383,128 @@ class OwnedLibrary:
             conn.close()
         return [self._sweep(uuid, folder) for uuid in wanted]
 
+    # ---- bringing photographs in ----
+
+    async def stage(self, source: str) -> dict:
+        """Look at a source and say what is there and where it would go."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._intake_executor.submit(self._stage, source)
+        return await asyncio.wrap_future(future)
+
+    def _stage(self, source: str) -> dict:
+        source = os.path.abspath(source)
+        # The staging pictures are for this look only; the last look's go.
+        import shutil
+
+        shutil.rmtree(os.path.join(self._library.tiles.root, ".staging"), ignore_errors=True)
+        conn = model.connect(self._library.catalog_path)
+        try:
+            candidates = intake.scan(conn, source)
+            receiving = drives.receiving(conn)
+        finally:
+            conn.close()
+        self._staged[source] = candidates
+        guess = intake.guess_kind(source, (c["name"] for c in candidates))
+        if guess is None and "takeout" in source.lower():
+            guess = intake.SNAPSHOTS
+        return {
+            "source": source,
+            "kind": guess,
+            "roots": dict(intake.ROOTS),
+            "receiving": receiving["label"] if receiving else None,
+            "candidates": [{k: v for k, v in c.items() if k != "path"} for c in candidates],
+        }
+
+    async def bring(self, source: str, keys: list[str], kind: str, *, clear_source: bool = False,
+                    roll: str = "") -> dict:
+        """Start bringing the chosen staged photographs in, on the intake lane."""
+
+        source = os.path.abspath(source)
+        staged = self._staged.get(source)
+        if staged is None:
+            raise ValueError("stage the source first")
+        wanted = {str(k) for k in keys}
+        chosen = [c for c in staged if c["key"] in wanted]
+        conn = model.connect(self._library.catalog_path)
+        try:
+            receiving = drives.receiving(conn)
+        finally:
+            conn.close()
+        if receiving is None:
+            raise ValueError("No drive is here to receive photographs. Attach a folder first.")
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            if self._intake.get("phase") == "bringing":
+                raise ValueError("an import is already running")
+            self._intake_stop.clear()
+            self._intake = {"phase": "bringing", "source": source, "kind": kind, "done": 0,
+                            "total": len(chosen), "brought": 0, "already": 0, "skipped": 0,
+                            "cleared": 0, "failed": 0, "bytes": 0, "started": time.time()}
+            self._intake_executor.submit(self._bring, source, chosen, kind, receiving["uuid"],
+                                         bool(clear_source), str(roll or ""))
+        return dict(self._intake)
+
+    def _bring(self, source, chosen, kind, drive_uuid, clear_source, roll) -> None:
+        conn = model.connect(self._library.catalog_path)
+
+        def progress(tally: dict) -> None:
+            self._intake.update({k: tally[k] for k in
+                                 ("done", "total", "brought", "already", "skipped", "cleared", "failed", "bytes")})
+            self._intake["elapsed"] = time.time() - self._intake["started"]
+            self._library.chores.nudge()
+
+        try:
+            tally = intake.bring(conn, drive_uuid, kind, chosen, roll=roll, clear_source=clear_source,
+                                 progress=progress, stop=self._intake_stop.is_set)
+            self._intake.update({k: tally[k] for k in
+                                 ("done", "total", "brought", "already", "skipped", "cleared", "failed", "bytes")})
+            self._intake["phase"] = "stopped" if tally["stopped"] else "done"
+            self._intake["failures"] = [o for o in tally["outcomes"] if o["outcome"] not in
+                                        ("written", "already there", "already in the library")][:50]
+        except Exception as error:  # noqa: BLE001 - the status carries it
+            self._intake["phase"] = "failed"
+            self._intake["error"] = str(error)
+        finally:
+            conn.close()
+            self._library.swept += 1
+            self._library.chores.nudge()
+
+    def intake_status(self) -> dict:
+        return dict(self._intake)
+
+    def stop_intake(self) -> None:
+        self._intake_stop.set()
+
+    def thumb(self, source: str, key: str) -> str | None:
+        """A small picture of one staged file, rendered into the home's staging
+        corner so the window can read it; None when the file will not render."""
+
+        import hashlib
+
+        import render
+
+        staged = self._staged.get(os.path.abspath(source)) or []
+        candidate = next((c for c in staged if c["key"] == key), None)
+        if candidate is None:
+            return None
+        folder = os.path.join(self._library.tiles.root, ".staging")
+        os.makedirs(folder, exist_ok=True)
+        name = hashlib.blake2b(f"{candidate['path']}|{candidate['size']}".encode("utf-8"), digest_size=16).hexdigest()
+        target = os.path.join(folder, f"{name}.jpg")
+        if not os.path.isfile(target):
+            try:
+                body = render.render(candidate["path"], 320)
+            except Exception:  # noqa: BLE001 - a file that will not render shows no picture
+                return None
+            with open(target + ".part", "wb") as handle:
+                handle.write(body)
+            os.replace(target + ".part", target)
+        return Path(target).as_uri()
+
     def follow(self, every: float = 60.0) -> None:
         """Keep the catalog true to the folders: every working drive that is
         here is swept on the sweep lane every `every` seconds (measured 0.5 s
@@ -373,7 +515,17 @@ class OwnedLibrary:
 
         def loop() -> None:
             first = True
-            while not self._stop_following.wait(0 if first else every):
+            passes = 0
+            while not self._stop_following.wait(0 if first else 5.0):
+                # A card that arrives is noticed within seconds; the folders are
+                # swept every `every` seconds (each fifth pass of five).
+                try:
+                    self.cards = intake.cards()
+                except Exception:  # noqa: BLE001
+                    self.cards = []
+                passes += 1
+                if not first and (passes % max(1, int(every // 5))):
+                    continue
                 with self._state:
                     if self._closed:
                         return
@@ -397,6 +549,8 @@ class OwnedLibrary:
                 self._stop_following.set()
 
                 def finish() -> None:
+                    self._intake_stop.set()
+                    self._intake_executor.shutdown(wait=True, cancel_futures=False)
                     self._scan_executor.shutdown(wait=True, cancel_futures=False)
                     self._library.close()
 

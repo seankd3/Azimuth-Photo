@@ -242,6 +242,8 @@ def _clear(source: str, tally: dict) -> None:
 
 def cards() -> list[dict]:
     """Removable volumes with a DCIM folder -- a camera card that is here now.
+    Cheap on purpose (a drive type and one folder per letter), because it is
+    asked every few seconds; what the card holds is counted when it is staged.
     Windows only for the moment; elsewhere a card is a folder chosen by hand."""
 
     import sys
@@ -256,22 +258,9 @@ def cards() -> list[dict]:
         root = f"{letter}:\\"
         if ctypes.windll.kernel32.GetDriveTypeW(root) != removable:
             continue
-        dcim = os.path.join(root, "DCIM")
-        if not os.path.isdir(dcim):
+        if not os.path.isdir(os.path.join(root, "DCIM")):
             continue
-        photographs = 0
-        size = 0
-        for dirpath, _dirnames, filenames in os.walk(dcim):
-            for name in filenames:
-                path = os.path.join(dirpath, name)
-                if photos.supported(path):
-                    try:
-                        size += os.path.getsize(path)
-                        photographs += 1
-                    except OSError:
-                        continue
-        found.append({"root": root, "label": _volume_label(root) or f"Card {letter}:",
-                      "photos": photographs, "bytes": size})
+        found.append({"root": root, "label": _volume_label(root) or f"Card {letter}:"})
     return found
 
 
