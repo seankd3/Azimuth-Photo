@@ -33,6 +33,8 @@ scan of 157,064 rows.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 from model import cache, decisions
 from model.scope import EVERYTHING, Scope, where
 
@@ -83,7 +85,8 @@ Renditions = dict[str, tuple[cache.Kind, dict]]
 
 
 def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
-           limit: int = 200, offset: int = 0, renditions: Renditions | None = None) -> list[dict]:
+           limit: int = 200, offset: int = 0, renditions: Renditions | None = None,
+           reachable_on: Iterable[int] = ()) -> list[dict]:
     """One page of the grid.
 
     Deliberately has no `include_missing`, no `source`, no `online_only`. Those
@@ -98,20 +101,24 @@ def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
     without this function learning about any of them.
 
     `renditions` names cached answers the row should carry -- the grid tile,
-    the loupe -- as `name: (kind, recipe)`. Each becomes the answer's path or
-    NULL, read from the cache table in the same query, so a row says whether
-    its picture exists without anyone touching the disk.
+    the loupe -- as `name: (kind, recipe)`. Each becomes the answer's path when
+    it is ready or NULL, plus `<name>_failed` when the answer was tried and
+    could not be made, read from the cache table in the same query, so a row
+    says whether its picture exists without anyone touching the disk.
+    `reachable_on` is the drives that are here now; the row's `reachable` says
+    whether a copy sits on one of them, which is whether a picture could be
+    made at all.
     """
 
     if sort not in SORTS:
         raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
     clause, args = where(scope)
     return _page(conn, f"{IN_LIBRARY} AND ({clause})", args, SORTS[sort], (),
-                 limit, offset, renditions)
+                 limit, offset, renditions, reachable_on)
 
 
 def trash(conn, *, limit: int = 200, offset: int = 0,
-          renditions: Renditions | None = None) -> list[dict]:
+          renditions: Renditions | None = None, reachable_on: Iterable[int] = ()) -> list[dict]:
     """One page of Trash, newest decision first.
 
     The same page as the grid with the complement of `IN_LIBRARY` and an order
@@ -124,11 +131,12 @@ def trash(conn, *, limit: int = 200, offset: int = 0,
         f"ORDER BY {decisions.AUTHORITY_SQL} DESC, d.at DESC, d.id DESC LIMIT 1) DESC, i.id DESC"
     )
     return _page(conn, "i.status = 'trashed' AND i.tail IS NOT NULL", (), latest,
-                 (decisions.STATUS,), limit, offset, renditions)
+                 (decisions.STATUS,), limit, offset, renditions, reachable_on)
 
 
 def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
-          limit: int, offset: int, renditions: Renditions | None) -> list[dict]:
+          limit: int, offset: int, renditions: Renditions | None,
+          reachable_on: Iterable[int] = ()) -> list[dict]:
     limit, offset = int(limit), int(offset)
     if not 1 <= limit <= 500:
         raise ValueError("a page contains between 1 and 500 photos")
@@ -140,10 +148,18 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
         alias = f"r{position}"
         joins.append(
             f"LEFT JOIN cache {alias} ON {alias}.hash = i.content_hash AND {alias}.kind = ?"
-            f" AND {alias}.recipe = ? AND {alias}.state = 'ready'"
+            f" AND {alias}.recipe = ?"
         )
-        columns.append(f", {alias}.path AS {name}")
+        columns.append(
+            f", CASE WHEN {alias}.state = 'ready' THEN {alias}.path END AS {name}"
+            f", {alias}.state = 'failed' AS {name}_failed"
+        )
         bound += [kind.name, cache.canonical(kind, recipe)]
+    here = [int(d) for d in reachable_on]
+    holes = ",".join("?" for _ in here) or "NULL"
+    columns.append(
+        f", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id AND c.drive_id IN ({holes})) AS reachable"
+    )
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.rotate, i.elo,
@@ -153,7 +169,9 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
         ORDER BY {order}
         LIMIT ? OFFSET ?
         """,
-        (*bound, *args, *order_args, limit, offset),
+        # Bound in SQL text order: the reachability list sits in the SELECT,
+        # before the rendition joins' kinds and recipes.
+        (*here, *bound, *args, *order_args, limit, offset),
     )]
 
 

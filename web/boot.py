@@ -107,8 +107,16 @@ class Library:
         self._open()
         return self._with_urls(queries.photos(
             self.conn, scope=scope, sort=sort, limit=limit, offset=offset,
-            renditions=self.tiles.renditions,
+            renditions=self.tiles.renditions, reachable_on=self._here(),
         ))
+
+    def _here(self) -> list[int]:
+        """The drives attached right now, answered by looking at each marker."""
+
+        return [
+            int(row["id"]) for row in self.conn.execute("SELECT id, uuid FROM drives")
+            if drives.online(self.conn, row["uuid"])
+        ]
 
     def size(self, scope: Scope = EVERYTHING) -> int:
         self._open()
@@ -174,6 +182,7 @@ class Library:
         self._open()
         return self._with_urls(queries.trash(
             self.conn, limit=limit, offset=offset, renditions=self.tiles.renditions,
+            reachable_on=self._here(),
         ))
 
     def empty_trash(self, expected_count: int, *, dry_run: bool = False) -> dict:

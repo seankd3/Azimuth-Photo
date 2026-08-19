@@ -297,11 +297,14 @@ async function scanDrive(drive) {
   }
 }
 
-async function selectPhoto(photo, index) {
+async function selectPhoto(index) {
+  // The row as it is now; a cell's click never carries a row of its own.
+  const photo = read().photos.get(index);
+  if (!photo) return;
   update({ selected: photo, selectedIndex: index });
   try {
     const details = await product.photo(photo.id);
-    if (read().selected?.id === photo.id) update({ selected: { ...photo, ...details } });
+    if (read().selected?.id === photo.id) update({ selected: { ...read().selected, ...details } });
   } catch (error) {
     if (read().selected?.id === photo.id) notify(error.message);
   }
@@ -328,7 +331,7 @@ async function selectIndex(index, { open = loupe.open } = {}) {
   const photo = read().photos.get(bounded);
   if (!photo) return;
   scrollIndexIntoView(bounded);
-  selectPhoto(photo, bounded);
+  selectPhoto(bounded);
   scheduleGrid();
   if (!loupe.open) requestAnimationFrame(() => grid.querySelector(`[data-index="${bounded}"]`)?.focus());
   if (open) showPhoto(photo);
@@ -347,6 +350,12 @@ function showPhoto(photo) {
 function renderLoupe(photo) {
   loupeImage.dataset.turn = photo.rotate || 0;
   const source = photo.loupe || photo.tile || '';
+  const note = document.querySelector('[data-loupe-note]');
+  note.textContent = source ? ''
+    : photo.tile_failed || photo.loupe_failed ? 'This photograph cannot be shown.'
+      : photo.reachable ? 'Preparing this photograph…'
+        : 'The drive that holds this photograph is away.';
+  note.hidden = Boolean(source);
   if (loupeImage.dataset.source === source) return;
   loupeImage.dataset.source = source;
   if (source) loupeImage.src = source;
@@ -354,9 +363,10 @@ function renderLoupe(photo) {
   loupeImage.alt = photo.tail || 'Selected photo';
 }
 
-function openPhoto(photo, index) {
-  if (read().selectedIndex !== index) selectPhoto(photo, index);
-  showPhoto(photo);
+function openPhoto(index) {
+  if (read().selectedIndex !== index) selectPhoto(index);
+  const photo = read().photos.get(index);
+  if (photo) showPhoto(photo);
 }
 
 

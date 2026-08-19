@@ -52,6 +52,11 @@ function currentLayout(width, rowHeight, count) {
 function showTile(cell, photo) {
   const image = cell.querySelector('img');
   const source = photo.tile || '';
+  // An empty cell is one of three honest states: the worker will make the
+  // picture (pending), it was tried and cannot be made (unshowable), or no
+  // copy is on a drive that is here (away). The cell says which.
+  const state = source ? '' : photo.tile_failed ? 'unshowable' : photo.reachable ? 'pending' : 'away';
+  if (cell.dataset.empty !== state) cell.dataset.empty = state;
   if (image.dataset.source === source) return;
   image.dataset.source = source;
   if (source) image.src = source;
@@ -104,8 +109,8 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
-  cell.addEventListener('click', () => actions.select(photo, index));
-  cell.addEventListener('dblclick', () => actions.open(photo, index));
+  cell.addEventListener('click', () => actions.select(index));
+  cell.addEventListener('dblclick', () => actions.open(index));
   return cell;
 }
 
@@ -167,7 +172,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
       showTile(cell, photo);
       const picked = photo.status === 'picked';
       cell.classList.toggle('is-picked', picked);
-      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}`);
+      const why = cell.dataset.empty === 'unshowable' ? ', cannot be shown' : cell.dataset.empty === 'away' ? ', drive away' : '';
+      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
       cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
     }
     desired.push(cell);

@@ -176,6 +176,9 @@ def main() -> int:
         width=1500,
         height=950,
         min_size=(900, 600),
+        # Opened maximized: the owner works in the full window, and every
+        # surface is designed at that size first.
+        maximized=True,
         background_color="#0d0e10",
     )
     desktop.bind(window)

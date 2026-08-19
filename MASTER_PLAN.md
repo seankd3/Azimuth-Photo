@@ -178,6 +178,8 @@ global `CLAUDE.md`.
 
 ---
 
+- `live` "when testing the UI interactively it might be best to make it fullscreen as that will by my main viewing size. and you can deisgn around that (fitting nicely on 1080p screens is good too but not a priority for me atm)" — 08-19 · **the design size is the full 3456×2160 window at 175%.** The app opens maximized and every native proof photographs it maximized; 1080p must still fit but is not the size decisions are made at.
+
 ### 1.9b Codebase and architecture (08-15, the 2.0 order)
 
 - `open` "I want the codebase to have zero tech debt, just clean dead simple code. small codebase." — 08-15 · measured honestly rather than agreed to: 146,178 lines, of which 39,135 is UI. Cutting the UI removes the product, not the debt, so the target is stated against the backend — **107k → ~12k**, tests → ~5k, UI → ~25k. One mechanical gate holds it: a line budget that fails the build. Advisory doctrine decays; this is the lesson from three previous cleanup waves growing back.
