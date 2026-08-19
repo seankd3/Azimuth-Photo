@@ -12,6 +12,7 @@ import webview
 
 import boot
 import home
+from model.scope import EVERYTHING, folder as in_folder
 
 
 Result = TypeVar("Result")
@@ -85,10 +86,19 @@ class Desktop:
     def pulse(self) -> dict:
         return self._run(lambda library: library.pulse())
 
-    def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0) -> list[dict]:
+    def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0,
+               folder: str | None = None) -> list[dict]:
+        scope = in_folder(folder) if folder else EVERYTHING
         return self._run(
-            lambda library: library.browse(sort=sort, limit=int(limit), offset=int(offset))
+            lambda library: library.browse(scope=scope, sort=sort, limit=int(limit), offset=int(offset))
         )
+
+    def size(self, folder: str | None = None) -> int:
+        scope = in_folder(folder) if folder else EVERYTHING
+        return self._run(lambda library: library.size(scope))
+
+    def folders(self) -> list[dict]:
+        return self._run(lambda library: library.folders())
 
     def photo(self, photo_id: int) -> dict:
         answer = self._run(lambda library: library.details(int(photo_id)))

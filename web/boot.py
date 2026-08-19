@@ -20,7 +20,7 @@ import model
 import tiles
 import work
 from model import cache, copies, cull, decisions, drives, photos, trash
-from model.scope import EVERYTHING, Scope
+from model.scope import EVERYTHING, Scope, folder as in_folder
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -109,6 +109,17 @@ class Library:
             self.conn, scope=scope, sort=sort, limit=limit, offset=offset,
             renditions=self.tiles.renditions,
         ))
+
+    def size(self, scope: Scope = EVERYTHING) -> int:
+        self._open()
+        return queries.size(self.conn, scope)
+
+    def folders(self) -> list[dict]:
+        """One tree over every drive, each node with its count and whether
+        everything under it has a copy on a record drive."""
+
+        self._open()
+        return queries.folder_tree(self.conn)
 
     def look(self, photo_ids) -> int:
         """The window says which photographs it is showing; the worker makes

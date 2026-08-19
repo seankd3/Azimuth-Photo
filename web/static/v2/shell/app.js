@@ -44,7 +44,7 @@ const pages = new PageCache({
   pageSize: PAGE,
   load: (offset, limit) => read().view === 'trash'
     ? product.trashPhotos({ limit, offset })
-    : product.photos({ sort: read().sort, limit, offset }),
+    : product.photos({ sort: read().sort, limit, offset, folder: read().folder }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
     notify(`Some photos could not be loaded. ${error.message}`);
@@ -148,7 +148,7 @@ homeForm.addEventListener('submit', async (event) => {
   try {
     await product.settleHome(homePath.textContent);
     homeDialog.close();
-    await loadView();
+    await Promise.all([loadView(), loadFolders()]);
   } catch (error) {
     homeError.textContent = error.message;
   } finally {
@@ -184,17 +184,18 @@ async function loadView() {
   const requestGeneration = pages.reset();
   update({ loading: true, photos: new Map(), total: 0, selected: null, selectedIndex: null });
   try {
-    const { sort, view } = read();
-    const [counts, drives, trashCount, page] = await Promise.all([
+    const { sort, view, folder } = read();
+    const [counts, drives, trashCount, size, page] = await Promise.all([
       product.counts(),
       product.drives(),
       product.trashCount(),
+      view === 'trash' ? Promise.resolve(0) : product.size(folder),
       view === 'trash'
         ? product.trashPhotos({ limit: PAGE, offset: 0 })
-        : product.photos({ sort, limit: PAGE, offset: 0 }),
+        : product.photos({ sort, limit: PAGE, offset: 0, folder }),
     ]);
-    if (!pages.isCurrent(requestGeneration) || read().view !== view) return;
-    const total = view === 'trash' ? trashCount : counts.photos;
+    if (!pages.isCurrent(requestGeneration) || read().view !== view || read().folder !== folder) return;
+    const total = view === 'trash' ? trashCount : size;
     pages.seed(requestGeneration, page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
     update({ notice: '' });
@@ -210,12 +211,13 @@ async function refreshInPlace() {
   // The library changed under the window -- a sweep admitted photographs or
   // the worker finished one -- so re-read what is loaded without resetting it.
   const generation = pages.generation;
-  const view = read().view;
-  const [counts, drives, trashCount] = await Promise.all([
+  const { view, folder } = read();
+  const [counts, drives, trashCount, size] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
+    view === 'trash' ? Promise.resolve(0) : product.size(folder),
   ]);
-  if (!pages.isCurrent(generation) || read().view !== view) return;
-  await pages.refresh(view === 'trash' ? trashCount : counts.photos);
+  if (!pages.isCurrent(generation) || read().view !== view || read().folder !== folder) return;
+  await pages.refresh(view === 'trash' ? trashCount : size);
   if (!pages.isCurrent(generation)) return;
   update({ counts: { ...counts, trash: trashCount }, drives });
   const { selected, photos } = read();
@@ -253,6 +255,24 @@ async function followLibrary() {
   }
 }
 
+async function loadFolders() {
+  // The tree is every tail's folders with counts and a safety word; it costs
+  // about a second on a large library and changes only when a sweep or an
+  // import changes tails, so it is read at boot and after a sweep, never on
+  // the first-paint path.
+  try {
+    update({ folders: await product.folders() });
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+function showFolder(path) {
+  update({ view: 'library', folder: path, selected: null, selectedIndex: null });
+  workspace.scrollTo({ top: 0 });
+  loadView();
+}
+
 async function scanDrive(drive) {
   update({ scanning: true });
   workspace.scrollTo({ top: 0 });
@@ -266,6 +286,7 @@ async function scanDrive(drive) {
     }
     const result = await scan;
     await refreshInPlace();
+    await loadFolders();
     notify(result.applied
       ? `${result.photos_added.toLocaleString()} photos added.`
       : result.reason || 'The folder could not be fully read.');
@@ -338,12 +359,50 @@ function openPhoto(photo, index) {
 }
 
 
+function renderFolders(state) {
+  // One row per visible node, depth as a CSS variable; a node opens from its
+  // disclosure and scopes the grid from its name. Safety is one quiet mark:
+  // amber when something under here exists only on the working disk, hollow
+  // when the record drive is away and nobody can say, nothing when all is well.
+  const rows = [];
+  // A hollow ring says "the record drive is away, so nobody can say"; with no
+  // record drive registered at all there is nothing to say per folder.
+  const anyRecord = state.drives.some((drive) => drive.is_record);
+  const walk = (nodes, depth) => {
+    for (const node of nodes) {
+      const row = document.createElement('div');
+      row.className = 'folder-row' + (state.view === 'library' && state.folder === node.path ? ' is-active' : '');
+      row.style.setProperty('--depth', depth);
+      row.dataset.folder = node.path;
+      const open = state.open.has(node.path);
+      const disclosure = document.createElement('button');
+      disclosure.type = 'button';
+      disclosure.className = 'disclosure' + (node.children.length ? ' has-children' : '') + (open ? ' is-open' : '');
+      disclosure.dataset.toggle = node.path;
+      disclosure.setAttribute('aria-label', open ? 'Collapse' : 'Expand');
+      disclosure.textContent = '▶';
+      const safety = document.createElement('span');
+      safety.className = `safety ${node.safety === 'unknown' && !anyRecord ? 'quiet' : node.safety}`;
+      const name = document.createElement('span');
+      name.className = 'folder-name';
+      name.textContent = node.name;
+      const count = document.createElement('span');
+      count.className = 'folder-count';
+      count.textContent = node.total_count.toLocaleString();
+      row.append(disclosure, safety, name, count);
+      rows.push(row);
+      if (open && node.children.length) walk(node.children, depth + 1);
+    }
+  };
+  walk(state.folders, 0);
+  document.querySelector('[data-folder-tree]').replaceChildren(...rows);
+}
+
 function renderChrome(state) {
   library.renderInspector(inspector, state.selected);
   if (loupe.open && state.selected) renderLoupe(state.selected);
   const count = state.counts.photos.toLocaleString();
-  const viewCount = state.view === 'trash' ? state.counts.trash : state.counts.photos;
-  document.querySelector('[data-photo-count]').textContent = `${viewCount.toLocaleString()} photos`;
+  document.querySelector('[data-photo-count]').textContent = `${state.total.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   document.querySelector('[data-result-label]').textContent = state.loading
@@ -363,9 +422,12 @@ function renderChrome(state) {
   document.querySelector('[data-action="clear-pick"]').hidden = !canCull || state.selected.status !== 'picked';
   document.querySelector('[data-action="restore"]').hidden = state.view !== 'trash' || !state.selected;
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
-  document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library');
+  document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !state.folder);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
-  document.querySelector('.view-title strong').textContent = state.view === 'trash' ? 'Trash' : 'All photos';
+  document.querySelector('.view-title strong').textContent = state.view === 'trash'
+    ? 'Trash'
+    : state.folder ? state.folder.split('/').pop() : 'All photos';
+  renderFolders(state);
 
   driveList.replaceChildren(...state.drives.map((drive) => {
     const row = document.createElement('div');
@@ -408,8 +470,21 @@ document.addEventListener('click', (event) => {
   if (action === 'change-home') {
     product.chooseFolder().then((chosen) => { if (chosen) homePath.textContent = chosen; }).catch((error) => { homeError.textContent = error.message; });
   }
+  const toggle = event.target.closest('[data-toggle]')?.dataset.toggle;
+  if (toggle !== undefined) {
+    const open = new Set(read().open);
+    if (open.has(toggle)) open.delete(toggle);
+    else open.add(toggle);
+    update({ open });
+    return;
+  }
+  const folderRow = event.target.closest('.folder-row');
+  if (folderRow) {
+    showFolder(folderRow.dataset.folder);
+    return;
+  }
   if (action === 'all-photos') {
-    update({ view: 'library' });
+    update({ view: 'library', folder: null });
     workspace.scrollTo({ top: 0 });
     loadView();
   }
@@ -504,5 +579,5 @@ loupe.addEventListener('close', () => {
 });
 
 subscribe(render);
-product.home().then((where) => (where ? loadView() : chooseHome()));
+product.home().then((where) => (where ? Promise.all([loadView(), loadFolders()]) : chooseHome()));
 followLibrary();

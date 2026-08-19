@@ -1,6 +1,9 @@
 const state = {
   counts: { photos: 0, starred: 0, unidentified: 0, trash: 0 },
   drives: [],
+  folder: null,
+  folders: [],
+  open: new Set(),
   photos: new Map(),
   total: 0,
   loading: true,

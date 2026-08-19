@@ -187,6 +187,15 @@ def folders(conn) -> list[dict]:
     ]
 
 
+def size(conn, scope: Scope = EVERYTHING) -> int:
+    """How many photographs a scope holds -- the total a page window needs."""
+
+    clause, args = where(scope)
+    return int(conn.execute(
+        f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY} AND ({clause})", args
+    ).fetchone()[0])
+
+
 def counts(conn) -> dict:
     """What the status line says.
 
