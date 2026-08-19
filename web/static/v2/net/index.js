@@ -36,7 +36,7 @@ export const library = Object.freeze({
   forgetMissing: (folder = '') => invoke('forget_missing', folder),
   cards: () => invoke('cards'),
   stage: (source) => invoke('stage', source),
-  bring: (source, keys, kind, clearSource = false, roll = '') => invoke('bring', source, keys, kind, clearSource, roll),
+  bring: (source, keys, kind, clearSource = false, roll = '', rolls = {}) => invoke('bring', source, keys, kind, clearSource, roll, rolls),
   intakeStatus: () => invoke('intake_status'),
   stopIntake: () => invoke('stop_intake'),
   thumb: (source, key) => invoke('thumb', source, key),

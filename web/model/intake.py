@@ -49,6 +49,13 @@ ROOTS = {
 # when the source does not say otherwise.
 CAMERA = frozenset({".arw", ".cr2", ".cr3", ".dng", ".nef", ".orf", ".raf", ".rw2"})
 
+# Words a lab or a scanning tool writes into a scan's description when it
+# knows the stock; a roll named after its stock beats a number.
+STOCKS = ("portra", "ektar", "gold", "ultramax", "colorplus", "pro image", "tri-x", "t-max", "tmax",
+          "hp5", "fp4", "delta", "pan f", "xp2", "superia", "provia", "velvia", "acros", "c200",
+          "cinestill", "lomography", "fomapan", "kentmere", "rollei", "ektachrome", "vision3")
+_DATE_IN_NAME = re.compile(r"(20\d\d|19\d\d)[-_.]?(0[1-9]|1[0-2])[-_.]?(0[1-9]|[12]\d|3[01])")
+
 
 def destination(kind: str, taken: str | None, name: str, *, roll: str = "") -> str:
     """The tail for one photograph. Pure: the same inputs always name the same place."""
@@ -105,7 +112,9 @@ def scan(conn, source_root: str) -> list[dict]:
             "SELECT filename, file_size FROM images WHERE file_size IS NOT NULL")
     }
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        group = os.path.relpath(dirpath, root).replace(os.sep, "/")
+        group = "" if group == "." else group
         for name in sorted(filenames):
             if name.startswith("."):
                 continue
@@ -116,29 +125,63 @@ def scan(conn, source_root: str) -> list[dict]:
                 continue
             if not stat.S_ISREG(entry.st_mode) or entry.st_size <= 0 or not photos.supported(path):
                 continue
+            tags = _tags(path)
             seen.append({
                 "key": os.path.relpath(path, root).replace(os.sep, "/"),
                 "path": path,
                 "name": name,
+                "group": group,
                 "size": int(entry.st_size),
-                "taken": _taken(path, entry),
+                "taken": tags.get("date_taken") or dt.datetime.fromtimestamp(entry.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                # A scan carries no capture date; a lab's folder or archive name
+                # often carries the order's, which is the day the roll gets.
+                "folder_date": _date_in(os.path.relpath(dirpath, root)) or _date_in(os.path.basename(root)),
+                "stock": _stock(tags.get("description", "")),
                 "suspect": (name, int(entry.st_size)) in known,
             })
     return seen
 
 
-def _taken(path: str, entry) -> str:
-    """The photograph's own date, else the file's: always a date."""
-
+def _tags(path: str) -> dict:
     import metadata
 
     try:
-        answer = metadata.read(path).get("date_taken")
-    except Exception:  # noqa: BLE001 - an unreadable header is a file-time date
-        answer = None
-    if answer:
-        return answer
-    return dt.datetime.fromtimestamp(entry.st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        return metadata.read(path, description=True)
+    except Exception:  # noqa: BLE001 - an unreadable header is no tags
+        return {}
+
+
+def _date_in(text: str) -> str | None:
+    found = _DATE_IN_NAME.search(text or "")
+    return f"{found.group(1)}-{found.group(2)}-{found.group(3)}" if found else None
+
+
+def _stock(description: str) -> str:
+    """The stock as the lab wrote it: the part of the description, between
+    separators, that names one -- "Kodak Portra 400" out of
+    "Kodak Portra 400 - Noritsu HS-1800"."""
+
+    for part in re.split(r"[,;|/]| - |\s{2,}", description or ""):
+        lowered = part.lower()
+        if any(stock in lowered for stock in STOCKS):
+            return part.strip(" -_,.;:")
+    return ""
+
+
+def rolls(candidates: Iterable[dict]) -> dict[str, dict]:
+    """Film scans come by the roll -- one folder each, usually. Each roll is
+    named after its stock when a scan says so, else numbered 1, 2, 3 in the
+    order the folders come; the owner may rename any of them."""
+
+    groups: dict[str, dict] = {}
+    for candidate in candidates:
+        roll = groups.setdefault(candidate.get("group", ""), {"name": "", "count": 0, "stock": ""})
+        roll["count"] += 1
+        if not roll["stock"] and candidate.get("stock"):
+            roll["stock"] = candidate["stock"]
+    for number, (group, roll) in enumerate(groups.items(), start=1):
+        roll["name"] = roll["stock"] or str(number)
+    return groups
 
 
 def bring(
@@ -148,6 +191,7 @@ def bring(
     candidates: Iterable[dict],
     *,
     roll: str = "",
+    rolls_by_group: dict[str, str] | None = None,
     clear_source: bool = False,
     skip_known: bool = True,
     progress: Callable[[dict], None] | None = None,
@@ -198,9 +242,11 @@ def bring(
 
         name = candidate["name"]
         outcome = None
+        this_roll = (rolls_by_group or {}).get(candidate.get("group", ""), "") or roll
+        day = (candidate.get("folder_date") if kind == FILM else None) or candidate["taken"]
         for attempt in range(1, 1000):
             try:
-                tail = destination(kind, candidate["taken"], _numbered(name, attempt), roll=roll)
+                tail = destination(kind, day, _numbered(name, attempt), roll=this_roll)
             except ValueError as error:
                 outcome = {"outcome": f"no destination: {error}"}
                 break

@@ -413,13 +413,14 @@ class OwnedLibrary:
         return {
             "source": source,
             "kind": guess,
+            "rolls": intake.rolls(candidates),
             "roots": dict(intake.ROOTS),
             "receiving": receiving["label"] if receiving else None,
             "candidates": [{k: v for k, v in c.items() if k != "path"} for c in candidates],
         }
 
     async def bring(self, source: str, keys: list[str], kind: str, *, clear_source: bool = False,
-                    roll: str = "") -> dict:
+                    roll: str = "", rolls: dict[str, str] | None = None) -> dict:
         """Start bringing the chosen staged photographs in, on the intake lane."""
 
         source = os.path.abspath(source)
@@ -445,10 +446,10 @@ class OwnedLibrary:
                             "total": len(chosen), "brought": 0, "already": 0, "skipped": 0,
                             "cleared": 0, "failed": 0, "bytes": 0, "started": time.time()}
             self._intake_executor.submit(self._bring, source, chosen, kind, receiving["uuid"],
-                                         bool(clear_source), str(roll or ""))
+                                         bool(clear_source), str(roll or ""), dict(rolls or {}))
         return dict(self._intake)
 
-    def _bring(self, source, chosen, kind, drive_uuid, clear_source, roll) -> None:
+    def _bring(self, source, chosen, kind, drive_uuid, clear_source, roll, rolls) -> None:
         conn = model.connect(self._library.catalog_path)
 
         def progress(tally: dict) -> None:
@@ -458,8 +459,8 @@ class OwnedLibrary:
             self._library.chores.nudge()
 
         try:
-            tally = intake.bring(conn, drive_uuid, kind, chosen, roll=roll, clear_source=clear_source,
-                                 progress=progress, stop=self._intake_stop.is_set)
+            tally = intake.bring(conn, drive_uuid, kind, chosen, roll=roll, rolls_by_group=rolls,
+                                 clear_source=clear_source, progress=progress, stop=self._intake_stop.is_set)
             self._intake.update({k: tally[k] for k in
                                  ("done", "total", "brought", "already", "skipped", "cleared", "failed", "bytes")})
             self._intake["phase"] = "stopped" if tally["stopped"] else "done"

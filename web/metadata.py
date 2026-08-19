@@ -20,8 +20,9 @@ from photo import exif as raw_exif
 from photo import kind
 
 
-def read(path: str) -> dict:
-    """Read the six embedded fields the library indexes."""
+def read(path: str, *, description: bool = False) -> dict:
+    """Read the six embedded fields the library indexes (and, when asked, the
+    free-text description a lab or a scanning tool may have written)."""
 
     width, height = render.dimensions(path)
     tags = _raw_tags(path) if kind.is_raw(path) else _display_tags(path)
@@ -39,6 +40,8 @@ def read(path: str) -> dict:
     ):
         if value:
             answer[name] = value
+    if description:
+        answer["description"] = _text(tags.get("description"))
     return answer
 
 
@@ -164,6 +167,7 @@ def _display_tags(path: str) -> dict:
         "date_taken": values.get(0x9003) or values.get(0x0132),
         "date_digitized": values.get(0x9004),
         "lens": values.get(0xA434),
+        "description": values.get(0x010E) or values.get(0x9286),
     }
 
 

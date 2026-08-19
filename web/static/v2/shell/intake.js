@@ -4,7 +4,7 @@
 // destination shown as truth, one button. Esc before that button writes
 // nothing. The work itself is the product's; this is its conversation.
 
-const KIND_LABEL = { raws: 'Camera raws', snapshots: 'Snapshots', edits: 'Edits' };
+const KIND_LABEL = { raws: 'Camera raws', snapshots: 'Snapshots', edits: 'Edits', film: 'Film scans' };
 
 export function createIntakeWorkflow({ product, notify, afterImport }) {
   const dialog = document.querySelector('[data-import-dialog]');
@@ -18,7 +18,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   const clearBox = document.querySelector('[data-clear]');
   const startButton = document.querySelector('[data-action="start-import"]');
   const stopButton = document.querySelector('[data-action="stop-import"]');
-  const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false };
+  const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false, rolls: {} };
   let poll = null;
 
   const thumbs = new IntersectionObserver((entries) => {
@@ -42,6 +42,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     state.source = staged.source;
     state.kind = staged.kind;
     state.roots = staged.roots || {};
+    state.rolls = staged.rolls || {};
     state.candidates = staged.candidates;
     state.isCard = isCard;
     state.running = false;
@@ -61,9 +62,31 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   }
 
   function destinationOf(candidate) {
+    // A preview of the rule: root/YYYY/YYYY-MM-DD, and for film the roll; a
+    // scan's day is its lab folder's date when the folder carries one.
     const root = state.roots[state.kind] || '…';
-    const day = (candidate.taken || '').slice(0, 10);
-    return `${root}/${day.slice(0, 4)}/${day}`;
+    const film = state.kind === 'film';
+    const day = ((film && candidate.folder_date) || candidate.taken || '').slice(0, 10);
+    const roll = film ? `/${(state.rolls[candidate.group || ''] || {}).name || '?'}` : '';
+    return `${root}/${day.slice(0, 4)}/${day}${roll}`;
+  }
+
+  function renderRolls() {
+    const box = document.querySelector('[data-rolls]');
+    box.hidden = state.kind !== 'film';
+    if (box.hidden) return;
+    const list = document.querySelector('[data-roll-list]');
+    list.replaceChildren(...Object.entries(state.rolls).map(([group, roll]) => {
+      const item = document.createElement('li');
+      const where = document.createElement('span');
+      where.textContent = `${group || '(top)'} · ${roll.count} frames`;
+      const name = document.createElement('input');
+      name.value = roll.name;
+      name.dataset.group = group;
+      name.setAttribute('aria-label', `Roll name for ${group || 'the top folder'}`);
+      item.append(where, name);
+      return item;
+    }));
   }
 
   function render() {
@@ -71,6 +94,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
       button.classList.toggle('is-active', button.dataset.kind === state.kind);
     }
     document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
+    renderRolls();
 
     const cells = state.candidates.map((candidate) => {
       const cell = document.createElement('label');
@@ -126,7 +150,8 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     progress.hidden = false;
     progress.textContent = 'Starting…';
     try {
-      await product.bring(state.source, [...state.checked], state.kind, state.isCard && clearBox.checked);
+      const rolls = Object.fromEntries(Object.entries(state.rolls).map(([group, roll]) => [group, roll.name]));
+      await product.bring(state.source, [...state.checked], state.kind, state.isCard && clearBox.checked, '', rolls);
     } catch (error) {
       notify(error.message);
       state.running = false;
@@ -191,6 +216,12 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     if (!key) return;
     if (event.target.checked) state.checked.add(key);
     else state.checked.delete(key);
+    render();
+  });
+  document.querySelector('[data-roll-list]').addEventListener('input', (event) => {
+    const group = event.target.dataset.group;
+    if (group === undefined) return;
+    state.rolls[group].name = event.target.value.trim() || state.rolls[group].name;
     render();
   });
   document.querySelector('[data-kind-choice]').addEventListener('click', (event) => {

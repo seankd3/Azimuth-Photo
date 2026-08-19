@@ -362,6 +362,33 @@ class BringingPhotographsIn(CoreCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 4)
         self.assertEqual(os.listdir(os.path.join(card, "DCIM", "100CANON")), [])
 
+    def test_film_scans_land_by_roll_under_the_lab_folder_date(self):
+        lab = os.path.join(self.tmp, "Lab_2026-06-02_Order42")
+        roll_a = os.path.join(lab, "Roll A")
+        roll_b = os.path.join(lab, "Roll B")
+        os.makedirs(roll_a); os.makedirs(roll_b)
+        # the lab wrote the stock into one scan's description
+        exif = Image.Exif(); exif[0x010E] = "Kodak Portra 400, Noritsu HS-1800"
+        Image.new("RGB", (40, 30), (200, 180, 150)).save(os.path.join(roll_a, "000001.jpg"), "JPEG", exif=exif)
+        Image.new("RGB", (40, 30), (120, 130, 90)).save(os.path.join(roll_a, "000002.jpg"), "JPEG")
+        Image.new("RGB", (40, 30), (30, 60, 90)).save(os.path.join(roll_b, "000001.jpg"), "JPEG")
+
+        staged = intake.scan(self.conn, lab)
+        rolls = intake.rolls(staged)
+        self.assertEqual(list(rolls), ["Roll A", "Roll B"])
+        self.assertIn("Portra 400", rolls["Roll A"]["name"])
+        self.assertEqual(rolls["Roll B"]["name"], "2")
+        self.assertEqual({c["folder_date"] for c in staged}, {"2026-06-02"})
+        rolls["Roll B"]["name"] = "Tri-X"  # the owner renames one
+
+        result = intake.bring(self.conn, self.hot["uuid"], intake.FILM, staged,
+                              rolls_by_group={g: r["name"] for g, r in rolls.items()})
+
+        self.assertEqual(result["brought"], 3)
+        tails = sorted(row[0] for row in self.conn.execute("SELECT tail FROM images"))
+        self.assertEqual(tails[0], f"Raws/Film Scans/2026/2026-06-02/{rolls['Roll A']['name']}/000001.jpg")
+        self.assertEqual(tails[2], "Raws/Film Scans/2026/2026-06-02/Tri-X/000001.jpg")
+
     def test_a_missing_photograph_brought_back_takes_its_new_address(self):
         body = self.jpeg(seed="m")
         lost = self.write(self.hot_root, "Snapshots/2025/2025-01-01/gone.jpg", body)

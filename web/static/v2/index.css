@@ -409,7 +409,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .stage-when { font-size: 11px; color: var(--text-3); }
 .import-side { padding: 16px 18px; border-left: 1px solid var(--line); overflow: auto; }
 .import-side .eyebrow { margin: 14px 0 8px; }
-.kind-choice { display: flex; gap: 6px; }
+.kind-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .kind-choice button {
   flex: 1;
   padding: 8px 6px;
@@ -422,9 +422,14 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 }
 .kind-choice button.is-active { border-color: var(--accent); color: var(--text); background: #1f2730; }
 .kind-choice.is-asking button { border-color: #d9a441; }
+.rolls ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+.rolls li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+.rolls li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: #111215; color: var(--text); font-size: 12px; }
 .destinations { margin: 0; padding: 0; list-style: none; font: 12px/1.6 ui-monospace, monospace; color: var(--text-2); }
 .destinations li { display: flex; justify-content: space-between; gap: 8px; }
-.destinations li span:last-child { color: var(--text-3); }
+.destinations li span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.destinations li span:last-child { flex: none; color: var(--text-3); }
 .import-choose { display: flex; gap: 6px; }
 .import-foot { display: flex; align-items: center; gap: 14px; padding: 14px 34px; border-top: 1px solid var(--line); }
 .import-foot [data-import-summary] { flex: 1; color: var(--text-2); font-size: 13px; }
