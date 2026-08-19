@@ -228,6 +228,37 @@ def strength(conn, *, steps: int = 300, rate: float = 1.0, pull: float = 1.0) ->
     return {h: BASE + SPREAD * float(scores[index[h]]) for h in subjects}
 
 
+# A star is the ranking's readable face, and it is earned: only a photograph
+# seen in at least this many rounds carries one. One round is luck, two a
+# coincidence, three a pattern.
+EARNED = 3
+# Cumulative shares of the ranked photographs, best first, for five, four,
+# three and two stars; every other ranked photograph has one. A display
+# choice, not a model one -- the order is the ranking's, this only names it.
+BANDS = ((5, 0.02), (4, 0.10), (3, 0.30), (2, 0.60))
+
+
+def stars(scores: dict[str, float], seen: dict[str, int]) -> dict[str, int]:
+    """Every ranked photograph's star, from its place in the ranking.
+
+    Top 2% five, top 10% four, top 30% three, top 60% two, the rest one; a
+    photograph never ranked has none. There is no manual star anywhere --
+    the keys 1 to 5 filter, they do not rate -- so the star cannot disagree
+    with the order and Lightroom always receives a real value.
+    """
+
+    ranked = sorted(
+        (h for h, n in seen.items() if n >= EARNED and h in scores),
+        key=lambda h: (-scores[h], h),
+    )
+    out: dict[str, int] = {}
+    for place, subject in enumerate(ranked):
+        # `place < count * share`, so the best of even a handful is five: a
+        # small shoot has a best frame too.
+        out[subject] = next((star for star, share in BANDS if place < len(ranked) * share), 1)
+    return out
+
+
 def _somewhere(upper: int) -> int:
     """A random offset. Its own function so a test can hold it still."""
 

@@ -1255,13 +1255,13 @@ class LibraryQueriesRefuse(CoreCase):
             "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
             (("Raws/one.jpg", digest), ("Raws/two.jpg", digest)),
         )
-        decisions.decide(self.conn, digest, decisions.STAR, 5)
+        decisions.decide(self.conn, digest, decisions.ROTATE, 90)
 
         rebuilt = library_surface.reindex(self.conn)
 
-        stars = [row[0] for row in self.conn.execute("SELECT stars FROM images ORDER BY id")]
-        self.assertEqual(stars, [5, 5])
-        self.assertEqual(rebuilt[decisions.STAR], 2)
+        turns = [row[0] for row in self.conn.execute("SELECT rotate FROM images ORDER BY id")]
+        self.assertEqual(turns, [90, 90])
+        self.assertEqual(rebuilt[decisions.ROTATE], 2)
 
     def test_an_invalid_decision_cannot_partially_rebuild_the_read_index(self):
         first, second = "d" * 64, "e" * 64
@@ -1270,7 +1270,7 @@ class LibraryQueriesRefuse(CoreCase):
             (("Raws/one.jpg", first), ("Raws/two.jpg", second)),
         )
         decisions.decide(self.conn, first, decisions.STATUS, "trashed")
-        decisions.decide(self.conn, second, decisions.STAR, 9)
+        decisions.decide(self.conn, second, decisions.ROTATE, 45)
 
         with self.assertRaises(ValueError):
             library_surface.reindex(self.conn)
@@ -1642,6 +1642,46 @@ class RankingIsDerived(CoreCase):
         # what is on screen does not come straight back
         again = rank.candidates(self.conn, 2, scope=all_of(EVERYTHING, store.ready), avoid=[tall, tall2])
         self.assertFalse({tall, tall2} & {p["hash"] for p in again})
+
+    def test_stars_are_the_rankings_face_and_rerank_writes_both(self):
+        # "Stars should be applied by the photos elo" (07-31): no manual star
+        # exists; a ranked photograph's star is its place in the order, earned
+        # after three rounds, and a star read from a sidecar or V1 is evidence
+        # in the log that no longer projects to the column.
+        ids = {}
+        for name in "abcdefghij":
+            ids[name] = self._identified(f"Raws/{name}.CR2")
+        order = "abcdefghij"   # a beats everyone below it, three times over
+        for repeat in range(rank.EARNED):
+            for i, name in enumerate(order[:-1]):
+                rank.record(self.conn, ids[name][0], [ids[order[i + 1]][0]])
+        scores = rank.strength(self.conn)
+        starred = rank.stars(scores, rank.seen(self.conn))
+        self.assertEqual(starred[ids["a"][1]], 5)      # the best of even ten
+        self.assertEqual(starred[ids["b"][1]], 3)      # top 30%: places two and three
+        self.assertEqual(starred[ids["c"][1]], 3)
+        self.assertEqual(starred[ids["d"][1]], 2)      # top 60%
+        self.assertEqual(starred[ids["j"][1]], 1)      # ranked, last
+        self.assertTrue(all(1 <= s <= 5 for s in starred.values()))
+        # seen fewer than three rounds: ranked but not yet starred
+        fresh_id, fresh = self._identified("Raws/fresh.CR2")
+        rank.record(self.conn, fresh_id, [ids["j"][0]])
+        self.assertNotIn(fresh, rank.stars(rank.strength(self.conn), rank.seen(self.conn)))
+        # and a sidecar star stays in the log without touching the column
+        decisions.decide(self.conn, ids["j"][1], decisions.STAR, 5)
+        self.assertNotIn(decisions.STAR, decisions.PROJECTED)
+        library_surface.rerank(self.conn)
+        rows = {row["tail"]: (row["elo"], row["stars"]) for row in self.conn.execute("SELECT tail, elo, stars FROM images")}
+        self.assertEqual(rows["Raws/a.CR2"][1], 5)
+        self.assertEqual(rows["Raws/j.CR2"][1], 1)
+        self.assertGreater(rows["Raws/a.CR2"][0], rows["Raws/j.CR2"][0])
+        self.assertEqual(rows["Raws/fresh.CR2"][1], 0)
+        # taking the rounds back empties the order again
+        for row in self.conn.execute("SELECT id FROM decisions WHERE family = 'compare' AND value LIKE '%over%'").fetchall():
+            rank.retract(self.conn, row["id"])
+        library_surface.rerank(self.conn)
+        self.assertEqual({row[0] for row in self.conn.execute("SELECT stars FROM images")}, {0})
+        self.assertEqual({row[0] for row in self.conn.execute("SELECT elo FROM images")}, {rank.BASE})
 
     def test_judged_counts_photographs_in_the_scope_that_were_in_a_round(self):
         from model.scope import folder

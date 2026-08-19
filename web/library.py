@@ -17,10 +17,12 @@ filters on.
 paths, the same query answers for photos on the working disk and on the
 archive, together, without knowing either exists.
 
-**Decision columns are an index, not the truth.** `status` and `stars` live on
-`images` because a grid query cannot join 88,379 log rows per paint. They are
-rebuilt from the log by `reindex()`, so a wrong write is repairable rather than
-fatal — which is what makes it safe for the log to be the only thing backed up.
+**Decision columns are an index, not the truth.** `status` and `rotate` live
+on `images` because a grid query cannot join 88,379 log rows per paint. They
+are rebuilt from the log by `reindex()`, so a wrong write is repairable rather
+than fatal — which is what makes it safe for the log to be the only thing
+backed up. `elo` and `stars` are the same kind of index over the ranking,
+rewritten whole by `rerank()`.
 
 The SQL-shaped lessons in here are the expensive ones. `GLOB` never `LIKE`,
 because `LIKE` is ASCII-case-insensitive and will match a folder you did not
@@ -367,27 +369,31 @@ def reindex(conn) -> dict[str, int]:
 
 
 def rerank(conn, subjects=None, vectors=None) -> int:
-    """Recompute the ranking from the log and write it into the sort index.
+    """Recompute the ranking from the log and write it, and its stars, into
+    the sort index.
 
     Ranking is a derivation, so this is the only place it is stored, and it is
-    stored only so that `ORDER BY elo` is an index read. Losing this column
-    costs one recomputation; losing the log would cost the judgements.
+    stored only so that `ORDER BY elo` and `stars >= ?` are index reads.
+    Losing these columns costs one recomputation; losing the log would cost
+    the judgements.
 
     Rewritten whole, every time: what the ranking scores gets its score and
-    everything else returns to base. A photograph that drops out of the
-    ranking -- its only round taken back -- must drop out of the order too,
-    which a write that only touched the scored ones left standing at a number
-    nothing justified any more. With the embedding space the ranking reaches
-    every photograph with a vector; without it, the ones you have judged.
+    its star, and everything else returns to base and none. A photograph that
+    drops out of the ranking -- its only round taken back -- must drop out of
+    the order too, which a write that only touched the scored ones left
+    standing at a number nothing justified any more. With the embedding space
+    the ranking reaches every photograph with a vector; without it, the ones
+    you have judged.
     """
 
     import rank
 
     scores = rank.ranking(conn, subjects, vectors)
-    conn.execute("UPDATE images SET elo = ? WHERE elo != ?", (rank.BASE, rank.BASE))
+    starred = rank.stars(scores, rank.seen(conn))
+    conn.execute("UPDATE images SET elo = ?, stars = 0 WHERE elo != ? OR stars != 0", (rank.BASE, rank.BASE))
     conn.executemany(
-        "UPDATE images SET elo = ? WHERE content_hash = ?",
-        [(score, subject) for subject, score in scores.items()],
+        "UPDATE images SET elo = ?, stars = ? WHERE content_hash = ?",
+        [(score, starred.get(subject, 0), subject) for subject, score in scores.items()],
     )
     conn.commit()
     return len(scores)

@@ -33,6 +33,10 @@ from typing import Any
 # kind of decision must never need a migration — but naming them here is how a
 # reader learns what the log holds.
 STATUS = "status"      # unflagged / picked / trashed
+# A rating made elsewhere -- Lightroom's, read from a sidecar, or V1's column
+# adopted into the log. Evidence of taste, never the star column: a star here
+# is computed from the ranking, and Refine is the only way to change it
+# ("Stars should be applied by the photos elo", 07-31).
 STAR = "star"          # 0-5
 COMPARE = "compare"    # one photo beat another
 DEVELOP = "develop"    # an edit
@@ -48,7 +52,6 @@ FORGET = "forget"      # this subject is no longer wanted
 # a rule a writer knows is a rule the rebuild knows.
 PROJECTED: dict[str, tuple[str, Any, Any]] = {
     STATUS: ("status", "unflagged", lambda v: v in ("unflagged", "picked", "trashed")),
-    STAR: ("stars", 0, lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 5),
     ROTATE: ("rotate", 0, lambda v: v in (0, 90, 180, 270)),
 }
 
