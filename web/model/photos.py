@@ -198,7 +198,13 @@ def _record(conn, path: str, drive_uuid: str, tail: str) -> dict:
         copy_tail = None
     else:
         row = conn.execute("SELECT tail FROM images WHERE id = ?", (photo_id,)).fetchone()
-        copy_tail = None if row["tail"] == tail else tail
+        if row["tail"] != tail and not copies.drives_holding(conn, photo_id):
+            # Nothing held this photograph any more -- it was missing -- so the
+            # address it is brought back to becomes its address.
+            conn.execute("UPDATE images SET tail = ? WHERE id = ?", (tail, photo_id))
+            copy_tail = None
+        else:
+            copy_tail = None if row["tail"] == tail else tail
 
     drive = conn.execute("SELECT id FROM drives WHERE uuid = ?", (drive_uuid,)).fetchone()
     if drive is None:

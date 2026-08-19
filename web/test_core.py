@@ -6,6 +6,7 @@ that only restates what the code plainly says was deleted — a suite nobody
 reads is a suite nobody runs.
 """
 
+import io
 import os
 from pathlib import Path
 import shutil
@@ -23,7 +24,7 @@ import boot
 import library as library_surface
 import metadata as embedded_metadata
 from PIL import Image
-from model import backup, cache, copies, cull, decisions, drives, photos, scope, sets, trash
+from model import backup, cache, copies, cull, decisions, drives, intake, photos, scope, sets, trash
 from photo import exif as raw_exif
 
 TAIL = "Raws/Digital/2026/x.CR3"
@@ -268,6 +269,118 @@ class CoreCase(unittest.TestCase):
         self.conn.execute("INSERT INTO images(tail, file_size) VALUES (?, ?)", (tail, size))
         self.conn.commit()
         return self.conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"]
+
+
+class BringingPhotographsIn(CoreCase):
+    """Import is `put` per file plus one rule, and these are its promises."""
+
+    def card(self, files: dict[str, bytes]) -> str:
+        root = os.path.join(self.tmp, "Card")
+        for rel, body in files.items():
+            path = os.path.join(root, "DCIM", "100CANON", rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "wb") as handle:
+                handle.write(body)
+        return root
+
+    def jpeg(self, taken: str = "2026:05:26 18:29:56", seed: str = "a") -> bytes:
+        exif = Image.Exif()
+        exif[0x9003] = taken
+        out = io.BytesIO()
+        shade = (ord(seed[0]) * 7) % 256
+        Image.new("RGB", (32, 24), (shade, 255 - shade, 90)).save(out, "JPEG", exif=exif)
+        return out.getvalue()
+
+    def test_the_destination_rule_is_pure_and_refuses_to_guess(self):
+        self.assertEqual(intake.destination(intake.RAWS, "2026-05-26 18:29:56", "IMG_0001.CR3"),
+                         "Raws/Digital/2026/2026-05-26/IMG_0001.CR3")
+        self.assertEqual(intake.destination(intake.FILM, "2026-05-26", "scan01.tif", roll="Portra 400 #3"),
+                         "Raws/Film Scans/2026/2026-05-26/Portra 400 #3/scan01.tif")
+        self.assertEqual(intake.destination(intake.SNAPSHOTS, "2026-05-26", "IMG_9.HEIC"), "Snapshots/2026/2026-05-26/IMG_9.HEIC")
+        self.assertEqual(intake.destination(intake.EDITS, "2026-05-26", "a/b:c.jpg"), "Edits/2026/2026-05-26/a-b-c.jpg")
+        with self.assertRaises(ValueError):
+            intake.destination(intake.RAWS, None, "x.jpg")
+        with self.assertRaises(ValueError):
+            intake.destination(intake.FILM, "2026-05-26", "x.tif")
+        self.assertEqual(intake.guess_kind(self.card({}), ["IMG_0001.CR3"]), intake.RAWS)
+        self.assertIsNone(intake.guess_kind(os.path.join(self.tmp, "Photos"), ["a.jpg", "b.jpg"]))
+
+    def test_bring_verifies_suffixes_skips_by_identity_and_clears_only_after(self):
+        one = self.jpeg(seed="a")
+        two = self.jpeg(seed="b")   # same name as `one` in another card folder, different bytes
+        held = self.jpeg(seed="h")
+        card = self.card({"IMG_0001.JPG": one, "IMG_0003.JPG": held})
+        twin_dir = os.path.join(card, "DCIM", "101CANON")
+        os.makedirs(twin_dir)
+        with open(os.path.join(twin_dir, "IMG_0001.JPG"), "wb") as handle:
+            handle.write(two)
+        # IMG_0003 is already in the library, under another name in another folder
+        already = self.write(self.hot_root, "Snapshots/2026/2026-05-26/elsewhere.jpg", held)
+        photos.put(self.conn, already, self.hot["uuid"], "Snapshots/2026/2026-05-26/elsewhere.jpg")
+
+        staged = intake.scan(self.conn, card)
+        self.assertEqual([c["key"] for c in staged],
+                         ["DCIM/100CANON/IMG_0001.JPG", "DCIM/100CANON/IMG_0003.JPG", "DCIM/101CANON/IMG_0001.JPG"])
+        self.assertTrue(all(c["taken"].startswith("2026-05-26") for c in staged))
+        self.assertFalse(staged[1]["suspect"], "a suspicion needs the same name and size; identity decides at the copy")
+        result = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, staged, clear_source=True)
+
+        self.assertEqual(result["skipped"], 1, "the photograph the library already holds is skipped by identity")
+        self.assertEqual(result["brought"], 2)
+        self.assertEqual(result["cleared"], 3, "verified and skipped sources are cleared; nothing else")
+        tails = sorted(row[0] for row in self.conn.execute("SELECT tail FROM images"))
+        self.assertEqual(tails, [
+            "Raws/Digital/2026/2026-05-26/IMG_0001-2.JPG",  # the twin landed beside, never over
+            "Raws/Digital/2026/2026-05-26/IMG_0001.JPG",
+            "Snapshots/2026/2026-05-26/elsewhere.jpg",
+        ])
+        for tail in tails:
+            self.assertTrue(os.path.isfile(os.path.join(self.hot_root, tail.replace("/", os.sep))))
+        self.assertEqual(sorted(os.listdir(os.path.join(card, "DCIM", "100CANON"))), [])
+        self.assertEqual(sorted(os.listdir(twin_dir)), [])
+
+        # a second run over the same (now empty) card is a no-op; over a re-insert it skips everything
+        again = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card))
+        self.assertEqual(again["total"], 0)
+
+    def test_bring_stops_between_files_and_resumes_by_running_again(self):
+        card = self.card({f"IMG_{n:04d}.JPG": self.jpeg(seed=chr(97 + n)) for n in range(4)})
+        staged = intake.scan(self.conn, card)
+        asked = {"n": 0}
+
+        def stop_after_two() -> bool:
+            asked["n"] += 1
+            return asked["n"] > 2
+
+        first = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, staged, clear_source=True, stop=stop_after_two)
+        self.assertTrue(first["stopped"])
+        self.assertEqual(first["brought"], 2)
+        self.assertEqual(len(os.listdir(os.path.join(card, "DCIM", "100CANON"))), 2, "unbrought sources are untouched")
+
+        second = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card), clear_source=True)
+        self.assertEqual(second["brought"], 2)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 4)
+        self.assertEqual(os.listdir(os.path.join(card, "DCIM", "100CANON")), [])
+
+    def test_a_missing_photograph_brought_back_takes_its_new_address(self):
+        body = self.jpeg(seed="m")
+        lost = self.write(self.hot_root, "Snapshots/2025/2025-01-01/gone.jpg", body)
+        photos.put(self.conn, lost, self.hot["uuid"], "Snapshots/2025/2025-01-01/gone.jpg")
+        photo_id = self.conn.execute("SELECT id FROM images").fetchone()[0]
+        cull.pick(self.conn, (photo_id,))
+        os.remove(lost)
+        copies.sweep(self.conn, self.hot["uuid"])
+        self.assertEqual(copies.drives_holding(self.conn, photo_id), [])
+
+        card = self.card({"IMG_0007.JPG": body})
+        result = intake.bring(self.conn, self.hot["uuid"], intake.SNAPSHOTS, intake.scan(self.conn, card))
+
+        row = self.conn.execute("SELECT id, tail, status FROM images").fetchone()
+        self.assertEqual(result["brought"], 1)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
+        self.assertEqual(row["id"], photo_id)
+        self.assertEqual(row["tail"], "Snapshots/2026/2026-05-26/IMG_0007.JPG")
+        self.assertEqual(row["status"], "picked")
 
 
 class DrivesAreNotLetters(CoreCase):
