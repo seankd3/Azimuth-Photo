@@ -4,7 +4,7 @@ const ACTIONS = Object.freeze({
   reject: { call: 'reject', after: 'trashed', message: 'Photograph rejected.' },
 });
 
-export function createCullWorkflow({ product, read, replace, remove, selectIndex, status, undo }) {
+export function createCullWorkflow({ product, read, replace, remove, selectIndex, notify, undo }) {
   let busy = false;
 
   async function apply(name) {
@@ -28,7 +28,7 @@ export function createCullWorkflow({ product, read, replace, remove, selectIndex
       }
       undo.show(action.message, result.changed);
     } catch (reason) {
-      status.textContent = reason.message;
+      notify(reason.message);
     } finally {
       busy = false;
     }

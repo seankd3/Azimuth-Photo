@@ -63,6 +63,21 @@ export class PageCache {
     return true;
   }
 
+  refresh(total) {
+    // Re-read every loaded page in place. The generation and the positions
+    // stay, only the rows change, so a selection survives and nothing flashes.
+    this.total = Math.max(0, Number(total));
+    const generation = this.generation;
+    const reads = [...this.loaded].map((offset) => this.load(offset, this.pageSize).then((items) => {
+      if (!this.isCurrent(generation)) return;
+      for (let position = offset; position < offset + this.pageSize; position += 1) this.values.delete(position);
+      for (const [position, item] of items.entries()) this.values.set(offset + position, item);
+    }));
+    return Promise.all(reads).then(() => {
+      if (this.isCurrent(generation)) this.onPage(new Map(this.values), this.total);
+    });
+  }
+
   pageOffset(index) {
     return Math.floor(index / this.pageSize) * this.pageSize;
   }

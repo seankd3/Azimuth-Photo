@@ -1,4 +1,4 @@
-export function createTrashWorkflow({ product, read, reload, status, undo }) {
+export function createTrashWorkflow({ product, read, reload, notify, undo }) {
   const dialog = document.querySelector('[data-empty-dialog]');
   const form = document.querySelector('[data-empty-form]');
   const error = document.querySelector('[data-empty-error]');
@@ -18,7 +18,7 @@ export function createTrashWorkflow({ product, read, reload, status, undo }) {
       await reload();
       if (result.changed.length) undo.show('Photograph restored.', result.changed);
     } catch (reason) {
-      status.textContent = reason.message;
+      notify(reason.message);
     }
   }
 
@@ -33,7 +33,7 @@ export function createTrashWorkflow({ product, read, reload, status, undo }) {
       dialog.showModal();
       form.elements.count.focus();
     } catch (reason) {
-      status.textContent = reason.message;
+      notify(reason.message);
     }
   }
 
@@ -52,9 +52,9 @@ export function createTrashWorkflow({ product, read, reload, status, undo }) {
       const result = await product.emptyTrash(expected);
       closeDialog();
       await reload();
-      status.textContent = result.errors.length
+      notify(result.errors.length
         ? `${result.emptied.length.toLocaleString()} deleted; ${result.errors.length.toLocaleString()} could not be deleted.`
-        : `${result.emptied.length.toLocaleString()} photographs permanently deleted.`;
+        : `${result.emptied.length.toLocaleString()} photographs permanently deleted.`);
     } catch (reason) {
       error.textContent = reason.message;
     } finally {

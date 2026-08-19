@@ -223,6 +223,16 @@ class Library:
         self._open()
         return work.debt(self.conn, (embedded_metadata.KIND, self.tiles.kind))
 
+    def pulse(self) -> dict[str, int]:
+        """What a window asks every couple of seconds: did anything land?
+
+        One integer read from the worker and no query, so asking costs nothing.
+        The window already holds the counts it would want next; a moved pulse
+        is its cue to re-read them. `debt` is the expensive full accounting.
+        """
+
+        return {"done": self.chores.done}
+
     def _source_identity(self, photo_id: int) -> tuple[str, str] | None:
         row = self.conn.execute(
             "SELECT content_hash AS hash FROM images WHERE id = ?", (int(photo_id),)

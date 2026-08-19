@@ -17,6 +17,19 @@ const driveError = document.querySelector('[data-drive-error]');
 const loupe = document.querySelector('[data-loupe]');
 const loupeImage = document.querySelector('[data-loupe-image]');
 const status = document.querySelector('[data-status]');
+let noticeTimer = null;
+
+function notify(message) {
+  // The status line is state: a notice, or else what the library is doing.
+  // A notice is transient, so the ambient truth behind it returns by itself.
+  update({ notice: message });
+  clearTimeout(noticeTimer);
+  if (message) {
+    noticeTimer = setTimeout(() => {
+      if (read().notice === message) update({ notice: '' });
+    }, 8000);
+  }
+}
 const driveList = document.querySelector('[data-drive-list]');
 
 let cellSize = 220;
@@ -30,19 +43,19 @@ const pages = new PageCache({
     : product.photos({ sort: read().sort, limit, offset }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
-    status.textContent = `Some photos could not be loaded. ${error.message}`;
+    notify(`Some photos could not be loaded. ${error.message}`);
   },
 });
 const undo = createUndo({
   product,
   reload: () => loadView(),
-  status,
+  notify,
 });
 const trashWorkflow = createTrashWorkflow({
   product,
   read,
   reload: () => loadView(),
-  status,
+  notify,
   undo,
 });
 const cullWorkflow = createCullWorkflow({
@@ -69,7 +82,7 @@ const cullWorkflow = createCullWorkflow({
     void pages.ensure(index);
   },
   selectIndex,
-  status,
+  notify,
   undo,
 });
 
@@ -139,12 +152,59 @@ async function loadView() {
     const total = view === 'trash' ? trashCount : counts.photos;
     pages.seed(requestGeneration, page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
-    if (!read().scanning) status.textContent = '';
+    update({ notice: '' });
     if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
   } catch (error) {
     if (!pages.isCurrent(requestGeneration)) return;
     update({ loading: false });
-    status.textContent = error.message;
+    notify(error.message);
+  }
+}
+
+async function refreshInPlace() {
+  // The library changed under the window -- a sweep admitted photographs or
+  // the worker finished one -- so re-read what is loaded without resetting it.
+  const generation = pages.generation;
+  const view = read().view;
+  const [counts, drives, trashCount] = await Promise.all([
+    product.counts(), product.drives(), product.trashCount(),
+  ]);
+  if (!pages.isCurrent(generation) || read().view !== view) return;
+  await pages.refresh(view === 'trash' ? trashCount : counts.photos);
+  if (!pages.isCurrent(generation)) return;
+  update({ counts: { ...counts, trash: trashCount }, drives });
+  const { selected, photos } = read();
+  if (!selected) return;
+  for (const [index, photo] of photos) {
+    if (photo.id === selected.id) {
+      update({ selected: { ...selected, ...photo }, selectedIndex: index });
+      return;
+    }
+  }
+}
+
+async function followLibrary() {
+  // The worker identifies, reads and renders in the background. The window
+  // learns of it by asking one free question every couple of seconds and
+  // re-reading what it holds only when the answer moved.
+  let last = null;
+  for (;;) {
+    await delay(2000);
+    let pulse;
+    try {
+      pulse = await product.pulse();
+    } catch {
+      continue;
+    }
+    const moved = last !== null && pulse.done !== last.done;
+    last = pulse;
+    if (moved && !read().loading && !read().scanning) {
+      try {
+        await refreshInPlace();
+      } catch (error) {
+        notify(error.message);
+      }
+    }
   }
 }
 
@@ -154,17 +214,18 @@ async function scanDrive(drive) {
   try {
     let finished = false;
     const scan = product.refresh(drive.uuid).finally(() => { finished = true; });
+    await loadView();
     while (!finished) {
       await delay(500);
-      await loadView();
+      await refreshInPlace();
     }
     const result = await scan;
-    await loadView();
-    status.textContent = result.applied
+    await refreshInPlace();
+    notify(result.applied
       ? `${result.photos_added.toLocaleString()} photos added.`
-      : result.reason || 'The folder could not be fully read.';
+      : result.reason || 'The folder could not be fully read.');
   } catch (error) {
-    status.textContent = error.message;
+    notify(error.message);
   } finally {
     update({ scanning: false });
   }
@@ -176,7 +237,7 @@ async function selectPhoto(photo, index) {
     const details = await product.photo(photo.id);
     if (read().selected?.id === photo.id) update({ selected: { ...photo, ...details } });
   } catch (error) {
-    if (read().selected?.id === photo.id) status.textContent = error.message;
+    if (read().selected?.id === photo.id) notify(error.message);
   }
 }
 
@@ -218,7 +279,7 @@ async function showPhoto(photo) {
     loupeImage.alt = photo.tail || 'Selected photo';
     if (!loupe.open) loupe.showModal();
   } catch (error) {
-    if (read().selected?.id === photoId) status.textContent = error.message;
+    if (read().selected?.id === photoId) notify(error.message);
   }
 }
 
@@ -238,7 +299,11 @@ function renderChrome(state) {
   document.querySelector('[data-result-label]').textContent = state.loading
     ? 'Loading your library…'
     : `${state.photos.size.toLocaleString()} of ${state.total.toLocaleString()} loaded`;
-  if (state.scanning) status.textContent = 'Reading your photos…';
+  status.textContent = state.notice || (state.scanning
+    ? 'Reading your photos…'
+    : state.counts.unidentified
+      ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
+      : '');
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash';
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
@@ -381,3 +446,4 @@ loupe.addEventListener('close', () => {
 
 subscribe(render);
 loadView();
+followLibrary();

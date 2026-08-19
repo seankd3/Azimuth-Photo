@@ -15,6 +15,7 @@ async function invoke(method, ...arguments_) {
 export const library = Object.freeze({
   counts: () => invoke('counts'),
   drives: () => invoke('drives'),
+  pulse: () => invoke('pulse'),
   photos: ({ sort, limit, offset }) => invoke('photos', sort, limit, offset),
   photo: (id) => invoke('photo', id),
   trashPhotos: ({ limit, offset }) => invoke('trash_photos', limit, offset),

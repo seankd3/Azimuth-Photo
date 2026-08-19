@@ -4,6 +4,7 @@ const state = {
   photos: new Map(),
   total: 0,
   loading: true,
+  notice: '',
   scanning: false,
   selected: null,
   selectedIndex: null,

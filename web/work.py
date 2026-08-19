@@ -299,6 +299,10 @@ class Chores:
         self._ceiling_bytes = ceiling_bytes
         self._stopped = threading.Event()
         self._thread: threading.Thread | None = None
+        # Items finished since start. A window asks for this number and re-reads
+        # what it holds only when it moved -- the whole of how the grid learns
+        # that identity, metadata or a tile landed behind it.
+        self.done = 0
 
     @property
     def running(self) -> bool:
@@ -344,6 +348,8 @@ class Chores:
                 except Exception:
                     log.exception("worker=chores step failed")
                     did = None
+                if did:
+                    self.done += 1
 
                 if did is None and self._ceiling_bytes is not None:
                     try:

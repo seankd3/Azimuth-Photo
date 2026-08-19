@@ -56,6 +56,9 @@ class Desktop:
     def drives(self) -> list[dict]:
         return self._wait(self._product.run(lambda library: library.attached()))
 
+    def pulse(self) -> dict:
+        return self._wait(self._product.run(lambda library: library.pulse()))
+
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0) -> list[dict]:
         return self._wait(
             self._product.run(

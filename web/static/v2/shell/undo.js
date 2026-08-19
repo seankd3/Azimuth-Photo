@@ -1,4 +1,4 @@
-export function createUndo({ product, reload, status }) {
+export function createUndo({ product, reload, notify }) {
   const toast = document.querySelector('[data-toast]');
   let changes = null;
 
@@ -21,7 +21,7 @@ export function createUndo({ product, reload, status }) {
       await product.undoCull(current);
       await reload();
     } catch (reason) {
-      status.textContent = reason.message;
+      notify(reason.message);
     }
   }
 
