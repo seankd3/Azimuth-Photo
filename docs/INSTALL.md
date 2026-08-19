@@ -24,30 +24,33 @@ runs it. It is not yet an installer.
 
 ## First launch
 
-Azimuth opens a native folder chooser. Select a folder containing photographs.
-The folder is attached immediately and the library fills progressively while
-it is read. Select “This is an archive drive” only for a durable archive copy.
+Azimuth first asks where it should live: one folder that holds the catalog and
+the previews, like a Lightroom catalog. It proposes an `Azimuth Photo` folder on
+the fast internal disk with the most room; *Change…* opens the native chooser.
+The choice is remembered, so later starts do not ask.
+
+It then opens a native folder chooser for your photographs. Select a folder;
+it is attached immediately and the library fills progressively while it is
+read. Select “This is an archive drive” only for a durable archive copy.
 
 Azimuth reads originals in place. Attaching a folder never moves, renames, or
 deletes its photographs.
 
 ## Data locations
 
-On Windows, the V2 catalog lives at:
+Everything the application makes for itself lives in the home you chose:
 
 ```text
-%LOCALAPPDATA%\Azimuth Photo\catalog\azimuth-v2.db
+<home>\catalog\azimuth.db
+<home>\previews\
 ```
 
-Generated tiles live under:
+The one file outside the home is the pointer that names it, on Windows at
+`%LOCALAPPDATA%\Azimuth Photo\home`.
 
-```text
-%LOCALAPPDATA%\Azimuth Photo\cache\v2-tiles\
-```
-
-Set `AZIMUTH_HOME` before launch to isolate all V2 data under another directory.
-This is useful for development and clean-catalog proof; it does not select a V1
-catalog or compatibility mode.
+Set `AZIMUTH_HOME` before launch to make that folder the home without reading
+or writing the pointer. This is how development runs and clean-catalog proofs
+stay isolated; it does not select a V1 catalog or compatibility mode.
 
 ## Run from source
 
