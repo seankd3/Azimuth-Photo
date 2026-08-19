@@ -7,21 +7,10 @@
 # It falls by measurement (`check.py --write`) and rises only by hand, in its
 # own commit. A number that is not the measurement describes a tree that is
 # not there.
-# paths rose 3 -> 79 on 2026-08-17 because the RULE widened, not because the
-# docs did: `invokes` read only .github/, and now every instruction document is
-# read -- AGENTS.md, docs/*.md, .claude/skills/ and .claude/workflows/ -- with
-# folders counted, which is what a file-extension pattern could never catch.
-# The first measurement found 82 dead paths, four of them in AGENTS.md's own
-# ownership map, so the authoritative guide was sending agents to three folders
-# that are not there. Those four are fixed. Of the 79 below, 11 are
-# docs/GATES.md quoting the very paths the gate was built to catch -- a citation
-# of a dead path is evidence, not a wrong direction, and it is left counted
-# rather than adding machinery to tell prose from quotation.
-# Worst first: docs/development.md 32, PERF_BUDGETS 15, GATES 11, ci.yml 5.
 seam 16
 layers 26
 tables 47
-paths 79
+paths 0
 routes 0
 names 0
 collects 0

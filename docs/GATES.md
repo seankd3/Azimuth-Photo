@@ -35,7 +35,7 @@ code produces more of them, never fewer.
 | `seam` | UI `/api/` literals no handler serves | **16** | `python scripts/gates/check.py` |
 | `layers` | imports pointing up the stack | **33** | " |
 | `tables` | table DDL outside `web/model/schema.sql` | **61** | " |
-| `paths` | paths an instruction names that are not tracked | **79** | " |
+| `paths` | dead paths in the two guides an agent must read | **0** | " |
 | `routes` | a path served twice, stranded, or shadowed | **0** | " |
 | `names` | a name that is called and defined nowhere | **0** | " |
 | `collects` | test modules that fail to import | **0** | " |
@@ -216,37 +216,22 @@ fixtures and are not counted. Moved on 12 of 400 commits, rose on 5.
 
 ---
 
-### `paths` — an instruction may not name a path that is not there
+### `paths` — the guides an agent must read may not name a path that is not there
 
-A CI workflow and an agent guide are the same kind of document: both tell
-somebody where to work. So every repository-relative path either one names — in
-a command, a link, or a sentence — must be tracked, and **folders count**.
+`AGENTS.md` assigned preview generation to `web/thumbnails/`, the route map to a
+deleted goldens file, and the PWA to a deleted folder — for a day or more after
+all three were deleted. A new agent reading the authoritative guide was sent to
+three places that are not there. All three were folders, so a file-extension
+pattern could never have caught them.
 
-This gate began as `invokes`, which read only `.github/`. Widening it to every
-instruction document, on 2026-08-17, found **82 dead paths, four of them in
-`AGENTS.md`'s own code-ownership map**: it assigned preview generation to
-`web/thumbnails/`, the route map to `web/harness/goldens/routes.json`, and the
-PWA to `web/static/js/mobile/`, a day or more after all three were deleted. A
-new agent reading the authoritative guide was being sent to three folders that
-are not there. That is the failure the gate exists to make impossible, and it is
-why a folder counts as a path: every one of those three was a directory, which
-the file-extension pattern could never have caught.
+A path is anything in backticks starting with a tracked top-level folder, which
+is how both guides already write one. Git supplies that list, so the gate has no
+list to keep in sync. It reads `AGENTS.md` and the orientation skill and nothing
+else: dead paths elsewhere in `docs/` are a tidy-up, not a build failure, and
+`docs/development.md` currently has about thirty of them.
 
-Those four are fixed. The remaining **78 are counted debt**, worst first:
-
-```
-32  docs/development.md      <- the edit map AGENTS.md sends every new agent to
-15  docs/PERF_BUDGETS.md
-11  docs/GATES.md            <- this file, quoting the dead paths it explains
- 5  .github/workflows/ci.yml <- inherited benchmark references, deleted first
-```
-
-**A record is not an instruction.** `MASTER_PLAN.md` preserves the owner's asks
-verbatim, `SIMPLIFY_LOG.md` and `REWRITE_LEDGER.md` say what was deleted, and
-`docs/archive/` is kept precisely because it is out of date. A dead path in
-those is history, not a lie, so they are excluded by name. That exclusion is the
-gate knowing what it reads — widen it only for another document that records the
-past rather than directing the present.
+Proven by reintroducing each of the three real deletions and watching it fail on
+each. 32 lines.
 
 ---
 

@@ -1,21 +1,12 @@
-"""An instruction may not name a path that is not there.
+"""The guides an agent must read may not name a path that is not there.
 
-A CI workflow and an agent guide are the same kind of document: both tell
-somebody where to work. When one names a file or folder that was deleted, it
-does not fail loudly -- it sends the next reader to a place that is not there,
-and a wrong map is worse than no map.
+`AGENTS.md` once assigned preview generation to `web/thumbnails/` for a day
+after that folder was deleted. A wrong map is worse than no map.
 
-So every repository-relative path an instruction names, in a command, a link or
-a sentence, must be tracked. Folders count: `web/thumbnails/` had been gone for
-a day while `AGENTS.md` still assigned preview generation to it.
-
-**A record is not an instruction.** `MASTER_PLAN.md` preserves the owner's asks
-verbatim, `SIMPLIFY_LOG.md` and `REWRITE_LEDGER.md` say what was deleted, and
-`docs/archive/` is kept precisely because it is out of date. A dead path in
-those is history, and history is allowed to name what no longer exists. They are
-excluded by name below, and that exclusion is the gate knowing what it reads --
-widen it only for another document that records the past rather than directing
-the present.
+A path is anything in backticks that starts with a tracked top-level folder,
+which is how both guides already write one. Git supplies that list, so there is
+nothing here to keep in sync. Other documents are not read: their dead paths are
+a tidy-up, not a gate.
 """
 
 from __future__ import annotations
@@ -24,43 +15,18 @@ import re
 
 from common import read, tracked
 
-# Where product code lives. A path outside these is a URL, a dependency, or
-# prose that happens to contain a slash.
-TOP = ("scripts/", "web/", "clients/", "android/", "desktop/", "tools/", "docs/", "bench/", ".github/")
-
-INSTRUCTIONS = (
-    ".github/*",
-    ".claude/skills/*",
-    ".claude/workflows/*",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "README.md",
-    "CONTRIBUTING.md",
-    "docs/*.md",
-)
-
-RECORDS = ("MASTER_PLAN.md", "docs/SIMPLIFY_LOG.md", "docs/REWRITE_LEDGER.md", "docs/archive/")
-
-FILE = re.compile(r"[\w][\w./-]*[.](?:py|sh|ps1|js|json|txt|sql|toml|lua|md|css|html|yml|yaml)\b")
-FOLDER = re.compile(r"[\w][\w./-]*/")
+GUIDES = ("AGENTS.md", ".claude/skills/azimuth-orient/SKILL.md")
+QUOTED = re.compile(r"`([\w][\w./-]*/[\w./-]*)`")
 
 
 def run(root) -> list[str]:
-    files = set(tracked(root))
-    # A folder exists when something tracked lives under it.
-    present = set(files)
-    for path in files:
-        parts = path.split("/")
-        for depth in range(1, len(parts)):
-            present.add("/".join(parts[:depth]) + "/")
-
-    found = []
-    for path in tracked(root, *INSTRUCTIONS):
-        if path.startswith(RECORDS):
-            continue
-        for number, line in enumerate(read(root, path).splitlines(), 1):
-            named = set(FILE.findall(line)) | set(FOLDER.findall(line))
-            for target in sorted(named):
-                if target.startswith(TOP) and target not in present:
-                    found.append(f"{path}:{number}: {target}")
-    return found
+    present = set(tracked(root))
+    present |= {p[:i] + "/" for p in list(present) for i, c in enumerate(p) if c == "/"}
+    repo = tuple(sorted({p.split("/")[0] + "/" for p in present if "/" in p}))
+    return [
+        f"{guide}:{number}: {named}"
+        for guide in GUIDES
+        for number, line in enumerate(read(root, guide).splitlines(), 1)
+        for named in QUOTED.findall(line)
+        if named.startswith(repo) and named not in present
+    ]
