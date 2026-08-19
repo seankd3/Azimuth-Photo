@@ -157,7 +157,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .photo-cell {
   position: absolute;
-  aspect-ratio: 1;
   overflow: hidden;
   padding: 0;
   border: 1px solid transparent;

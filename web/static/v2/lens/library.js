@@ -1,9 +1,45 @@
 import {
   measureGrid,
   placeGridCell,
+  verticalNeighbour,
   visibleGridRange,
 } from '../kit/virtual-grid.js';
 import { registerLens } from '../store/index.js';
+
+// The layout is a pure function of the width, the row height, and every
+// photograph's shape. Shapes arrive with the rows (width and height from the
+// embedded metadata), so the lens keeps one array of aspects the size of the
+// library, fills it from whatever rows are loaded, and lays out again only
+// when something it depends on changed. Unknown shapes are assumed 3:2 and
+// the viewport is anchored to its first cell across a re-layout, so a row
+// above changing height does not move what the person is looking at.
+let aspects = new Float32Array(0);
+let aspectsVersion = 0;
+let layout = null;
+let layoutKey = '';
+
+function collectAspects(state) {
+  if (aspects.length !== state.total) {
+    aspects = new Float32Array(state.total).fill(NaN);
+    aspectsVersion += 1;
+  }
+  for (const [index, photo] of state.photos) {
+    if (index >= aspects.length) continue;
+    const aspect = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : NaN;
+    if (Object.is(aspects[index], aspect) || (Number.isNaN(aspects[index]) && Number.isNaN(aspect))) continue;
+    aspects[index] = aspect;
+    aspectsVersion += 1;
+  }
+}
+
+function currentLayout(width, rowHeight, count) {
+  const key = `${width}:${rowHeight}:${count}:${aspectsVersion}`;
+  if (key !== layoutKey) {
+    layout = measureGrid(width, rowHeight, aspects, count);
+    layoutKey = key;
+  }
+  return layout;
+}
 
 // A cell's picture is a file the browser reads itself. The row says whether
 // the answer exists (`photo.tile` is a URL or null); a cell with none shows
@@ -75,7 +111,7 @@ function positionCell(cell, layout, index) {
   cell.style.left = `${place.left}px`;
   cell.style.top = `${place.top}px`;
   cell.style.width = `${place.width}px`;
-  cell.style.height = `${place.width}px`;
+  cell.style.height = `${place.height}px`;
 }
 
 function reconcileGrid(grid, state, actions, layout, range) {
@@ -132,21 +168,43 @@ function renderGrid(grid, state, actions) {
   }
 
   const count = state.total || 18;
-  const layout = measureGrid(grid.clientWidth, actions.cellSize, count);
-  const range = visibleGridRange(layout, actions.scrollTop, actions.viewportHeight);
-  grid.style.height = `${layout.height}px`;
-  grid.dataset.columns = layout.columns;
-  grid.dataset.cell = layout.cell;
-  grid.dataset.pitch = layout.cell + layout.gap;
-  grid.dataset.start = range.start;
-  grid.dataset.end = range.end;
+  collectAspects(state);
+  const before = layout;
+  const anchor = before && before.count === count && actions.scrollTop > 0
+    ? anchorOf(before, actions.scrollTop)
+    : null;
+  const layoutNow = currentLayout(grid.clientWidth, actions.rowHeight, count);
+  let scrollTop = actions.scrollTop;
+  if (anchor && layoutNow !== before) {
+    // Keep the first visible cell where it was on screen across the re-layout.
+    scrollTop = Math.max(0, placeGridCell(layoutNow, anchor.index).top - anchor.offset);
+    if (Math.abs(scrollTop - actions.scrollTop) >= 1) actions.scrollTo(scrollTop);
+  }
+  const range = visibleGridRange(layoutNow, scrollTop, actions.viewportHeight);
+  grid.style.height = `${layoutNow.height}px`;
 
   if (state.loading && state.total === 0) {
     const loadingState = { ...state, photos: new Map(), selectedIndex: null };
-    reconcileGrid(grid, loadingState, { ...actions, need: () => {} }, layout, range);
+    reconcileGrid(grid, loadingState, { ...actions, need: () => {}, look: () => {} }, layoutNow, range);
     return;
   }
-  reconcileGrid(grid, state, actions, layout, range);
+  reconcileGrid(grid, state, actions, layoutNow, range);
+}
+
+function anchorOf(current, scrollTop) {
+  const range = visibleGridRange(current, scrollTop, 1, 0);
+  const index = Math.min(range.start, current.count - 1);
+  return { index, offset: placeGridCell(current, index).top - scrollTop };
+}
+
+// What the shell needs from the geometry without owning it: where a cell is,
+// and which cell an arrow key means.
+function place(index) {
+  return layout && index < layout.count ? placeGridCell(layout, index) : null;
+}
+
+function neighbour(index, direction) {
+  return layout ? verticalNeighbour(layout, index, direction) : null;
 }
 
 function renderInspector(panel, selected) {
@@ -172,4 +230,4 @@ function renderInspector(panel, selected) {
   panel.replaceChildren(heading, facts);
 }
 
-registerLens('library', { renderGrid, renderInspector });
+registerLens('library', { neighbour, place, renderGrid, renderInspector });

@@ -32,7 +32,7 @@ function notify(message) {
 }
 const driveList = document.querySelector('[data-drive-list]');
 
-let cellSize = 220;
+let rowHeight = 220;
 let scrollFrame = null;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -110,8 +110,9 @@ function visibleGrid() {
     open: openPhoto,
     look: lookAt,
     need: (start, end) => pages.ensureRange(start, end),
-    cellSize,
+    rowHeight,
     scrollTop: workspace.scrollTop,
+    scrollTo: (top) => { workspace.scrollTop = top; },
     viewportHeight: Math.max(1, workspace.clientHeight - CONTEXTBAR_HEIGHT),
   });
 }
@@ -255,14 +256,12 @@ async function selectPhoto(photo, index) {
 }
 
 function scrollIndexIntoView(index) {
-  const columns = Number(grid.dataset.columns) || 1;
-  const pitch = Number(grid.dataset.pitch) || cellSize;
-  const cell = Number(grid.dataset.cell) || cellSize;
-  const rowTop = 4 + (Math.floor(index / columns) * pitch);
+  const place = library.place(index);
+  if (!place) return;
   const viewport = Math.max(1, workspace.clientHeight - CONTEXTBAR_HEIGHT);
-  if (rowTop < workspace.scrollTop) workspace.scrollTop = rowTop;
-  else if (rowTop + cell > workspace.scrollTop + viewport) {
-    workspace.scrollTop = rowTop + cell - viewport;
+  if (place.top < workspace.scrollTop) workspace.scrollTop = place.top;
+  else if (place.top + place.height > workspace.scrollTop + viewport) {
+    workspace.scrollTop = place.top + place.height - viewport;
   }
 }
 
@@ -418,15 +417,16 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  const columns = Number(grid.dataset.columns) || 1;
-  const moves = {
-    ArrowLeft: -1,
-    ArrowRight: 1,
-    ArrowUp: -columns,
-    ArrowDown: columns,
-  };
-  if (event.key in moves) {
-    selectIndex((current ?? (moves[event.key] > 0 ? -1 : read().total)) + moves[event.key]);
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    const move = event.key === 'ArrowLeft' ? -1 : 1;
+    selectIndex((current ?? (move > 0 ? -1 : read().total)) + move);
+    event.preventDefault();
+  } else if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+    // Rows do not share columns, so up and down mean the nearest cell in the
+    // row above or below, which the lens knows from its layout.
+    const direction = event.key === 'ArrowUp' ? -1 : 1;
+    const next = current === null ? (direction > 0 ? 0 : read().total - 1) : library.neighbour(current, direction);
+    if (next !== null) selectIndex(next);
     event.preventDefault();
   } else if (event.key === 'Home') {
     selectIndex(0);
@@ -447,11 +447,14 @@ document.querySelector('[data-sort]').addEventListener('change', (event) => {
 });
 
 document.querySelector('[data-density]').addEventListener('input', (event) => {
-  const anchor = read().selectedIndex ?? (Number(grid.dataset.start) || 0);
-  cellSize = Number(event.target.value);
+  // The lens anchors the first visible cell across the re-layout itself; a
+  // selection, when there is one, is what the person is looking at.
+  rowHeight = Number(event.target.value);
   visibleGrid();
-  scrollIndexIntoView(anchor);
-  visibleGrid();
+  if (read().selectedIndex !== null) {
+    scrollIndexIntoView(read().selectedIndex);
+    visibleGrid();
+  }
 });
 
 workspace.addEventListener('scroll', scheduleGrid, { passive: true });
