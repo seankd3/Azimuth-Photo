@@ -29,10 +29,10 @@ class OwnedLibraryTests(unittest.IsolatedAsyncioTestCase):
             release = threading.Event()
             real_sweep = boot.copies.sweep
 
-            def held_sweep(conn, drive_uuid):
+            def held_sweep(conn, drive_uuid, under=""):
                 started.set()
                 release.wait(timeout=2)
-                return real_sweep(conn, drive_uuid)
+                return real_sweep(conn, drive_uuid, under=under)
 
             try:
                 with patch.object(boot.copies, "sweep", held_sweep):

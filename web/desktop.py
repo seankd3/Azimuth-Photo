@@ -33,7 +33,8 @@ class Desktop:
     question.
     """
 
-    def __init__(self, home_path: str | None):
+    def __init__(self, home_path: str | None, *, follow: bool = True):
+        self._follow = follow
         self._product: boot.OwnedLibrary | None = None
         self._home: str | None = None
         self._window = None
@@ -56,6 +57,8 @@ class Desktop:
         self._product = boot.OwnedLibrary(catalog_path, previews)
         self._home = path
         self._wait(self._product.run(lambda library: library.start()))
+        if self._follow:
+            self._product.follow()
 
     def bind(self, window) -> None:
         self._window = window
@@ -101,10 +104,10 @@ class Desktop:
         return self._run(lambda library: library.folders())
 
     def photo(self, photo_id: int) -> dict:
-        answer = self._run(lambda library: library.details(int(photo_id)))
-        if answer is None:
-            raise ValueError("photo is unavailable")
-        return answer
+        # No embedded facts yet -- the photograph is not identified, or its
+        # drive is away -- is a normal answer, not a failure: the row the
+        # window already holds stands until the facts arrive.
+        return self._run(lambda library: library.details(int(photo_id))) or {}
 
     def pick(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.pick(photo_ids))
@@ -123,6 +126,14 @@ class Desktop:
 
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
+
+    def forget(self, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.forget(photo_ids))
+
+    def synchronize(self, folder: str = "") -> list[dict]:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.synchronize(str(folder or "")))
 
     def trash_count(self) -> int:
         return self._run(lambda library: library.trash_count())

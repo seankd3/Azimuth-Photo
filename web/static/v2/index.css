@@ -214,6 +214,21 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   filter: drop-shadow(0 2px 3px rgb(0 0 0 / 55%));
 }
 .photo-cell.is-picked .pick-flag { opacity: 1; }
+.photo-cell[data-missing="1"]::before {
+  /* the file is not on any drive that was looked at: a quiet mark, not a hole */
+  content: "!";
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #d9a441;
+  color: #1a1b1f;
+  font: 700 12px/18px system-ui, sans-serif;
+  text-align: center;
+}
 .photo-cell[data-empty="pending"] { background: #18191d; animation: breathe 1.4s ease-in-out infinite alternate; }
 .photo-cell[data-empty="unshowable"]::after,
 .photo-cell[data-empty="away"]::after {
@@ -317,6 +332,29 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .confirm-field { display: grid; gap: 8px; margin-bottom: 18px; color: var(--text-2); font-size: 13px; }
 .confirm-field input { border: 1px solid var(--line); border-radius: 7px; background: #111216; color: var(--text); padding: 9px; }
 
+.context-menu {
+  position: fixed;
+  z-index: 30;
+  margin: 0;
+  padding: 6px;
+  border: 1px solid #383b42;
+  border-radius: 9px;
+  background: #1a1b1f;
+  box-shadow: 0 12px 40px rgb(0 0 0 / 55%);
+}
+.context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.context-menu button:hover { background: #242a31; }
 .toast {
   position: fixed;
   z-index: 8;

@@ -213,6 +213,16 @@ def _identify_one(conn, row) -> bool:
         value = decisions.latest(conn, digest, family)
         if valid(value):
             conn.execute(f"UPDATE images SET {column} = ? WHERE id = ?", (value, int(row["id"])))
+    # A row is an address. Now that this one knows its identity, any other row
+    # of the same identity that no drive holds is a dead address -- the file
+    # was renamed, or moved in a way name, size and time could not pair -- and
+    # leaves. Nothing is lost: decisions live under the identity, and this row
+    # carries them.
+    conn.execute(
+        "DELETE FROM images WHERE content_hash = ? AND id != ? "
+        "AND NOT EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = images.id)",
+        (digest, int(row["id"])),
+    )
     return True
 
 
@@ -357,7 +367,10 @@ class Chores:
         self._ceiling_bytes = ceiling_bytes
         self._lanes = max(1, int(lanes))
         self._stopped = threading.Event()
-        self._wake = threading.Event()
+        # One wake event per lane. A shared one lost wakeups: the first lane
+        # to wake cleared it and the others slept out their wait, which made
+        # stopping take up to the whole idle wait -- and a test's close time out.
+        self._wake = [threading.Event() for _ in range(self._lanes)]
         self._threads: list[threading.Thread] = []
         # Items finished since start. A window asks for this number and re-reads
         # what it holds only when it moved -- the whole of how the grid learns
@@ -386,13 +399,15 @@ class Chores:
         """Something is newly owed -- a sweep admitted photographs, the window
         looked elsewhere -- so an idle lane should not sleep out its wait."""
 
-        self._wake.set()
+        for wake in self._wake:
+            wake.set()
 
     def stop(self, timeout: float = 5.0) -> bool:
         """Finish the items in hand, close the catalogs, and report success."""
 
         self._stopped.set()
-        self._wake.set()
+        for wake in self._wake:
+            wake.set()
         for thread in self._threads:
             thread.join(timeout)
         stopped = not self.running
@@ -432,8 +447,8 @@ class Chores:
                 if did:
                     self._stopped.wait(0.05)
                 else:
-                    self._wake.wait(5.0)
-                    self._wake.clear()
+                    self._wake[lane].wait(5.0)
+                    self._wake[lane].clear()
         except Exception:
             log.exception("worker=chores stopped unexpectedly")
         finally:

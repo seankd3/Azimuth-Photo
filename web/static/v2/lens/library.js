@@ -172,7 +172,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
       showTile(cell, photo);
       const picked = photo.status === 'picked';
       cell.classList.toggle('is-picked', picked);
-      const why = cell.dataset.empty === 'unshowable' ? ', cannot be shown' : cell.dataset.empty === 'away' ? ', drive away' : '';
+      cell.dataset.missing = photo.placed ? '0' : '1';
+      const why = !photo.placed ? ', missing' : cell.dataset.empty === 'unshowable' ? ', cannot be shown' : cell.dataset.empty === 'away' ? ', drive away' : '';
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
       cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
     }
@@ -245,6 +246,7 @@ function renderInspector(panel, selected) {
   const rows = [
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
+    ['Where', !selected.placed ? 'Missing — no drive holds it' : selected.reachable ? 'Here' : 'On a drive that is away'],
     ['Taken', selected.date_taken],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ')],
     ['Lens', selected.lens],

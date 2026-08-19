@@ -45,6 +45,8 @@ class Library:
         # Read by the worker on every step, so the first tiles made are the
         # ones on screen; nothing else about the worker's order changes.
         self._looking: tuple[int, ...] = ()
+        # Sweeps of the folders completed since start, for the window's pulse.
+        self.swept = 0
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
             (embedded_metadata.KIND, *self.tiles.kinds),
@@ -174,6 +176,26 @@ class Library:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
 
+    def forget(self, photo_ids) -> dict:
+        """Drop rows that no drive holds. A row is an address; its decisions
+        live under the identity and come back with the file if it ever does."""
+
+        self._open()
+        wanted = sorted({int(i) for i in photo_ids if int(i) > 0})
+        if not wanted:
+            return {"forgotten": 0, "kept": []}
+        marks = ",".join("?" * len(wanted))
+        held = {
+            int(row[0]) for row in self.conn.execute(
+                f"SELECT DISTINCT photo_id FROM copies WHERE photo_id IN ({marks})", wanted)
+        }
+        gone = [i for i in wanted if i not in held]
+        if gone:
+            self.conn.execute(
+                f"DELETE FROM images WHERE id IN ({','.join('?' * len(gone))})", gone)
+            self.conn.commit()
+        return {"forgotten": len(gone), "kept": sorted(held)}
+
     def trash_count(self) -> int:
         self._open()
         return trash.count(self.conn)
@@ -241,12 +263,13 @@ class Library:
     def pulse(self) -> dict[str, int]:
         """What a window asks every couple of seconds: did anything land?
 
-        One integer read from the worker and no query, so asking costs nothing.
-        The window already holds the counts it would want next; a moved pulse
-        is its cue to re-read them. `debt` is the expensive full accounting.
+        Two integers and no query, so asking costs nothing: what the worker
+        finished, and how many sweeps of the folders have completed. The window
+        already holds the counts it would want next; a moved pulse is its cue
+        to re-read them. `debt` is the expensive full accounting.
         """
 
-        return {"done": self.chores.done}
+        return {"done": self.chores.done, "swept": self.swept}
 
     def _source_identity(self, photo_id: int) -> tuple[str, str] | None:
         row = self.conn.execute(
@@ -282,6 +305,8 @@ class OwnedLibrary:
         self._closed = False
         self._close_future = None
         self._executor_shutdown = False
+        self._stop_following = threading.Event()
+        self._follower: threading.Thread | None = None
         try:
             self._library = self._executor.submit(Library, catalog_path, tile_root).result()
         except BaseException:
@@ -298,22 +323,70 @@ class OwnedLibrary:
             future = self._executor.submit(operation, self._library)
         return await asyncio.wrap_future(future)
 
-    async def refresh(self, drive_uuid: str) -> dict:
+    async def refresh(self, drive_uuid: str, under: str = "") -> dict:
         """Sweep on its own connection so the library remains browseable."""
-
-        def sweep() -> dict:
-            conn = model.connect(self._library.catalog_path)
-            try:
-                return copies.sweep(conn, drive_uuid)
-            finally:
-                conn.close()
-                self._library.chores.nudge()
 
         with self._state:
             if self._closed:
                 raise RuntimeError("library is closed")
-            future = self._scan_executor.submit(sweep)
+            future = self._scan_executor.submit(self._sweep, drive_uuid, under)
         return await asyncio.wrap_future(future)
+
+    def _sweep(self, drive_uuid: str, under: str = "") -> dict:
+        conn = model.connect(self._library.catalog_path)
+        try:
+            return copies.sweep(conn, drive_uuid, under=under)
+        finally:
+            conn.close()
+            self._library.swept += 1
+            self._library.chores.nudge()
+
+    async def synchronize(self, folder: str = "") -> list[dict]:
+        """Sweep one folder (or everything) on every drive that is here now --
+        the tree's *Synchronize folder*, and what the following loop does."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._scan_executor.submit(self._synchronize, folder, False)
+        return await asyncio.wrap_future(future)
+
+    def _synchronize(self, folder: str = "", working_only: bool = False) -> list[dict]:
+        conn = model.connect(self._library.catalog_path)
+        try:
+            rows = conn.execute("SELECT uuid, is_record FROM drives ORDER BY id").fetchall()
+            wanted = [
+                str(row["uuid"]) for row in rows
+                if (not working_only or not row["is_record"]) and drives.online(conn, row["uuid"])
+            ]
+        finally:
+            conn.close()
+        return [self._sweep(uuid, folder) for uuid in wanted]
+
+    def follow(self, every: float = 60.0) -> None:
+        """Keep the catalog true to the folders: every working drive that is
+        here is swept on the sweep lane every `every` seconds (measured 0.5 s
+        for 1,874 files), and every drive once now, so other programs may add,
+        move and cull files and the library keeps up. The archive is swept on
+        attach, on request, and at each start; a walk of 144,000 files is not
+        something to do every minute."""
+
+        def loop() -> None:
+            first = True
+            while not self._stop_following.wait(0 if first else every):
+                with self._state:
+                    if self._closed:
+                        return
+                    future = self._scan_executor.submit(self._synchronize, "", not first)
+                try:
+                    future.result()
+                except Exception:  # noqa: BLE001 - a failed sweep is logged by its lane
+                    pass
+                first = False
+
+        self._stop_following = threading.Event()
+        self._follower = threading.Thread(target=loop, name="follow", daemon=True)
+        self._follower.start()
 
     async def close(self) -> None:
         """Drain earlier operations, close the product, and release its thread."""
@@ -321,6 +394,7 @@ class OwnedLibrary:
         with self._state:
             if self._close_future is None:
                 self._closed = True
+                self._stop_following.set()
 
                 def finish() -> None:
                     self._scan_executor.shutdown(wait=True, cancel_futures=False)

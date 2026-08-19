@@ -244,16 +244,69 @@ async function followLibrary() {
       continue;
     }
     const moved = last !== null && pulse.done !== last.done;
+    const swept = last !== null && pulse.swept !== last.swept;
     last = pulse;
-    if (moved && !read().loading && !read().scanning) {
+    if ((moved || swept) && !read().loading && !read().scanning) {
       try {
         await refreshInPlace();
+        if (swept) await loadFolders();
       } catch (error) {
         notify(error.message);
       }
     }
   }
 }
+
+const folderMenu = document.querySelector('[data-folder-menu]');
+
+async function forgetSelected() {
+  const { selected, selectedIndex } = read();
+  if (!selected || selected.placed) return;
+  try {
+    const result = await product.forget([selected.id]);
+    if (result.forgotten) {
+      await loadView();
+      selectIndex(Math.min(selectedIndex, Math.max(0, read().total - 1)));
+      notify('Forgotten. It comes back, with its decisions, if the file ever does.');
+    }
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+async function synchronizeFolder(folder) {
+  // Lightroom's Synchronize: walk this folder on every drive that is here,
+  // now. The following loop does the same for the working drives each minute.
+  folderMenu.hidden = true;
+  notify(`Synchronizing ${folder || 'everything'}…`);
+  try {
+    const results = await product.synchronize(folder || '');
+    const added = results.reduce((n, r) => n + (r.photos_added || 0), 0);
+    const moved = results.reduce((n, r) => n + (r.photos_moved || 0), 0);
+    const retired = results.reduce((n, r) => n + (r.copies_retired || 0), 0);
+    await Promise.all([refreshInPlace(), loadFolders()]);
+    notify(`Synchronized: ${added} added, ${moved} moved, ${retired} no longer there.`);
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
+document.addEventListener('contextmenu', (event) => {
+  const row = event.target.closest('.folder-row');
+  const all = event.target.closest('.nav-row[data-action="all-photos"]');
+  if (!row && !all) {
+    folderMenu.hidden = true;
+    return;
+  }
+  event.preventDefault();
+  folderMenu.dataset.folder = row ? row.dataset.folder : '';
+  folderMenu.style.left = `${event.clientX}px`;
+  folderMenu.style.top = `${event.clientY}px`;
+  folderMenu.hidden = false;
+});
+document.addEventListener('click', (event) => {
+  if (!event.target.closest('[data-folder-menu]')) folderMenu.hidden = true;
+});
 
 async function loadFolders() {
   // The tree is every tail's folders with counts and a safety word; it costs
@@ -431,6 +484,7 @@ function renderChrome(state) {
   document.querySelector('[data-cull-actions]').hidden = !canCull;
   document.querySelector('[data-action="pick"]').hidden = !canCull || state.selected.status === 'picked';
   document.querySelector('[data-action="clear-pick"]').hidden = !canCull || state.selected.status !== 'picked';
+  document.querySelector('[data-action="forget"]').hidden = !(state.view === 'library' && state.selected && state.selected.placed === 0);
   document.querySelector('[data-action="restore"]').hidden = state.view !== 'trash' || !state.selected;
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !state.folder);
@@ -505,6 +559,8 @@ document.addEventListener('click', (event) => {
     loadView();
   }
   if (action === 'restore') trashWorkflow.restoreSelected();
+  if (action === 'forget') forgetSelected();
+  if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'reject') cullWorkflow.apply('reject');

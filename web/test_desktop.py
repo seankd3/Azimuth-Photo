@@ -70,7 +70,9 @@ class DesktopTests(unittest.TestCase):
                 os.path.join(photo_root, "lake.jpg"), "JPEG"
             )
             catalog, _previews = home.paths(os.path.join(directory, "Home"))
-            product = desktop.Desktop(os.path.join(directory, "Home"))
+            # The following loop would sweep the folder by itself; this test
+            # asks the sweep explicitly, so it keeps the loop out.
+            product = desktop.Desktop(os.path.join(directory, "Home"), follow=False)
             try:
                 drive = product.attach(photo_root)
                 refreshed = product.refresh(drive["uuid"])

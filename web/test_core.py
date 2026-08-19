@@ -386,18 +386,110 @@ class SweepingRefuses(CoreCase):
         self.assertEqual(library_surface.photos(self.conn, sort="added")[0]["id"], row["id"])
         self.assertEqual(library_surface.folders(self.conn), [{"folder": "Raws/2026", "photos": 1}])
 
-    def test_a_changed_file_is_reported_without_replacing_its_identity(self):
+    def test_a_rewritten_file_is_re_identified_and_its_decisions_carried(self):
         path = self.write(self.hot_root, "Raws/2026/change.jpg", b"before")
         copies.sweep(self.conn, self.hot["uuid"])
         photo_id = self.conn.execute("SELECT id FROM images").fetchone()["id"]
+        before = photos.content_hash(path)
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (before, photo_id))
+        cull.pick(self.conn, (photo_id,))
         with open(path, "wb") as handle:
             handle.write(b"after and a different size")
 
         result = copies.sweep(self.conn, self.hot["uuid"])
 
+        after = photos.content_hash(path)
+        row = self.conn.execute("SELECT content_hash, status, file_size FROM images WHERE id = ?", (photo_id,)).fetchone()
         self.assertEqual(result["changed"], ["Raws/2026/change.jpg"])
+        self.assertEqual(result["photos_rewritten"], 1)
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
-        self.assertIsNone(photos.open_photo(self.conn, photo_id))
+        self.assertEqual(row["content_hash"], after)
+        self.assertEqual(row["file_size"], os.path.getsize(path))
+        # the pick went with the photograph to its new identity, and the old
+        # identity's row is still in the log
+        self.assertEqual(decisions.latest(self.conn, after, decisions.STATUS), "picked")
+        self.assertEqual(decisions.latest(self.conn, before, decisions.STATUS), "picked")
+        self.assertEqual(photos.open_photo(self.conn, photo_id), path)
+
+    def test_a_moved_file_keeps_its_row_and_its_decisions(self):
+        path = self.write(self.hot_root, "Raws/2026/2026-01-01/frame.jpg", b"same bytes either place")
+        copies.sweep(self.conn, self.hot["uuid"])
+        photo_id = self.conn.execute("SELECT id FROM images").fetchone()["id"]
+        cull.pick(self.conn, (photo_id,)) if self.conn.execute(
+            "SELECT content_hash FROM images WHERE id = ?", (photo_id,)).fetchone()[0] else None
+        # a person moves the shoot into a renamed folder in Explorer
+        new_dir = os.path.join(self.hot_root, "Raws", "2026", "2026-01-01 Lake")
+        os.rename(os.path.dirname(path), new_dir)
+
+        result = copies.sweep(self.conn, self.hot["uuid"])
+
+        row = self.conn.execute("SELECT id, tail FROM images").fetchone()
+        self.assertEqual(result["photos_moved"], 1)
+        self.assertEqual(result["photos_added"], 0)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 1)
+        self.assertEqual(row["id"], photo_id)
+        self.assertEqual(row["tail"], "Raws/2026/2026-01-01 Lake/frame.jpg")
+        self.assertEqual(len(copies.drives_holding(self.conn, photo_id)), 1)
+
+    def test_a_move_on_one_drive_records_an_alternate_tail_when_the_archive_still_holds_it(self):
+        body = b"held on both drives"
+        hot_path = self.write(self.hot_root, "Raws/2026/frame.jpg", body)
+        cold_path = os.path.join(self.cold_root, "Raws", "2026", "frame.jpg")
+        os.makedirs(os.path.dirname(cold_path), exist_ok=True)
+        shutil.copy2(hot_path, cold_path)  # a backup keeps the file's time
+        copies.sweep(self.conn, self.hot["uuid"])
+        copies.sweep(self.conn, self.cold["uuid"])
+        photo_id = self.conn.execute("SELECT id FROM images").fetchone()["id"]
+        os.makedirs(os.path.join(self.hot_root, "Raws", "2026-moved"))
+        os.rename(hot_path, os.path.join(self.hot_root, "Raws", "2026-moved", "frame.jpg"))
+
+        result = copies.sweep(self.conn, self.hot["uuid"])
+
+        self.assertEqual(result["photos_moved"], 1)
+        self.assertEqual(self.conn.execute("SELECT tail FROM images WHERE id = ?", (photo_id,)).fetchone()[0], "Raws/2026/frame.jpg")
+        holding = {d["uuid"]: d["copy_tail"] for d in copies.drives_holding(self.conn, photo_id)}
+        self.assertEqual(holding[self.hot["uuid"]], "Raws/2026-moved/frame.jpg")
+        self.assertIsNone(holding[self.cold["uuid"]])
+        self.assertEqual(photos.open_photo(self.conn, photo_id), os.path.join(self.hot_root, "Raws", "2026-moved", "frame.jpg"))
+
+    def test_a_renamed_file_becomes_one_row_again_once_identified(self):
+        # A new name is not matched by name, size and time; it is admitted as
+        # a new row, and when the worker learns its identity the old address,
+        # which nothing holds any more, leaves -- with the decisions safe in
+        # the log under the identity both rows share.
+        path = self.write(self.hot_root, "Raws/2026/IMG_0001.jpg", b"renamed later")
+        copies.sweep(self.conn, self.hot["uuid"])
+        old_id = self.conn.execute("SELECT id FROM images").fetchone()["id"]
+        while work.step(self.conn, (), yield_to=lambda: False):
+            pass
+        cull.pick(self.conn, (old_id,))
+        os.rename(path, os.path.join(self.hot_root, "Raws", "2026", "lake.jpg"))
+        copies.sweep(self.conn, self.hot["uuid"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM images").fetchone()[0], 2)
+
+        while work.step(self.conn, (), yield_to=lambda: False):
+            pass
+
+        rows = self.conn.execute("SELECT id, tail, status FROM images").fetchall()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["tail"], "Raws/2026/lake.jpg")
+        self.assertEqual(rows[0]["status"], "picked")
+        self.assertNotEqual(rows[0]["id"], old_id)
+
+    def test_a_sweep_of_one_folder_leaves_the_rest_alone(self):
+        kept = self.write(self.hot_root, "Raws/2025/kept.jpg", b"kept")
+        gone = self.write(self.hot_root, "Raws/2026/gone.jpg", b"gone")
+        copies.sweep(self.conn, self.hot["uuid"])
+        os.remove(gone)
+        os.remove(kept)
+
+        result = copies.sweep(self.conn, self.hot["uuid"], under="Raws/2026")
+
+        held = {row["tail"] for row in self.conn.execute(
+            "SELECT i.tail FROM copies c JOIN images i ON i.id = c.photo_id")}
+        self.assertEqual(result["copies_retired"], 1)
+        self.assertIn("Raws/2025/kept.jpg", held)
+        self.assertNotIn("Raws/2026/gone.jpg", held)
 
     def test_a_known_alternate_copy_tail_is_not_admitted_as_a_second_photo(self):
         alternate = "Raws/2026/lake-2.jpg"
@@ -429,7 +521,7 @@ class SweepingRefuses(CoreCase):
         self.conn.commit()
         real = copies.walk_tails
 
-        def pull_the_plug(root):
+        def pull_the_plug(root, under=""):
             seen = real(root)
             os.remove(os.path.join(root, drives.MARKER_NAME))
             return seen

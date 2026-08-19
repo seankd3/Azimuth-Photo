@@ -159,6 +159,7 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
     holes = ",".join("?" for _ in here) or "NULL"
     columns.append(
         f", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id AND c.drive_id IN ({holes})) AS reachable"
+        ", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id) AS placed"
     )
     return [dict(row) for row in conn.execute(
         f"""

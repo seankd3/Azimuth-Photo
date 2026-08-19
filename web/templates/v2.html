@@ -52,6 +52,7 @@
           <button class="quiet-button" type="button" data-action="clear-pick"><kbd>U</kbd> Clear</button>
           <button class="danger-button" type="button" data-action="reject"><kbd>X</kbd> Reject</button>
         </div>
+        <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
         <label>Sort
           <select data-sort>
             <option value="newest">Newest</option>
@@ -114,6 +115,10 @@
       <button class="danger-button" type="submit" disabled>Permanently delete</button>
     </form>
   </dialog>
+
+  <menu class="context-menu" data-folder-menu hidden>
+    <button type="button" data-action="synchronize-folder">Synchronize folder</button>
+  </menu>
 
   <div class="toast" data-toast hidden role="status">
     <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
