@@ -129,6 +129,21 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
+    # ---- refine ----
+
+    def refine(self, n: int = 9, folder: str | None = None, avoid: list[str] | None = None) -> dict:
+        return self._run(lambda library: library.refine(int(n), str(folder or ""), list(avoid or [])))
+
+    def round(self, winner_id: int, over_ids: list[int]) -> dict:
+        recorded = self._run(lambda library: library.round(int(winner_id), over_ids))
+        self._product.rank_soon()
+        return recorded
+
+    def unround(self, decision: int) -> dict:
+        retracted = self._run(lambda library: library.unround(int(decision)))
+        self._product.rank_soon()
+        return retracted
+
     def forget(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.forget(photo_ids))
 

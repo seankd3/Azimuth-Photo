@@ -199,9 +199,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: default;
 }
 .photo-cell img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; }
-.photo-cell[data-turn="90"] img { transform: rotate(90deg); }
-.photo-cell[data-turn="180"] img { transform: rotate(180deg); }
-.photo-cell[data-turn="270"] img { transform: rotate(270deg); }
+/* a turn is how a picture is shown, wherever it is shown */
+[data-turn="90"] img { transform: rotate(90deg); }
+[data-turn="180"] img { transform: rotate(180deg); }
+[data-turn="270"] img { transform: rotate(270deg); }
 .pick-flag {
   position: absolute;
   top: 0;
@@ -254,6 +255,59 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .photo-cell.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .photo-skeleton { position: absolute; background: #18191d; animation: breathe 1.4s ease-in-out infinite alternate; }
 @keyframes breathe { to { background: #22242a; } }
+
+/* Refine: the stage takes the grid's place; cards are equal-area at their own shape */
+.workspace:has(.refine-stage:not([hidden])) { overflow: hidden; }
+.refine-stage {
+  display: grid;
+  gap: 12px;
+  height: calc(100% - 46px);
+  padding: 14px;
+}
+.refine-card {
+  position: relative;
+  justify-self: center;
+  align-self: center;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: #15161a;
+  cursor: pointer;
+  transition: border-color .08s ease, transform .08s ease;
+}
+.refine-card img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; }
+.refine-card kbd {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 55%);
+  color: var(--text-2);
+  font: 11px/1.4 ui-monospace, monospace;
+  opacity: .75;
+  transition: opacity .12s ease;
+}
+.refine-card.is-selected kbd { opacity: 1; color: var(--text); }
+.refine-card:hover { border-color: #666a72; }
+.refine-card.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.refine-card.is-picked { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); transform: scale(.985); }
+.refine-empty { grid-column: 1 / -1; grid-row: 1 / -1; align-self: center; text-align: center; color: var(--text-3); font-size: 14px; }
+.refine-progress { color: var(--text-3); font-variant-numeric: tabular-nums; }
+.refine-size { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--chrome-2); }
+.refine-size button {
+  min-width: 28px;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 12px;
+  cursor: pointer;
+}
+.refine-size button.is-active { background: #2b3440; color: var(--text); }
+.contextbar [data-action="leave-refine"] kbd { color: var(--text-3); font: 10px/1 ui-monospace, monospace; margin-right: 4px; }
 
 .empty-state {
   position: absolute;

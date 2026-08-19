@@ -373,28 +373,18 @@ def rerank(conn, subjects=None, vectors=None) -> int:
     stored only so that `ORDER BY elo` is an index read. Losing this column
     costs one recomputation; losing the log would cost the judgements.
 
-    **It refuses to run without vectors, and that refusal is the point.**
-    Ranking without propagation is not a smaller version of the ranking, it is
-    a different and much worse one: 2,532 comparisons cover 665 photographs,
-    and propagation is what carries them to the other 156,000. Writing plain
-    Elo over the index would quietly replace a whole-library order with an
-    order over 0.4% of it, and nothing would look broken — the grid would just
-    be wrong in a way no error message could describe.
-
-    So: pass the embedding space, or do not rerank. Reading with a stale
-    ranking is strictly better than writing a lesser one.
+    Rewritten whole, every time: what the ranking scores gets its score and
+    everything else returns to base. A photograph that drops out of the
+    ranking -- its only round taken back -- must drop out of the order too,
+    which a write that only touched the scored ones left standing at a number
+    nothing justified any more. With the embedding space the ranking reaches
+    every photograph with a vector; without it, the ones you have judged.
     """
 
     import rank
 
-    if vectors is None or not subjects:
-        raise ValueError(
-            "rerank needs the embedding space; plain Elo covers 665 of 157,064 photos"
-        )
-
     scores = rank.ranking(conn, subjects, vectors)
-    if not scores:
-        return 0
+    conn.execute("UPDATE images SET elo = ? WHERE elo != ?", (rank.BASE, rank.BASE))
     conn.executemany(
         "UPDATE images SET elo = ? WHERE content_hash = ?",
         [(score, subject) for subject, score in scores.items()],

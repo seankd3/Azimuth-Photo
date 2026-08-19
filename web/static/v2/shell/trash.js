@@ -16,7 +16,7 @@ export function createTrashWorkflow({ product, read, reload, notify, undo }) {
     try {
       const result = await product.restore([selected.id]);
       await reload();
-      if (result.changed.length) undo.show('Photograph restored.', result.changed);
+      if (result.changed.length) undo.show('Photograph restored.', () => product.undoCull(result.changed).then(reload));
     } catch (reason) {
       notify(reason.message);
     }

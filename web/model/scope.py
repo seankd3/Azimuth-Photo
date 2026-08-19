@@ -72,6 +72,20 @@ def folder(path: str) -> Scope:
     return Scope("substr(i.tail, 1, ?) = ?", (len(prefix), prefix))
 
 
+def outside(path: str) -> Scope:
+    """Everything not filed under one folder.
+
+    The default-off rule: snapshots rank and refine only when you go there
+    ("Everything, just not by default" -- 07-31). A scope, not a flag, so the
+    surfaces that honour it honour it in the same query they already run.
+    """
+
+    if not path:
+        return EVERYTHING
+    prefix = str(path).replace("\\", "/").rstrip("/") + "/"
+    return Scope("substr(i.tail, 1, ?) != ?", (len(prefix), prefix))
+
+
 def starred(least: int) -> Scope:
     """At least this many stars."""
 

@@ -53,6 +53,7 @@ trying to buy with a threshold.
 from __future__ import annotations
 
 from model import decisions
+from model.scope import EVERYTHING, Scope, where as scope_where
 
 BASE = 1200.0
 # Strength is fitted in log-odds; this is only how it is spoken aloud. A
@@ -72,26 +73,82 @@ def rounds(conn) -> list[tuple[str, list[str]]]:
 
     Pairs still read: a duel is a round whose set has one member, so `{"beat":
     x}` and `{"over": [x, y, z]}` are the same shape at different sizes.
+
+    A round taken back is still in the log -- the log says what happened --
+    as a later row naming it: `{"undo": id}`. Both rows drop out here, so the
+    fit never sees a round you retracted, and nothing was deleted to manage
+    that.
     """
 
     import json
 
-    out: list[tuple[str, list[str]]] = []
+    kept: list[tuple[int, str, list[str]]] = []
+    retracted: set[int] = set()
     for row in conn.execute(
-        "SELECT subject, value FROM decisions WHERE family = ? ORDER BY at ASC, id ASC",
+        "SELECT id, subject, value FROM decisions WHERE family = ? ORDER BY at ASC, id ASC",
         (decisions.COMPARE,),
     ):
         try:
             value = json.loads(row["value"])
         except (TypeError, ValueError):
             continue
-        over = value.get("over") if isinstance(value, dict) else None
-        if over is None and isinstance(value, dict) and value.get("beat"):
+        if not isinstance(value, dict):
+            continue
+        if value.get("undo"):
+            retracted.add(int(value["undo"]))
+            continue
+        over = value.get("over")
+        if over is None and value.get("beat"):
             over = [value["beat"]]
         over = [h for h in (over or []) if h and h != row["subject"]]
         if over:
-            out.append((row["subject"], over))
-    return out
+            kept.append((int(row["id"]), row["subject"], over))
+    return [(picked, over) for number, picked, over in kept if number not in retracted]
+
+
+def record(conn, winner_id: int, over_ids) -> dict:
+    """One round, whole: this photograph, out of these. Returns what `retract`
+    needs to take it back.
+
+    Ids become identities here, because a round is about photographs and not
+    about rows: the same frame on two drives is one member. A photograph with
+    no identity yet cannot be in a round -- the window does not offer it --
+    so asking is refused rather than recorded half.
+    """
+
+    wanted = [int(winner_id), *(int(i) for i in over_ids)]
+    holes = ",".join("?" for _ in wanted)
+    known = {
+        int(row["id"]): row["hash"] for row in conn.execute(
+            f"SELECT id, content_hash AS hash FROM images WHERE id IN ({holes})", wanted,
+        ) if row["hash"]
+    }
+    winner = known.get(int(winner_id))
+    over = sorted({known[i] for i in wanted[1:] if i in known and known[i] != winner})
+    if winner is None or not over:
+        raise ValueError("every photograph in a round needs an identity first")
+    number = decisions.decide(conn, winner, decisions.COMPARE, {"over": over})
+    conn.commit()
+    return {"decision": number, "subject": winner, "over": over}
+
+
+def retract(conn, decision: int) -> dict:
+    """Take one round back, by saying so.
+
+    Not a delete: the log's job is to say what happened, and a redo has
+    nothing to read from a deletion. The retraction names the round, and
+    `rounds()` drops both.
+    """
+
+    row = conn.execute(
+        "SELECT subject FROM decisions WHERE id = ? AND family = ?",
+        (int(decision), decisions.COMPARE),
+    ).fetchone()
+    if row is None:
+        raise ValueError("no such round")
+    number = decisions.decide(conn, row["subject"], decisions.COMPARE, {"undo": int(decision)})
+    conn.commit()
+    return {"decision": number, "retracted": int(decision)}
 
 
 def strength(conn, *, steps: int = 300, rate: float = 1.0, pull: float = 1.0) -> dict[str, float]:
@@ -194,7 +251,7 @@ def seen(conn) -> dict[str, int]:
     return counts
 
 
-def candidates(conn, n: int = 12, *, folder: str | None = None) -> list[dict]:
+def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> list[dict]:
     """Photographs worth comparing next.
 
     The mosaic is a candidate query, and the query is one sentence: **show the
@@ -202,20 +259,26 @@ def candidates(conn, n: int = 12, *, folder: str | None = None) -> list[dict]:
     comparison between two photographs you already know the order of teaches
     nothing; a comparison between two that are close teaches the most.
 
-    That replaces a route with 22 parameters and a strategy engine. Filters are
-    not an argument here — narrowing the library is `library.photos`'s job, and
-    a mosaic over a folder is this query over that folder.
+    That replaces a route with 22 parameters and a strategy engine. Narrowing
+    is not an argument here -- it is the `scope`, the same one every surface
+    takes, so a mosaic over a folder is this query over that folder and a
+    mosaic over what can be shown right now is this query over that.
+
+    `avoid` is what is on screen or was a moment ago, by identity; a set is
+    drawn from the rest so the same frame does not come straight back.
+
+    A pair is one orientation. Two photographs side by side are judged by
+    shape before they are judged by anything else -- a portrait against a
+    landscape is a comparison of frames, not photographs -- so the companion
+    in a pair shares the anchor's orientation when one exists. A larger set is
+    mixed and shown at equal area, which is what takes shape out of it there.
     """
 
     experience = seen(conn)
     scores = strength(conn)
 
-    where = "i.status != 'trashed' AND i.tail IS NOT NULL AND i.content_hash IS NOT NULL"
-    args: list = []
-    if folder:
-        prefix = folder.replace("\\", "/").rstrip("/") + "/"
-        where += " AND substr(i.tail, 1, ?) = ?"
-        args += [len(prefix), prefix]
+    clause, args = scope_where(scope)
+    where = f"i.status != 'trashed' AND i.tail IS NOT NULL AND i.content_hash IS NOT NULL AND ({clause})"
 
     # A window at a random offset, not the top of the library. Ordering the
     # pool by rating looked reasonable and was wrong: 127,219 photographs sit
@@ -228,29 +291,73 @@ def candidates(conn, n: int = 12, *, folder: str | None = None) -> list[dict]:
     # off the end keeps the last few thousand photographs reachable.
     window = 4000
     highest = conn.execute("SELECT MAX(id) FROM images").fetchone()[0] or 0
+    select = "SELECT i.id, i.content_hash AS hash, i.width, i.height, i.rotate FROM images i"
     pool = [dict(row) for row in conn.execute(
-        f"SELECT i.id, i.tail, i.content_hash AS hash, i.elo, i.width, i.height"
-        f" FROM images i WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
+        f"{select} WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
         (*args, _somewhere(highest), window),
     )]
     if len(pool) < window:
         pool += [dict(row) for row in conn.execute(
-            f"SELECT i.id, i.tail, i.content_hash AS hash, i.elo, i.width, i.height"
-            f" FROM images i WHERE {where} ORDER BY i.id LIMIT ?",
-            (*args, window - len(pool)),
+            f"{select} WHERE {where} ORDER BY i.id LIMIT ?", (*args, window - len(pool)),
         )]
+    unwanted = set(avoid)
+    pool = [p for p in pool if p["hash"] not in unwanted]
     if not pool:
         return []
 
     for photo in pool:
         photo["comparisons"] = experience.get(photo["hash"], 0)
-        photo["rating"] = scores.get(photo["hash"], float(photo["elo"] or BASE))
+        photo["rating"] = scores.get(photo["hash"], BASE)
 
     # The least-judged photograph anchors the set; the rest are its nearest
     # neighbours by rating, which is what makes the answer informative.
     anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
-    pool.sort(key=lambda p: abs(p["rating"] - anchor["rating"]))
-    return pool[:max(2, int(n))]
+    n = max(2, int(n))
+    if n == 2:
+        pool.sort(key=lambda p: (_orientation(p) != _orientation(anchor), abs(p["rating"] - anchor["rating"])))
+    else:
+        pool.sort(key=lambda p: abs(p["rating"] - anchor["rating"]))
+    chosen: list[dict] = []
+    identities: set[str] = set()
+    for photo in pool:
+        if photo["hash"] in identities:
+            continue          # one frame on two drives is one member
+        identities.add(photo["hash"])
+        chosen.append(photo)
+        if len(chosen) == n:
+            break
+    return chosen
+
+
+def _orientation(photo: dict) -> str:
+    """Landscape, portrait or square, as the photograph is shown -- a turn
+    swaps the sides. Unread dimensions count as landscape, the common case."""
+
+    width, height = photo.get("width") or 3, photo.get("height") or 2
+    if int(photo.get("rotate") or 0) % 180:
+        width, height = height, width
+    return "landscape" if width > height else "portrait" if height > width else "square"
+
+
+def judged(conn, scope: Scope = EVERYTHING) -> int:
+    """How many photographs in a scope have been in at least one round.
+
+    The progress a ranking surface shows: not a percentage of anything
+    invented, just how much of what you are looking at you have looked at.
+    """
+
+    import json
+
+    members = {h for picked, over in rounds(conn) for h in (picked, *over)}
+    if not members:
+        return 0
+    clause, args = scope_where(scope)
+    return int(conn.execute(
+        f"SELECT COUNT(DISTINCT i.content_hash) FROM images i"
+        f" WHERE i.status != 'trashed' AND i.tail IS NOT NULL AND ({clause})"
+        f" AND i.content_hash IN (SELECT value FROM json_each(?))",
+        (*args, json.dumps(sorted(members))),
+    ).fetchone()[0])
 
 
 def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:

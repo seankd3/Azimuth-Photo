@@ -3,6 +3,7 @@ import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCullWorkflow } from './cull.js';
 import { createIntakeWorkflow } from './intake.js';
+import { createRefineWorkflow } from './refine.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
 
@@ -51,11 +52,7 @@ const pages = new PageCache({
     notify(`Some photos could not be loaded. ${error.message}`);
   },
 });
-const undo = createUndo({
-  product,
-  reload: () => loadView(),
-  notify,
-});
+const undo = createUndo({ notify });
 const trashWorkflow = createTrashWorkflow({
   product,
   read,
@@ -73,9 +70,21 @@ const intakeWorkflow = createIntakeWorkflow({
     await Promise.all([loadView(), loadFolders()]);
   },
 });
+const refineWorkflow = createRefineWorkflow({
+  product,
+  read,
+  update,
+  notify,
+  undo,
+  onLeave: async () => {
+    // The ranking moved while the stage was up; a grid sorted by it reloads.
+    if (read().sort === 'best') await loadView();
+  },
+});
 const cullWorkflow = createCullWorkflow({
   product,
   read,
+  reload: () => loadView(),
   replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status, rotate: photo.rotate })),
   remove: async (index, moved) => {
     // One cell left the grid: edit the window in place so the loop never
@@ -361,6 +370,11 @@ async function loadFolders() {
 }
 
 function showFolder(path) {
+  if (read().view === 'refine') {
+    update({ folder: path, selected: null, selectedIndex: null });
+    refineWorkflow.resize(refineWorkflow.size());
+    return;
+  }
   update({ view: 'library', folder: path, selected: null, selectedIndex: null });
   workspace.scrollTo({ top: 0 });
   loadView();
@@ -517,7 +531,16 @@ function renderChrome(state) {
     : state.counts.unidentified
       ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
       : '');
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash';
+  const refining = state.view === 'refine';
+  grid.hidden = refining;
+  document.querySelector('[data-refine]').hidden = !refining;
+  document.querySelector('[data-refine-progress]').hidden = !refining;
+  document.querySelector('[data-refine-size]').hidden = !refining;
+  document.querySelector('[data-action="refine"]').hidden = state.view !== 'library';
+  document.querySelector('[data-action="leave-refine"]').hidden = !refining;
+  document.querySelector('[data-result-label]').hidden = refining;
+  document.querySelector('[data-density]').closest('label').hidden = refining;
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = state.view === 'library' && Boolean(state.selected?.hash);
@@ -531,7 +554,7 @@ function renderChrome(state) {
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
-    : state.folder ? state.folder.split('/').pop() : 'All photos';
+    : (refining ? 'Refine · ' : '') + (state.folder ? state.folder.split('/').pop() : 'All photos');
   renderFolders(state);
 
   driveList.replaceChildren(...state.drives.map((drive) => {
@@ -547,7 +570,7 @@ function renderChrome(state) {
 }
 
 function render(state) {
-  visibleGrid();
+  if (state.view !== 'refine') visibleGrid();
   renderChrome(state);
 }
 
@@ -615,6 +638,10 @@ document.addEventListener('click', (event) => {
   if (action === 'check-new') intakeWorkflow.checkNew();
   if (action === 'check-all') intakeWorkflow.checkAll();
   if (action === 'check-none') intakeWorkflow.checkNone();
+  if (action === 'refine') refineWorkflow.open();
+  if (action === 'leave-refine') refineWorkflow.close();
+  const size = event.target.closest('[data-refine-size] [data-size]')?.dataset.size;
+  if (size) refineWorkflow.resize(Number(size));
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'reject') cullWorkflow.apply('reject');
@@ -633,8 +660,14 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') intakeWorkflow.close();
     return;
   }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !isTyping) {
+    undo.run();
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape') {
     if (loupe.open) closeLoupe();
+    else if (refineWorkflow.isOpen()) refineWorkflow.close();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected) update({ selected: null, selectedIndex: null });
@@ -643,6 +676,10 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (isTyping || driveDialog.open || trashWorkflow.isOpen()) return;
+  if (refineWorkflow.isOpen()) {
+    if (refineWorkflow.key(event)) event.preventDefault();
+    return;
+  }
 
   const current = read().selectedIndex;
   const key = event.key.toLowerCase();

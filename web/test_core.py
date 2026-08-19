@@ -7,6 +7,7 @@ reads is a suite nobody runs.
 """
 
 import io
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -24,6 +25,7 @@ import boot
 import library as library_surface
 import metadata as embedded_metadata
 from PIL import Image
+from model.scope import EVERYTHING
 from model import backup, cache, copies, cull, decisions, drives, intake, photos, scope, sets, trash
 from photo import exif as raw_exif
 
@@ -1501,7 +1503,7 @@ class RankingIsDerived(CoreCase):
         first = rank.strength(self.conn)
 
         shuffled = list(self.conn.execute(
-            "SELECT subject, value FROM decisions WHERE family = 'compare'").fetchall())
+            "SELECT id, subject, value FROM decisions WHERE family = 'compare'").fetchall())
         random.Random(11).shuffle(shuffled)
 
         class Reordered:
@@ -1568,6 +1570,91 @@ class RankingIsDerived(CoreCase):
         # Ranking works at zero embedding coverage and sharpens as they land.
         self._round("a", ["b"], 1.0)
         self.assertEqual(rank.ranking(self.conn), rank.strength(self.conn))
+
+    def _identified(self, tail, width=3000, height=2000):
+        photo_id = self.photo(tail)
+        digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
+        self.conn.execute("UPDATE images SET content_hash = ?, width = ?, height = ? WHERE id = ?",
+                          (digest, width, height, photo_id))
+        self.conn.commit()
+        return photo_id, digest
+
+    def test_a_round_taken_back_stops_counting_and_stays_in_the_log(self):
+        # V1's undo wrote a `compare_undone` row that the fit never read, so
+        # Undo in Refine did nothing to the ranking. Here the retraction is a
+        # round-family row naming the round, and `rounds()` drops both --
+        # without deleting anything, so the log still says what happened.
+        a, a_hash = self._identified("Raws/a.CR2")
+        b, b_hash = self._identified("Raws/b.CR2")
+        c, c_hash = self._identified("Raws/c.CR2")
+        first = rank.record(self.conn, a, [b, c])
+        second = rank.record(self.conn, b, [c])
+        self.assertEqual(len(rank.rounds(self.conn)), 2)
+        rank.retract(self.conn, first["decision"])
+        self.assertEqual(rank.rounds(self.conn), [(b_hash, [c_hash])])
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM decisions WHERE family = 'compare'").fetchone()[0], 3)
+        with self.assertRaises(ValueError):
+            rank.retract(self.conn, 999999)
+        with self.assertRaises(ValueError):
+            rank.record(self.conn, self.photo("Raws/unidentified.CR2"), [a])
+        self.assertEqual(second["over"], [c_hash])
+
+    def test_a_set_comes_only_from_what_can_be_shown_and_a_pair_is_one_orientation(self):
+        # "Limit refine to the files that already have thumbnails so we never
+        # get blank spots" (07-21): the candidate query runs over the tile
+        # store's `ready` scope, which is the cache itself, not a flag on the
+        # row. And a duel of a portrait against a landscape compares frames
+        # before photographs, so a pair shares the anchor's orientation.
+        import tiles
+        from model.scope import all_of
+        store = tiles.Store(os.path.join(self.tmp, "tiles"), ceiling_bytes=0)
+        ready, unready = [], []
+        for i in range(6):
+            photo_id, digest = self._identified(f"Raws/r{i}.CR2", width=3000, height=2000)
+            cache.put(self.conn, digest, store.grid, cache.Made(path=f"r{i}.jpg", bytes=1))
+            ready.append(digest)
+        tall_id, tall = self._identified("Raws/tall.CR2", width=2000, height=3000)
+        cache.put(self.conn, tall, store.grid, cache.Made(path="tall.jpg", bytes=1))
+        for i in range(3):
+            _id, digest = self._identified(f"Raws/u{i}.CR2")
+            unready.append(digest)
+        self.conn.commit()
+
+        chosen = rank.candidates(self.conn, 12, scope=all_of(EVERYTHING, store.ready))
+        self.assertEqual({p["hash"] for p in chosen}, set(ready) | {tall})
+        self.assertTrue(all(p["hash"] not in unready for p in chosen))
+
+        # the least-judged anchors: judge every landscape once so the portrait
+        # anchors the pair, and its companion must then be another portrait --
+        # none exists, so the pair falls back to the nearest landscape
+        for digest in ready:
+            self._round(digest, [ready[0]] if digest != ready[0] else [ready[1]], 1.0)
+        pair = rank.candidates(self.conn, 2, scope=all_of(EVERYTHING, store.ready))
+        self.assertEqual(pair[0]["hash"], tall)
+        self.assertEqual(len(pair), 2)
+        # and with a second portrait it is the pair
+        tall2_id, tall2 = self._identified("Raws/tall2.CR2", width=2000, height=3000)
+        cache.put(self.conn, tall2, store.grid, cache.Made(path="tall2.jpg", bytes=1))
+        self.conn.commit()
+        pair = rank.candidates(self.conn, 2, scope=all_of(EVERYTHING, store.ready))
+        self.assertEqual({p["hash"] for p in pair}, {tall, tall2})
+        # what is on screen does not come straight back
+        again = rank.candidates(self.conn, 2, scope=all_of(EVERYTHING, store.ready), avoid=[tall, tall2])
+        self.assertFalse({tall, tall2} & {p["hash"] for p in again})
+
+    def test_judged_counts_photographs_in_the_scope_that_were_in_a_round(self):
+        from model.scope import folder
+        a, a_hash = self._identified("Raws/2026/a.CR2")
+        b, b_hash = self._identified("Raws/2026/b.CR2")
+        c, c_hash = self._identified("Snapshots/c.jpg")
+        self.assertEqual(rank.judged(self.conn), 0)
+        rank.record(self.conn, a, [b])
+        self.assertEqual(rank.judged(self.conn), 2)
+        self.assertEqual(rank.judged(self.conn, folder("Raws")), 2)
+        self.assertEqual(rank.judged(self.conn, folder("Snapshots")), 0)
+        rank.record(self.conn, c, [a])
+        self.assertEqual(rank.judged(self.conn, folder("Snapshots")), 1)
 
 
 if __name__ == "__main__":

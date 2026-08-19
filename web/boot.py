@@ -18,10 +18,11 @@ from typing import Callable, TypeVar
 import library as queries
 import metadata as embedded_metadata
 import model
+import rank
 import tiles
 import work
 from model import cache, copies, cull, decisions, drives, intake, photos, trash
-from model.scope import EVERYTHING, Scope, folder as in_folder, where as scope_where
+from model.scope import EVERYTHING, Scope, all_of, folder as in_folder, ids as these, outside, where as scope_where
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -177,6 +178,41 @@ class Library:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
 
+    # ---- refine ----
+
+    def refining(self, folder: str = "") -> Scope:
+        """What Refine ranks: the folder you are in, or the library without
+        its snapshots -- phone shots rank only when you go to them
+        ("Everything, just not by default", 07-31)."""
+
+        return in_folder(folder) if folder else outside(intake.ROOTS[intake.SNAPSHOTS])
+
+    def refine(self, n: int = 9, folder: str = "", avoid=()) -> dict:
+        """A set worth comparing, from what can be shown this instant, and how
+        far the scope has been ranked."""
+
+        self._open()
+        scope = self.refining(folder)
+        chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready), avoid=avoid)
+        rows = {row["id"]: row for row in self._with_urls(queries.photos(
+            self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
+            offset=0, renditions=self.tiles.renditions, reachable_on=self._here(),
+        ))} if chosen else {}
+        return {
+            "photos": [{**rows[p["id"]], "comparisons": p["comparisons"], "rating": p["rating"]}
+                       for p in chosen if p["id"] in rows],
+            "judged": rank.judged(self.conn, scope),
+            "total": queries.size(self.conn, scope),
+        }
+
+    def round(self, winner_id: int, over_ids) -> dict:
+        self._open()
+        return rank.record(self.conn, int(winner_id), over_ids)
+
+    def unround(self, decision: int) -> dict:
+        self._open()
+        return rank.retract(self.conn, int(decision))
+
     def forget_missing(self, folder: str = "") -> dict:
         """Forget every photograph under a folder (or anywhere) that no drive
         holds -- Lightroom's remove-missing, scoped to the tree."""
@@ -320,6 +356,7 @@ class OwnedLibrary:
         self._executor_shutdown = False
         self._stop_following = threading.Event()
         self._follower: threading.Thread | None = None
+        self._ranking = False
         # Bringing photographs in has its own lane: a card takes minutes, and
         # neither browsing nor the minute sweep may wait behind it.
         self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
@@ -351,6 +388,25 @@ class OwnedLibrary:
                 raise RuntimeError("library is closed")
             future = self._scan_executor.submit(self._sweep, drive_uuid, under)
         return await asyncio.wrap_future(future)
+
+    def rank_soon(self) -> None:
+        """Recompute the ranking behind the sort index, off the interactive
+        lane, at most once for any burst of rounds."""
+
+        with self._state:
+            if self._closed or self._ranking:
+                return
+            self._ranking = True
+            self._scan_executor.submit(self._rank)
+
+    def _rank(self) -> None:
+        with self._state:
+            self._ranking = False
+        conn = model.connect(self._library.catalog_path)
+        try:
+            queries.rerank(conn)
+        finally:
+            conn.close()
 
     def _sweep(self, drive_uuid: str, under: str = "") -> dict:
         conn = model.connect(self._library.catalog_path)

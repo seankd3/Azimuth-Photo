@@ -55,10 +55,21 @@
           <button class="danger-button" type="button" data-action="reject"><kbd>X</kbd> Reject</button>
         </div>
         <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
+        <span class="refine-progress" data-refine-progress hidden></span>
+        <div class="refine-size" data-refine-size hidden role="group" aria-label="How many at once">
+          <button type="button" data-size="2">2</button>
+          <button type="button" data-size="4">4</button>
+          <button type="button" data-size="6">6</button>
+          <button type="button" data-size="9">9</button>
+          <button type="button" data-size="12">12</button>
+        </div>
+        <button class="quiet-button" type="button" data-action="refine">Refine</button>
+        <button class="quiet-button" type="button" data-action="leave-refine" hidden><kbd>Esc</kbd> Done</button>
         <label>Sort
           <select data-sort>
             <option value="newest">Newest</option>
             <option value="oldest">Oldest</option>
+            <option value="best">Best</option>
             <option value="added">Recently added</option>
             <option value="filename">Filename</option>
           </select>
@@ -70,6 +81,7 @@
         <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
       <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
+      <section class="refine-stage" data-refine aria-label="Refine" hidden></section>
     </main>
 
     <aside class="inspector" aria-label="Photo information" data-inspector>

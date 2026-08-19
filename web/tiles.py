@@ -31,6 +31,7 @@ import tempfile
 
 import render
 from model import cache
+from model.scope import Scope
 
 GRID = "grid"
 LOUPE = "loupe"
@@ -71,6 +72,17 @@ class Store:
         """What a photo row carries: the answer each kind has for it."""
 
         return {"tile": (self.grid, {}), "loupe": (self.loupe, {})}
+
+    @property
+    def ready(self) -> Scope:
+        """Photographs whose grid tile exists -- what a surface can show the
+        instant it asks, with nothing decoded on the way."""
+
+        return Scope(
+            "EXISTS (SELECT 1 FROM cache t WHERE t.hash = i.content_hash"
+            " AND t.kind = ? AND t.recipe = ? AND t.state = ?)",
+            (self.grid.name, cache.canonical(self.grid, {}), cache.READY),
+        )
 
     def path(self, digest: str, size: int) -> str:
         """Return the sole name for an answer, refusing ambiguous inputs."""

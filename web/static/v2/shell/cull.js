@@ -10,7 +10,7 @@ const ACTIONS = Object.freeze({
   turnLeft: { call: (product, id) => product.turn([id], 270), patch: (photo) => ({ rotate: (photo.rotate + 270) % 360 }), message: 'Turned left.' },
 });
 
-export function createCullWorkflow({ product, read, replace, remove, selectIndex, notify, undo }) {
+export function createCullWorkflow({ product, read, reload, replace, remove, selectIndex, notify, undo }) {
   let busy = false;
 
   async function apply(name) {
@@ -32,7 +32,7 @@ export function createCullWorkflow({ product, read, replace, remove, selectIndex
         replace({ ...selected, ...action.patch(selected) });
         if (action.advance) await selectIndex(selectedIndex + 1);
       }
-      undo.show(action.message, result.changed);
+      undo.show(action.message, () => product.undoCull(result.changed).then(reload));
     } catch (reason) {
       notify(reason.message);
     } finally {
