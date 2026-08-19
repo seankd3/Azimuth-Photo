@@ -75,14 +75,15 @@ function photoCell(photo, index, actions) {
   cell.dataset.kind = 'photo';
   cell.dataset.photoId = photo.id;
   cell.dataset.photoKey = `${photo.id}:${photo.tail}`;
-  cell.setAttribute('aria-label', photo.tail || `Photo ${photo.id}`);
   cell.setAttribute('aria-pressed', 'false');
 
   const image = element('img');
   image.alt = '';
   image.loading = 'lazy';
   image.decoding = 'async';
-  cell.append(image);
+  const flag = element('span', 'pick-flag');
+  flag.setAttribute('aria-hidden', 'true');
+  cell.append(image, flag);
   loadTile(image, photo, actions);
   cell.addEventListener('click', () => actions.select(photo, index));
   cell.addEventListener('dblclick', () => actions.open(photo, index));
@@ -127,6 +128,9 @@ function reconcileGrid(grid, state, actions, layout, range) {
     positionCell(cell, layout, index);
     cell.classList.toggle('is-selected', index === state.selectedIndex);
     if (cell.dataset.kind === 'photo') {
+      const picked = photo.status === 'picked';
+      cell.classList.toggle('is-picked', picked);
+      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}`);
       cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
     }
     desired.push(cell);
@@ -175,6 +179,8 @@ function renderInspector(panel, selected) {
   heading.append(element('p', 'eyebrow', 'Photo'), element('h2', '', selected.tail || 'Untitled'));
   const facts = element('dl', 'facts');
   const rows = [
+    ['Cull', !selected.hash ? 'Reading…'
+      : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
     ['Taken', selected.date_taken],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ')],
     ['Lens', selected.lens],

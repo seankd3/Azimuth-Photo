@@ -835,6 +835,7 @@ class CullIsAReversibleDecision(CoreCase):
         action = cull.reject(self.conn, (first,))
 
         self.assertEqual(len(action["changed"]), 1)
+        self.assertEqual(action["changed"][0]["photos"], 2)
         self.assertEqual(trash.count(self.conn), 2)
 
     def test_empty_trash_reverifies_and_removes_every_known_copy(self):

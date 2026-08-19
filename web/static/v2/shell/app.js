@@ -1,7 +1,9 @@
 import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
+import { createCullWorkflow } from './cull.js';
 import { createTrashWorkflow } from './trash.js';
+import { createUndo } from './undo.js';
 
 const PAGE = 200;
 const CONTEXTBAR_HEIGHT = 46;
@@ -31,11 +33,44 @@ const pages = new PageCache({
     status.textContent = `Some photos could not be loaded. ${error.message}`;
   },
 });
+const undo = createUndo({
+  product,
+  reload: () => loadView(),
+  status,
+});
 const trashWorkflow = createTrashWorkflow({
   product,
   read,
   reload: () => loadView(),
   status,
+  undo,
+});
+const cullWorkflow = createCullWorkflow({
+  product,
+  read,
+  replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status })),
+  remove: async (index, moved) => {
+    // One cell left the grid: edit the window in place so the loop never
+    // waits on a reload. A duplicate identity takes more than one row with
+    // it, at positions this window cannot know; then the library is asked.
+    if (moved !== 1) {
+      await loadView();
+      return;
+    }
+    pages.remove(index);
+    const counts = read().counts;
+    update({
+      counts: {
+        ...counts,
+        photos: Math.max(0, counts.photos - moved),
+        trash: counts.trash + moved,
+      },
+    });
+    void pages.ensure(index);
+  },
+  selectIndex,
+  status,
+  undo,
 });
 
 function visibleGrid() {
@@ -158,9 +193,13 @@ function scrollIndexIntoView(index) {
 }
 
 async function selectIndex(index, { open = loupe.open } = {}) {
+  if (read().total === 0) {
+    update({ selected: null, selectedIndex: null });
+    return;
+  }
   const bounded = Math.max(0, Math.min(read().total - 1, index));
-  if (!Number.isFinite(bounded) || read().total === 0) return;
-  await pages.ensure(bounded);
+  if (!Number.isFinite(bounded)) return;
+  if (!read().photos.has(bounded)) await pages.ensure(bounded);
   const photo = read().photos.get(bounded);
   if (!photo) return;
   scrollIndexIntoView(bounded);
@@ -201,6 +240,12 @@ function renderChrome(state) {
     : `${state.photos.size.toLocaleString()} of ${state.total.toLocaleString()} loaded`;
   if (state.scanning) status.textContent = 'Reading your photos…';
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash';
+  // A decision is keyed on identity, and identity arrives shortly after a
+  // sweep; until then the photograph cannot take one, so nothing offers to.
+  const canCull = state.view === 'library' && Boolean(state.selected?.hash);
+  document.querySelector('[data-cull-actions]').hidden = !canCull;
+  document.querySelector('[data-action="pick"]').hidden = !canCull || state.selected.status === 'picked';
+  document.querySelector('[data-action="clear-pick"]').hidden = !canCull || state.selected.status !== 'picked';
   document.querySelector('[data-action="restore"]').hidden = state.view !== 'trash' || !state.selected;
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library');
@@ -256,8 +301,11 @@ document.addEventListener('click', (event) => {
     loadView();
   }
   if (action === 'restore') trashWorkflow.restoreSelected();
+  if (action === 'pick') cullWorkflow.apply('pick');
+  if (action === 'clear-pick') cullWorkflow.apply('clear');
+  if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
-  if (action === 'undo-toast') trashWorkflow.undo();
+  if (action === 'undo-toast') undo.run();
   if (action === 'close-drive') closeDriveDialog();
   if (action === 'close-empty') trashWorkflow.closeDialog();
   if (action === 'close-loupe') closeLoupe();
@@ -278,6 +326,13 @@ document.addEventListener('keydown', (event) => {
   if (isTyping || driveDialog.open || trashWorkflow.isOpen()) return;
 
   const current = read().selectedIndex;
+  const key = event.key.toLowerCase();
+  const cullActions = { p: 'pick', u: 'clear', x: 'reject' };
+  if (key in cullActions && read().view === 'library' && read().selected?.hash) {
+    cullWorkflow.apply(cullActions[key]);
+    event.preventDefault();
+    return;
+  }
   const columns = Number(grid.dataset.columns) || 1;
   const moves = {
     ArrowLeft: -1,

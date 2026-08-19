@@ -89,7 +89,7 @@ def _change(
             if before == after:
                 continue
             decision_id = decisions.decide(conn, subject, decisions.STATUS, after)
-            conn.execute(
+            updated = conn.execute(
                 "UPDATE images SET status = ? WHERE content_hash = ?",
                 (after, subject),
             )
@@ -99,6 +99,7 @@ def _change(
                     "before": before,
                     "after": after,
                     "decision": decision_id,
+                    "photos": updated.rowcount,
                 }
             )
         conn.commit()

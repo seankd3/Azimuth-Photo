@@ -1,9 +1,7 @@
-export function createTrashWorkflow({ product, read, reload, status }) {
+export function createTrashWorkflow({ product, read, reload, status, undo }) {
   const dialog = document.querySelector('[data-empty-dialog]');
   const form = document.querySelector('[data-empty-form]');
   const error = document.querySelector('[data-empty-error]');
-  const toast = document.querySelector('[data-toast]');
-  let undoChanges = null;
 
   function closeDialog() {
     if (dialog.open) dialog.close();
@@ -12,24 +10,13 @@ export function createTrashWorkflow({ product, read, reload, status }) {
     form.querySelector('[type="submit"]').disabled = true;
   }
 
-  function hideToast() {
-    toast.hidden = true;
-    undoChanges = null;
-  }
-
-  function showUndo(message, changes) {
-    undoChanges = changes;
-    toast.querySelector('[data-toast-copy]').textContent = message;
-    toast.hidden = false;
-  }
-
   async function restoreSelected() {
     const selected = read().selected;
     if (!selected || read().view !== 'trash') return;
     try {
       const result = await product.restore([selected.id]);
       await reload();
-      if (result.changed.length) showUndo('Photograph restored.', result.changed);
+      if (result.changed.length) undo.show('Photograph restored.', result.changed);
     } catch (reason) {
       status.textContent = reason.message;
     }
@@ -45,18 +32,6 @@ export function createTrashWorkflow({ product, read, reload, status }) {
       dialog.dataset.expected = expected;
       dialog.showModal();
       form.elements.count.focus();
-    } catch (reason) {
-      status.textContent = reason.message;
-    }
-  }
-
-  async function undo() {
-    if (!undoChanges) return;
-    const changes = undoChanges;
-    hideToast();
-    try {
-      await product.undoTrash(changes);
-      await reload();
     } catch (reason) {
       status.textContent = reason.message;
     }
@@ -92,6 +67,5 @@ export function createTrashWorkflow({ product, read, reload, status }) {
     isOpen: () => dialog.open,
     openDialog,
     restoreSelected,
-    undo,
   });
 }

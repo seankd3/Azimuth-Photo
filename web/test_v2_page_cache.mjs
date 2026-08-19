@@ -41,4 +41,10 @@ const loadCount = requests.length;
 await cache.ensure(400);
 assert.equal(requests.length, loadCount, 'a failed visible page does not create a retry storm');
 
+generation = cache.reset();
+cache.seed(generation, [{ id: 1, hash: 'a', status: 'unflagged' }, { id: 2, hash: 'a', status: 'unflagged' }, { id: 3, hash: 'b', status: 'unflagged' }], 3);
+const touched = cache.patch((item) => item.hash === 'a', (item) => ({ ...item, status: 'picked' }));
+assert.equal(touched, 2, 'a change to an identity lands on every row that holds it');
+assert.deepEqual([...pages.at(-1).values.values()].map((item) => item.status), ['picked', 'picked', 'unflagged']);
+
 console.log('page cache refuters passed');

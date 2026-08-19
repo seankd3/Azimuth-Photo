@@ -31,6 +31,38 @@ export class PageCache {
     return true;
   }
 
+  patch(matches, transform) {
+    // Every loaded row the predicate names, not one position: an identity can
+    // occupy several rows, and a change to it must land on all of them.
+    let touched = 0;
+    for (const [position, item] of this.values) {
+      if (!matches(item)) continue;
+      this.values.set(position, transform(item));
+      touched += 1;
+    }
+    if (touched) this.onPage(new Map(this.values), this.total);
+    return touched;
+  }
+
+  remove(index) {
+    index = Number(index);
+    if (!this.values.has(index)) return false;
+
+    const affectedPage = this.pageOffset(index);
+    this.generation += 1;
+    this.total = Math.max(0, this.total - 1);
+    this.values = new Map(
+      [...this.values]
+        .filter(([position]) => position !== index)
+        .map(([position, value]) => [position > index ? position - 1 : position, value]),
+    );
+    this.loaded = new Set([...this.loaded].filter((offset) => offset < affectedPage));
+    this.pending = new Map();
+    this.failed = new Set([...this.failed].filter((offset) => offset < affectedPage));
+    this.onPage(new Map(this.values), this.total);
+    return true;
+  }
+
   pageOffset(index) {
     return Math.floor(index / this.pageSize) * this.pageSize;
   }
