@@ -24,6 +24,15 @@ Everything below that looks like a magic number was paid for once:
 * **`draft()` before `load()`.** The archive holds frames up to 527 MP — 1.5 GB
   of RGB each. Full-decoding one for a 400 px tile is how the old server
   reached 6.6 GB resident.
+* **The camera's own JPEG is the tile, whenever the RAW carries one big
+  enough.** Every RAW embeds the camera's rendering of itself -- Canon and Sony
+  at full size, phones at about 1,000 px -- and it is what the photographer
+  saw on the back of the camera. Measured on this machine: a 3840 loupe and
+  its 1024 grid tile from that preview cost ~0.3 s together; demosaicing the
+  same CR3 for one size costs 0.5-1.1 s, and a phone DNG 2.6-3.1 s. Lightroom's
+  embedded-preview mode and Photo Mechanic are this exact choice. Develop
+  renders its own pixels when there is an edit; a tile of an unedited
+  photograph is the camera's.
 * **Demosaic at half size** whenever the half frame is still within 25% of the
   target. A mild upscale is invisible in a grid tile and saves seconds.
 * **A frame too big to afford is refused, never clamped.** Clamping an
@@ -64,15 +73,20 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # which knows what the machine can actually pay.
 Image.MAX_IMAGE_PIXELS = None
 
-# The sizes, which are the sizes the UI already asks for. Not tiers with
-# policies, budgets and allocation profiles -- just how long the long side is.
-SIZES = {"sm": 400, "md": 1920, "lg": 3840, "full": 0}
-GRID = SIZES["sm"]
-LOUPE = SIZES["md"]
-FULL = SIZES["full"]  # native resolution
+# Two stored sizes, derived from what a cell and a window need in device
+# pixels rather than inherited from V1's three. A grid cell on a 4K-class
+# display at its densest is under 1,000 px; a full-window loupe on the same
+# display wants ~3,500, and 4096 is also exactly half of the 8192-wide
+# previews the common full-frame bodies embed, so the loupe is a draft read
+# and no resample at all. Anything beyond that is the original, decoded on
+# demand: a 1:1 tier for 157,000 photographs is 1.9 TB, which is not a cache.
+GRID = 1024
+LOUPE = 4096
+FULL = 0  # native resolution
 
 # What the archive's existing tiles were encoded at. Kept so re-rendering a
-# photo does not visibly change it.
+# photo does not visibly change it. Baseline, not progressive-and-optimised:
+# measured at 3840 px, that pair cost 165 ms against 32 ms and saved 5%.
 QUALITY = 92
 
 # What one decode may cost, in bytes of RGB. A frame whose full decode would
@@ -103,10 +117,71 @@ def _affordable(width: int, height: int, longest: int) -> None:
         raise TooBig(f"{width}x{height} at longest={longest or 'native'} exceeds the decode ceiling")
 
 
+def _draft(image: Image.Image, longest: int) -> None:
+    """Ask the JPEG decoder for no more pixels than `longest` needs.
+
+    `draft()` scales by powers of two and returns a frame at least as large as
+    the box it is given, so the box has to carry the image's own shape: asking
+    for a square of side 2x on a 3:2 frame forces the *short* side past it and
+    costs a scale step -- measured, 186 ms instead of ~60 for a 400 px tile.
+    Below 1920 the box is twice the target so the resample has pixels to work
+    with; at and above it the target itself is enough, and the difference
+    between 4096 and 8192 decoded pixels is 150 ms per photograph.
+    """
+
+    if not longest:
+        return
+    margin = 2 if longest < 1920 else 1
+    width, height = image.size
+    long_side = max(width, height, 1)
+    image.draft("RGB", (max(1, margin * longest * width // long_side),
+                        max(1, margin * longest * height // long_side)))
+
+
+def _flip(image: Image.Image, flip: int) -> Image.Image:
+    """LibRaw's flip, applied to pixels it did not orient itself."""
+
+    turn = {3: Image.ROTATE_180, 5: Image.ROTATE_90, 6: Image.ROTATE_270}.get(int(flip))
+    return image.transpose(turn) if turn else image
+
+
+def _preview(raw, longest: int) -> Image.Image | None:
+    """The camera's embedded JPEG, when it is big enough to be the answer.
+
+    Big enough is the same 25% margin the half-size demosaic uses. When a
+    longest side of 0 means native resolution, no preview qualifies; export and
+    Develop read the sensor.
+    """
+
+    import io
+
+    import rawpy
+
+    try:
+        thumb = raw.extract_thumb()
+    except rawpy.LibRawError:
+        return None
+    if thumb.format != rawpy.ThumbFormat.JPEG:
+        return None
+    image = Image.open(io.BytesIO(thumb.data))
+    if not longest or max(image.size) < int(longest * 0.75):
+        image.close()
+        return None
+    _draft(image, longest)
+    image.load()
+    # The preview's own EXIF usually repeats the camera's orientation, but the
+    # RAW's flip is the authority and applying both would turn a portrait
+    # twice; so the preview's tag is ignored and the flip alone is honoured.
+    return _flip(image, raw.sizes.flip)
+
+
 def _decode_raw(path: str, longest: int) -> Image.Image:
     import rawpy
 
     with rawpy.imread(path) as raw:
+        preview = _preview(raw, longest)
+        if preview is not None:
+            return preview
         sizes = raw.sizes
         long_side = max(sizes.width, sizes.height)
         # Half the sensor is plenty whenever it still lands near the target.
@@ -134,15 +209,10 @@ def _decode_display(path: str, longest: int) -> Image.Image:
     """
 
     image = Image.open(path)
-    if longest:
-        # Twice the target, not the target: `draft` only scales by powers of
-        # two, so asking for exactly the target can land a 1/8 read just under
-        # it and the upscale back is visibly soft. 2x always leaves a frame at
-        # least as large as what is wanted.
-        image.draft("RGB", (longest * 2, longest * 2))
+    _draft(image, longest)
     _affordable(image.width, image.height, longest)
     image.load()
-    return image
+    return ImageOps.exif_transpose(image) or image
 
 
 def decode(path: str, longest: int = FULL) -> Image.Image:
@@ -154,7 +224,6 @@ def decode(path: str, longest: int = FULL) -> Image.Image:
     """
 
     image = _decode_raw(path, longest) if kind.is_raw(path) else _decode_display(path, longest)
-    image = ImageOps.exif_transpose(image) or image
     return image.convert("RGB") if image.mode not in ("RGB", "L") else image
 
 
@@ -185,7 +254,7 @@ def fit(image: Image.Image, longest: int) -> Image.Image:
 
 def encode(image: Image.Image, quality: int = QUALITY) -> bytes:
     out = io.BytesIO()
-    image.save(out, format="JPEG", quality=quality, optimize=True, progressive=True)
+    image.save(out, format="JPEG", quality=quality)
     return out.getvalue()
 
 
@@ -211,11 +280,22 @@ def render(source: str, size: int = GRID, rotate: int = 0) -> bytes:
     than the same one rendered differently.
     """
 
+    return encode(pixels(source, size, rotate))
+
+
+def pixels(source: str, size: int = GRID, rotate: int = 0) -> Image.Image:
+    """The oriented, turned, fitted pixels `render` encodes.
+
+    Exposed so the tile store can pay one decode for two sizes: the loupe is
+    cut from these pixels and the grid tile from the loupe's, and the original
+    -- on an archive drive, the expensive read -- is opened exactly once.
+    """
+
     image = decode(source, size)
     if rotate % 360:
         # PIL rotates counter-clockwise; the owner means clockwise.
         image = image.rotate(-int(rotate) % 360, expand=True)
-    return encode(fit(image, size))
+    return fit(image, size)
 
 
 def dimensions(path: str) -> tuple[int, int]:

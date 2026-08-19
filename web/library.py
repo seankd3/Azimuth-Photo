@@ -33,7 +33,7 @@ scan of 157,064 rows.
 
 from __future__ import annotations
 
-from model import decisions
+from model import cache, decisions
 from model.scope import EVERYTHING, Scope, where
 
 # The one predicate. Spelled once, imported everywhere, never inlined.
@@ -79,8 +79,11 @@ SORTS = {
 }
 
 
+Renditions = dict[str, tuple[cache.Kind, dict]]
+
+
 def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
-           limit: int = 200, offset: int = 0) -> list[dict]:
+           limit: int = 200, offset: int = 0, renditions: Renditions | None = None) -> list[dict]:
     """One page of the grid.
 
     Deliberately has no `include_missing`, no `source`, no `online_only`. Those
@@ -93,27 +96,64 @@ def photos(conn, *, scope: Scope = EVERYTHING, sort: str = "newest",
     gone the same way: **which photographs** is one argument, so a collection, a
     folder, a rating and anything later are the same kind of thing and compose
     without this function learning about any of them.
+
+    `renditions` names cached answers the row should carry -- the grid tile,
+    the loupe -- as `name: (kind, recipe)`. Each becomes the answer's path or
+    NULL, read from the cache table in the same query, so a row says whether
+    its picture exists without anyone touching the disk.
     """
 
     if sort not in SORTS:
         raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
+    clause, args = where(scope)
+    return _page(conn, f"{IN_LIBRARY} AND ({clause})", args, SORTS[sort], (),
+                 limit, offset, renditions)
+
+
+def trash(conn, *, limit: int = 200, offset: int = 0,
+          renditions: Renditions | None = None) -> list[dict]:
+    """One page of Trash, newest decision first.
+
+    The same page as the grid with the complement of `IN_LIBRARY` and an order
+    read from the decision log, because Trash is the library seen from the
+    other side of one status decision, not a second kind of listing.
+    """
+
+    latest = (
+        f"(SELECT d.at FROM decisions d WHERE d.subject = i.content_hash AND d.family = ? "
+        f"ORDER BY {decisions.AUTHORITY_SQL} DESC, d.at DESC, d.id DESC LIMIT 1) DESC, i.id DESC"
+    )
+    return _page(conn, "i.status = 'trashed' AND i.tail IS NOT NULL", (), latest,
+                 (decisions.STATUS,), limit, offset, renditions)
+
+
+def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
+          limit: int, offset: int, renditions: Renditions | None) -> list[dict]:
     limit, offset = int(limit), int(offset)
     if not 1 <= limit <= 500:
-        raise ValueError("a library page contains between 1 and 500 photos")
+        raise ValueError("a page contains between 1 and 500 photos")
     if offset < 0:
-        raise ValueError("a library offset cannot be negative")
+        raise ValueError("a page offset cannot be negative")
 
-    clause, args = where(scope)
+    joins, columns, bound = [], [], []
+    for position, (name, (kind, recipe)) in enumerate((renditions or {}).items()):
+        alias = f"r{position}"
+        joins.append(
+            f"LEFT JOIN cache {alias} ON {alias}.hash = i.content_hash AND {alias}.kind = ?"
+            f" AND {alias}.recipe = ? AND {alias}.state = 'ready'"
+        )
+        columns.append(f", {alias}.path AS {name}")
+        bound += [kind.name, cache.canonical(kind, recipe)]
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.elo, i.content_hash AS hash,
-               i.width, i.height, i.file_size
-        FROM images i
-        WHERE {IN_LIBRARY} AND ({clause})
-        ORDER BY {SORTS[sort]}
+               i.width, i.height, i.file_size{"".join(columns)}
+        FROM images i {" ".join(joins)}
+        WHERE {condition}
+        ORDER BY {order}
         LIMIT ? OFFSET ?
         """,
-        (*args, limit, offset),
+        (*bound, *args, *order_args, limit, offset),
     )]
 
 

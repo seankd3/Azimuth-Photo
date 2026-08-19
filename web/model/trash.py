@@ -1,4 +1,7 @@
-"""Browse and permanently empty photographs rejected into Trash."""
+"""Count and permanently empty photographs rejected into Trash.
+
+Browsing Trash is a library page (`library.trash`); what lives here is the
+irreversible half, which needs copy facts and byte proof."""
 
 from __future__ import annotations
 
@@ -19,34 +22,6 @@ def count(conn) -> int:
             (TRASHED,),
         ).fetchone()[0]
     )
-
-
-def browse(conn, *, limit: int = 200, offset: int = 0) -> list[dict]:
-    """One bounded Trash page, newest decision first."""
-
-    limit, offset = int(limit), int(offset)
-    if not 1 <= limit <= 500:
-        raise ValueError("a Trash page contains between 1 and 500 photos")
-    if offset < 0:
-        raise ValueError("a Trash offset cannot be negative")
-    return [
-        dict(row)
-        for row in conn.execute(
-            f"""
-            SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.elo,
-                   i.content_hash AS hash, i.width, i.height, i.file_size,
-                   (SELECT d.at FROM decisions d
-                    WHERE d.subject = i.content_hash AND d.family = ?
-                    ORDER BY {decisions.AUTHORITY_SQL} DESC, d.at DESC, d.id DESC
-                    LIMIT 1) AS trashed_at
-            FROM images i
-            WHERE i.status = ? AND i.tail IS NOT NULL
-            ORDER BY trashed_at DESC, i.id DESC
-            LIMIT ? OFFSET ?
-            """,
-            (decisions.STATUS, TRASHED, limit, offset),
-        )
-    ]
 
 
 def _file_token(path: str) -> tuple[int, int, int, int]:

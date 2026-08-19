@@ -5,44 +5,25 @@ import {
 } from '../kit/virtual-grid.js';
 import { registerLens } from '../store/index.js';
 
-const pendingTiles = new WeakMap();
-const tileObserver = 'IntersectionObserver' in window
-  ? new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-      tileObserver.unobserve(entry.target);
-      const load = pendingTiles.get(entry.target);
-      pendingTiles.delete(entry.target);
-      load?.();
-    }
-  }, { rootMargin: '500px' })
-  : null;
+// A cell's picture is a file the browser reads itself. The row says whether
+// the answer exists (`photo.tile` is a URL or null); a cell with none shows
+// its placeholder and fills the moment a refresh hands it a URL. Nothing here
+// fetches, decodes, retries, or watches the viewport -- `loading="lazy"` is
+// the browser doing that.
+function showTile(cell, photo) {
+  const image = cell.querySelector('img');
+  const source = photo.tile || '';
+  if (image.dataset.source === source) return;
+  image.dataset.source = source;
+  if (source) image.src = source;
+  else image.removeAttribute('src');
+}
 
 function element(tag, className = '', text = '') {
   const node = document.createElement(tag);
   if (className) node.className = className;
   if (text) node.textContent = text;
   return node;
-}
-
-function forgetCell(cell) {
-  const image = cell?.querySelector?.('img');
-  if (!image) return;
-  tileObserver?.unobserve(image);
-  pendingTiles.delete(image);
-}
-
-function loadTile(image, photo, actions) {
-  const load = () => actions.tile(photo.id).then(
-    (source) => { image.src = source; },
-    () => { image.remove(); },
-  );
-  if (!tileObserver) {
-    load();
-    return;
-  }
-  pendingTiles.set(image, load);
-  tileObserver.observe(image);
 }
 
 function emptyState(actions) {
@@ -84,7 +65,6 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
-  loadTile(image, photo, actions);
   cell.addEventListener('click', () => actions.select(photo, index));
   cell.addEventListener('dblclick', () => actions.open(photo, index));
   return cell;
@@ -117,7 +97,6 @@ function reconcileGrid(grid, state, actions, layout, range) {
       ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}`
       : cell?.dataset.kind === 'skeleton';
     if (!matches) {
-      forgetCell(cell);
       leftovers.delete(cell);
       cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
     }
@@ -128,6 +107,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
     positionCell(cell, layout, index);
     cell.classList.toggle('is-selected', index === state.selectedIndex);
     if (cell.dataset.kind === 'photo') {
+      showTile(cell, photo);
       const picked = photo.status === 'picked';
       cell.classList.toggle('is-picked', picked);
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}`);
@@ -137,16 +117,15 @@ function reconcileGrid(grid, state, actions, layout, range) {
     leftovers.delete(cell);
   }
 
-  for (const cell of leftovers) forgetCell(cell);
   grid.replaceChildren(...desired);
   if (firstMissing !== null) actions.need(firstMissing, lastMissing);
+  actions.look(desired.filter((cell) => cell.dataset.kind === 'photo').map((cell) => Number(cell.dataset.photoId)));
 }
 
 function renderGrid(grid, state, actions) {
   grid.setAttribute('aria-busy', String(state.loading));
 
   if (state.total === 0 && !state.loading) {
-    for (const cell of grid.children) forgetCell(cell);
     grid.style.height = '';
     grid.replaceChildren(emptyState(actions));
     return;

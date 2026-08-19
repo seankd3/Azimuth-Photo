@@ -4,6 +4,18 @@ A tile is only a cached answer to one question: what do these photograph
 bytes look like at this size and rotation? The content hash and recipe name
 the answer, so moving or renaming the source cannot invalidate it.
 
+Two sizes, two kinds, one store. They are two kinds because they differ in
+policy, not in pixels: a grid tile is what keeps the library browsable with
+the archive away, so it is never evicted and costs ~170 KB; a loupe tile is
+what a full window shows, costs ~2 MB, and may be remade if space is wanted.
+One kind with the size in its recipe could not say that.
+
+One read, one decode, both sizes. Whichever kind is asked first decodes the
+original at loupe size and publishes both files; the other kind finds its file
+already there and only records it. When only the loupe exists, the grid tile
+is cut from it and the original is not opened at all -- which is what lets
+the grid fill with the archive drive unplugged.
+
 This module owns files. ``model.cache`` owns the rows describing them and
 ``work`` decides what is owed. There is no adoption path, scheduler, mutable
 global directory, or V1 thumbnail vocabulary here.
@@ -12,33 +24,55 @@ global directory, or V1 thumbnail vocabulary here.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 
 import render
 from model import cache
 
-DEFAULT_CEILING_BYTES = 20 * 1024**3
+GRID = "grid"
+LOUPE = "loupe"
 
 
 class Store:
-    """One tile directory and the cache capability that writes into it."""
+    """One tile directory and the two cache capabilities that write into it."""
 
-    def __init__(self, root: str, *, ceiling_bytes: int = DEFAULT_CEILING_BYTES):
+    def __init__(self, root: str, *, ceiling_bytes: int | None = None):
         self.root = os.path.abspath(os.fspath(root))
+        os.makedirs(self.root, exist_ok=True)
+        # The ceiling bounds evictable answers only -- loupes -- and defaults to
+        # half of what the cache disk has free when the store opens, so a
+        # machine with a small disk keeps recent loupes and a machine with a
+        # large one keeps them all. The owner may lower it; nothing raises it.
+        if ceiling_bytes is None:
+            ceiling_bytes = shutil.disk_usage(self.root).free // 2
         self.ceiling_bytes = int(ceiling_bytes)
         if self.ceiling_bytes < 0:
             raise ValueError("tile ceiling cannot be negative")
-        self.kind = cache.Kind(
-            name="tile",
-            compute=self._make,
-            params=("size", "rotate"),
-            ahead=lambda: (
-                {"size": render.GRID, "rotate": 0},
-                {"size": render.LOUPE, "rotate": 0},
-            ),
-            cost=0.4,
+        self.grid = cache.Kind(
+            name=GRID,
+            compute=self._make_grid,
+            params=("rotate",),
+            ahead=lambda: ({"rotate": 0},),
+            cost=0.3,
+            evictable=False,
             remove=self.remove,
         )
+        self.loupe = cache.Kind(
+            name=LOUPE,
+            compute=self._make_loupe,
+            params=("rotate",),
+            ahead=lambda: ({"rotate": 0},),
+            cost=0.5,
+            remove=self.remove,
+        )
+        self.kinds = (self.grid, self.loupe)
+
+    @property
+    def renditions(self) -> dict[str, tuple[cache.Kind, dict]]:
+        """What a photo row carries: the answer each kind has for it, unturned."""
+
+        return {"tile": (self.grid, {"rotate": 0}), "loupe": (self.loupe, {"rotate": 0})}
 
     def path(self, digest: str, size: int, rotate: int = 0) -> str:
         """Return the sole name for an answer, refusing ambiguous inputs."""
@@ -53,13 +87,40 @@ class Store:
         turn = f"r{rotate}" if rotate else ""
         return os.path.join(self.root, digest[:2], f"{digest}-{size}{turn}.jpg")
 
-    def _make(self, source: str, digest: str, *, size: int = render.GRID,
-              rotate: int = 0) -> cache.Made:
-        body = render.render(source, int(size), rotate=int(rotate))
+    def _make_grid(self, source: str, digest: str, *, rotate: int = 0) -> cache.Made:
+        return self._answer(source, digest, render.GRID, int(rotate))
+
+    def _make_loupe(self, source: str, digest: str, *, rotate: int = 0) -> cache.Made:
+        return self._answer(source, digest, render.LOUPE, int(rotate))
+
+    def _answer(self, source: str, digest: str, size: int, rotate: int) -> cache.Made:
         target = self.path(digest, size, rotate)
+        if os.path.isfile(target):
+            # Published already, as the other size's by-product. The name is the
+            # content and the size, so a file at this path is this answer.
+            return cache.Made(path=target, bytes=os.path.getsize(target))
+
+        loupe = self.path(digest, render.LOUPE, rotate)
+        if size < render.LOUPE and os.path.isfile(loupe):
+            # The loupe is the cheapest faithful source: the same pixels, already
+            # turned, and no original to open.
+            return self._publish(target, render.render(loupe, size))
+
+        grid = self.path(digest, render.GRID, rotate)
+        image = render.pixels(source, render.LOUPE, rotate)
+        try:
+            made_loupe = self._publish(loupe, render.encode(image))
+            made_grid = (
+                cache.Made(path=grid, bytes=os.path.getsize(grid)) if os.path.isfile(grid)
+                else self._publish(grid, render.encode(render.fit(image, render.GRID)))
+            )
+        finally:
+            image.close()
+        return made_grid if size == render.GRID else made_loupe
+
+    def _publish(self, target: str, body: bytes) -> cache.Made:
         folder = os.path.dirname(target)
         os.makedirs(folder, exist_ok=True)
-
         staging = None
         try:
             with tempfile.NamedTemporaryFile(
@@ -82,17 +143,7 @@ class Store:
                     os.remove(staging)
                 except FileNotFoundError:
                     pass
-
         return cache.Made(path=target, bytes=len(body))
-
-    def read(self, entry) -> bytes | None:
-        """Read a recorded tile; absence means it may be made again."""
-
-        path = self.present(entry)
-        if path is None:
-            return None
-        with open(path, "rb") as handle:
-            return handle.read()
 
     def present(self, entry) -> str | None:
         """Return the owned path only while the recorded answer exists."""
@@ -114,13 +165,15 @@ class Store:
         """Remove every tile answer for one photograph."""
 
         rows = conn.execute(
-            "SELECT path FROM cache WHERE hash = ? AND kind = ?",
-            (str(digest), self.kind.name),
+            "SELECT path FROM cache WHERE hash = ? AND kind IN (?, ?)",
+            (str(digest), GRID, LOUPE),
         ).fetchall()
         for row in rows:
             if row["path"]:
                 self.remove(row["path"])
-        removed = cache.forget(conn, digest, kind=self.kind)
+        removed = 0
+        for kind in self.kinds:
+            removed += cache.forget(conn, digest, kind=kind)
         conn.commit()
         return removed
 
@@ -128,7 +181,7 @@ class Store:
         """Remove only files recorded as this store's tiles; never a tree."""
 
         rows = conn.execute(
-            "SELECT path FROM cache WHERE kind = ?", (self.kind.name,)
+            "SELECT path FROM cache WHERE kind IN (?, ?)", (GRID, LOUPE)
         ).fetchall()
         removed = missing = 0
         for row in rows:
@@ -139,15 +192,15 @@ class Store:
                 removed += 1
             except FileNotFoundError:
                 missing += 1
-        conn.execute("DELETE FROM cache WHERE kind = ?", (self.kind.name,))
+        conn.execute("DELETE FROM cache WHERE kind IN (?, ?)", (GRID, LOUPE))
         conn.commit()
         return {"removed": removed, "already_gone": missing, "rows": len(rows)}
 
     def status(self, conn) -> dict:
         row = conn.execute(
             "SELECT COUNT(*) AS tiles, COALESCE(SUM(bytes), 0) AS bytes,"
-            " SUM(state = 'failed') AS failed FROM cache WHERE kind = ?",
-            (self.kind.name,),
+            " SUM(state = 'failed') AS failed FROM cache WHERE kind IN (?, ?)",
+            (GRID, LOUPE),
         ).fetchone()
         return {
             "directory": self.root,

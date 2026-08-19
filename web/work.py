@@ -41,7 +41,7 @@ import threading
 from typing import Callable, Iterable
 
 from model import cache, photos
-from model.scope import EVERYTHING, Scope, where
+from model.scope import EVERYTHING, Scope, ids as only, where
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +106,7 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
     source, args = _owed_from(kind, recipe, scope)
     return [dict(row) for row in conn.execute(
         f"""
-        SELECT i.id, i.content_hash AS hash, i.tail, i.file_size
+        SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken
         {source}
         ORDER BY {nearest}i.date_taken DESC, i.id DESC
         LIMIT ?
@@ -156,7 +156,7 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope) -> tuple[str
     )
 
 
-def unidentified(conn, limit: int = 200) -> list[dict]:
+def unidentified(conn, limit: int = 200, *, scope: Scope = EVERYTHING) -> list[dict]:
     """Photos with no hash yet.
 
     Identity is the one debt that cannot be a cache kind, because every cache
@@ -169,13 +169,15 @@ def unidentified(conn, limit: int = 200) -> list[dict]:
     everything imported before the mark.
     """
 
+    narrowed, args = where(scope)
     return [dict(row) for row in conn.execute(
-        f"SELECT id, tail, file_size {_UNIDENTIFIED} ORDER BY date_taken DESC, id DESC LIMIT ?",
-        (int(limit),),
+        f"SELECT i.id, i.tail, i.file_size, i.date_taken {_UNIDENTIFIED} AND ({narrowed})"
+        f" ORDER BY i.date_taken DESC, i.id DESC LIMIT ?",
+        (*args, int(limit)),
     )]
 
 
-_UNIDENTIFIED = "FROM images WHERE content_hash IS NULL AND vc_of IS NULL AND tail IS NOT NULL"
+_UNIDENTIFIED = "FROM images i WHERE i.content_hash IS NULL AND i.vc_of IS NULL AND i.tail IS NOT NULL"
 
 
 def _unidentified_count(conn) -> int:
@@ -209,6 +211,14 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
          yield_to: Callable[[], bool] | None = None) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
 
+    Most-owed is decided by photograph, not by kind: what is on screen comes
+    first, then the newest photograph that still owes anything, and for that
+    photograph identity, then each kind in the order given. Kind-major order --
+    every identity, then every date, then the first tile -- meant a fresh
+    library of 157,000 photographs would not show a single picture until hours
+    of hashing were done, and the proof of this surface caught it at 47: ten
+    seconds of identity and metadata before the first tile.
+
     One item, then return. Concurrency lives *above* this function — in how
     many workers call it and where they run — rather than inside it, which is
     what keeps this readable and what makes stopping instant: there is never a
@@ -226,34 +236,59 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     if paused(conn) or (yield_to is not None and yield_to()):
         return None
 
-    for row in unidentified(conn, limit=1):
-        if _identify_one(conn, row):
-            conn.commit()
-            return {"did": "identity", "photo": row["id"]}
-        # Its drive is away. Nothing is owed *to this machine* about it now;
-        # the next pass will find it if the drive comes back.
-        return None
+    looked = [int(i) for i in on_screen]
+    scopes = (only(looked), EVERYTHING) if looked else (EVERYTHING,)
+    for scope in scopes:
+        did = _most_owed(conn, tuple(kinds), scope)
+        if did is not None:
+            return did
+    return None
 
+
+def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None:
+    """Within one scope: the newest photograph's first owed thing.
+
+    Each debt is asked for its newest few candidates rather than one, because
+    being unable to locate a photograph is normal -- its drive is away -- and
+    a single away photograph at the head of a kind must not stall the rest.
+    The heads are merged newest-first across identity and every kind, so a
+    photograph is finished (identity, metadata, tiles) before the next is
+    begun, which is the order a person browsing newest-first feels.
+    """
+
+    heads: list[tuple[tuple, str, cache.Kind | None, dict | None, dict]] = []
+    for row in unidentified(conn, limit=CANDIDATES, scope=scope):
+        heads.append((_age(row), "identity", None, None, row))
     for kind in kinds:
         if not kind.here():
             continue
-        # A window rather than one row. Being unable to locate a photograph is
-        # normal -- its drive is away -- and asking for exactly one candidate
-        # meant a single away photo stalled every other kind of work behind it.
-        # Trying a handful costs nothing and makes progress whenever *any* of
-        # them is reachable.
         for recipe in kind.ahead():
-            for row in owed(
-                conn, kind, recipe=recipe, on_screen=on_screen, limit=CANDIDATES
-            ):
-                source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
-                if source is None:
-                    continue
-                entry = cache.make(conn, row["hash"], kind, source, recipe)
-                if entry is not None and kind.project is not None:
-                    cache.project(conn, row["hash"], row["id"], kind, entry, recipe)
-                return {"did": kind.name, "photo": row["id"], "recipe": recipe}
+            for row in owed(conn, kind, recipe=recipe, scope=scope, limit=CANDIDATES):
+                heads.append((_age(row), kind.name, kind, recipe, row))
+    heads.sort(key=lambda head: head[0], reverse=True)
+
+    for _age_key, what, kind, recipe, row in heads:
+        if what == "identity":
+            if _identify_one(conn, row):
+                conn.commit()
+                return {"did": "identity", "photo": row["id"]}
+            continue
+        source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+        if source is None:
+            continue
+        entry = cache.make(conn, row["hash"], kind, source, recipe)
+        if entry is not None and kind.project is not None:
+            cache.project(conn, row["hash"], row["id"], kind, entry, recipe)
+        return {"did": kind.name, "photo": row["id"], "recipe": recipe}
     return None
+
+
+def _age(row) -> tuple:
+    """Sorted descending, this puts the newest first: a known date before an
+    unknown one, a later date before an earlier, a higher id among equals."""
+
+    taken = row["date_taken"]
+    return (bool(taken), str(taken or ""), int(row["id"]))
 
 
 def sweep_cache(conn, ceiling_bytes: int, kinds: Iterable[cache.Kind]) -> int:

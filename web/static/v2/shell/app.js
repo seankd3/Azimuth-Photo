@@ -86,6 +86,18 @@ const cullWorkflow = createCullWorkflow({
   undo,
 });
 
+let lookTimer = null;
+let looking = '';
+function lookAt(ids) {
+  // Tell the library what is on screen, once per settled viewport, so the
+  // worker makes these tiles first. The last statement wins; nothing waits.
+  const now = ids.join(',');
+  if (now === looking) return;
+  looking = now;
+  clearTimeout(lookTimer);
+  lookTimer = setTimeout(() => { product.look(ids).catch(() => {}); }, 120);
+}
+
 function visibleGrid() {
   const inTrash = read().view === 'trash';
   library.renderGrid(grid, read(), {
@@ -96,7 +108,7 @@ function visibleGrid() {
     emptyAction: inTrash ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
-    tile: product.tile,
+    look: lookAt,
     need: (start, end) => pages.ensureRange(start, end),
     cellSize,
     scrollTop: workspace.scrollTop,
@@ -128,6 +140,7 @@ function closeDriveDialog() {
 function closeLoupe() {
   if (loupe.open) loupe.close();
   loupeImage.removeAttribute('src');
+  delete loupeImage.dataset.source;
   loupeImage.alt = '';
   const selectedIndex = read().selectedIndex;
   if (selectedIndex !== null) {
@@ -267,30 +280,37 @@ async function selectIndex(index, { open = loupe.open } = {}) {
   selectPhoto(photo, bounded);
   scheduleGrid();
   if (!loupe.open) requestAnimationFrame(() => grid.querySelector(`[data-index="${bounded}"]`)?.focus());
-  if (open) await showPhoto(photo);
+  if (open) showPhoto(photo);
 }
 
-async function showPhoto(photo) {
-  const photoId = photo.id;
-  try {
-    const source = await product.tile(photoId, 1920);
-    if (read().selected?.id !== photoId) return;
-    loupeImage.src = source;
-    loupeImage.alt = photo.tail || 'Selected photo';
-    if (!loupe.open) loupe.showModal();
-  } catch (error) {
-    if (read().selected?.id === photoId) notify(error.message);
-  }
+function showPhoto(photo) {
+  // The loupe shows the best picture the row has: the loupe tile, else the
+  // grid tile scaled up while the loupe tile is made first (the library is
+  // told this photograph is what is being looked at). When the row changes
+  // under an open loupe, `renderLoupe` swaps the picture in.
+  product.look([photo.id]).catch(() => {});
+  renderLoupe(photo);
+  if (!loupe.open) loupe.showModal();
 }
 
-async function openPhoto(photo, index) {
+function renderLoupe(photo) {
+  const source = photo.loupe || photo.tile || '';
+  if (loupeImage.dataset.source === source) return;
+  loupeImage.dataset.source = source;
+  if (source) loupeImage.src = source;
+  else loupeImage.removeAttribute('src');
+  loupeImage.alt = photo.tail || 'Selected photo';
+}
+
+function openPhoto(photo, index) {
   if (read().selectedIndex !== index) selectPhoto(photo, index);
-  await showPhoto(photo);
+  showPhoto(photo);
 }
 
 
 function renderChrome(state) {
   library.renderInspector(inspector, state.selected);
+  if (loupe.open && state.selected) renderLoupe(state.selected);
   const count = state.counts.photos.toLocaleString();
   const viewCount = state.view === 'trash' ? state.counts.trash : state.counts.photos;
   document.querySelector('[data-photo-count]').textContent = `${viewCount.toLocaleString()} photos`;
@@ -441,6 +461,7 @@ loupe.addEventListener('click', (event) => {
 });
 loupe.addEventListener('close', () => {
   loupeImage.removeAttribute('src');
+  delete loupeImage.dataset.source;
   loupeImage.alt = '';
 });
 

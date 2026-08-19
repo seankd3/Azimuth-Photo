@@ -1,8 +1,8 @@
 """Refuters for the one-process desktop boundary."""
 
 import os
-import base64
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -51,7 +51,14 @@ class DesktopTests(unittest.TestCase):
                 counts = product.counts()
                 page = product.photos()
                 details = product.photo(page[0]["id"])
-                tile_uri = product.tile(page[0]["id"])
+                # The worker is already running; a row gains its tile URL when
+                # the file exists, and the window reads the file itself.
+                deadline = time.time() + 8
+                tiled = product.photos()
+                while not tiled[0]["tile"] and time.time() < deadline:
+                    time.sleep(0.1)
+                    tiled = product.photos()
+                looked = product.look([page[0]["id"]])
                 picked = product.pick([page[0]["id"]])
                 picked_page = product.photos()
                 cleared = product.clear_pick([page[0]["id"]])
@@ -66,7 +73,8 @@ class DesktopTests(unittest.TestCase):
             finally:
                 product.close()
 
-            prefix, encoded = tile_uri.split(",", 1)
+            tile_path = tiled[0]["tile"].removeprefix("file:///")
+            tile_magic = open(tile_path, "rb").read(3)
             renamed = catalog + ".closed"
             os.replace(catalog, renamed)
             catalog_released = os.path.isfile(renamed)
@@ -80,8 +88,9 @@ class DesktopTests(unittest.TestCase):
         self.assertEqual(cleared["changed"][0]["after"], "unflagged")
         self.assertEqual(clear_page[0]["status"], "unflagged")
         self.assertEqual((details["width"], details["height"]), (640, 480))
-        self.assertEqual(prefix, "data:image/jpeg;base64")
-        self.assertTrue(base64.b64decode(encoded).startswith(b"\xff\xd8\xff"))
+        self.assertTrue(tiled[0]["tile"].startswith("file:///"))
+        self.assertEqual(tile_magic, b"\xff\xd8\xff")
+        self.assertEqual(looked, 1)
         self.assertEqual(hidden, [])
         self.assertEqual(trash_count, 1)
         self.assertEqual(trash_page[0]["id"], page[0]["id"])

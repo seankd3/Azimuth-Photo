@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import os
 from pathlib import Path
 import sys
@@ -120,15 +119,8 @@ class Desktop:
             )
         )
 
-    def tile(self, photo_id: int, size: int = 400) -> str:
-        body = self._wait(
-            self._product.run(
-                lambda library: library.tile(int(photo_id), size=int(size))
-            )
-        )
-        if body is None:
-            raise ValueError("photo is unavailable")
-        return "data:image/jpeg;base64," + base64.b64encode(body).decode("ascii")
+    def look(self, photo_ids: list[int]) -> int:
+        return self._wait(self._product.run(lambda library: library.look(photo_ids)))
 
     def attach(self, root: str, is_record: bool = False) -> dict:
         return self._wait(
@@ -157,10 +149,13 @@ class Desktop:
 def main() -> int:
     catalog_path, tile_root = default_paths()
     desktop = Desktop(catalog_path, tile_root)
-    document = bundled_document().read_text(encoding="utf-8")
+    # The document is opened from its file rather than handed over as a
+    # string: a page with a file origin may show a tile straight from the
+    # store (`<img src="file:///...">`, measured 5 ms), while an inlined page
+    # has no origin and every picture would have to cross the bridge encoded.
     window = webview.create_window(
         "Azimuth Photo",
-        html=document,
+        url=bundled_document().as_uri(),
         js_api=desktop,
         width=1500,
         height=950,

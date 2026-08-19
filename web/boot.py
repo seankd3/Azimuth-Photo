@@ -10,21 +10,22 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import os
+from pathlib import Path
 import threading
 from typing import Callable, TypeVar
 
 import library as queries
 import metadata as embedded_metadata
 import model
-import render
 import tiles
 import work
 from model import cache, copies, cull, decisions, drives, photos, trash
 from model.scope import EVERYTHING, Scope
 
-TILE_SIZES = frozenset((render.GRID, render.LOUPE, 3840))
-ROTATIONS = frozenset((0, 90, 180, 270))
 Result = TypeVar("Result")
+# How many photographs a window may say it is looking at. A viewport holds a
+# few dozen; the bound keeps the worker's ORDER BY small.
+LOOKING_AT_MOST = 400
 
 
 class Library:
@@ -40,9 +41,14 @@ class Library:
         except Exception:
             self.conn.close()
             raise
+        # What the window says it is looking at, most recent statement wins.
+        # Read by the worker on every step, so the first tiles made are the
+        # ones on screen; nothing else about the worker's order changes.
+        self._looking: tuple[int, ...] = ()
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
-            (embedded_metadata.KIND, self.tiles.kind),
+            (embedded_metadata.KIND, *self.tiles.kinds),
+            on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
         )
         self._closed = False
@@ -93,9 +99,26 @@ class Library:
         offset: int = 0,
     ) -> list[dict]:
         self._open()
-        return queries.photos(
-            self.conn, scope=scope, sort=sort, limit=limit, offset=offset
-        )
+        return self._with_urls(queries.photos(
+            self.conn, scope=scope, sort=sort, limit=limit, offset=offset,
+            renditions=self.tiles.renditions,
+        ))
+
+    def look(self, photo_ids) -> int:
+        """The window says which photographs it is showing; the worker makes
+        their tiles first. Returns how many it will remember."""
+
+        wanted = tuple(int(i) for i in photo_ids if int(i) > 0)[:LOOKING_AT_MOST]
+        self._looking = wanted
+        return len(wanted)
+
+    def _with_urls(self, rows: list[dict]) -> list[dict]:
+        # A tile is a file the window reads straight from disk, so a rendition
+        # crosses the boundary as its URL and nothing is decoded on this lane.
+        for row in rows:
+            for name in self.tiles.renditions:
+                row[name] = Path(row[name]).as_uri() if row.get(name) else None
+        return rows
 
     def counts(self) -> dict[str, int]:
         self._open()
@@ -127,7 +150,9 @@ class Library:
 
     def browse_trash(self, *, limit: int = 200, offset: int = 0) -> list[dict]:
         self._open()
-        return trash.browse(self.conn, limit=limit, offset=offset)
+        return self._with_urls(queries.trash(
+            self.conn, limit=limit, offset=offset, renditions=self.tiles.renditions,
+        ))
 
     def empty_trash(self, expected_count: int, *, dry_run: bool = False) -> dict:
         self._open()
@@ -136,47 +161,6 @@ class Library:
             expected_count=int(expected_count),
             dry_run=bool(dry_run),
         )
-
-    def tile(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> bytes | None:
-        """Return one real tile, making it once when it is absent."""
-
-        path = self.tile_path(photo_id, size=size, rotate=rotate)
-        if path is None:
-            return None
-        with open(path, "rb") as handle:
-            return handle.read()
-
-    def tile_path(self, photo_id: int, *, size: int = render.GRID, rotate: int = 0) -> str | None:
-        """Return one real tile path, making the immutable answer once."""
-
-        self._open()
-        size, rotate = int(size), int(rotate)
-        if size not in TILE_SIZES:
-            raise ValueError(f"tile size is one of {sorted(TILE_SIZES)}")
-        if rotate not in ROTATIONS:
-            raise ValueError(f"rotation is one of {sorted(ROTATIONS)}")
-
-        found = self._source_identity(photo_id)
-        if found is None:
-            return None
-        source, digest = found
-
-        recipe = {"size": size, "rotate": rotate}
-        entry = cache.get(self.conn, digest, self.tiles.kind, recipe)
-        if entry is not None and entry["state"] == cache.FAILED:
-            return None
-        path = self.tiles.present(entry)
-        if path is not None:
-            return path
-        entry = cache.make(
-            self.conn,
-            digest,
-            self.tiles.kind,
-            source,
-            recipe,
-            remake=entry is not None,
-        )
-        return self.tiles.present(entry)
 
     def details(self, photo_id: int) -> dict | None:
         """Return and project embedded browse metadata for one photograph."""
@@ -221,7 +205,7 @@ class Library:
 
     def debt(self) -> dict[str, int]:
         self._open()
-        return work.debt(self.conn, (embedded_metadata.KIND, self.tiles.kind))
+        return work.debt(self.conn, (embedded_metadata.KIND, *self.tiles.kinds))
 
     def pulse(self) -> dict[str, int]:
         """What a window asks every couple of seconds: did anything land?

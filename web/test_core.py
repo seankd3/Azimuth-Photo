@@ -93,31 +93,38 @@ class FreshCatalogTests(unittest.TestCase):
                 listed = library_surface.photos(conn)
                 store = tiles.Store(tile_root)
 
-                identified = work.step(conn, (store.kind,), yield_to=lambda: False)
-                made = work.step(conn, (store.kind,), yield_to=lambda: False)
-                listed_after = library_surface.photos(conn)
-                entry = cache.get(
-                    conn,
-                    listed_after[0]["hash"],
-                    store.kind,
-                    {"size": render.GRID, "rotate": 0},
-                )
-                with Image.open(entry["path"]) as tile:
+                identified = work.step(conn, store.kinds, yield_to=lambda: False)
+                made = work.step(conn, store.kinds, yield_to=lambda: False)
+                recorded = work.step(conn, store.kinds, yield_to=lambda: False)
+                listed_after = library_surface.photos(conn, renditions=store.renditions)
+                grid_entry = cache.get(conn, listed_after[0]["hash"], store.grid, {"rotate": 0})
+                loupe_entry = cache.get(conn, listed_after[0]["hash"], store.loupe, {"rotate": 0})
+                with Image.open(grid_entry["path"]) as tile:
                     tile_size = tile.size
-                tile_path = entry["path"]
-                freed = work.sweep_cache(conn, 0, (store.kind,))
-                tile_survived = os.path.exists(tile_path)
+                with Image.open(loupe_entry["path"]) as tile:
+                    loupe_size = tile.size
+                freed = work.sweep_cache(conn, 0, store.kinds)
+                grid_survived = os.path.exists(grid_entry["path"])
+                loupe_survived = os.path.exists(loupe_entry["path"])
             finally:
                 conn.close()
 
         self.assertEqual(swept["photos_added"], 1)
         self.assertEqual(len(listed), 1)
         self.assertEqual(identified, {"did": "identity", "photo": listed[0]["id"]})
-        self.assertEqual(made["did"], "tile")
-        self.assertEqual(max(tile_size), render.GRID)
-        self.assertTrue(tile_path.startswith(tile_root))
+        # The grid kind runs first and one decode publishes both files; the
+        # loupe kind then finds its file and only records it.
+        self.assertEqual(made["did"], "grid")
+        self.assertEqual(recorded["did"], "loupe")
+        self.assertEqual(max(tile_size), min(render.GRID, 800))
+        self.assertEqual(max(loupe_size), 800)  # never larger than the photograph
+        self.assertEqual(listed_after[0]["tile"], grid_entry["path"])
+        self.assertEqual(listed_after[0]["loupe"], loupe_entry["path"])
+        self.assertTrue(grid_entry["path"].startswith(tile_root))
+        # A ceiling of zero removes what may be removed: the loupe, never the grid.
         self.assertEqual(freed, 1)
-        self.assertFalse(tile_survived)
+        self.assertTrue(grid_survived)
+        self.assertFalse(loupe_survived)
 
     def test_one_owned_worker_starts_once_and_releases_its_catalog(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -143,7 +150,11 @@ class FreshCatalogTests(unittest.TestCase):
             attached = product.attach(photo_root)
             swept = product.refresh(attached["uuid"])
             page = product.browse()
-            body = product.tile(page[0]["id"])
+            # Nothing is decoded on the interactive lane: the row says there is
+            # no tile yet, and the worker makes it.
+            while work.step(product.conn, (*product.tiles.kinds,), yield_to=lambda: False):
+                pass
+            page_after = product.browse()
             self.assertTrue(product.start())
             product.close()
             with self.assertRaises(RuntimeError):
@@ -151,11 +162,14 @@ class FreshCatalogTests(unittest.TestCase):
 
             with boot.Library(catalog, tile_root) as reopened:
                 again = reopened.browse()
-                cached = reopened.tile(again[0]["id"])
+            tile_file = Path(again[0]["tile"].removeprefix("file:///"))
+            body = tile_file.read_bytes()
 
         self.assertEqual(swept["photos_added"], 1)
         self.assertEqual(len(page), 1)
-        self.assertEqual(body, cached)
+        self.assertIsNone(page[0]["tile"])
+        self.assertTrue(page_after[0]["tile"].startswith("file:///"))
+        self.assertEqual(again[0]["tile"], page_after[0]["tile"])
         self.assertTrue(body.startswith(b"\xff\xd8"))
 
     def test_embedded_metadata_is_cached_projected_and_overridden_by_your_date(self):
@@ -765,7 +779,7 @@ class CullIsAReversibleDecision(CoreCase):
         self.assertEqual(trash.count(self.conn), 2)
         self.assertEqual(library_surface.photos(self.conn), [])
         self.assertEqual(
-            [photo["id"] for photo in trash.browse(self.conn)],
+            [photo["id"] for photo in library_surface.trash(self.conn)],
             [unflagged, picked],
         )
         restored = cull.restore(self.conn, (picked,))
@@ -807,7 +821,7 @@ class CullIsAReversibleDecision(CoreCase):
         self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
         for limit, offset in ((0, 0), (501, 0), (20, -1)):
             with self.assertRaises(ValueError):
-                trash.browse(self.conn, limit=limit, offset=offset)
+                library_surface.trash(self.conn, limit=limit, offset=offset)
 
     def test_a_large_selection_is_one_bound_argument_and_one_transaction(self):
         total = 5_000
