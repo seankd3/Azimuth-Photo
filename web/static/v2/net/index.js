@@ -13,6 +13,9 @@ async function invoke(method, ...arguments_) {
 }
 
 export const library = Object.freeze({
+  home: () => invoke('home'),
+  proposeHome: () => invoke('propose_home'),
+  settleHome: (path) => invoke('settle_home', path),
   counts: () => invoke('counts'),
   drives: () => invoke('drives'),
   pulse: () => invoke('pulse'),

@@ -70,6 +70,17 @@
     </aside>
   </div>
 
+  <dialog class="drive-dialog" data-home-dialog aria-labelledby="home-title">
+    <form data-home-form>
+      <p class="eyebrow">First things first</p>
+      <h1 id="home-title">Where should Azimuth live?</h1>
+      <p class="dialog-copy">One folder holds your catalog and previews — like a Lightroom catalog. Your photographs stay where they are.</p>
+      <div class="home-path"><code data-home-path>…</code><button class="quiet-button" type="button" data-action="change-home">Change…</button></div>
+      <p class="form-error" data-home-error role="alert"></p>
+      <button class="primary-button" type="submit">Use this folder</button>
+    </form>
+  </dialog>
+
   <dialog class="drive-dialog" data-drive-dialog aria-labelledby="drive-title">
     <form data-drive-form>
       <button class="dialog-close" type="button" data-action="close-drive" aria-label="Close">×</button>

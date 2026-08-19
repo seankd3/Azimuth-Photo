@@ -240,6 +240,18 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   cursor: pointer;
 }
 .dialog-close:hover, .loupe-close:hover { background: #292b30; color: var(--text); }
+.home-path { display: flex; gap: 10px; align-items: center; margin: 0 0 22px; }
+.home-path code {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #111215;
+  color: var(--text);
+  font: 13px/1.4 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
 .check-row { display: flex; gap: 9px; align-items: center; margin: 16px 0 22px; color: var(--text-2); font-size: 13px; }
 .check-row input { accent-color: var(--accent); }
 .form-error { min-height: 18px; margin: -8px 0 10px; color: #ee9c92; font-size: 12px; }

@@ -3,27 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 import sys
 import threading
-from typing import Awaitable, TypeVar
+from typing import Awaitable, Callable, TypeVar
 
 import webview
 
 import boot
-from core.runtime_paths import resolve_runtime_paths
+import home
 
 
 Result = TypeVar("Result")
-
-
-def default_paths() -> tuple[str, str]:
-    runtime = resolve_runtime_paths()
-    return (
-        os.path.join(runtime.data_dir, "catalog", "azimuth-v2.db"),
-        os.path.join(runtime.cache_dir, "v2-tiles"),
-    )
 
 
 def bundled_document() -> Path:
@@ -33,103 +24,115 @@ def bundled_document() -> Path:
 
 
 class Desktop:
-    """The complete JavaScript-facing product vocabulary."""
+    """The complete JavaScript-facing product vocabulary.
 
-    def __init__(self, catalog_path: str, tile_root: str):
-        self._product = boot.OwnedLibrary(catalog_path, tile_root)
+    A desktop may open without a home -- the first run -- and then every
+    library verb refuses until one is chosen; choosing is the one verb that
+    is always available, and it is remembered so the next start needs no
+    question.
+    """
+
+    def __init__(self, home_path: str | None):
+        self._product: boot.OwnedLibrary | None = None
+        self._home: str | None = None
         self._window = None
         self._close_lock = threading.Lock()
         self._closed = False
-        self._wait(self._product.run(lambda library: library.start()))
+        if home_path:
+            self._settle(home_path)
 
     @staticmethod
     def _wait(answer: Awaitable[Result]) -> Result:
         return asyncio.run(answer)
 
+    def _run(self, operation: Callable[[boot.Library], Result]) -> Result:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.run(operation))
+
+    def _settle(self, path: str) -> None:
+        catalog_path, previews = home.paths(path)
+        self._product = boot.OwnedLibrary(catalog_path, previews)
+        self._home = path
+        self._wait(self._product.run(lambda library: library.start()))
+
     def bind(self, window) -> None:
         self._window = window
 
+    # ---- the home ----
+
+    def home(self) -> str | None:
+        return self._home
+
+    def propose_home(self) -> str:
+        return home.propose()
+
+    def settle_home(self, path: str) -> str:
+        if self._product is not None:
+            raise RuntimeError("this library is already open")
+        settled = home.remember(path)
+        self._settle(settled)
+        return settled
+
+    # ---- the library ----
+
     def counts(self) -> dict:
-        return self._wait(self._product.run(lambda library: library.counts()))
+        return self._run(lambda library: library.counts())
 
     def drives(self) -> list[dict]:
-        return self._wait(self._product.run(lambda library: library.attached()))
+        return self._run(lambda library: library.attached())
 
     def pulse(self) -> dict:
-        return self._wait(self._product.run(lambda library: library.pulse()))
+        return self._run(lambda library: library.pulse())
 
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0) -> list[dict]:
-        return self._wait(
-            self._product.run(
-                lambda library: library.browse(sort=sort, limit=int(limit), offset=int(offset))
-            )
+        return self._run(
+            lambda library: library.browse(sort=sort, limit=int(limit), offset=int(offset))
         )
 
     def photo(self, photo_id: int) -> dict:
-        answer = self._wait(
-            self._product.run(lambda library: library.details(int(photo_id)))
-        )
+        answer = self._run(lambda library: library.details(int(photo_id)))
         if answer is None:
             raise ValueError("photo is unavailable")
         return answer
 
     def pick(self, photo_ids: list[int]) -> dict:
-        return self._wait(
-            self._product.run(lambda library: library.pick(photo_ids))
-        )
+        return self._run(lambda library: library.pick(photo_ids))
 
     def clear_pick(self, photo_ids: list[int]) -> dict:
-        return self._wait(
-            self._product.run(lambda library: library.clear_pick(photo_ids))
-        )
+        return self._run(lambda library: library.clear_pick(photo_ids))
 
     def reject(self, photo_ids: list[int]) -> dict:
-        return self._wait(
-            self._product.run(lambda library: library.reject(photo_ids))
-        )
+        return self._run(lambda library: library.reject(photo_ids))
 
     def restore(self, photo_ids: list[int]) -> dict:
-        return self._wait(
-            self._product.run(lambda library: library.restore(photo_ids))
-        )
+        return self._run(lambda library: library.restore(photo_ids))
 
     def undo_cull(self, changes: list[dict]) -> dict:
-        return self._wait(
-            self._product.run(lambda library: library.undo_cull(changes))
-        )
+        return self._run(lambda library: library.undo_cull(changes))
 
     def trash_count(self) -> int:
-        return self._wait(self._product.run(lambda library: library.trash_count()))
+        return self._run(lambda library: library.trash_count())
 
     def trash_photos(self, limit: int = 200, offset: int = 0) -> list[dict]:
-        return self._wait(
-            self._product.run(
-                lambda library: library.browse_trash(
-                    limit=int(limit), offset=int(offset)
-                )
-            )
+        return self._run(
+            lambda library: library.browse_trash(limit=int(limit), offset=int(offset))
         )
 
     def empty_trash(self, expected_count: int, dry_run: bool = False) -> dict:
-        return self._wait(
-            self._product.run(
-                lambda library: library.empty_trash(
-                    int(expected_count), dry_run=bool(dry_run)
-                )
-            )
+        return self._run(
+            lambda library: library.empty_trash(int(expected_count), dry_run=bool(dry_run))
         )
 
     def look(self, photo_ids: list[int]) -> int:
-        return self._wait(self._product.run(lambda library: library.look(photo_ids)))
+        return self._run(lambda library: library.look(photo_ids))
 
     def attach(self, root: str, is_record: bool = False) -> dict:
-        return self._wait(
-            self._product.run(
-                lambda library: library.attach(root, is_record=bool(is_record))
-            )
-        )
+        return self._run(lambda library: library.attach(root, is_record=bool(is_record)))
 
     def refresh(self, drive_uuid: str) -> dict:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
         return self._wait(self._product.refresh(str(drive_uuid)))
 
     def choose_folder(self) -> str:
@@ -142,13 +145,13 @@ class Desktop:
         with self._close_lock:
             if self._closed:
                 return
-            self._wait(self._product.close())
+            if self._product is not None:
+                self._wait(self._product.close())
             self._closed = True
 
 
 def main() -> int:
-    catalog_path, tile_root = default_paths()
-    desktop = Desktop(catalog_path, tile_root)
+    desktop = Desktop(home.current())
     # The document is opened from its file rather than handed over as a
     # string: a page with a file origin may show a tile straight from the
     # store (`<img src="file:///...">`, measured 5 ms), while an inlined page

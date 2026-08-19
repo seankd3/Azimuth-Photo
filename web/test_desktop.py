@@ -9,6 +9,7 @@ from unittest.mock import patch
 from PIL import Image
 
 import desktop
+import home
 
 
 class DesktopTests(unittest.TestCase):
@@ -21,20 +22,45 @@ class DesktopTests(unittest.TestCase):
             }
             environment["AZIMUTH_HOME"] = directory
             with patch.dict(os.environ, environment, clear=True):
-                catalog, tile_root = desktop.default_paths()
-                product = desktop.Desktop(catalog, tile_root)
+                where = home.current()
+                catalog, previews = home.paths(where)
+                product = desktop.Desktop(where)
                 try:
                     counts = product.counts()
                 finally:
                     product.close()
+                pointer_written = os.path.exists(home.pointer())
 
             self.assertEqual(counts["photos"], 0)
-            self.assertEqual(
-                catalog,
-                os.path.join(directory, "data", "catalog", "azimuth-v2.db"),
-            )
-            self.assertEqual(tile_root, os.path.join(directory, "cache", "v2-tiles"))
+            self.assertEqual(where, directory)
+            self.assertEqual(catalog, os.path.join(directory, "catalog", "azimuth.db"))
+            self.assertEqual(previews, os.path.join(directory, "previews"))
+            self.assertFalse(pointer_written, "an isolated home must never write the owner's pointer")
             os.replace(catalog, catalog + ".closed")
+
+    def test_a_first_run_refuses_the_library_until_a_home_is_chosen(self):
+        with tempfile.TemporaryDirectory() as directory:
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if not key.startswith("AZIMUTH_")
+            }
+            environment["AZIMUTH_HOME"] = directory
+            with patch.dict(os.environ, environment, clear=True):
+                product = desktop.Desktop(None)
+                try:
+                    self.assertIsNone(product.home())
+                    with self.assertRaises(RuntimeError):
+                        product.counts()
+                    self.assertTrue(product.propose_home().endswith("Azimuth Photo"))
+                    chosen = product.settle_home(directory)
+                    counts = product.counts()
+                    with self.assertRaises(RuntimeError):
+                        product.settle_home(directory)
+                finally:
+                    product.close()
+            self.assertEqual(chosen, directory)
+            self.assertEqual(counts["photos"], 0)
 
     def test_real_library_crosses_the_bridge_without_http(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -43,8 +69,8 @@ class DesktopTests(unittest.TestCase):
             Image.new("RGB", (640, 480), "teal").save(
                 os.path.join(photo_root, "lake.jpg"), "JPEG"
             )
-            catalog = os.path.join(directory, "catalog.db")
-            product = desktop.Desktop(catalog, os.path.join(directory, "tiles"))
+            catalog, _previews = home.paths(os.path.join(directory, "Home"))
+            product = desktop.Desktop(os.path.join(directory, "Home"))
             try:
                 drive = product.attach(photo_root)
                 refreshed = product.refresh(drive["uuid"])
@@ -105,10 +131,7 @@ class DesktopTests(unittest.TestCase):
                 return (r"C:\Photos",)
 
         with tempfile.TemporaryDirectory() as directory:
-            product = desktop.Desktop(
-                os.path.join(directory, "catalog.db"),
-                os.path.join(directory, "tiles"),
-            )
+            product = desktop.Desktop(None)
             try:
                 product.bind(Window())
                 chosen = product.choose_folder()

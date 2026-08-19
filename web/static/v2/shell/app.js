@@ -11,6 +11,10 @@ const library = getLens('library');
 const workspace = document.querySelector('.workspace');
 const grid = document.querySelector('[data-grid]');
 const inspector = document.querySelector('[data-inspector]');
+const homeDialog = document.querySelector('[data-home-dialog]');
+const homeForm = document.querySelector('[data-home-form]');
+const homePath = document.querySelector('[data-home-path]');
+const homeError = document.querySelector('[data-home-error]');
 const driveDialog = document.querySelector('[data-drive-dialog]');
 const driveForm = document.querySelector('[data-drive-form]');
 const driveError = document.querySelector('[data-drive-error]');
@@ -124,6 +128,33 @@ function scheduleGrid() {
     visibleGrid();
   });
 }
+
+// The first run: a home is chosen once and remembered. The dialog cannot be
+// dismissed, because nothing works without one; Change… opens the native
+// chooser, and the proposal is the fixed local disk with the most room.
+async function chooseHome() {
+  homePath.textContent = await product.proposeHome();
+  homeDialog.showModal();
+  homeForm.querySelector('[type="submit"]').focus();
+}
+
+homeDialog.addEventListener('cancel', (event) => event.preventDefault());
+
+homeForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const submit = homeForm.querySelector('[type="submit"]');
+  submit.disabled = true;
+  homeError.textContent = '';
+  try {
+    await product.settleHome(homePath.textContent);
+    homeDialog.close();
+    await loadView();
+  } catch (error) {
+    homeError.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+});
 
 function openDriveDialog() {
   if (driveDialog.open) return;
@@ -374,6 +405,9 @@ driveForm.addEventListener('submit', async (event) => {
 document.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]')?.dataset.action;
   if (action === 'add-drive') openDriveDialog();
+  if (action === 'change-home') {
+    product.chooseFolder().then((chosen) => { if (chosen) homePath.textContent = chosen; }).catch((error) => { homeError.textContent = error.message; });
+  }
   if (action === 'all-photos') {
     update({ view: 'library' });
     workspace.scrollTo({ top: 0 });
@@ -398,6 +432,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
+  if (homeDialog.open) return;
   if (event.key === 'Escape') {
     if (loupe.open) closeLoupe();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
@@ -469,5 +504,5 @@ loupe.addEventListener('close', () => {
 });
 
 subscribe(render);
-loadView();
+product.home().then((where) => (where ? loadView() : chooseHome()));
 followLibrary();
