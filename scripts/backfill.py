@@ -34,6 +34,15 @@ os.environ.setdefault("HF_HOME", r"D:\azimuth-bench\models")
 BATCH = 2
 PAGE = 2000
 
+# Where V1 kept its previews, named by row id. A tile row's `path` is a hint
+# like a copy row is -- checked when it matters -- and the hint can point at a
+# file only some processes can see: a Claude-desktop shell is an MSIX package,
+# so anything it wrote under %LOCALAPPDATA% landed in that package's private
+# overlay, invisible to every other process on the machine. The same bytes are
+# hardlinked here under their V1 names, which every process can read.
+V1_THUMBS = r"C:\Azimuth Photo\thumbs"
+V1_SIZES = ("sm", "md", "lg")
+
 # What is owed: a photograph in the library with no answer -- ready *or failed*
 # -- from the model in use. A failure is an answer; asking again every pass is
 # how a worker never reaches the readable photographs behind one broken file.
@@ -42,7 +51,7 @@ PAGE = 2000
 # model sees 384px either way and a 400px JPEG on this disk is 10x cheaper to
 # read than a RAW on the archive drive: measured 6 img/s against 0.56.
 OWED = """
-    SELECT i.content_hash AS hash, i.tail, i.file_size,
+    SELECT i.id, i.content_hash AS hash, i.tail, i.file_size,
            (SELECT t.path FROM cache t
              WHERE t.hash = i.content_hash AND t.kind = 'tile'
                AND t.state = 'ready' AND t.path IS NOT NULL
@@ -58,6 +67,15 @@ OWED = """
     ORDER BY i.content_hash
     LIMIT ?
 """
+
+
+def renditions(row):
+    """Every place a small JPEG of this photograph might be, best first."""
+
+    if row["rendition"]:
+        yield row["rendition"]
+    for size in V1_SIZES:
+        yield os.path.join(V1_THUMBS, size, f"{row['id']}.jpg")
 
 
 def say(message: str) -> None:
@@ -104,8 +122,10 @@ def main() -> int:
                 group = rows[start:start + BATCH]
                 sources, digests = [], []
                 for row in group:
-                    source = row["rendition"]
-                    if not (source and os.path.isfile(source)):
+                    source = next((p for p in renditions(row) if os.path.isfile(p)), None)
+                    if source is None and from_renditions:
+                        continue  # phase two reads the original
+                    if source is None:
                         source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
                     if not source:
                         unreachable += 1
