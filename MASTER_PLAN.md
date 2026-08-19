@@ -129,6 +129,12 @@ global `CLAUDE.md`.
 
 - `open` "sounds good build it all. but lets drop the video requirement for now too much of a rabithole" — 08-19 · **the 08-19 import design is approved as written; video is out of scope.** The working drive is swept every minute and the archive on attach or request with *Synchronize folder* on the tree; a move is recognized by name, size and time and confirmed by identity; changed bytes carry their decisions; a file gone from every drive shows as missing with a Forget verb; card and folder import put by the one destination rule into Raws/Snapshots/Edits with the camera's own date, verify every byte, clear the card only after, and never overwrite. Video files are neither imported nor catalogued until asked for again.
 
+- `open` "to anserw your questions 1, on attach/request." — 08-19 · the sweep cadence question. **Read as:** drives are swept on attach and on request (*Synchronize folder*), with the working drive's minute sweep kept as the "background worker to check for new photos" asked for the same day — 0.5 s for 1,874 files, invisible. If "on attach/request" was meant to exclude the minute sweep, say so and it goes.
+- `open` "2 no videos" — 08-19 · restated; video files are not catalogued or imported.
+- `open` "3 show as missing with forget missing options added to the folder tree rick click menu? similar to LRC" — 08-19 · **missing photographs are shown, and *Forget missing photos* is a folder verb on the tree's right-click menu** (Lightroom's remove-missing, scoped to a folder), beside the per-photograph Forget.
+- `open` "4 mostly google photos takeout." — 08-19 · **phone photographs arrive as folders, not cards.** Import-a-folder is the phone path; a Google Photos Takeout folder is guessed as Snapshots.
+- `open` "5 yeah sounds good to me, default rolls to 1. 2.. 3... with options to name or if film stock metadata is present" — 08-19 · **film scans: rolls default to 1, 2, 3… under the day, nameable, and named from film-stock metadata when it is present.** Built after card and folder import.
+
 ### 1.5 Editing and colour
 
 - `runtime` "the raw thumbnails look great, but the as soon as i go into the edit/develop tab the colors get super ugly, this is absolutely critical to get right." — 07-15 · `web/thumbnails/generation.py:120-126`, `web/raw_thumb_ops.py:57-82`, `web/features/develop/rawproc.py:613-621` — Thumbs use embedded JPEG or LibRaw demosaic, not Develop; anti-vomit `develop_default_render` exists, but “super ugly” needs a live thumb-vs-Develop A/B on real RAWs.
