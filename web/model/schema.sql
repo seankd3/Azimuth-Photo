@@ -18,6 +18,12 @@ CREATE TABLE IF NOT EXISTS images (
     status           TEXT    NOT NULL DEFAULT 'unflagged'
                      CHECK (status IN ('unflagged', 'picked', 'trashed')),
     stars            INTEGER NOT NULL DEFAULT 0,
+    -- How the photograph is shown, in degrees clockwise: the owner's turn for
+    -- a file filed sideways. A display decision, not new pixels -- tiles are
+    -- made once and the window turns them -- so it is a projection like the
+    -- two above it.
+    rotate           INTEGER NOT NULL DEFAULT 0
+                     CHECK (rotate IN (0, 90, 180, 270)),
     elo              REAL    NOT NULL DEFAULT 1200.0,
     version_of       INTEGER REFERENCES images(id) ON DELETE SET NULL,
     -- Transitional only. A V1 virtual copy has no file of its own; it leaves

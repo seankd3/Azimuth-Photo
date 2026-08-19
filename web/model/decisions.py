@@ -41,6 +41,17 @@ ROTATE = "rotate"      # 0/90/180/270, when the file itself is filed sideways
 DATE = "date"          # a corrected capture date
 FORGET = "forget"      # this subject is no longer wanted
 
+# Decisions that are also browse columns: the family, its column on `images`,
+# what a photograph has before any decision, and what counts as a value. The
+# log is the truth and the column is its index; `library.reindex` rebuilds
+# every column from this table, and a change to one writes both. One home, so
+# a rule a writer knows is a rule the rebuild knows.
+PROJECTED: dict[str, tuple[str, Any, Any]] = {
+    STATUS: ("status", "unflagged", lambda v: v in ("unflagged", "picked", "trashed")),
+    STAR: ("stars", 0, lambda v: isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= 5),
+    ROTATE: ("rotate", 0, lambda v: v in (0, 90, 180, 270)),
+}
+
 YOU = "you"
 FILE = "file"
 LRCAT = "lrcat"

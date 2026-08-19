@@ -146,8 +146,8 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
         bound += [kind.name, cache.canonical(kind, recipe)]
     return [dict(row) for row in conn.execute(
         f"""
-        SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.elo, i.content_hash AS hash,
-               i.width, i.height, i.file_size{"".join(columns)}
+        SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.rotate, i.elo,
+               i.content_hash AS hash, i.width, i.height, i.file_size{"".join(columns)}
         FROM images i {" ".join(joins)}
         WHERE {condition}
         ORDER BY {order}
@@ -327,19 +327,12 @@ def reindex(conn) -> dict[str, int]:
 
     plans: list[tuple[str, str, object, str]] = []
     counts: dict[str, int] = {}
-    for family, column, default in (
-        (decisions.STATUS, "status", "unflagged"),
-        (decisions.STAR, "stars", 0),
-    ):
+    for family, (column, default, valid) in decisions.PROJECTED.items():
         latest = decisions.current(conn, family)
         for subject, value in latest.items():
             value = default if value is None else value
-            if family == decisions.STATUS and value not in {"unflagged", "picked", "trashed"}:
-                raise ValueError(f"invalid photo status: {value!r}")
-            if family == decisions.STAR and (
-                isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 5
-            ):
-                raise ValueError(f"invalid star decision: {value!r}")
+            if not valid(value):
+                raise ValueError(f"invalid {family} decision: {value!r}")
             plans.append((family, column, value, subject))
         counts[family] = 0
 

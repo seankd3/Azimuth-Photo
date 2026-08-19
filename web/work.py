@@ -40,7 +40,7 @@ import os
 import threading
 from typing import Callable, Iterable
 
-from model import cache, photos
+from model import cache, decisions, photos
 from model.scope import EVERYTHING, Scope, all_of, ids as only, where
 
 log = logging.getLogger(__name__)
@@ -200,10 +200,19 @@ def _identify_one(conn, row) -> bool:
     path = photos.locate(conn, row["tail"], expected_size=row["file_size"])
     if path is None:
         return False
+    digest = photos.content_hash(path)
     conn.execute(
         "UPDATE images SET content_hash = ? WHERE id = ? AND content_hash IS NULL",
-        (photos.content_hash(path), int(row["id"])),
+        (digest, int(row["id"])),
     )
+    # A decision belongs to the identity, and this row may have arrived after
+    # one was made -- a second copy of a picked or turned photograph. Its
+    # columns take the log's current answers now, so the row is never the one
+    # copy that disagrees until the next full reindex.
+    for family, (column, _default, valid) in decisions.PROJECTED.items():
+        value = decisions.latest(conn, digest, family)
+        if valid(value):
+            conn.execute(f"UPDATE images SET {column} = ? WHERE id = ?", (value, int(row["id"])))
     return True
 
 

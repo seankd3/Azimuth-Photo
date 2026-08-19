@@ -97,8 +97,8 @@ class FreshCatalogTests(unittest.TestCase):
                 made = work.step(conn, store.kinds, yield_to=lambda: False)
                 recorded = work.step(conn, store.kinds, yield_to=lambda: False)
                 listed_after = library_surface.photos(conn, renditions=store.renditions)
-                grid_entry = cache.get(conn, listed_after[0]["hash"], store.grid, {"rotate": 0})
-                loupe_entry = cache.get(conn, listed_after[0]["hash"], store.loupe, {"rotate": 0})
+                grid_entry = cache.get(conn, listed_after[0]["hash"], store.grid)
+                loupe_entry = cache.get(conn, listed_after[0]["hash"], store.loupe)
                 with Image.open(grid_entry["path"]) as tile:
                     tile_size = tile.size
                 with Image.open(loupe_entry["path"]) as tile:
@@ -749,6 +749,23 @@ class CullIsAReversibleDecision(CoreCase):
         self.conn.commit()
         cull.reject(self.conn, (photo_id,))
         return photo_id, hot_path, cold_path
+
+    def test_a_turn_is_the_same_decision_shape_as_a_pick(self):
+        photo = self.add("scan.tif", "7" * 64)
+        first = cull.turn(self.conn, (photo,))
+        second = cull.turn(self.conn, (photo,), by=90)
+        shown = lambda: self.conn.execute("SELECT rotate, status FROM images WHERE id = ?", (photo,)).fetchone()  # noqa: E731
+        self.assertEqual(tuple(shown()), (180, "unflagged"))
+        self.assertEqual(first["changed"][0]["family"], decisions.ROTATE)
+        self.assertEqual(decisions.latest(self.conn, "7" * 64, decisions.ROTATE), 180)
+        # Undo of the second turn restores exactly the first; a stale undo of the
+        # first is refused because the second intervened.
+        cull.undo(self.conn, second["changed"])
+        self.assertEqual(tuple(shown()), (90, "unflagged"))
+        with self.assertRaises(ValueError):
+            cull.undo(self.conn, first["changed"])
+        cull.turn(self.conn, (photo,), by=270)
+        self.assertEqual(tuple(shown()), (0, "unflagged"))
 
     def test_pick_clear_and_undo_are_one_status_dimension(self):
         photo = self.add("frame.jpg", "f" * 64)

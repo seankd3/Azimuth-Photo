@@ -121,6 +121,9 @@ class Desktop:
     def undo_cull(self, changes: list[dict]) -> dict:
         return self._run(lambda library: library.undo_cull(changes))
 
+    def turn(self, photo_ids: list[int], by: int = 90) -> dict:
+        return self._run(lambda library: library.turn(photo_ids, by=int(by)))
+
     def trash_count(self) -> int:
         return self._run(lambda library: library.trash_count())
 

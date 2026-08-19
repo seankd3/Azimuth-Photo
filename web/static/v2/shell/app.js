@@ -65,7 +65,7 @@ const trashWorkflow = createTrashWorkflow({
 const cullWorkflow = createCullWorkflow({
   product,
   read,
-  replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status })),
+  replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status, rotate: photo.rotate })),
   remove: async (index, moved) => {
     // One cell left the grid: edit the window in place so the loop never
     // waits on a reload. A duplicate identity takes more than one row with
@@ -345,6 +345,7 @@ function showPhoto(photo) {
 }
 
 function renderLoupe(photo) {
+  loupeImage.dataset.turn = photo.rotate || 0;
   const source = photo.loupe || photo.tile || '';
   if (loupeImage.dataset.source === source) return;
   loupeImage.dataset.source = source;
@@ -521,7 +522,7 @@ document.addEventListener('keydown', (event) => {
 
   const current = read().selectedIndex;
   const key = event.key.toLowerCase();
-  const cullActions = { p: 'pick', u: 'clear', x: 'reject' };
+  const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnLeft' : 'turnRight' };
   if (key in cullActions && read().view === 'library' && read().selected?.hash) {
     cullWorkflow.apply(cullActions[key]);
     event.preventDefault();

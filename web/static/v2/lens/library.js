@@ -25,7 +25,10 @@ function collectAspects(state) {
   }
   for (const [index, photo] of state.photos) {
     if (index >= aspects.length) continue;
-    const aspect = photo.width > 0 && photo.height > 0 ? photo.width / photo.height : NaN;
+    const sideways = photo.rotate === 90 || photo.rotate === 270;
+    const aspect = photo.width > 0 && photo.height > 0
+      ? (sideways ? photo.height / photo.width : photo.width / photo.height)
+      : NaN;
     if (Object.is(aspects[index], aspect) || (Number.isNaN(aspects[index]) && Number.isNaN(aspect))) continue;
     aspects[index] = aspect;
     aspectsVersion += 1;
@@ -106,12 +109,30 @@ function photoCell(photo, index, actions) {
   return cell;
 }
 
-function positionCell(cell, layout, index) {
+function positionCell(cell, layout, index, photo) {
   const place = placeGridCell(layout, index);
   cell.style.left = `${place.left}px`;
   cell.style.top = `${place.top}px`;
   cell.style.width = `${place.width}px`;
   cell.style.height = `${place.height}px`;
+  const turn = photo?.rotate || 0;
+  cell.dataset.turn = turn;
+  const image = cell.querySelector('img');
+  if (!image) return;
+  // A turned picture: the image is laid out at the cell's turned size and
+  // rotated about its centre, so the tile is shown sideways without a second
+  // tile ever being made.
+  if (turn === 90 || turn === 270) {
+    image.style.width = `${place.height}px`;
+    image.style.height = `${place.width}px`;
+    image.style.left = `${(place.width - place.height) / 2}px`;
+    image.style.top = `${(place.height - place.width) / 2}px`;
+  } else {
+    image.style.width = '';
+    image.style.height = '';
+    image.style.left = '';
+    image.style.top = '';
+  }
 }
 
 function reconcileGrid(grid, state, actions, layout, range) {
@@ -140,7 +161,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
       firstMissing ??= index;
       lastMissing = index + 1;
     }
-    positionCell(cell, layout, index);
+    positionCell(cell, layout, index, photo);
     cell.classList.toggle('is-selected', index === state.selectedIndex);
     if (cell.dataset.kind === 'photo') {
       showTile(cell, photo);

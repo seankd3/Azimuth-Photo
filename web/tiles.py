@@ -1,8 +1,10 @@
 """Persistent JPEG answers for the grid and loupe.
 
 A tile is only a cached answer to one question: what do these photograph
-bytes look like at this size and rotation? The content hash and recipe name
-the answer, so moving or renaming the source cannot invalidate it.
+bytes look like at this size? The content hash names the answer, so moving
+or renaming the source cannot invalidate it. A turn the owner asks for is
+how the window shows the tile, not a different tile; an edit, when Develop
+arrives, will be a recipe because it is different pixels.
 
 Two sizes, two kinds, one store. They are two kinds because they differ in
 policy, not in pixels: a grid tile is what keeps the library browsable with
@@ -52,8 +54,6 @@ class Store:
         self.grid = cache.Kind(
             name=GRID,
             compute=self._make_grid,
-            params=("rotate",),
-            ahead=lambda: ({"rotate": 0},),
             cost=0.3,
             evictable=False,
             remove=self.remove,
@@ -61,8 +61,6 @@ class Store:
         self.loupe = cache.Kind(
             name=LOUPE,
             compute=self._make_loupe,
-            params=("rotate",),
-            ahead=lambda: ({"rotate": 0},),
             cost=0.5,
             remove=self.remove,
         )
@@ -70,11 +68,11 @@ class Store:
 
     @property
     def renditions(self) -> dict[str, tuple[cache.Kind, dict]]:
-        """What a photo row carries: the answer each kind has for it, unturned."""
+        """What a photo row carries: the answer each kind has for it."""
 
-        return {"tile": (self.grid, {"rotate": 0}), "loupe": (self.loupe, {"rotate": 0})}
+        return {"tile": (self.grid, {}), "loupe": (self.loupe, {})}
 
-    def path(self, digest: str, size: int, rotate: int = 0) -> str:
+    def path(self, digest: str, size: int) -> str:
         """Return the sole name for an answer, refusing ambiguous inputs."""
 
         digest = str(digest)
@@ -83,31 +81,29 @@ class Store:
         size = int(size)
         if size <= 0:
             raise ValueError("tile size must be positive")
-        rotate = int(rotate) % 360
-        turn = f"r{rotate}" if rotate else ""
-        return os.path.join(self.root, digest[:2], f"{digest}-{size}{turn}.jpg")
+        return os.path.join(self.root, digest[:2], f"{digest}-{size}.jpg")
 
-    def _make_grid(self, source: str, digest: str, *, rotate: int = 0) -> cache.Made:
-        return self._answer(source, digest, render.GRID, int(rotate))
+    def _make_grid(self, source: str, digest: str) -> cache.Made:
+        return self._answer(source, digest, render.GRID)
 
-    def _make_loupe(self, source: str, digest: str, *, rotate: int = 0) -> cache.Made:
-        return self._answer(source, digest, render.LOUPE, int(rotate))
+    def _make_loupe(self, source: str, digest: str) -> cache.Made:
+        return self._answer(source, digest, render.LOUPE)
 
-    def _answer(self, source: str, digest: str, size: int, rotate: int) -> cache.Made:
-        target = self.path(digest, size, rotate)
+    def _answer(self, source: str, digest: str, size: int) -> cache.Made:
+        target = self.path(digest, size)
         if os.path.isfile(target):
             # Published already, as the other size's by-product. The name is the
             # content and the size, so a file at this path is this answer.
             return cache.Made(path=target, bytes=os.path.getsize(target))
 
-        loupe = self.path(digest, render.LOUPE, rotate)
+        loupe = self.path(digest, render.LOUPE)
         if size < render.LOUPE and os.path.isfile(loupe):
-            # The loupe is the cheapest faithful source: the same pixels, already
-            # turned, and no original to open.
+            # The loupe is the cheapest faithful source: the same pixels, and no
+            # original to open.
             return self._publish(target, render.render(loupe, size))
 
-        grid = self.path(digest, render.GRID, rotate)
-        image = render.pixels(source, render.LOUPE, rotate)
+        grid = self.path(digest, render.GRID)
+        image = render.pixels(source, render.LOUPE)
         try:
             made_loupe = self._publish(loupe, render.encode(image))
             made_grid = (

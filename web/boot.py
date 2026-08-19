@@ -162,6 +162,10 @@ class Library:
         self._open()
         return cull.undo(self.conn, changes)
 
+    def turn(self, photo_ids, by: int = 90) -> dict:
+        self._open()
+        return cull.turn(self.conn, photo_ids, by=int(by))
+
     def trash_count(self) -> int:
         self._open()
         return trash.count(self.conn)

@@ -31,6 +31,7 @@ export const library = Object.freeze({
   reject: (ids) => invoke('reject', ids),
   restore: (ids) => invoke('restore', ids),
   undoCull: (changes) => invoke('undo_cull', changes),
+  turn: (ids, by = 90) => invoke('turn', ids, by),
   emptyTrash: (expectedCount, dryRun = false) => invoke('empty_trash', expectedCount, dryRun),
   attach: (root, isRecord) => invoke('attach', root, isRecord),
   refresh: (uuid) => invoke('refresh', uuid),
