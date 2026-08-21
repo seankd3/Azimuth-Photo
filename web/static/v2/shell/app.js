@@ -154,12 +154,15 @@ function lookAt(ids) {
 
 function visibleGrid() {
   const inTrash = read().view === 'trash';
+  const searching = Boolean(read().query);
   library.renderGrid(grid, read(), {
-    emptyTitle: inTrash ? 'Trash is empty.' : 'No photos here yet.',
+    emptyTitle: inTrash ? 'Trash is empty.' : searching ? 'Nothing matches.' : 'No photos here yet.',
     emptyCopy: inTrash
       ? 'Rejected photographs stay recoverable here until you empty Trash.'
-      : 'Add a folder to start your library.',
-    emptyAction: inTrash ? null : { label: 'Add a folder', run: openDriveDialog },
+      : searching
+        ? 'Try fewer words, or a different idea — meaning works too, not just names.'
+        : 'Add a folder to start your library.',
+    emptyAction: inTrash || searching ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
     look: lookAt,
