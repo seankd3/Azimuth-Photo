@@ -12,7 +12,6 @@ import webview
 
 import boot
 import home
-from model.scope import EVERYTHING, folder as in_folder
 
 
 Result = TypeVar("Result")
@@ -92,15 +91,14 @@ class Desktop:
         return pulse
 
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0,
-               folder: str | None = None) -> list[dict]:
-        scope = in_folder(folder) if folder else EVERYTHING
+               view: dict | None = None) -> list[dict]:
         return self._run(
-            lambda library: library.browse(scope=scope, sort=sort, limit=int(limit), offset=int(offset))
+            lambda library: library.browse(
+                scope=library.viewing(view), sort=sort, limit=int(limit), offset=int(offset))
         )
 
-    def size(self, folder: str | None = None) -> int:
-        scope = in_folder(folder) if folder else EVERYTHING
-        return self._run(lambda library: library.size(scope))
+    def size(self, view: dict | None = None) -> int:
+        return self._run(lambda library: library.size(library.viewing(view)))
 
     def folders(self) -> list[dict]:
         return self._run(lambda library: library.folders())
@@ -129,15 +127,51 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
-    def search(self, query: str, limit: int = 200, offset: int = 0) -> dict:
+    def search(self, query: str, limit: int = 200, offset: int = 0,
+               view: dict | None = None) -> dict:
         if self._product is None:
             raise RuntimeError("Choose where Azimuth should live first.")
-        return self._wait(self._product.find(str(query or ""), int(limit), int(offset)))
+        return self._wait(self._product.find(str(query or ""), int(limit), int(offset), view))
+
+    # ---- collections ----
+
+    def collections(self) -> list[dict]:
+        return self._run(lambda library: library.collections())
+
+    def create_collection(self, name: str, chips: list | None = None) -> dict:
+        return self._run(lambda library: library.create_collection(str(name), chips or None))
+
+    def rename_collection(self, set_id: str, name: str) -> dict | None:
+        return self._run(lambda library: library.rename_collection(str(set_id), str(name)))
+
+    def forget_collection(self, set_id: str) -> bool:
+        return self._run(lambda library: library.forget_collection(str(set_id)))
+
+    def add_to_collection(self, set_id: str, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.add_to_collection(str(set_id), photo_ids))
+
+    def remove_from_collection(self, set_id: str, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.remove_from_collection(str(set_id), photo_ids))
+
+    def quick(self, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.quick(photo_ids))
+
+    def freeze_collection(self, set_id: str) -> dict:
+        return self._run(lambda library: library.freeze_collection(str(set_id)))
+
+    def save_view(self, name: str, view: dict | None = None) -> dict:
+        return self._run(lambda library: library.save_view(str(name), view))
+
+    def save_photos(self, name: str, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.save_photos(str(name), photo_ids))
+
+    def cameras(self) -> list[dict]:
+        return self._run(lambda library: library.cameras())
 
     # ---- refine ----
 
-    def refine(self, n: int = 9, folder: str | None = None, avoid: list[str] | None = None) -> dict:
-        return self._run(lambda library: library.refine(int(n), str(folder or ""), list(avoid or [])))
+    def refine(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None) -> dict:
+        return self._run(lambda library: library.refine(int(n), view, list(avoid or [])))
 
     def round(self, winner_id: int, over_ids: list[int]) -> dict:
         recorded = self._run(lambda library: library.round(int(winner_id), over_ids))

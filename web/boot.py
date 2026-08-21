@@ -23,8 +23,8 @@ import rank
 import search as finding
 import tiles
 import work
-from model import cache, copies, cull, decisions, drives, intake, photos, trash
-from model.scope import EVERYTHING, Scope, all_of, folder as in_folder, ids as these, outside, where as scope_where
+from model import cache, copies, criteria, cull, decisions, drives, intake, photos, sets, trash
+from model.scope import EVERYTHING, Scope, all_of, any_of, folder as in_folder, ids as these, outside, where as scope_where
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -106,6 +106,37 @@ class Library:
             for row in self.conn.execute("SELECT * FROM drives ORDER BY id")
         ]
 
+    def viewing(self, view: dict | None) -> Scope:
+        """One scope from what the window says it is looking at: a folder, a
+        collection (with everything shelved under it), and the filter chips.
+        Every surface -- grid, count, Refine, search -- narrows by this one
+        answer, which is what keeps them the same view."""
+
+        self._open()
+        view = view or {}
+        parts = []
+        if view.get("folder"):
+            parts.append(in_folder(str(view["folder"])))
+        if view.get("collection"):
+            parts.append(self._shelf(str(view["collection"])))
+        if view.get("chips"):
+            parts.append(criteria.compile(self.conn, view["chips"]))
+        return all_of(*parts)
+
+    def _shelf(self, set_id: str) -> Scope:
+        """A collection and everything shelved under it. The shelf is the
+        name: `America/Utah` sits under `America`, so browsing a parent is
+        the union of its own answer and its descendants' -- the 07-09 ruling,
+        derived from names the way the folder tree derives from tails."""
+
+        said = sets.describe(self.conn, set_id)
+        if said is None:
+            return criteria.resolve(self.conn, set_id)
+        prefix = str(said.get("name", "")) + "/"
+        under = [entry["id"] for entry in sets.all(self.conn, kind=sets.COLLECTION)
+                 if str(entry.get("name", "")).startswith(prefix)]
+        return any_of(*(criteria.resolve(self.conn, sid) for sid in (set_id, *under)))
+
     def browse(
         self,
         *,
@@ -185,7 +216,7 @@ class Library:
         return cull.turn(self.conn, photo_ids, by=int(by))
 
     def search(self, query: str, *, limit: int = 200, offset: int = 0,
-               space=None, query_vector=None) -> dict:
+               space=None, query_vector=None, view: dict | None = None) -> dict:
         """Find photographs: the fused ranking, one page of it as rows.
 
         The whole answer is capped at 500 -- a search whose five hundredth
@@ -193,7 +224,8 @@ class Library:
         """
 
         self._open()
-        ranked = finding.search(self.conn, query, space=space, query_vector=query_vector)
+        ranked = finding.search(self.conn, query, space=space, query_vector=query_vector,
+                                scope=self.viewing(view))
         page = ranked[int(offset):int(offset) + max(1, int(limit))]
         rows = {row["id"]: row for row in queries.photos(
             self.conn, scope=these(page), sort="newest", limit=max(1, len(page)),
@@ -201,21 +233,181 @@ class Library:
         )} if page else {}
         return {"total": len(ranked), "photos": [rows[i] for i in page if i in rows]}
 
+    # ---- collections ----
+
+    QUICK = "quick"
+    LAST_IMPORT = "last-import"
+    PINNED = {QUICK: "Quick Collection", LAST_IMPORT: "Previous import"}
+
+    def collections(self) -> list[dict]:
+        """Every collection for the sidebar: id, name, whether it is smart,
+        and how many photographs it answers with right now. The two pinned
+        sets are always present, so the shelf never looks broken before
+        first use."""
+
+        self._open()
+        for set_id, name in self.PINNED.items():
+            if sets.describe(self.conn, set_id) is None:
+                sets.create(self.conn, name, set_id=set_id)
+        self.conn.commit()
+        out = []
+        for entry in sets.all(self.conn, kind=sets.COLLECTION):
+            clause, args = scope_where(all_of(
+                Scope(queries.IN_LIBRARY), criteria.resolve(self.conn, entry["id"])))
+            count = int(self.conn.execute(
+                f"SELECT COUNT(DISTINCT i.content_hash) FROM images i WHERE {clause}", args
+            ).fetchone()[0])
+            out.append({
+                "id": entry["id"], "name": entry["name"],
+                "smart": bool(entry.get("criteria")), "criteria": entry.get("criteria"),
+                "pinned": entry["id"] in self.PINNED, "count": count,
+            })
+        return out
+
+    def create_collection(self, name: str, chips=None) -> dict:
+        self._open()
+        set_id = sets.create(self.conn, name, criteria=chips)
+        self.conn.commit()
+        return {"id": set_id, "name": str(name).strip(), "smart": bool(chips)}
+
+    def rename_collection(self, set_id: str, name: str) -> dict | None:
+        self._open()
+        said = sets.rename(self.conn, set_id, name)
+        self.conn.commit()
+        return said
+
+    def forget_collection(self, set_id: str) -> bool:
+        self._open()
+        if set_id in self.PINNED:
+            raise ValueError("the pinned collections stay")
+        gone = sets.forget(self.conn, set_id)
+        self.conn.commit()
+        return gone
+
+    def _identities(self, photo_ids) -> list[str]:
+        wanted = sorted({int(i) for i in photo_ids if int(i) > 0})
+        if not wanted:
+            return []
+        marks = ",".join("?" * len(wanted))
+        found = [str(row[0]) for row in self.conn.execute(
+            f"SELECT DISTINCT content_hash FROM images WHERE id IN ({marks})"
+            " AND content_hash IS NOT NULL", wanted)]
+        if not found:
+            raise ValueError("those photographs have no identity yet")
+        return found
+
+    def _fixed_only(self, set_id: str) -> dict:
+        said = sets.describe(self.conn, set_id)
+        if said is None:
+            raise ValueError("no such collection")
+        if said.get("criteria"):
+            raise ValueError("A smart collection fills itself. Freeze it to edit by hand.")
+        return said
+
+    def add_to_collection(self, set_id: str, photo_ids) -> dict:
+        self._open()
+        self._fixed_only(set_id)
+        added = sets.add(self.conn, set_id, self._identities(photo_ids))
+        self.conn.commit()
+        return {"added": added}
+
+    def remove_from_collection(self, set_id: str, photo_ids) -> dict:
+        self._open()
+        self._fixed_only(set_id)
+        removed = sets.remove(self.conn, set_id, self._identities(photo_ids))
+        self.conn.commit()
+        return {"removed": removed}
+
+    def quick(self, photo_ids) -> dict:
+        """Toss the selection into the Quick Collection -- or, if every one
+        of them is already there, take them back out. One key either way."""
+
+        self._open()
+        if sets.describe(self.conn, self.QUICK) is None:
+            sets.create(self.conn, self.PINNED[self.QUICK], set_id=self.QUICK)
+        identities = self._identities(photo_ids)
+        held = set(sets.members(self.conn, self.QUICK))
+        if set(identities) <= held:
+            moved = sets.remove(self.conn, self.QUICK, identities)
+            verb = "removed"
+        else:
+            moved = sets.add(self.conn, self.QUICK, identities)
+            verb = "added"
+        self.conn.commit()
+        return {verb: moved, "count": len(sets.members(self.conn, self.QUICK))}
+
+    def freeze_collection(self, set_id: str) -> dict:
+        """A smart collection becomes fixed: its current answer is written as
+        membership and the rules leave. From here it is edited by hand --
+        the album you are about to share elsewhere."""
+
+        self._open()
+        said = sets.describe(self.conn, set_id)
+        if said is None:
+            raise ValueError("no such collection")
+        if not said.get("criteria"):
+            raise ValueError("that collection is already fixed")
+        clause, args = scope_where(all_of(
+            Scope(queries.IN_LIBRARY), criteria.resolve(self.conn, set_id)))
+        held = [str(row[0]) for row in self.conn.execute(
+            f"SELECT DISTINCT i.content_hash FROM images i WHERE {clause}"
+            " AND i.content_hash IS NOT NULL", args)]
+        if held:
+            sets.add(self.conn, set_id, held)
+        sets.redefine(self.conn, set_id, None)
+        self.conn.commit()
+        return {"frozen": len(held)}
+
+    def save_view(self, name: str, view: dict | None) -> dict:
+        """The current view, kept: folder and collection fold into chips, so
+        what you saved is exactly what you were looking at, live."""
+
+        view = dict(view or {})
+        chips = list(view.get("chips") or [])
+        if view.get("folder"):
+            chips.append({"is": "folder", "values": [str(view["folder"])]})
+        if view.get("collection"):
+            chips.append({"is": "in", "values": [str(view["collection"])]})
+        if not chips:
+            raise ValueError("this view is the whole library; narrow it first")
+        return self.create_collection(name, chips)
+
+    def save_photos(self, name: str, photo_ids) -> dict:
+        """These exact photographs, kept: a fixed collection from a moment --
+        a search's results, a hand selection."""
+
+        self._open()
+        identities = self._identities(photo_ids)
+        set_id = sets.create(self.conn, name)
+        sets.add(self.conn, set_id, identities)
+        self.conn.commit()
+        return {"id": set_id, "name": str(name).strip(), "kept": len(identities)}
+
+    def cameras(self) -> list[dict]:
+        """What the camera chip offers: every model in the library, counted."""
+
+        self._open()
+        return [dict(row) for row in self.conn.execute(
+            "SELECT camera_model AS model, COUNT(*) AS photos FROM images"
+            " WHERE camera_model IS NOT NULL AND status != 'trashed'"
+            " GROUP BY camera_model ORDER BY photos DESC")]
+
     # ---- refine ----
 
-    def refining(self, folder: str = "") -> Scope:
-        """What Refine ranks: the folder you are in, or the library without
+    def refining(self, view: dict | None) -> Scope:
+        """What Refine ranks: the view you are in, or the library without
         its snapshots -- phone shots rank only when you go to them
         ("Everything, just not by default", 07-31)."""
 
-        return in_folder(folder) if folder else outside(intake.ROOTS[intake.SNAPSHOTS])
+        looking = self.viewing(view)
+        return looking if looking else outside(intake.ROOTS[intake.SNAPSHOTS])
 
-    def refine(self, n: int = 9, folder: str = "", avoid=()) -> dict:
+    def refine(self, n: int = 9, view: dict | None = None, avoid=()) -> dict:
         """A set worth comparing, from what can be shown this instant, and how
         far the scope has been ranked."""
 
         self._open()
-        scope = self.refining(folder)
+        scope = self.refining(view)
         chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready), avoid=avoid)
         rows = {row["id"]: row for row in self._with_urls(queries.photos(
             self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
@@ -415,7 +607,8 @@ class OwnedLibrary:
             future = self._scan_executor.submit(self._sweep, drive_uuid, under)
         return await asyncio.wrap_future(future)
 
-    async def find(self, query: str, limit: int = 200, offset: int = 0) -> dict:
+    async def find(self, query: str, limit: int = 200, offset: int = 0,
+                   view: dict | None = None) -> dict:
         """Search, with whatever this machine has warm.
 
         The space comes from the rank lane's memo; the query becomes a vector
@@ -440,7 +633,8 @@ class OwnedLibrary:
                     self._warming = True
                     self._scan_executor.submit(embed._model)
         return await self.run(lambda library: library.search(
-            query, limit=int(limit), offset=int(offset), space=space, query_vector=query_vector,
+            query, limit=int(limit), offset=int(offset), space=space,
+            query_vector=query_vector, view=view,
         ))
 
     def rank_soon(self) -> None:
@@ -591,6 +785,16 @@ class OwnedLibrary:
         try:
             tally = intake.bring(conn, drive_uuid, kind, chosen, roll=roll, rolls_by_group=rolls,
                                  clear_source=clear_source, progress=progress, stop=self._intake_stop.is_set)
+            # What just came in is the pinned Previous import, rolled whole:
+            # the last import's members leave, this one's arrive.
+            if tally.get("hashes"):
+                if sets.describe(conn, Library.LAST_IMPORT) is None:
+                    sets.create(conn, Library.PINNED[Library.LAST_IMPORT], set_id=Library.LAST_IMPORT)
+                standing = sets.members(conn, Library.LAST_IMPORT)
+                if standing:
+                    sets.remove(conn, Library.LAST_IMPORT, standing)
+                sets.add(conn, Library.LAST_IMPORT, tally["hashes"])
+                conn.commit()
             self._intake.update({k: tally[k] for k in
                                  ("done", "total", "brought", "already", "skipped", "cleared", "failed", "bytes")})
             self._intake["phase"] = "stopped" if tally["stopped"] else "done"

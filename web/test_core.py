@@ -1899,6 +1899,92 @@ class CriteriaAreExecutable(CoreCase):
         self.assertEqual(held(ouro), set())
 
 
+class CollectionsAreOneSurface(CoreCase):
+    """The product verbs over sets: the shelf, the pinned pair, Quick's one
+    key, Freeze, and Save-view folding the view into chips."""
+
+    def setUp(self):
+        super().setUp()
+        self.library = boot.Library(os.path.join(self.tmp, "catalog.db"),
+                                    os.path.join(self.tmp, "tiles"))
+        self.addCleanup(self.library.close)
+        self.conn = self.library.conn
+
+    def _photo(self, tail, stars=0):
+        self.conn.execute("INSERT INTO images(tail, content_hash, stars) VALUES (?, ?, ?)",
+                          (tail, hashlib.blake2b(tail.encode(), digest_size=32).hexdigest(), stars))
+        self.conn.commit()
+        row = self.conn.execute("SELECT id, content_hash AS hash FROM images WHERE tail = ?",
+                                (tail,)).fetchone()
+        return int(row["id"]), str(row["hash"])
+
+    def _ids(self, scope_):
+        clause, args = scope.where(scope_)
+        return {int(r[0]) for r in self.conn.execute(
+            f"SELECT i.id FROM images i WHERE {clause}", args)}
+
+    def test_the_shelf_is_the_name_and_a_parent_is_the_union(self):
+        utah_id, utah = self._photo("Raws/utah.CR2")
+        cali_id, cali = self._photo("Raws/cali.CR2")
+        lands_id, lands = self._photo("Raws/lands.CR2", stars=4)
+        parent = self.library.create_collection("America")
+        child_a = self.library.create_collection("America/Utah")
+        child_b = self.library.create_collection("America/California")
+        self.library.add_to_collection(child_a["id"], [utah_id])
+        self.library.add_to_collection(child_b["id"], [cali_id])
+        self.assertEqual(self._ids(self.library._shelf(parent["id"])), {utah_id, cali_id})
+        self.assertEqual(self._ids(self.library._shelf(child_a["id"])), {utah_id})
+
+        # an intersection is a smart collection of two `in` chips
+        lands_set = self.library.create_collection("Landscapes")
+        self.library.add_to_collection(lands_set["id"], [utah_id, lands_id])
+        both = self.library.create_collection("Utah landscapes", chips=[
+            {"is": "in", "values": [lands_set["id"]]},
+            {"is": "in", "values": [child_a["id"]]},
+        ])
+        self.assertEqual(self._ids(self.library._shelf(both["id"])), {utah_id})
+
+        # the view composes folder, collection and chips into one scope
+        looking = self.library.viewing({"collection": lands_set["id"],
+                                        "chips": [{"is": "stars", "least": 3}]})
+        self.assertEqual(self._ids(looking), {lands_id})
+
+    def test_pinned_quick_freeze_and_save_view(self):
+        a_id, _a = self._photo("Raws/a.CR2", stars=5)
+        b_id, _b = self._photo("Raws/b.CR2")
+
+        listed = {c["id"]: c for c in self.library.collections()}
+        self.assertTrue(listed["quick"]["pinned"])
+        self.assertTrue(listed["last-import"]["pinned"])
+        with self.assertRaises(ValueError):
+            self.library.forget_collection("quick")
+
+        # one key: in when any are out, out when all are in
+        self.assertEqual(self.library.quick([a_id, b_id]), {"added": 2, "count": 2})
+        self.assertEqual(self.library.quick([a_id, b_id]), {"removed": 2, "count": 0})
+        self.assertEqual(self.library.quick([a_id]), {"added": 1, "count": 1})
+
+        smart = self.library.create_collection("Best", chips=[{"is": "stars", "least": 3}])
+        with self.assertRaises(ValueError):
+            self.library.add_to_collection(smart["id"], [b_id])
+        self.assertEqual(self.library.freeze_collection(smart["id"]), {"frozen": 1})
+        self.library.add_to_collection(smart["id"], [b_id])   # fixed now
+        self.assertEqual(self._ids(self.library._shelf(smart["id"])), {a_id, b_id})
+        with self.assertRaises(ValueError):
+            self.library.freeze_collection(smart["id"])       # already fixed
+
+        saved = self.library.save_view("May raws", {
+            "folder": "Raws", "chips": [{"is": "stars", "least": 3}]})
+        rules = sets.describe(self.conn, saved["id"])["criteria"]
+        self.assertEqual({chip["is"] for chip in rules}, {"folder", "stars"})
+        with self.assertRaises(ValueError):
+            self.library.save_view("Everything", {})
+
+        kept = self.library.save_photos("Moment", [a_id, b_id])
+        self.assertEqual(kept["kept"], 2)
+        self.assertEqual(self._ids(self.library._shelf(kept["id"])), {a_id, b_id})
+
+
 class SearchNeverRefuses(CoreCase):
     def _photo(self, tail, camera=None, taken=None):
         photo_id = self.photo(tail)

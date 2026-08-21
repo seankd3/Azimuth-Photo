@@ -39,16 +39,17 @@ other surface; search only decides which ids and in what order.
 from __future__ import annotations
 
 from model import sets
+from model.scope import EVERYTHING, Scope, where as scope_where
 
 # The constant from the reciprocal-rank-fusion paper. It flattens the
 # difference between rank 1 and rank 2 just enough that agreement between two
 # lists beats a single list's confidence.
 RRF_K = 60
 
-IN_LIBRARY = "status != 'trashed' AND tail IS NOT NULL"
+IN_LIBRARY = "i.status != 'trashed' AND i.tail IS NOT NULL"
 
 
-def _lexical(conn, query: str, limit: int) -> list[int]:
+def _lexical(conn, query: str, limit: int, scope: Scope) -> list[int]:
     """Filename, folder, camera, lens, date — everything that is words about
     a photo.
 
@@ -60,19 +61,20 @@ def _lexical(conn, query: str, limit: int) -> list[int]:
     """
 
     like = f"%{query}%"
+    clause, args = scope_where(scope)
     return [row["id"] for row in conn.execute(
         f"""
-        SELECT id FROM images
-        WHERE {IN_LIBRARY} AND (
-              tail LIKE ? OR camera_make LIKE ? OR camera_model LIKE ?
-              OR lens LIKE ? OR date_taken LIKE ?)
-        ORDER BY date_taken DESC, id DESC LIMIT ?
+        SELECT i.id FROM images i
+        WHERE {IN_LIBRARY} AND ({clause}) AND (
+              i.tail LIKE ? OR i.camera_make LIKE ? OR i.camera_model LIKE ?
+              OR i.lens LIKE ? OR i.date_taken LIKE ?)
+        ORDER BY i.date_taken DESC, i.id DESC LIMIT ?
         """,
-        (like, like, like, like, like, int(limit)),
+        (*args, like, like, like, like, like, int(limit)),
     )]
 
 
-def _named(conn, query: str, limit: int) -> list[int]:
+def _named(conn, query: str, limit: int, scope: Scope) -> list[int]:
     """Members of every set whose name contains the query.
 
     A keyword and a collection are the same thing with different shelves, so
@@ -88,14 +90,16 @@ def _named(conn, query: str, limit: int) -> list[int]:
     if not members:
         return []
     marks = ",".join("?" for _ in members)
+    clause, args = scope_where(scope)
     return [row["id"] for row in conn.execute(
-        f"SELECT id FROM images WHERE {IN_LIBRARY} AND content_hash IN ({marks})"
-        f" ORDER BY date_taken DESC, id DESC LIMIT ?",
-        (*sorted(members), int(limit)),
+        f"SELECT i.id FROM images i WHERE {IN_LIBRARY} AND ({clause})"
+        f" AND i.content_hash IN ({marks})"
+        f" ORDER BY i.date_taken DESC, i.id DESC LIMIT ?",
+        (*args, *sorted(members), int(limit)),
     )]
 
 
-def _semantic(conn, space, query_vector, limit: int) -> list[int]:
+def _semantic(conn, space, query_vector, limit: int, scope: Scope) -> list[int]:
     """Nearest photographs in the embedding space, or nothing at all."""
 
     if query_vector is None or space is None:
@@ -113,12 +117,13 @@ def _semantic(conn, space, query_vector, limit: int) -> list[int]:
     top = np.argpartition(similarity, -keep)[-keep:]
     ranked = [subjects[i] for i in top[np.argsort(similarity[top])[::-1]]]
     marks = ",".join("?" for _ in ranked)
+    clause, args = scope_where(scope)
     found: dict[str, int] = {}
     for row in conn.execute(
-        f"SELECT id, content_hash AS hash FROM images"
-        f" WHERE {IN_LIBRARY} AND content_hash IN ({marks})"
-        f" ORDER BY id DESC",
-        ranked,
+        f"SELECT i.id, i.content_hash AS hash FROM images i"
+        f" WHERE {IN_LIBRARY} AND ({clause}) AND i.content_hash IN ({marks})"
+        f" ORDER BY i.id DESC",
+        (*args, *ranked),
     ):
         found.setdefault(row["hash"], row["id"])  # one row per identity
     return [found[h] for h in ranked if h in found]
@@ -136,16 +141,21 @@ def fuse(*lists: list[int], limit: int) -> list[int]:
     return [image_id for image_id, _ in ordered[:int(limit)]]
 
 
-def search(conn, query: str, *, space=None, query_vector=None, limit: int = 500) -> list[int]:
-    """Find photographs: one ranked list of ids, from whatever is available."""
+def search(conn, query: str, *, space=None, query_vector=None,
+           scope: Scope = EVERYTHING, limit: int = 500) -> list[int]:
+    """Find photographs: one ranked list of ids, from whatever is available.
+
+    `scope` is the view being searched -- a folder, a collection, the chips
+    -- so searching inside a collection is this same function and not a
+    second one."""
 
     query = (query or "").strip()
     if not query:
         return []
     ranked = fuse(
-        _lexical(conn, query, limit),
-        _named(conn, query, limit),
-        _semantic(conn, space, query_vector, limit),
+        _lexical(conn, query, limit, scope),
+        _named(conn, query, limit, scope),
+        _semantic(conn, space, query_vector, limit, scope),
         limit=limit * 2,
     )
     if not ranked:

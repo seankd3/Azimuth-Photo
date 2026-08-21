@@ -205,7 +205,7 @@ def bring(
     leaving a source removed whose copy was not verified.
     """
 
-    tally = {"brought": 0, "already": 0, "skipped": 0, "cleared": 0, "failed": 0,
+    tally = {"hashes": [], "brought": 0, "already": 0, "skipped": 0, "cleared": 0, "failed": 0,
              "bytes": 0, "done": 0, "total": 0, "stopped": False, "outcomes": []}
     wanted = list(candidates)
     tally["total"] = len(wanted)
@@ -257,6 +257,7 @@ def bring(
             tally["failed"] += 1
             note(outcome["outcome"] if outcome else "no destination", candidate)
             continue
+        tally["hashes"].append(identity)
         conn.commit()
         if outcome["outcome"] == "written":
             tally["brought"] += 1
