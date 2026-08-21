@@ -28,8 +28,53 @@ import threading
 # shrink it costs time and changes nothing it sees.
 INPUT = 384
 
+# The model is a constant of the build, measured in, not a setting: nothing
+# else runs on this hardware. Changing it is a new recipe -- the space
+# re-fills from the tiles and the old rows are dead weight to delete -- so
+# the KEY names repository, revision and width, and the RECIPE is that name
+# spelled exactly as `model.cache.canonical` spells it. The live backfill has
+# been writing rows under this string since 08-17; a test pins all three
+# spellings together.
+MODEL = "google/siglip2-so400m-patch14-384"
+KEY = "google--siglip2-so400m-patch14-384@main:1152"
+RECIPE = '{"model":"' + KEY + '"}'
+
 _lock = threading.Lock()
 _loaded: tuple[object, object] | None = None
+
+
+def kind(tiles):
+    """The embedding as a cache capability, composed over the tile store.
+
+    Everything about it is a consequence of one sentence -- **a vector is
+    computed from the grid tile** -- and the sentence was measured before it
+    was believed: identical model input at 8x less work, and the tile is
+    local, so the archive drive may be away. So it *wants* exactly what the
+    grid can show, its *source* is the tile file rather than the original,
+    it is *here* only where the model runs, and it is never evicted, because
+    a vector is hours of GPU to remake and 4.6 KB to keep.
+    """
+
+    import render
+    from model import cache
+
+    def compute(source, hash, model):
+        made = vector(source)
+        return cache.Made(value=made.tobytes(), bytes=made.nbytes)
+
+    return cache.Kind(
+        name="embedding",
+        compute=compute,
+        cost=0.15,
+        params=("model",),
+        ahead=lambda: ({"model": KEY},),
+        evictable=False,
+        wants=tiles.ready.sql,
+        # Late-bound so a harness that stands the model down (a suite, a proof
+        # on a card the backfill owns) patches `ready` and the kind follows.
+        here=lambda: ready(),
+        source=lambda conn, row: tiles.path(row["hash"], render.GRID),
+    )
 
 
 def ready() -> bool:
@@ -39,13 +84,36 @@ def ready() -> bool:
     the same code. False means the work loop simply skips embeddings and
     records nothing, so a machine that *can* embed does not later find a row
     claiming this photograph could not be.
+
+    "Right now" includes the weights being on this disk. The first draft
+    answered from the GPU alone, and the cost was measured the same day: a
+    machine with a card and no local weights sent every worker lane into a
+    2.4 GB download behind the model lock, and identity and tiles starved for
+    seven minutes on a fresh library. Fetching weights is work you can watch
+    (`fetch()`), never a surprise inside a background lane — so `_model()`
+    loads with `local_files_only` and can never touch the network.
     """
 
     try:
         import torch
+        from huggingface_hub import try_to_load_from_cache
     except Exception:
         return False
-    return bool(torch.cuda.is_available())
+    if not torch.cuda.is_available():
+        return False
+    return isinstance(try_to_load_from_cache(MODEL, "model.safetensors"), str)
+
+
+def fetch() -> None:
+    """Bring the weights to this machine, deliberately and in the open.
+
+    The one place the network is allowed. Everything else reads the local
+    cache: run this once on a new machine and `ready()` starts saying yes.
+    """
+
+    from huggingface_hub import snapshot_download
+
+    snapshot_download(MODEL)
 
 
 def _model():
@@ -62,11 +130,11 @@ def _model():
             if _loaded is None:
                 import torch
                 from transformers import AutoModel, AutoProcessor
-                import settings
 
-                repo = settings.active_embedding_config()["model_id"]
-                model = AutoModel.from_pretrained(repo, dtype=torch.float16).to("cuda").eval()
-                _loaded = (model, AutoProcessor.from_pretrained(repo))
+                model = AutoModel.from_pretrained(
+                    MODEL, dtype=torch.float16, local_files_only=True
+                ).to("cuda").eval()
+                _loaded = (model, AutoProcessor.from_pretrained(MODEL, local_files_only=True))
     return _loaded
 
 

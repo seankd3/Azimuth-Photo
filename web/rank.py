@@ -259,6 +259,31 @@ def stars(scores: dict[str, float], seen: dict[str, int]) -> dict[str, int]:
     return out
 
 
+def space(conn) -> tuple[list[str], object]:
+    """Every ready vector for the model in use, as one matrix.
+
+    This is the whole input the prediction needs, read from the same cache
+    the worker and the backfill write. Row order is the subject list; the
+    matrix is float32, unit rows, one width -- a second width under the same
+    recipe would be corruption and is allowed to fail loudly. Empty is a
+    normal answer on a fresh library, and the ranking is then the fit alone.
+    """
+
+    import numpy as np
+
+    import embed
+
+    rows = conn.execute(
+        "SELECT hash, value FROM cache WHERE kind = 'embedding' AND recipe = ?"
+        " AND state = 'ready' AND value IS NOT NULL",
+        (embed.RECIPE,),
+    ).fetchall()
+    if not rows:
+        return [], None
+    subjects = [str(row["hash"]) for row in rows]
+    return subjects, np.stack([np.frombuffer(row["value"], dtype=np.float32) for row in rows])
+
+
 def _somewhere(upper: int) -> int:
     """A random offset. Its own function so a test can hold it still."""
 
@@ -298,6 +323,13 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
     `avoid` is what is on screen or was a moment ago, by identity; a set is
     drawn from the rest so the same frame does not come straight back.
 
+    Rating is read from the sort index rather than refitted: `rerank` keeps
+    that column current after every round, and with vectors it carries the
+    prediction too -- so "nearest in rating" quietly becomes "looks about as
+    good", and photographs never judged are drawn from where the taste model
+    thinks the anchor lives. That is what the old diverse/compete strategy
+    engine was reaching for, as one ORDER BY instead of four modes.
+
     A pair is one orientation. Two photographs side by side are judged by
     shape before they are judged by anything else -- a portrait against a
     landscape is a comparison of frames, not photographs -- so the companion
@@ -306,7 +338,6 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
     """
 
     experience = seen(conn)
-    scores = strength(conn)
 
     clause, args = scope_where(scope)
     where = f"i.status != 'trashed' AND i.tail IS NOT NULL AND i.content_hash IS NOT NULL AND ({clause})"
@@ -322,7 +353,7 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
     # off the end keeps the last few thousand photographs reachable.
     window = 4000
     highest = conn.execute("SELECT MAX(id) FROM images").fetchone()[0] or 0
-    select = "SELECT i.id, i.content_hash AS hash, i.width, i.height, i.rotate FROM images i"
+    select = "SELECT i.id, i.content_hash AS hash, i.width, i.height, i.rotate, i.elo FROM images i"
     pool = [dict(row) for row in conn.execute(
         f"{select} WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
         (*args, _somewhere(highest), window),
@@ -338,7 +369,7 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
 
     for photo in pool:
         photo["comparisons"] = experience.get(photo["hash"], 0)
-        photo["rating"] = scores.get(photo["hash"], BASE)
+        photo["rating"] = float(photo["elo"] or BASE)
 
     # The least-judged photograph anchors the set; the rest are its nearest
     # neighbours by rating, which is what makes the answer informative.

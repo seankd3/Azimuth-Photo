@@ -1683,6 +1683,112 @@ class RankingIsDerived(CoreCase):
         self.assertEqual({row[0] for row in self.conn.execute("SELECT stars FROM images")}, {0})
         self.assertEqual({row[0] for row in self.conn.execute("SELECT elo FROM images")}, {rank.BASE})
 
+    def test_the_worker_grows_the_space_from_the_tiles(self):
+        # A vector is computed from the grid tile: owed only where a tile
+        # exists, read from the tile file (so the archive drive may be away),
+        # skipped entirely on a machine that cannot run the model, and keyed
+        # by the recipe string the live backfill has been writing since 08-17.
+        import struct
+
+        import embed
+        import numpy as np
+        import render
+        import tiles as tile_store
+        import work
+
+        store = tile_store.Store(os.path.join(self.tmp, "tiles"), ceiling_bytes=0)
+        space = embed.kind(store)
+        self.assertEqual(
+            cache.canonical(space, {"model": embed.KEY}),
+            '{"model":"google--siglip2-so400m-patch14-384@main:1152"}',
+        )
+        self.assertEqual(cache.canonical(space, {"model": embed.KEY}), embed.RECIPE)
+
+        # a photograph with a tile but no reachable copy: the archive is away
+        tiled_id, tiled = self._identified("Raws/2026/away.CR2")
+        tile_path = store.path(tiled, render.GRID)
+        os.makedirs(os.path.dirname(tile_path), exist_ok=True)
+        Image.new("RGB", (64, 40), (90, 120, 200)).save(tile_path, "JPEG")
+        cache.put(self.conn, tiled, store.grid, cache.Made(path=tile_path, bytes=os.path.getsize(tile_path)))
+        # a photograph with no tile yet: not owed a vector at all
+        self._identified("Raws/2026/untiled.CR2")
+        self.conn.commit()
+
+        recipe = {"model": embed.KEY}
+        self.assertEqual(work.owing(self.conn, space, recipe=recipe), 1)
+
+        read_from = []
+
+        def fake_vector(source):
+            read_from.append(source)
+            with open(source, "rb") as handle:
+                seed = struct.unpack("<I", handle.read(4).ljust(4, b"\0"))[0]
+            out = np.random.default_rng(seed).normal(size=8).astype(np.float32)
+            return out / np.linalg.norm(out)
+
+        with patch.object(embed, "ready", lambda: False):
+            self.assertIsNone(work.step(self.conn, (space,)))
+        with patch.object(embed, "ready", lambda: True), patch.object(embed, "vector", fake_vector):
+            did = work.step(self.conn, (space,))
+        self.assertEqual(did, {"did": "embedding", "photo": tiled_id, "recipe": recipe})
+        self.assertEqual(read_from, [tile_path])
+        row = cache.get(self.conn, tiled, space, recipe)
+        self.assertEqual(row["state"], cache.READY)
+        self.assertEqual(len(row["value"]), 8 * 4)
+        self.assertEqual(work.owing(self.conn, space, recipe=recipe), 0)
+
+        subjects, vectors = rank.space(self.conn)
+        self.assertEqual(subjects, [tiled])
+        self.assertEqual(vectors.shape, (1, 8))
+
+    def test_the_space_reaches_photographs_you_never_judged(self):
+        # The propagation promise, end to end: four judged pairs along one
+        # axis, two strangers with vectors and no rounds -- rerank writes the
+        # stranger who looks like the winners above the one who looks like
+        # the losers, stars stay earned-only, and retracting every round
+        # returns the whole order to base.
+        import embed
+        import numpy as np
+
+        axis = np.eye(8, dtype=np.float32)
+        planted = []
+
+        def plant(tail, vector):
+            photo_id, digest = self._identified(tail)
+            self.conn.execute(
+                "INSERT INTO cache(hash, kind, recipe, state, value, bytes, at)"
+                " VALUES (?, 'embedding', ?, 'ready', ?, ?, 1.0)",
+                (digest, embed.RECIPE, vector.tobytes(), vector.nbytes),
+            )
+            planted.append((photo_id, digest))
+            return photo_id, digest
+
+        for pair in range(4):
+            winner_id, _w = plant(f"Raws/win{pair}.CR2", axis[0])
+            loser_id, _l = plant(f"Raws/lose{pair}.CR2", axis[1])
+            for _ in range(rank.EARNED):
+                rank.record(self.conn, winner_id, [loser_id])
+        _sa_id, stranger_winner = plant("Raws/stranger-good.CR2", axis[0])
+        _sb_id, stranger_loser = plant("Raws/stranger-bad.CR2", axis[1])
+        self.conn.commit()
+
+        library_surface.rerank(self.conn, *rank.space(self.conn))
+        elo = {row["hash"]: row["elo"] for row in
+               self.conn.execute("SELECT content_hash AS hash, elo FROM images WHERE content_hash IS NOT NULL")}
+        stars = {row["hash"]: row["stars"] for row in
+                 self.conn.execute("SELECT content_hash AS hash, stars FROM images WHERE content_hash IS NOT NULL")}
+        self.assertGreater(elo[stranger_winner], elo[stranger_loser])
+        self.assertNotEqual(elo[stranger_winner], rank.BASE)
+        self.assertEqual(stars[stranger_winner], 0)      # predicted, never earned
+        self.assertEqual(len([h for h, e in elo.items() if e != rank.BASE]), 10)
+
+        for row in self.conn.execute(
+                "SELECT id FROM decisions WHERE family = 'compare' AND value LIKE '%over%'").fetchall():
+            rank.retract(self.conn, row["id"])
+        library_surface.rerank(self.conn, *rank.space(self.conn))
+        moved = self.conn.execute("SELECT COUNT(*) FROM images WHERE elo != ?", (rank.BASE,)).fetchone()[0]
+        self.assertEqual(moved, 0)
+
     def test_judged_counts_photographs_in_the_scope_that_were_in_a_round(self):
         from model.scope import folder
         a, a_hash = self._identified("Raws/2026/a.CR2")

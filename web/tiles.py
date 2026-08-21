@@ -76,12 +76,16 @@ class Store:
     @property
     def ready(self) -> Scope:
         """Photographs whose grid tile exists -- what a surface can show the
-        instant it asks, with nothing decoded on the way."""
+        instant it asks, with nothing decoded on the way.
+
+        Spelled in literals rather than bound arguments so the same sentence
+        serves as a kind's `wants`, which has no argument channel; every value
+        is a module constant, so there is nothing to inject.
+        """
 
         return Scope(
-            "EXISTS (SELECT 1 FROM cache t WHERE t.hash = i.content_hash"
-            " AND t.kind = ? AND t.recipe = ? AND t.state = ?)",
-            (self.grid.name, cache.canonical(self.grid, {}), cache.READY),
+            f"EXISTS (SELECT 1 FROM cache t WHERE t.hash = i.content_hash"
+            f" AND t.kind = '{GRID}' AND t.recipe = '{{}}' AND t.state = '{cache.READY}')"
         )
 
     def path(self, digest: str, size: int) -> str:

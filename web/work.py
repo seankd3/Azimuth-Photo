@@ -298,7 +298,9 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
                 conn.commit()
                 return {"did": "identity", "photo": row["id"]}
             continue
-        source = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+        find = kind.source or (lambda conn, row: photos.locate(
+            conn, row["tail"], expected_size=row["file_size"]))
+        source = find(conn, row)
         if source is None:
             continue
         entry = cache.make(conn, row["hash"], kind, source, recipe)

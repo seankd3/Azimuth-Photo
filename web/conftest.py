@@ -52,6 +52,23 @@ def worker_scratch(label: str) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def model_stood_down(monkeypatch):
+    """The suite never loads the 2.4 GB embedding model.
+
+    `embed.ready()` is the product's own seam for "can this machine make a
+    vector right now", and during a test run the honest answer is no -- the
+    card belongs to whatever real work is running (the live backfill, at the
+    time this was written). A test about the embedding kind patches `ready`
+    back to True together with a fake `vector`, which exercises every line
+    except the forward pass.
+    """
+
+    import embed
+
+    monkeypatch.setattr(embed, "ready", lambda: False)
+
+
 @pytest.fixture
 def ephemeral_port() -> int:
     return free_port()

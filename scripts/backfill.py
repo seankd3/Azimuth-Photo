@@ -84,7 +84,6 @@ def say(message: str) -> None:
 
 def main() -> int:
     import embed
-    import settings
     from core.catalog_path import catalog_path
     from model import photos
 
@@ -96,9 +95,8 @@ def main() -> int:
 
     # The recipe names the model, spelled exactly as `model.cache.canonical`
     # spells it, so the rows this writes are the rows the product reads.
-    model = str(settings.active_embedding_config()["model_key"])
-    recipe = f'{{"model":"{model}"}}'
-    say(f"model {model}")
+    recipe = embed.RECIPE
+    say(f"model {embed.KEY}")
 
     done = failed = unreachable = 0
     started = time.perf_counter()

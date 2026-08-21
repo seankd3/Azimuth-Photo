@@ -78,6 +78,12 @@ class Kind:
     # Can this machine make it right now? A missing model, no GPU, a helper's
     # job. Asked, never remembered.
     here: Callable[[], bool] = lambda: True
+    # Where the file this kind reads lives, given the photo row. Almost always
+    # the photograph itself -- by tail, on a drive that is here, which is the
+    # default the work loop supplies -- but a kind computed from another
+    # kind's file answers differently: the embedding reads the grid tile, and
+    # that is what lets vectors be made with the archive drive away.
+    source: Callable[..., str | None] | None = None
     # How to remove one. Almost always "unlink the path", but a Develop base is
     # three files sharing a stem -- the pixels, the metadata and a preview --
     # and an eviction that took one of them would leave a base that looks

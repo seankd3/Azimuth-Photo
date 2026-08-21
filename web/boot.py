@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Callable, TypeVar
 
+import embed
 import library as queries
 import metadata as embedded_metadata
 import model
@@ -37,6 +38,10 @@ class Library:
         self.catalog_path = os.path.abspath(os.fspath(catalog_path))
         os.makedirs(os.path.dirname(self.catalog_path), exist_ok=True)
         self.tiles = tiles.Store(tile_root)
+        # The vector kind: computed from the grid tile, made only where the
+        # model runs, never evicted. On the worker like any other kind, so a
+        # fresh library grows its own space photo by photo.
+        self.space = embed.kind(self.tiles)
         self.conn = model.connect(self.catalog_path)
         try:
             embedded_metadata.reindex(self.conn)
@@ -51,7 +56,7 @@ class Library:
         self.swept = 0
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
-            (embedded_metadata.KIND, *self.tiles.kinds),
+            (embedded_metadata.KIND, *self.tiles.kinds, self.space),
             on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
             # A decode is one core for a third of a second; a quarter of the
@@ -307,7 +312,7 @@ class Library:
 
     def debt(self) -> dict[str, int]:
         self._open()
-        return work.debt(self.conn, (embedded_metadata.KIND, *self.tiles.kinds))
+        return work.debt(self.conn, (embedded_metadata.KIND, *self.tiles.kinds, self.space))
 
     def pulse(self) -> dict[str, int]:
         """What a window asks every couple of seconds: did anything land?
@@ -357,6 +362,8 @@ class OwnedLibrary:
         self._stop_following = threading.Event()
         self._follower: threading.Thread | None = None
         self._ranking = False
+        self._ranked = None            # (last round row, vector count) already written
+        self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
         # Bringing photographs in has its own lane: a card takes minutes, and
         # neither browsing nor the minute sweep may wait behind it.
         self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
@@ -404,7 +411,27 @@ class OwnedLibrary:
             self._ranking = False
         conn = model.connect(self._library.catalog_path)
         try:
-            queries.rerank(conn)
+            import embed
+
+            key = (
+                conn.execute(
+                    "SELECT MAX(id) FROM decisions WHERE family = ?", (decisions.COMPARE,)
+                ).fetchone()[0],
+                conn.execute(
+                    "SELECT COUNT(*) FROM cache WHERE kind = 'embedding' AND recipe = ? AND state = 'ready'",
+                    (embed.RECIPE,),
+                ).fetchone()[0],
+            )
+            if key == self._ranked:
+                return
+            # The matrix is hundreds of megabytes on a full library and the
+            # rows are append-only, so it is re-read only when the count
+            # moved; a sitting of rounds reranks against the space in memory.
+            if self._space is None or self._space[0] != key[1]:
+                self._space = (key[1], *rank.space(conn))
+            _count, subjects, vectors = self._space
+            queries.rerank(conn, subjects, vectors)
+            self._ranked = key
         finally:
             conn.close()
 
@@ -591,6 +618,10 @@ class OwnedLibrary:
                     future.result()
                 except Exception:  # noqa: BLE001 - a failed sweep is logged by its lane
                     pass
+                # Ranking follows the library the same way the folders do: a
+                # cheap ask each pass, and `_rank` itself knows whether the
+                # rounds or the space moved since it last wrote the order.
+                self.rank_soon()
                 first = False
 
         self._stop_following = threading.Event()
