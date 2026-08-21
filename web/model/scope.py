@@ -63,6 +63,39 @@ def all_of(*scopes: Scope) -> Scope:
     )
 
 
+def any_of(*scopes: Scope) -> Scope:
+    """At least one of the scopes. The other half of composition: `all_of`
+    narrows, this widens -- a parent collection is the union of its children,
+    and a chip holding two cameras is either camera."""
+
+    live = [s for s in scopes if s.sql != "0"]
+    if not live:
+        return NOTHING
+    if any(not s for s in live):
+        return EVERYTHING
+    if len(live) == 1:
+        return live[0]
+    return Scope(
+        " OR ".join(f"({s.sql})" for s in live),
+        tuple(arg for s in live for arg in s.args),
+    )
+
+
+def not_of(scope: Scope) -> Scope:
+    """Everything the scope does not match.
+
+    NULL-safe on purpose: SQL's three-valued logic makes `NOT (camera = ?)`
+    silently drop every photograph whose camera was never read, and "not shot
+    on the RP" plainly includes a photograph that names no camera at all.
+    """
+
+    if not scope:
+        return NOTHING
+    if scope.sql == "0":
+        return EVERYTHING
+    return Scope(f"NOT IFNULL(({scope.sql}), 0)", scope.args)
+
+
 def folder(path: str) -> Scope:
     """Everything filed under one folder, by tail prefix."""
 
@@ -109,6 +142,53 @@ def in_set(set_id: str) -> Scope:
         f"i.content_hash IN (SELECT subject FROM ({decisions.LATEST_IN_FAMILY}) WHERE value = 'true')",
         (sets.family(set_id),),
     )
+
+
+def camera(models) -> Scope:
+    """Shot on one of these cameras, by the exact model the file names."""
+
+    wanted = sorted({str(m).strip() for m in models if str(m).strip()})
+    if not wanted:
+        return EVERYTHING
+    marks = ",".join("?" for _ in wanted)
+    return Scope(f"i.camera_model IN ({marks})", tuple(wanted))
+
+
+def taken(start: str = "", end: str = "") -> Scope:
+    """Taken within [start, end], whole days inclusive.
+
+    Dates are stored `YYYY-MM-DD HH:MM:SS` and compare lexically, so the range
+    is two string comparisons on the indexed column; the inclusive end day
+    becomes an exclusive next-day bound.
+    """
+
+    import datetime as dt
+
+    def day(value):
+        value = str(value or "").strip()[:10]
+        if not value:
+            return None
+        return dt.date.fromisoformat(value)
+
+    first, last = day(start), day(end)
+    parts = []
+    if first:
+        parts.append(Scope("i.date_taken >= ?", (first.isoformat(),)))
+    if last:
+        after = (last + dt.timedelta(days=1)).isoformat()
+        parts.append(Scope("i.date_taken < ?", (after,)))
+    return all_of(*parts) if parts else EVERYTHING
+
+
+def status(values) -> Scope:
+    """Photographs whose cull status is one of these."""
+
+    allowed = ("unflagged", "picked")
+    wanted = sorted({str(v) for v in values if str(v) in allowed})
+    if not wanted:
+        return EVERYTHING
+    marks = ",".join("?" for _ in wanted)
+    return Scope(f"i.status IN ({marks})", tuple(wanted))
 
 
 def ids(image_ids) -> Scope:

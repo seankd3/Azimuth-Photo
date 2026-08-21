@@ -1803,6 +1803,102 @@ class RankingIsDerived(CoreCase):
         self.assertEqual(rank.judged(self.conn, folder("Snapshots")), 1)
 
 
+class CriteriaAreExecutable(CoreCase):
+    """The chip language: AND across, OR within, NOT null-safe, and a smart
+    set is its rules where a fixed set is its members."""
+
+    def _photo(self, tail, camera=None, taken=None, stars=0, status="unflagged"):
+        photo_id = self.photo(tail)
+        digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, camera_model = ?, date_taken = ?,"
+            " stars = ?, status = ? WHERE id = ?",
+            (digest, camera, taken, stars, status, photo_id))
+        self.conn.commit()
+        return photo_id, digest
+
+    def _matching(self, chips):
+        from model import criteria
+
+        clause, args = scope.where(criteria.compile(self.conn, chips))
+        return {row["id"] for row in self.conn.execute(
+            f"SELECT i.id FROM images i WHERE {clause}", args)}
+
+    def test_chips_and_across_or_within_and_negate_null_safely(self):
+        from model import criteria
+
+        r5, _ = self._photo("Raws/a.CR2", camera="EOS R5", taken="2026-05-01 10:00:00", stars=4)
+        rp, _ = self._photo("Raws/b.CR2", camera="EOS RP", taken="2026-06-01 10:00:00", stars=2)
+        phone, _ = self._photo("Snapshots/c.jpg", camera="Pixel 3a", taken="2026-05-15 10:00:00")
+        unread, _ = self._photo("Raws/d.CR2", camera=None, taken=None)
+
+        either = self._matching([{"is": "camera", "values": ["EOS R5", "EOS RP"]}])
+        self.assertEqual(either, {r5, rp})
+        narrowed = self._matching([
+            {"is": "camera", "values": ["EOS R5", "EOS RP"]},
+            {"is": "stars", "least": 3},
+        ])
+        self.assertEqual(narrowed, {r5})
+        # NOT includes the photograph that names no camera at all
+        self.assertEqual(
+            self._matching([{"is": "camera", "values": ["EOS R5"], "not": True}]),
+            {rp, phone, unread})
+        # a whole-day range is inclusive of its end day
+        may = self._matching([{"is": "taken", "from": "2026-05-01", "to": "2026-05-15"}])
+        self.assertEqual(may, {r5, phone})
+        self.assertEqual(self._matching([{"is": "folder", "values": ["Raws"]}]), {r5, rp, unread})
+
+        for bad in (
+            [{"is": "sharpness", "least": 3}],
+            [{"is": "stars", "least": 9}],
+            [{"is": "camera", "values": []}],
+            [{"is": "taken"}],
+            [{"is": "camera", "values": ["x"], "size": 1}],
+        ):
+            with self.assertRaises(ValueError):
+                criteria.check(bad)
+
+    def test_a_smart_set_is_its_rules_and_freeze_is_dropping_them(self):
+        from model import criteria
+
+        keeper, keeper_hash = self._photo("Raws/keep.CR2", stars=4)
+        passed, _ = self._photo("Raws/pass.CR2", stars=1)
+        smart = sets.create(self.conn, "Best raws", criteria=[
+            {"is": "folder", "values": ["Raws"]}, {"is": "stars", "least": 3}])
+
+        def held(set_id):
+            clause, args = scope.where(criteria.resolve(self.conn, set_id))
+            return {row["id"] for row in self.conn.execute(
+                f"SELECT i.id FROM images i WHERE {clause}", args)}
+
+        self.assertEqual(held(smart), {keeper})
+        # membership follows the facts, no rows written
+        riser, riser_hash = self._photo("Raws/riser.CR2", stars=5)
+        self.assertEqual(held(smart), {keeper, riser})
+
+        # freeze: write the members, drop the rules -- and the set stops moving
+        sets.add(self.conn, smart, [keeper_hash, riser_hash])
+        sets.redefine(self.conn, smart, None)
+        self.conn.execute("UPDATE images SET stars = 0 WHERE content_hash = ?", (riser_hash,))
+        self.conn.commit()
+        self.assertEqual(held(smart), {keeper, riser})
+        self.assertNotIn("criteria", sets.describe(self.conn, smart))
+
+        # an intersection is two `in` chips, and renaming keeps rules
+        place = sets.create(self.conn, "Utah")
+        sets.add(self.conn, place, [keeper_hash])
+        both = sets.create(self.conn, "Utah keepers", criteria=[
+            {"is": "in", "values": [smart]}, {"is": "in", "values": [place]}])
+        self.assertEqual(held(both), {keeper})
+        sets.rename(self.conn, both, "Utah best")
+        self.assertEqual(sets.describe(self.conn, both)["criteria"][0]["is"], "in")
+
+        # a cycle answers empty instead of recursing
+        ouro = sets.create(self.conn, "Ouroboros", criteria=[{"is": "stars", "least": 1}])
+        sets.redefine(self.conn, ouro, [{"is": "in", "values": [ouro]}])
+        self.assertEqual(held(ouro), set())
+
+
 class SearchNeverRefuses(CoreCase):
     def _photo(self, tail, camera=None, taken=None):
         photo_id = self.photo(tail)

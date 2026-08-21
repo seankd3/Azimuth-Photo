@@ -78,8 +78,13 @@ def describe(conn, set_id: str) -> dict | None:
     return {"id": set_id, **said}
 
 
-def create(conn, name: str, *, kind: str = COLLECTION, set_id: str | None = None) -> str:
-    """Mint a set and return its id. The id never changes; the name may."""
+def create(conn, name: str, *, kind: str = COLLECTION, criteria=None, set_id: str | None = None) -> str:
+    """Mint a set and return its id. The id never changes; the name may.
+
+    With `criteria` the set is smart: its members are whatever the stored
+    chips match right now, and nothing is ever written per photograph.
+    Without, it is fixed and `add`/`remove` say who is in.
+    """
 
     name = str(name).strip()
     if not name:
@@ -90,8 +95,33 @@ def create(conn, name: str, *, kind: str = COLLECTION, set_id: str | None = None
     family(set_id)
     if decisions.latest(conn, family(set_id), SET) is not None:
         raise ValueError(f"set id was already used: {set_id}")
-    decisions.decide(conn, family(set_id), SET, {"kind": kind, "name": name})
+    said = {"kind": kind, "name": name}
+    if criteria:
+        from model import criteria as chips
+
+        said["criteria"] = chips.check(criteria)
+    decisions.decide(conn, family(set_id), SET, said)
     return set_id
+
+
+def redefine(conn, set_id: str, criteria) -> dict | None:
+    """Change a smart set's rules — or drop them, which is how Freeze ends.
+
+    The descriptor is rewritten whole with the same kind and name; membership
+    rows are untouched, which is exactly why freezing works: the members a
+    caller wrote a moment ago become the answer the instant the rules leave.
+    """
+
+    said = describe(conn, set_id)
+    if said is None:
+        return None
+    kept = {"kind": said["kind"], "name": said["name"]}
+    if criteria:
+        from model import criteria as chips
+
+        kept["criteria"] = chips.check(criteria)
+    decisions.decide(conn, family(set_id), SET, kept)
+    return {"id": set_id, **kept}
 
 
 def rename(conn, set_id: str, name: str) -> dict | None:
@@ -104,7 +134,7 @@ def rename(conn, set_id: str, name: str) -> dict | None:
     if not name:
         raise ValueError("a set needs a name")
     said = {**said, "name": name}
-    decisions.decide(conn, family(set_id), SET, {"kind": said["kind"], "name": name})
+    decisions.decide(conn, family(set_id), SET, {k: v for k, v in said.items() if k != "id"})
     return said
 
 
