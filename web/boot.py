@@ -413,11 +413,16 @@ class Library:
             self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
             offset=0, renditions=self.tiles.renditions, reachable_on=self._here(),
         ))} if chosen else {}
+        clause, args = scope_where(scope)
         return {
             "photos": [{**rows[p["id"]], "comparisons": p["comparisons"], "rating": p["rating"]}
                        for p in chosen if p["id"] in rows],
             "judged": rank.judged(self.conn, scope),
-            "total": queries.size(self.conn, scope),
+            # Distinct identities, the same unit `judged` speaks -- a photo
+            # filed in two folders is one photograph to rank, not two.
+            "total": int(self.conn.execute(
+                f"SELECT COUNT(DISTINCT i.content_hash) FROM images i"
+                f" WHERE {queries.IN_LIBRARY} AND ({clause})", args).fetchone()[0]),
         }
 
     def round(self, winner_id: int, over_ids) -> dict:

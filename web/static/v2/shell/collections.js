@@ -281,7 +281,11 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
   document.addEventListener('click', (event) => {
     if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
     if (!photoMenu.hidden && !photoMenu.contains(event.target)) photoMenu.hidden = true;
-    if (!namePop.hidden && !namePop.contains(event.target)) answer(null);
+    // The click that just opened the popover -- a menu item, Save view, New
+    // collection -- bubbles here in the same dispatch; it must not also be
+    // the click that closes it.
+    const opener = event.target.closest('[data-photo-menu], [data-collection-menu], [data-action]');
+    if (!namePop.hidden && !namePop.contains(event.target) && !opener) answer(null);
   });
 
   return Object.freeze({ refresh, render, show, create, saveView, keepResults, toss, menuFor });

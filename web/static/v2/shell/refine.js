@@ -302,10 +302,10 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   function renderProgress() {
-    const state = read();
-    const shelf = (state.collections || []).find((c) => c.id === state.collection);
+    const app = read();
+    const shelf = (app.collections || []).find((c) => c.id === app.collection);
     const where = shelf ? `“${shelf.name.split('/').pop()}”`
-      : state.folder ? state.folder.split('/').pop() : 'your library';
+      : app.folder ? app.folder.split('/').pop() : 'your library';
     const ranked = state.total
       ? `${state.judged.toLocaleString()} of ${state.total.toLocaleString()} in ${where} ranked`
       : '';
