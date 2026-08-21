@@ -654,6 +654,11 @@ class OwnedLibrary:
                     self.cards = intake.cards()
                 except Exception:  # noqa: BLE001
                     self.cards = []
+                # Ranking follows the library on every pass, not only the
+                # minute sweeps: `_rank` skips in two cheap queries when
+                # nothing moved, and a vector the worker just made reaches
+                # Best and search within seconds instead of a minute.
+                self.rank_soon()
                 passes += 1
                 if not first and (passes % max(1, int(every // 5))):
                     continue
@@ -665,10 +670,6 @@ class OwnedLibrary:
                     future.result()
                 except Exception:  # noqa: BLE001 - a failed sweep is logged by its lane
                     pass
-                # Ranking follows the library the same way the folders do: a
-                # cheap ask each pass, and `_rank` itself knows whether the
-                # rounds or the space moved since it last wrote the order.
-                self.rank_soon()
                 first = False
 
         self._stop_following = threading.Event()

@@ -142,9 +142,30 @@ def search(conn, query: str, *, space=None, query_vector=None, limit: int = 500)
     query = (query or "").strip()
     if not query:
         return []
-    return fuse(
+    ranked = fuse(
         _lexical(conn, query, limit),
         _named(conn, query, limit),
         _semantic(conn, space, query_vector, limit),
-        limit=limit,
+        limit=limit * 2,
     )
+    if not ranked:
+        return []
+    # One photograph once. The same identity filed in two folders is two
+    # rows, and two doors may answer with different rows of it; a search is
+    # about photographs, so an identity keeps only its best rank. A row not
+    # yet identified has nothing to collapse on and stands alone.
+    marks = ",".join("?" for _ in ranked)
+    identity = {int(row["id"]): row["hash"] for row in conn.execute(
+        f"SELECT id, content_hash AS hash FROM images WHERE id IN ({marks})", ranked)}
+    seen: set[str] = set()
+    out: list[int] = []
+    for image_id in ranked:
+        digest = identity.get(image_id)
+        if digest:
+            if digest in seen:
+                continue
+            seen.add(digest)
+        out.append(image_id)
+        if len(out) == int(limit):
+            break
+    return out

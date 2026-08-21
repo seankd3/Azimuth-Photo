@@ -1853,6 +1853,18 @@ class SearchNeverRefuses(CoreCase):
         without = finding.search(self.conn, "sunset")
         self.assertEqual(set(without), {agreed, word_only})
 
+    def test_one_photograph_is_one_result_however_many_rows_hold_it(self):
+        import search as finding
+
+        digest = hashlib.blake2b(b"the-same-bytes", digest_size=32).hexdigest()
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
+            (("Snapshots/2025/beach.jpg", digest), ("Edits/2025/beach.jpg", digest)),
+        )
+        self.conn.commit()
+        found = finding.search(self.conn, "beach")
+        self.assertEqual(len(found), 1)
+
     def test_a_page_of_results_arrives_in_rank_order_with_renditions(self):
         first, _ = self._photo("Raws/2026/pier-b.CR2", taken="2026-01-01T00:00:00")
         second, _ = self._photo("Raws/2026/pier-a.CR2", taken="2026-06-01T00:00:00")
