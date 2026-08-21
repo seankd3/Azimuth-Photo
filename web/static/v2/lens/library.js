@@ -109,7 +109,11 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
-  cell.addEventListener('click', () => actions.select(index));
+  cell.addEventListener('click', (event) => actions.select(index, {
+    shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey,
+  }));
+  cell.draggable = true;
+  cell.addEventListener('dragstart', (event) => actions.drag?.(index, event));
   cell.addEventListener('dblclick', () => actions.open(index));
   return cell;
 }
@@ -167,7 +171,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
       lastMissing = index + 1;
     }
     positionCell(cell, layout, index, photo);
-    cell.classList.toggle('is-selected', index === state.selectedIndex);
+    cell.classList.toggle('is-selected',
+      index === state.selectedIndex || Boolean(photo && state.marked?.has(photo.id)));
     if (cell.dataset.kind === 'photo') {
       showTile(cell, photo);
       const picked = photo.status === 'picked';

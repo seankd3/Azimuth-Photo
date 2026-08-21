@@ -2,6 +2,8 @@ import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCullWorkflow } from './cull.js';
+import { createCollectionsPanel } from './collections.js';
+import { createFilterBar } from './filters.js';
 import { createIntakeWorkflow } from './intake.js';
 import { createRefineWorkflow } from './refine.js';
 import { createTrashWorkflow } from './trash.js';
@@ -42,13 +44,30 @@ let rowHeight = 220;
 let scrollFrame = null;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+// What the window is looking at, as the bridge speaks it. Null when it is
+// the whole library, so the server sees "no view" rather than three empties.
+function viewOf() {
+  const { folder, collection, chips } = read();
+  if (!folder && !collection && !(chips || []).length) return null;
+  return { folder, collection, chips };
+}
+
+// What a verb acts on: the marked set when there is one, else the focused
+// photograph. One answer for cull, Quick, menus and drags.
+function selection() {
+  const { marked, selected } = read();
+  if (marked && marked.size) return [...marked];
+  return selected ? [selected.id] : [];
+}
+let anchorIndex = null;
 const pages = new PageCache({
   pageSize: PAGE,
   load: (offset, limit) => read().view === 'trash'
     ? product.trashPhotos({ limit, offset })
     : read().query
-      ? product.find({ query: read().query, limit, offset }).then((answer) => answer.photos)
-      : product.photos({ sort: read().sort, limit, offset, folder: read().folder }),
+      ? product.find({ query: read().query, limit, offset, view: viewOf() }).then((answer) => answer.photos)
+      : product.photos({ sort: read().sort, limit, offset, view: viewOf() }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
     notify(`Some photos could not be loaded. ${error.message}`);
@@ -67,10 +86,25 @@ const intakeWorkflow = createIntakeWorkflow({
   notify,
   afterImport: async () => {
     // What just came in is what the person wants to see: Recently added.
-    update({ view: 'library', folder: null, sort: 'added' });
+    update({ view: 'library', folder: null, collection: null, sort: 'added' });
     document.querySelector('[data-sort]').value = 'added';
-    await Promise.all([loadView(), loadFolders()]);
+    await Promise.all([loadView(), loadFolders(), collectionsPanel.refresh()]);
   },
+});
+const collectionsPanel = createCollectionsPanel({
+  product,
+  read,
+  update,
+  notify,
+  reload: () => loadView(),
+  selection,
+  viewOf,
+});
+const filterBar = createFilterBar({
+  product,
+  read,
+  update,
+  onChange: () => { workspace.scrollTo({ top: 0 }); loadView(); },
 });
 const refineWorkflow = createRefineWorkflow({
   product,
@@ -78,6 +112,7 @@ const refineWorkflow = createRefineWorkflow({
   update,
   notify,
   undo,
+  viewOf,
   onLeave: async () => {
     // The ranking moved while the stage was up; a grid sorted by it reloads.
     if (read().sort === 'best') await loadView();
@@ -87,6 +122,7 @@ const cullWorkflow = createCullWorkflow({
   product,
   read,
   reload: () => loadView(),
+  selection,
   replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status, rotate: photo.rotate })),
   remove: async (index, moved) => {
     // One cell left the grid: edit the window in place so the loop never
@@ -165,6 +201,17 @@ function visibleGrid() {
     emptyAction: inTrash || searching ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
+    drag: (index, event) => {
+      const photo = read().photos.get(index);
+      if (!photo) return;
+      if (!selection().includes(photo.id)) {
+        void selectPhoto(index);
+        event.dataTransfer.setData('text/azimuth-ids', JSON.stringify([photo.id]));
+      } else {
+        event.dataTransfer.setData('text/azimuth-ids', JSON.stringify(selection()));
+      }
+      event.dataTransfer.effectAllowed = 'copy';
+    },
     look: lookAt,
     need: (start, end) => pages.ensureRange(start, end),
     rowHeight,
@@ -238,19 +285,21 @@ async function loadView() {
   update({ loading: true, photos: new Map(), total: 0, selected: null, selectedIndex: null });
   try {
     const { sort, view, folder, query } = read();
+    const looking = viewOf();
+    const key = JSON.stringify(looking);
     const [counts, drives, trashCount, size, page] = await Promise.all([
       product.counts(),
       product.drives(),
       product.trashCount(),
-      view === 'trash' || query ? Promise.resolve(0) : product.size(folder),
+      view === 'trash' || query ? Promise.resolve(0) : product.size(looking),
       view === 'trash'
         ? product.trashPhotos({ limit: PAGE, offset: 0 })
         : query
-          ? product.find({ query, limit: PAGE, offset: 0 })
-          : product.photos({ sort, limit: PAGE, offset: 0, folder }),
+          ? product.find({ query, limit: PAGE, offset: 0, view: looking })
+          : product.photos({ sort, limit: PAGE, offset: 0, view: looking }),
     ]);
     if (!pages.isCurrent(requestGeneration) || read().view !== view
-        || read().folder !== folder || read().query !== query) return;
+        || JSON.stringify(viewOf()) !== key || read().query !== query) return;
     const total = view === 'trash' ? trashCount : query ? page.total : size;
     pages.seed(requestGeneration, query ? page.photos : page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
@@ -267,13 +316,14 @@ async function refreshInPlace() {
   // The library changed under the window -- a sweep admitted photographs or
   // the worker finished one -- so re-read what is loaded without resetting it.
   const generation = pages.generation;
-  const { view, folder, query } = read();
+  const { view, query } = read();
+  const key = JSON.stringify(viewOf());
   const [counts, drives, trashCount, size] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
-    view === 'trash' || query ? Promise.resolve(0) : product.size(folder),
+    view === 'trash' || query ? Promise.resolve(0) : product.size(viewOf()),
   ]);
   if (!pages.isCurrent(generation) || read().view !== view
-      || read().folder !== folder || read().query !== query) return;
+      || JSON.stringify(viewOf()) !== key || read().query !== query) return;
   await pages.refresh(view === 'trash' ? trashCount : query ? read().total : size);
   if (!pages.isCurrent(generation)) return;
   update({ counts: { ...counts, trash: trashCount }, drives });
@@ -412,11 +462,12 @@ function showFolder(path) {
     update({ query: '' });
   }
   if (read().view === 'refine') {
-    update({ folder: path, selected: null, selectedIndex: null });
+    update({ folder: path, collection: null, selected: null, selectedIndex: null, marked: new Set() });
     refineWorkflow.resize(refineWorkflow.size());
     return;
   }
-  update({ view: 'library', folder: path, selected: null, selectedIndex: null });
+  update({ view: 'library', folder: path, collection: null,
+           selected: null, selectedIndex: null, marked: new Set() });
   workspace.scrollTo({ top: 0 });
   loadView();
 }
@@ -445,11 +496,28 @@ async function scanDrive(drive) {
   }
 }
 
-async function selectPhoto(index) {
+async function selectPhoto(index, modifiers = {}) {
   // The row as it is now; a cell's click never carries a row of its own.
   const photo = read().photos.get(index);
   if (!photo) return;
-  update({ selected: photo, selectedIndex: index });
+  const marked = new Set(read().marked);
+  if (modifiers.shift && anchorIndex !== null) {
+    // The range covers what is loaded between the anchor and here; sparse
+    // pages contribute what they hold.
+    for (let i = Math.min(anchorIndex, index); i <= Math.max(anchorIndex, index); i += 1) {
+      const held = read().photos.get(i);
+      if (held) marked.add(held.id);
+    }
+  } else if (modifiers.toggle) {
+    if (marked.has(photo.id)) marked.delete(photo.id);
+    else marked.add(photo.id);
+    anchorIndex = index;
+  } else {
+    marked.clear();
+    marked.add(photo.id);
+    anchorIndex = index;
+  }
+  update({ selected: photo, selectedIndex: index, marked });
   try {
     const details = await product.photo(photo.id);
     if (read().selected?.id === photo.id) update({ selected: { ...read().selected, ...details } });
@@ -558,6 +626,8 @@ function renderFolders(state) {
 }
 
 function renderChrome(state) {
+  collectionsPanel.render(state);
+  filterBar.render(state);
   library.renderInspector(inspector, state.selected);
   if (loupe.open && state.selected) renderLoupe(state.selected);
   const count = state.counts.photos.toLocaleString();
@@ -594,10 +664,16 @@ function renderChrome(state) {
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !state.folder);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
+  const shelf = (state.collections || []).find((c) => c.id === state.collection);
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
     : searching ? `Results for “${state.query}”`
-    : (refining ? 'Refine · ' : '') + (state.folder ? state.folder.split('/').pop() : 'All photos');
+    : (refining ? 'Refine · ' : '')
+      + (shelf ? shelf.name : state.folder ? state.folder.split('/').pop() : 'All photos');
+  document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || refining;
+  document.querySelector('[data-action="save-view"]').hidden =
+    state.view !== 'library' || refining || searching || !viewOf();
+  document.querySelector('[data-action="keep-results"]').hidden = !searching;
   renderFolders(state);
 
   driveList.replaceChildren(...state.drives.map((drive) => {
@@ -656,7 +732,8 @@ document.addEventListener('click', (event) => {
   }
   if (action === 'all-photos') {
     searchBox.value = '';
-    update({ view: 'library', folder: null, query: '' });
+    update({ view: 'library', folder: null, collection: null, chips: [], query: '',
+             selected: null, selectedIndex: null, marked: new Set() });
     workspace.scrollTo({ top: 0 });
     loadView();
   }
@@ -682,6 +759,9 @@ document.addEventListener('click', (event) => {
   if (action === 'check-new') intakeWorkflow.checkNew();
   if (action === 'check-all') intakeWorkflow.checkAll();
   if (action === 'check-none') intakeWorkflow.checkNone();
+  if (action === 'new-collection') collectionsPanel.create(event.target);
+  if (action === 'save-view') collectionsPanel.saveView(event.target);
+  if (action === 'keep-results') collectionsPanel.keepResults(event.target);
   if (action === 'refine') refineWorkflow.open();
   if (action === 'leave-refine') refineWorkflow.close();
   const size = event.target.closest('[data-refine-size] [data-size]')?.dataset.size;
@@ -720,8 +800,11 @@ document.addEventListener('keydown', (event) => {
     else if (refineWorkflow.isOpen()) refineWorkflow.close();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
-    else if (read().selected) update({ selected: null, selectedIndex: null });
-    else if (read().query) { searchBox.value = ''; runSearch(''); }
+    else if (read().selected || read().marked?.size) {
+      update({ selected: null, selectedIndex: null, marked: new Set() });
+      anchorIndex = null;
+    } else if (read().query) { searchBox.value = ''; runSearch(''); }
+    else if (read().chips.length) { update({ chips: [] }); loadView(); }
     else return;
     event.preventDefault();
     return;
@@ -734,6 +817,11 @@ document.addEventListener('keydown', (event) => {
 
   const current = read().selectedIndex;
   const key = event.key.toLowerCase();
+  if (key === 'b' && read().view === 'library' && selection().length) {
+    collectionsPanel.toss();
+    event.preventDefault();
+    return;
+  }
   const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnLeft' : 'turnRight' };
   if (key in cullActions && read().view === 'library' && read().selected?.hash) {
     cullWorkflow.apply(cullActions[key]);
@@ -780,6 +868,15 @@ document.querySelector('[data-density]').addEventListener('input', (event) => {
   }
 });
 
+grid.addEventListener('contextmenu', (event) => {
+  const cell = event.target.closest('.photo-cell[data-kind="photo"]');
+  if (!cell || read().view !== 'library') return;
+  const index = Number(cell.dataset.index);
+  const photo = read().photos.get(index);
+  if (photo && !selection().includes(photo.id)) void selectPhoto(index);
+  collectionsPanel.menuFor(event);
+});
+
 workspace.addEventListener('scroll', scheduleGrid, { passive: true });
 new ResizeObserver(scheduleGrid).observe(workspace);
 loupe.addEventListener('click', (event) => {
@@ -792,5 +889,7 @@ loupe.addEventListener('close', () => {
 });
 
 subscribe(render);
-product.home().then((where) => (where ? Promise.all([loadView(), loadFolders()]) : chooseHome()));
+product.home().then((where) => (where
+  ? Promise.all([loadView(), loadFolders(), collectionsPanel.refresh()])
+  : chooseHome()));
 followLibrary();

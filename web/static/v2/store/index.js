@@ -1,7 +1,11 @@
 const state = {
+  chips: [],
+  collection: null,
+  collections: [],
   counts: { photos: 0, starred: 0, unidentified: 0, trash: 0 },
   drives: [],
   folder: null,
+  marked: new Set(),
   folders: [],
   open: new Set(),
   photos: new Map(),

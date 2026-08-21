@@ -20,7 +20,7 @@ const RECENT = 48;
 const ASPECT_MIN = 0.4;
 const ASPECT_MAX = 2.6;
 
-export function createRefineWorkflow({ product, read, update, notify, undo, onLeave }) {
+export function createRefineWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
   const stage = document.querySelector('[data-refine]');
   const state = {
     size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
@@ -41,7 +41,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   async function ask(n) {
-    const answer = await product.refine({ n, folder: read().folder, avoid: avoiding() });
+    const answer = await product.refine({ n, view: viewOf(), avoid: avoiding() });
     state.judged = answer.judged;
     state.total = answer.total;
     return answer.photos;
@@ -302,7 +302,10 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   function renderProgress() {
-    const where = read().folder ? read().folder.split('/').pop() : 'your library';
+    const state = read();
+    const shelf = (state.collections || []).find((c) => c.id === state.collection);
+    const where = shelf ? `“${shelf.name.split('/').pop()}”`
+      : state.folder ? state.folder.split('/').pop() : 'your library';
     const ranked = state.total
       ? `${state.judged.toLocaleString()} of ${state.total.toLocaleString()} in ${where} ranked`
       : '';

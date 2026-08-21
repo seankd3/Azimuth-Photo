@@ -39,6 +39,12 @@
         </button>
       </section>
       <section>
+        <div class="section-heading"><p class="eyebrow">Collections</p>
+          <button class="mini-button" type="button" data-action="new-collection" aria-label="New collection">+</button>
+        </div>
+        <div class="collection-tree" data-collections-tree></div>
+      </section>
+      <section>
         <div class="section-heading"><p class="eyebrow">Folders</p></div>
         <div class="folder-tree" data-folder-tree></div>
       </section>
@@ -58,6 +64,10 @@
           <button class="danger-button" type="button" data-action="reject"><kbd>X</kbd> Reject</button>
         </div>
         <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
+        <div class="chip-bar" data-chips></div>
+        <button class="quiet-button" type="button" data-action="add-chip">+ Filter</button>
+        <button class="quiet-button" type="button" data-action="save-view" hidden>Save view…</button>
+        <button class="quiet-button" type="button" data-action="keep-results" hidden>Save results…</button>
         <span class="refine-progress" data-refine-progress hidden></span>
         <div class="refine-size" data-refine-size hidden role="group" aria-label="How many at once">
           <button type="button" data-size="2">2</button>
@@ -137,6 +147,27 @@
     <button type="button" data-action="synchronize-folder">Synchronize folder</button>
     <button type="button" data-action="forget-missing">Forget missing photos</button>
   </menu>
+
+  <menu class="context-menu" data-collection-menu hidden>
+    <button type="button" data-action="rename-collection">Rename…</button>
+    <button type="button" data-action="freeze-collection">Freeze into a fixed collection</button>
+    <button type="button" data-action="delete-collection">Delete collection</button>
+  </menu>
+
+  <menu class="context-menu" data-photo-menu hidden></menu>
+  <menu class="context-menu" data-chip-menu hidden>
+    <button type="button" data-field="stars">Stars</button>
+    <button type="button" data-field="taken">Date taken</button>
+    <button type="button" data-field="camera">Camera</button>
+    <button type="button" data-field="status">Pick status</button>
+    <button type="button" data-field="in">In collection</button>
+  </menu>
+  <div class="popover" data-chip-editor hidden></div>
+  <div class="popover name-pop" data-name-pop hidden>
+    <p class="eyebrow" data-name-title>Name</p>
+    <input type="text" data-name-input autocomplete="off" spellcheck="false">
+    <button class="primary-button" type="button" data-action="name-ok">Save</button>
+  </div>
 
   <dialog class="import-dialog" data-import-dialog aria-labelledby="import-title">
     <header class="import-head">

@@ -3,28 +3,33 @@
 // exact changes. Each action says how it patches a row (or that it removes
 // the photograph from this view) and what to call it; nothing else differs.
 const ACTIONS = Object.freeze({
-  pick: { call: (product, id) => product.pick([id]), patch: () => ({ status: 'picked' }), message: 'Photograph picked.', advance: true },
-  clear: { call: (product, id) => product.clearPick([id]), patch: () => ({ status: 'unflagged' }), message: 'Pick cleared.', advance: true },
-  reject: { call: (product, id) => product.reject([id]), removes: true, message: 'Photograph rejected.' },
-  turnRight: { call: (product, id) => product.turn([id], 90), patch: (photo) => ({ rotate: (photo.rotate + 90) % 360 }), message: 'Turned right.' },
-  turnLeft: { call: (product, id) => product.turn([id], 270), patch: (photo) => ({ rotate: (photo.rotate + 270) % 360 }), message: 'Turned left.' },
+  pick: { call: (product, ids) => product.pick(ids), patch: () => ({ status: 'picked' }), message: (n) => n === 1 ? 'Photograph picked.' : `${n} photographs picked.`, advance: true },
+  clear: { call: (product, ids) => product.clearPick(ids), patch: () => ({ status: 'unflagged' }), message: (n) => n === 1 ? 'Pick cleared.' : `${n} picks cleared.`, advance: true },
+  reject: { call: (product, ids) => product.reject(ids), removes: true, message: (n) => n === 1 ? 'Photograph rejected.' : `${n} photographs rejected.` },
+  turnRight: { call: (product, ids) => product.turn(ids, 90), patch: (photo) => ({ rotate: (photo.rotate + 90) % 360 }), message: () => 'Turned right.' },
+  turnLeft: { call: (product, ids) => product.turn(ids, 270), patch: (photo) => ({ rotate: (photo.rotate + 270) % 360 }), message: () => 'Turned left.' },
 });
 
-export function createCullWorkflow({ product, read, reload, replace, remove, selectIndex, notify, undo }) {
+export function createCullWorkflow({ product, read, reload, replace, remove, selection, selectIndex, notify, undo }) {
   let busy = false;
 
   async function apply(name) {
     const action = ACTIONS[name];
     const state = read();
-    if (!action || busy || state.view !== 'library' || !state.selected) return;
+    const ids = selection();
+    if (!action || busy || state.view !== 'library' || !ids.length) return;
 
     busy = true;
     const { selected, selectedIndex } = state;
     try {
-      const result = await action.call(product, selected.id);
+      const result = await action.call(product, ids);
       if (!result.changed.length) return;
 
-      if (action.removes) {
+      if (ids.length > 1) {
+        // Many at once: the library is re-read rather than patched cell by
+        // cell, and the selection stands so the next verb hits the same set.
+        await reload();
+      } else if (action.removes) {
         const moved = result.changed.reduce((total, change) => total + change.photos, 0);
         await remove(selectedIndex, moved);
         await selectIndex(selectedIndex);
@@ -32,7 +37,7 @@ export function createCullWorkflow({ product, read, reload, replace, remove, sel
         replace({ ...selected, ...action.patch(selected) });
         if (action.advance) await selectIndex(selectedIndex + 1);
       }
-      undo.show(action.message, () => product.undoCull(result.changed).then(reload));
+      undo.show(action.message(ids.length), () => product.undoCull(result.changed).then(reload));
     } catch (reason) {
       notify(reason.message);
     } finally {
