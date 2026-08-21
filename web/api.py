@@ -213,7 +213,9 @@ async def catalog(folder: str | None = None, sort: str = "", starred: int = 0,
 async def find(q: str = "", limit: int = 200):
     import search as search_module
 
-    return {"images": search_module.search(db(), q, limit=limit)}
+    conn = db()
+    ids = search_module.search(conn, q, limit=limit)
+    return {"images": _rows_for(conn, ids)}
 
 
 @router.post("/api/image/{image_id}/rating")
@@ -639,14 +641,15 @@ async def similar(image_id: int, limit: int = 50):
     if row is None:
         return Response(status_code=404)
 
+    import rank
+
     found = []
     if row["hash"]:
-        entry = cache.get(conn, row["hash"], search_module.EMBEDDING)
-        if entry and entry["value"]:
-            ids = await asyncio.to_thread(
-                search_module._semantic, conn, search_module._vector(entry["value"]),
-                max(1, min(int(limit), 500)) + 1,
-            )
+        space = await asyncio.to_thread(rank.space, conn)
+        subjects, matrix = space
+        if matrix is not None and row["hash"] in subjects:
+            anchor = matrix[subjects.index(row["hash"])]
+            ids = search_module._semantic(conn, space, anchor, max(1, min(int(limit), 500)) + 1)
             found = [i for i in ids if i != image_id]
 
     return {"images": _rows_for(conn, found), "source_id": image_id}

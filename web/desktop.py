@@ -129,6 +129,11 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
+    def search(self, query: str, limit: int = 200, offset: int = 0) -> dict:
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        return self._wait(self._product.find(str(query or ""), int(limit), int(offset)))
+
     # ---- refine ----
 
     def refine(self, n: int = 9, folder: str | None = None, avoid: list[str] | None = None) -> dict:

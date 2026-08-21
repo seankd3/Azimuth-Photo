@@ -104,6 +104,17 @@ def ready() -> bool:
     return isinstance(try_to_load_from_cache(MODEL, "model.safetensors"), str)
 
 
+def warm() -> bool:
+    """Is the model already in memory?
+
+    The typing path asks this, never `ready()`: a query is embedded inline
+    only when the answer costs milliseconds. Cold means words-only results
+    now and a background warm-up for the next keystroke.
+    """
+
+    return _loaded is not None
+
+
 def fetch() -> None:
     """Bring the weights to this machine, deliberately and in the open.
 

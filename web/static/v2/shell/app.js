@@ -46,7 +46,9 @@ const pages = new PageCache({
   pageSize: PAGE,
   load: (offset, limit) => read().view === 'trash'
     ? product.trashPhotos({ limit, offset })
-    : product.photos({ sort: read().sort, limit, offset, folder: read().folder }),
+    : read().query
+      ? product.find({ query: read().query, limit, offset }).then((answer) => answer.photos)
+      : product.photos({ sort: read().sort, limit, offset, folder: read().folder }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
     notify(`Some photos could not be loaded. ${error.message}`);
@@ -108,6 +110,34 @@ const cullWorkflow = createCullWorkflow({
   selectIndex,
   notify,
   undo,
+});
+
+const searchBox = document.querySelector('[data-search]');
+let searchTimer = null;
+function runSearch(text) {
+  clearTimeout(searchTimer);
+  const query = text.trim();
+  if (query === read().query) return;
+  update({ view: 'library', query, selected: null, selectedIndex: null });
+  workspace.scrollTo({ top: 0 });
+  loadView();
+}
+searchBox.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => runSearch(searchBox.value), 300);
+});
+searchBox.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    runSearch(searchBox.value);
+    event.preventDefault();
+  }
+  if (event.key === 'Escape') {
+    searchBox.value = '';
+    runSearch('');
+    searchBox.blur();
+    event.stopPropagation();
+    event.preventDefault();
+  }
 });
 
 let lookTimer = null;
@@ -204,19 +234,22 @@ async function loadView() {
   const requestGeneration = pages.reset();
   update({ loading: true, photos: new Map(), total: 0, selected: null, selectedIndex: null });
   try {
-    const { sort, view, folder } = read();
+    const { sort, view, folder, query } = read();
     const [counts, drives, trashCount, size, page] = await Promise.all([
       product.counts(),
       product.drives(),
       product.trashCount(),
-      view === 'trash' ? Promise.resolve(0) : product.size(folder),
+      view === 'trash' || query ? Promise.resolve(0) : product.size(folder),
       view === 'trash'
         ? product.trashPhotos({ limit: PAGE, offset: 0 })
-        : product.photos({ sort, limit: PAGE, offset: 0, folder }),
+        : query
+          ? product.find({ query, limit: PAGE, offset: 0 })
+          : product.photos({ sort, limit: PAGE, offset: 0, folder }),
     ]);
-    if (!pages.isCurrent(requestGeneration) || read().view !== view || read().folder !== folder) return;
-    const total = view === 'trash' ? trashCount : size;
-    pages.seed(requestGeneration, page, total);
+    if (!pages.isCurrent(requestGeneration) || read().view !== view
+        || read().folder !== folder || read().query !== query) return;
+    const total = view === 'trash' ? trashCount : query ? page.total : size;
+    pages.seed(requestGeneration, query ? page.photos : page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
     update({ notice: '' });
     if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
@@ -231,13 +264,14 @@ async function refreshInPlace() {
   // The library changed under the window -- a sweep admitted photographs or
   // the worker finished one -- so re-read what is loaded without resetting it.
   const generation = pages.generation;
-  const { view, folder } = read();
+  const { view, folder, query } = read();
   const [counts, drives, trashCount, size] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
-    view === 'trash' ? Promise.resolve(0) : product.size(folder),
+    view === 'trash' || query ? Promise.resolve(0) : product.size(folder),
   ]);
-  if (!pages.isCurrent(generation) || read().view !== view || read().folder !== folder) return;
-  await pages.refresh(view === 'trash' ? trashCount : size);
+  if (!pages.isCurrent(generation) || read().view !== view
+      || read().folder !== folder || read().query !== query) return;
+  await pages.refresh(view === 'trash' ? trashCount : query ? read().total : size);
   if (!pages.isCurrent(generation)) return;
   update({ counts: { ...counts, trash: trashCount }, drives });
   const { selected, photos } = read();
@@ -370,6 +404,10 @@ async function loadFolders() {
 }
 
 function showFolder(path) {
+  if (read().query) {
+    searchBox.value = '';
+    update({ query: '' });
+  }
   if (read().view === 'refine') {
     update({ folder: path, selected: null, selectedIndex: null });
     refineWorkflow.resize(refineWorkflow.size());
@@ -531,16 +569,17 @@ function renderChrome(state) {
     : state.counts.unidentified
       ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
       : '');
+  const searching = state.view === 'library' && Boolean(state.query);
   const refining = state.view === 'refine';
   grid.hidden = refining;
   document.querySelector('[data-refine]').hidden = !refining;
   document.querySelector('[data-refine-progress]').hidden = !refining;
   document.querySelector('[data-refine-size]').hidden = !refining;
-  document.querySelector('[data-action="refine"]').hidden = state.view !== 'library';
+  document.querySelector('[data-action="refine"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-refine"]').hidden = !refining;
   document.querySelector('[data-result-label]').hidden = refining;
   document.querySelector('[data-density]').closest('label').hidden = refining;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining;
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining || searching;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = state.view === 'library' && Boolean(state.selected?.hash);
@@ -554,6 +593,7 @@ function renderChrome(state) {
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
+    : searching ? `Results for “${state.query}”`
     : (refining ? 'Refine · ' : '') + (state.folder ? state.folder.split('/').pop() : 'All photos');
   renderFolders(state);
 
@@ -612,7 +652,8 @@ document.addEventListener('click', (event) => {
     return;
   }
   if (action === 'all-photos') {
-    update({ view: 'library', folder: null });
+    searchBox.value = '';
+    update({ view: 'library', folder: null, query: '' });
     workspace.scrollTo({ top: 0 });
     loadView();
   }
@@ -665,12 +706,19 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  if (event.key === '/' && !isTyping) {
+    searchBox.focus();
+    searchBox.select();
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Escape') {
     if (loupe.open) closeLoupe();
     else if (refineWorkflow.isOpen()) refineWorkflow.close();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected) update({ selected: null, selectedIndex: null });
+    else if (read().query) { searchBox.value = ''; runSearch(''); }
     else return;
     event.preventDefault();
     return;

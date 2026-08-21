@@ -1,303 +1,150 @@
 """Search: one query, ranked fusion, and it never refuses to answer.
 
-Two ways of finding a photograph, combined by rank rather than by score.
+Three ways of finding a photograph, combined by rank rather than by score.
 
 **Lexical** — the filename, the folder it sits in, the camera, the lens, the
-date, and any keyword you gave it. Always available, because every one of those
-facts is in the catalog the moment the photo is.
+date. Always available, because every one of those facts is in the catalog the
+moment the photo is read.
 
-**Semantic** — the embedding space, when the photograph has a vector and the
-query can be turned into one. 42,937 of 157,064 have vectors today.
+**Named** — the sets you made. A keyword and a collection are one thing
+(`model/sets`), so a query that matches a set's name finds its members:
+"japan" finds everything you keyworded `travel/japan`, and "wedding" finds the
+collection so named, through the same door.
+
+**Semantic** — the embedding space, when it is loaded and the query can be
+turned into a vector. The caller passes both; this module never loads a model
+and never reads the space off disk, because the typing path must never wait
+for either. A caller that has them passes them, a caller that does not passes
+None and gets words-only results immediately. Nothing in here blocks, and
+nothing in here should learn how.
 
 > It degrades, never blocks, and never says *not enough photos*.
 
 That last clause is a rule, not a nicety. A search that refuses until coverage
-is complete is a search that is useless for the eighteen months of computing
-that coverage takes — and this library will never be at 100%, because new
-photographs arrive faster than embeddings are made for them.
+is complete is useless for the months that coverage takes — and the library is
+never at 100%, because new photographs arrive faster than vectors are made.
 
 **Fusion is by rank, not by score.** Reciprocal rank fusion — `1/(60 + rank)`
 summed across the lists a result appears in — because a cosine similarity and
-an FTS relevance are not on the same scale and never will be. Normalising them
+a LIKE match are not on the same scale and never will be. Normalising them
 against each other requires a constant that is wrong for some query, and the
-symptom is a filename match losing to a vaguely-related photo. Ranks have no
+symptom is a filename match losing to a vaguely related photo. Ranks have no
 units, so there is nothing to calibrate.
+
+The answer is a ranked list of image ids and nothing more. Fetching rows,
+tiles and pages is `library.photos` over an ids scope, the same as every
+other surface; search only decides which ids and in what order.
 """
 
 from __future__ import annotations
 
-import os
-
-from model import cache, decisions
+from model import sets
 
 # The constant from the reciprocal-rank-fusion paper. It flattens the
 # difference between rank 1 and rank 2 just enough that agreement between two
 # lists beats a single list's confidence.
 RRF_K = 60
 
-EMBEDDING = "embedding"
+IN_LIBRARY = "status != 'trashed' AND tail IS NOT NULL"
 
 
 def _lexical(conn, query: str, limit: int) -> list[int]:
-    """Filename, folder, camera, lens — everything that is words about a photo.
+    """Filename, folder, camera, lens, date — everything that is words about
+    a photo.
 
-    `LIKE` is deliberate here and safe: this is a human's substring search over
-    a text column, not a path prefix test. Where a *prefix* is meant — folder
-    browsing — `library.photos` uses `substr()` instead, because `LIKE` is
-    ASCII-case-insensitive and a bracket in a folder name would become a
-    character class.
+    `LIKE` is deliberate here and safe: this is a human's substring search
+    over text columns, not a path prefix test. Where a *prefix* is meant —
+    folder browsing — `library.photos` uses `substr()` instead, because
+    `LIKE` is ASCII-case-insensitive and a bracket in a folder name would
+    become a character class.
     """
 
-    like = f"%{query.strip()}%"
+    like = f"%{query}%"
     return [row["id"] for row in conn.execute(
-        """
-        SELECT i.id FROM images i
-        WHERE i.status != 'trashed' AND (
-              i.tail LIKE ? OR i.camera_model LIKE ? OR i.lens LIKE ?
-              OR i.date_taken LIKE ?)
-        ORDER BY i.date_taken DESC LIMIT ?
+        f"""
+        SELECT id FROM images
+        WHERE {IN_LIBRARY} AND (
+              tail LIKE ? OR camera_make LIKE ? OR camera_model LIKE ?
+              OR lens LIKE ? OR date_taken LIKE ?)
+        ORDER BY date_taken DESC, id DESC LIMIT ?
         """,
-        (like, like, like, like, int(limit)),
+        (like, like, like, like, like, int(limit)),
     )]
 
 
-def _by_keyword(conn, query: str, limit: int) -> list[int]:
-    """Photographs you named. A keyword is a decision, so this reads the log."""
+def _named(conn, query: str, limit: int) -> list[int]:
+    """Members of every set whose name contains the query.
 
-    wanted = query.strip().lower()
-    hits = [
-        subject for subject, value in decisions.current(conn, "keyword").items()
-        if isinstance(value, str) and wanted in value.lower()
-    ]
-    if not hits:
+    A keyword and a collection are the same thing with different shelves, so
+    one match rule serves both, and a photograph in two matching sets is in
+    the list once, newest first.
+    """
+
+    wanted = query.lower()
+    members: set[str] = set()
+    for entry in sets.all(conn):
+        if wanted in str(entry.get("name", "")).lower():
+            members.update(sets.members(conn, entry["id"]))
+    if not members:
         return []
-    holes = ",".join("?" for _ in hits[:900])
+    marks = ",".join("?" for _ in members)
     return [row["id"] for row in conn.execute(
-        f"SELECT id FROM images WHERE content_hash IN ({holes}) AND status != 'trashed' LIMIT ?",
-        (*hits[:900], int(limit)),
+        f"SELECT id FROM images WHERE {IN_LIBRARY} AND content_hash IN ({marks})"
+        f" ORDER BY date_taken DESC, id DESC LIMIT ?",
+        (*sorted(members), int(limit)),
     )]
 
 
-def _vector(blob: bytes):
-    import numpy as np
+def _semantic(conn, space, query_vector, limit: int) -> list[int]:
+    """Nearest photographs in the embedding space, or nothing at all."""
 
-    return np.frombuffer(blob, dtype=np.float32)
-
-
-# The embedding space, loaded once. Not a cache of an answer — a cache of the
-# *data*, which is 703 MB and unchanged between queries. Keyed on how many
-# vectors there are, so a helper landing more of them invalidates it without
-# anything having to notify anybody.
-_space: tuple[int, list[str], object] | None = None
-
-
-def space(conn):
-    """Every embedding as one normalised matrix, and the hashes beside it.
-
-    Three decisions, measured on the real 42,937 vectors, worth **390x**
-    together — 19,538 ms per query down to 50 ms:
-
-    * **`np.frombuffer` over the joined blobs, not `struct.unpack` per row.**
-      Unpacking 176 million floats through Python took 11 s; reading the same
-      bytes as one array takes 0.145 s.
-    * **Normalise once, here.** A unit vector is the same vector, so doing it
-      per query paid 0.5 s every time for an answer that never changed.
-    * **Count before fetching.** Selecting 703 MB out of SQLite and *then*
-      finding the memo warm still cost 5 s a query. Once memoised, the load was
-      never the expensive part — the `SELECT` was.
-
-    > The cold load is 6.2 s and **must never be on the boot path.**
-
-    That is the shape of every boot wound this project has had: something
-    correct and expensive placed before the first paint. Ranking and search
-    both degrade honestly without it, so it is owed work like any other — the
-    grid paints, and the space arrives when it arrives.
-    """
-
-    global _space
-    import numpy as np
-
-    # One model's vectors, never a mixture. Without this the reshape below is a
-    # loaded gun: vectors of two lengths concatenate happily and then fail to
-    # divide into `(rows, -1)`.
-    recipe = cache.canonical(EMBEDDING, {"model": active_model()})
-
-    # Count before fetching. Reading 703 MB out of SQLite and *then* noticing
-    # the memo was warm cost 5 s per query -- the load was never the expensive
-    # part once it was memoised, the SELECT was. The memo is keyed on the model
-    # too, or switching to one with the same number of vectors would hand back
-    # the other one's space.
-    have = conn.execute(
-        "SELECT COUNT(*) FROM cache WHERE kind = ? AND recipe = ? AND state = 'ready'",
-        (EMBEDDING, recipe),
-    ).fetchone()[0]
-    if not have:
-        return [], None
-    if _space is not None and _space[0] == (recipe, have):
-        return _space[1], _space[2]
-
-    rows = conn.execute(
-        "SELECT hash, value FROM cache WHERE kind = ? AND recipe = ? AND state = 'ready'"
-        " ORDER BY hash",
-        (EMBEDDING, recipe),
-    ).fetchall()
-    matrix = np.frombuffer(b"".join(r["value"] for r in rows), dtype=np.float32)
-    matrix = matrix.reshape(len(rows), -1).copy()
-    matrix /= np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-9
-    hashes = [r["hash"] for r in rows]
-    _space = ((recipe, have), hashes, matrix)
-    return hashes, matrix
-
-
-def _semantic(conn, query_vector, limit: int) -> list[int]:
-    """Nearest photographs in the embedding space, or nothing at all.
-
-    Reads every vector as one matrix. That is why embeddings live in the cache
-    row's `value` and not as files on disk: 42,937 file opens is a different
-    kind of operation from one read, and reclaim would have mistaken them for
-    previews.
-    """
-
-    if query_vector is None:
+    if query_vector is None or space is None:
         return []
-    import numpy as np
-
-    hashes_all, matrix = space(conn)
-    if matrix is None:
+    subjects, matrix = space
+    if matrix is None or not len(subjects):
         return []
+
+    import numpy as np
 
     q = np.asarray(query_vector, dtype=np.float32)
     q = q / (np.linalg.norm(q) + 1e-9)
     similarity = matrix @ q
-    top = np.argpartition(similarity, -min(limit, len(similarity)))[-limit:]
-    hashes = [hashes_all[i] for i in top[np.argsort(similarity[top])[::-1]]]
-    holes = ",".join("?" for _ in hashes)
-    found = {
-        row["content_hash"]: row["id"]
-        for row in conn.execute(
-            f"SELECT id, content_hash FROM images WHERE content_hash IN ({holes}) AND status != 'trashed'",
-            hashes,
-        )
-    }
-    return [found[h] for h in hashes if h in found]
+    keep = min(int(limit), len(subjects))
+    top = np.argpartition(similarity, -keep)[-keep:]
+    ranked = [subjects[i] for i in top[np.argsort(similarity[top])[::-1]]]
+    marks = ",".join("?" for _ in ranked)
+    found: dict[str, int] = {}
+    for row in conn.execute(
+        f"SELECT id, content_hash AS hash FROM images"
+        f" WHERE {IN_LIBRARY} AND content_hash IN ({marks})"
+        f" ORDER BY id DESC",
+        ranked,
+    ):
+        found.setdefault(row["hash"], row["id"])  # one row per identity
+    return [found[h] for h in ranked if h in found]
 
 
-def fuse(*lists: list[int], limit: int = 200) -> list[int]:
-    """Reciprocal rank fusion. Ranks have no units, so nothing needs calibrating."""
+def fuse(*lists: list[int], limit: int) -> list[int]:
+    """Reciprocal rank fusion. Ranks have no units, so nothing needs
+    calibrating."""
 
     score: dict[int, float] = {}
     for ranked in lists:
         for position, image_id in enumerate(ranked):
             score[image_id] = score.get(image_id, 0.0) + 1.0 / (RRF_K + position + 1)
-    return [image_id for image_id, _ in sorted(score.items(), key=lambda kv: -kv[1])][:limit]
+    ordered = sorted(score.items(), key=lambda pair: -pair[1])
+    return [image_id for image_id, _ in ordered[:int(limit)]]
 
 
-def search(conn, query: str, *, query_vector=None, limit: int = 200) -> list[dict]:
-    """Find photographs. Always answers, with whatever it has.
-
-    `query_vector` is the caller's to supply, and no caller supplies one yet --
-    `/api/search` passes only the words, so search is lexical and keyword today
-    and the 42,937 vectors sit unread. Embedding the query is the missing half.
-
-    Whoever adds it inherits one property, which two deleted tests
-    (`test_search_stability`) were the last record of: **the typing path must
-    never wait for a model.** Their mechanism -- a 192-line ladder with a
-    `deep` flag and eight injected callables -- is gone and should stay gone,
-    but the property is real and is now the argument's shape rather than a
-    ladder's: a caller that has a vector passes one, a caller that cannot
-    afford to wait passes None and gets words-only results immediately. Nothing
-    in here blocks, and nothing in here should learn how.
-    """
+def search(conn, query: str, *, space=None, query_vector=None, limit: int = 500) -> list[int]:
+    """Find photographs: one ranked list of ids, from whatever is available."""
 
     query = (query or "").strip()
     if not query:
         return []
-
-    ids = fuse(
-        _lexical(conn, query, limit * 2),
-        _by_keyword(conn, query, limit * 2),
-        _semantic(conn, query_vector, limit * 2),
+    return fuse(
+        _lexical(conn, query, limit),
+        _named(conn, query, limit),
+        _semantic(conn, space, query_vector, limit),
         limit=limit,
     )
-    if not ids:
-        return []
-
-    holes = ",".join("?" for _ in ids)
-    found = {
-        row["id"]: dict(row)
-        for row in conn.execute(
-            f"SELECT id, tail, date_taken, stars, elo, content_hash AS hash, width, height"
-            f" FROM images WHERE id IN ({holes})",
-            ids,
-        )
-    }
-    return [found[i] for i in ids if i in found]
-
-
-# Embeddings are a cache kind with one rider: never evict. They are small, they
-# take hours to remake, and a machine that cannot make them (no model, no GPU)
-# must record nothing rather than a failure -- so the helper that can is not
-# looking at a row saying this photograph could not be embedded.
-def _make_embedding(source: str, hash: str, model: str) -> cache.Made:
-    """The vector, as bytes. `model` comes from the recipe and is not read here.
-
-    The recipe names the model so that `owed` schedules the right photographs
-    and `space` reads one model's vectors; the loaded model is whichever
-    `settings.active_embedding_config()` says, and those are the same answer by
-    construction. Passing it would let them disagree.
-
-    **Embedded from the loupe tile when there is one.** The model sees 384px
-    either way, so decoding a 50 MB RAW off the archive drive to get there buys
-    nothing and costs everything: measured, 0.56 img/s from originals against
-    6.6 from renditions -- 56 hours for the library rather than 5. It also
-    decides whether this work can happen at all with the drive unplugged, which
-    is the whole reason the tiles live on the laptop.
-    """
-
-    import embed
-    import render
-    import tiles
-
-    rendition = tiles.path_for(hash, render.LOUPE)
-    if not os.path.exists(rendition):
-        rendition = source
-    return cache.Made(value=embed.vector(rendition).tobytes(), bytes=1152 * 4)
-
-
-# An embedding's recipe is the model that made it.
-#
-# It had none, and the cost of that was not theoretical. Two vectors from two
-# models are not comparable and are not even the same length -- SigLIP-2 is
-# 1,152 numbers, the Qwen 8B that made the 42,937 vectors in this catalog is
-# 4,096 -- yet `_space` concatenated every ready row and reshaped the result to
-# `(rows, -1)`. One vector from a second model and that reshape raises, so
-# changing the model would have taken search down rather than degrading it.
-#
-# Naming the model in the recipe makes the mixed space unrepresentable instead
-# of guarded, and hands three other things over for free: `owed` schedules
-# exactly the photographs missing a vector *from the model in use*, the old
-# vectors keep their identity instead of being silently mixed or thrown away,
-# and changing model becomes a thing the catalog can hold two of rather than a
-# migration.
-def active_model() -> str:
-    import settings
-    return str(settings.active_embedding_config()["model_key"])
-
-
-def _can_embed() -> bool:
-    import embed
-    return embed.ready()
-
-
-EMBEDDING_KIND = cache.register(cache.Kind(
-    name=EMBEDDING,
-    compute=_make_embedding,
-    cost=2.0,
-    params=("model",),
-    evictable=False,
-    here=_can_embed,
-    # One recipe, and it is whichever model is configured now. Change the model
-    # and the work loop starts owing vectors for the new one without anything
-    # having to notice, because `owed` is an anti-join against this recipe.
-    ahead=lambda: ({"model": active_model()},),
-))

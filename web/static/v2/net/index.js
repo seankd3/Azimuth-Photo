@@ -33,6 +33,7 @@ export const library = Object.freeze({
   undoCull: (changes) => invoke('undo_cull', changes),
   turn: (ids, by = 90) => invoke('turn', ids, by),
   forget: (ids) => invoke('forget', ids),
+  find: ({ query, limit, offset }) => invoke('search', query, limit, offset),
   refine: ({ n, folder = null, avoid = [] }) => invoke('refine', n, folder, avoid),
   round: (winnerId, overIds) => invoke('round', winnerId, overIds),
   unround: (decision) => invoke('unround', decision),

@@ -5,6 +5,7 @@ const state = {
   folders: [],
   open: new Set(),
   photos: new Map(),
+  query: '',
   total: 0,
   loading: true,
   notice: '',

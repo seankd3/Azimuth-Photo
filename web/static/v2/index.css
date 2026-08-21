@@ -35,7 +35,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .topbar {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 228px minmax(0, 1fr) auto;
+  grid-template-columns: 228px auto minmax(0, 1fr) auto;
   align-items: center;
   border-bottom: 1px solid var(--line);
   background: var(--chrome);
@@ -409,6 +409,18 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   cursor: pointer;
 }
 .context-menu button:hover { background: #242a31; }
+.topbar-search { display: flex; justify-content: center; min-width: 0; padding: 0 18px; }
+.topbar-search input {
+  width: min(420px, 100%);
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--chrome-2);
+  color: var(--text);
+  font-size: 13px;
+}
+.topbar-search input::placeholder { color: var(--text-3); }
+.topbar-search input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
 .card-chip {
   padding: 7px 12px;
   border: 1px solid #2f5a4a;

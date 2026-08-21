@@ -20,6 +20,7 @@ import library as queries
 import metadata as embedded_metadata
 import model
 import rank
+import search as finding
 import tiles
 import work
 from model import cache, copies, cull, decisions, drives, intake, photos, trash
@@ -182,6 +183,23 @@ class Library:
     def turn(self, photo_ids, by: int = 90) -> dict:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
+
+    def search(self, query: str, *, limit: int = 200, offset: int = 0,
+               space=None, query_vector=None) -> dict:
+        """Find photographs: the fused ranking, one page of it as rows.
+
+        The whole answer is capped at 500 -- a search whose five hundredth
+        result matters is a browse, and the folder tree is better at it.
+        """
+
+        self._open()
+        ranked = finding.search(self.conn, query, space=space, query_vector=query_vector)
+        page = ranked[int(offset):int(offset) + max(1, int(limit))]
+        rows = {row["id"]: row for row in queries.photos(
+            self.conn, scope=these(page), sort="newest", limit=max(1, len(page)),
+            offset=0, renditions=self.tiles.renditions, reachable_on=self._here(),
+        )} if page else {}
+        return {"total": len(ranked), "photos": [rows[i] for i in page if i in rows]}
 
     # ---- refine ----
 
@@ -362,6 +380,7 @@ class OwnedLibrary:
         self._stop_following = threading.Event()
         self._follower: threading.Thread | None = None
         self._ranking = False
+        self._warming = False
         self._ranked = None            # (last round row, vector count) already written
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
         # Bringing photographs in has its own lane: a card takes minutes, and
@@ -395,6 +414,34 @@ class OwnedLibrary:
                 raise RuntimeError("library is closed")
             future = self._scan_executor.submit(self._sweep, drive_uuid, under)
         return await asyncio.wrap_future(future)
+
+    async def find(self, query: str, limit: int = 200, offset: int = 0) -> dict:
+        """Search, with whatever this machine has warm.
+
+        The space comes from the rank lane's memo; the query becomes a vector
+        only when the model is already in memory. Cold but capable means
+        words-only now and a warm-up on the sweep lane, so the next search is
+        semantic -- the typing path never waits for a model.
+        """
+
+        import embed
+
+        space = None
+        if self._space is not None:
+            space = (self._space[1], self._space[2])
+        else:
+            self.rank_soon()
+        query_vector = None
+        if embed.warm():
+            query_vector = embed.text(query)
+        elif embed.ready():
+            with self._state:
+                if not self._warming:
+                    self._warming = True
+                    self._scan_executor.submit(embed._model)
+        return await self.run(lambda library: library.search(
+            query, limit=int(limit), offset=int(offset), space=space, query_vector=query_vector,
+        ))
 
     def rank_soon(self) -> None:
         """Recompute the ranking behind the sort index, off the interactive

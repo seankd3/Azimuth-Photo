@@ -1803,5 +1803,68 @@ class RankingIsDerived(CoreCase):
         self.assertEqual(rank.judged(self.conn, folder("Snapshots")), 1)
 
 
+class SearchNeverRefuses(CoreCase):
+    def _photo(self, tail, camera=None, taken=None):
+        photo_id = self.photo(tail)
+        digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, camera_model = ?, date_taken = ? WHERE id = ?",
+            (digest, camera, taken, photo_id))
+        self.conn.commit()
+        return photo_id, digest
+
+    def test_words_find_files_cameras_and_named_sets(self):
+        import search as finding
+
+        by_name, _h1 = self._photo("Raws/2026/zion-hike.CR2")
+        by_camera, _h2 = self._photo("Raws/2026/0001.CR2", camera="Canon EOS RP")
+        named, named_hash = self._photo("Snapshots/2025/img.jpg")
+        trashed, _h3 = self._photo("Raws/2026/zion-lost.CR2")
+        self.conn.execute("UPDATE images SET status = 'trashed' WHERE id = ?", (trashed,))
+        keyword = sets.create(self.conn, "travel/zion", kind=sets.KEYWORD)
+        sets.add(self.conn, keyword, [named_hash])
+        self.conn.commit()
+
+        found = finding.search(self.conn, "zion")
+        self.assertIn(by_name, found)
+        self.assertIn(named, found)          # through the set's name
+        self.assertNotIn(trashed, found)
+        self.assertIn(by_camera, finding.search(self.conn, "canon"))
+        self.assertEqual(finding.search(self.conn, "   "), [])
+
+    def test_agreement_outranks_confidence_and_nothing_blocks_on_vectors(self):
+        # RRF: a photograph two doors agree on beats either door's favourite.
+        # And with no space at all the same query still answers -- degrading
+        # is the design, not a fallback.
+        import numpy as np
+
+        import search as finding
+
+        agreed, agreed_hash = self._photo("Raws/2026/sunset-01.CR2")
+        word_only, _ = self._photo("Raws/2026/sunset-02.CR2")
+        look_only, look_hash = self._photo("Raws/2026/0002.CR2")
+        axis = np.eye(4, dtype=np.float32)
+        space = ([agreed_hash, look_hash], np.stack([axis[0], axis[0]]))
+
+        with_space = finding.search(self.conn, "sunset", space=space, query_vector=axis[0])
+        self.assertEqual(with_space[0], agreed)
+        self.assertEqual(set(with_space), {agreed, word_only, look_only})
+
+        without = finding.search(self.conn, "sunset")
+        self.assertEqual(set(without), {agreed, word_only})
+
+    def test_a_page_of_results_arrives_in_rank_order_with_renditions(self):
+        first, _ = self._photo("Raws/2026/pier-b.CR2", taken="2026-01-01T00:00:00")
+        second, _ = self._photo("Raws/2026/pier-a.CR2", taken="2026-06-01T00:00:00")
+        import tiles as tile_store
+        store = tile_store.Store(os.path.join(self.tmp, "tiles"), ceiling_bytes=0)
+        answer = library_surface.photos(
+            self.conn, scope=scope.ids([first, second]), sort="newest",
+            limit=10, offset=0, renditions=store.renditions, reachable_on=[])
+        self.assertEqual({row["id"] for row in answer}, {first, second})
+        for row in answer:
+            self.assertIn("tile", row)
+
+
 if __name__ == "__main__":
     unittest.main()
