@@ -618,12 +618,31 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .toast[hidden] { display: none; }
 .toast button { border: 0; background: transparent; color: var(--accent); font-weight: 650; cursor: pointer; }
 
-.loupe { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; }
-.loupe img { display: block; width: 100%; height: 100%; object-fit: contain; }
-.loupe img[data-turn="90"], .loupe img[data-turn="270"] { width: 100vh; height: 100vw; position: absolute; left: calc(50vw - 50vh); top: calc(50vh - 50vw); }
-.loupe img[data-turn="90"] { transform: rotate(90deg); }
-.loupe img[data-turn="180"] { transform: rotate(180deg); }
-.loupe img[data-turn="270"] { transform: rotate(270deg); }
+.loupe { width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; background: #000; overflow: hidden; }
+.loupe img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  max-width: none;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-drag: none;
+  touch-action: none;
+}
+.loupe-zoom {
+  position: absolute;
+  left: 16px;
+  bottom: 14px;
+  z-index: 2;
+  padding: 5px 11px;
+  border-radius: 999px;
+  background: rgb(20 21 24 / 75%);
+  color: var(--text-2);
+  font: 12px/1.4 ui-monospace, monospace;
+  pointer-events: none;
+}
 .loupe-close { z-index: 2; background: rgb(20 21 24 / 75%); }
 .loupe-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: 15px; }
 .loupe-note[hidden] { display: none; }

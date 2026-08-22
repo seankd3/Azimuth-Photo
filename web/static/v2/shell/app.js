@@ -5,6 +5,7 @@ import { createCullWorkflow } from './cull.js';
 import { createCollectionsPanel } from './collections.js';
 import { createFilterBar } from './filters.js';
 import { createIntakeWorkflow } from './intake.js';
+import { createLoupe } from './loupe.js';
 import { createRefineWorkflow } from './refine.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
@@ -24,6 +25,7 @@ const driveForm = document.querySelector('[data-drive-form]');
 const driveError = document.querySelector('[data-drive-error]');
 const loupe = document.querySelector('[data-loupe]');
 const loupeImage = document.querySelector('[data-loupe-image]');
+const loupeView = createLoupe({ dialog: loupe, image: loupeImage });
 const status = document.querySelector('[data-status]');
 let noticeTimer = null;
 
@@ -123,7 +125,12 @@ const cullWorkflow = createCullWorkflow({
   read,
   reload: () => loadView(),
   selection,
-  replace: (photo) => pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status, rotate: photo.rotate })),
+  replace: (photo) => {
+    pages.patch((item) => item.hash === photo.hash, (item) => ({ ...item, status: photo.status, rotate: photo.rotate }));
+    // The focused photograph is state of its own; a verb that edits the row
+    // edits it too, or the loupe would show the photograph as it was.
+    if (read().selected?.hash === photo.hash) update({ selected: { ...read().selected, status: photo.status, rotate: photo.rotate } });
+  },
   remove: async (index, moved) => {
     // One cell left the grid: edit the window in place so the loop never
     // waits on a reload. A duplicate identity takes more than one row with
@@ -271,6 +278,7 @@ function closeDriveDialog() {
 
 function closeLoupe() {
   if (loupe.open) loupe.close();
+  loupeView.reset();
   loupeImage.removeAttribute('src');
   delete loupeImage.dataset.source;
   loupeImage.alt = '';
@@ -564,7 +572,6 @@ function showPhoto(photo) {
 }
 
 function renderLoupe(photo) {
-  loupeImage.dataset.turn = photo.rotate || 0;
   const source = photo.loupe || photo.tile || '';
   const note = document.querySelector('[data-loupe-note]');
   note.textContent = source ? ''
@@ -572,11 +579,15 @@ function renderLoupe(photo) {
       : photo.reachable ? 'Preparing this photograph…'
         : 'The drive that holds this photograph is away.';
   note.hidden = Boolean(source);
-  if (loupeImage.dataset.source === source) return;
-  loupeImage.dataset.source = source;
-  if (source) loupeImage.src = source;
-  else loupeImage.removeAttribute('src');
-  loupeImage.alt = photo.tail || 'Selected photo';
+  // An <img> with no source still renders its alt text; while the note is
+  // the whole message, the img says nothing.
+  loupeImage.alt = source ? (photo.tail || 'Selected photo') : '';
+  if (source) loupeView.show(photo, source);
+  else {
+    loupeView.reset();
+    loupeImage.removeAttribute('src');
+    delete loupeImage.dataset.source;
+  }
 }
 
 function openPhoto(index) {
@@ -796,7 +807,9 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
-    if (loupe.open) closeLoupe();
+    if (loupe.open) {
+      if (!loupeView.escape()) closeLoupe();
+    }
     else if (refineWorkflow.isOpen()) refineWorkflow.close();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
