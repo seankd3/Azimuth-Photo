@@ -1,15 +1,21 @@
 :root {
+  /* azimuthphoto.com's instrument palette: near-black ground, white-alpha
+     hairlines, launch-orange accent, mono for anything that reads like a
+     readout. The site and the app are one face. */
   color-scheme: dark;
-  --bg: #0d0e10;
-  --chrome: #17181b;
-  --chrome-2: #1c1e22;
-  --line: #2a2c31;
-  --text: #f1f1f2;
-  --text-2: #a4a6ad;
-  --text-3: #70737b;
-  --accent: #7eb8ec;
-  --focus: #9bcaf2;
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --bg: #0a0c0e;
+  --chrome: #0e1114;
+  --chrome-2: #14181c;
+  --line: rgb(238 241 244 / 8%);
+  --line-strong: rgb(238 241 244 / 15%);
+  --text: #eef1f4;
+  --text-2: #98a1aa;
+  --text-3: #5a626b;
+  --accent: #fc4d21;
+  --focus: #ff8258;
+  --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-family: var(--sans);
   background: var(--bg);
   color: var(--text);
 }
@@ -57,7 +63,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border: 0;
   background: rgb(23 24 27 / 62%);
   color: var(--text-3);
-  font: 13px/1 ui-monospace, monospace;
+  font: 13px/1 var(--mono);
   opacity: .4;
   cursor: pointer;
   transition: opacity .12s ease;
@@ -88,8 +94,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   padding: 0 20px;
   border: 0;
   background: transparent;
-  font-weight: 650;
-  letter-spacing: -.01em;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: .22em;
+  text-transform: uppercase;
   cursor: pointer;
 }
 
@@ -137,9 +146,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .eyebrow {
   margin: 0 8px 9px;
   color: var(--text-3);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: .12em;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .18em;
   text-transform: uppercase;
 }
 .nav-row {
@@ -153,7 +163,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   color: var(--text-2);
   cursor: pointer;
 }
-.nav-row.is-active { background: #242a31; color: var(--text); }
+.nav-row.is-active { background: #1a1f24; color: var(--text); }
 .nav-row span:last-child { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .folder-tree { display: flex; flex-direction: column; }
 .folder-row {
@@ -171,7 +181,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .folder-row:hover { background: #1f2227; }
-.folder-row.is-active { background: #242a31; color: var(--text); }
+.folder-row.is-active { background: #1a1f24; color: var(--text); }
 .collection-tree { display: flex; flex-direction: column; }
 .collection-row {
   display: flex;
@@ -188,8 +198,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .collection-row:hover { background: #1f2126; }
-.collection-row.is-active { background: #242a31; color: var(--text); }
-.collection-row.is-drop { background: #223041; outline: 1px solid var(--accent); }
+.collection-row.is-active { background: #1a1f24; color: var(--text); }
+.collection-row.is-drop { background: #241512; outline: 1px solid var(--accent); }
 .collection-row .leaf { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .collection-row .smart-mark { color: var(--accent); font-size: 11px; }
 .collection-row .set-count { color: var(--text-3); font-variant-numeric: tabular-nums; font-size: 12px; }
@@ -240,7 +250,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   gap: 18px;
   min-height: 46px;
   padding: 0 14px;
-  border-bottom: 1px solid #202226;
+  border-bottom: 1px solid var(--line);
   background: rgb(18 19 22 / 94%);
   backdrop-filter: blur(12px);
   color: var(--text-3);
@@ -250,7 +260,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .contextbar label { display: flex; align-items: center; gap: 7px; }
 .cull-actions { display: flex; gap: 7px; }
 .cull-actions button { display: flex; align-items: center; gap: 7px; }
-.cull-actions kbd { color: var(--text-3); font: 10px/1 ui-monospace, monospace; }
+.cull-actions kbd { color: var(--text-3); font: 10px/1 var(--mono); }
 .contextbar select {
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -359,7 +369,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border-radius: 4px;
   background: rgb(0 0 0 / 55%);
   color: var(--text-2);
-  font: 11px/1.4 ui-monospace, monospace;
+  font: 11px/1.4 var(--mono);
   opacity: .75;
   transition: opacity .12s ease;
 }
@@ -375,10 +385,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   align-items: center;
   gap: 7px;
   padding: 4px 6px 4px 10px;
-  border: 1px solid #33506b;
+  border: 1px solid var(--line-strong);
   border-radius: 999px;
-  background: #16222e;
-  color: #a8cdf0;
+  background: #14181c;
+  color: var(--text-2);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
@@ -402,7 +412,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   z-index: 40;
   min-width: 220px;
   padding: 12px 14px;
-  border: 1px solid #383b42;
+  border: 1px solid var(--line-strong);
   border-radius: 10px;
   background: #1d1f24;
   box-shadow: 0 14px 44px rgb(0 0 0 / 50%);
@@ -429,7 +439,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   color: var(--text-3);
   cursor: pointer;
 }
-.popover .star-row button.is-on { border-color: var(--accent); color: var(--text); background: #1f2730; }
+.popover .star-row button.is-on { border-color: var(--accent); color: var(--text); background: #241512; }
 .popover .not-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .name-pop { display: flex; flex-direction: column; gap: 9px; }
 .name-pop[hidden] { display: none; }
@@ -444,8 +454,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   font-size: 12px;
   cursor: pointer;
 }
-.refine-size button.is-active { background: #2b3440; color: var(--text); }
-.contextbar [data-action="leave-refine"] kbd { color: var(--text-3); font: 10px/1 ui-monospace, monospace; margin-right: 4px; }
+.refine-size button.is-active { background: #241512; color: var(--text); }
+.contextbar [data-action="leave-refine"] kbd { color: var(--text-3); font: 10px/1 var(--mono); margin-right: 4px; }
 
 .empty-state {
   position: absolute;
@@ -461,10 +471,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .empty-state h2 { margin: 0 0 8px; font-size: 18px; }
 .empty-state p { margin: 0 0 22px; color: var(--text-3); }
 .primary-button {
-  border: 1px solid #8fc6f4;
+  border: 1px solid #ff7247;
   border-radius: 7px;
   background: var(--accent);
-  color: #071019;
+  color: #180702;
   padding: 9px 15px;
   font-weight: 650;
   cursor: pointer;
@@ -483,7 +493,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .drive-dialog, .confirm-dialog {
   width: min(480px, calc(100vw - 40px));
   padding: 0;
-  border: 1px solid #383b42;
+  border: 1px solid var(--line-strong);
   border-radius: 13px;
   background: #1a1b1f;
   box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
@@ -515,7 +525,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   border-radius: 8px;
   background: #111215;
   color: var(--text);
-  font: 13px/1.4 ui-monospace, monospace;
+  font: 13px/1.4 var(--mono);
   overflow-wrap: anywhere;
 }
 .check-row { display: flex; gap: 9px; align-items: center; margin: 16px 0 22px; color: var(--text-2); font-size: 13px; }
@@ -529,7 +539,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   z-index: 30;
   margin: 0;
   padding: 6px;
-  border: 1px solid #383b42;
+  border: 1px solid var(--line-strong);
   border-radius: 9px;
   background: #1a1b1f;
   box-shadow: 0 12px 40px rgb(0 0 0 / 55%);
@@ -546,7 +556,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   text-align: left;
   cursor: pointer;
 }
-.context-menu button:hover { background: #242a31; }
+.context-menu button:hover { background: #1a1f24; }
 .topbar-search { display: flex; justify-content: center; min-width: 0; padding: 0 18px; }
 .topbar-search input {
   width: min(420px, 100%);
@@ -573,7 +583,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   width: min(1400px, calc(100vw - 60px));
   height: min(900px, calc(100vh - 60px));
   padding: 0;
-  border: 1px solid #383b42;
+  border: 1px solid var(--line-strong);
   border-radius: 13px;
   background: #1a1b1f;
   box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
@@ -624,13 +634,13 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   font-size: 12px;
   cursor: pointer;
 }
-.kind-choice button.is-active { border-color: var(--accent); color: var(--text); background: #1f2730; }
+.kind-choice button.is-active { border-color: var(--accent); color: var(--text); background: #241512; }
 .kind-choice.is-asking button { border-color: #d9a441; }
 .rolls ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .rolls li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .rolls li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: #111215; color: var(--text); font-size: 12px; }
-.destinations { margin: 0; padding: 0; list-style: none; font: 12px/1.6 ui-monospace, monospace; color: var(--text-2); }
+.destinations { margin: 0; padding: 0; list-style: none; font: 12px/1.6 var(--mono); color: var(--text-2); }
 .destinations li { display: flex; justify-content: space-between; gap: 8px; }
 .destinations li span:first-child { min-width: 0; overflow-wrap: anywhere; }
 .destinations li span:last-child { flex: none; color: var(--text-3); }
@@ -685,7 +695,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   scrollbar-width: none;
   background: rgb(14 15 17 / 88%);
   backdrop-filter: blur(10px);
-  border-top: 1px solid #23252a;
+  border-top: 1px solid var(--line);
 }
 .loupe-strip::-webkit-scrollbar { display: none; }
 .loupe-stage.is-full .loupe-strip { display: none; }
@@ -724,7 +734,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   border-radius: 999px;
   background: rgb(20 21 24 / 75%);
   color: var(--text-2);
-  font: 12px/1.4 ui-monospace, monospace;
+  font: 12px/1.4 var(--mono);
   pointer-events: none;
 }
 .loupe-stage .loupe-close { z-index: 2; position: absolute; top: 12px; right: 12px; background: rgb(20 21 24 / 75%); }

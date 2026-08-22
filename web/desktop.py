@@ -279,7 +279,7 @@ def main() -> int:
         # Opened maximized: the owner works in the full window, and every
         # surface is designed at that size first.
         maximized=True,
-        background_color="#0d0e10",
+        background_color="#0a0c0e",
     )
     desktop.bind(window)
     window.events.closed += desktop.close
