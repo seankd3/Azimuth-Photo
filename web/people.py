@@ -118,9 +118,19 @@ def repeople(conn) -> int:
             continue
         strongest = max(group, key=lambda face: scores[face])
         exemplar = f"{owners[strongest][0]}:{owners[strongest][1]}"
-        best = sorted(group, key=lambda face: scores[face], reverse=True)
-        # Three distinct photographs, each carrying the face's own box, so a
-        # strip can show the person rather than the place they stood.
+        # The faces shown are the person's most typical large faces: among
+        # the group's larger half, nearest the identity centroid first. A
+        # poorly lit or blurred face embeds *atypically* — quality pushes a
+        # vector away from the mean — so centrality quietly filters bad
+        # light without ever metering it.
+        import numpy as np
+
+        centre = matrix[group].mean(axis=0)
+        centre = centre / (np.linalg.norm(centre) or 1.0)
+        typical = {face: float(matrix[face] @ centre) for face in group}
+        big = float(np.median([crops[face][2] * crops[face][3] for face in group]))
+        best = sorted(group, key=lambda face: (
+            crops[face][2] * crops[face][3] >= big, typical[face]), reverse=True)
         sample, seen = [], set()
         for face in best:
             if owners[face][0] in seen:
