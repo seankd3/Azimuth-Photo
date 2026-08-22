@@ -25,7 +25,9 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   const state = {
     size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
     rounds: 0, judged: 0, total: 0, busy: false, filling: null, generation: 0,
+    answered: false, queued: null,
   };
+  const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
   function isOpen() {
     return read().view === 'refine';
@@ -41,10 +43,15 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   async function ask(n) {
-    const answer = await product.refine({ n, view: viewOf(), avoid: avoiding() });
+    // The whole answer comes back; the caller writes what it holds after its
+    // own staleness check, so a superseded ask cannot smear old numbers.
+    return product.refine({ n, view: viewOf(), avoid: avoiding() });
+  }
+
+  function accept(answer) {
     state.judged = answer.judged;
     state.total = answer.total;
-    return answer.photos;
+    state.answered = true;
   }
 
   function preload(photo) {
@@ -72,15 +79,28 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     const generation = state.generation;
     state.filling = (async () => {
       try {
-        const photos = await ask(state.size);
+        const answer = await ask(state.size);
         if (generation !== state.generation) return;
+        accept(answer);
         const onStage = new Set(state.set.map((p) => p.hash));
-        for (const photo of photos) {
+        for (const photo of answer.photos) {
           if (onStage.has(photo.hash) || state.buffer.some((p) => p.hash === photo.hash)) continue;
           state.buffer.push(photo);
           void preload(photo);
         }
-        renderProgress();
+        if (state.set.length < state.size && state.buffer.length) {
+          // The set shrank while the well was dry; arrivals rejoin the
+          // stage instead of waiting in hand for a set that cannot grow.
+          while (state.set.length < state.size && state.buffer.length) {
+            const photo = state.buffer.shift();
+            state.set.push(photo);
+            state.age.push(0);
+            remember([photo]);
+          }
+          render();
+        } else {
+          renderProgress();
+        }
       } catch (error) {
         notify(error.message);
       } finally {
@@ -90,16 +110,6 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     await state.filling;
   }
 
-  async function take() {
-    // The next photograph for the stage: from the buffer, or asked for now.
-    if (!state.buffer.length) await fill();
-    if (!state.buffer.length) {
-      const fresh = await ask(1);
-      state.buffer.push(...fresh);
-    }
-    return state.buffer.shift() || null;
-  }
-
   async function load() {
     state.generation += 1;
     const generation = state.generation;
@@ -107,14 +117,25 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     state.set = [];
     state.age = [];
     state.selected = -1;
+    state.answered = false;
     render();
     try {
-      const photos = await ask(state.size);
+      let answer = await ask(state.size);
       if (generation !== state.generation) return;
-      state.set = photos;
-      state.age = photos.map(() => 0);
-      remember(photos);
-      await Promise.all(photos.map(preload));
+      if (answer.photos.length < Math.min(state.size, 2) && state.recent.length) {
+        // The memory window can swallow a small scope whole; forget what was
+        // seen and ask once more before calling the well dry.
+        state.recent = [];
+        answer = await ask(state.size);
+        if (generation !== state.generation) return;
+      }
+      accept(answer);
+      state.set = answer.photos;
+      state.age = answer.photos.map(() => 0);
+      remember(answer.photos);
+      // Decoded-before-shown, but never held hostage: a slow drive gets a
+      // beat, then the stage paints and the stragglers pop in.
+      await Promise.race([Promise.all(answer.photos.map(preload)), delay(180)]);
       if (generation !== state.generation) return;
       render();
       void fill();
@@ -148,23 +169,36 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
 
   async function pick(index) {
     const winner = state.set[index];
-    if (!winner || state.busy || state.set.length < 2) return;
+    if (state.busy) {
+      // The fastest part of the loop must never eat a keystroke: the pick
+      // waits out the beat and lands, instead of vanishing.
+      state.queued = index;
+      return;
+    }
+    if (!winner || state.set.length < 2) return;
     state.busy = true;
     const generation = state.generation;
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
+
+    // The pick is seen the instant it is made; the write and the hold run
+    // underneath it, so the felt beat is the hold — not the hold plus a
+    // round-trip.
+    const card = stage.querySelector(`[data-index="${index}"]`);
+    card?.classList.add('is-picked');
+    const held = delay(HOLD_MS);
     let recorded;
     try {
       recorded = await product.round(winner.id, losers.map((p) => p.id));
     } catch (error) {
+      card?.classList.remove('is-picked');
       notify(error.message);
       state.busy = false;
+      state.queued = null;
       return;
     }
     state.rounds += 1;
-    const card = stage.querySelector(`[data-index="${index}"]`);
-    card?.classList.add('is-picked');
-    await new Promise((resolve) => setTimeout(resolve, HOLD_MS));
+    await held;
     if (generation !== state.generation) { state.busy = false; return; }  // left or resized meanwhile
 
     // The pick leaves, credited; so does the card that has sat through the
@@ -175,10 +209,31 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     }
     const leaving = oldest >= 0 ? [index, oldest] : [index];
     for (let i = 0; i < state.age.length; i += 1) state.age[i] += 1;
-    const arrivals = [];
-    for (const slot of leaving) {
-      const next = await take();
-      arrivals.push([slot, next]);
+
+    // Every replacement in one motion: the buffer first, a fill already in
+    // flight next, one ask for whatever is still missing — never a
+    // round-trip per slot.
+    const arrivals = leaving.map((slot) => [slot, state.buffer.shift() || null]);
+    let missing = arrivals.filter(([, next]) => !next).length;
+    if (missing && state.filling) {
+      await state.filling;
+      for (const entry of arrivals) {
+        if (!entry[1]) entry[1] = state.buffer.shift() || null;
+      }
+      missing = arrivals.filter(([, next]) => !next).length;
+    }
+    if (missing) {
+      try {
+        const answer = await ask(missing);
+        if (generation !== state.generation) { state.busy = false; return; }
+        accept(answer);
+        const fresh = [...answer.photos];
+        for (const entry of arrivals) {
+          if (!entry[1]) entry[1] = fresh.shift() || null;
+        }
+      } catch {
+        // nothing arrived; the set shrinks rather than blocking the pick
+      }
     }
     for (const [slot, next] of arrivals) {
       if (next) {
@@ -201,16 +256,20 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
       async () => {
         await product.unround(recorded.decision);
         if (!isOpen()) { await onLeave(); return; }   // the grid behind may be sorted by it
+        // Anything asked for around the retracted round is stale, numbers
+        // included; the generation moves so an in-flight answer is dropped.
+        state.generation += 1;
         state.rounds = Math.max(0, state.rounds - 1);
         state.set = before.set;
         state.age = before.age;
         render();
-        // what is in hand was chosen around a round that no longer counts,
-        // and the progress it reported with it; ask again
         state.buffer = [];
         void fill();
       },
     );
+    const queued = state.queued;
+    state.queued = null;
+    if (queued !== null) void pick(queued);
   }
 
   function move(by) {
@@ -224,7 +283,9 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     // The keyboard is the fast way through: a digit picks that card, arrows
     // move (or, in a pair, pick a side), Enter picks the selection.
     if (!isOpen()) return false;
-    const digit = event.key === '0' ? 10 : Number(event.key);
+    // Digits pick cards one to ten; the two keys past 0 on the same row
+    // carry on to eleven and twelve, so every card at twelve-up has a key.
+    const digit = event.key === '0' ? 10 : event.key === '-' ? 11 : event.key === '=' ? 12 : Number(event.key);
     if (Number.isInteger(digit) && digit >= 1 && digit <= state.set.length && event.key.length === 1) {
       void pick(digit - 1);
       return true;
@@ -328,9 +389,15 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     if (state.set.length < 2) {
       const empty = document.createElement('div');
       empty.className = 'refine-empty';
-      empty.textContent = state.total === 0
-        ? 'Nothing here to refine.'
-        : 'Not enough photographs to refine here yet — they join as their previews are made.';
+      // Three honest states: still asking, truly nothing, or the scope is
+      // simply spent for now.
+      empty.textContent = !state.answered
+        ? 'Choosing photographs…'
+        : state.total === 0
+          ? 'Nothing here to refine.'
+          : state.judged >= state.total
+            ? 'Everything here has been through a round. Change where you are looking, or keep going another sitting.'
+            : 'Not enough photographs to refine here yet — they join as their previews are made.';
       stage.replaceChildren(empty);
       renderProgress();
       return;
@@ -347,7 +414,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
       image.decoding = 'async';
       if (!image.src) image.src = sourceFor(photo);
       const number = document.createElement('kbd');
-      number.textContent = index + 1 === 10 ? '0' : String(index + 1);
+      number.textContent = index + 1 === 10 ? '0' : index + 1 === 11 ? '-' : index + 1 === 12 ? '=' : String(index + 1);
       card.append(image, number);
       return card;
     }));
