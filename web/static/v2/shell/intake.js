@@ -42,7 +42,10 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     state.source = staged.source;
     state.kind = staged.kind;
     state.roots = staged.roots || {};
-    state.rolls = staged.rolls || {};
+    // Each roll keeps the proposed name beside the person's own, so an
+    // emptied field falls back to the proposal instead of trapping the text.
+    state.rolls = Object.fromEntries(Object.entries(staged.rolls || {})
+      .map(([group, roll]) => [group, { ...roll, proposed: roll.name }]));
     state.candidates = staged.candidates;
     state.isCard = isCard;
     state.running = false;
@@ -53,12 +56,21 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     clearRow.hidden = !isCard;
     clearBox.checked = isCard;
     progress.hidden = true;
+    progress.textContent = '';
     stopButton.hidden = true;
     startButton.hidden = false;
     startButton.textContent = 'Import';
     notify('');
+    renderStage();
+    renderRolls();
     render();
     if (!dialog.open) dialog.showModal();
+    startButton.focus();
+  }
+
+  function rollName(group) {
+    const roll = state.rolls[group || ''] || {};
+    return (roll.name || '').trim() || roll.proposed || '?';
   }
 
   function destinationOf(candidate) {
@@ -67,7 +79,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     const root = state.roots[state.kind] || '…';
     const film = state.kind === 'film';
     const day = ((film && candidate.folder_date) || candidate.taken || '').slice(0, 10);
-    const roll = film ? `/${(state.rolls[candidate.group || ''] || {}).name || '?'}` : '';
+    const roll = film ? `/${rollName(candidate.group)}` : '';
     return `${root}/${day.slice(0, 4)}/${day}${roll}`;
   }
 
@@ -89,13 +101,10 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     }));
   }
 
-  function render() {
-    for (const button of document.querySelectorAll('[data-kind-choice] [data-kind]')) {
-      button.classList.toggle('is-active', button.dataset.kind === state.kind);
-    }
-    document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
-    renderRolls();
-
+  // The stage is built once per staging; a checkbox tick or a roll name only
+  // re-answers the summary side. Rebuilding the cells threw away every
+  // thumbnail and the focus of the field being typed in.
+  function renderStage() {
     const cells = state.candidates.map((candidate) => {
       const cell = document.createElement('label');
       cell.className = 'stage-cell' + (candidate.suspect ? ' is-suspect' : '') + (state.checked.has(candidate.key) ? ' is-checked' : '');
@@ -118,6 +127,21 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     });
     stage.replaceChildren(...cells);
     for (const image of stage.querySelectorAll('img')) thumbs.observe(image);
+  }
+
+  function syncChecks() {
+    for (const box of stage.querySelectorAll('input[type="checkbox"]')) {
+      const checked = state.checked.has(box.dataset.key);
+      box.checked = checked;
+      box.closest('.stage-cell').classList.toggle('is-checked', checked);
+    }
+  }
+
+  function render() {
+    for (const button of document.querySelectorAll('[data-kind-choice] [data-kind]')) {
+      button.classList.toggle('is-active', button.dataset.kind === state.kind);
+    }
+    document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
 
     const counts = new Map();
     let bytes = 0;
@@ -150,10 +174,12 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     progress.hidden = false;
     progress.textContent = 'Starting…';
     try {
-      const rolls = Object.fromEntries(Object.entries(state.rolls).map(([group, roll]) => [group, roll.name]));
+      const rolls = Object.fromEntries(Object.entries(state.rolls).map(([group]) => [group, rollName(group)]));
       await product.bring(state.source, [...state.checked], state.kind, state.isCard && clearBox.checked, '', rolls);
     } catch (error) {
-      notify(error.message);
+      // The dialog's own line carries its own refusal — a message behind the
+      // modal backdrop is a message to nobody.
+      progress.textContent = error.message;
       state.running = false;
       startButton.hidden = false;
       stopButton.hidden = true;
@@ -204,7 +230,11 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   }
 
   function close() {
-    if (state.running) return;
+    if (state.running) {
+      // The key is not broken, the import is running — say so where the eyes are.
+      progress.textContent = 'Finish or stop the import first.';
+      return;
+    }
     if (dialog.open) dialog.close();
     stage.replaceChildren();
     state.candidates = [];
@@ -216,18 +246,22 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     if (!key) return;
     if (event.target.checked) state.checked.add(key);
     else state.checked.delete(key);
+    event.target.closest('.stage-cell').classList.toggle('is-checked', event.target.checked);
     render();
   });
   document.querySelector('[data-roll-list]').addEventListener('input', (event) => {
     const group = event.target.dataset.group;
     if (group === undefined) return;
-    state.rolls[group].name = event.target.value.trim() || state.rolls[group].name;
+    // The field holds exactly what was typed — clearing it brings the
+    // proposed name back at import time, not while typing.
+    state.rolls[group].name = event.target.value;
     render();
   });
   document.querySelector('[data-kind-choice]').addEventListener('click', (event) => {
     const kind = event.target.closest('[data-kind]')?.dataset.kind;
     if (!kind) return;
     state.kind = kind;
+    renderRolls();
     render();
   });
   dialog.addEventListener('cancel', (event) => {
@@ -240,9 +274,9 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     start,
     stop: () => product.stopIntake().catch(() => {}),
     close,
-    checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); render(); },
-    checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); render(); },
-    checkNone: () => { state.checked = new Set(); render(); },
+    checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); },
+    checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); syncChecks(); render(); },
+    checkNone: () => { state.checked = new Set(); syncChecks(); render(); },
     isOpen: () => dialog.open,
     finish: () => { if (startButton.textContent === 'Done') close(); else start(); },
   });
