@@ -418,6 +418,44 @@ class Library:
             " WHERE camera_model IS NOT NULL AND status != 'trashed'"
             " GROUP BY camera_model ORDER BY photos DESC")]
 
+    def facets(self) -> dict:
+        """The library's shape, for the search drop: years, cameras, the top
+        roots, and orientations, each counted in identities. Every entry is a
+        fact the chip language can say back, so a card is a chip."""
+
+        self._open()
+        ask = self.conn.execute
+        live = f"{queries.IN_LIBRARY} AND i.status != 'trashed'"
+        years = [
+            {"year": row[0], "photos": row[1]}
+            for row in ask(
+                "SELECT substr(i.date_taken, 1, 4) AS y, COUNT(DISTINCT i.content_hash)"
+                f" FROM images i WHERE {live} AND i.date_taken IS NOT NULL"
+                " GROUP BY y ORDER BY y DESC")
+            if row[0] and len(row[0]) == 4
+        ]
+        shown_w = "CASE WHEN i.rotate IN (90, 270) THEN i.height ELSE i.width END"
+        shown_h = "CASE WHEN i.rotate IN (90, 270) THEN i.width ELSE i.height END"
+        orientations = [
+            {"orientation": row[0], "photos": row[1]}
+            for row in ask(
+                f"SELECT CASE WHEN {shown_w} > {shown_h} THEN 'landscape'"
+                f" WHEN {shown_w} < {shown_h} THEN 'portrait' ELSE 'square' END AS o,"
+                " COUNT(DISTINCT i.content_hash)"
+                f" FROM images i WHERE {live} AND i.width > 0 AND i.height > 0"
+                " GROUP BY o ORDER BY 2 DESC")
+        ]
+        roots = [
+            {"folder": row[0], "photos": row[1]}
+            for row in ask(
+                "SELECT substr(i.tail, 1, instr(i.tail, '/') - 1) AS root,"
+                " COUNT(DISTINCT i.content_hash)"
+                f" FROM images i WHERE {live} AND instr(i.tail, '/') > 0"
+                " GROUP BY root ORDER BY 2 DESC")
+        ]
+        return {"years": years, "cameras": self.cameras(),
+                "orientations": orientations, "roots": roots}
+
     # ---- refine ----
 
     def refining(self, view: dict | None) -> Scope:

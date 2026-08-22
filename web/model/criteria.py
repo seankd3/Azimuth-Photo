@@ -43,8 +43,15 @@ FIELDS = {
     "in": ("values",),
     "camera": ("values",),
     "status": ("values",),
+    "orientation": ("values",),
     "stars": ("least",),
     "taken": ("from", "to"),
+}
+
+# fields whose values are a closed set rather than whatever the files say
+CLOSED = {
+    "status": ("unflagged", "picked"),
+    "orientation": ("landscape", "portrait", "square"),
 }
 
 
@@ -70,6 +77,10 @@ def check(chips) -> list[dict]:
             values = [str(v).strip() for v in (chip.get("values") or []) if str(v).strip()]
             if not values:
                 raise ValueError(f"a {field} chip needs at least one value")
+            if field in CLOSED:
+                bad = sorted(set(values) - set(CLOSED[field]))
+                if bad:
+                    raise ValueError(f"a {field} chip takes {list(CLOSED[field])}; refused {bad}")
             clean["values"] = sorted(set(values))
         if field == "stars":
             least = int(chip.get("least", 0))
@@ -104,6 +115,8 @@ def compile(conn, chips, _seen: frozenset = frozenset()) -> Scope:
             built = scopes.camera(chip["values"])
         elif field == "status":
             built = scopes.status(chip["values"])
+        elif field == "orientation":
+            built = scopes.orientation(chip["values"])
         elif field == "stars":
             built = scopes.starred(chip["least"])
         else:

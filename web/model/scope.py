@@ -191,6 +191,29 @@ def status(values) -> Scope:
     return Scope(f"i.status IN ({marks})", tuple(wanted))
 
 
+def orientation(values) -> Scope:
+    """Filed sideways or upright — the shape as shown, not as stored.
+
+    A quarter-turn decision swaps the shown width and height, so the shape is
+    computed through `i.rotate`. A photograph whose dimensions were never read
+    matches no orientation, and NULL-safely falls into any negation.
+    """
+
+    allowed = ("landscape", "portrait", "square")
+    wanted = sorted({str(v) for v in values if str(v) in allowed})
+    if not wanted:
+        return EVERYTHING
+    shown_w = "CASE WHEN i.rotate IN (90, 270) THEN i.height ELSE i.width END"
+    shown_h = "CASE WHEN i.rotate IN (90, 270) THEN i.width ELSE i.height END"
+    tests = {
+        "landscape": f"{shown_w} > {shown_h}",
+        "portrait": f"{shown_w} < {shown_h}",
+        "square": f"{shown_w} = {shown_h}",
+    }
+    sql = " OR ".join(f"({tests[v]})" for v in wanted)
+    return Scope(f"i.width > 0 AND i.height > 0 AND ({sql})")
+
+
 def ids(image_ids) -> Scope:
     """An explicit list of image ids as one JSON-bound argument.
 

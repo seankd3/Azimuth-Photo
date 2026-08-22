@@ -46,6 +46,7 @@ export const library = Object.freeze({
   saveView: (name, view) => invoke('save_view', name, view),
   savePhotos: (name, ids) => invoke('save_photos', name, ids),
   cameras: () => invoke('cameras'),
+  facets: () => invoke('facets'),
   round: (winnerId, overIds) => invoke('round', winnerId, overIds),
   unround: (decision) => invoke('unround', decision),
   forgetMissing: (folder = '', dry = false) => invoke('forget_missing', folder, dry),

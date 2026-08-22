@@ -7,6 +7,7 @@ import { createFilterBar } from './filters.js';
 import { createIntakeWorkflow } from './intake.js';
 import { createLoupe } from './loupe.js';
 import { createRefineWorkflow } from './refine.js';
+import { createSearchCards } from './searchcards.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
 
@@ -303,31 +304,35 @@ const cullWorkflow = createCullWorkflow({
 });
 
 const searchBox = document.querySelector('[data-search]');
-let searchTimer = null;
 function runSearch(text) {
-  clearTimeout(searchTimer);
   const query = text.trim();
   if (query === read().query) return;
   update({ view: 'library', query });
   workspace.scrollTo({ top: 0 });
   loadView();
 }
-searchBox.addEventListener('input', () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => runSearch(searchBox.value), 300);
-});
-searchBox.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter') {
-    runSearch(searchBox.value);
-    event.preventDefault();
-  }
-  if (event.key === 'Escape') {
-    searchBox.value = '';
-    runSearch('');
-    searchBox.blur();
-    event.stopPropagation();
-    event.preventDefault();
-  }
+// The box belongs to the cards: they offer the library's shape on focus,
+// narrow it as you type, and leave Enter meaning what it always meant.
+const searchCards = createSearchCards({
+  product,
+  read,
+  update,
+  box: searchBox,
+  search: runSearch,
+  applyChip: (chip) => {
+    if (read().query) {
+      searchBox.value = '';
+      update({ query: '' });
+    }
+    const held = read().chips || [];
+    const same = JSON.stringify(chip);
+    if (!held.some((c) => JSON.stringify(c) === same)) {
+      update({ view: 'library', chips: [...held, chip] });
+    } else if (read().view !== 'library' && read().view !== 'refine') {
+      update({ view: 'library' });
+    }
+    viewMoved();
+  },
 });
 
 let lookTimer = null;

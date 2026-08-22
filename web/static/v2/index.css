@@ -582,6 +582,40 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 }
 .topbar-search input::placeholder { color: var(--text-3); }
 .topbar-search input:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.search-drop {
+  z-index: 45;
+  max-height: min(56vh, 560px);
+  padding: 8px;
+}
+.search-drop .eyebrow { margin: 8px 8px 4px; }
+.search-drop .eyebrow:first-child { margin-top: 2px; }
+.drop-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.drop-row.is-cursor { background: #1a1f24; color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.drop-glyph { flex: none; width: 16px; color: var(--text-3); font-size: 12px; text-align: center; }
+.drop-row.is-cursor .drop-glyph { color: var(--accent); }
+.drop-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drop-count { flex: none; color: var(--text-3); font: 12px/1.4 var(--mono); }
+.drop-everything { justify-content: space-between; color: var(--text); }
+.drop-everything kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: var(--text-3);
+  font: 11px/1.5 var(--mono);
+}
 .card-chip {
   padding: 7px 12px;
   border: 1px solid #2f5a4a;

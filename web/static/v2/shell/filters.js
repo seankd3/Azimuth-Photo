@@ -8,7 +8,7 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
-const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', in: 'In' };
+const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', in: 'In' };
 
 export function createFilterBar({ product, read, update, onChange }) {
   const bar = document.querySelector('[data-chips]');
@@ -135,6 +135,8 @@ export function createFilterBar({ product, read, update, onChange }) {
         offered = (await product.cameras()).map((c) => [c.model, `${c.model} · ${c.photos.toLocaleString()}`]);
       } else if (chip.is === 'status') {
         offered = [['picked', 'Picked'], ['unflagged', 'Unflagged']];
+      } else if (chip.is === 'orientation') {
+        offered = [['landscape', 'Landscape'], ['portrait', 'Portrait'], ['square', 'Square']];
       } else {
         // The collection being looked at would only re-say the view.
         offered = (read().collections || [])

@@ -199,6 +199,9 @@ class Desktop:
     def cameras(self) -> list[dict]:
         return self._run(lambda library: library.cameras())
 
+    def facets(self) -> dict:
+        return self._run(lambda library: library.facets())
+
     # ---- refine ----
 
     def refine(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None) -> dict:
