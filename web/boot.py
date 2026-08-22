@@ -460,17 +460,48 @@ class Library:
         return {"years": years, "cameras": self.cameras(),
                 "orientations": orientations, "roots": roots}
 
-    def _sample_tiles(self, scope) -> list[str]:
+    def _sample_tiles(self, scope) -> list[dict]:
         rows = self._with_urls(queries.photos(
             self.conn, scope=scope, sort="best", limit=3,
             renditions=self.tiles.renditions, reachable_on=self._here()))
-        return [row["tile"] for row in rows if row.get("tile")]
+        return [{"tile": row["tile"]} for row in rows if row.get("tile")]
+
+    def _face_samples(self, sample) -> list[dict]:
+        """Face crops as {tile, view}: the stored tile plus a CSS view box
+        framing the face. The crop is presentation — the box was always the
+        data, and no second picture is ever rendered."""
+
+        hashes = [entry["hash"] for entry in sample]
+        if not hashes:
+            return []
+        marks = ",".join("?" for _ in hashes)
+        rows = self._with_urls(queries.photos(
+            self.conn, scope=Scope(f"i.content_hash IN ({marks})", tuple(hashes)),
+            sort="newest", limit=len(hashes), renditions=self.tiles.renditions,
+            reachable_on=self._here()))
+        tiles = {row["hash"]: row["tile"] for row in rows if row.get("tile")}
+
+        def pc(v: float) -> float:
+            return round(max(0.0, min(1.0, v)) * 100, 2)
+
+        out = []
+        for entry in sample:
+            tile = tiles.get(entry["hash"])
+            if not tile:
+                continue
+            x, y, w, h = entry["box"]
+            side = max(w, h) * 1.9
+            cx, cy = x + w / 2, y + h / 2 - h * 0.08  # a breath above centre: eyes
+            view = (f"inset({pc(cy - side / 2)}% {pc(1 - (cx + side / 2))}%"
+                    f" {pc(1 - (cy + side / 2))}% {pc(cx - side / 2)}%)")
+            out.append({"tile": tile, "view": view})
+        return out
 
     def clusters(self) -> list[dict]:
-        """The clusters proposing themselves right now: terms and named
-        people with tilde-counts and the faces of each group (its three
-        best-ranked tiles), plus the people not yet introduced — each a
-        "Someone" carrying the exemplar face a Name decision would land on."""
+        """The clusters proposing themselves right now. Terms carry their
+        three best-ranked tiles; people — named or waiting as "Someone" —
+        carry their own faces, cropped from the same tiles by the boxes the
+        worker already found."""
 
         import people as persons
         import clusters as proposing
@@ -478,16 +509,20 @@ class Library:
 
         self._open()
         out = proposing.proposals(self.conn)
+        known = {group["name"]: group for group in persons.groups(self.conn) if group.get("name")}
         for entry in out:
-            entry["samples"] = self._sample_tiles(alike([entry["term"]]))
+            person = known.get(entry["term"])
+            if person:
+                entry["people"] = True
+                entry["samples"] = self._face_samples(person["sample"])
+            else:
+                entry["samples"] = self._sample_tiles(alike([entry["term"]]))
         for group in persons.groups(self.conn):
             if group.get("name"):
                 continue
-            marks = ",".join("?" for _ in group["sample"]) or "''"
             out.append({
-                "term": "Someone", "person": group["exemplar"], "count": group["photos"],
-                "samples": self._sample_tiles(
-                    Scope(f"i.content_hash IN ({marks})", tuple(group["sample"]))),
+                "term": "Someone", "person": group["exemplar"], "people": True,
+                "count": group["photos"], "samples": self._face_samples(group["sample"]),
             })
         return out
 
@@ -618,6 +653,20 @@ class Library:
         # How this photograph's score is known: the rounds it was actually
         # in. Zero with a moved score means the ranking predicted it.
         answer["rounds"] = rank.seen(self.conn).get(digest, 0)
+        # Every name this photograph wears — palette tags, groups the space
+        # formed, people — so the panel can answer "why is this here".
+        import json as coding
+
+        names: set[str] = set()
+        for row in self.conn.execute(
+            "SELECT value FROM cache WHERE kind IN ('alike', 'people')"
+            " AND state = 'ready' AND hash = ?", (digest,)):
+            held = row["value"]
+            try:
+                names.update(coding.loads(held if isinstance(held, str) else bytes(held).decode("utf-8")))
+            except (ValueError, TypeError):
+                continue
+        answer["names"] = sorted(names)
         return answer
 
     def set_date(self, photo_id: int, value: str) -> str:

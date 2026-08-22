@@ -273,6 +273,7 @@ function renderInspector(panel, selected) {
         : 'Not ranked yet';
   const rows = [
     ['Score', score],
+    ['Names', (selected.names || []).join(' · ')],
     ['Stars', selected.stars ? '★'.repeat(selected.stars) : ''],
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],

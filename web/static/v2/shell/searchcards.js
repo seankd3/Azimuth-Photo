@@ -76,7 +76,7 @@ export function createSearchCards({ product, read, update, box, search, applyChi
     const clusters = (read().clusters || []).filter((c) => !c.person && match(c.term)).slice(0, query ? 4 : 5)
       .map((c) => ({
         label: c.term, count: `~${c.count.toLocaleString()}`, glyph: '◇',
-        strip: c.samples || [],
+        strip: c.samples || [], faces: Boolean(c.people),
         run: () => applyChip({ is: 'alike', values: [c.term] }),
       }));
     if (clusters.length) sections.push(['Clusters', clusters]);
@@ -135,14 +135,19 @@ export function createSearchCards({ product, read, update, box, search, applyChi
         label.textContent = entry.label;
         row.append(glyph, label);
         if (entry.strip?.length) {
-          // The faces of the group: its three best-ranked tiles.
+          // The faces of the group: best-ranked tiles, or for a person the
+          // face itself, cropped by the box the worker found it in.
           const strip = document.createElement('span');
           strip.className = 'drop-strip';
-          for (const source of entry.strip.slice(0, 3)) {
+          for (const sample of entry.strip.slice(0, 3)) {
             const tile = document.createElement('img');
-            tile.src = source;
+            tile.src = sample.tile;
             tile.alt = '';
             tile.decoding = 'async';
+            if (sample.view) {
+              tile.style.objectViewBox = sample.view;
+              tile.classList.add('face');
+            }
             strip.append(tile);
           }
           row.append(strip);

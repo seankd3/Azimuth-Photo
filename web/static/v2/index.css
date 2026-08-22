@@ -610,6 +610,15 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .drop-count { flex: none; color: var(--text-3); font: 12px/1.4 var(--mono); }
 .drop-strip { display: flex; flex: none; gap: 3px; }
 .drop-strip img { width: 26px; height: 26px; object-fit: cover; border-radius: 2px; background: #16171b; }
+.drop-strip img.face { border-radius: 50%; }
+.cluster-face {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #16171b;
+}
 .drop-everything { justify-content: space-between; color: var(--text); }
 .drop-everything kbd {
   padding: 1px 6px;

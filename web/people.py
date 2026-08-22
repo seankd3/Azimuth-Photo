@@ -38,16 +38,17 @@ def _faces(conn):
         " AND hash != ?",
         (faces.RECIPE, GROUPS),
     ).fetchall()
-    owners, scores, stacks = [], [], []
+    owners, scores, stacks, crops = [], [], [], []
     for row in rows:
         boxes, det, matrix = faces.unpack(row["value"])
         for index in range(len(boxes)):
             owners.append((row["hash"], index))
             scores.append(det[index])
             stacks.append(matrix[index])
+            crops.append(boxes[index])
     if not stacks:
-        return [], [], np.zeros((0, 512), dtype=np.float32)
-    return owners, scores, np.stack(stacks)
+        return [], [], np.zeros((0, 512), dtype=np.float32), []
+    return owners, scores, np.stack(stacks), crops
 
 
 def _cluster(owners, scores, matrix):
@@ -95,7 +96,7 @@ def repeople(conn) -> int:
     """The whole people answer, rewritten: named groups become per-photo
     rows, every group at least FLOOR strong waits in the summary."""
 
-    owners, scores, matrix = _faces(conn)
+    owners, scores, matrix, crops = _faces(conn)
     conn.execute("DELETE FROM cache WHERE kind = 'people'")
     conn.execute("DELETE FROM cache WHERE kind = 'faces' AND hash = ?", (GROUPS,))
     if not owners:
@@ -118,7 +119,16 @@ def repeople(conn) -> int:
         strongest = max(group, key=lambda face: scores[face])
         exemplar = f"{owners[strongest][0]}:{owners[strongest][1]}"
         best = sorted(group, key=lambda face: scores[face], reverse=True)
-        sample = list(dict.fromkeys(owners[face][0] for face in best))[:3]
+        # Three distinct photographs, each carrying the face's own box, so a
+        # strip can show the person rather than the place they stood.
+        sample, seen = [], set()
+        for face in best:
+            if owners[face][0] in seen:
+                continue
+            seen.add(owners[face][0])
+            sample.append({"hash": owners[face][0], "box": crops[face]})
+            if len(sample) == 3:
+                break
         summary.append({"name": name, "exemplar": exemplar,
                         "photos": len(photos), "faces": len(group), "sample": sample})
 

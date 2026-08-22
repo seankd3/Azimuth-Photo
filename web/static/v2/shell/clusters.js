@@ -39,9 +39,22 @@ export function createClustersPanel({ product, read, update, notify, browse, kep
         row.dataset.cluster = entry.term;
         row.title = `${entry.term} — proposed from the photographs themselves`;
       }
-      const mark = document.createElement('span');
-      mark.className = 'smart-mark';
-      mark.textContent = entry.person ? '◉' : '◇';
+      let mark;
+      const face = entry.people && entry.samples?.[0];
+      if (face) {
+        // The mark is the person: their own face, cropped from the tile it
+        // was found on.
+        mark = document.createElement('img');
+        mark.className = 'cluster-face';
+        mark.src = face.tile;
+        mark.alt = '';
+        mark.decoding = 'async';
+        if (face.view) mark.style.objectViewBox = face.view;
+      } else {
+        mark = document.createElement('span');
+        mark.className = 'smart-mark';
+        mark.textContent = entry.people ? '◉' : '◇';
+      }
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
