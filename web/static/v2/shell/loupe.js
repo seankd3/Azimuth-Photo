@@ -5,7 +5,7 @@
 // around the cursor, a drag pans, Esc steps back to Fit before it closes,
 // and a turn is part of the same transform — the file is never rewritten.
 
-export function createLoupe({ dialog, image }) {
+export function createLoupe({ dialog, image, inset = () => 0 }) {
   const chip = document.createElement('span');
   chip.className = 'loupe-zoom';
   dialog.append(chip);
@@ -23,8 +23,17 @@ export function createLoupe({ dialog, image }) {
     return turned() ? { w: height, h: width } : { w: width, h: height };
   }
 
-  function measure() {
+  function area() {
+    // The photograph lives above the filmstrip: the strip is not a curtain
+    // over the picture, it takes its slice of the window honestly.
     const box = dialog.getBoundingClientRect();
+    const pad = inset();
+    return { width: box.width, height: box.height - pad,
+             cx: box.left + box.width / 2, cy: box.top + (box.height - pad) / 2 };
+  }
+
+  function measure() {
+    const box = area();
     const { w, h } = sizes();
     state.fit = Math.min(box.width / w, box.height / h, 1);
     // 100% is one image pixel to one device pixel — the sharpness read.
@@ -32,7 +41,7 @@ export function createLoupe({ dialog, image }) {
   }
 
   function clamp() {
-    const box = dialog.getBoundingClientRect();
+    const box = area();
     const { w, h } = sizes();
     const overX = Math.max(0, (w * state.scale - box.width) / 2);
     const overY = Math.max(0, (h * state.scale - box.height) / 2);
@@ -43,7 +52,7 @@ export function createLoupe({ dialog, image }) {
   function apply() {
     clamp();
     image.style.transform =
-      `translate(-50%, -50%) translate(${state.tx}px, ${state.ty}px)` +
+      `translate(-50%, -50%) translate(${state.tx}px, ${state.ty - inset() / 2}px)` +
       ` scale(${state.scale}) rotate(${state.turn}deg)`;
     const zoomed = state.scale > state.fit + 1e-4;
     image.style.cursor = zoomed ? (pointer ? 'grabbing' : 'grab') : 'zoom-in';
@@ -60,9 +69,9 @@ export function createLoupe({ dialog, image }) {
   }
 
   function zoomAt(clientX, clientY, next) {
-    const box = dialog.getBoundingClientRect();
-    const px = clientX - (box.left + box.width / 2);
-    const py = clientY - (box.top + box.height / 2);
+    const box = area();
+    const px = clientX - box.cx;
+    const py = clientY - box.cy;
     const grew = next / state.scale;
     state.tx = px - (px - state.tx) * grew;
     state.ty = py - (py - state.ty) * grew;
@@ -161,5 +170,10 @@ export function createLoupe({ dialog, image }) {
 
   new ResizeObserver(() => { if (dialog.open) (state.mode === 'fit' ? toFit : apply)(); }).observe(dialog);
 
-  return Object.freeze({ show, toFit, escape, reset });
+  function refresh() {
+    if (state.mode === 'fit') toFit();
+    else { measure(); apply(); }
+  }
+
+  return Object.freeze({ show, toFit, escape, reset, refresh });
 }

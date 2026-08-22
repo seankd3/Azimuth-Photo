@@ -25,7 +25,84 @@ const driveForm = document.querySelector('[data-drive-form]');
 const driveError = document.querySelector('[data-drive-error]');
 const loupe = document.querySelector('[data-loupe]');
 const loupeImage = document.querySelector('[data-loupe-image]');
-const loupeView = createLoupe({ dialog: loupe, image: loupeImage });
+const loupeStrip = document.querySelector('[data-loupe-strip]');
+const loupeView = createLoupe({
+  dialog: loupe,
+  image: loupeImage,
+  inset: () => (loupe.classList.contains('is-full') ? 0 : loupeStrip.offsetHeight),
+});
+
+// The photographs beside this one, already decoded, so an arrow is one
+// frame — the same warming Refine's stage uses. A small held set keeps the
+// decoded bitmaps referenced; the oldest fall off the far end.
+const warmed = new Map();
+function warmNeighbours(index) {
+  for (const offset of [1, -1, 2, -2, 3, -3]) {
+    const photo = read().photos.get(index + offset);
+    if (!photo) continue;
+    const source = photo.loupe || photo.tile;
+    if (!source || warmed.has(source)) continue;
+    const held = new Image();
+    held.decoding = 'async';
+    held.src = source;
+    held.decode?.().catch(() => {});
+    warmed.set(source, held);
+    if (warmed.size > 14) warmed.delete(warmed.keys().next().value);
+  }
+}
+
+// The filmstrip: this neighbourhood, the current photograph held centred.
+// Rebuilt only when its answer would differ, so the two-second pulse cannot
+// make it flicker or steal a scroll position mid-browse.
+let stripKey = '';
+function renderStrip(state) {
+  if (!loupe.open || loupe.classList.contains('is-full')) return;
+  const current = state.selectedIndex ?? 0;
+  const start = Math.max(0, current - 14);
+  const end = Math.min(state.total, current + 15);
+  void pages.ensureRange(start, end);
+  let signature = `${current}:${start}:${end}`;
+  for (let index = start; index < end; index += 1) {
+    const photo = state.photos.get(index);
+    signature += photo ? `|${photo.id}.${photo.tile ? 1 : 0}.${photo.status}.${photo.rotate}` : '|·';
+  }
+  if (signature === stripKey) return;
+  stripKey = signature;
+  const cells = [];
+  for (let index = start; index < end; index += 1) {
+    const photo = state.photos.get(index);
+    const cell = document.createElement('button');
+    cell.type = 'button';
+    cell.className = 'strip-cell'
+      + (index === current ? ' is-current' : '')
+      + (photo?.status === 'picked' ? ' is-picked' : '');
+    cell.dataset.index = index;
+    cell.dataset.turn = photo?.rotate || 0;
+    cell.setAttribute('aria-label', photo?.tail || `Photo ${index + 1}`);
+    if (photo?.tile) {
+      const tile = document.createElement('img');
+      tile.src = photo.tile;
+      tile.alt = '';
+      tile.decoding = 'async';
+      cell.append(tile);
+    }
+    cells.push(cell);
+  }
+  loupeStrip.replaceChildren(...cells);
+  const held = loupeStrip.querySelector('.is-current');
+  if (held) {
+    loupeStrip.scrollLeft = held.offsetLeft - (loupeStrip.clientWidth - held.offsetWidth) / 2;
+  }
+}
+
+function toggleFull(on = !loupe.classList.contains('is-full')) {
+  loupe.classList.toggle('is-full', on);
+  loupeView.refresh();
+  if (!on) {
+    stripKey = '';
+    renderStrip(read());
+  }
+}
 const status = document.querySelector('[data-status]');
 let noticeTimer = null;
 
@@ -278,6 +355,9 @@ function closeDriveDialog() {
 
 function closeLoupe() {
   if (loupe.open) loupe.close();
+  loupe.classList.remove('is-full');
+  loupeStrip.replaceChildren();
+  stripKey = '';
   loupeView.reset();
   loupeImage.removeAttribute('src');
   delete loupeImage.dataset.source;
@@ -569,6 +649,8 @@ function showPhoto(photo) {
   product.look([photo.id]).catch(() => {});
   renderLoupe(photo);
   if (!loupe.open) loupe.showModal();
+  renderStrip(read());
+  if (read().selectedIndex !== null) warmNeighbours(read().selectedIndex);
 }
 
 function renderLoupe(photo) {
@@ -640,7 +722,11 @@ function renderChrome(state) {
   collectionsPanel.render(state);
   filterBar.render(state);
   library.renderInspector(inspector, state.selected);
-  if (loupe.open && state.selected) renderLoupe(state.selected);
+  if (loupe.open && state.selected) {
+    renderLoupe(state.selected);
+    renderStrip(state);
+    if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
+  }
   const count = state.counts.photos.toLocaleString();
   document.querySelector('[data-photo-count]').textContent = `${state.total.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
@@ -835,6 +921,15 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  if (key === 'f' && read().view === 'library') {
+    if (loupe.open) toggleFull();
+    else if (read().selected) {
+      showPhoto(read().selected);
+      toggleFull(true);
+    }
+    event.preventDefault();
+    return;
+  }
   const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnLeft' : 'turnRight' };
   if (key in cullActions && read().view === 'library' && read().selected?.hash) {
     cullWorkflow.apply(cullActions[key]);
@@ -895,6 +990,16 @@ new ResizeObserver(scheduleGrid).observe(workspace);
 loupe.addEventListener('click', (event) => {
   if (event.target === loupe) closeLoupe();
 });
+loupeStrip.addEventListener('click', (event) => {
+  const cell = event.target.closest('.strip-cell');
+  if (cell) selectIndex(Number(cell.dataset.index));
+  event.stopPropagation();
+});
+loupeStrip.addEventListener('wheel', (event) => {
+  loupeStrip.scrollLeft += event.deltaY;
+  event.preventDefault();
+  event.stopPropagation();
+}, { passive: false });
 loupe.addEventListener('close', () => {
   loupeImage.removeAttribute('src');
   delete loupeImage.dataset.source;
