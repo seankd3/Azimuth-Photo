@@ -1,45 +1,43 @@
-"""Bring a 1.x catalog into the 2.0 core. Run once; safe to run again.
+"""Carry the owner's judgement from the V1 catalog into a V2 home.
 
-Two adoptions, because the old schema kept the two kinds of fact in eight
-different places and the core keeps them in two:
+**The map is (tail, file size) → identity, and everything else follows.**
+V1 named photographs by a 32-hex partial hash; V2 identity is the full-byte
+BLAKE2b of the file. Nothing can convert one into the other, but both
+catalogs know each file's tail and byte size, so once V2 has identified a
+file the two rows meet — and every judgement keyed on the old name can be
+re-said under the new one. Ambiguous keys (two rows sharing tail and size)
+are excluded and counted, never guessed.
 
-* **judgements → the `decisions` log**, which is the only irreplaceable thing;
-* **embeddings → the `cache` table**, keyed on the photograph's bytes rather
-  than on a row id, so they survive the rows being rebuilt.
+What carries, and how:
 
-Nothing is dropped and nothing is cleared. The old tables are left exactly as
-they were, so this is reversible by ignoring its output.
+* **Decisions** — star and rotate verbatim; V1's `flag` and `status` fold
+  into V2's one status vocabulary (picked stays picked, rejected is
+  trashed); every compare pair is re-said whole (`{"over": [...]}`) with
+  both members mapped or not at all; develop rows carry untouched for the
+  Develop wave to interpret. Timestamps are preserved, so history reads in
+  order. Idempotent: a row whose (subject, family, at, value) already
+  stands is not said twice.
+* **Keywords** — V1 keyword rows become keyword-kind sets with their
+  members, which is what the V2 search's named door already reads.
+* **Embeddings** — the SigLIP vectors the backfill spent GPU-hours making
+  are copied under their new keys, never recomputed. `INSERT OR IGNORE`,
+  so a vector V2 already made wins.
+* **Grid tiles** — seeded from the V1 1920-px previews, downscaled to the
+  grid's own 1024 and encoded by the same `render.encode` the store uses.
+  1920 clears the renderer's own honesty bar for a 1024 answer, so this is
+  the same answer the worker would make, hours sooner. The loupe is not
+  seeded: 1920 is below its bar, and a dishonest tile is worse than a slow
+  one.
 
----
+Afterwards the read indexes are rebuilt from the adopted log (`reindex`)
+and the ranking is recomputed with the adopted vectors (`rerank`), so Best
+and the stars are yours again on first paint.
 
-Collect the owner's judgements out of the old schema and into the log.
+The V1 catalog is opened read-only and never written. Safe to re-run: each
+pass adopts whatever became mappable since the last one — run it again
+after the archive drive is attached and swept.
 
-Measured before writing this: a 2.4 GB catalog of 84 tables holds about 89,378
-rows the owner actually decided. Everything else is recomputable. So this reads
-the eight places a judgement was kept and appends each one to `decisions`,
-after which the log — not any column — is the thing that must never be lost.
-
-**It only ever appends.** No old table is dropped, no column is cleared, no row
-is updated. A repeat run adopts nothing, because a decision already in the log
-is recognised by subject, family, instant *and value* together. That is what
-makes it safe to run against the live catalog with no ceremony: the worst case
-is that it did nothing.
-
-**Subjects are content hashes wherever one exists**, because a hash survives
-the rows being rebuilt, the ids being renumbered and the file being moved to
-another drive — which is the entire reason the log is keyed on identity rather
-than on `image_id`. A photo with no hash yet is filed under `image:<id>` and
-gets re-filed when it is identified.
-
-What is deliberately *not* adopted: `images.elo` and `images.comparisons`. Not
-because they are worthless — the opposite. Most of those Elos were **propagated
-through the embedding space**, which is the mechanism that lets 2,532
-comparisons order 157,000 photographs. But a propagated score is a derivation
-of *comparisons plus vectors*, and both inputs keep growing: every new
-comparison and every embedding off the owed queue should re-rank everything
-that resembles it. Freezing the output as if it were judgement is exactly what
-stopped it improving. The judgement is the 2,532 pairs; the ranking is computed
-from them, again and again.
+    python scripts/adopt.py <v2-home> [--source <v1 db>] [--previews <dir>]
 """
 
 from __future__ import annotations
@@ -53,242 +51,279 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web"))
 
-from model import decisions  # noqa: E402
+V1_DB = r"C:\Azimuth Photo\data\catalog\azimuth.db"
+V1_PREVIEWS = r"C:\Azimuth Photo\thumbs\md"
+
+# V1 spelled one judgement two ways ("picked" and {"value": "picked"}), and
+# split the cull between `flag` and `status`. V2 has one vocabulary.
+STATUS_FROM_V1 = {"picked": "picked", "rejected": "trashed", "trashed": "trashed"}
 
 
-def _epoch(value) -> float | None:
-    """A stored timestamp as an epoch, or None when it is not a time.
+def say(message: str) -> None:
+    print(f"{time.strftime('%m-%d %H:%M:%S')}  {message}", flush=True)
 
-    The catalog spells times three ways depending on which year the writing
-    code was from. A decision whose time cannot be read is still adopted — it
-    just lands at the moment of adoption, which is the honest answer.
-    """
 
-    if value is None:
+def plain(value) -> str | None:
+    """The judgement inside however V1 spelled it."""
+
+    try:
+        held = json.loads(value)
+    except (TypeError, ValueError):
         return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    for shape in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
-        try:
-            return time.mktime(time.strptime(str(value)[:19], shape))
-        except ValueError:
+    if isinstance(held, dict):
+        held = held.get("value")
+    return held if isinstance(held, (str, int)) else held
+
+
+def build_map(v1, v2) -> tuple[dict[str, str], dict[int, str], int]:
+    """32-hex → 64-hex and V1 id → 64-hex, by unique (tail, size) on both
+    sides. Returns the two maps and how many keys were ambiguous."""
+
+    def unique(conn, sql):
+        rows = {}
+        doubled = set()
+        for row in conn.execute(sql):
+            key = (row[0], int(row[1]))
+            if key in rows:
+                doubled.add(key)
+            else:
+                rows[key] = row
+        return {k: v for k, v in rows.items() if k not in doubled}, doubled
+
+    old, old_doubled = unique(v1, "SELECT tail, file_size, content_hash, id FROM images"
+                                  " WHERE tail IS NOT NULL AND file_size IS NOT NULL")
+    new, new_doubled = unique(v2, "SELECT tail, file_size, content_hash, id FROM images"
+                                  " WHERE tail IS NOT NULL AND file_size IS NOT NULL"
+                                  " AND content_hash IS NOT NULL")
+    hash_map: dict[str, str] = {}
+    id_map: dict[int, str] = {}
+    for key, (_tail, _size, old_hash, old_id) in old.items():
+        met = new.get(key)
+        if met is None:
             continue
-    return None
+        identity = str(met[2])
+        if old_hash:
+            hash_map[str(old_hash)] = identity
+        id_map[int(old_id)] = identity
+    return hash_map, id_map, len(old_doubled) + len(new_doubled)
 
 
-def _subjects(conn) -> dict[int, str]:
-    """image id -> the identity its decisions are filed under."""
-
-    return {
-        int(row["id"]): row["content_hash"] or f"image:{row['id']}"
-        for row in conn.execute("SELECT id, content_hash FROM images")
-    }
+def already(v2, subject: str, family: str, at, value_text: str) -> bool:
+    return v2.execute(
+        "SELECT 1 FROM decisions WHERE subject = ? AND family = ? AND at = ? AND value = ? LIMIT 1",
+        (subject, family, at, value_text),
+    ).fetchone() is not None
 
 
-def _already(conn) -> tuple[set, set]:
-    """What the log already holds, in the two shapes a repeat run must match.
+def adopt_decisions(v1, v2, hash_map) -> dict[str, int]:
+    from model import decisions
 
-    Two shapes, because the old schema recorded *when* for only some
-    judgements, and each mistake here cost a run to find:
+    tally = {"star": 0, "rotate": 0, "status": 0, "compare": 0, "develop": 0,
+             "unmapped": 0, "skipped": 0, "stood": 0}
+    rows = []
 
-    * **Timed sources** — comparisons, edits, trashings — dedupe on the exact
-      instant *and* the value. Keyed on `(subject, family, at)` alone, 2,532
-      comparison pairs adopted as 564: timestamps have one-second resolution
-      and a photo can win several comparisons inside one second, so every pair
-      after the first collapsed into its neighbour.
-    * **Timeless sources** — stars, flags, keywords, quality — dedupe on the
-      value alone, because there is no recorded instant and inventing `now`
-      made every rerun look new. That is how a second run added 6,360
-      duplicates.
+    for row in v1.execute("SELECT subject, family, value, at FROM decisions ORDER BY at ASC, id ASC"):
+        subject = hash_map.get(str(row[0]))
+        family, value, at = str(row[1]), row[2], row[3]
 
-    A star the owner set, imported twice, is one decision. Two comparisons of
-    the same pair at different times are two.
-    """
+        if family in ("quality", "chores", "collection_meta", "keyword"):
+            tally["skipped"] += 1          # keyword carries separately, as sets
+            continue
+        if subject is None:
+            tally["unmapped"] += 1
+            continue
 
-    timed, valued = set(), set()
-    for row in conn.execute("SELECT subject, family, at, value FROM decisions"):
-        timed.add((row["subject"], row["family"], round(float(row["at"]), 3), row["value"]))
-        valued.add((row["subject"], row["family"], row["value"]))
-    return timed, valued
-
-
-def adopt(conn, *, dry_run: bool = False) -> dict[str, int]:
-    subject_of = _subjects(conn)
-    timed, valued = _already(conn)
-    now = time.time()
-    tally: dict[str, int] = {}
-
-    def keep(image_id, family, value, at=None):
-        subject = subject_of.get(int(image_id))
-        if subject is None or value is None:
-            return
-        payload = json.dumps(value)
-        when = _epoch(at)
-        if when is None:
-            # The source never recorded an instant. Dedupe on what was decided.
-            if (subject, family, payload) in valued:
-                return
-            when = now
-        elif (subject, family, round(when, 3), payload) in timed:
-            return
-        timed.add((subject, family, round(when, 3), payload))
-        valued.add((subject, family, payload))
-        tally[family] = tally.get(family, 0) + 1
-        if not dry_run:
-            decisions.decide(conn, subject, family, value, at=when)
-
-    def table_exists(name) -> bool:
-        return conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone() is not None
-
-    # Stars and flags: the two judgements the owner makes fastest, and the ones
-    # no derivation ever wrote to.
-    for row in conn.execute("SELECT id, stars, flag, status, trashed_at FROM images"):
-        if row["stars"]:
-            keep(row["id"], decisions.STAR, int(row["stars"]))
-        if row["flag"] and row["flag"] != "unflagged":
-            keep(row["id"], "flag", row["flag"])
-        if row["status"] and row["status"] != "kept":
-            keep(row["id"], decisions.STATUS, row["status"], row["trashed_at"])
-
-    # The pair ledger. This is the ranking judgement in full: which of these two
-    # photographs is better, asked and answered 2,532 times. Elo is a reading of
-    # this, and is computed rather than adopted.
-    if table_exists("comparisons"):
-        for row in conn.execute("SELECT winner_id, loser_id, mode, created_at FROM comparisons"):
-            winner, loser = subject_of.get(int(row["winner_id"])), subject_of.get(int(row["loser_id"]))
-            if winner and loser:
-                keep(row["winner_id"], decisions.COMPARE,
-                     {"beat": loser, "mode": row["mode"]}, row["created_at"])
-
-    # Edits. Stored per image and per virtual copy; the settings blob is the
-    # decision, and its history is the log's own ordering from here on.
-    if table_exists("develop_settings"):
-        columns = {r["name"] for r in conn.execute("PRAGMA table_info(develop_settings)")}
-        stamp = "updated_at" if "updated_at" in columns else "NULL"
-        payload = "settings_json" if "settings_json" in columns else "settings"
-        if payload in columns:
-            for row in conn.execute(f"SELECT image_id, {payload} AS v, {stamp} AS at FROM develop_settings"):
-                keep(row["image_id"], decisions.DEVELOP, row["v"], row["at"])
-
-    if table_exists("image_keywords") and table_exists("keywords"):
-        for row in conn.execute(
-            "SELECT ik.image_id, k.name FROM image_keywords ik JOIN keywords k ON k.id = ik.keyword_id"
-        ):
-            keep(row["image_id"], "keyword", row["name"])
-
-    # The oplog. Missed on the first pass and found by an adversarial read of
-    # the kill lists, which is the best argument for doing them: this is
-    # already an append-only decision log, keyed on content hash, with
-    # families — the same shape arrived at independently — and it holds 311
-    # rows of the owner's keywords, flags, edits and statuses that exist
-    # nowhere else. Deleting features/sync/ without reading it first would
-    # have thrown them away silently.
-    if table_exists("oplog"):
-        renamed = {"keywords": "keyword"}
-        for row in conn.execute("SELECT content_hash, family, payload, ts FROM oplog ORDER BY seq"):
-            if not row["content_hash"]:
+        if family == "star":
+            held = plain(value)
+            if not (isinstance(held, int) and 0 <= held <= 5):
+                tally["skipped"] += 1
                 continue
+            rows.append((subject, decisions.STAR, json.dumps(held), at))
+            tally["star"] += 1
+        elif family == "rotate":
+            held = plain(value)
+            if held not in (0, 90, 180, 270):
+                tally["skipped"] += 1
+                continue
+            rows.append((subject, decisions.ROTATE, json.dumps(held), at))
+            tally["rotate"] += 1
+        elif family in ("flag", "status"):
+            held = STATUS_FROM_V1.get(plain(value))
+            if held is None:
+                tally["skipped"] += 1
+                continue
+            rows.append((subject, decisions.STATUS, json.dumps(held), at))
+            tally["status"] += 1
+        elif family == "compare":
             try:
-                value = json.loads(row["payload"]) if row["payload"] else None
+                held = json.loads(value)
             except (TypeError, ValueError):
-                value = row["payload"]
-            family = renamed.get(row["family"], row["family"])
-            at = _epoch(row["ts"])
-            payload = json.dumps(value)
-            if at is None or (subject_of and (row["content_hash"], family, round(at, 3), payload) in timed):
+                tally["skipped"] += 1
                 continue
-            timed.add((row["content_hash"], family, round(at, 3), payload))
-            tally[family] = tally.get(family, 0) + 1
-            if not dry_run:
-                decisions.decide(conn, row["content_hash"], family, value, at=at)
+            over = held.get("over") or ([held["beat"]] if held.get("beat") else [])
+            mapped = [hash_map[h] for h in over if h in hash_map and hash_map[h] != subject]
+            if not mapped:
+                tally["unmapped"] += 1     # a round needs both sides
+                continue
+            rows.append((subject, decisions.COMPARE, json.dumps({"over": sorted(mapped)}), at))
+            tally["compare"] += 1
+        elif family == "develop":
+            rows.append((subject, "develop", value, at))
+            tally["develop"] += 1
+        else:
+            tally["skipped"] += 1
 
-    if table_exists("image_quality"):
-        columns = {r["name"] for r in conn.execute("PRAGMA table_info(image_quality)")}
-        if "image_id" in columns:
-            field = "score" if "score" in columns else next(iter(columns - {"image_id"}), None)
-            if field:
-                for row in conn.execute(f"SELECT image_id, {field} AS v FROM image_quality"):
-                    keep(row["image_id"], "quality", row["v"])
-
-    if not dry_run:
-        conn.commit()
+    for subject, family, value_text, at in rows:
+        if already(v2, subject, family, at, value_text):
+            tally["stood"] += 1
+            tally[{"star": "star", "rotate": "rotate", "status": "status",
+                   "compare": "compare", "develop": "develop"}.get(family, "skipped")] -= 1
+            continue
+        v2.execute("INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, 'you')",
+                   (subject, family, value_text, at))
+    v2.commit()
     return tally
 
 
-def adopt_embeddings(conn, *, dry_run: bool = False) -> dict[str, int]:
-    """Re-key the embedding vectors onto the photographs they describe.
+def adopt_keywords(v1, v2, hash_map) -> dict[str, int]:
+    from model import sets
 
-    They were stored against `image_id`, which is a row number: rebuild the
-    table, renumber, re-import, and 42,937 vectors that cost hours of GPU time
-    are pointing at the wrong photographs or at nothing. Keyed on the content
-    hash they survive all of that, because the vector describes the *bytes*.
-
-    They land in `value` rather than as files on disk, deliberately. The whole
-    set is read as one matrix when ranking or searching; 42,937 file opens is a
-    different kind of operation, and reclaim would have mistaken them for
-    previews and evicted the most expensive thing in the catalog.
-    """
-
-    if not conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='embeddings_by_model'"
-    ).fetchone():
-        return {"embedding": 0}
-
-    already = {
-        row["hash"] for row in conn.execute("SELECT hash FROM cache WHERE kind = 'embedding'")
-    }
-    moved = 0
-    for row in conn.execute(
-        """
-        SELECT i.content_hash AS hash, e.embedding, e.model_key
-        FROM embeddings_by_model e JOIN images i ON i.id = e.image_id
-        WHERE i.content_hash IS NOT NULL
-        """
-    ).fetchall():
-        if row["hash"] in already:
+    wanted: dict[str, set[str]] = {}
+    for row in v1.execute("SELECT subject, value FROM decisions WHERE family = 'keyword'"):
+        name = plain(row[1])
+        subject = hash_map.get(str(row[0]))
+        if not name or not isinstance(name, str) or subject is None:
             continue
-        already.add(row["hash"])
-        moved += 1
-        if not dry_run:
-            conn.execute(
-                "INSERT OR REPLACE INTO cache(hash, kind, recipe, state, value, bytes, at)"
-                " VALUES (?, 'embedding', '', 'ready', ?, ?, ?)",
-                (row["hash"], row["embedding"], len(row["embedding"]), time.time()),
-            )
-    if not dry_run:
-        conn.commit()
-    return {"embedding": moved}
+        wanted.setdefault(name.strip(), set()).add(subject)
+
+    made = joined = 0
+    held = {entry["name"]: entry["id"] for entry in sets.all(v2, kind=sets.KEYWORD)}
+    for name, members in sorted(wanted.items()):
+        set_id = held.get(name)
+        if set_id is None:
+            set_id = sets.create(v2, name, kind=sets.KEYWORD)
+            made += 1
+        standing = set(sets.members(v2, set_id))
+        fresh = sorted(members - standing)
+        if fresh:
+            sets.add(v2, set_id, fresh)
+            joined += len(fresh)
+    v2.commit()
+    return {"keyword_sets": made, "keyword_members": joined}
+
+
+def adopt_embeddings(v1, v2, hash_map) -> dict[str, int]:
+    import embed
+
+    copied = stood = unmapped = 0
+    batch = []
+    for row in v1.execute(
+        "SELECT hash, value, bytes, at FROM cache"
+        " WHERE kind = 'embedding' AND recipe = ? AND state = 'ready' AND value IS NOT NULL",
+        (embed.RECIPE,),
+    ):
+        identity = hash_map.get(str(row[0]))
+        if identity is None:
+            unmapped += 1
+            continue
+        batch.append((identity, embed.RECIPE, row[1], row[2], row[3]))
+    for identity, recipe, value, size, at in batch:
+        done = v2.execute(
+            "INSERT OR IGNORE INTO cache(hash, kind, recipe, state, value, bytes, at)"
+            " VALUES (?, 'embedding', ?, 'ready', ?, ?, ?)",
+            (identity, recipe, value, size, at),
+        )
+        if done.rowcount:
+            copied += 1
+        else:
+            stood += 1
+    v2.commit()
+    return {"vectors_copied": copied, "vectors_stood": stood, "vectors_unmapped": unmapped}
+
+
+def seed_tiles(v2, id_map, store, previews: str) -> dict[str, int]:
+    import io
+
+    import render
+    from model import cache
+    from PIL import Image
+
+    seeded = stood = absent = 0
+    for old_id, identity in id_map.items():
+        if cache.get(v2, identity, store.grid) is not None:
+            stood += 1
+            continue
+        source = os.path.join(previews, f"{old_id}.jpg")
+        if not os.path.exists(source):
+            absent += 1
+            continue
+        try:
+            with Image.open(source) as preview:
+                sized = render.fit(preview.convert("RGB"), render.GRID)
+                body = render.encode(sized)
+        except Exception:
+            absent += 1
+            continue
+        target = store.path(identity, render.GRID)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as handle:
+            handle.write(body)
+        cache.put(v2, identity, store.grid, cache.Made(path=target, bytes=len(body)))
+        seeded += 1
+        if seeded % 2000 == 0:
+            v2.commit()
+            say(f"  tiles seeded {seeded:,}")
+    v2.commit()
+    return {"tiles_seeded": seeded, "tiles_stood": stood, "tiles_absent": absent}
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("catalog")
-    parser.add_argument("--apply", action="store_true", help="write; otherwise report only")
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("home", help="the V2 home folder (holds catalog/ and previews/)")
+    parser.add_argument("--source", default=V1_DB)
+    parser.add_argument("--previews", default=V1_PREVIEWS)
     args = parser.parse_args()
 
-    conn = sqlite3.connect(args.catalog)
-    conn.row_factory = sqlite3.Row
-    with open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                           "web", "model", "schema.sql"), encoding="utf-8") as handle:
-        conn.executescript(handle.read())
+    import home as homes
+    import library as queries
+    import model
+    import rank
+    import tiles
 
-    tally = adopt(conn, dry_run=not args.apply)
-    print("judgements -> decisions")
-    for family in sorted(tally):
-        print(f"  {family:10} {tally[family]:>7,}")
-    print(f"  {'total':10} {sum(tally.values()):>7,}")
+    catalog, previews = homes.paths(args.home)
+    if not os.path.exists(catalog):
+        raise SystemExit(f"no V2 catalog at {catalog} — open the app there (or attach) first")
 
-    vectors = adopt_embeddings(conn, dry_run=not args.apply)
-    print("embeddings -> cache")
-    print(f"  {'embedding':10} {vectors['embedding']:>7,}")
+    v1 = sqlite3.connect(f"file:{args.source}?mode=ro", uri=True)
+    v1.row_factory = sqlite3.Row
+    v2 = model.connect(catalog, timeout=60.0)
+    store = tiles.Store(previews)
+    say(f"adopting into {args.home} from {args.source}")
 
-    if not args.apply:
-        print("\n  dry run; pass --apply")
-    print(f"\n  log holds {conn.execute('SELECT COUNT(*) FROM decisions').fetchone()[0]:,}"
-          f", cache holds {conn.execute('SELECT COUNT(*) FROM cache').fetchone()[0]:,}")
-    conn.close()
+    hash_map, id_map, ambiguous = build_map(v1, v2)
+    say(f"mapped {len(id_map):,} photographs by (tail, size); {ambiguous} ambiguous keys excluded")
+
+    tally: dict[str, int] = {"ambiguous": ambiguous, "mapped": len(id_map)}
+    tally.update(adopt_decisions(v1, v2, hash_map))
+    say(f"decisions: {tally['star']} stars, {tally['compare']} rounds, {tally['status']} statuses, "
+        f"{tally['rotate']} rotates, {tally['develop']} develop; {tally['stood']} stood, "
+        f"{tally['unmapped']} unmapped, {tally['skipped']} skipped")
+    tally.update(adopt_keywords(v1, v2, hash_map))
+    say(f"keywords: {tally['keyword_sets']} sets, {tally['keyword_members']} members")
+    tally.update(adopt_embeddings(v1, v2, hash_map))
+    say(f"vectors: {tally['vectors_copied']:,} copied, {tally['vectors_stood']:,} stood, "
+        f"{tally['vectors_unmapped']:,} await their files")
+    tally.update(seed_tiles(v2, id_map, store, args.previews))
+    say(f"tiles: {tally['tiles_seeded']:,} seeded from previews, {tally['tiles_stood']:,} stood, "
+        f"{tally['tiles_absent']:,} had no preview")
+
+    rebuilt = queries.reindex(v2)
+    ranked = queries.rerank(v2, *rank.space(v2))
+    say(f"reindexed {sum(rebuilt.values())} projections; reranked {ranked:,} photographs")
+
+    v1.close()
+    v2.close()
+    say("done")
     return 0
 
 
