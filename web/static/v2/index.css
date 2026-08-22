@@ -120,7 +120,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .top-actions { padding-right: 14px; }
 .quiet-button {
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 4px;
   background: var(--chrome-2);
   padding: 7px 12px;
   cursor: pointer;
@@ -128,7 +128,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .quiet-button:hover { border-color: #454850; }
 .danger-button {
   border: 1px solid #8c4d4a;
-  border-radius: 7px;
+  border-radius: 4px;
   background: #5d302f;
   color: #fff;
   padding: 7px 12px;
@@ -160,12 +160,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   width: 100%;
   padding: 9px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-2);
   cursor: pointer;
 }
-.nav-row.is-active { background: #1a1f24; color: var(--text); }
+.nav-row.is-active { background: #1a1f24; color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .nav-row span:last-child { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .folder-tree { display: flex; flex-direction: column; }
 .folder-row {
@@ -175,7 +175,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   width: 100%;
   padding: 5px 8px 5px calc(8px + var(--depth, 0) * 14px);
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-2);
   font-size: 13px;
@@ -183,7 +183,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .folder-row:hover { background: #1f2227; }
-.folder-row.is-active { background: #1a1f24; color: var(--text); }
+.folder-row.is-active { background: #1a1f24; color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .collection-tree { display: flex; flex-direction: column; }
 .collection-row {
   display: flex;
@@ -192,7 +192,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   width: 100%;
   padding: 7px 10px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-2);
   font-size: 13px;
@@ -200,7 +200,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .collection-row:hover { background: #1f2126; }
-.collection-row.is-active { background: #1a1f24; color: var(--text); }
+.collection-row.is-active { background: #1a1f24; color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
 .collection-row.is-drop { background: #241512; outline: 1px solid var(--accent); }
 /* a smart collection fills itself: a drag over it is answered, not ignored */
 .collection-row.is-refused { outline: 1px dashed #6b4133; outline-offset: -1px; cursor: not-allowed; }
@@ -213,7 +213,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   height: 20px;
   margin-right: 6px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-3);
   font-size: 13px;
@@ -267,7 +267,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .cull-actions kbd { color: var(--text-3); font: 10px/1 var(--mono); }
 .contextbar select {
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--chrome-2);
   color: var(--text-2);
   padding: 5px 8px;
@@ -421,7 +421,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
+  border-radius: 4px;
   background: #1d1f24;
   box-shadow: 0 14px 44px rgb(0 0 0 / 50%);
 }
@@ -432,7 +432,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   flex: 1;
   padding: 6px 8px;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: #111215;
   color: var(--text);
   font-size: 13px;
@@ -442,7 +442,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   flex: 1;
   padding: 5px 0;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-3);
   cursor: pointer;
@@ -451,12 +451,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .popover .not-row { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
 .name-pop { display: flex; flex-direction: column; gap: 9px; }
 .name-pop[hidden] { display: none; }
-.refine-size { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: var(--chrome-2); }
+.refine-size { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 4px; background: var(--chrome-2); }
 .refine-size button {
   min-width: 28px;
   padding: 3px 7px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 3px;
   background: transparent;
   color: var(--text-3);
   font-size: 12px;
@@ -481,7 +481,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .empty-state p { margin: 0 0 22px; color: var(--text-3); }
 .primary-button {
   border: 1px solid #ff7247;
-  border-radius: 7px;
+  border-radius: 4px;
+  /* one cut corner: the launch button wears the airframe chamfer */
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%);
   background: var(--accent);
   color: #180702;
   padding: 9px 15px;
@@ -503,7 +505,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   width: min(480px, calc(100vw - 40px));
   padding: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 13px;
+  border-radius: 3px;
   background: #1a1b1f;
   box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
 }
@@ -531,7 +533,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: #111215;
   color: var(--text);
   font: 13px/1.4 var(--mono);
@@ -541,7 +543,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .check-row input { accent-color: var(--accent); }
 .form-error { min-height: 18px; margin: -8px 0 10px; color: #ee9c92; font-size: 12px; }
 .confirm-field { display: grid; gap: 8px; margin-bottom: 18px; color: var(--text-2); font-size: 13px; }
-.confirm-field input { border: 1px solid var(--line); border-radius: 7px; background: #111216; color: var(--text); padding: 9px; }
+.confirm-field input { border: 1px solid var(--line); border-radius: 4px; background: #111216; color: var(--text); padding: 9px; }
 
 .context-menu {
   position: fixed;
@@ -549,7 +551,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   margin: 0;
   padding: 6px;
   border: 1px solid var(--line-strong);
-  border-radius: 9px;
+  border-radius: 4px;
   background: #1a1b1f;
   box-shadow: 0 12px 40px rgb(0 0 0 / 55%);
 }
@@ -558,7 +560,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   width: 100%;
   padding: 8px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text);
   font-size: 13px;
@@ -596,7 +598,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   max-height: min(900px, calc(100vh - 60px));
   padding: 0;
   border: 1px solid var(--line-strong);
-  border-radius: 13px;
+  border-radius: 3px;
   background: #1a1b1f;
   box-shadow: 0 28px 90px rgb(0 0 0 / 55%);
   display: flex;
@@ -623,7 +625,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   gap: 4px;
   padding: 6px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 3px;
   background: #111215;
   cursor: pointer;
 }
@@ -640,7 +642,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   flex: 1;
   padding: 8px 6px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 4px;
   background: transparent;
   color: var(--text-2);
   font-size: 12px;
@@ -651,7 +653,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .rolls ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .rolls li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .rolls li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px; background: #111215; color: var(--text); font-size: 12px; }
+.rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: 4px; background: #111215; color: var(--text); font-size: 12px; }
 .destinations { margin: 0; padding: 0; list-style: none; font: 12px/1.6 var(--mono); color: var(--text-2); }
 .destinations li { display: flex; justify-content: space-between; gap: 8px; }
 .destinations li span:first-child { min-width: 0; overflow-wrap: anywhere; }
@@ -670,7 +672,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   align-items: center;
   transform: translateX(-50%);
   border: 1px solid #3a3d44;
-  border-radius: 9px;
+  border-radius: 4px;
   background: #202227;
   padding: 10px 12px 10px 15px;
   box-shadow: 0 12px 40px rgb(0 0 0 / 55%);

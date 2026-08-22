@@ -23,6 +23,37 @@ def bundled_document() -> Path:
     return Path(__file__).parents[1] / "build" / "desktop" / "index.html"
 
 
+def bundled_icon() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS) / "desktop" / "icon.ico"
+    return Path(__file__).parents[1] / "desktop" / "icon.ico"
+
+
+def wear_the_mark(window) -> None:
+    """The compass on the title bar and the taskbar. Python windows otherwise
+    wear the interpreter's icon, and the taskbar groups them under python."""
+
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("AzimuthPhoto.Desktop")
+    except Exception:
+        pass
+    icon = bundled_icon()
+    if not icon.is_file():
+        return
+
+    def dress():
+        try:
+            from System.Drawing import Icon  # pywebview's WinForms runtime
+
+            window.native.Icon = Icon(str(icon))
+        except Exception:
+            pass
+
+    window.events.shown += dress
+
+
 class Desktop:
     """The complete JavaScript-facing product vocabulary.
 
@@ -282,6 +313,7 @@ def main() -> int:
         background_color="#0a0c0e",
     )
     desktop.bind(window)
+    wear_the_mark(window)
     window.events.closed += desktop.close
     try:
         webview.start(gui="edgechromium")
