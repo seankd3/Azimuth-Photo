@@ -73,8 +73,8 @@ function element(tag, className = '', text = '') {
 function emptyState(actions) {
   const empty = element('div', 'empty-state');
   const mark = element('div', 'empty-mark');
+  mark.innerHTML = '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"></circle><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"></path><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"></path></g></svg>';
   mark.setAttribute('aria-hidden', 'true');
-  mark.append(element('i'), element('i'), element('i'));
   empty.append(mark, element('h2', '', actions.emptyTitle));
   empty.append(element('p', '', actions.emptyCopy));
   if (actions.emptyAction) {
