@@ -1,4 +1,4 @@
-export function createTrashWorkflow({ product, read, reload, notify, undo }) {
+export function createTrashWorkflow({ product, read, reload, notify, undo, selection }) {
   const dialog = document.querySelector('[data-empty-dialog]');
   const form = document.querySelector('[data-empty-form]');
   const error = document.querySelector('[data-empty-error]');
@@ -11,12 +11,18 @@ export function createTrashWorkflow({ product, read, reload, notify, undo }) {
   }
 
   async function restoreSelected() {
-    const selected = read().selected;
-    if (!selected || read().view !== 'trash') return;
+    // The one answer for what a verb acts on: the marked set, else the
+    // focused photograph — the same grammar as every cull verb.
+    const ids = selection();
+    if (!ids.length || read().view !== 'trash') return;
     try {
-      const result = await product.restore([selected.id]);
+      const result = await product.restore(ids);
       await reload();
-      if (result.changed.length) undo.show('Photograph restored.', () => product.undoCull(result.changed).then(reload));
+      const n = result.changed.length;
+      if (n) {
+        undo.show(n === 1 ? 'Photograph restored.' : `${n} photographs restored.`,
+          () => product.undoCull(result.changed).then(reload));
+      }
     } catch (reason) {
       notify(reason.message);
     }

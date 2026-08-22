@@ -13,7 +13,6 @@ const state = {
   query: '',
   total: 0,
   loading: true,
-  notice: '',
   scanning: false,
   selected: null,
   selectedIndex: null,

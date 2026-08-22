@@ -149,7 +149,24 @@
 
   <menu class="context-menu" data-folder-menu hidden>
     <button type="button" data-action="synchronize-folder">Synchronize folder</button>
-    <button type="button" data-action="forget-missing">Forget missing photos</button>
+    <hr>
+    <button type="button" data-action="forget-missing">Forget missing photos…</button>
+  </menu>
+
+  <dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-title">
+    <form method="dialog">
+      <p class="eyebrow">Are you sure</p>
+      <h1 id="confirm-title" data-confirm-title></h1>
+      <p class="dialog-copy" data-confirm-copy></p>
+      <div class="confirm-actions">
+        <button class="quiet-button" type="button" data-action="confirm-no">Cancel</button>
+        <button class="danger-button" type="submit" value="yes" data-confirm-yes></button>
+      </div>
+    </form>
+  </dialog>
+
+  <menu class="context-menu" data-drive-menu hidden>
+    <button type="button" data-action="rescan-drive">Re-scan now</button>
   </menu>
 
   <menu class="context-menu" data-collection-menu hidden>

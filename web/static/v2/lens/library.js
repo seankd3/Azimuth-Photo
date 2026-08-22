@@ -162,17 +162,16 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const matches = photo
       ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}`
       : cell?.dataset.kind === 'skeleton';
-    if (!matches) {
-      leftovers.delete(cell);
-      cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
-    }
+    if (!matches) cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
     if (!photo) {
       firstMissing ??= index;
       lastMissing = index + 1;
     }
     positionCell(cell, layout, index, photo);
-    cell.classList.toggle('is-selected',
-      index === state.selectedIndex || Boolean(photo && state.marked?.has(photo.id)));
+    // Marked wears the accent; the keyboard cursor is its own quieter ring,
+    // so where you are is visible inside what you have.
+    cell.classList.toggle('is-selected', Boolean(photo && state.marked?.has(photo.id)) || (!photo && index === state.selectedIndex));
+    cell.classList.toggle('is-focus', index === state.selectedIndex);
     if (cell.dataset.kind === 'photo') {
       showTile(cell, photo);
       const picked = photo.status === 'picked';
@@ -186,7 +185,14 @@ function reconcileGrid(grid, state, actions, layout, range) {
     leftovers.delete(cell);
   }
 
-  grid.replaceChildren(...desired);
+  // Cells are absolutely positioned, so DOM order carries nothing: only what
+  // left the range is removed and only what entered is attached. Cells that
+  // stay are never detached — their focus, and the breathing of a tile still
+  // being made, survive every scroll frame.
+  for (const leftover of leftovers) leftover.remove();
+  for (const cell of desired) {
+    if (cell.parentNode !== grid) grid.append(cell);
+  }
   if (firstMissing !== null) actions.need(firstMissing, lastMissing);
   actions.look(desired.filter((cell) => cell.dataset.kind === 'photo').map((cell) => Number(cell.dataset.photoId)));
 }
@@ -196,7 +202,14 @@ function renderGrid(grid, state, actions) {
 
   if (state.total === 0 && !state.loading) {
     grid.style.height = '';
-    grid.replaceChildren(emptyState(actions));
+    // The same empty state stays put across renders — rebuilding it twice a
+    // second would blink its hover and drop a click mid-swap.
+    const key = `${actions.emptyTitle}|${actions.emptyCopy}|${actions.emptyAction?.label || ''}`;
+    if (grid.firstElementChild?.dataset.emptyKey !== key) {
+      const empty = emptyState(actions);
+      empty.dataset.emptyKey = key;
+      grid.replaceChildren(empty);
+    }
     return;
   }
 

@@ -3,6 +3,10 @@
 // either of these collections, not the RP — chips AND across, values OR
 // within, and any chip excludes instead. A filter is an unsaved smart
 // collection; Save view is what names it.
+//
+// The editor edits a chip of its own; the bar only ever holds chips the
+// library can execute. A new chip joins on its first real value, an emptied
+// chip leaves, and nothing half-made can reach a query.
 
 const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', in: 'In' };
 
@@ -10,7 +14,8 @@ export function createFilterBar({ product, read, update, onChange }) {
   const bar = document.querySelector('[data-chips]');
   const menu = document.querySelector('[data-chip-menu]');
   const editor = document.querySelector('[data-chip-editor]');
-  let editing = null;   // index into chips while the editor is open
+  let editing = null;   // { chip, index } while the editor is open; index null until the chip is in the bar
+  let changeTimer = null;
 
   function chips() {
     return read().chips || [];
@@ -30,6 +35,11 @@ export function createFilterBar({ product, read, update, onChange }) {
     }
     if (chip.is === 'status') return `${not}${chip.values.join(' or ')}`;
     return `${not}${chip.values.join(' or ')}`;
+  }
+
+  function describe(state) {
+    // The view as one sentence — what Save view proposes to call it.
+    return chips().map((chip) => say(chip, state)).join(' · ');
   }
 
   function render(state) {
@@ -52,15 +62,21 @@ export function createFilterBar({ product, read, update, onChange }) {
   }
 
   function commit(next) {
-    update({ chips: next, selected: null, selectedIndex: null, marked: new Set() });
-    onChange();
+    // The pills answer instantly; the library follows one beat later, so a
+    // run of checkbox ticks costs one reload, not one per tick.
+    update({ chips: next });
+    render(read());
+    clearTimeout(changeTimer);
+    changeTimer = setTimeout(onChange, 200);
   }
 
   function place(box, anchor) {
     const at = anchor.getBoundingClientRect();
     box.hidden = false;
-    box.style.left = `${Math.min(at.left, window.innerWidth - box.offsetWidth - 12)}px`;
-    box.style.top = `${at.bottom + 6}px`;
+    box.style.left = `${Math.max(12, Math.min(at.left, window.innerWidth - box.offsetWidth - 12))}px`;
+    const below = at.bottom + 6;
+    const fits = below + box.offsetHeight + 12 <= window.innerHeight;
+    box.style.top = `${fits ? below : Math.max(12, at.top - box.offsetHeight - 6)}px`;
   }
 
   function closeEditor() {
@@ -82,9 +98,8 @@ export function createFilterBar({ product, read, update, onChange }) {
     return row;
   }
 
-  async function openEditor(index, anchor) {
-    const chip = { ...chips()[index] };
-    editing = index;
+  async function openEditor(chip, index, anchor) {
+    editing = { chip, index };
     editor.replaceChildren();
     const title = document.createElement('p');
     title.className = 'eyebrow';
@@ -110,7 +125,7 @@ export function createFilterBar({ product, read, update, onChange }) {
         const date = document.createElement('input');
         date.type = 'date';
         date.value = chip[edge] || '';
-        date.addEventListener('change', () => { chip[edge] = date.value; save(); });
+        date.addEventListener('change', () => { chip[edge] = date.value; save(false); });
         row.append(document.createTextNode(edge === 'from' ? 'From' : 'To'), date);
         editor.append(row);
       }
@@ -121,8 +136,9 @@ export function createFilterBar({ product, read, update, onChange }) {
       } else if (chip.is === 'status') {
         offered = [['picked', 'Picked'], ['unflagged', 'Unflagged']];
       } else {
+        // The collection being looked at would only re-say the view.
         offered = (read().collections || [])
-          .filter((c) => !c.pinned || c.count)
+          .filter((c) => (!c.pinned || c.count) && c.id !== read().collection)
           .map((c) => [c.id, c.name]);
       }
       for (const [value, label] of offered) {
@@ -148,20 +164,40 @@ export function createFilterBar({ product, read, update, onChange }) {
     editor.append(invert);
 
     function save(close = true) {
+      if (!editing) return;
       const next = chips().slice();
-      if ('values' in chip && chip.values.length === 0) next.splice(index, 1);
-      else next[index] = chip;
+      if ('values' in chip && chip.values.length === 0) {
+        // Unchecking the last value is the person saying "done with this".
+        if (editing.index !== null) {
+          next.splice(editing.index, 1);
+          commit(next);
+        }
+        closeEditor();
+        return;
+      }
+      if (editing.index === null) {
+        editing.index = next.length;
+        next.push(chip);
+      } else {
+        next[editing.index] = { ...chip };
+      }
       commit(next);
       if (close) closeEditor();
     }
 
     place(editor, anchor);
+    editor.querySelector('input, button')?.focus();
+    // Stars and dates are born valid — the default is already a sentence, so
+    // it applies on open and the editor refines it. A values chip waits for
+    // its first value.
+    if (editing.index === null && !('values' in chip)) save(false);
   }
 
   // ---- wiring ----
 
   document.querySelector('[data-action="add-chip"]').addEventListener('click', (event) => {
     place(menu, event.currentTarget);
+    menu.querySelector('[data-field]')?.focus();
     event.stopPropagation();
   });
 
@@ -172,42 +208,44 @@ export function createFilterBar({ product, read, update, onChange }) {
     const fresh = field === 'stars' ? { is: 'stars', least: 3 }
       : field === 'taken' ? { is: 'taken', from: '', to: '' }
       : { is: field, values: [] };
-    const next = [...chips(), fresh];
-    update({ chips: next });
-    render(read());
-    const anchor = bar.querySelector(`[data-chip="${next.length - 1}"]`) || bar;
-    void openEditor(next.length - 1, anchor);
+    void openEditor(fresh, null, document.querySelector('[data-action="add-chip"]'));
   });
 
   bar.addEventListener('click', (event) => {
     const drop = event.target.closest('[data-drop]');
     if (drop) {
+      const dropped = Number(drop.dataset.drop);
       const next = chips().slice();
-      next.splice(Number(drop.dataset.drop), 1);
+      next.splice(dropped, 1);
+      if (editing && editing.index !== null) {
+        if (editing.index === dropped) closeEditor();
+        else if (editing.index > dropped) editing.index -= 1;
+      }
       commit(next);
-      closeEditor();
       return;
     }
     const pill = event.target.closest('[data-chip]');
-    if (pill) void openEditor(Number(pill.dataset.chip), pill);
+    if (pill) {
+      const index = Number(pill.dataset.chip);
+      void openEditor({ ...chips()[index] }, index, pill);
+    }
   });
 
   document.addEventListener('click', (event) => {
     if (!editor.hidden && !editor.contains(event.target)
         && !event.target.closest('[data-chip]') && !event.target.closest('[data-field]')) {
-      // an unfinished new chip with nothing chosen leaves with the editor
-      if (editing !== null) {
-        const chip = chips()[editing];
-        if (chip && 'values' in chip && chip.values.length === 0) {
-          const next = chips().slice();
-          next.splice(editing, 1);
-          commit(next);
-        }
-      }
       closeEditor();
     }
     if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
   });
 
-  return Object.freeze({ render, close: closeEditor });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || (editor.hidden && menu.hidden)) return;
+    closeEditor();
+    menu.hidden = true;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  });
+
+  return Object.freeze({ render, describe, close: closeEditor });
 }

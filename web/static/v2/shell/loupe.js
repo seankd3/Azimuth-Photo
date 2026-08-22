@@ -5,7 +5,7 @@
 // around the cursor, a drag pans, Esc steps back to Fit before it closes,
 // and a turn is part of the same transform — the file is never rewritten.
 
-export function createLoupe({ stage, image, inset = () => 0 }) {
+export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {} }) {
   const chip = document.createElement('span');
   chip.className = 'loupe-zoom';
   stage.append(chip);
@@ -82,8 +82,11 @@ export function createLoupe({ stage, image, inset = () => 0 }) {
   }
 
   function show(photo, source) {
-    state.turn = photo.rotate || 0;
     const fresh = image.dataset.source !== source;
+    // The same picture at the same turn has nothing to settle — a background
+    // refresh must not snap a pan or a wheel zoom back to centre.
+    if (!fresh && (photo.rotate || 0) === state.turn) return;
+    state.turn = photo.rotate || 0;
     if (fresh) {
       image.dataset.source = source;
       image.src = source;
@@ -102,6 +105,7 @@ export function createLoupe({ stage, image, inset = () => 0 }) {
     };
     if (image.complete && image.naturalWidth) settle();
     image.onload = settle;
+    image.onerror = () => onTrouble();
   }
 
   function escape() {
@@ -112,9 +116,18 @@ export function createLoupe({ stage, image, inset = () => 0 }) {
     return false;
   }
 
+  function clear() {
+    // A neighbour with no picture yet passes through without ending a
+    // sharpness run: the pending load is dropped, the mode is kept.
+    image.onload = null;
+    image.onerror = null;
+  }
+
   function reset() {
     state.mode = 'fit';
+    state.turn = 0;
     image.onload = null;
+    image.onerror = null;
   }
 
   // ---- hands ----
@@ -151,7 +164,13 @@ export function createLoupe({ stage, image, inset = () => 0 }) {
       // The click asks the sharpness question at this spot — or, already
       // zoomed, steps back to the whole picture.
       if (state.mode === 'zoom') toFit();
-      else zoomAt(event.clientX, event.clientY, Math.max(state.full, state.fit * 1.0001));
+      else {
+        measure();
+        const target = Math.max(state.full, state.fit * 1.0001);
+        // A picture already shown at 1:1 or beyond has nothing sharper to
+        // reveal; the click changes nothing rather than pretending to.
+        if (target > state.fit + 1e-3) zoomAt(event.clientX, event.clientY, target);
+      }
     } else {
       apply();
     }
@@ -175,5 +194,5 @@ export function createLoupe({ stage, image, inset = () => 0 }) {
     else { measure(); apply(); }
   }
 
-  return Object.freeze({ show, toFit, escape, reset, refresh });
+  return Object.freeze({ show, toFit, escape, clear, reset, refresh });
 }

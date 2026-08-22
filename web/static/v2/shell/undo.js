@@ -1,19 +1,30 @@
-// The one Undo toast. It holds a message and the exact way back -- a thunk
-// the caller made from what it just did -- and runs it once. Cull, Trash and
-// Refine all put their last act here, so there is one Undo and one key.
-export function createUndo({ notify }) {
+// The one toast. Every transient message in the app lands here — a cull, a
+// notice, an error — with, when the act can be taken back, the exact way
+// back: a thunk the caller made from what it just did. One surface, always
+// visible over any chrome, and it expires by itself; an Undo expiring drops
+// the revert too, so Ctrl+Z can never reverse a decision the person has
+// stopped thinking about.
+const SHOWN_MS = 8000;
+
+export function createUndo() {
   const toast = document.querySelector('[data-toast]');
+  const button = toast.querySelector('button');
   let revert = null;
+  let timer = null;
 
   function hide() {
+    clearTimeout(timer);
     toast.hidden = true;
     revert = null;
   }
 
-  function show(message, nextRevert) {
+  function show(message, nextRevert = null) {
+    clearTimeout(timer);
     revert = nextRevert;
     toast.querySelector('[data-toast-copy]').textContent = message;
+    button.hidden = !nextRevert;
     toast.hidden = false;
+    timer = setTimeout(hide, SHOWN_MS);
   }
 
   async function run() {
@@ -23,7 +34,7 @@ export function createUndo({ notify }) {
     try {
       await current();
     } catch (reason) {
-      notify(reason.message);
+      show(reason.message);
     }
   }
 
