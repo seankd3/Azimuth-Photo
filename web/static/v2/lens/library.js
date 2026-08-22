@@ -248,7 +248,19 @@ function renderInspector(panel, selected) {
   const heading = element('div', 'inspector-heading');
   heading.append(element('p', 'eyebrow', 'Photo'), element('h2', '', selected.tail || 'Untitled'));
   const facts = element('dl', 'facts');
+  // The score, with its provenance: earned from the rounds this photograph
+  // was actually in, predicted by the taste direction where it was not, and
+  // never a black box. 1200 with no rounds means the ranking has not
+  // reached it yet.
+  const rounds = selected.rounds ?? null;
+  const elo = Math.round(selected.elo || 1200);
+  const score = rounds === null && elo === 1200 ? ''
+    : rounds ? `${elo.toLocaleString()} · ${rounds} round${rounds === 1 ? '' : 's'}`
+      : elo !== 1200 ? `${elo.toLocaleString()} · predicted`
+        : 'Not ranked yet';
   const rows = [
+    ['Score', score],
+    ['Stars', selected.stars ? '★'.repeat(selected.stars) : ''],
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
     ['Where', !selected.placed ? 'Missing — no drive holds it' : selected.reachable ? 'Here' : 'On a drive that is away'],
@@ -256,6 +268,8 @@ function renderInspector(panel, selected) {
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ')],
     ['Lens', selected.lens],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
+    ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
+    ['Folder', selected.tail && selected.tail.includes('/') ? selected.tail.slice(0, selected.tail.lastIndexOf('/')) : ''],
   ];
   for (const [label, value] of rows) {
     if (!value) continue;

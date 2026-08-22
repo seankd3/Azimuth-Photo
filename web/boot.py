@@ -501,7 +501,11 @@ class Library:
             self.conn, digest, photo_id, embedded_metadata.KIND, entry
         ):
             return None
-        return embedded_metadata.decoded(entry)
+        answer = embedded_metadata.decoded(entry)
+        # How this photograph's score is known: the rounds it was actually
+        # in. Zero with a moved score means the ranking predicted it.
+        answer["rounds"] = rank.seen(self.conn).get(digest, 0)
+        return answer
 
     def set_date(self, photo_id: int, value: str) -> str:
         """Correct one capture date as an owner decision and reproject it."""
