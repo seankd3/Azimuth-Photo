@@ -5,10 +5,10 @@
 // around the cursor, a drag pans, Esc steps back to Fit before it closes,
 // and a turn is part of the same transform — the file is never rewritten.
 
-export function createLoupe({ dialog, image, inset = () => 0 }) {
+export function createLoupe({ stage, image, inset = () => 0 }) {
   const chip = document.createElement('span');
   chip.className = 'loupe-zoom';
-  dialog.append(chip);
+  stage.append(chip);
 
   const state = { scale: 1, fit: 1, full: 1, tx: 0, ty: 0, turn: 0, mode: 'fit' };
   let pointer = null;   // {id, x, y, moved} while a drag may be happening
@@ -26,7 +26,7 @@ export function createLoupe({ dialog, image, inset = () => 0 }) {
   function area() {
     // The photograph lives above the filmstrip: the strip is not a curtain
     // over the picture, it takes its slice of the window honestly.
-    const box = dialog.getBoundingClientRect();
+    const box = stage.getBoundingClientRect();
     const pad = inset();
     return { width: box.width, height: box.height - pad,
              cx: box.left + box.width / 2, cy: box.top + (box.height - pad) / 2 };
@@ -158,8 +158,8 @@ export function createLoupe({ dialog, image, inset = () => 0 }) {
   });
   image.addEventListener('pointercancel', () => { pointer = null; apply(); });
 
-  dialog.addEventListener('wheel', (event) => {
-    if (!dialog.open) return;
+  stage.addEventListener('wheel', (event) => {
+    if (stage.hidden) return;
     event.preventDefault();
     const step = event.deltaY < 0 ? 1.18 : 1 / 1.18;
     measure();
@@ -168,7 +168,7 @@ export function createLoupe({ dialog, image, inset = () => 0 }) {
     zoomAt(event.clientX, event.clientY, next);
   }, { passive: false });
 
-  new ResizeObserver(() => { if (dialog.open) (state.mode === 'fit' ? toFit : apply)(); }).observe(dialog);
+  new ResizeObserver(() => { if (!stage.hidden) (state.mode === 'fit' ? toFit : apply)(); }).observe(stage);
 
   function refresh() {
     if (state.mode === 'fit') toFit();

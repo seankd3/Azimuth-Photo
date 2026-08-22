@@ -25,12 +25,36 @@ const driveForm = document.querySelector('[data-drive-form]');
 const driveError = document.querySelector('[data-drive-error]');
 const loupe = document.querySelector('[data-loupe]');
 const loupeImage = document.querySelector('[data-loupe-image]');
+const shell = document.querySelector('.app-shell');
 const loupeStrip = document.querySelector('[data-loupe-strip]');
+const loupeOpen = () => read().view === 'loupe';
 const loupeView = createLoupe({
-  dialog: loupe,
+  stage: loupe,
   image: loupeImage,
   inset: () => (loupe.classList.contains('is-full') ? 0 : loupeStrip.offsetHeight),
 });
+
+// The chrome folds, LRC-style: each panel gives its edge to the
+// photographs and the tab at that edge brings it back. Tab folds the
+// sides, Shift+Tab everything; the choice is remembered across launches.
+const PANELS_KEY = 'azimuth.panels';
+function loadPanels() {
+  try {
+    const held = JSON.parse(localStorage.getItem(PANELS_KEY) || '');
+    return { left: held.left !== false, right: held.right !== false, top: held.top !== false };
+  } catch {
+    return { left: true, right: true, top: true };
+  }
+}
+function setPanels(panels, { remember = true } = {}) {
+  update({ panels });
+  if (remember) localStorage.setItem(PANELS_KEY, JSON.stringify(panels));
+}
+function togglePanel(side) {
+  const panels = { ...read().panels, [side]: !read().panels[side] };
+  setPanels(panels);
+}
+let panelsBeforeFull = null;
 
 // The photographs beside this one, already decoded, so an arrow is one
 // frame — the same warming Refine's stage uses. A small held set keeps the
@@ -56,7 +80,7 @@ function warmNeighbours(index) {
 // make it flicker or steal a scroll position mid-browse.
 let stripKey = '';
 function renderStrip(state) {
-  if (!loupe.open || loupe.classList.contains('is-full')) return;
+  if (!loupeOpen() || loupe.classList.contains('is-full')) return;
   const current = state.selectedIndex ?? 0;
   const start = Math.max(0, current - 14);
   const end = Math.min(state.total, current + 15);
@@ -96,12 +120,19 @@ function renderStrip(state) {
 }
 
 function toggleFull(on = !loupe.classList.contains('is-full')) {
+  // The clean room: the strip and every panel leave together, and what was
+  // folded before F is put back exactly when F ends.
   loupe.classList.toggle('is-full', on);
-  loupeView.refresh();
-  if (!on) {
+  if (on) {
+    panelsBeforeFull = { ...read().panels };
+    setPanels({ left: false, right: false, top: false }, { remember: false });
+  } else {
+    setPanels(panelsBeforeFull || loadPanels(), { remember: false });
+    panelsBeforeFull = null;
     stripKey = '';
     renderStrip(read());
   }
+  loupeView.refresh();
 }
 const status = document.querySelector('[data-status]');
 let noticeTimer = null;
@@ -354,8 +385,8 @@ function closeDriveDialog() {
 
 
 function closeLoupe() {
-  if (loupe.open) loupe.close();
-  loupe.classList.remove('is-full');
+  if (loupe.classList.contains('is-full')) toggleFull(false);
+  if (loupeOpen()) update({ view: 'library' });
   loupeStrip.replaceChildren();
   stripKey = '';
   loupeView.reset();
@@ -624,7 +655,7 @@ function scrollIndexIntoView(index) {
   }
 }
 
-async function selectIndex(index, { open = loupe.open } = {}) {
+async function selectIndex(index, { open = loupeOpen() } = {}) {
   if (read().total === 0) {
     update({ selected: null, selectedIndex: null });
     return;
@@ -637,7 +668,7 @@ async function selectIndex(index, { open = loupe.open } = {}) {
   scrollIndexIntoView(bounded);
   selectPhoto(bounded);
   scheduleGrid();
-  if (!loupe.open) requestAnimationFrame(() => grid.querySelector(`[data-index="${bounded}"]`)?.focus());
+  if (!loupeOpen()) requestAnimationFrame(() => grid.querySelector(`[data-index="${bounded}"]`)?.focus());
   if (open) showPhoto(photo);
 }
 
@@ -647,8 +678,8 @@ function showPhoto(photo) {
   // told this photograph is what is being looked at). When the row changes
   // under an open loupe, `renderLoupe` swaps the picture in.
   product.look([photo.id]).catch(() => {});
+  if (!loupeOpen()) update({ view: 'loupe' });
   renderLoupe(photo);
-  if (!loupe.open) loupe.showModal();
   renderStrip(read());
   if (read().selectedIndex !== null) warmNeighbours(read().selectedIndex);
 }
@@ -722,7 +753,7 @@ function renderChrome(state) {
   collectionsPanel.render(state);
   filterBar.render(state);
   library.renderInspector(inspector, state.selected);
-  if (loupe.open && state.selected) {
+  if (state.view === 'loupe' && state.selected) {
     renderLoupe(state.selected);
     renderStrip(state);
     if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
@@ -741,18 +772,24 @@ function renderChrome(state) {
       : '');
   const searching = state.view === 'library' && Boolean(state.query);
   const refining = state.view === 'refine';
-  grid.hidden = refining;
+  const holding = state.view === 'loupe';
+  shell.classList.toggle('hide-left', !state.panels.left);
+  shell.classList.toggle('hide-right', !state.panels.right);
+  shell.classList.toggle('hide-top', !state.panels.top);
+  loupe.hidden = !holding;
+  grid.hidden = refining || holding;
   document.querySelector('[data-refine]').hidden = !refining;
   document.querySelector('[data-refine-progress]').hidden = !refining;
   document.querySelector('[data-refine-size]').hidden = !refining;
   document.querySelector('[data-action="refine"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-refine"]').hidden = !refining;
-  document.querySelector('[data-result-label]').hidden = refining;
-  document.querySelector('[data-density]').closest('label').hidden = refining;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining || searching;
+  document.querySelector('[data-result-label]').hidden = refining || holding;
+  document.querySelector('[data-density]').closest('label').hidden = refining || holding;
+  document.querySelector('[data-action="add-chip"]').hidden = refining || holding || state.view === 'trash';
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining || searching || holding;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
-  const canCull = state.view === 'library' && Boolean(state.selected?.hash);
+  const canCull = (state.view === 'library' || state.view === 'loupe') && Boolean(state.selected?.hash);
   document.querySelector('[data-cull-actions]').hidden = !canCull;
   document.querySelector('[data-action="pick"]').hidden = !canCull || state.selected.status === 'picked';
   document.querySelector('[data-action="clear-pick"]').hidden = !canCull || state.selected.status !== 'picked';
@@ -786,7 +823,7 @@ function renderChrome(state) {
 }
 
 function render(state) {
-  if (state.view !== 'refine') visibleGrid();
+  if (state.view !== 'refine' && state.view !== 'loupe') visibleGrid();
   renderChrome(state);
 }
 
@@ -856,6 +893,9 @@ document.addEventListener('click', (event) => {
   if (action === 'check-new') intakeWorkflow.checkNew();
   if (action === 'check-all') intakeWorkflow.checkAll();
   if (action === 'check-none') intakeWorkflow.checkNone();
+  if (action === 'toggle-left') togglePanel('left');
+  if (action === 'toggle-right') togglePanel('right');
+  if (action === 'toggle-top') togglePanel('top');
   if (action === 'new-collection') collectionsPanel.create(event.target);
   if (action === 'save-view') collectionsPanel.saveView(event.target);
   if (action === 'keep-results') collectionsPanel.keepResults(event.target);
@@ -893,7 +933,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
-    if (loupe.open) {
+    if (loupeOpen()) {
       if (!loupeView.escape()) closeLoupe();
     }
     else if (refineWorkflow.isOpen()) refineWorkflow.close();
@@ -909,6 +949,18 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (isTyping || driveDialog.open || trashWorkflow.isOpen()) return;
+  if (event.key === 'Tab') {
+    const panels = read().panels;
+    if (event.shiftKey) {
+      const any = panels.left || panels.right || panels.top;
+      setPanels({ left: !any, right: !any, top: !any });
+    } else {
+      const sides = panels.left || panels.right;
+      setPanels({ ...panels, left: !sides, right: !sides });
+    }
+    event.preventDefault();
+    return;
+  }
   if (refineWorkflow.isOpen()) {
     if (refineWorkflow.key(event)) event.preventDefault();
     return;
@@ -916,13 +968,13 @@ document.addEventListener('keydown', (event) => {
 
   const current = read().selectedIndex;
   const key = event.key.toLowerCase();
-  if (key === 'b' && read().view === 'library' && selection().length) {
+  if (key === 'b' && ['library', 'loupe'].includes(read().view) && selection().length) {
     collectionsPanel.toss();
     event.preventDefault();
     return;
   }
-  if (key === 'f' && read().view === 'library') {
-    if (loupe.open) toggleFull();
+  if (key === 'f' && ['library', 'loupe'].includes(read().view)) {
+    if (loupeOpen()) toggleFull();
     else if (read().selected) {
       showPhoto(read().selected);
       toggleFull(true);
@@ -931,7 +983,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnLeft' : 'turnRight' };
-  if (key in cullActions && read().view === 'library' && read().selected?.hash) {
+  if (key in cullActions && ['library', 'loupe'].includes(read().view) && read().selected?.hash) {
     cullWorkflow.apply(cullActions[key]);
     event.preventDefault();
     return;
@@ -987,9 +1039,6 @@ grid.addEventListener('contextmenu', (event) => {
 
 workspace.addEventListener('scroll', scheduleGrid, { passive: true });
 new ResizeObserver(scheduleGrid).observe(workspace);
-loupe.addEventListener('click', (event) => {
-  if (event.target === loupe) closeLoupe();
-});
 loupeStrip.addEventListener('click', (event) => {
   const cell = event.target.closest('.strip-cell');
   if (cell) selectIndex(Number(cell.dataset.index));
@@ -1000,12 +1049,8 @@ loupeStrip.addEventListener('wheel', (event) => {
   event.preventDefault();
   event.stopPropagation();
 }, { passive: false });
-loupe.addEventListener('close', () => {
-  loupeImage.removeAttribute('src');
-  delete loupeImage.dataset.source;
-  loupeImage.alt = '';
-});
 
+setPanels(loadPanels(), { remember: false });
 subscribe(render);
 product.home().then((where) => (where
   ? Promise.all([loadView(), loadFolders(), collectionsPanel.refresh()])

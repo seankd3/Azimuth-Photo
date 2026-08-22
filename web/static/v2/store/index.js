@@ -6,6 +6,7 @@ const state = {
   drives: [],
   folder: null,
   marked: new Set(),
+  panels: { left: true, right: true, top: true },
   folders: [],
   open: new Set(),
   photos: new Map(),

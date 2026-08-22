@@ -95,6 +95,12 @@
       </div>
       <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
       <section class="refine-stage" data-refine aria-label="Refine" hidden></section>
+      <section class="loupe-stage" data-loupe aria-label="Photo preview" hidden>
+        <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
+        <img data-loupe-image alt="">
+        <p class="loupe-note" data-loupe-note hidden></p>
+        <div class="loupe-strip" data-loupe-strip role="listbox" aria-label="Nearby photographs"></div>
+      </section>
     </main>
 
     <aside class="inspector" aria-label="Photo information" data-inspector>
@@ -125,12 +131,9 @@
     </form>
   </dialog>
 
-  <dialog class="loupe" data-loupe aria-label="Photo preview">
-    <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
-    <img data-loupe-image alt="">
-    <p class="loupe-note" data-loupe-note hidden></p>
-    <div class="loupe-strip" data-loupe-strip role="listbox" aria-label="Nearby photographs"></div>
-  </dialog>
+  <button class="panel-tab tab-left" type="button" data-action="toggle-left" aria-label="Show or hide the left panel">‹</button>
+  <button class="panel-tab tab-right" type="button" data-action="toggle-right" aria-label="Show or hide the right panel">›</button>
+  <button class="panel-tab tab-top" type="button" data-action="toggle-top" aria-label="Show or hide the top bar">˄</button>
 
   <dialog class="confirm-dialog" data-empty-dialog aria-labelledby="empty-title">
     <form data-empty-form>
