@@ -69,6 +69,15 @@ export function createSearchCards({ product, read, update, box, search, applyChi
       }));
     if (collections.length) sections.push(['Collections', collections]);
 
+    // What the library proposes about itself: tilde-counted until a label
+    // earns its threshold.
+    const clusters = (read().clusters || []).filter((c) => match(c.term)).slice(0, query ? 4 : 5)
+      .map((c) => ({
+        label: c.term, count: `~${c.count.toLocaleString()}`, glyph: '◇',
+        run: () => applyChip({ is: 'alike', values: [c.term] }),
+      }));
+    if (clusters.length) sections.push(['Clusters', clusters]);
+
     const years = held.years.filter((y) => match(y.year)).slice(0, query ? 3 : 6)
       .map((y) => ({
         label: y.year, count: y.photos, glyph: '▤',
@@ -125,7 +134,7 @@ export function createSearchCards({ product, read, update, box, search, applyChi
         if (entry.count !== undefined) {
           const count = document.createElement('span');
           count.className = 'drop-count';
-          count.textContent = entry.count.toLocaleString();
+          count.textContent = typeof entry.count === 'number' ? entry.count.toLocaleString() : entry.count;
           row.append(count);
         }
         rows.push(row);

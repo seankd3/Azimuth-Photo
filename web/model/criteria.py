@@ -44,6 +44,7 @@ FIELDS = {
     "camera": ("values",),
     "status": ("values",),
     "orientation": ("values",),
+    "alike": ("values",),
     "stars": ("least",),
     "taken": ("from", "to"),
 }
@@ -117,6 +118,8 @@ def compile(conn, chips, _seen: frozenset = frozenset()) -> Scope:
             built = scopes.status(chip["values"])
         elif field == "orientation":
             built = scopes.orientation(chip["values"])
+        elif field == "alike":
+            built = scopes.alike(chip["values"])
         elif field == "stars":
             built = scopes.starred(chip["least"])
         else:

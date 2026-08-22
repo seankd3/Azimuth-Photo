@@ -456,6 +456,15 @@ class Library:
         return {"years": years, "cameras": self.cameras(),
                 "orientations": orientations, "roots": roots}
 
+    def clusters(self) -> list[dict]:
+        """The clusters proposing themselves right now: term and tilde-count,
+        largest first, excluding what has already been kept."""
+
+        import clusters as proposing
+
+        self._open()
+        return proposing.proposals(self.conn)
+
     # ---- refine ----
 
     def refining(self, view: dict | None) -> Scope:
@@ -652,6 +661,7 @@ class OwnedLibrary:
         self._warming = False
         self._ranked = None            # (last round row, vector count) already written
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
+        self._clustered = None         # (vector count, palette stamp) already assigned
         # Bringing photographs in has its own lane: a card takes minutes, and
         # neither browsing nor the minute sweep may wait behind it.
         self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
@@ -750,6 +760,14 @@ class OwnedLibrary:
             _count, subjects, vectors = self._space
             queries.rerank(conn, subjects, vectors)
             self._ranked = key
+            # Clusters ride the same rhythm: when the space grew, every
+            # photograph re-names its strongest resemblance, rewritten whole.
+            import clusters
+
+            stamp = clusters.available(self._library.catalog_path)
+            if stamp and self._clustered != (key[1], stamp):
+                clusters.recluster(conn, subjects, vectors, self._library.catalog_path)
+                self._clustered = (key[1], stamp)
         finally:
             conn.close()
 

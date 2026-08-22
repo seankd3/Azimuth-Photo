@@ -2,6 +2,7 @@ const state = {
   chips: [],
   collection: null,
   collections: [],
+  clusters: [],
   counts: { photos: 0, starred: 0, unidentified: 0, trash: 0 },
   drives: [],
   folder: null,

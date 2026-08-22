@@ -8,7 +8,7 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
-const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', in: 'In' };
+const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', alike: 'Alike', in: 'In' };
 
 export function createFilterBar({ product, read, update, onChange }) {
   const bar = document.querySelector('[data-chips]');
@@ -33,7 +33,7 @@ export function createFilterBar({ product, read, update, onChange }) {
       const names = new Map((state.collections || []).map((c) => [c.id, c.name]));
       return `${not}in ${chip.values.map((v) => names.get(v) || v).join(' or ')}`;
     }
-    if (chip.is === 'status') return `${not}${chip.values.join(' or ')}`;
+    if (chip.is === 'alike') return `${not}≈ ${chip.values.join(' or ')}`;
     return `${not}${chip.values.join(' or ')}`;
   }
 
@@ -137,6 +137,10 @@ export function createFilterBar({ product, read, update, onChange }) {
         offered = [['picked', 'Picked'], ['unflagged', 'Unflagged']];
       } else if (chip.is === 'orientation') {
         offered = [['landscape', 'Landscape'], ['portrait', 'Portrait'], ['square', 'Square']];
+      } else if (chip.is === 'alike') {
+        // The proposals plus whatever this chip already wears.
+        const proposed = (read().clusters || []).map((c) => c.term);
+        offered = [...new Set([...chip.values, ...proposed])].map((t) => [t, t]);
       } else {
         // The collection being looked at would only re-say the view.
         offered = (read().collections || [])

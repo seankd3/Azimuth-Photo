@@ -2,6 +2,7 @@ import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCullWorkflow, CULL_MENU } from './cull.js';
+import { createClustersPanel } from './clusters.js';
 import { createCollectionsPanel } from './collections.js';
 import { createFilterBar } from './filters.js';
 import { createIntakeWorkflow } from './intake.js';
@@ -233,6 +234,22 @@ const filterBar = createFilterBar({
   read,
   update,
   onChange: () => viewMoved(),
+});
+const clustersPanel = createClustersPanel({
+  product,
+  read,
+  update,
+  notify,
+  browse: (term) => {
+    // A cluster row is a place to go: the view becomes just this proposal.
+    searchBox.value = '';
+    const chips = [{ is: 'alike', values: [term] }];
+    if (read().view === 'refine') update({ folder: null, collection: null, chips, query: '' });
+    else update({ view: 'library', folder: null, collection: null, chips, query: '',
+                  selected: null, selectedIndex: null });
+    viewMoved();
+  },
+  kept: () => Promise.all([collectionsPanel.refresh(), clustersPanel.refresh()]),
 });
 const refineWorkflow = createRefineWorkflow({
   product,
@@ -507,16 +524,17 @@ async function refreshInPlace() {
   const generation = pages.generation;
   const { view, query } = read();
   const key = JSON.stringify(viewOf());
-  const [counts, drives, trashCount, size, collections] = await Promise.all([
+  const [counts, drives, trashCount, size, collections, clusters] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
     view === 'trash' || query ? Promise.resolve(0) : product.size(viewOf()),
     product.collections(),
+    product.clusters().catch(() => read().clusters),
   ]);
   if (!pages.isCurrent(generation) || read().view !== view
       || JSON.stringify(viewOf()) !== key || read().query !== query) return;
   await pages.refresh(view === 'trash' ? trashCount : query ? read().total : size);
   if (!pages.isCurrent(generation)) return;
-  update({ counts: { ...counts, trash: trashCount }, drives, collections });
+  update({ counts: { ...counts, trash: trashCount }, drives, collections, clusters });
   const { selected, photos } = read();
   if (!selected) return;
   for (const [index, photo] of photos) {
@@ -903,6 +921,7 @@ function renderFolders(state) {
 
 function renderChrome(state) {
   collectionsPanel.render(state);
+  clustersPanel.render(state);
   filterBar.render(state);
   library.renderInspector(inspector, state.selected);
   if (state.view === 'loupe' && state.selected) {
@@ -1266,6 +1285,6 @@ loupeStrip.addEventListener('wheel', (event) => {
 setPanels(loadPanels(), { remember: false });
 subscribe(render);
 product.home().then((where) => (where
-  ? Promise.all([loadView(), loadFolders(), collectionsPanel.refresh()])
+  ? Promise.all([loadView(), loadFolders(), collectionsPanel.refresh(), clustersPanel.refresh()])
   : chooseHome()));
 followLibrary();

@@ -44,6 +44,10 @@
         </div>
         <div class="collection-tree" data-collections-tree></div>
       </section>
+      <section data-clusters-section hidden>
+        <div class="section-heading"><p class="eyebrow">Clusters</p></div>
+        <div class="collection-tree" data-clusters-list></div>
+      </section>
       <section>
         <div class="section-heading"><p class="eyebrow">Folders</p></div>
         <div class="folder-tree" data-folder-tree></div>
@@ -167,6 +171,10 @@
 
   <menu class="context-menu" data-drive-menu hidden>
     <button type="button" data-action="rescan-drive">Re-scan now</button>
+  </menu>
+
+  <menu class="context-menu" data-cluster-menu hidden>
+    <button type="button" data-action="keep-cluster">Keep as a collection</button>
   </menu>
 
   <menu class="context-menu" data-collection-menu hidden>

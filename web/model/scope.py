@@ -191,6 +191,26 @@ def status(values) -> Scope:
     return Scope(f"i.status IN ({marks})", tuple(wanted))
 
 
+def alike(terms) -> Scope:
+    """Wears one of these names — a proposal, not a fact.
+
+    Names are tags, not a partition: each photograph's row holds its
+    strongest few as a JSON list, rewritten whole as the space grows, so
+    this reads whatever the current answer is; a name that no longer exists
+    honestly matches nothing.
+    """
+
+    wanted = sorted({str(t).strip() for t in terms if str(t).strip()})
+    if not wanted:
+        return EVERYTHING
+    marks = ",".join("?" for _ in wanted)
+    return Scope(
+        "i.content_hash IN (SELECT c.hash FROM cache c, json_each(CAST(c.value AS TEXT)) j"
+        f" WHERE c.kind = 'alike' AND c.state = 'ready' AND j.value IN ({marks}))",
+        tuple(wanted),
+    )
+
+
 def orientation(values) -> Scope:
     """Filed sideways or upright — the shape as shown, not as stored.
 
