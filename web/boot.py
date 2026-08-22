@@ -457,13 +457,21 @@ class Library:
                 "orientations": orientations, "roots": roots}
 
     def clusters(self) -> list[dict]:
-        """The clusters proposing themselves right now: term and tilde-count,
-        largest first, excluding what has already been kept."""
+        """The clusters proposing themselves right now: term, tilde-count and
+        the faces of the group — its three best-ranked tiles — largest first,
+        excluding what has already been kept."""
 
         import clusters as proposing
+        from model.scope import alike
 
         self._open()
-        return proposing.proposals(self.conn)
+        out = proposing.proposals(self.conn)
+        for entry in out:
+            rows = self._with_urls(queries.photos(
+                self.conn, scope=alike([entry["term"]]), sort="best", limit=3,
+                renditions=self.tiles.renditions, reachable_on=self._here()))
+            entry["samples"] = [row["tile"] for row in rows if row.get("tile")]
+        return out
 
     # ---- refine ----
 

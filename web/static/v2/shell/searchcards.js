@@ -74,6 +74,7 @@ export function createSearchCards({ product, read, update, box, search, applyChi
     const clusters = (read().clusters || []).filter((c) => match(c.term)).slice(0, query ? 4 : 5)
       .map((c) => ({
         label: c.term, count: `~${c.count.toLocaleString()}`, glyph: '◇',
+        strip: c.samples || [],
         run: () => applyChip({ is: 'alike', values: [c.term] }),
       }));
     if (clusters.length) sections.push(['Clusters', clusters]);
@@ -131,6 +132,19 @@ export function createSearchCards({ product, read, update, box, search, applyChi
         label.className = 'drop-label';
         label.textContent = entry.label;
         row.append(glyph, label);
+        if (entry.strip?.length) {
+          // The faces of the group: its three best-ranked tiles.
+          const strip = document.createElement('span');
+          strip.className = 'drop-strip';
+          for (const source of entry.strip.slice(0, 3)) {
+            const tile = document.createElement('img');
+            tile.src = source;
+            tile.alt = '';
+            tile.decoding = 'async';
+            strip.append(tile);
+          }
+          row.append(strip);
+        }
         if (entry.count !== undefined) {
           const count = document.createElement('span');
           count.className = 'drop-count';

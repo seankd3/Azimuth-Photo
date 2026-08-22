@@ -66,14 +66,49 @@ def available(catalog_path) -> str | None:
 # the owner's own answers.
 MARGIN = 0.9
 MOST = 4
+# A group found in the space itself only earns a row when the palette has
+# not already told its story through the tags of most of its members.
+TOLD = 0.6
+
+
+def _groups(matrix, floor: int):
+    """The space's own structure: k-means blobs, as (member-index lists).
+
+    Plain Lloyd over the unit vectors — cosine and euclidean agree there —
+    seeded so the same space yields the same groups every pass.
+    """
+
+    import numpy as np
+
+    n = len(matrix)
+    k = max(4, min(40, n // 12))
+    if n < 2 * k:
+        return []
+    rng = np.random.default_rng(7)
+    centers = matrix[rng.choice(n, size=k, replace=False)].copy()
+    assign = np.zeros(n, dtype=np.int64)
+    for _ in range(20):
+        assign = (matrix @ centers.T).argmax(axis=1)
+        for c in range(k):
+            mine = matrix[assign == c]
+            if len(mine):
+                centers[c] = mine.mean(axis=0)
+                centers[c] /= np.linalg.norm(centers[c]) or 1.0
+    return [np.flatnonzero(assign == c) for c in range(k)
+            if floor <= (assign == c).sum()]
 
 
 def recluster(conn, subjects, matrix, catalog_path) -> int:
-    """Every embedded photograph's strongest palette resemblances, rewritten
-    whole — the same wholesale rhythm `rerank` uses for elo and stars. One
-    row per photograph, its names as a JSON list, strongest first."""
+    """Every embedded photograph's names, rewritten whole — the same
+    wholesale rhythm `rerank` uses for elo and stars. One row per
+    photograph, a JSON list: its strongest palette resemblances, plus the
+    name of any group the space itself formed around it that the palette
+    had not already told. Both kinds of name ride the same rows, so the
+    shelf, the chips and Keep never learn the difference."""
 
     import json
+
+    import numpy as np
 
     held = vectors(catalog_path)
     if held is None or not len(subjects):
@@ -81,15 +116,33 @@ def recluster(conn, subjects, matrix, catalog_path) -> int:
     scores = matrix @ held.T
     names = [name for name, _ in palette.PALETTE]
     order = scores.argsort(axis=1)
-    rows = []
-    for row, subject in enumerate(subjects):
+    worn = []
+    for row in range(len(subjects)):
         best = float(scores[row, order[row, -1]])
-        worn = [
+        worn.append([
             names[int(pick)]
             for pick in order[row, ::-1][:MOST]
             if float(scores[row, int(pick)]) >= MARGIN * best
-        ]
-        rows.append((subject, KIND, STAMP, json.dumps(worn)))
+        ])
+
+    floor = max(4, len(subjects) // 200)
+    taken = set(names)
+    for members in _groups(matrix, floor):
+        centre = matrix[members].mean(axis=0)
+        centre /= np.linalg.norm(centre) or 1.0
+        voice = (centre @ held.T).argsort()[::-1]
+        first, second = names[int(voice[0])], names[int(voice[1])]
+        told = sum(1 for m in members if first in worn[m]) / len(members)
+        if told >= TOLD:
+            continue
+        name = f"{first} · {second}"
+        if name in taken:
+            continue
+        taken.add(name)
+        for m in members:
+            worn[int(m)].append(name)
+
+    rows = [(subject, KIND, STAMP, json.dumps(mine)) for subject, mine in zip(subjects, worn)]
     conn.execute("DELETE FROM cache WHERE kind = ?", (KIND,))
     conn.executemany(
         "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"

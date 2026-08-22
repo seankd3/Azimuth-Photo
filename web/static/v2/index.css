@@ -608,6 +608,8 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .drop-row.is-cursor .drop-glyph { color: var(--accent); }
 .drop-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .drop-count { flex: none; color: var(--text-3); font: 12px/1.4 var(--mono); }
+.drop-strip { display: flex; flex: none; gap: 3px; }
+.drop-strip img { width: 26px; height: 26px; object-fit: cover; border-radius: 2px; background: #16171b; }
 .drop-everything { justify-content: space-between; color: var(--text); }
 .drop-everything kbd {
   padding: 1px 6px;
