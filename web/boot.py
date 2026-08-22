@@ -252,8 +252,10 @@ class Library:
         self.conn.commit()
         out = []
         for entry in sets.all(self.conn, kind=sets.COLLECTION):
+            # The number on the row is the number the row opens to: the
+            # shelf's union, not the parent's own members alone.
             clause, args = scope_where(all_of(
-                Scope(queries.IN_LIBRARY), criteria.resolve(self.conn, entry["id"])))
+                Scope(queries.IN_LIBRARY), self._shelf(entry["id"])))
             count = int(self.conn.execute(
                 f"SELECT COUNT(DISTINCT i.content_hash) FROM images i WHERE {clause}", args
             ).fetchone()[0])
@@ -264,17 +266,38 @@ class Library:
             })
         return out
 
+    def _taken_name(self, name: str, but: str | None = None) -> None:
+        held = str(name).strip().lower()
+        for entry in sets.all(self.conn, kind=sets.COLLECTION):
+            if entry["id"] != but and str(entry.get("name", "")).lower() == held:
+                raise ValueError(f"A collection called “{name}” is already there.")
+
     def create_collection(self, name: str, chips=None) -> dict:
         self._open()
+        self._taken_name(name)
         set_id = sets.create(self.conn, name, criteria=chips)
         self.conn.commit()
         return {"id": set_id, "name": str(name).strip(), "smart": bool(chips)}
 
     def rename_collection(self, set_id: str, name: str) -> dict | None:
+        """Rename the collection — and the shelf under it. `America/Utah`
+        means nothing once `America` is `USA`, so the children's prefixes
+        follow in the same commit."""
+
         self._open()
+        self._taken_name(name, but=set_id)
+        was = sets.describe(self.conn, set_id)
         said = sets.rename(self.conn, set_id, name)
+        followed = 0
+        if said is not None and was is not None:
+            prefix = str(was.get("name", "")) + "/"
+            for entry in sets.all(self.conn, kind=sets.COLLECTION):
+                held = str(entry.get("name", ""))
+                if entry["id"] != set_id and held.startswith(prefix):
+                    sets.rename(self.conn, entry["id"], str(name).strip() + "/" + held[len(prefix):])
+                    followed += 1
         self.conn.commit()
-        return said
+        return {**said, "followed": followed} if said is not None else None
 
     def forget_collection(self, set_id: str) -> bool:
         self._open()
@@ -307,9 +330,12 @@ class Library:
     def add_to_collection(self, set_id: str, photo_ids) -> dict:
         self._open()
         self._fixed_only(set_id)
-        added = sets.add(self.conn, set_id, self._identities(photo_ids))
+        wanted = self._identities(photo_ids)
+        # The count reported is what actually joined, not what was handed in.
+        newly = len(set(wanted) - set(sets.members(self.conn, set_id)))
+        sets.add(self.conn, set_id, wanted)
         self.conn.commit()
-        return {"added": added}
+        return {"added": newly}
 
     def remove_from_collection(self, set_id: str, photo_ids) -> dict:
         self._open()
@@ -433,15 +459,19 @@ class Library:
         self._open()
         return rank.retract(self.conn, int(decision))
 
-    def forget_missing(self, folder: str = "") -> dict:
+    def forget_missing(self, folder: str = "", dry: bool = False) -> dict:
         """Forget every photograph under a folder (or anywhere) that no drive
-        holds -- Lightroom's remove-missing, scoped to the tree."""
+        holds -- Lightroom's remove-missing, scoped to the tree. With `dry`
+        it only counts, so the window can say what one click would do."""
 
         self._open()
         clause, args = scope_where(in_folder(folder) if folder else EVERYTHING)
-        cursor = self.conn.execute(
-            f"DELETE FROM images WHERE id IN (SELECT i.id FROM images i WHERE {queries.IN_LIBRARY} AND ({clause})"
-            f" AND NOT EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id))", args)
+        missing = (f"SELECT i.id FROM images i WHERE {queries.IN_LIBRARY} AND ({clause})"
+                   f" AND NOT EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id)")
+        if dry:
+            count = int(self.conn.execute(f"SELECT COUNT(*) FROM ({missing})", args).fetchone()[0])
+            return {"forgotten": count, "dry": True}
+        cursor = self.conn.execute(f"DELETE FROM images WHERE id IN ({missing})", args)
         self.conn.commit()
         return {"forgotten": int(cursor.rowcount)}
 

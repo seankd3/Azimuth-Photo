@@ -186,8 +186,8 @@ class Desktop:
     def forget(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.forget(photo_ids))
 
-    def forget_missing(self, folder: str = "") -> dict:
-        return self._run(lambda library: library.forget_missing(str(folder or "")))
+    def forget_missing(self, folder: str = "", dry: bool = False) -> dict:
+        return self._run(lambda library: library.forget_missing(str(folder or ""), dry=bool(dry)))
 
     # ---- bringing photographs in ----
 
