@@ -48,6 +48,7 @@ export const library = Object.freeze({
   cameras: () => invoke('cameras'),
   facets: () => invoke('facets'),
   clusters: () => invoke('clusters'),
+  namePerson: (exemplar, name) => invoke('name_person', exemplar, name),
   round: (winnerId, overIds) => invoke('round', winnerId, overIds),
   unround: (decision) => invoke('unround', decision),
   forgetMissing: (folder = '', dry = false) => invoke('forget_missing', folder, dry),

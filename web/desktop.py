@@ -119,6 +119,9 @@ class Desktop:
     def pulse(self) -> dict:
         pulse = self._run(lambda library: library.pulse())
         pulse["cards"] = len(self._product.cards)
+        # The rank lane's derived rewrites (clusters, people): the window
+        # re-asks for them when this moves, same as done and swept.
+        pulse["shaped"] = self._product.shaped
         return pulse
 
     def photos(self, sort: str = "newest", limit: int = 200, offset: int = 0,
@@ -204,6 +207,12 @@ class Desktop:
 
     def clusters(self) -> list[dict]:
         return self._run(lambda library: library.clusters())
+
+    def name_person(self, exemplar: str, called: str) -> dict:
+        said = self._run(lambda library: library.name_person(str(exemplar), str(called)))
+        # The groups rewrite around the new name on the rank lane.
+        self._product.rank_soon()
+        return said
 
     # ---- refine ----
 

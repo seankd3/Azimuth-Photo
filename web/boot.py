@@ -16,6 +16,7 @@ import time
 from typing import Callable, TypeVar
 
 import embed
+import faces
 import library as queries
 import metadata as embedded_metadata
 import model
@@ -43,6 +44,9 @@ class Library:
         # model runs, never evicted. On the worker like any other kind, so a
         # fresh library grows its own space photo by photo.
         self.space = embed.kind(self.tiles)
+        # Faces ride the same worker: found on the CPU, kept forever, and
+        # clustered into people on the rank lane's rhythm.
+        self.looking_at_people = faces.kind(self.tiles)
         self.conn = model.connect(self.catalog_path)
         try:
             embedded_metadata.reindex(self.conn)
@@ -57,7 +61,7 @@ class Library:
         self.swept = 0
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
-            (embedded_metadata.KIND, *self.tiles.kinds, self.space),
+            (embedded_metadata.KIND, *self.tiles.kinds, self.space, self.looking_at_people),
             on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
             # A decode is one core for a third of a second; a quarter of the
@@ -456,22 +460,46 @@ class Library:
         return {"years": years, "cameras": self.cameras(),
                 "orientations": orientations, "roots": roots}
 
-    def clusters(self) -> list[dict]:
-        """The clusters proposing themselves right now: term, tilde-count and
-        the faces of the group — its three best-ranked tiles — largest first,
-        excluding what has already been kept."""
+    def _sample_tiles(self, scope) -> list[str]:
+        rows = self._with_urls(queries.photos(
+            self.conn, scope=scope, sort="best", limit=3,
+            renditions=self.tiles.renditions, reachable_on=self._here()))
+        return [row["tile"] for row in rows if row.get("tile")]
 
+    def clusters(self) -> list[dict]:
+        """The clusters proposing themselves right now: terms and named
+        people with tilde-counts and the faces of each group (its three
+        best-ranked tiles), plus the people not yet introduced — each a
+        "Someone" carrying the exemplar face a Name decision would land on."""
+
+        import people as persons
         import clusters as proposing
         from model.scope import alike
 
         self._open()
         out = proposing.proposals(self.conn)
         for entry in out:
-            rows = self._with_urls(queries.photos(
-                self.conn, scope=alike([entry["term"]]), sort="best", limit=3,
-                renditions=self.tiles.renditions, reachable_on=self._here()))
-            entry["samples"] = [row["tile"] for row in rows if row.get("tile")]
+            entry["samples"] = self._sample_tiles(alike([entry["term"]]))
+        for group in persons.groups(self.conn):
+            if group.get("name"):
+                continue
+            marks = ",".join("?" for _ in group["sample"]) or "''"
+            out.append({
+                "term": "Someone", "person": group["exemplar"], "count": group["photos"],
+                "samples": self._sample_tiles(
+                    Scope(f"i.content_hash IN ({marks})", tuple(group["sample"]))),
+            })
         return out
+
+    def name_person(self, exemplar: str, called: str) -> dict:
+        """Introduce someone: the name lands on the exemplar face and the
+        rank lane re-groups around it."""
+
+        import people as persons
+
+        self._open()
+        said = persons.name(self.conn, exemplar, called)
+        return said
 
     # ---- refine ----
 
@@ -670,6 +698,10 @@ class OwnedLibrary:
         self._ranked = None            # (last round row, vector count) already written
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
         self._clustered = None         # (vector count, palette stamp) already assigned
+        self._peopled = None           # (face rows, last person decision) already grouped
+        # Bumped whenever the lane rewrites a derived answer the window shows
+        # (clusters, people); rides the pulse so the window knows to re-ask.
+        self.shaped = 0
         # Bringing photographs in has its own lane: a card takes minutes, and
         # neither browsing nor the minute sweep may wait behind it.
         self._intake_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="intake")
@@ -748,7 +780,13 @@ class OwnedLibrary:
         conn = model.connect(self._library.catalog_path)
         try:
             import embed
+            import faces as facing
+            import people as persons
 
+            # Everything this lane derives, in one change key: rounds and
+            # vectors move the ranking, faces and introductions move the
+            # people. Any of the four waking up wakes the whole pass — the
+            # sub-steps still skip on their own narrower keys.
             key = (
                 conn.execute(
                     "SELECT MAX(id) FROM decisions WHERE family = ?", (decisions.COMPARE,)
@@ -756,6 +794,13 @@ class OwnedLibrary:
                 conn.execute(
                     "SELECT COUNT(*) FROM cache WHERE kind = 'embedding' AND recipe = ? AND state = 'ready'",
                     (embed.RECIPE,),
+                ).fetchone()[0],
+                conn.execute(
+                    "SELECT COUNT(*) FROM cache WHERE kind = 'faces' AND recipe = ? AND state = 'ready'",
+                    (facing.RECIPE,),
+                ).fetchone()[0],
+                conn.execute(
+                    "SELECT MAX(id) FROM decisions WHERE family = ?", (persons.FAMILY,)
                 ).fetchone()[0],
             )
             if key == self._ranked:
@@ -776,6 +821,14 @@ class OwnedLibrary:
             if stamp and self._clustered != (key[1], stamp):
                 clusters.recluster(conn, subjects, vectors, self._library.catalog_path)
                 self._clustered = (key[1], stamp)
+                self.shaped += 1
+            # People too: when faces landed or someone was introduced, the
+            # groups and their names rewrite whole. Needs no model — the
+            # vectors are already in the rows.
+            if key[2:] != self._peopled and key[2]:
+                persons.repeople(conn)
+                self._peopled = key[2:]
+                self.shaped += 1
         finally:
             conn.close()
 

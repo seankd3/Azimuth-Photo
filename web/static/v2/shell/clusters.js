@@ -4,7 +4,7 @@
 // collection now answers for it. Counts wear the tilde on purpose: a
 // proposal is the space talking, not a fact, until calibration teaches a
 // label its threshold.
-export function createClustersPanel({ product, read, update, notify, browse, kept }) {
+export function createClustersPanel({ product, read, update, notify, browse, kept, ask }) {
   const section = document.querySelector('[data-clusters-section]');
   const list = document.querySelector('[data-clusters-list]');
   const menu = document.querySelector('[data-cluster-menu]');
@@ -31,11 +31,17 @@ export function createClustersPanel({ product, read, update, notify, browse, kep
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'collection-row cluster-row';
-      row.dataset.cluster = entry.term;
-      row.title = `${entry.term} — proposed from the photographs themselves`;
+      if (entry.person) {
+        // A face group nobody has introduced yet: the row exists to be named.
+        row.dataset.person = entry.person;
+        row.title = 'Someone the library keeps seeing — click to name them';
+      } else {
+        row.dataset.cluster = entry.term;
+        row.title = `${entry.term} — proposed from the photographs themselves`;
+      }
       const mark = document.createElement('span');
       mark.className = 'smart-mark';
-      mark.textContent = '◇';
+      mark.textContent = entry.person ? '◉' : '◇';
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
@@ -47,12 +53,36 @@ export function createClustersPanel({ product, read, update, notify, browse, kep
     }));
   }
 
+  async function introduce(exemplar, anchor) {
+    const called = await ask('Name this person', anchor);
+    if (!called) return;
+    try {
+      await product.namePerson(exemplar, called);
+      notify(`“${called}” — the library will gather their photographs now.`);
+      // The groups rewrite on the rank lane; a beat later the name is real.
+      setTimeout(() => void kept(), 3000);
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
   list.addEventListener('click', (event) => {
+    const someone = event.target.closest('[data-person]');
+    if (someone) {
+      void introduce(someone.dataset.person, someone);
+      return;
+    }
     const row = event.target.closest('[data-cluster]');
     if (row) browse(row.dataset.cluster);
   });
 
   list.addEventListener('contextmenu', (event) => {
+    const someone = event.target.closest('[data-person]');
+    if (someone) {
+      event.preventDefault();
+      void introduce(someone.dataset.person, someone);
+      return;
+    }
     const row = event.target.closest('[data-cluster]');
     if (!row) return;
     event.preventDefault();

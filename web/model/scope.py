@@ -204,9 +204,11 @@ def alike(terms) -> Scope:
     if not wanted:
         return EVERYTHING
     marks = ",".join("?" for _ in wanted)
+    # Palette tags and people ride the same shape — a JSON list of names per
+    # identity — under two kinds with two writers; a chip reads both.
     return Scope(
         "i.content_hash IN (SELECT c.hash FROM cache c, json_each(CAST(c.value AS TEXT)) j"
-        f" WHERE c.kind = 'alike' AND c.state = 'ready' AND j.value IN ({marks}))",
+        f" WHERE c.kind IN ('alike', 'people') AND c.state = 'ready' AND j.value IN ({marks}))",
         tuple(wanted),
     )
 

@@ -172,7 +172,7 @@ def proposals(conn, limit: int = 12) -> list[dict]:
     counted = conn.execute(
         "SELECT j.value AS term, COUNT(DISTINCT c.hash) AS photos"
         " FROM cache c, json_each(CAST(c.value AS TEXT)) j"
-        " WHERE c.kind = ? AND c.state = 'ready'"
+        " WHERE c.kind IN (?, 'people') AND c.state = 'ready'"
         "   AND c.hash IN (SELECT i.content_hash FROM images i"
         f"                 WHERE {queries.IN_LIBRARY})"
         " GROUP BY term ORDER BY photos DESC",

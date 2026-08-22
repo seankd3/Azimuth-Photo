@@ -250,6 +250,7 @@ const clustersPanel = createClustersPanel({
     viewMoved();
   },
   kept: () => Promise.all([collectionsPanel.refresh(), clustersPanel.refresh()]),
+  ask: (title, anchor, initial) => collectionsPanel.ask(title, anchor, initial),
 });
 const refineWorkflow = createRefineWorkflow({
   product,
@@ -560,9 +561,10 @@ async function followLibrary() {
     }
     const moved = last !== null && pulse.done !== last.done;
     const swept = last !== null && pulse.swept !== last.swept;
+    const shaped = last !== null && pulse.shaped !== last.shaped;
     if (last === null || pulse.cards !== last.cards) showCards();
     last = pulse;
-    if ((moved || swept) && !read().loading && !read().scanning) {
+    if ((moved || swept || shaped) && !read().loading && !read().scanning) {
       try {
         await refreshInPlace();
         if (swept) await loadFolders();

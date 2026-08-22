@@ -71,7 +71,9 @@ export function createSearchCards({ product, read, update, box, search, applyChi
 
     // What the library proposes about itself: tilde-counted until a label
     // earns its threshold.
-    const clusters = (read().clusters || []).filter((c) => match(c.term)).slice(0, query ? 4 : 5)
+    // The unintroduced wait in the sidebar; the drop offers only what a chip
+    // can already say.
+    const clusters = (read().clusters || []).filter((c) => !c.person && match(c.term)).slice(0, query ? 4 : 5)
       .map((c) => ({
         label: c.term, count: `~${c.count.toLocaleString()}`, glyph: '◇',
         strip: c.samples || [],

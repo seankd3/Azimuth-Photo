@@ -348,5 +348,5 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
     event.stopImmediatePropagation();
   });
 
-  return Object.freeze({ refresh, render, show, create, saveView, keepResults, toss, menuFor });
+  return Object.freeze({ refresh, render, show, create, saveView, keepResults, toss, menuFor, ask: prompt });
 }
