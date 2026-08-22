@@ -22,6 +22,16 @@ class DesktopTests(unittest.TestCase):
             }
             environment["AZIMUTH_HOME"] = directory
             with patch.dict(os.environ, environment, clear=True):
+                # The owner may have a real pointer on this machine; isolation
+                # means this run does not create or change it, not that it was
+                # never there.
+                def pointer_state():
+                    try:
+                        return os.stat(home.pointer()).st_mtime_ns
+                    except OSError:
+                        return None
+
+                pointer_before = pointer_state()
                 where = home.current()
                 catalog, previews = home.paths(where)
                 product = desktop.Desktop(where)
@@ -29,13 +39,14 @@ class DesktopTests(unittest.TestCase):
                     counts = product.counts()
                 finally:
                     product.close()
-                pointer_written = os.path.exists(home.pointer())
+                pointer_after = pointer_state()
 
             self.assertEqual(counts["photos"], 0)
             self.assertEqual(where, directory)
             self.assertEqual(catalog, os.path.join(directory, "catalog", "azimuth.db"))
             self.assertEqual(previews, os.path.join(directory, "previews"))
-            self.assertFalse(pointer_written, "an isolated home must never write the owner's pointer")
+            self.assertEqual(pointer_before, pointer_after,
+                             "an isolated home must never touch the owner's pointer")
             os.replace(catalog, catalog + ".closed")
 
     def test_a_first_run_refuses_the_library_until_a_home_is_chosen(self):
