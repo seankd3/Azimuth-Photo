@@ -22,10 +22,13 @@ const ASPECT_MAX = 2.6;
 
 export function createRankWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
   const stage = document.querySelector('[data-rank]');
+  const MODES = ['close', 'random', 'diverse', 'tournament'];
+  const MODE_KEY = 'azimuth.rank-mode';
   const state = {
     size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
     rounds: 0, judged: 0, total: 0, busy: false, filling: null, generation: 0,
     answered: false, queued: null,
+    mode: MODES.includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'close',
   };
   const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -45,7 +48,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   async function ask(n) {
     // The whole answer comes back; the caller writes what it holds after its
     // own staleness check, so a superseded ask cannot smear old numbers.
-    return product.rank({ n, view: viewOf(), avoid: avoiding() });
+    return product.rank({ n, view: viewOf(), avoid: avoiding(), mode: state.mode });
   }
 
   function accept(answer) {
@@ -163,6 +166,16 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   async function resize(n) {
     if (!SIZES[n]) return;
     state.size = n;
+    if (isOpen()) await load();
+    else render();
+  }
+
+  async function remode(mode) {
+    if (!MODES.includes(mode) || mode === state.mode) return;
+    state.mode = mode;
+    localStorage.setItem(MODE_KEY, mode);
+    // The buffer was drawn under the old opinion; a fresh deal says the new one.
+    state.buffer = [];
     if (isOpen()) await load();
     else render();
   }
@@ -376,6 +389,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     for (const button of document.querySelectorAll('[data-rank-size] button')) {
       button.classList.toggle('is-active', Number(button.dataset.size) === state.size);
     }
+    for (const button of document.querySelectorAll('[data-rank-mode] button')) {
+      button.classList.toggle('is-active', button.dataset.mode === state.mode);
+    }
   }
 
   function render() {
@@ -428,5 +444,5 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   });
   new ResizeObserver(() => { if (isOpen()) layout(); }).observe(stage);
 
-  return Object.freeze({ open, close, resize, pick, key, isOpen, render, size: () => state.size });
+  return Object.freeze({ open, close, resize, remode, pick, key, isOpen, render, size: () => state.size });
 }

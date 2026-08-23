@@ -652,7 +652,7 @@ class SweepingRefuses(CoreCase):
         image = self.photo()
         copies.saw(self.conn, image, int(self.cold["id"]))
         self.conn.commit()
-        with patch.object(copies, "walk_tails", return_value=(set(), False)):
+        with patch.object(copies, "walk_tails", return_value=(set(), set(), False)):
             self.assertFalse(copies.sweep(self.conn, self.cold["uuid"])["applied"])
         self.assertTrue(copies.drives_holding(self.conn, image))
 
@@ -2170,6 +2170,171 @@ class SearchNeverRefuses(CoreCase):
         self.assertEqual({row["id"] for row in answer}, {first, second})
         for row in answer:
             self.assertIn("tile", row)
+
+
+class AModeIsAnOrdering(CoreCase):
+    """Rank's selection modes are small pure orderings over one pool —
+    tournament seats the judged leaders, diverse spreads across the range,
+    random is a walk — never a second candidate machinery."""
+
+    def _pool(self):
+        held = []
+        for i in range(8):
+            photo_id = self.photo(f"Raws/p{i}.cr3")
+            digest = f"{i:064x}"
+            self.conn.execute(
+                "UPDATE images SET content_hash = ?, elo = ? WHERE id = ?",
+                (digest, 1100 + i * 40, photo_id))
+            held.append((photo_id, digest))
+        self.conn.commit()
+        return held
+
+    def test_tournament_seats_the_leaders_and_diverse_spans_the_range(self):
+        pool = self._pool()
+        # Four have been through rounds; four never have.
+        rank.record(self.conn, pool[7][0], [pool[6][0]])
+        rank.record(self.conn, pool[5][0], [pool[4][0]])
+
+        seated = rank.candidates(self.conn, 4, mode="tournament")
+        self.assertEqual([p["id"] for p in seated],
+                         [pool[7][0], pool[6][0], pool[5][0], pool[4][0]])
+
+        spread = rank.candidates(self.conn, 3, mode="diverse")
+        ratings = sorted(p["rating"] for p in spread)
+        self.assertEqual(ratings[0], 1100.0)     # the bottom of the range
+        self.assertEqual(ratings[-1], 1380.0)    # and the top
+
+        drawn = rank.candidates(self.conn, 4, mode="random")
+        self.assertEqual(len(drawn), 4)
+        self.assertEqual(len({p["hash"] for p in drawn}), 4)
+
+        # An unknown mode answers like the default rather than refusing —
+        # a stale window after an update must still deal a hand.
+        self.assertEqual(len(rank.candidates(self.conn, 4, mode="later-idea")), 4)
+
+
+class AnEditIsADecision(CoreCase):
+    """Develop's ground rules: Lightroom's sidecar reads into a decision in
+    Lightroom's own spelling, the crop projects to a column, the rendition
+    recipe built in SQL is byte-identical to the one Python stores under,
+    and an edited photograph owes its cropped tile while keeping its plain
+    one — because the embedding and the faces read the plain pixels."""
+
+    SIDECAR = """<x:xmpmeta xmlns:x="adobe:ns:meta/">
+ <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+  <rdf:Description rdf:about=""
+    xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"
+   crs:RawFileName="frame.cr3"
+   crs:CropLeft="0.043210"
+   crs:CropTop="0.1"
+   crs:CropRight="0.9"
+   crs:CropBottom="0.95"
+   crs:CropAngle="0"
+   crs:Exposure2012="+0.50">
+   <crs:ToneCurvePV2012>
+    <rdf:Seq>
+     <rdf:li>0, 0</rdf:li>
+     <rdf:li>255, 255</rdf:li>
+    </rdf:Seq>
+   </crs:ToneCurvePV2012>
+  </rdf:Description>
+ </rdf:RDF>
+</x:xmpmeta>"""
+
+    def test_a_sidecar_reads_whole_and_projects_its_crop(self):
+        import develop as developing
+
+        photo_id = self.photo("Raws/frame.cr3")
+        digest = "d" * 64
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        folder = os.path.join(self.tmp, "Raws")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "frame.xmp"), "w", encoding="utf-8") as handle:
+            handle.write(self.SIDECAR)
+
+        adopted = developing.adopt(self.conn, self.tmp, ["Raws/frame.xmp"])
+        self.assertEqual(adopted, 1)
+        held = developing.settings(self.conn, digest)
+        self.assertEqual(held["Exposure2012"], "+0.50")        # spelling kept
+        self.assertEqual(held["ToneCurvePV2012"], ["0, 0", "255, 255"])
+        column = self.conn.execute(
+            "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"]
+        self.assertEqual(column, "[0.04321,0.1,0.9,0.95]")
+
+        # An unchanged sidecar appends nothing on the next sweep.
+        self.assertEqual(developing.adopt(self.conn, self.tmp, ["Raws/frame.xmp"]), 0)
+
+    def test_the_sql_recipe_splice_is_byte_identical_to_canonical(self):
+        import develop as developing
+
+        photo_id = self.photo("Raws/spliced.cr3")
+        digest = "e" * 64
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        developing.edit(self.conn, digest, dict(zip(
+            developing.CROP_KEYS, (0.043210, 0.1, 0.9, 0.95))))
+
+        store = tiles.Store(os.path.join(self.tmp, "tiles"))
+        param, expression = store.grid.keyed
+        base = cache.canonical(store.grid, {})
+        prefix = f'{{"{param}":'
+        suffix = "," + base[1:] if base != "{}" else "}"
+        spliced = self.conn.execute(
+            f"SELECT ? || {expression} || ? FROM images i WHERE i.id = ?",
+            (prefix, suffix, photo_id)).fetchone()[0]
+        fragment = self.conn.execute(
+            "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"]
+        import json as coding
+
+        self.assertEqual(spliced, cache.canonical(store.grid, {"crop": coding.loads(fragment)}))
+
+    def test_an_edited_photo_owes_both_recipes_and_a_plain_one_owes_one(self):
+        import develop as developing
+
+        store = tiles.Store(os.path.join(self.tmp, "tiles"))
+        edited = self.photo("Raws/edited.cr3")
+        plain = self.photo("Raws/plain.cr3")
+        self.conn.executemany(
+            "UPDATE images SET content_hash = ? WHERE id = ?",
+            [("a" * 64, edited), ("b" * 64, plain)])
+        developing.edit(self.conn, "a" * 64, dict(zip(
+            developing.CROP_KEYS, (0.25, 0.25, 0.75, 0.75))))
+
+        base = [row["id"] for row in work.owed(self.conn, store.grid, recipe={})]
+        keyed = [row["id"] for row in work.owed(self.conn, store.grid, recipe={}, keyed=True)]
+        self.assertEqual(set(base), {edited, plain})   # plain pixels for everyone
+        self.assertEqual(keyed, [edited])              # the edit owes its own look
+        self.assertEqual(
+            work.owing(self.conn, store.grid), 3)      # two plain, one cropped
+
+    def test_the_owner_outranks_the_sidecar_and_uncrop_clears_the_column(self):
+        import develop as developing
+
+        photo_id = self.photo("Raws/mine.cr3")
+        digest = "f" * 64
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        decisions.decide(self.conn, digest, developing.FAMILY,
+                         dict(zip(developing.CROP_KEYS, (0.1, 0.1, 0.9, 0.9))),
+                         by=developing.BY_FILE)
+        developing.project(self.conn, digest)
+        developing.edit(self.conn, digest, {key: None for key in developing.CROP_KEYS})
+        self.assertIsNone(self.conn.execute(
+            "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"])
+
+    def test_a_cropped_tile_is_cut_from_the_plain_loupe_without_the_original(self):
+        from PIL import Image as Pillow
+
+        store = tiles.Store(os.path.join(self.tmp, "tiles"))
+        digest = "c" * 64
+        image = Pillow.new("RGB", (1000, 800), (10, 200, 30))
+        image.paste((250, 20, 20), (0, 0, 500, 800))    # left half red
+        store._publish(store.path(digest, render.LOUPE), render.encode(image))
+
+        made = store._answer("", digest, render.GRID, crop=(0.5, 0.0, 1.0, 1.0))
+        with Pillow.open(made.path) as cropped:
+            width, height = cropped.size
+            middle = cropped.getpixel((width // 2, height // 2))
+        self.assertAlmostEqual(width / height, 500 / 800, places=1)
+        self.assertGreater(middle[1], middle[0])         # the green half survived
 
 
 class ASplitPersonHealsByName(CoreCase):

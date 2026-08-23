@@ -148,15 +148,31 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
     joins, columns, bound = [], [], []
     for position, (name, (kind, recipe)) in enumerate((renditions or {}).items()):
         alias = f"r{position}"
-        joins.append(
-            f"LEFT JOIN cache {alias} ON {alias}.hash = i.content_hash AND {alias}.kind = ?"
-            f" AND {alias}.recipe = ?"
-        )
+        base = cache.canonical(kind, recipe)
+        if kind.keyed is None:
+            joins.append(
+                f"LEFT JOIN cache {alias} ON {alias}.hash = i.content_hash AND {alias}.kind = ?"
+                f" AND {alias}.recipe = ?"
+            )
+            bound += [kind.name, base]
+        else:
+            # An edited photograph's rendition is its own recipe, spelled
+            # per row from the photo's develop fragment — the same splice
+            # the worker's anti-join uses, so what is owed and what is
+            # shown can never disagree.
+            param, expression = kind.keyed
+            prefix = f'{{"{param}":'
+            suffix = "," + base[1:] if base != "{}" else "}"
+            joins.append(
+                f"LEFT JOIN cache {alias} ON {alias}.hash = i.content_hash AND {alias}.kind = ?"
+                f" AND {alias}.recipe = CASE WHEN {expression} IS NULL THEN ?"
+                f" ELSE ? || {expression} || ? END"
+            )
+            bound += [kind.name, base, prefix, suffix]
         columns.append(
             f", CASE WHEN {alias}.state = 'ready' THEN {alias}.path END AS {name}"
             f", {alias}.state = 'failed' AS {name}_failed"
         )
-        bound += [kind.name, cache.canonical(kind, recipe)]
     here = [int(d) for d in reachable_on]
     holes = ",".join("?" for _ in here) or "NULL"
     columns.append(

@@ -25,9 +25,13 @@ global directory, or V1 thumbnail vocabulary here.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import shutil
 import tempfile
+
+from PIL import Image
 
 import render
 from model import cache
@@ -35,6 +39,16 @@ from model.scope import Scope
 
 GRID = "grid"
 LOUPE = "loupe"
+
+
+def _worn(crop) -> str:
+    """The filename's word for a crop: nothing for none, a short digest
+    of the exact fragment otherwise — a different crop is a different file."""
+
+    if crop is None:
+        return ""
+    spelled = json.dumps(list(crop), separators=(",", ":"))
+    return "-c" + hashlib.blake2b(spelled.encode(), digest_size=5).hexdigest()
 
 
 class Store:
@@ -52,10 +66,17 @@ class Store:
         self.ceiling_bytes = int(ceiling_bytes)
         if self.ceiling_bytes < 0:
             raise ValueError("tile ceiling cannot be negative")
+        # `crop` is the develop geometry: an edited photograph's tile is
+        # different pixels, so it is a different recipe — keyed on the
+        # photo's own develop column, while the plain tile keeps the recipe
+        # (and the bytes) it always had, because the embedding and the faces
+        # read the plain pixels.
         self.grid = cache.Kind(
             name=GRID,
             compute=self._make_grid,
             cost=0.3,
+            params=("crop",),
+            keyed=("crop", "i.develop"),
             evictable=False,
             remove=self.remove,
         )
@@ -63,6 +84,8 @@ class Store:
             name=LOUPE,
             compute=self._make_loupe,
             cost=0.5,
+            params=("crop",),
+            keyed=("crop", "i.develop"),
             remove=self.remove,
         )
         self.kinds = (self.grid, self.loupe)
@@ -88,7 +111,7 @@ class Store:
             f" AND t.kind = '{GRID}' AND t.recipe = '{{}}' AND t.state = '{cache.READY}')"
         )
 
-    def path(self, digest: str, size: int) -> str:
+    def path(self, digest: str, size: int, crop=None) -> str:
         """Return the sole name for an answer, refusing ambiguous inputs."""
 
         digest = str(digest)
@@ -97,29 +120,42 @@ class Store:
         size = int(size)
         if size <= 0:
             raise ValueError("tile size must be positive")
-        return os.path.join(self.root, digest[:2], f"{digest}-{size}.jpg")
+        return os.path.join(self.root, digest[:2], f"{digest}-{size}{_worn(crop)}.jpg")
 
-    def _make_grid(self, source: str, digest: str) -> cache.Made:
-        return self._answer(source, digest, render.GRID)
+    def _make_grid(self, source: str, digest: str, crop=None) -> cache.Made:
+        return self._answer(source, digest, render.GRID, crop)
 
-    def _make_loupe(self, source: str, digest: str) -> cache.Made:
-        return self._answer(source, digest, render.LOUPE)
+    def _make_loupe(self, source: str, digest: str, crop=None) -> cache.Made:
+        return self._answer(source, digest, render.LOUPE, crop)
 
-    def _answer(self, source: str, digest: str, size: int) -> cache.Made:
-        target = self.path(digest, size)
+    def _answer(self, source: str, digest: str, size: int, crop=None) -> cache.Made:
+        target = self.path(digest, size, crop)
         if os.path.isfile(target):
             # Published already, as the other size's by-product. The name is the
             # content and the size, so a file at this path is this answer.
             return cache.Made(path=target, bytes=os.path.getsize(target))
 
-        loupe = self.path(digest, render.LOUPE)
+        loupe = self.path(digest, render.LOUPE, crop)
         if size < render.LOUPE and os.path.isfile(loupe):
             # The loupe is the cheapest faithful source: the same pixels, and no
             # original to open.
             return self._publish(target, render.render(loupe, size))
 
-        grid = self.path(digest, render.GRID)
-        image = render.pixels(source, render.LOUPE)
+        if crop is not None:
+            plain = self.path(digest, render.LOUPE)
+            if os.path.isfile(plain):
+                # A crop of the plain loupe is the same pixels the original
+                # would give, without opening the original — which is what
+                # makes adopting hundreds of Lightroom crops cost seconds,
+                # and an interactive crop feel instant.
+                with Image.open(plain) as held:
+                    image = render.cut(held.convert("RGB"), crop)
+            else:
+                image = render.pixels(source, render.LOUPE, crop=crop)
+        else:
+            image = render.pixels(source, render.LOUPE)
+
+        grid = self.path(digest, render.GRID, crop)
         try:
             made_loupe = self._publish(loupe, render.encode(image))
             made_grid = (

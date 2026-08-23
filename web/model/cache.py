@@ -98,6 +98,15 @@ class Kind:
     # Projection is explicitly downstream of a ready cache row; compute stays
     # a pure function of source bytes and recipe.
     project: Callable[[Any, int, dict], None] | None = None
+    # A rendition may depend on a per-photograph fact — an edited photo's
+    # tile is different pixels, so it must be a different recipe. `keyed` is
+    # (param name, SQL expression over `images i`) whose value, when not
+    # NULL, is that photograph's canonical JSON fragment for the named
+    # param. The param must sort first among the kind's params, so the
+    # recipe string is one concatenation in SQL and byte-identical to
+    # `canonical`'s spelling. A photo whose expression is NULL wants only
+    # the base recipe — nothing about the untouched library changes.
+    keyed: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)

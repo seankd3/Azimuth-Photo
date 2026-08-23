@@ -1,6 +1,7 @@
 import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
+import { createCropSurface } from './crop.js';
 import { createCullWorkflow, CULL_MENU } from './cull.js';
 import { createPeoplePanel } from './people.js';
 import { createAlbumsPanel } from './albums.js';
@@ -283,6 +284,26 @@ const labelsPanel = createLabelsPanel({
   product,
   update,
   browse: (term) => browseChip({ is: 'label', values: [term] }),
+});
+const cropSurface = createCropSurface({
+  product,
+  read,
+  notify,
+  applied: async (photoId) => {
+    // The verb published the cropped tiles before returning; re-reading the
+    // window is all it takes for the new look to be everywhere.
+    await refreshInPlace();
+    const { selected, photos } = read();
+    if (selected?.id === photoId) {
+      for (const [index, photo] of photos) {
+        if (photo.id === photoId) {
+          update({ selected: { ...selected, ...photo }, selectedIndex: index });
+          if (loupeOpen()) showPhoto(read().selected);
+          break;
+        }
+      }
+    }
+  },
 });
 const peoplePanel = createPeoplePanel({
   product,
@@ -1053,6 +1074,7 @@ function renderChrome(state) {
   document.querySelector('[data-rank]').hidden = !ranking;
   document.querySelector('[data-rank-progress]').hidden = !ranking;
   document.querySelector('[data-rank-size]').hidden = !ranking;
+  document.querySelector('[data-rank-mode]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
   document.querySelector('[data-result-label]').hidden = ranking || holding || walled;
@@ -1211,6 +1233,8 @@ document.addEventListener('click', (event) => {
   if (action === 'leave-rank') rankWorkflow.close();
   const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
   if (size) rankWorkflow.resize(Number(size));
+  const rankMode = event.target.closest('[data-rank-mode] [data-mode]')?.dataset.mode;
+  if (rankMode) void rankWorkflow.remode(rankMode);
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'turn-right') cullWorkflow.apply(event.shiftKey ? 'turnLeft' : 'turnRight');
@@ -1237,6 +1261,10 @@ document.addEventListener('keydown', (event) => {
       intakeWorkflow.toggleSelected();
       event.preventDefault();
     }
+    return;
+  }
+  if (cropSurface.isOpen()) {
+    if (cropSurface.key(event)) event.preventDefault();
     return;
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !isTyping) {
@@ -1321,6 +1349,14 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  // Crop: Lightroom's rectangle, over the loupe. From the grid it opens
+  // the loupe on its way.
+  if (key === 'c' && ['library', 'loupe'].includes(read().view) && read().selected?.hash) {
+    if (!loupeOpen()) showPhoto(read().selected);
+    void cropSurface.open(read().selected);
+    event.preventDefault();
+    return;
+  }
   if (key === 'u' && read().view === 'trash' && selection().length) {
     trashWorkflow.restoreSelected();
     event.preventDefault();
@@ -1389,6 +1425,15 @@ const photoVerbs = () => [
     label,
     run: () => cullWorkflow.apply(action),
   })),
+  {
+    label: 'Crop… — C',
+    run: () => {
+      const held = read().selected;
+      if (!held?.hash) return;
+      if (!loupeOpen()) showPhoto(held);
+      void cropSurface.open(held);
+    },
+  },
   { label: 'More like this', run: () => moreLikeThis(selection()) },
 ];
 grid.addEventListener('contextmenu', (event) => {

@@ -35,6 +35,7 @@ nothing, because the queue is the query itself.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -81,7 +82,7 @@ def set_paused(conn, stop: bool) -> bool:
 
 
 def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
-         scope: Scope = EVERYTHING, limit: int = 200) -> list[dict]:
+         scope: Scope = EVERYTHING, limit: int = 200, keyed: bool = False) -> list[dict]:
     """Photos that should have this answer and do not. The whole scheduler.
 
     A failed entry counts as answered: it is in `cache` with `state='failed'`,
@@ -103,10 +104,11 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
     # omitted entirely when nothing is on screen, so a background pass does not
     # pay for an empty IN list.
     nearest = f"i.id IN ({hole}) DESC, " if ids else ""
-    source, args = _owed_from(kind, recipe, scope)
+    carried = f", {kind.keyed[1]} AS keyed" if keyed else ""
+    source, args = _owed_from(kind, recipe, scope, keyed=keyed)
     return [dict(row) for row in conn.execute(
         f"""
-        SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken
+        SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken{carried}
         {source}
         ORDER BY {nearest}i.date_taken DESC, i.id DESC
         LIMIT ?
@@ -133,26 +135,59 @@ def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = 
     """
 
     source, args = _owed_from(kind, recipe, scope)
-    return int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
+    count = int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
+    if kind.keyed is not None:
+        source, args = _owed_from(kind, recipe, scope, keyed=True)
+        count += int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
+    return count
 
 
-def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope) -> tuple[str, tuple]:
-    """The anti-join itself: what is owed, before anyone says what to do with it."""
+def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
+               *, keyed: bool = False) -> tuple[str, tuple]:
+    """The anti-join itself: what is owed, before anyone says what to do with it.
+
+    A `keyed` pass owes the per-photograph variant: the recipe is the base
+    recipe with the photo's own fragment spliced in as the first key, built
+    in SQL so the anti-join stays one query. The base pass is unchanged —
+    an edited photograph still owes its plain rendition, because derived
+    kinds (the embedding, the faces) read the plain pixels.
+    """
 
     narrowed, scope_args = where(scope)
+    if not keyed:
+        return (
+            f"""
+            FROM images i
+            LEFT JOIN cache c
+                   ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
+            WHERE i.content_hash IS NOT NULL
+              AND i.tail IS NOT NULL
+              AND i.vc_of IS NULL
+              AND c.hash IS NULL
+              AND ({kind.wants})
+              AND ({narrowed})
+            """,
+            (kind.name, cache.canonical(kind, recipe), *scope_args),
+        )
+    param, expression = kind.keyed
+    base = cache.canonical(kind, recipe)
+    prefix = f'{{"{param}":'
+    suffix = "," + base[1:] if base != "{}" else "}"
     return (
         f"""
         FROM images i
         LEFT JOIN cache c
-               ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
+               ON c.hash = i.content_hash AND c.kind = ?
+              AND c.recipe = ? || {expression} || ?
         WHERE i.content_hash IS NOT NULL
           AND i.tail IS NOT NULL
           AND i.vc_of IS NULL
+          AND {expression} IS NOT NULL
           AND c.hash IS NULL
           AND ({kind.wants})
           AND ({narrowed})
         """,
-        (kind.name, cache.canonical(kind, recipe), *scope_args),
+        (kind.name, prefix, suffix, *scope_args),
     )
 
 
@@ -290,6 +325,14 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
         for recipe in kind.ahead():
             for row in owed(conn, kind, recipe=recipe, scope=scope, limit=CANDIDATES):
                 heads.append((_age(row), kind.name, kind, recipe, row))
+            if kind.keyed is None:
+                continue
+            # The per-photograph variants: same kind, same base recipe, the
+            # photo's own fragment as the first key.
+            for row in owed(conn, kind, recipe=recipe, scope=scope,
+                            limit=CANDIDATES, keyed=True):
+                variant = {**(recipe or {}), kind.keyed[0]: json.loads(row["keyed"])}
+                heads.append((_age(row), kind.name, kind, variant, row))
     heads.sort(key=lambda head: head[0], reverse=True)
 
     for _age_key, what, kind, recipe, row in heads:

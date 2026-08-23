@@ -283,19 +283,37 @@ def render(source: str, size: int = GRID, rotate: int = 0) -> bytes:
     return encode(pixels(source, size, rotate))
 
 
-def pixels(source: str, size: int = GRID, rotate: int = 0) -> Image.Image:
-    """The oriented, turned, fitted pixels `render` encodes.
+def pixels(source: str, size: int = GRID, rotate: int = 0, crop=None) -> Image.Image:
+    """The oriented, cropped, turned, fitted pixels `render` encodes.
 
     Exposed so the tile store can pay one decode for two sizes: the loupe is
     cut from these pixels and the grid tile from the loupe's, and the original
     -- on an archive drive, the expensive read -- is opened exactly once.
+
+    `crop` is Lightroom's rectangle — (left, top, right, bottom) in unit
+    coordinates of the *oriented* image — applied before the owner's turn,
+    because Lightroom knows nothing of that turn.
     """
 
     image = decode(source, size)
+    if crop is not None:
+        image = cut(image, crop)
     if rotate % 360:
         # PIL rotates counter-clockwise; the owner means clockwise.
         image = image.rotate(-int(rotate) % 360, expand=True)
     return fit(image, size)
+
+
+def cut(image: Image.Image, crop) -> Image.Image:
+    """One crop rectangle, unit coordinates to pixels, never empty."""
+
+    left, top, right, bottom = (float(v) for v in crop)
+    width, height = image.size
+    x0 = max(0, min(width - 1, round(left * width)))
+    y0 = max(0, min(height - 1, round(top * height)))
+    x1 = max(x0 + 1, min(width, round(right * width)))
+    y1 = max(y0 + 1, min(height, round(bottom * height)))
+    return image.crop((x0, y0, x1, y1))
 
 
 def dimensions(path: str) -> tuple[int, int]:

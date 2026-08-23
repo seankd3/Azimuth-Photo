@@ -9,18 +9,21 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import json
 import os
 from pathlib import Path
 import threading
 import time
 from typing import Callable, TypeVar
 
+import develop as developing
 import embed
 import faces
 import library as queries
 import metadata as embedded_metadata
 import model
 import rank
+import render
 import search as finding
 import tiles
 import work
@@ -67,6 +70,9 @@ class Library:
                 " AND hash IN (SELECT content_hash FROM images"
                 "              WHERE file_ext = '.cr3' AND content_hash IS NOT NULL)")
             embedded_metadata.reindex(self.conn)
+            # The develop column is an index over the log, same as the
+            # metadata columns above it.
+            developing.reindex(self.conn)
         except Exception:
             self.conn.close()
             raise
@@ -116,7 +122,11 @@ class Library:
     def refresh(self, drive_uuid: str) -> dict:
         self._open()
         try:
-            return copies.sweep(self.conn, drive_uuid)
+            said = copies.sweep(self.conn, drive_uuid)
+            root = drives.root_of(self.conn, drive_uuid)
+            if said.get("applied") and root and said.get("sidecars"):
+                said["edits_adopted"] = developing.adopt(self.conn, root, said["sidecars"])
+            return said
         finally:
             self.chores.nudge()
 
@@ -235,6 +245,84 @@ class Library:
     def turn(self, photo_ids, by: int = 90) -> dict:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
+
+    def crop(self, photo_id: int, box=None) -> dict:
+        """The owner crops one photograph — or uncrops it with no box.
+
+        The decision lands first; then the cropped loupe and grid publish
+        immediately when the plain loupe file is already here, so the edit
+        is on screen before the worker has turned around. The worker owns
+        whatever could not be made now.
+        """
+
+        self._open()
+        row = self.conn.execute(
+            "SELECT content_hash AS hash, tail, file_size FROM images WHERE id = ?",
+            (int(photo_id),)).fetchone()
+        if row is None or not row["hash"]:
+            raise ValueError("that photograph has no identity yet")
+        if box is None:
+            patch = {key: None for key in developing.CROP_KEYS}
+        else:
+            left, top, right, bottom = (float(v) for v in box)
+            if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+                raise ValueError("a crop keeps some of the photograph")
+            patch = dict(zip(developing.CROP_KEYS, (left, top, right, bottom)))
+        developing.edit(self.conn, row["hash"], patch)
+        current = self.conn.execute(
+            "SELECT develop FROM images WHERE id = ?", (int(photo_id),)).fetchone()["develop"]
+        self._prune_renditions(row["hash"], keep=current)
+        made = None
+        if current is not None:
+            crop = json.loads(current)
+            source = photos.locate(self.conn, row["tail"], expected_size=row["file_size"])
+            if source or os.path.isfile(self.tiles.path(row["hash"], render.LOUPE)):
+                for kind in self.tiles.kinds:
+                    cache.make(self.conn, row["hash"], kind, source or "", {"crop": crop})
+                made = True
+        self.chores.nudge()
+        return {"develop": current, "made": bool(made)}
+
+    def crop_state(self, photo_id: int) -> dict:
+        """What the crop surface needs: the full-frame loupe to drag over,
+        and the rectangle currently worn."""
+
+        self._open()
+        row = self.conn.execute(
+            "SELECT content_hash AS hash, develop FROM images WHERE id = ?",
+            (int(photo_id),)).fetchone()
+        if row is None or not row["hash"]:
+            raise ValueError("that photograph has no identity yet")
+        plain = self.tiles.path(row["hash"], render.LOUPE)
+        box = developing.crop_of(row["develop"])
+        return {
+            "plain": Path(plain).as_uri() if os.path.isfile(plain) else None,
+            "box": list(box) if box else None,
+        }
+
+    def _prune_renditions(self, digest: str, keep: str | None) -> None:
+        """Drop rendition rows for edits this photograph no longer wears.
+
+        The grid tile is never evicted, so a superseded crop's rows would
+        otherwise sit forever beside the current answer."""
+
+        kinds = {kind.name: kind for kind in self.tiles.kinds}
+        marks = ",".join("?" for _ in kinds)
+        rows = self.conn.execute(
+            f"SELECT kind, recipe, path FROM cache WHERE hash = ? AND kind IN ({marks})"
+            f" AND recipe != '{{}}'",
+            (str(digest), *kinds),
+        ).fetchall()
+        wanted = f'{{"crop":{keep}}}' if keep else None
+        for row in rows:
+            if row["recipe"] == wanted:
+                continue
+            if row["path"]:
+                kinds[row["kind"]].remove(row["path"])
+            self.conn.execute(
+                "DELETE FROM cache WHERE hash = ? AND kind = ? AND recipe = ?",
+                (str(digest), row["kind"], row["recipe"]))
+        self.conn.commit()
 
     def search(self, query: str, *, limit: int = 200, offset: int = 0,
                space=None, query_vector=None, view: dict | None = None,
@@ -652,13 +740,16 @@ class Library:
         looking = self.viewing(view)
         return looking if looking else outside(intake.ROOTS[intake.SNAPSHOTS])
 
-    def rank(self, n: int = 9, view: dict | None = None, avoid=()) -> dict:
+    def rank(self, n: int = 9, view: dict | None = None, avoid=(),
+             mode: str = "close", space=None) -> dict:
         """A set worth comparing, from what can be shown this instant, and how
-        far the scope has been ranked."""
+        far the scope has been ranked. `mode` picks the ordering — close,
+        random, diverse, tournament — never a different question."""
 
         self._open()
         scope = self.ranking(view)
-        chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready), avoid=avoid)
+        chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready),
+                                 avoid=avoid, mode=mode, space=space)
         rows = {row["id"]: row for row in self._with_urls(queries.photos(
             self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
             offset=0, renditions=self.tiles.renditions, reachable_on=self._here(),
@@ -1006,7 +1097,13 @@ class OwnedLibrary:
     def _sweep(self, drive_uuid: str, under: str = "") -> dict:
         conn = model.connect(self._library.catalog_path)
         try:
-            return copies.sweep(conn, drive_uuid, under=under)
+            said = copies.sweep(conn, drive_uuid, under=under)
+            # The walk noticed Lightroom's sidecars; their settings become
+            # decisions here, on the sweep's own lane and rhythm.
+            root = drives.root_of(conn, drive_uuid)
+            if said.get("applied") and root and said.get("sidecars"):
+                said["edits_adopted"] = developing.adopt(conn, root, said["sidecars"])
+            return said
         finally:
             conn.close()
             self._library.swept += 1

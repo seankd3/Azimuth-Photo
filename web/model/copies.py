@@ -104,6 +104,7 @@ def walk_tails(root: str, under: str = "") -> tuple[set[str], bool]:
     """
 
     seen: set[str] = set()
+    sidecars: set[str] = set()
     complete = True
     from model import photos
 
@@ -113,7 +114,7 @@ def walk_tails(root: str, under: str = "") -> tuple[set[str], bool]:
 
     start = os.path.join(root, *under.split("/")) if under else root
     if under and not os.path.isdir(start):
-        return seen, True  # a folder that is not there holds nothing, truthfully
+        return seen, sidecars, True  # a folder that is not there holds nothing, truthfully
     for dirpath, dirnames, filenames in os.walk(start, onerror=failed):
         dirnames[:] = [d for d in dirnames if not _skip(d)]
         for name in filenames:
@@ -128,11 +129,18 @@ def walk_tails(root: str, under: str = "") -> tuple[set[str], bool]:
             if not stat.S_ISREG(entry.st_mode) or entry.st_size <= 0:
                 continue
             if not photos.supported(path):
+                # The walk is the one pass that sees every file, so it is
+                # where Lightroom's sidecars are noticed; who reads them is
+                # not this module's business.
+                if name.lower().endswith(".xmp"):
+                    tail = drives.tail_for(root, path)
+                    if tail:
+                        sidecars.add(tail)
                 continue
             tail = drives.tail_for(root, path)
             if tail:
                 seen.add(tail)
-    return seen, complete
+    return seen, sidecars, complete
 
 
 def sweep(
@@ -155,7 +163,7 @@ def sweep(
     if root is None:
         return {"drive": drive_uuid, "applied": False, "reason": "not attached"}
 
-    seen, complete = walk_tails(root, under)
+    seen, sidecars, complete = walk_tails(root, under)
 
     # Re-read the marker *after* walking. If the drive went away mid-pass, what
     # we saw describes a moment that no longer exists.
@@ -229,6 +237,9 @@ def sweep(
             "photos_rewritten": carried,
             "changed": changed,
             "unknown_files": len(seen) - recorded,
+            # What the walk noticed beside the photographs; the caller
+            # decides whether anything reads them.
+            "sidecars": sorted(sidecars),
         }
 
     def publish() -> bool:

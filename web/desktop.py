@@ -176,6 +176,12 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
+    def crop(self, photo_id: int, box: list | None = None) -> dict:
+        return self._run(lambda library: library.crop(int(photo_id), box))
+
+    def crop_state(self, photo_id: int) -> dict:
+        return self._run(lambda library: library.crop_state(int(photo_id)))
+
     def days(self, view: dict | None = None) -> list:
         return self._run(lambda library: library.days(view))
 
@@ -254,8 +260,11 @@ class Desktop:
 
     # ---- rank ----
 
-    def rank(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None) -> dict:
-        return self._run(lambda library: library.rank(int(n), view, list(avoid or [])))
+    def rank(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None,
+             mode: str = "close") -> dict:
+        space = self._product.spaced()
+        return self._run(lambda library: library.rank(
+            int(n), view, list(avoid or []), mode=str(mode or "close"), space=space))
 
     def round(self, winner_id: int, over_ids: list[int]) -> dict:
         recorded = self._run(lambda library: library.round(int(winner_id), over_ids))

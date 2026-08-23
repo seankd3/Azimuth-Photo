@@ -87,6 +87,12 @@
           <button type="button" data-size="9">9</button>
           <button type="button" data-size="12">12</button>
         </div>
+        <div class="rank-size rank-mode" data-rank-mode hidden role="group" aria-label="How the set is drawn">
+          <button type="button" data-mode="close" title="The least-judged, among photographs rated alike">Close</button>
+          <button type="button" data-mode="random" title="A walk with no opinion">Random</button>
+          <button type="button" data-mode="diverse" title="Spread across the scope's looks">Diverse</button>
+          <button type="button" data-mode="tournament" title="The leaders meet">Tournament</button>
+        </div>
         <button class="quiet-button" type="button" data-action="rank">Rank</button>
         <button class="quiet-button" type="button" data-action="leave-rank" hidden><kbd>Esc</kbd> Done</button>
         <label>Sort
@@ -112,6 +118,18 @@
         <img data-loupe-image alt="">
         <p class="loupe-note" data-loupe-note hidden></p>
         <div class="loupe-strip" data-loupe-strip role="listbox" aria-label="Nearby photographs"></div>
+        <div class="crop-surface" data-crop hidden>
+          <img alt="" draggable="false">
+          <div class="crop-box" aria-hidden="true">
+            <span class="crop-thirds"></span>
+          </div>
+          <div class="crop-bar">
+            <span class="crop-hint">Drag the box — edges resize, the middle moves</span>
+            <button class="quiet-button" type="button" data-action="crop-reset">Full frame</button>
+            <button class="quiet-button" type="button" data-action="crop-cancel">Cancel</button>
+            <button class="primary-button" type="button" data-action="crop-apply"><kbd>⏎</kbd> Apply</button>
+          </div>
+        </div>
       </section>
     </main>
 

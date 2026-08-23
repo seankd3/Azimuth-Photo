@@ -307,34 +307,40 @@ def seen(conn) -> dict[str, int]:
     return counts
 
 
-def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> list[dict]:
+def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
+               mode: str = "close", space=None) -> list[dict]:
     """Photographs worth comparing next.
 
-    The mosaic is a candidate query, and the query is one sentence: **show the
-    least-judged photographs, and around them the ones closest in rating.** A
-    comparison between two photographs you already know the order of teaches
-    nothing; a comparison between two that are close teaches the most.
+    The mosaic is a candidate query, and the default is one sentence: **show
+    the least-judged photographs, and around them the ones closest in
+    rating.** A comparison between two photographs you already know the order
+    of teaches nothing; a comparison between two that are close teaches the
+    most.
 
-    That replaces a route with 22 parameters and a strategy engine. Narrowing
-    is not an argument here -- it is the `scope`, the same one every surface
-    takes, so a mosaic over a folder is this query over that folder and a
-    mosaic over what can be shown right now is this query over that.
+    `mode` is a small pure ordering over the same pool — never a strategy
+    engine (the thing with 22 parameters this replaced):
 
-    `avoid` is what is on screen or was a moment ago, by identity; a set is
-    drawn from the rest so the same frame does not come straight back.
+    - ``close``       the default above.
+    - ``random``      the pool shuffled — a walk with no opinion.
+    - ``diverse``     spread apart in the embedding space (by rating when
+                      no vectors have been made), so one round looks across
+                      the scope instead of within one look.
+    - ``tournament``  the leaders meet: the highest-rated already-judged
+                      photographs face each other, which is how a top
+                      settles. Falls back to ``close`` until enough have
+                      been judged to have leaders.
 
-    Rating is read from the sort index rather than refitted: `rerank` keeps
-    that column current after every round, and with vectors it carries the
-    prediction too -- so "nearest in rating" quietly becomes "looks about as
-    good", and photographs never judged are drawn from where the taste model
-    thinks the anchor lives. That is what the old diverse/compete strategy
-    engine was reaching for, as one ORDER BY instead of four modes.
+    Narrowing is not an argument here -- it is the `scope`, the same one
+    every surface takes. `avoid` is what is on screen or was a moment ago,
+    by identity; a set is drawn from the rest so the same frame does not
+    come straight back.
 
     A pair is one orientation. Two photographs side by side are judged by
     shape before they are judged by anything else -- a portrait against a
     landscape is a comparison of frames, not photographs -- so the companion
-    in a pair shares the anchor's orientation when one exists. A larger set is
-    mixed and shown at equal area, which is what takes shape out of it there.
+    in a pair shares the anchor's orientation when one exists. A larger set
+    is mixed and shown at equal area, which is what takes shape out of it
+    there.
     """
 
     experience = seen(conn)
@@ -371,17 +377,11 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
         photo["comparisons"] = experience.get(photo["hash"], 0)
         photo["rating"] = float(photo["elo"] or BASE)
 
-    # The least-judged photograph anchors the set; the rest are its nearest
-    # neighbours by rating, which is what makes the answer informative.
-    anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
     n = max(2, int(n))
-    if n == 2:
-        pool.sort(key=lambda p: (_orientation(p) != _orientation(anchor), abs(p["rating"] - anchor["rating"])))
-    else:
-        pool.sort(key=lambda p: abs(p["rating"] - anchor["rating"]))
+    ordered = _ordered(pool, n, str(mode), space)
     chosen: list[dict] = []
     identities: set[str] = set()
-    for photo in pool:
+    for photo in ordered:
         if photo["hash"] in identities:
             continue          # one frame on two drives is one member
         identities.add(photo["hash"])
@@ -389,6 +389,71 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=()) -> lis
         if len(chosen) == n:
             break
     return chosen
+
+
+def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
+    """The pool, in the order one mode would take from it."""
+
+    if mode == "random":
+        import random
+
+        shuffled = list(pool)
+        random.shuffle(shuffled)
+        return shuffled
+
+    if mode == "tournament":
+        leaders = sorted((p for p in pool if p["comparisons"] > 0),
+                         key=lambda p: -p["rating"])
+        if len(leaders) >= n:
+            return leaders
+        # Not enough judged to have leaders yet: fall through to close.
+
+    if mode == "diverse":
+        return _spread(pool, n, space)
+
+    # close: the least-judged photograph anchors the set; the rest are its
+    # nearest neighbours by rating, which is what makes the answer
+    # informative.
+    anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
+    if n == 2:
+        return sorted(pool, key=lambda p: (
+            _orientation(p) != _orientation(anchor), abs(p["rating"] - anchor["rating"])))
+    return sorted(pool, key=lambda p: abs(p["rating"] - anchor["rating"]))
+
+
+def _spread(pool: list[dict], n: int, space) -> list[dict]:
+    """Farthest-point sampling over the embedding space: each next member is
+    the photograph least like everything already in the set. Without vectors
+    the spread is by rating — even steps across the scope's whole range."""
+
+    placed = {}
+    if space is not None and space[1] is not None and len(space[0]):
+        placed = {subject: i for i, subject in enumerate(space[0])}
+    seen_in_space = [p for p in pool if p["hash"] in placed]
+    if len(seen_in_space) < max(4, n):
+        ranked = sorted(pool, key=lambda p: p["rating"])
+        if len(ranked) <= n:
+            return ranked
+        step = (len(ranked) - 1) / (n - 1)
+        picked = [ranked[round(i * step)] for i in range(n)]
+        rest = [p for p in ranked if p not in picked]
+        return picked + rest
+
+    import numpy as np
+
+    matrix = space[1]
+    vectors = matrix[[placed[p["hash"]] for p in seen_in_space]]
+    start = min(range(len(seen_in_space)),
+                key=lambda i: seen_in_space[i]["comparisons"])
+    chosen = [start]
+    nearest = vectors @ vectors[start]
+    while len(chosen) < min(n, len(seen_in_space)):
+        far = int(np.argmin(nearest))
+        chosen.append(far)
+        nearest = np.maximum(nearest, vectors @ vectors[far])
+    rest = [i for i in range(len(seen_in_space)) if i not in set(chosen)]
+    others = [p for p in pool if p["hash"] not in placed]
+    return [seen_in_space[i] for i in (*chosen, *rest)] + others
 
 
 def _orientation(photo: dict) -> str:

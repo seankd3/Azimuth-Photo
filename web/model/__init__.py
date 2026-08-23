@@ -33,6 +33,14 @@ def connect(path: str = ":memory:", *, timeout: float = 30.0) -> sqlite3.Connect
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(SCHEMA.read_text(encoding="utf-8"))
+        # SQLite has no ALTER ... IF NOT EXISTS, so a column added after
+        # catalogs exist is checked for here — the one migration shape the
+        # schema file cannot say. `develop` carries the photo's current
+        # geometry fragment (the crop, as canonical JSON) so renditions can
+        # key their recipes on it in SQL.
+        held = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
+        if "develop" not in held:
+            conn.execute("ALTER TABLE images ADD COLUMN develop TEXT")
         # Without sqlite_stat1 the planner guesses, and at catalog scale it
         # guesses a partial-index scan with a row fetch per entry — measured
         # 587 ms against 42 ms for the plan it picks once it has statistics.
