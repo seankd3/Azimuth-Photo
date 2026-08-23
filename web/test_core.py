@@ -1467,6 +1467,25 @@ class DecodingRefuses(unittest.TestCase):
         self.assertEqual(found["date_taken"], "2026:08:17 03:34:08")
         self.assertEqual(found["lens"], "RF 50mm")
 
+    def test_cr3_cmt2_is_the_exif_ifd_itself(self):
+        # In CR3, CMT1 carries IFD0 and CMT2 *is* the Exif IFD — its date
+        # and lens tags sit at the top level with no 0x8769 pointer.
+        # Reading CMT2 with IFD0's map left every CR3 in the real library
+        # (657 of them) with a make, a model, and no date at all.
+        taken = b"2026:08:23 00:52:27\0"
+        tiff = (b"II" + struct.pack("<HI", 42, 8)
+                + struct.pack("<H", 1)
+                + struct.pack("<HHII", 0x9003, 2, len(taken), 26)
+                + struct.pack("<I", 0)
+                + taken)
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "frame.cr3")
+            with open(path, "wb") as handle:
+                handle.write(b"\0" * 16 + b"CMT2" + tiff)
+            found = raw_exif.read(path)
+
+        self.assertEqual(found["date_taken"], "2026:08:23 00:52:27")
+
     def test_raw_ness_is_decided_by_the_first_three_bytes(self):
         # This archive holds 1,306 files named .CR2 that are full-resolution
         # JPEGs. LibRaw refuses them as "not a raw file", so every branch taken

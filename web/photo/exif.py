@@ -31,19 +31,23 @@ def read(path: str, *, limit: int = MAX_HEADER_BYTES) -> dict[str, object]:
         data = handle.read(int(limit))
 
     found: dict[str, object] = {}
-    if _tiff(data, 0, found):
+    if _tiff(data, 0, found, IFD0):
         return found
 
-    # CR3 is ISO-BMFF. Canon's CMT1 and CMT2 boxes carry TIFF IFDs.
-    for box in (b"CMT1", b"CMT2"):
+    # CR3 is ISO-BMFF. Canon's CMT1 box carries IFD0 (make, model); CMT2 *is*
+    # the Exif IFD itself — its top-level entries are the Exif-namespace tags,
+    # with no 0x8769 pointer to follow. Reading it with IFD0's map is how
+    # every CR3 in the library sat "undated" while its stage preview knew
+    # the date perfectly well.
+    for box, wanted in ((b"CMT1", IFD0), (b"CMT2", EXIF)):
         start = data.find(box)
         while start >= 0:
-            _tiff(data, start + len(box), found)
+            _tiff(data, start + len(box), found, wanted)
             start = data.find(box, start + len(box))
     return found
 
 
-def _tiff(data: bytes, base: int, found: dict[str, object]) -> bool:
+def _tiff(data: bytes, base: int, found: dict[str, object], wanted: dict[int, str | None]) -> bool:
     if base < 0 or base + 8 > len(data):
         return False
     order = data[base:base + 2]
@@ -53,7 +57,7 @@ def _tiff(data: bytes, base: int, found: dict[str, object]) -> bool:
     magic, first = struct.unpack_from(endian + "HI", data, base + 2)
     if magic != 42:
         return False
-    _ifd(data, base, first, endian, IFD0, found, depth=0)
+    _ifd(data, base, first, endian, wanted, found, depth=0)
     return True
 
 

@@ -56,6 +56,16 @@ class Library:
             self.conn.execute(
                 "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
                 " AND note LIKE 'ProjectionError:%'")
+            # CR3 metadata read before the CMT2 fix has make and model but
+            # no date and no lens — 657 rows on the real library. A Canon
+            # raw always carries a date, so a dateless answer for one is the
+            # old reader's, and dropping it re-owes the read to the fixed
+            # one. No-op once they carry dates.
+            self.conn.execute(
+                "DELETE FROM cache WHERE kind = 'metadata'"
+                " AND value NOT LIKE '%date_taken%'"
+                " AND hash IN (SELECT content_hash FROM images"
+                "              WHERE file_ext = '.cr3' AND content_hash IS NOT NULL)")
             embedded_metadata.reindex(self.conn)
         except Exception:
             self.conn.close()
