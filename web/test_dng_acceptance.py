@@ -23,7 +23,8 @@ if os.environ.get("AZIMUTH_RUN_DNG_ACCEPTANCE") != "1":
     # which binds libc at import time and cannot even collect on Windows.
     pytest.skip("AZIMUTH_RUN_DNG_ACCEPTANCE not set", allow_module_level=True)
 
-from features.develop import adobe_profiles, dng_pipeline, importer, lossydng, pipeline, rawproc, xmp_write
+import develop as developing
+from features.develop import adobe_profiles, dng_pipeline, lossydng, pipeline, rawproc, xmp_write
 
 pytestmark = pytest.mark.slow
 
@@ -66,7 +67,7 @@ def _has_material_tone_edit(value: object) -> bool:
 
 
 def _embedded_settings(path: str) -> tuple[dict, bool]:
-    packet = importer.read_embedded_xmp(path)
+    packet = developing.read_embedded(path)
     if packet is None:
         return {}, True
     try:
@@ -81,19 +82,24 @@ def _embedded_settings(path: str) -> tuple[dict, bool]:
 def _stratified_dng_sample(limit: int = SAMPLE_SIZE) -> list[dict]:
     connection = sqlite3.connect(f"file:{PROD_DB}?mode=ro", uri=True)
     try:
+        # Newest-first, because the archive drive is often away and the
+        # newest files are the ones on the working disk; a missing camera
+        # model is its own stratum rather than an exclusion (the V1 catalog
+        # never filled it for whole shoots of perfectly eligible DNGs).
         rows = connection.execute(
             """
             WITH candidates AS (
-                SELECT i.camera_model, i.filepath,
-                       row_number() OVER (PARTITION BY i.camera_model ORDER BY i.id) AS model_rank
+                SELECT coalesce(i.camera_model, '?') AS camera_model, i.filepath,
+                       row_number() OVER (
+                           PARTITION BY coalesce(i.camera_model, '?')
+                           ORDER BY i.id DESC) AS model_rank
                   FROM images i
                  WHERE lower(i.file_ext) = '.dng'
                    AND i.missing_at IS NULL
-                   AND coalesce(i.camera_model, '') != ''
             )
             SELECT camera_model, filepath
               FROM candidates
-             WHERE model_rank <= 12
+             WHERE model_rank <= 400
              ORDER BY camera_model, model_rank
             """
         ).fetchall()

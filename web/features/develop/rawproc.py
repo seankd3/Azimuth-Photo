@@ -625,18 +625,18 @@ def _remove_base(path: str) -> None:
             pass
 
 
-BASE = _cache.register(_cache.Kind(
+# V1 registered this kind into a global cache registry; V2's cache has no
+# registry — kinds are handed to whoever owns them. The Kind stands so the
+# decoder functions in this module import cleanly for harvesting; the V2
+# develop-base story is designed in docs/DEVELOP.md's tone phase.
+BASE = _cache.Kind(
     name="base",
-    # A base is made by Develop's own decoder on demand, not by the chore loop:
-    # nobody wants 144,000 linear RAW decodes on a disk that also holds tiles.
-    # It is registered so that `cache.evict` can see it -- one ceiling over
-    # everything cached, which is what deletes its private eviction worker.
     compute=lambda source, hash: _cache.Made(),
     here=lambda: False,
     wants="0",
     cost=8.0,
     remove=_remove_base,
-))
+)
 
 
 def record_base(conn, image_id: int, paths: BasePaths) -> None:

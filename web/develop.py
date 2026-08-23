@@ -40,6 +40,41 @@ _CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"
 _RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 
 
+def read_embedded(raw_path: str) -> bytes | None:
+    """The XMP packet inside a DNG/TIFF container, or None.
+
+    Lightroom writes develop settings *into* a DNG — sidecars exist only
+    beside proprietary raws — so a DNG's edits are read from its own bytes.
+    A bounded scan: chunks in, at most 16 MiB of packet out.
+    """
+
+    start_tag, end_tag = b"<x:xmpmeta", b"</x:xmpmeta>"
+    chunk_size = 1 << 22
+    overlap = len(start_tag)
+    buf = b""
+    packet_start = -1
+    collected = bytearray()
+    with open(raw_path, "rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                return None
+            buf = buf[-overlap:] + chunk if packet_start < 0 else chunk
+            if packet_start < 0:
+                found_at = buf.find(start_tag)
+                if found_at < 0:
+                    continue
+                packet_start = found_at
+                collected.extend(buf[found_at:])
+            else:
+                collected.extend(chunk)
+            end = collected.find(end_tag)
+            if end >= 0:
+                return bytes(collected[: end + len(end_tag)])
+            if len(collected) > (1 << 24):
+                return None
+
+
 def read_sidecar(path: str) -> dict[str, object] | None:
     """Every crs fact in one sidecar, keys spelled as Lightroom spells them.
 

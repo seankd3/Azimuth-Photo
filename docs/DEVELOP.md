@@ -139,14 +139,19 @@ measured pair.
    golden set; the PV15.4-SDR gap closed here or the miss documented in
    numbers.
 
-   *Probed 08-23:* `features.develop.pipeline` and `xmp_write` import
-   clean on this branch — the color math and the sidecar writer survive
-   as-is. `adobe_profiles`/`dng_pipeline`/`rawproc` break on V1's
-   `model.cache.register`, and the acceptance harness's own import chain
-   dies at `photo.visibility` (carved away) — so the tone phase begins by
-   de-V1ing those two chains and standing the harness back up against the
-   V2 catalog. The V1 catalog knows 89,659 DNGs (251 on the working disk
-   today) for the stratified sample.
+   *Probed and measured 08-23:* `features.develop.pipeline` and
+   `xmp_write` import clean — the color math and the sidecar writer
+   survive as-is. The profile/DNG chains were de-V1'd (rawproc's kind no
+   longer registers into a registry that does not exist; the embedded-XMP
+   reader moved home to `develop.read_embedded`, where DNG adoption will
+   want it anyway), and **the 40-DNG acceptance harness runs again**: 8
+   minutes over the working disk's DNGs against Adobe's own embedded
+   renders. Baseline: **clean mean |ΔL| = 0.0445 against the 0.035 bar**
+   (ab within bounds, lossy-gain gate passing). The worst pairs
+   (`D:\azimuth-bench\out\dng-acceptance\accept_*.jpg`) show the
+   direction: our render is lighter and flatter — Adobe's camera-profile
+   tone digs deeper shadows. That 0.0095 of L, mostly shadow contrast, is
+   the tone phase's first target.
 4. **Color** — HSL, ColorGrade, calibration, PointColors; grayscale.
 5. **Detail + lens + effects** — sharpen/NR (the V1 guided filter
    survives), defringe/CA, vignette/grain.
