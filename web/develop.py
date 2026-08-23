@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import xml.etree.ElementTree as ET
 
 from model import decisions
@@ -39,12 +38,6 @@ CROP_KEYS = ("CropLeft", "CropTop", "CropRight", "CropBottom")
 
 _CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"
 _RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-
-
-def sidecar_path(photo_path: str) -> str:
-    """Lightroom's sidecar name: the photograph's stem plus ``.xmp``."""
-
-    return os.path.splitext(photo_path)[0] + ".xmp"
 
 
 def read_sidecar(path: str) -> dict[str, object] | None:
@@ -205,12 +198,3 @@ def crop_of(fragment_json: str | None) -> tuple[float, float, float, float] | No
         return None
     return (left, top, right, bottom)
 
-
-_NUMBER = re.compile(r"^[+-]?\d+(\.\d+)?$")
-
-
-def spell(value: float) -> str:
-    """A slider value in Lightroom's own spelling — signed, trimmed."""
-
-    text = f"{value:+.6f}".rstrip("0").rstrip(".")
-    return text if _NUMBER.match(text) else f"{value:+.2f}"

@@ -116,17 +116,37 @@ measured pair.
 
 ## Build order
 
-1. **Crop and angle** — 569 of 580 real sidecars, the whole edit for most
-   photographs, and pure geometry (no color risk). Read crs crop → render
-   cropped tiles/loupe → crop UI in the loupe (L-key grammar later) →
-   write back.
-2. **The read path whole** — parse all 11 files' settings into decisions;
-   settings inspector (read-only) in the loupe so an edited photo *shows*
-   its Lightroom state before we can render it.
+1. **Crop and angle** — DONE 08-23 (`2d58766a`). The sweep's walk hands
+   over the sidecars it sees; settings land whole as file-authored
+   decisions (spellings kept, arrays kept); the crop projects to
+   `images.develop` and renditions key their recipes on it per photograph
+   *in SQL* (a `keyed` cache kind — the plain tile survives beside the
+   cropped one, because the embedding and the faces read plain pixels).
+   The crop surface: C over the loupe, drag draws, edges resize, middle
+   moves, Enter applies, Full frame removes; the verb cuts the cropped
+   loupe and grid from the plain loupe file synchronously. Proven in the
+   window: a sidecar narrowed its tile 1.78 → 0.99, the exact rectangle.
+   **Angle parked with its receipt: all 1,138 real CropAngle values are
+   exactly 0** — rendering it waits for a measured fixture, not a guessed
+   dialect (V1 crops then rotates, which letterboxes corners; Lightroom's
+   frame does not).
+2. **The read path whole** — adoption already reads every key (done with
+   1); the loupe inspector says "Edited" from the projected column. The
+   full settings inspector rides the tone phase, when there is something
+   to show for each key.
 3. **Tone core, measured** — WB, Exposure/Contrast/H/S/W/B, tone curve +
    parametric, on the harvested pipeline; acceptance pairs against the
    golden set; the PV15.4-SDR gap closed here or the miss documented in
    numbers.
+
+   *Probed 08-23:* `features.develop.pipeline` and `xmp_write` import
+   clean on this branch — the color math and the sidecar writer survive
+   as-is. `adobe_profiles`/`dng_pipeline`/`rawproc` break on V1's
+   `model.cache.register`, and the acceptance harness's own import chain
+   dies at `photo.visibility` (carved away) — so the tone phase begins by
+   de-V1ing those two chains and standing the harness back up against the
+   V2 catalog. The V1 catalog knows 89,659 DNGs (251 on the working disk
+   today) for the stratified sample.
 4. **Color** — HSL, ColorGrade, calibration, PointColors; grayscale.
 5. **Detail + lens + effects** — sharpen/NR (the V1 guided filter
    survives), defringe/CA, vignette/grain.

@@ -9,7 +9,7 @@
 const EDGE = 14;          // how close counts as grabbing an edge, in px
 const LEAST = 0.02;       // no crop thinner than 2% survives a drag
 
-export function createCropSurface({ product, read, notify, applied }) {
+export function createCropSurface({ product, notify, applied }) {
   const surface = document.querySelector('[data-crop]');
   const picture = surface.querySelector('img');
   const box = surface.querySelector('.crop-box');

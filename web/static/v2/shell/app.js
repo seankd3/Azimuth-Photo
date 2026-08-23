@@ -287,7 +287,6 @@ const labelsPanel = createLabelsPanel({
 });
 const cropSurface = createCropSurface({
   product,
-  read,
   notify,
   applied: async (photoId) => {
     // The verb published the cropped tiles before returning; re-reading the

@@ -333,6 +333,7 @@ function renderInspector(panel, selected) {
         : 'Not ranked yet';
   const rows = [
     ['Score', score],
+    ['Edited', selected.develop ? 'Cropped — C adjusts' : ''],
     ['Names', (selected.names || []).join(' · ')],
     ['Stars', selected.stars ? '★'.repeat(selected.stars) : ''],
     ['Cull', !selected.hash ? 'Reading…'
