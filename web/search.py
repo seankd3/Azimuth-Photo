@@ -142,19 +142,26 @@ def fuse(*lists: list[int], limit: int) -> list[int]:
 
 
 def search(conn, query: str, *, space=None, query_vector=None,
-           scope: Scope = EVERYTHING, limit: int = 500) -> list[int]:
+           scope: Scope = EVERYTHING, limit: int = 500,
+           omit: frozenset = frozenset()) -> list[int]:
     """Find photographs: one ranked list of ids, from whatever is available.
 
     `scope` is the view being searched -- a folder, a collection, the chips
     -- so searching inside a collection is this same function and not a
-    second one."""
+    second one.
+
+    A query may be photographs instead of words: the caller seeds
+    `query_vector` from their vectors and passes no text, and only the
+    semantic door answers. `omit` names identities the answer must not
+    contain -- the seeds themselves, which the asker is already looking at.
+    """
 
     query = (query or "").strip()
-    if not query:
+    if not query and query_vector is None:
         return []
     ranked = fuse(
-        _lexical(conn, query, limit, scope),
-        _named(conn, query, limit, scope),
+        _lexical(conn, query, limit, scope) if query else [],
+        _named(conn, query, limit, scope) if query else [],
         _semantic(conn, space, query_vector, limit, scope),
         limit=limit * 2,
     )
@@ -167,7 +174,7 @@ def search(conn, query: str, *, space=None, query_vector=None,
     marks = ",".join("?" for _ in ranked)
     identity = {int(row["id"]): row["hash"] for row in conn.execute(
         f"SELECT id, content_hash AS hash FROM images WHERE id IN ({marks})", ranked)}
-    seen: set[str] = set()
+    seen: set[str] = set(omit)
     out: list[int] = []
     for image_id in ranked:
         digest = identity.get(image_id)

@@ -13,6 +13,7 @@ const state = {
   open: new Set(),
   photos: new Map(),
   query: '',
+  like: [],
   total: 0,
   loading: true,
   scanning: false,

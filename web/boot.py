@@ -220,16 +220,27 @@ class Library:
         return cull.turn(self.conn, photo_ids, by=int(by))
 
     def search(self, query: str, *, limit: int = 200, offset: int = 0,
-               space=None, query_vector=None, view: dict | None = None) -> dict:
+               space=None, query_vector=None, view: dict | None = None,
+               like=()) -> dict:
         """Find photographs: the fused ranking, one page of it as rows.
 
         The whole answer is capped at 500 -- a search whose five hundredth
         result matters is a browse, and the folder tree is better at it.
+
+        `like` asks with photographs instead of words: the query becomes the
+        selection's centre in the space -- no model involved, their vectors
+        are already in the matrix -- and the seeds themselves stay out of
+        the answer.
         """
 
         self._open()
+        omit: frozenset = frozenset()
+        if like:
+            held = self._identities(like)
+            query_vector = self._centre(held, space)
+            omit = frozenset(held)
         ranked = finding.search(self.conn, query, space=space, query_vector=query_vector,
-                                scope=self.viewing(view))
+                                scope=self.viewing(view), omit=omit)
         page = ranked[int(offset):int(offset) + max(1, int(limit))]
         rows = {row["id"]: row for row in queries.photos(
             self.conn, scope=these(page), sort="newest", limit=max(1, len(page)),
@@ -315,6 +326,27 @@ class Library:
         gone = sets.forget(self.conn, set_id)
         self.conn.commit()
         return gone
+
+    @staticmethod
+    def _centre(identities, space):
+        """Where a selection sits in the space: the normalized mean of its
+        vectors, or None when none of them have one yet."""
+
+        if space is None:
+            return None
+        subjects, matrix = space
+        if matrix is None or not len(subjects):
+            return None
+
+        import numpy as np
+
+        placed = {subject: i for i, subject in enumerate(subjects)}
+        rows = [placed[held] for held in identities if held in placed]
+        if not rows:
+            return None
+        centre = matrix[rows].mean(axis=0)
+        norm = np.linalg.norm(centre)
+        return centre / norm if norm else None
 
     def _identities(self, photo_ids) -> list[str]:
         wanted = sorted({int(i) for i in photo_ids if int(i) > 0})
@@ -814,13 +846,17 @@ class OwnedLibrary:
         return await asyncio.wrap_future(future)
 
     async def find(self, query: str, limit: int = 200, offset: int = 0,
-                   view: dict | None = None) -> dict:
+                   view: dict | None = None, like=()) -> dict:
         """Search, with whatever this machine has warm.
 
         The space comes from the rank lane's memo; the query becomes a vector
         only when the model is already in memory. Cold but capable means
         words-only now and a warm-up on the sweep lane, so the next search is
         semantic -- the typing path never waits for a model.
+
+        A `like` search seeds from photographs already in the space, so it
+        needs no model at all -- only the memo, which the first rank pass
+        after boot fills.
         """
 
         import embed
@@ -831,16 +867,17 @@ class OwnedLibrary:
         else:
             self.rank_soon()
         query_vector = None
-        if embed.warm():
-            query_vector = embed.text(query)
-        elif embed.ready():
-            with self._state:
-                if not self._warming:
-                    self._warming = True
-                    self._scan_executor.submit(embed._model)
+        if not like:
+            if embed.warm():
+                query_vector = embed.text(query)
+            elif embed.ready():
+                with self._state:
+                    if not self._warming:
+                        self._warming = True
+                        self._scan_executor.submit(embed._model)
         return await self.run(lambda library: library.search(
             query, limit=int(limit), offset=int(offset), space=space,
-            query_vector=query_vector, view=view,
+            query_vector=query_vector, view=view, like=like,
         ))
 
     def rank_soon(self) -> None:

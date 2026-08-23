@@ -177,10 +177,12 @@ class Desktop:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
     def search(self, query: str, limit: int = 200, offset: int = 0,
-               view: dict | None = None) -> dict:
+               view: dict | None = None, like: list | None = None) -> dict:
         if self._product is None:
             raise RuntimeError("Choose where Azimuth should live first.")
-        return self._wait(self._product.find(str(query or ""), int(limit), int(offset), view))
+        return self._wait(self._product.find(
+            str(query or ""), int(limit), int(offset), view,
+            like=[int(i) for i in (like or [])]))
 
     # ---- albums ----
 

@@ -405,6 +405,22 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   white-space: nowrap;
 }
 .chip.is-not { border-color: #6b4133; background: #2e1d16; color: #f0b8a8; }
+/* The likeness search's presence in the bar: chip-shaped, accent-toned,
+   one click to end it. */
+.like-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 10px;
+  border: 1px solid #5a2c1c;
+  border-radius: 999px;
+  background: #241512;
+  color: var(--focus);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.like-pill:hover { border-color: var(--accent); }
 .chip .drop-chip {
   width: 16px;
   height: 16px;

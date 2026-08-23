@@ -219,12 +219,15 @@ function selection() {
   return selected ? [selected.id] : [];
 }
 let anchorIndex = null;
+// A search is words in the box or a selection asked alike — one door.
+const seeking = () => Boolean(read().query || (read().like || []).length);
+const asked = () => ({ query: read().query, like: read().like || [] });
 const pages = new PageCache({
   pageSize: PAGE,
   load: (offset, limit) => read().view === 'trash'
     ? product.trashPhotos({ limit, offset })
-    : read().query
-      ? product.find({ query: read().query, limit, offset, view: viewOf() }).then((answer) => answer.photos)
+    : seeking()
+      ? product.find({ ...asked(), limit, offset, view: viewOf() }).then((answer) => answer.photos)
       : product.photos({ sort: read().sort, limit, offset, view: viewOf() }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
@@ -271,8 +274,8 @@ const filterBar = createFilterBar({
 // the same landing through their own chip field.
 function browseChip(chip) {
   searchBox.value = '';
-  if (read().view === 'rank') update({ folder: null, album: null, chips: [chip], query: '' });
-  else update({ view: 'library', folder: null, album: null, chips: [chip], query: '',
+  if (read().view === 'rank') update({ folder: null, album: null, chips: [chip], query: '', like: [] });
+  else update({ view: 'library', folder: null, album: null, chips: [chip], query: '', like: [],
                 selected: null, selectedIndex: null });
   viewMoved();
 }
@@ -362,11 +365,27 @@ const cullWorkflow = createCullWorkflow({
 const searchBox = document.querySelector('[data-search]');
 function runSearch(text) {
   const query = text.trim();
-  if (query === read().query) return;
-  update({ view: 'library', query });
+  if (query === read().query && !(read().like || []).length) return;
+  update({ view: 'library', query, like: [] });
   workspace.scrollTo({ top: 0 });
   loadView();
 }
+// More like this: the same search door, asked with photographs. It always
+// asks the whole library — you narrow afterwards with chips if you want —
+// and the seeds themselves stay out of the answer.
+function moreLikeThis(ids) {
+  if (!ids.length) return;
+  if (loupeOpen()) closeLoupe();
+  searchBox.value = '';
+  update({ view: 'library', folder: null, album: null, chips: [], query: '', like: ids,
+           selected: null, selectedIndex: null });
+  workspace.scrollTo({ top: 0 });
+  loadView();
+}
+document.querySelector('[data-like-pill]').addEventListener('click', () => {
+  update({ like: [] });
+  loadView();
+});
 // The box belongs to the cards: they offer the library's shape on focus,
 // narrow it as you type, and leave Enter meaning what it always meant.
 const searchCards = createSearchCards({
@@ -376,6 +395,8 @@ const searchCards = createSearchCards({
   box: searchBox,
   search: runSearch,
   applyChip: (chip) => {
+    // A card replaces typed words, but narrows a like-search: chips ride
+    // into the search's view scope, so "similar, and portrait" composes.
     if (read().query) {
       searchBox.value = '';
       update({ query: '' });
@@ -405,7 +426,7 @@ function lookAt(ids) {
 
 function visibleGrid() {
   const inTrash = read().view === 'trash';
-  const searching = Boolean(read().query);
+  const searching = seeking();
   const scanning = read().scanning;
   // An empty album is an invitation, not an empty library — it must never
   // say "Add a folder" inside a place made for gathering.
@@ -425,7 +446,7 @@ function visibleGrid() {
         : inAlbum
           ? (shelf.smart
             ? 'No photographs match its filters yet — they join as they qualify.'
-            : 'Drag photos here, press B, or right-click any photo anywhere in the library.')
+            : 'Drag photos onto its name, or right-click any photo anywhere in the library.')
           : searching
             ? 'Try fewer words, or a different idea — meaning works too, not just names.'
             : 'Add a folder to start your library.',
@@ -546,17 +567,18 @@ async function loadView() {
       product.counts(),
       product.drives(),
       product.trashCount(),
-      view === 'trash' || query ? Promise.resolve(0) : product.size(looking),
+      view === 'trash' || seeking() ? Promise.resolve(0) : product.size(looking),
       view === 'trash'
         ? product.trashPhotos({ limit: PAGE, offset: 0 })
-        : query
-          ? product.find({ query, limit: PAGE, offset: 0, view: looking })
+        : seeking()
+          ? product.find({ ...asked(), limit: PAGE, offset: 0, view: looking })
           : product.photos({ sort, limit: PAGE, offset: 0, view: looking }),
     ]);
     if (!pages.isCurrent(requestGeneration) || read().view !== view
         || JSON.stringify(viewOf()) !== key || read().query !== query) return;
-    const total = view === 'trash' ? trashCount : query ? page.total : size;
-    pages.seed(requestGeneration, query ? page.photos : page, total);
+    const found = view !== 'trash' && seeking();
+    const total = view === 'trash' ? trashCount : found ? page.total : size;
+    pages.seed(requestGeneration, found ? page.photos : page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
     if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
   } catch (error) {
@@ -577,14 +599,14 @@ async function refreshInPlace({ shelves = true } = {}) {
   const key = JSON.stringify(viewOf());
   const [counts, drives, trashCount, size, albums, people, labels] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
-    view === 'trash' || query ? Promise.resolve(0) : product.size(viewOf()),
+    view === 'trash' || seeking() ? Promise.resolve(0) : product.size(viewOf()),
     shelves ? product.albums() : read().albums,
     shelves ? product.people().catch(() => read().people) : read().people,
     shelves ? product.labels().catch(() => read().labels) : read().labels,
   ]);
   if (!pages.isCurrent(generation) || read().view !== view
       || JSON.stringify(viewOf()) !== key || read().query !== query) return;
-  await pages.refresh(view === 'trash' ? trashCount : query ? read().total : size);
+  await pages.refresh(view === 'trash' ? trashCount : seeking() ? read().total : size);
   if (!pages.isCurrent(generation)) return;
   update({ counts: { ...counts, trash: trashCount }, drives, albums, people, labels });
   const { selected, photos } = read();
@@ -785,9 +807,9 @@ function viewMoved() {
 }
 
 function showFolder(path) {
-  if (read().query) {
+  if (seeking()) {
     searchBox.value = '';
-    update({ query: '' });
+    update({ query: '', like: [] });
   }
   if (read().view === 'rank') update({ folder: path, album: null });
   else update({ view: 'library', folder: path, album: null, selected: null, selectedIndex: null });
@@ -999,7 +1021,7 @@ function renderChrome(state) {
     : state.counts.unidentified
       ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
       : '';
-  const searching = state.view === 'library' && Boolean(state.query);
+  const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
   shell.classList.toggle('hide-left', !state.panels.left);
@@ -1022,6 +1044,12 @@ function renderChrome(state) {
   const word = teachable();
   hint.hidden = !word;
   if (word) hint.textContent = `Refining “${word}” — Y anchors · N excludes`;
+  // The likeness search wears a pill where the chips live: it is part of
+  // the question being asked, and its ✕ is how the question ends.
+  const pill = document.querySelector('[data-like-pill]');
+  const alike = (state.like || []).length;
+  pill.hidden = !alike || state.view === 'trash' || holding;
+  if (alike) pill.textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`} ✕`;
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
@@ -1041,8 +1069,11 @@ function renderChrome(state) {
   const where = shelf ? shelf.name : state.folder ? state.folder.split('/').pop() : '';
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
-    : searching ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
-    : (ranking ? 'Rank · ' : '') + (where || 'All photos');
+    : searching
+      ? (state.query
+        ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
+        : `More like ${(state.like || []).length === 1 ? 'this photo' : `${(state.like || []).length} photos`}`)
+      : (ranking ? 'Rank · ' : '') + (where || 'All photos');
   document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
   document.querySelector('[data-action="save-view"]').hidden =
     state.view !== 'library' || ranking || searching || !viewOf();
@@ -1216,7 +1247,7 @@ document.addEventListener('keydown', (event) => {
     else if (read().selected || read().marked?.size) {
       update({ selected: null, selectedIndex: null, marked: new Set() });
       anchorIndex = null;
-    } else if (read().query) { searchBox.value = ''; runSearch(''); }
+    } else if (seeking()) { searchBox.value = ''; runSearch(''); }
     else if (read().chips.length) { update({ chips: [] }); loadView(); }
     else return;
     event.preventDefault();
@@ -1319,17 +1350,26 @@ document.querySelector('[data-density]').addEventListener('input', (event) => {
   }
 });
 
+// The same verbs under the mouse as in the bar and on the keys — one list
+// for wherever a photograph can be right-clicked.
+const photoVerbs = () => [
+  ...CULL_MENU.map(({ action, label }) => ({
+    label,
+    run: () => cullWorkflow.apply(action),
+  })),
+  { label: 'More like this', run: () => moreLikeThis(selection()) },
+];
 grid.addEventListener('contextmenu', (event) => {
   const cell = event.target.closest('.photo-cell[data-kind="photo"]');
   if (!cell || read().view !== 'library') return;
   const index = Number(cell.dataset.index);
   const photo = read().photos.get(index);
   if (photo && !selection().includes(photo.id)) void selectPhoto(index);
-  // The same verbs under the mouse as in the bar and on the keys.
-  albumsPanel.menuFor(event, CULL_MENU.map(({ action, label }) => ({
-    label,
-    run: () => cullWorkflow.apply(action),
-  })));
+  albumsPanel.menuFor(event, photoVerbs());
+});
+loupe.addEventListener('contextmenu', (event) => {
+  if (!read().selected) return;
+  albumsPanel.menuFor(event, photoVerbs());
 });
 
 workspace.addEventListener('scroll', scheduleGrid, { passive: true });

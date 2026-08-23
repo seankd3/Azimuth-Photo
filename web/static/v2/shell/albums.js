@@ -161,7 +161,8 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
     const name = await prompt('Save these results as', anchor, read().query);
     if (!name) return;
     try {
-      const answered = await product.find({ query: read().query, limit: 1000, offset: 0, view: viewOf() });
+      const answered = await product.find({
+        query: read().query, like: read().like || [], limit: 1000, offset: 0, view: viewOf() });
       const ids = answered.photos.map((p) => p.id);
       const kept = await product.savePhotos(name, ids);
       await refresh();
@@ -173,8 +174,7 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
     }
   }
 
-  async function toss(ids = selection()) {
-    if (!ids.length) return;
+  async function quickToss(ids) {
     try {
       const moved = await product.quick(ids);
       await refresh();
@@ -182,6 +182,27 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
       notify('added' in moved
         ? `${moved.added} in Quick album — ${moved.count} held.`
         : `${moved.removed} out of Quick album — ${moved.count} held.`);
+    } catch (error) {
+      notify(error.message);
+    }
+  }
+
+  async function toss(ids = selection()) {
+    if (!ids.length) return;
+    // The album being viewed is the target — Lightroom's target collection
+    // without the set-as-target state. Inside one, everything shown is a
+    // member, so B is the prune: out of a plain album, excluded from a
+    // smart one. In Last import (a record, not a shelf) and everywhere
+    // else, B fills the Quick album; inside Quick that same fill toggles.
+    const here = (read().albums || []).find((c) => c.id === read().album);
+    if (!here || here.id === 'quick' || here.id === 'last-import') return quickToss(ids);
+    try {
+      const out = await product.removeFromAlbum(here.id, ids);
+      await refresh();
+      await reload();
+      notify(here.smart
+        ? `${out.removed} excluded from “${here.name}”.`
+        : `${out.removed} out of “${here.name}”.`);
     } catch (error) {
       notify(error.message);
     }
@@ -304,8 +325,13 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
       button.addEventListener('click', () => { photoMenu.hidden = true; void run(); });
       return button;
     };
+    const here = read().album;
+    const viewing = (read().albums || []).find((c) => c.id === here);
+    // B belongs to whichever verb it drives here: the prune inside an
+    // album, the Quick toss everywhere else.
+    const pruning = viewing && here !== 'quick' && here !== 'last-import';
     const rows = verbs.map(({ label, run }) => item(label, run));
-    rows.push(item(`Quick album — B`, () => toss(ids)));
+    rows.push(item(pruning ? 'Quick album' : 'Quick album — B', () => quickToss(ids)));
     for (const entry of fixed.filter((c) => c.id !== 'quick')) {
       rows.push(item(`Add to “${entry.name}”`, () => addTo(entry.id, ids)));
     }
@@ -315,11 +341,10 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
       const kept = await product.savePhotos(name, ids).catch((error) => { notify(error.message); return null; });
       if (kept) { await refresh(); notify(`“${name}” keeps ${kept.kept} photographs.`); }
     }));
-    const here = read().album;
-    const viewing = (read().albums || []).find((c) => c.id === here);
     if (viewing) {
       rows.push(item(
-        viewing.smart ? `Exclude from “${viewing.name}”` : `Remove from “${viewing.name}”`,
+        (viewing.smart ? `Exclude from “${viewing.name}”` : `Remove from “${viewing.name}”`)
+          + (pruning ? ' — B' : ''),
         () => removeFrom(here, ids)));
     }
     photoMenu.replaceChildren(...rows);

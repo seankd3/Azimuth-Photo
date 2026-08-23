@@ -1992,6 +1992,13 @@ class CollectionsAreOneSurface(CoreCase):
 
 
 class SearchNeverRefuses(CoreCase):
+    def setUp(self):
+        super().setUp()
+        self.library = boot.Library(os.path.join(self.tmp, "catalog.db"),
+                                    os.path.join(self.tmp, "tiles"))
+        self.addCleanup(self.library.close)
+        self.conn = self.library.conn
+
     def _photo(self, tail, camera=None, taken=None):
         photo_id = self.photo(tail)
         digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
@@ -2040,6 +2047,28 @@ class SearchNeverRefuses(CoreCase):
 
         without = finding.search(self.conn, "sunset")
         self.assertEqual(set(without), {agreed, word_only})
+
+    def test_a_selection_finds_its_neighbours_and_never_itself(self):
+        # More-like-this is the same search asked with photographs: the query
+        # vector is the selection's centre in the space -- no words and no
+        # model -- and the seeds stay out of their own answer.
+        import numpy as np
+
+        seed, seed_hash = self._photo("Raws/2026/dune-01.CR2")
+        near, _near_hash = self._photo("Raws/2026/dune-02.CR2")
+        _far, far_hash = self._photo("Snapshots/2025/cat.jpg")
+        axis = np.eye(4, dtype=np.float32)
+        space = ([seed_hash, _near_hash, far_hash],
+                 np.stack([axis[0], axis[0], axis[1]]))
+
+        answer = self.library.search("", like=[seed], space=space)
+        ids = [row["id"] for row in answer["photos"]]
+        self.assertEqual(ids[0], near)
+        self.assertNotIn(seed, ids)
+
+        # Before the first rank pass there is no space memo: no words plus no
+        # vector answers empty, never an error.
+        self.assertEqual(self.library.search("", like=[seed], space=None)["photos"], [])
 
     def test_one_photograph_is_one_result_however_many_rows_hold_it(self):
         import search as finding

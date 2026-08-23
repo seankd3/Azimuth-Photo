@@ -33,7 +33,7 @@ export const library = Object.freeze({
   undoCull: (changes) => invoke('undo_cull', changes),
   turn: (ids, by = 90) => invoke('turn', ids, by),
   forget: (ids) => invoke('forget', ids),
-  find: ({ query, limit, offset, view = null }) => invoke('search', query, limit, offset, view),
+  find: ({ query, limit, offset, view = null, like = [] }) => invoke('search', query, limit, offset, view, like),
   rank: ({ n, view = null, avoid = [] }) => invoke('rank', n, view, avoid),
   albums: () => invoke('albums'),
   createAlbum: (name, chips = null) => invoke('create_album', name, chips),
