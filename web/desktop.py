@@ -176,11 +176,17 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
-    def crop(self, photo_id: int, box: list | None = None) -> dict:
-        return self._run(lambda library: library.crop(int(photo_id), box))
+    def develop(self, photo_id: int, patch: dict) -> dict:
+        return self._run(lambda library: library.develop(int(photo_id), patch or {}))
 
-    def crop_state(self, photo_id: int) -> dict:
-        return self._run(lambda library: library.crop_state(int(photo_id)))
+    def develop_preview(self, photo_id: int, patch: dict, size: int = 1280) -> str:
+        return self._run(lambda library: library.develop_preview(int(photo_id), patch or {}, int(size)))
+
+    def develop_state(self, photo_id: int) -> dict:
+        return self._run(lambda library: library.develop_state(int(photo_id)))
+
+    def export_settings(self, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.export_settings([int(i) for i in photo_ids]))
 
     def days(self, view: dict | None = None) -> list:
         return self._run(lambda library: library.days(view))

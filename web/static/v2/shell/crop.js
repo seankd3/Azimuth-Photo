@@ -22,7 +22,7 @@ export function createCropSurface({ product, notify, applied }) {
   async function open(photo) {
     let held;
     try {
-      held = await product.cropState(photo.id);
+      held = await product.developState(photo.id);
     } catch (error) {
       notify(error.message);
       return;
@@ -56,8 +56,11 @@ export function createCropSurface({ product, notify, applied }) {
     if (!state.photo) return;
     const whole = isWhole();
     const id = state.photo.id;
+    const keys = ['CropLeft', 'CropTop', 'CropRight', 'CropBottom'];
+    const box = state.unit.map((v) => Math.round(v * 1e6) / 1e6);
+    const patch = Object.fromEntries(keys.map((key, i) => [key, whole ? null : box[i]]));
     try {
-      await product.crop(id, whole ? null : state.unit.map((v) => Math.round(v * 1e6) / 1e6));
+      await product.develop(id, patch);
     } catch (error) {
       notify(error.message);
       return;

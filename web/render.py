@@ -283,25 +283,59 @@ def render(source: str, size: int = GRID, rotate: int = 0) -> bytes:
     return encode(pixels(source, size, rotate))
 
 
-def pixels(source: str, size: int = GRID, rotate: int = 0, crop=None) -> Image.Image:
-    """The oriented, cropped, turned, fitted pixels `render` encodes.
+def pixels(source: str, size: int = GRID, rotate: int = 0, edit=None) -> Image.Image:
+    """The oriented, developed, turned, fitted pixels `render` encodes.
 
     Exposed so the tile store can pay one decode for two sizes: the loupe is
     cut from these pixels and the grid tile from the loupe's, and the original
     -- on an archive drive, the expensive read -- is opened exactly once.
 
-    `crop` is Lightroom's rectangle — (left, top, right, bottom) in unit
-    coordinates of the *oriented* image — applied before the owner's turn,
-    because Lightroom knows nothing of that turn.
+    `edit` is the photograph's develop fragment — Lightroom's own keys,
+    typed. The crop is applied in unit coordinates of the *oriented* image
+    and everything else through the color pipeline, both before the owner's
+    turn, because Lightroom knows nothing of that turn.
     """
 
     image = decode(source, size)
-    if crop is not None:
-        image = cut(image, crop)
+    if edit:
+        image = developed(image, edit)
     if rotate % 360:
         # PIL rotates counter-clockwise; the owner means clockwise.
         image = image.rotate(-int(rotate) % 360, expand=True)
     return fit(image, size)
+
+
+def developed(image: Image.Image, edit: dict) -> Image.Image:
+    """One edit, applied to display-referred pixels: the crop, then the
+    color pipeline when any slider says anything.
+
+    The pipeline is V1's — the only place color math exists — entered
+    through its display base, which skips the camera base curve because
+    these pixels are already tone-mapped. The true linear-raw base is the
+    parity phase's work; every format edits identically until then.
+    """
+
+    import develop as developing
+
+    crop = tuple(float(edit[key]) for key in developing.CROP_KEYS) \
+        if all(key in edit for key in developing.CROP_KEYS) else None
+    if crop is not None:
+        image = cut(image, crop)
+    toned = {key: value for key, value in edit.items()
+             if key not in developing.CROP_KEYS}
+    if toned:
+        import numpy as np
+
+        from features.develop import pipeline as color
+
+        held = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+        out = color.apply_pipeline(
+            color.srgb_to_linear(held), toned,
+            color_profile={"base_kind": "display"},
+            blur_min_dimension=min(image.size),
+        )
+        image = Image.fromarray((np.clip(out, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8))
+    return image
 
 
 def cut(image: Image.Image, crop) -> Image.Image:

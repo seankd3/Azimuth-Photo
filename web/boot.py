@@ -246,65 +246,151 @@ class Library:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
 
-    def crop(self, photo_id: int, box=None) -> dict:
-        """The owner crops one photograph — or uncrops it with no box.
+    def _photo_row(self, photo_id: int):
+        row = self.conn.execute(
+            "SELECT content_hash AS hash, tail, file_size, develop FROM images WHERE id = ?",
+            (int(photo_id),)).fetchone()
+        if row is None or not row["hash"]:
+            raise ValueError("that photograph has no identity yet")
+        return row
 
-        The decision lands first; then the cropped loupe and grid publish
+    def develop(self, photo_id: int, patch: dict) -> dict:
+        """The owner changes one photograph's edit: Lightroom's own keys,
+        None removing one.
+
+        The decision lands first; then the edited loupe and grid publish
         immediately when the plain loupe file is already here, so the edit
         is on screen before the worker has turned around. The worker owns
         whatever could not be made now.
         """
 
         self._open()
-        row = self.conn.execute(
-            "SELECT content_hash AS hash, tail, file_size FROM images WHERE id = ?",
-            (int(photo_id),)).fetchone()
-        if row is None or not row["hash"]:
-            raise ValueError("that photograph has no identity yet")
-        if box is None:
-            patch = {key: None for key in developing.CROP_KEYS}
-        else:
-            left, top, right, bottom = (float(v) for v in box)
-            if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+        row = self._photo_row(photo_id)
+        held = {}
+        for key, value in dict(patch or {}).items():
+            key = str(key)
+            if key not in developing.RENDERED:
+                raise ValueError(f"not a setting this build renders: {key}")
+            held[key] = value
+        crop = [held.get(key) for key in developing.CROP_KEYS]
+        if any(v is not None for v in crop) and not all(v is None for v in crop):
+            left, top, right, bottom = ((float(v) if v is not None else None) for v in crop)
+            if None not in (left, top, right, bottom) and not (
+                    0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
                 raise ValueError("a crop keeps some of the photograph")
-            patch = dict(zip(developing.CROP_KEYS, (left, top, right, bottom)))
-        developing.edit(self.conn, row["hash"], patch)
+        developing.edit(self.conn, row["hash"], held)
         current = self.conn.execute(
             "SELECT develop FROM images WHERE id = ?", (int(photo_id),)).fetchone()["develop"]
         self._prune_renditions(row["hash"], keep=current)
-        made = None
+        made = False
         if current is not None:
-            crop = json.loads(current)
+            # The grid answer publishes now — the pipeline at grid size is
+            # a beat, not a wait — and the worker owns the loupe behind it:
+            # at loupe size the same render is tens of seconds, and this
+            # verb holds the library's one lane while it runs.
+            edit = developing.parts(current)
             source = photos.locate(self.conn, row["tail"], expected_size=row["file_size"])
-            if source or os.path.isfile(self.tiles.path(row["hash"], render.LOUPE)):
-                for kind in self.tiles.kinds:
-                    cache.make(self.conn, row["hash"], kind, source or "", {"crop": crop})
+            if source or os.path.isfile(self.tiles.path(row["hash"], render.GRID))                     or os.path.isfile(self.tiles.path(row["hash"], render.LOUPE)):
+                cache.make(self.conn, row["hash"], self.tiles.grid, source or "", {"edit": edit})
                 made = True
         self.chores.nudge()
-        return {"develop": current, "made": bool(made)}
+        return {"develop": current, "made": made}
 
-    def crop_state(self, photo_id: int) -> dict:
-        """What the crop surface needs: the full-frame loupe to drag over,
-        and the rectangle currently worn."""
+    def develop_preview(self, photo_id: int, patch: dict, size: int = 1280) -> str:
+        """One look at an uncommitted edit: the current settings plus this
+        patch, rendered over a held base, published as a file the window
+        loads like any tile. No decision is written — this is the slider
+        moving under the thumb.
+
+        The loupe file decodes once per photograph and the fitted base is
+        held; each look pays only the pipeline (the decode was ~3 s of a
+        3.5 s look). The answer is a file, never inline bytes: a data URI
+        crossing the bridge went silent past a size the bridge never
+        names, and a look that sometimes arrives is worse than none. Two
+        names alternate so the window never reads a half-written frame.
+        """
 
         self._open()
-        row = self.conn.execute(
-            "SELECT content_hash AS hash, develop FROM images WHERE id = ?",
-            (int(photo_id),)).fetchone()
-        if row is None or not row["hash"]:
-            raise ValueError("that photograph has no identity yet")
+        row = self._photo_row(photo_id)
+        size = max(256, min(2048, int(size)))
+        key = (row["hash"], size)
+        if getattr(self, "_preview_key", None) != key:
+            # The scrub is a proxy render, as Lightroom's own is: the grid
+            # tile decodes in tens of milliseconds where the loupe costs
+            # seconds, and a first look that outlives the bridge's patience
+            # arrives as no look at all.
+            plain = self.tiles.path(row["hash"], render.GRID)
+            if size > render.GRID or not os.path.isfile(plain):
+                plain = self.tiles.path(row["hash"], render.LOUPE)
+            if not os.path.isfile(plain):
+                raise ValueError("the full picture is not here yet")
+            with render.Image.open(plain) as source:
+                self._preview_base = render.fit(source.convert("RGB"), size)
+            self._preview_key = key
+        held = dict(developing.settings(self.conn, row["hash"]))
+        for key_name, value in dict(patch or {}).items():
+            if value is None:
+                held.pop(str(key_name), None)
+            else:
+                held[str(key_name)] = value
+        edit = developing.parts(developing.fragment(held))
+        image = render.developed(self._preview_base, edit) if edit else self._preview_base
+        looks = getattr(self, "_preview_looks", 0) + 1
+        self._preview_looks = looks
+        target = os.path.join(self.tiles.root, f".look-{looks % 2}.jpg")
+        with open(target, "wb") as handle:
+            handle.write(render.encode(image, quality=82))
+        return Path(target).as_uri() + f"?look={looks}"
+
+    def export_settings(self, photo_ids) -> dict:
+        """The owner's edits, written to sidecars beside the photographs —
+        the round trip's other half. Only the crs surface changes hands;
+        everything else a sidecar holds is kept."""
+
+        self._open()
+        written = unchanged = missing = 0
+        for photo_id in photo_ids:
+            row = self.conn.execute(
+                "SELECT content_hash AS hash, tail, file_size FROM images WHERE id = ?",
+                (int(photo_id),)).fetchone()
+            if row is None or not row["hash"]:
+                missing += 1
+                continue
+            source = photos.locate(self.conn, row["tail"], expected_size=row["file_size"])
+            if source is None:
+                missing += 1
+                continue
+            said = developing.write_sidecar(self.conn, row["hash"], source)
+            if said["status"] == "written":
+                written += 1
+            elif said["status"] == "unchanged":
+                unchanged += 1
+        return {"written": written, "unchanged": unchanged, "missing": missing}
+
+    def develop_state(self, photo_id: int) -> dict:
+        """What the editing surfaces need: the full-frame loupe, the crop
+        worn, and the current settings in Lightroom's spelling."""
+
+        self._open()
+        row = self._photo_row(photo_id)
         plain = self.tiles.path(row["hash"], render.LOUPE)
         box = developing.crop_of(row["develop"])
         return {
             "plain": Path(plain).as_uri() if os.path.isfile(plain) else None,
             "box": list(box) if box else None,
+            "settings": developing.parts(developing.fragment(
+                developing.settings(self.conn, row["hash"]))),
         }
 
     def _prune_renditions(self, digest: str, keep: str | None) -> None:
         """Drop rendition rows for edits this photograph no longer wears.
 
-        The grid tile is never evicted, so a superseded crop's rows would
-        otherwise sit forever beside the current answer."""
+        The grid tile is never evicted, so a superseded edit's rows would
+        otherwise sit forever beside the current answer. A worker mid-compute
+        on the old recipe can land one zombie row after this runs; it is
+        invisible — no join ever builds that recipe again — and the next
+        edit of the same photograph prunes it, so it is left alone rather
+        than guarded against."""
 
         kinds = {kind.name: kind for kind in self.tiles.kinds}
         marks = ",".join("?" for _ in kinds)
@@ -313,7 +399,7 @@ class Library:
             f" AND recipe != '{{}}'",
             (str(digest), *kinds),
         ).fetchall()
-        wanted = f'{{"crop":{keep}}}' if keep else None
+        wanted = f'{{"edit":{keep}}}' if keep else None
         for row in rows:
             if row["recipe"] == wanted:
                 continue

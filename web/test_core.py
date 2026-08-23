@@ -7,6 +7,7 @@ reads is a suite nobody runs.
 """
 
 import io
+import json
 import hashlib
 import os
 from pathlib import Path
@@ -2259,7 +2260,11 @@ class AnEditIsADecision(CoreCase):
         self.assertEqual(held["ToneCurvePV2012"], ["0, 0", "255, 255"])
         column = self.conn.execute(
             "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"]
-        self.assertEqual(column, "[0.04321,0.1,0.9,0.95]")
+        fragment = json.loads(column)
+        self.assertEqual(fragment["CropLeft"], 0.04321)        # typed, kept
+        self.assertEqual(fragment["Exposure2012"], 0.5)        # the slider renders
+        self.assertNotIn("RawFileName", fragment)              # not a rendered key
+        self.assertNotIn("CropAngle", fragment)                # zero says nothing
 
         # An unchanged sidecar appends nothing on the next sweep.
         self.assertEqual(developing.adopt(self.conn, self.tmp, ["Raws/frame.xmp"]), 0)
@@ -2285,7 +2290,7 @@ class AnEditIsADecision(CoreCase):
             "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"]
         import json as coding
 
-        self.assertEqual(spliced, cache.canonical(store.grid, {"crop": coding.loads(fragment)}))
+        self.assertEqual(spliced, cache.canonical(store.grid, {"edit": coding.loads(fragment)}))
 
     def test_an_edited_photo_owes_both_recipes_and_a_plain_one_owes_one(self):
         import develop as developing
@@ -2320,7 +2325,41 @@ class AnEditIsADecision(CoreCase):
         self.assertIsNone(self.conn.execute(
             "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"])
 
+    def test_write_back_replaces_the_crs_surface_and_keeps_everything_else(self):
+        import develop as developing
+
+        photo_id = self.photo("Raws/loop.cr3")
+        digest = "b" * 64
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        folder = os.path.join(self.tmp, "Raws")
+        os.makedirs(folder, exist_ok=True)
+        raw = os.path.join(folder, "loop.cr3")
+        with open(os.path.join(folder, "loop.xmp"), "w", encoding="utf-8") as handle:
+            handle.write(self.SIDECAR.replace(
+                'xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"',
+                'xmlns:crs="http://ns.adobe.com/camera-raw-settings/1.0/"\n'
+                '    xmlns:tiff="http://ns.adobe.com/tiff/1.0/"\n'
+                '   tiff:Make="Canon"'))
+
+        developing.adopt(self.conn, self.tmp, ["Raws/loop.xmp"])
+        developing.edit(self.conn, digest, {"Exposure2012": 1.25, "CropLeft": None,
+                                            "CropTop": None, "CropRight": None,
+                                            "CropBottom": None})
+        said = developing.write_sidecar(self.conn, digest, raw)
+        self.assertEqual(said["status"], "written")
+
+        back = developing.read_sidecar(said["target"])
+        self.assertEqual(back["Exposure2012"], "+1.25")         # ours, Adobe-spelled
+        self.assertNotIn("CropLeft", back)                       # the reset held
+        self.assertEqual(back["ToneCurvePV2012"], ["0, 0", "255, 255"])
+        text = open(said["target"], encoding="utf-8").read()
+        self.assertIn("Canon", text)                             # the non-crs block survived
+
+        # Writing again with nothing changed says so and touches nothing.
+        self.assertEqual(developing.write_sidecar(self.conn, digest, raw)["status"], "unchanged")
+
     def test_a_cropped_tile_is_cut_from_the_plain_loupe_without_the_original(self):
+        import develop as developing
         from PIL import Image as Pillow
 
         store = tiles.Store(os.path.join(self.tmp, "tiles"))
@@ -2329,12 +2368,90 @@ class AnEditIsADecision(CoreCase):
         image.paste((250, 20, 20), (0, 0, 500, 800))    # left half red
         store._publish(store.path(digest, render.LOUPE), render.encode(image))
 
-        made = store._answer("", digest, render.GRID, crop=(0.5, 0.0, 1.0, 1.0))
+        made = store._answer("", digest, render.GRID,
+                             dict(zip(developing.CROP_KEYS, (0.5, 0.0, 1.0, 1.0))))
         with Pillow.open(made.path) as cropped:
             width, height = cropped.size
             middle = cropped.getpixel((width // 2, height // 2))
         self.assertAlmostEqual(width / height, 500 / 800, places=1)
         self.assertGreater(middle[1], middle[0])         # the green half survived
+
+
+class ASliderIsADecision(CoreCase):
+    """The editing workspace's whole path: a slider release is one decision,
+    the decision is the recipe, the recipe is the tile — and the preview
+    asks without writing anything."""
+
+    def setUp(self):
+        super().setUp()
+        self.library = boot.Library(os.path.join(self.tmp, "catalog.db"),
+                                    os.path.join(self.tmp, "tiles"))
+        self.addCleanup(self.library.close)
+        self.conn = self.library.conn
+
+    def _lit(self, path):
+        from PIL import Image as Pillow
+
+        with Pillow.open(path) as image:
+            import numpy as np
+
+            return float(np.asarray(image.convert("L"), dtype=np.float32).mean())
+
+    def test_exposure_brightens_the_tile_and_none_takes_it_back(self):
+        import develop as developing
+        from PIL import Image as Pillow
+
+        photo_id = self.photo("Raws/lit.cr3")
+        digest = "9" * 64
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        self.conn.commit()
+        plain = self.library.tiles.path(digest, render.LOUPE)
+        self.library.tiles._publish(
+            plain, render.encode(Pillow.new("RGB", (640, 420), (96, 96, 96))))
+
+        said = self.library.develop(photo_id, {"Exposure2012": 1.0})
+        self.assertTrue(said["made"])
+        fragment = json.loads(said["develop"])
+        self.assertEqual(fragment, {"Exposure2012": 1.0})
+
+        held = self.conn.execute(
+            "SELECT recipe, path, state FROM cache WHERE hash = ? AND kind = 'grid'"
+            " AND recipe != '{}'", (digest,)).fetchone()
+        self.assertEqual(held["state"], "ready")
+        self.assertEqual(held["recipe"], '{"edit":{"Exposure2012":1.0}}')
+        self.assertGreater(self._lit(held["path"]), self._lit(plain) + 20)
+        # The loupe's edited answer belongs to the worker, not this verb:
+        # at loupe size the pipeline is tens of seconds, and the verb holds
+        # the library's one lane.
+        self.assertEqual(
+            [row["id"] for row in work.owed(self.conn, self.library.tiles.loupe,
+                                            recipe={}, keyed=True)],
+            [photo_id])
+
+        # The preview asks with an uncommitted patch and writes nothing.
+        decisions_before = self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        uri = self.library.develop_preview(photo_id, {"Exposure2012": -2.0}, size=320)
+        self.assertIn(".look-", uri)          # a file the window loads like a tile
+        self.assertIn("?look=", uri)          # named per look, cached never
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0],
+            decisions_before)
+
+        # None rests the slider; the photograph goes back to its plain answer.
+        said = self.library.develop(photo_id, {"Exposure2012": None})
+        self.assertIsNone(said["develop"])
+        self.assertIsNone(self.conn.execute(
+            "SELECT develop FROM images WHERE id = ?", (photo_id,)).fetchone()["develop"])
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) FROM cache WHERE hash = ? AND kind IN ('grid','loupe')"
+            " AND recipe != '{}'", (digest,)).fetchone()[0], 0)
+
+    def test_a_setting_this_build_does_not_render_is_refused(self):
+        photo_id = self.photo("Raws/strange.cr3")
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", ("8" * 64, photo_id))
+        self.conn.commit()
+        with self.assertRaises(ValueError):
+            self.library.develop(photo_id, {"PerspectiveUpright": 1})
 
 
 class ASplitPersonHealsByName(CoreCase):

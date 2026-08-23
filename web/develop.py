@@ -7,10 +7,11 @@ authoritative decision is the photograph's current edit; history and undo are
 the log, the same as stars and rotation.
 
 The renderable part of the edit is projected to ``images.develop`` as a
-canonical JSON fragment (today: the crop rectangle), which is what lets a
-rendition's cache recipe be built per photograph *in SQL* — the tile of an
-edited photograph is a different recipe because it is different pixels, and
-the tile of an untouched one keeps the exact recipe it always had.
+canonical JSON fragment — the crs subset the renderer reads, typed and
+sorted — which is what lets a rendition's cache recipe be built per
+photograph *in SQL* — the tile of an edited photograph is a different
+recipe because it is different pixels, and the tile of an untouched one
+keeps the exact recipe it always had.
 
 Sidecars are read on the sweep's rhythm: the walk already sees every ``.xmp``
 beside a photograph, and a sidecar whose settings differ from the last
@@ -35,6 +36,47 @@ BY_FILE = decisions.FILE
 # angle values in the real library is exactly 0, so rendering it waits for
 # a measured fixture rather than a guessed dialect.
 CROP_KEYS = ("CropLeft", "CropTop", "CropRight", "CropBottom")
+
+# Everything the renderer reads, in Lightroom's spelling — the census of the
+# real library's own sidecars (docs/DEVELOP.md), minus what is parked with a
+# receipt: CropAngle (all zeros), lens and perspective (fixtures first),
+# PointColors and the SDR/HDR pair (the parity phase owns them). A key
+# outside this set still lives in the decision and round-trips through
+# write-back; it just does not change pixels yet.
+RENDERED = frozenset((
+    *CROP_KEYS,
+    "Temperature", "Tint",
+    "Exposure2012", "Contrast2012", "Highlights2012", "Shadows2012",
+    "Whites2012", "Blacks2012",
+    "Texture", "Clarity2012", "Dehaze", "Vibrance", "Saturation",
+    "ToneCurvePV2012", "ToneCurvePV2012Red", "ToneCurvePV2012Green", "ToneCurvePV2012Blue",
+    "ParametricDarks", "ParametricLights", "ParametricShadows", "ParametricHighlights",
+    "ParametricShadowSplit", "ParametricMidtoneSplit", "ParametricHighlightSplit",
+    "HueAdjustmentRed", "HueAdjustmentOrange", "HueAdjustmentYellow", "HueAdjustmentGreen",
+    "HueAdjustmentAqua", "HueAdjustmentBlue", "HueAdjustmentPurple", "HueAdjustmentMagenta",
+    "SaturationAdjustmentRed", "SaturationAdjustmentOrange", "SaturationAdjustmentYellow",
+    "SaturationAdjustmentGreen", "SaturationAdjustmentAqua", "SaturationAdjustmentBlue",
+    "SaturationAdjustmentPurple", "SaturationAdjustmentMagenta",
+    "LuminanceAdjustmentRed", "LuminanceAdjustmentOrange", "LuminanceAdjustmentYellow",
+    "LuminanceAdjustmentGreen", "LuminanceAdjustmentAqua", "LuminanceAdjustmentBlue",
+    "LuminanceAdjustmentPurple", "LuminanceAdjustmentMagenta",
+    "SplitToningShadowHue", "SplitToningShadowSaturation",
+    "SplitToningHighlightHue", "SplitToningHighlightSaturation", "SplitToningBalance",
+    "ColorGradeGlobalHue", "ColorGradeGlobalSat", "ColorGradeGlobalLum",
+    "ColorGradeShadowLum", "ColorGradeMidtoneHue", "ColorGradeMidtoneSat",
+    "ColorGradeMidtoneLum", "ColorGradeHighlightLum", "ColorGradeBlending",
+    "Sharpness", "SharpenRadius", "SharpenDetail", "SharpenEdgeMasking",
+    "LuminanceSmoothing", "ColorNoiseReduction", "ColorNoiseReductionDetail",
+    "ColorNoiseReductionSmoothness",
+    "PostCropVignetteAmount", "PostCropVignetteMidpoint", "PostCropVignetteFeather",
+    "PostCropVignetteRoundness", "PostCropVignetteStyle", "PostCropVignetteHighlightContrast",
+    "GrainAmount", "GrainSize", "GrainFrequency",
+    "DefringePurpleAmount", "DefringePurpleHueLo", "DefringePurpleHueHi",
+    "DefringeGreenAmount", "DefringeGreenHueLo", "DefringeGreenHueHi",
+    "ShadowTint", "RedHue", "RedSaturation", "GreenHue", "GreenSaturation",
+    "BlueHue", "BlueSaturation",
+    "ConvertToGrayscale",
+))
 
 _CRS = "http://ns.adobe.com/camera-raw-settings/1.0/"
 _RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
@@ -112,25 +154,57 @@ def settings(conn, digest: str) -> dict:
     return said if isinstance(said, dict) else {}
 
 
+def _typed(value):
+    """A sidecar's string, as the number or truth it spells; lists and
+    dicts pass through for the renderer's own parsers."""
+
+    if isinstance(value, str):
+        held = value.strip()
+        if held.lower() in ("true", "false"):
+            return held.lower() == "true"
+        try:
+            number = float(held)
+        except ValueError:
+            return held
+        return int(number) if number.is_integer() and "." not in held else number
+    return value
+
+
 def fragment(held: dict) -> str | None:
-    """The renderable geometry of an edit, as the canonical recipe fragment.
+    """The renderable part of an edit, as the canonical recipe fragment:
+    the RENDERED crs subset, typed, defaults dropped, keys sorted.
 
     None when the edit changes no pixels a rendition shows — a full-frame
-    crop is not an edit, and a photograph without one keeps the recipe (and
-    the tiles) it always had.
+    crop is not an edit, a zeroed slider is not an edit, and a photograph
+    with neither keeps the recipe (and the tiles) it always had.
     """
 
-    try:
-        crop = [round(float(held.get(key, default)), 6)
-                for key, default in zip(CROP_KEYS, (0.0, 0.0, 1.0, 1.0))]
-    except (TypeError, ValueError):
+    kept: dict[str, object] = {}
+    for key in sorted(RENDERED & set(held)):
+        value = _typed(held[key])
+        if value in (0, 0.0, False, "", None):
+            continue          # a slider at rest says nothing
+        kept[key] = value
+    crop = None
+    if any(key in kept for key in CROP_KEYS):
+        try:
+            crop = [round(float(_typed(held.get(key, default))), 6)
+                    for key, default in zip(CROP_KEYS, (0.0, 0.0, 1.0, 1.0))]
+        except (TypeError, ValueError):
+            crop = None
+        for key in CROP_KEYS:
+            kept.pop(key, None)
+        if crop is not None:
+            left, top, right, bottom = crop
+            if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
+                crop = None
+            elif crop == [0.0, 0.0, 1.0, 1.0]:
+                crop = None
+        if crop is not None:
+            kept.update(zip(CROP_KEYS, crop))
+    if not kept:
         return None
-    left, top, right, bottom = crop
-    if not (0.0 <= left < right <= 1.0 and 0.0 <= top < bottom <= 1.0):
-        return None
-    if crop == [0.0, 0.0, 1.0, 1.0]:
-        return None
-    return json.dumps(crop, separators=(",", ":"))
+    return json.dumps(kept, separators=(",", ":"), sort_keys=True)
 
 
 def project(conn, digest: str) -> str | None:
@@ -222,14 +296,80 @@ def _last_adopted(conn, digest: str) -> dict | None:
     return said if isinstance(said, dict) else None
 
 
-def crop_of(fragment_json: str | None) -> tuple[float, float, float, float] | None:
-    """A stored fragment back as (left, top, right, bottom), or None."""
+def parts(fragment_json: str | None) -> dict:
+    """A stored fragment back as its typed dict, or empty."""
 
     if not fragment_json:
+        return {}
+    try:
+        held = json.loads(fragment_json)
+    except (TypeError, ValueError):
+        return {}
+    return held if isinstance(held, dict) else {}
+
+
+def write_sidecar(conn, digest: str, photo_path: str) -> dict:
+    """The round trip's other half: the photograph's current settings into
+    the sidecar beside it — the LRTimelapse discipline.
+
+    The crs surface becomes exactly ours (Lightroom's spellings for what it
+    wrote, Adobe's spelling for what the owner changed here); every other
+    block in the file — camera facts, keywords, history — is kept element
+    for element. A photograph without a sidecar gets a fresh, crs-only one
+    Lightroom reads the same way.
+    """
+
+    from features.develop import xmp_write
+
+    ours = settings(conn, digest)
+    if not ours:
+        return {"status": "nothing"}
+    target = os.path.splitext(str(photo_path))[0] + ".xmp"
+    for prefix, uri in (
+        ("x", "adobe:ns:meta/"), ("rdf", _RDF), ("crs", _CRS),
+        ("xmp", "http://ns.adobe.com/xap/1.0/"),
+        ("tiff", "http://ns.adobe.com/tiff/1.0/"),
+        ("exif", "http://ns.adobe.com/exif/1.0/"),
+        ("dc", "http://purl.org/dc/elements/1.1/"),
+        ("aux", "http://ns.adobe.com/exif/1.0/aux/"),
+        ("photoshop", "http://ns.adobe.com/photoshop/1.0/"),
+        ("xmpMM", "http://ns.adobe.com/xap/1.0/mm/"),
+        ("stEvt", "http://ns.adobe.com/xap/1.0/sType/ResourceEvent#"),
+        ("crd", "http://ns.adobe.com/camera-raw-defaults/1.0/"),
+    ):
+        ET.register_namespace(prefix, uri)
+    if os.path.isfile(target):
+        try:
+            tree = ET.parse(target)
+        except (ET.ParseError, OSError):
+            tree = None
+        description = None if tree is None else next(
+            tree.getroot().iter(f"{{{_RDF}}}Description"), None)
+        if description is not None:
+            for name in [n for n in description.attrib if n.startswith(f"{{{_CRS}}}")]:
+                del description.attrib[name]
+            for child in [c for c in description if c.tag.startswith(f"{{{_CRS}}}")]:
+                description.remove(child)
+            xmp_write._append_resource(description, ours)
+            payload = ET.tostring(tree.getroot(), encoding="utf-8")
+        else:
+            payload = xmp_write.serialize(ours).encode("utf-8")
+    else:
+        payload = xmp_write.serialize(ours).encode("utf-8")
+    from pathlib import Path
+
+    changed = xmp_write._atomic_write(Path(target), payload)
+    return {"status": "written" if changed else "unchanged", "target": target}
+
+
+def crop_of(fragment_json: str | None) -> tuple[float, float, float, float] | None:
+    """A stored fragment's crop as (left, top, right, bottom), or None."""
+
+    held = parts(fragment_json)
+    if not all(key in held for key in CROP_KEYS):
         return None
     try:
-        left, top, right, bottom = (float(v) for v in json.loads(fragment_json))
+        return tuple(float(held[key]) for key in CROP_KEYS)  # type: ignore[return-value]
     except (TypeError, ValueError):
         return None
-    return (left, top, right, bottom)
 

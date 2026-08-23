@@ -2,6 +2,7 @@ import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCropSurface } from './crop.js';
+import { createEditPanel } from './editpanel.js';
 import { createCullWorkflow, CULL_MENU } from './cull.js';
 import { createPeoplePanel } from './people.js';
 import { createAlbumsPanel } from './albums.js';
@@ -103,7 +104,10 @@ function renderStrip(state) {
   let signature = `${start}:${end}`;
   for (let index = start; index < end; index += 1) {
     const photo = state.photos.get(index);
-    signature += photo ? `|${photo.id}.${photo.tile ? 1 : 0}.${photo.status}.${photo.rotate}` : '|·';
+    // The tile's tail rides the signature: an edit changes the URL, not
+    // its truthiness, and a strip that only checks presence keeps showing
+    // the look the photograph no longer wears.
+    signature += photo ? `|${photo.id}.${photo.tile ? photo.tile.slice(-12) : 0}.${photo.status}.${photo.rotate}` : '|·';
   }
   const rebuilt = signature !== stripKey;
   if (rebuilt) {
@@ -284,6 +288,34 @@ const labelsPanel = createLabelsPanel({
   product,
   update,
   browse: (term) => browseChip({ is: 'label', values: [term] }),
+});
+const editPanel = createEditPanel({
+  product,
+  notify,
+  preview: (uri) => {
+    // The look rides over the rendition without touching the loupe's
+    // source memory, so passive renders skip it and the look survives;
+    // applied() clears that memory once, which is what lets the real
+    // rendition land after a commit or a reset.
+    loupeImage.src = uri;
+  },
+  applied: async (photoId) => {
+    // A committed change always deserves the real rendition, even when
+    // its URL matches what the loupe believes it has — a look may be
+    // sitting over it.
+    loupeImage.dataset.source = '';
+    await refreshInPlace();
+    const { selected, photos } = read();
+    if (selected?.id === photoId) {
+      for (const [index, photo] of photos) {
+        if (photo.id === photoId) {
+          update({ selected: { ...selected, ...photo }, selectedIndex: index });
+          if (loupeOpen()) showPhoto(read().selected);
+          break;
+        }
+      }
+    }
+  },
 });
 const cropSurface = createCropSurface({
   product,
@@ -1035,7 +1067,8 @@ function renderChrome(state) {
   peoplePanel.render(state);
   labelsPanel.render(state);
   filterBar.render(state);
-  library.renderInspector(inspector, state.selected);
+  library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected);
+  editPanel.follows(state.view === 'loupe' ? state.selected : null);
   if (state.view === 'loupe' && state.selected) {
     renderLoupe(state.selected);
     renderStrip(state);
@@ -1266,6 +1299,11 @@ document.addEventListener('keydown', (event) => {
     if (cropSurface.key(event)) event.preventDefault();
     return;
   }
+  if (editPanel.isOpen() && event.key === 'Escape' && !isTyping) {
+    editPanel.close();
+    event.preventDefault();
+    return;
+  }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !isTyping) {
     undo.run();
     event.preventDefault();
@@ -1356,6 +1394,16 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  // Develop: Lightroom's D, the Basic panel in the inspector's seat.
+  if (key === 'd' && ['library', 'loupe'].includes(read().view) && read().selected?.hash) {
+    if (editPanel.isOpen()) editPanel.close();
+    else {
+      if (!loupeOpen()) showPhoto(read().selected);
+      void editPanel.open(read().selected);
+    }
+    event.preventDefault();
+    return;
+  }
   if (key === 'u' && read().view === 'trash' && selection().length) {
     trashWorkflow.restoreSelected();
     event.preventDefault();
@@ -1434,6 +1482,19 @@ const photoVerbs = () => [
     },
   },
   { label: 'More like this', run: () => moreLikeThis(selection()) },
+  {
+    label: 'Save settings to file',
+    run: async () => {
+      try {
+        const said = await product.exportSettings(selection());
+        notify(`${said.written} sidecar${said.written === 1 ? '' : 's'} written`
+          + (said.unchanged ? `, ${said.unchanged} already current` : '')
+          + (said.missing ? `, ${said.missing} not here` : '') + '.');
+      } catch (error) {
+        notify(error.message);
+      }
+    },
+  },
 ];
 grid.addEventListener('contextmenu', (event) => {
   const cell = event.target.closest('.photo-cell[data-kind="photo"]');

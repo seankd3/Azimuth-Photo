@@ -134,7 +134,18 @@
     </main>
 
     <aside class="inspector" aria-label="Photo information" data-inspector>
-      <div class="inspector-empty">Select a photo to see its details.</div>
+      <div data-inspector-facts>
+        <div class="inspector-empty">Select a photo to see its details.</div>
+      </div>
+      <section class="edit-panel" data-edit-panel hidden aria-label="Edit">
+        <header class="edit-head">
+          <p class="eyebrow">Edit</p>
+          <button class="quiet-button" type="button" data-action="edit-reset">Reset</button>
+          <button class="quiet-button" type="button" data-action="edit-close" title="Done (D)">Done</button>
+        </header>
+        <div class="edit-groups" data-edit-groups></div>
+        <p class="edit-hint">Drag to look, release to keep · double-click a name resets it</p>
+      </section>
     </aside>
   </div>
 

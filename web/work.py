@@ -447,8 +447,11 @@ class Chores:
         for wake in self._wake:
             wake.set()
 
-    def stop(self, timeout: float = 5.0) -> bool:
-        """Finish the items in hand, close the catalogs, and report success."""
+    def stop(self, timeout: float = 15.0) -> bool:
+        """Finish the items in hand, close the catalogs, and report success.
+
+        The grace covers the longest single item a worker holds — an edited
+        loupe's pipeline render, a few seconds at its capped size."""
 
         self._stopped.set()
         for wake in self._wake:
