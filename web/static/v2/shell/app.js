@@ -1022,7 +1022,9 @@ function renderChrome(state) {
     if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
   }
   const count = state.counts.photos.toLocaleString();
-  document.querySelector('[data-photo-count]').textContent = `${state.total.toLocaleString()} photos`;
+  document.querySelector('[data-photo-count]').textContent = state.view === 'people'
+    ? `${(state.people || []).length.toLocaleString()} people`
+    : `${state.total.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
@@ -1038,21 +1040,22 @@ function renderChrome(state) {
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
+  const walled = state.view === 'people';
   shell.classList.toggle('hide-left', !state.panels.left);
   shell.classList.toggle('hide-right', !state.panels.right);
   shell.classList.toggle('hide-top', !state.panels.top);
   loupe.hidden = !holding;
-  grid.hidden = ranking || holding;
+  grid.hidden = ranking || holding || walled;
   document.querySelector('[data-rank]').hidden = !ranking;
   document.querySelector('[data-rank-progress]').hidden = !ranking;
   document.querySelector('[data-rank-size]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
-  document.querySelector('[data-result-label]').hidden = ranking || holding;
-  document.querySelector('[data-density]').closest('label').hidden = ranking || holding;
+  document.querySelector('[data-result-label]').hidden = ranking || holding || walled;
+  document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled;
   // The chips narrow the library view; Trash and the loupe are not places
   // to edit them, so they leave with their + button.
-  document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding;
+  document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding || walled;
   // The quiet invitation to refine: visible exactly when Y and N would land.
   const hint = document.querySelector('[data-teach-hint]');
   const word = teachable();
@@ -1062,9 +1065,9 @@ function renderChrome(state) {
   // the question being asked, and its ✕ is how the question ends.
   const pill = document.querySelector('[data-like-pill]');
   const alike = (state.like || []).length;
-  pill.hidden = !alike || state.view === 'trash' || holding;
+  pill.hidden = !alike || state.view === 'trash' || holding || walled;
   if (alike) pill.textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`} ✕`;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding;
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = (state.view === 'library' || state.view === 'loupe') && Boolean(state.selected?.hash);
@@ -1083,6 +1086,7 @@ function renderChrome(state) {
   const where = shelf ? shelf.name : state.folder ? state.folder.split('/').pop() : '';
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
+    : walled ? 'People'
     : searching
       ? (state.query
         ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
@@ -1256,6 +1260,7 @@ document.addEventListener('keydown', (event) => {
       }
     }
     else if (rankWorkflow.isOpen()) rankWorkflow.close();
+    else if (read().view === 'people') update({ view: 'library' });
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected || read().marked?.size) {
@@ -1323,6 +1328,7 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  if (read().view === 'people') return;   // the wall has no grid cursor
   const extend = { shift: event.shiftKey };
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     const move = event.key === 'ArrowLeft' ? -1 : 1;

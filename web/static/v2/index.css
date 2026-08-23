@@ -375,6 +375,56 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   height: calc(100% - 46px);
   padding: 14px;
 }
+/* The face wall: everyone at a size a face can be recognized at. Someones
+   first — the wall exists to introduce them. */
+.face-wall {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 14px;
+  padding: 18px;
+  overflow-y: auto;
+  height: calc(100% - 46px);
+}
+.face-card {
+  width: 164px;
+  padding: 12px 12px 10px;
+  border: 1px solid var(--line);
+  background: #14181c;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.face-card-look {
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  line-height: 0;
+}
+.face-card-look .smart-mark { font-size: 64px; line-height: 130px; }
+.face-card-face {
+  width: 130px;
+  height: 130px;
+  object-fit: cover;
+  border-radius: 3px;
+  background: #0d0e10;
+}
+.face-card-look:hover .face-card-face { outline: 1px solid var(--accent); }
+.face-card-name {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.face-card-count { margin: 0; color: var(--text-3); font-size: 11px; }
+.face-card-name-button { margin-top: 6px; width: 100%; }
+.people-door { color: var(--text-3); }
 .rank-card {
   position: relative;
   justify-self: center;

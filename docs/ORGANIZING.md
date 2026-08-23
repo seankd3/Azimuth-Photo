@@ -124,22 +124,31 @@ Sidebar (sections collapsible, state remembered):
 - **No second browse grammar for any new noun** — people, labels, sessions
   are all chips; there is one grid, one loupe, one Refine.
 
-## Build order
+## Build order — all six landed 08-22 (commits ead39c0f…)
 
-1. **The rename and the calm sidebar** — Albums (was Collections), Labels,
-   People sections; collapsible; empty-states that know where they are
-   ("Drag photos here, press B…" inside an empty album).
-2. **The face wall** + browse-before-name (server already writes interim
-   handles).
-3. **Smart-album exceptions** — one change in `criteria.resolve`
-   (rules ∪ pinned ∖ excluded over the membership rows that already store
-   true/false); drag-in and Remove become legal on smart; target-album for B.
-4. **Sessions** — gap clustering + folder-date fallback; grid chapters;
-   session chips and cards.
-5. **The teach loop** — learned labels (word- or example-seeded), the
-   Teach strip, removals-as-denials; per-label calibration when the E:
-   backfill fills the space.
-6. **More like this** — selection-seeded find; album suggestions.
+1. **The rename and the calm sidebar** — DONE (`ead39c0f`): Albums/Labels/
+   People, collapsible sections, place-aware empty states.
+2. **The face wall** — DONE: a workspace stage of big faces; the sidebar
+   keeps the named plus three Someones and a door row; Name… is a button
+   on the card; browse-before-name everywhere.
+3. **Smart-album exceptions** — DONE (`ead39c0f`): (rules ∪ pinned) ∖
+   denied in `criteria.resolve`; drag-in and Exclude legal on smart.
+   Target-album for B — DONE (`c9a577db`): the album being viewed is the
+   target; B prunes inside it, fills Quick everywhere else.
+4. **Sessions** — DONE (`1b61d325`), reshaped by arithmetic: 3-hour
+   sessions number ~10k at 155k photos, a header per fifteen frames — so
+   the grid chapters are **days** (exact index math, one GROUP BY) and
+   named sessions are **cards** in the search drop applying an ordinary
+   taken chip. Folder-date fallback for film scans is deliberately parked
+   until the E: originals are attached and real scan folders exist to
+   design against.
+5. **The teach loop** — DONE (`ead39c0f`): labels born by teaching, Y/N
+   from any search or label view, exclusions as denials. Per-label
+   calibration still parked behind the E: backfill. The Teach strip
+   (borderline row inside a label) remains open.
+6. **More like this** — DONE (`c9a577db`): selection-seeded find, seeds
+   omitted from their own answer; album growing = More like this over
+   exemplars + Add to album (composed, not bespoke).
 
 Performance rides alongside (measured 2026-08-22 at 155k rows): the folder
 tree's 30 s correlated subquery, the index spelling that costs counts and
