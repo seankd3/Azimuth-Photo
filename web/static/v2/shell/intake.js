@@ -2,11 +2,14 @@
 // the person sees every photograph before it enters the library (Lightroom's
 // three panes in Azimuth's opinionated form), one kind to confirm, the
 // destination shown as truth, one button. Esc before that button writes
-// nothing. The work itself is the product's; this is its conversation.
+// nothing. The work itself is the product's; this is its conversation —
+// and clicking Import ends it: the dialog puts itself away, the work
+// reports to the status line, the outcome arrives as a toast, and
+// Import… reopens the details (and Stop) while it runs.
 
 const KIND_LABEL = { raws: 'Camera raws', snapshots: 'Snapshots', edits: 'Edits', film: 'Film scans' };
 
-export function createIntakeWorkflow({ product, notify, afterImport }) {
+export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {} }) {
   const dialog = document.querySelector('[data-import-dialog]');
   const title = document.querySelector('[data-import-title]');
   const sourceLine = document.querySelector('[data-import-source]');
@@ -37,6 +40,11 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   }, { root: stage, rootMargin: '300px' });
 
   async function open(source, { isCard = false } = {}) {
+    if (state.running) {
+      // One import at a time; while it runs the dialog is its detail view.
+      if (!dialog.open) dialog.showModal();
+      return;
+    }
     notify(`Looking at ${source}…`);
     let staged;
     try {
@@ -249,6 +257,10 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
       return;
     }
     poll = setInterval(tick, 1000);
+    // The decision is made; the conversation ends itself. The work reports
+    // to the status line from here.
+    progressed('Importing…');
+    close();
   }
 
   async function tick() {
@@ -265,9 +277,11 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     const eta = rate ? Math.round(left / rate) : null;
     const gb = ((status.bytes || 0) / 1e9).toFixed(2);
     if (status.phase === 'bringing') {
-      progress.textContent = state.isCard && clearBox.checked && eta !== null
+      const said = state.isCard && clearBox.checked && eta !== null
         ? `${done.toLocaleString()} of ${total.toLocaleString()} · ${gb} GB · card free in ~${formatSeconds(eta)}`
         : `${done.toLocaleString()} of ${total.toLocaleString()} · ${gb} GB` + (eta !== null ? ` · ~${formatSeconds(eta)} left` : '');
+      progress.textContent = said;
+      progressed(`Importing ${said}`);
       return;
     }
     clearInterval(poll);
@@ -285,8 +299,9 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     const said = (status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
     progress.textContent = said;
-    // The dialog may have been put away while the work ran; the outcome
-    // still reaches the person.
+    progressed('');
+    // The dialog put itself away when the work began; the outcome still
+    // reaches the person.
     if (!dialog.open) notify(said);
     await afterImport();
   }
@@ -298,12 +313,10 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
 
   function close() {
     // Closing is always allowed. It puts the conversation away, never the
-    // work: a running import continues, and its outcome arrives as a toast.
+    // work: a running import continues, the status line carries it, and
+    // its outcome arrives as a toast.
     if (dialog.open) dialog.close();
-    if (state.running) {
-      notify('Importing in the background — the library follows as photographs land.');
-      return;
-    }
+    if (state.running) return;
     stage.replaceChildren();
     state.candidates = [];
     state.checked = new Set();
@@ -394,6 +407,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
       render();
     },
     isOpen: () => dialog.open,
+    running: () => state.running,
     finish: () => { if (startButton.textContent === 'Done') close(); else start(); },
   });
 }

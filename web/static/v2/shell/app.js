@@ -245,6 +245,7 @@ const trashWorkflow = createTrashWorkflow({
 const intakeWorkflow = createIntakeWorkflow({
   product,
   notify,
+  progressed: (text) => update({ importing: text || '' }),
   afterImport: async () => {
     // What just came in is what the person wants to see: Recently added.
     update({ view: 'library', folder: null, album: null, sort: 'added' });
@@ -1031,11 +1032,15 @@ function renderChrome(state) {
   document.querySelector('[data-result-label]').textContent = state.loading
     ? 'Loading your library…'
     : state.marked?.size > 1 ? `${state.marked.size.toLocaleString()} selected` : '';
-  status.textContent = state.scanning
-    ? 'Reading your photos…'
-    : state.counts.unidentified
-      ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
-      : '';
+  // The running import outranks the reading chatter: it is the one thing
+  // the person just asked for.
+  status.textContent = state.importing
+    ? state.importing
+    : state.scanning
+      ? 'Reading your photos…'
+      : state.counts.unidentified
+        ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
+        : '';
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
@@ -1181,7 +1186,10 @@ document.addEventListener('click', (event) => {
     if (drive) scanDrive(drive);
   }
   if (action === 'import-folder') {
-    product.chooseFolder().then((chosen) => { if (chosen) intakeWorkflow.open(chosen); }).catch((error) => notify(error.message));
+    // While an import runs, Import… is the door back to its details — no
+    // folder picker in the way.
+    if (intakeWorkflow.running()) intakeWorkflow.open('');
+    else product.chooseFolder().then((chosen) => { if (chosen) intakeWorkflow.open(chosen); }).catch((error) => notify(error.message));
   }
   if (action === 'import-card') {
     const root = document.querySelector('[data-action="import-card"]').dataset.root;

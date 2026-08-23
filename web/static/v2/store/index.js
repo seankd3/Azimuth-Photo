@@ -15,6 +15,7 @@ const state = {
   query: '',
   like: [],
   days: [],
+  importing: '',
   total: 0,
   loading: true,
   scanning: false,
