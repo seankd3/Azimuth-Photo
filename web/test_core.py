@@ -1224,7 +1224,7 @@ class SetsAreDecisions(CoreCase):
             for column in row
         )
 
-        self.assertIn("idx_photos_stars", plan)
+        self.assertIn("idx_live_stars", plan)
 
     def test_ambiguous_identifiers_and_non_photo_members_are_refused(self):
         with self.assertRaises(ValueError):
@@ -1927,25 +1927,25 @@ class CollectionsAreOneSurface(CoreCase):
         utah_id, utah = self._photo("Raws/utah.CR2")
         cali_id, cali = self._photo("Raws/cali.CR2")
         lands_id, lands = self._photo("Raws/lands.CR2", stars=4)
-        parent = self.library.create_collection("America")
-        child_a = self.library.create_collection("America/Utah")
-        child_b = self.library.create_collection("America/California")
-        self.library.add_to_collection(child_a["id"], [utah_id])
-        self.library.add_to_collection(child_b["id"], [cali_id])
+        parent = self.library.create_album("America")
+        child_a = self.library.create_album("America/Utah")
+        child_b = self.library.create_album("America/California")
+        self.library.add_to_album(child_a["id"], [utah_id])
+        self.library.add_to_album(child_b["id"], [cali_id])
         self.assertEqual(self._ids(self.library._shelf(parent["id"])), {utah_id, cali_id})
         self.assertEqual(self._ids(self.library._shelf(child_a["id"])), {utah_id})
 
         # an intersection is a smart collection of two `in` chips
-        lands_set = self.library.create_collection("Landscapes")
-        self.library.add_to_collection(lands_set["id"], [utah_id, lands_id])
-        both = self.library.create_collection("Utah landscapes", chips=[
+        lands_set = self.library.create_album("Landscapes")
+        self.library.add_to_album(lands_set["id"], [utah_id, lands_id])
+        both = self.library.create_album("Utah landscapes", chips=[
             {"is": "in", "values": [lands_set["id"]]},
             {"is": "in", "values": [child_a["id"]]},
         ])
         self.assertEqual(self._ids(self.library._shelf(both["id"])), {utah_id})
 
         # the view composes folder, collection and chips into one scope
-        looking = self.library.viewing({"collection": lands_set["id"],
+        looking = self.library.viewing({"album": lands_set["id"],
                                         "chips": [{"is": "stars", "least": 3}]})
         self.assertEqual(self._ids(looking), {lands_id})
 
@@ -1953,25 +1953,31 @@ class CollectionsAreOneSurface(CoreCase):
         a_id, _a = self._photo("Raws/a.CR2", stars=5)
         b_id, _b = self._photo("Raws/b.CR2")
 
-        listed = {c["id"]: c for c in self.library.collections()}
+        listed = {c["id"]: c for c in self.library.albums()}
         self.assertTrue(listed["quick"]["pinned"])
         self.assertTrue(listed["last-import"]["pinned"])
         with self.assertRaises(ValueError):
-            self.library.forget_collection("quick")
+            self.library.forget_album("quick")
 
         # one key: in when any are out, out when all are in
         self.assertEqual(self.library.quick([a_id, b_id]), {"added": 2, "count": 2})
         self.assertEqual(self.library.quick([a_id, b_id]), {"removed": 2, "count": 0})
         self.assertEqual(self.library.quick([a_id]), {"added": 1, "count": 1})
 
-        smart = self.library.create_collection("Best", chips=[{"is": "stars", "least": 3}])
-        with self.assertRaises(ValueError):
-            self.library.add_to_collection(smart["id"], [b_id])
-        self.assertEqual(self.library.freeze_collection(smart["id"]), {"frozen": 1})
-        self.library.add_to_collection(smart["id"], [b_id])   # fixed now
+        # A smart album takes exceptions: (rules ∪ pinned) ∖ denied. The
+        # starless photograph pins in past the rules, the five-star one is
+        # denied past them — the decade-old workaround the pro tools never
+        # closed, closed.
+        smart = self.library.create_album("Best", chips=[{"is": "stars", "least": 3}])
+        self.assertEqual(self._ids(self.library._shelf(smart["id"])), {a_id})
+        self.library.add_to_album(smart["id"], [b_id])
         self.assertEqual(self._ids(self.library._shelf(smart["id"])), {a_id, b_id})
+        self.library.remove_from_album(smart["id"], [a_id])
+        self.assertEqual(self._ids(self.library._shelf(smart["id"])), {b_id})
+        self.assertEqual(self.library.freeze_album(smart["id"]), {"frozen": 1})
+        self.assertEqual(self._ids(self.library._shelf(smart["id"])), {b_id})
         with self.assertRaises(ValueError):
-            self.library.freeze_collection(smart["id"])       # already fixed
+            self.library.freeze_album(smart["id"])       # already plain
 
         saved = self.library.save_view("May raws", {
             "folder": "Raws", "chips": [{"is": "stars", "least": 3}]})
@@ -2003,7 +2009,7 @@ class SearchNeverRefuses(CoreCase):
         named, named_hash = self._photo("Snapshots/2025/img.jpg")
         trashed, _h3 = self._photo("Raws/2026/zion-lost.CR2")
         self.conn.execute("UPDATE images SET status = 'trashed' WHERE id = ?", (trashed,))
-        keyword = sets.create(self.conn, "travel/zion", kind=sets.KEYWORD)
+        keyword = sets.create(self.conn, "travel/zion", kind=sets.LABEL)
         sets.add(self.conn, keyword, [named_hash])
         self.conn.commit()
 

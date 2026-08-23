@@ -2,12 +2,13 @@ import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
 import { createCullWorkflow, CULL_MENU } from './cull.js';
-import { createClustersPanel } from './clusters.js';
-import { createCollectionsPanel } from './collections.js';
+import { createPeoplePanel } from './people.js';
+import { createAlbumsPanel } from './albums.js';
 import { createFilterBar } from './filters.js';
 import { createIntakeWorkflow } from './intake.js';
+import { createLabelsPanel } from './labels.js';
 import { createLoupe } from './loupe.js';
-import { createRefineWorkflow } from './refine.js';
+import { createRankWorkflow } from './rank.js';
 import { createSearchCards } from './searchcards.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
@@ -65,7 +66,7 @@ function togglePanel(side) {
 let panelsBeforeFull = null;
 
 // The photographs beside this one, already decoded, so an arrow is one
-// frame — the same warming Refine's stage uses. A small held set keeps the
+// frame — the same warming Rank's stage uses. A small held set keeps the
 // decoded bitmaps referenced; the oldest fall off the far end.
 const warmed = new Map();
 function warmOne(photo) {
@@ -174,9 +175,40 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 // What the window is looking at, as the bridge speaks it. Null when it is
 // the whole library, so the server sees "no view" rather than three empties.
 function viewOf() {
-  const { folder, collection, chips } = read();
-  if (!folder && !collection && !(chips || []).length) return null;
-  return { folder, collection, chips };
+  const { folder, album, chips } = read();
+  if (!folder && !album && !(chips || []).length) return null;
+  return { folder, album, chips };
+}
+
+// Which word the view is refining, if any: exactly one label chip, or a
+// typed query that is not yet a label. The first answer is what creates
+// the word — vocabulary is born by teaching.
+function teachable() {
+  const { chips, query, view } = read();
+  if (view !== 'library') return null;
+  const worn = (chips || []).filter((c) => c.is === 'label' && !c.not && c.values.length === 1);
+  if (worn.length === 1 && !query) return worn[0].values[0];
+  if (query && !(chips || []).some((c) => c.is === 'label')) return query;
+  return null;
+}
+
+let teachTimer = null;
+async function teach(word, yes) {
+  const ids = selection();
+  if (!ids.length) return;
+  try {
+    await product.teach(word, ids, yes);
+    notify(yes
+      ? (ids.length === 1 ? `Anchored to “${word}”.` : `${ids.length} anchored to “${word}”.`)
+      : (ids.length === 1 ? `Not “${word}” — learning.` : `${ids.length} excluded from “${word}” — learning.`));
+    clearTimeout(teachTimer);
+    teachTimer = setTimeout(() => {
+      void labelsPanel.refresh();
+      if (teachable() === word) void refreshInPlace();
+    }, 2500);
+  } catch (error) {
+    notify(error.message);
+  }
 }
 
 // What a verb acts on: the marked set when there is one, else the focused
@@ -213,12 +245,12 @@ const intakeWorkflow = createIntakeWorkflow({
   notify,
   afterImport: async () => {
     // What just came in is what the person wants to see: Recently added.
-    update({ view: 'library', folder: null, collection: null, sort: 'added' });
+    update({ view: 'library', folder: null, album: null, sort: 'added' });
     document.querySelector('[data-sort]').value = 'added';
-    await Promise.all([loadView(), loadFolders(), collectionsPanel.refresh()]);
+    await Promise.all([loadView(), loadFolders(), albumsPanel.refresh()]);
   },
 });
-const collectionsPanel = createCollectionsPanel({
+const albumsPanel = createAlbumsPanel({
   product,
   read,
   update,
@@ -235,24 +267,30 @@ const filterBar = createFilterBar({
   update,
   onChange: () => viewMoved(),
 });
-const clustersPanel = createClustersPanel({
+// A person's row is a place to go: the view becomes just them. Labels get
+// the same landing through their own chip field.
+function browseChip(chip) {
+  searchBox.value = '';
+  if (read().view === 'rank') update({ folder: null, album: null, chips: [chip], query: '' });
+  else update({ view: 'library', folder: null, album: null, chips: [chip], query: '',
+                selected: null, selectedIndex: null });
+  viewMoved();
+}
+const labelsPanel = createLabelsPanel({
+  product,
+  update,
+  browse: (term) => browseChip({ is: 'label', values: [term] }),
+});
+const peoplePanel = createPeoplePanel({
   product,
   read,
   update,
   notify,
-  browse: (term) => {
-    // A cluster row is a place to go: the view becomes just this proposal.
-    searchBox.value = '';
-    const chips = [{ is: 'alike', values: [term] }];
-    if (read().view === 'refine') update({ folder: null, collection: null, chips, query: '' });
-    else update({ view: 'library', folder: null, collection: null, chips, query: '',
-                  selected: null, selectedIndex: null });
-    viewMoved();
-  },
-  kept: () => Promise.all([collectionsPanel.refresh(), clustersPanel.refresh()]),
-  ask: (title, anchor, initial) => collectionsPanel.ask(title, anchor, initial),
+  browse: (term) => browseChip({ is: 'person', values: [term] }),
+  renamed: () => Promise.all([albumsPanel.refresh(), peoplePanel.refresh()]),
+  ask: (title, anchor, initial) => albumsPanel.ask(title, anchor, initial),
 });
-const refineWorkflow = createRefineWorkflow({
+const rankWorkflow = createRankWorkflow({
   product,
   read,
   update,
@@ -265,11 +303,11 @@ const refineWorkflow = createRefineWorkflow({
     await loadView();
   },
 });
-let collectionsTimer = null;
-function refreshCollectionsSoon() {
-  // Smart-collection counts follow a cull within a beat, not on the next import.
-  clearTimeout(collectionsTimer);
-  collectionsTimer = setTimeout(() => collectionsPanel.refresh(), 1200);
+let albumsTimer = null;
+function refreshAlbumsSoon() {
+  // Smart-album counts follow a cull within a beat, not on the next import.
+  clearTimeout(albumsTimer);
+  albumsTimer = setTimeout(() => albumsPanel.refresh(), 1200);
 }
 
 const cullWorkflow = createCullWorkflow({
@@ -289,7 +327,7 @@ const cullWorkflow = createCullWorkflow({
     const selected = read().selected;
     const change = selected && byHash.get(selected.hash);
     if (change) update({ selected: { ...selected, [change.family]: change.after } });
-    refreshCollectionsSoon();
+    refreshAlbumsSoon();
   },
   removed: async (changed, selectedIndex) => {
     // Rows leave the view: the positions this window knows are spliced out
@@ -313,7 +351,7 @@ const cullWorkflow = createCullWorkflow({
       await refreshInPlace();
       update({ marked: new Set() });
     }
-    refreshCollectionsSoon();
+    refreshAlbumsSoon();
     await selectIndex(Math.min(selectedIndex ?? 0, Math.max(0, read().total - 1)));
   },
   selectIndex,
@@ -346,7 +384,7 @@ const searchCards = createSearchCards({
     const same = JSON.stringify(chip);
     if (!held.some((c) => JSON.stringify(c) === same)) {
       update({ view: 'library', chips: [...held, chip] });
-    } else if (read().view !== 'library' && read().view !== 'refine') {
+    } else if (read().view !== 'library' && read().view !== 'rank') {
       update({ view: 'library' });
     }
     viewMoved();
@@ -369,20 +407,29 @@ function visibleGrid() {
   const inTrash = read().view === 'trash';
   const searching = Boolean(read().query);
   const scanning = read().scanning;
+  // An empty album is an invitation, not an empty library — it must never
+  // say "Add a folder" inside a place made for gathering.
+  const shelf = read().album && (read().albums || []).find((a) => a.id === read().album);
+  const inAlbum = Boolean(shelf) && !searching && !scanning && read().view === 'library';
   library.renderGrid(grid, read(), {
     // While a sweep is reading a folder the library is not empty, it is
     // arriving — the one moment "Add a folder" must not be the message.
     emptyTitle: inTrash ? 'Trash is empty.'
       : scanning ? 'Reading your photos…'
-        : searching ? 'Nothing matches.' : 'No photos here yet.',
+        : inAlbum ? 'Nothing in this album yet.'
+          : searching ? 'Nothing matches.' : 'No photos here yet.',
     emptyCopy: inTrash
       ? 'Rejected photographs stay recoverable here until you empty Trash.'
       : scanning
         ? 'They appear here as they are found.'
-        : searching
-          ? 'Try fewer words, or a different idea — meaning works too, not just names.'
-          : 'Add a folder to start your library.',
-    emptyAction: inTrash || searching || scanning ? null : { label: 'Add a folder', run: openDriveDialog },
+        : inAlbum
+          ? (shelf.smart
+            ? 'No photographs match its filters yet — they join as they qualify.'
+            : 'Drag photos here, press B, or right-click any photo anywhere in the library.')
+          : searching
+            ? 'Try fewer words, or a different idea — meaning works too, not just names.'
+            : 'Add a folder to start your library.',
+    emptyAction: inTrash || searching || scanning || inAlbum ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
     drag: (index, event) => {
@@ -519,23 +566,27 @@ async function loadView() {
   }
 }
 
-async function refreshInPlace() {
+async function refreshInPlace({ shelves = true } = {}) {
   // The library changed under the window -- a sweep admitted photographs or
-  // the worker finished one -- so re-read what is loaded without resetting it.
+  // the worker finished one -- so re-read what is loaded without resetting
+  // it. The shelves (albums, people, labels) are many small count queries;
+  // a caller re-reading on every worker tick skips them and asks only when
+  // the lane says something derived was rewritten.
   const generation = pages.generation;
   const { view, query } = read();
   const key = JSON.stringify(viewOf());
-  const [counts, drives, trashCount, size, collections, clusters] = await Promise.all([
+  const [counts, drives, trashCount, size, albums, people, labels] = await Promise.all([
     product.counts(), product.drives(), product.trashCount(),
     view === 'trash' || query ? Promise.resolve(0) : product.size(viewOf()),
-    product.collections(),
-    product.clusters().catch(() => read().clusters),
+    shelves ? product.albums() : read().albums,
+    shelves ? product.people().catch(() => read().people) : read().people,
+    shelves ? product.labels().catch(() => read().labels) : read().labels,
   ]);
   if (!pages.isCurrent(generation) || read().view !== view
       || JSON.stringify(viewOf()) !== key || read().query !== query) return;
   await pages.refresh(view === 'trash' ? trashCount : query ? read().total : size);
   if (!pages.isCurrent(generation)) return;
-  update({ counts: { ...counts, trash: trashCount }, drives, collections, clusters });
+  update({ counts: { ...counts, trash: trashCount }, drives, albums, people, labels });
   const { selected, photos } = read();
   if (!selected) return;
   for (const [index, photo] of photos) {
@@ -566,7 +617,9 @@ async function followLibrary() {
     last = pulse;
     if ((moved || swept || shaped) && !read().loading && !read().scanning) {
       try {
-        await refreshInPlace();
+        // Worker ticks re-read the window; the shelves re-count only when a
+        // sweep or a lane rewrite actually moved what they say.
+        await refreshInPlace({ shelves: swept || shaped });
         if (swept) await loadFolders();
       } catch (error) {
         notify(error.message);
@@ -719,12 +772,12 @@ async function loadFolders() {
   }
 }
 
-// The view moved under whatever stage is up: Refine re-scopes in place, the
-// grid starts from the top of the new answer. Folders, collections, All
+// The view moved under whatever stage is up: Rank re-scopes in place, the
+// grid starts from the top of the new answer. Folders, albums, All
 // photos and the chips all route through here — one rule, one place.
 function viewMoved() {
-  if (refineWorkflow.isOpen()) {
-    refineWorkflow.resize(refineWorkflow.size());
+  if (rankWorkflow.isOpen()) {
+    rankWorkflow.resize(rankWorkflow.size());
     return;
   }
   workspace.scrollTo({ top: 0 });
@@ -736,8 +789,8 @@ function showFolder(path) {
     searchBox.value = '';
     update({ query: '' });
   }
-  if (read().view === 'refine') update({ folder: path, collection: null });
-  else update({ view: 'library', folder: path, collection: null, selected: null, selectedIndex: null });
+  if (read().view === 'rank') update({ folder: path, album: null });
+  else update({ view: 'library', folder: path, album: null, selected: null, selectedIndex: null });
   viewMoved();
 }
 
@@ -922,8 +975,9 @@ function renderFolders(state) {
 }
 
 function renderChrome(state) {
-  collectionsPanel.render(state);
-  clustersPanel.render(state);
+  albumsPanel.render(state);
+  peoplePanel.render(state);
+  labelsPanel.render(state);
   filterBar.render(state);
   library.renderInspector(inspector, state.selected);
   if (state.view === 'loupe' && state.selected) {
@@ -946,24 +1000,29 @@ function renderChrome(state) {
       ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
       : '';
   const searching = state.view === 'library' && Boolean(state.query);
-  const refining = state.view === 'refine';
+  const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
   shell.classList.toggle('hide-left', !state.panels.left);
   shell.classList.toggle('hide-right', !state.panels.right);
   shell.classList.toggle('hide-top', !state.panels.top);
   loupe.hidden = !holding;
-  grid.hidden = refining || holding;
-  document.querySelector('[data-refine]').hidden = !refining;
-  document.querySelector('[data-refine-progress]').hidden = !refining;
-  document.querySelector('[data-refine-size]').hidden = !refining;
-  document.querySelector('[data-action="refine"]').hidden = state.view !== 'library' || searching;
-  document.querySelector('[data-action="leave-refine"]').hidden = !refining;
-  document.querySelector('[data-result-label]').hidden = refining || holding;
-  document.querySelector('[data-density]').closest('label').hidden = refining || holding;
+  grid.hidden = ranking || holding;
+  document.querySelector('[data-rank]').hidden = !ranking;
+  document.querySelector('[data-rank-progress]').hidden = !ranking;
+  document.querySelector('[data-rank-size]').hidden = !ranking;
+  document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
+  document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
+  document.querySelector('[data-result-label]').hidden = ranking || holding;
+  document.querySelector('[data-density]').closest('label').hidden = ranking || holding;
   // The chips narrow the library view; Trash and the loupe are not places
   // to edit them, so they leave with their + button.
   document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || refining || searching || holding;
+  // The quiet invitation to refine: visible exactly when Y and N would land.
+  const hint = document.querySelector('[data-teach-hint]');
+  const word = teachable();
+  hint.hidden = !word;
+  if (word) hint.textContent = `Refining “${word}” — Y anchors · N excludes`;
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = (state.view === 'library' || state.view === 'loupe') && Boolean(state.selected?.hash);
@@ -978,15 +1037,15 @@ function renderChrome(state) {
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
   document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !state.folder);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
-  const shelf = (state.collections || []).find((c) => c.id === state.collection);
+  const shelf = (state.albums || []).find((c) => c.id === state.album);
   const where = shelf ? shelf.name : state.folder ? state.folder.split('/').pop() : '';
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
     : searching ? `Results for “${state.query}”${where ? ` in ${where}` : ''}`
-    : (refining ? 'Refine · ' : '') + (where || 'All photos');
-  document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || refining;
+    : (ranking ? 'Rank · ' : '') + (where || 'All photos');
+  document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
   document.querySelector('[data-action="save-view"]').hidden =
-    state.view !== 'library' || refining || searching || !viewOf();
+    state.view !== 'library' || ranking || searching || !viewOf();
   document.querySelector('[data-action="keep-results"]').hidden = !searching;
   renderFolders(state);
 
@@ -1012,7 +1071,7 @@ function render(state) {
   // Chrome first: it is what shows and hides the grid, and a grid laid out
   // while still hidden measures a zero-width column.
   renderChrome(state);
-  if (state.view !== 'refine' && state.view !== 'loupe') visibleGrid();
+  if (state.view !== 'rank' && state.view !== 'loupe') visibleGrid();
 }
 
 driveForm.addEventListener('submit', async (event) => {
@@ -1054,8 +1113,8 @@ document.addEventListener('click', (event) => {
   }
   if (action === 'all-photos') {
     searchBox.value = '';
-    if (read().view === 'refine') update({ folder: null, collection: null, chips: [], query: '' });
-    else update({ view: 'library', folder: null, collection: null, chips: [], query: '',
+    if (read().view === 'rank') update({ folder: null, album: null, chips: [], query: '' });
+    else update({ view: 'library', folder: null, album: null, chips: [], query: '',
                   selected: null, selectedIndex: null });
     viewMoved();
   }
@@ -1089,13 +1148,13 @@ document.addEventListener('click', (event) => {
   if (action === 'toggle-left') togglePanel('left');
   if (action === 'toggle-right') togglePanel('right');
   if (action === 'toggle-top') togglePanel('top');
-  if (action === 'new-collection') collectionsPanel.create(event.target);
-  if (action === 'save-view') collectionsPanel.saveView(event.target);
-  if (action === 'keep-results') collectionsPanel.keepResults(event.target);
-  if (action === 'refine') refineWorkflow.open();
-  if (action === 'leave-refine') refineWorkflow.close();
-  const size = event.target.closest('[data-refine-size] [data-size]')?.dataset.size;
-  if (size) refineWorkflow.resize(Number(size));
+  if (action === 'new-album') albumsPanel.create(event.target);
+  if (action === 'save-view') albumsPanel.saveView(event.target);
+  if (action === 'keep-results') albumsPanel.keepResults(event.target);
+  if (action === 'rank') rankWorkflow.open();
+  if (action === 'leave-rank') rankWorkflow.close();
+  const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
+  if (size) rankWorkflow.resize(Number(size));
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'reject') cullWorkflow.apply('reject');
@@ -1151,7 +1210,7 @@ document.addEventListener('keydown', (event) => {
         else closeLoupe();
       }
     }
-    else if (refineWorkflow.isOpen()) refineWorkflow.close();
+    else if (rankWorkflow.isOpen()) rankWorkflow.close();
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected || read().marked?.size) {
@@ -1179,15 +1238,15 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  if (refineWorkflow.isOpen()) {
-    if (refineWorkflow.key(event)) event.preventDefault();
+  if (rankWorkflow.isOpen()) {
+    if (rankWorkflow.key(event)) event.preventDefault();
     return;
   }
 
   const current = read().selectedIndex;
   const key = event.key.toLowerCase();
   if (key === 'b' && ['library', 'loupe'].includes(read().view) && selection().length) {
-    collectionsPanel.toss();
+    albumsPanel.toss();
     event.preventDefault();
     return;
   }
@@ -1202,6 +1261,14 @@ document.addEventListener('keydown', (event) => {
   }
   if (key === 'u' && read().view === 'trash' && selection().length) {
     trashWorkflow.restoreSelected();
+    event.preventDefault();
+    return;
+  }
+  // Refining a label: inside one word's view, Y anchors and N excludes.
+  // Deliberately not X — X rejects the photograph; N only teaches the word.
+  const word = teachable();
+  if (word && (key === 'y' || key === 'n') && selection().length) {
+    void teach(word, key === 'y');
     event.preventDefault();
     return;
   }
@@ -1259,7 +1326,7 @@ grid.addEventListener('contextmenu', (event) => {
   const photo = read().photos.get(index);
   if (photo && !selection().includes(photo.id)) void selectPhoto(index);
   // The same verbs under the mouse as in the bar and on the keys.
-  collectionsPanel.menuFor(event, CULL_MENU.map(({ action, label }) => ({
+  albumsPanel.menuFor(event, CULL_MENU.map(({ action, label }) => ({
     label,
     run: () => cullWorkflow.apply(action),
   })));
@@ -1284,9 +1351,35 @@ loupeStrip.addEventListener('wheel', (event) => {
   event.stopPropagation();
 }, { passive: false });
 
+// Sidebar sections fold from their headings, and the folds are remembered —
+// a long library keeps only the shelves it is using in view.
+const FOLDED_KEY = 'azimuth.folded-sections';
+let folded;
+try {
+  folded = new Set(JSON.parse(localStorage.getItem(FOLDED_KEY) || '[]'));
+} catch {
+  folded = new Set();
+}
+function applyFolds() {
+  for (const section of document.querySelectorAll('.sidebar section')) {
+    const name = section.querySelector('.eyebrow')?.textContent || '';
+    section.classList.toggle('is-folded', folded.has(name));
+  }
+}
+document.querySelector('.sidebar').addEventListener('click', (event) => {
+  const head = event.target.closest('.eyebrow');
+  if (!head) return;
+  const name = head.textContent;
+  if (folded.has(name)) folded.delete(name);
+  else folded.add(name);
+  localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]));
+  applyFolds();
+});
+applyFolds();
+
 setPanels(loadPanels(), { remember: false });
 subscribe(render);
 product.home().then((where) => (where
-  ? Promise.all([loadView(), loadFolders(), collectionsPanel.refresh(), clustersPanel.refresh()])
+  ? Promise.all([loadView(), loadFolders(), albumsPanel.refresh(), peoplePanel.refresh(), labelsPanel.refresh()])
   : chooseHome()));
 followLibrary();

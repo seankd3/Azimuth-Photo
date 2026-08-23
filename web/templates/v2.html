@@ -39,14 +39,18 @@
         </button>
       </section>
       <section>
-        <div class="section-heading"><p class="eyebrow">Collections</p>
-          <button class="mini-button" type="button" data-action="new-collection" aria-label="New collection">+</button>
+        <div class="section-heading"><p class="eyebrow">Albums</p>
+          <button class="mini-button" type="button" data-action="new-album" aria-label="New album">+</button>
         </div>
-        <div class="collection-tree" data-collections-tree></div>
+        <div class="side-list" data-albums-tree></div>
       </section>
-      <section data-clusters-section hidden>
-        <div class="section-heading"><p class="eyebrow">Clusters</p></div>
-        <div class="collection-tree" data-clusters-list></div>
+      <section data-people-section hidden>
+        <div class="section-heading"><p class="eyebrow">People</p></div>
+        <div class="side-list" data-people-list></div>
+      </section>
+      <section data-labels-section hidden>
+        <div class="section-heading"><p class="eyebrow">Labels</p></div>
+        <div class="side-list" data-labels-list></div>
       </section>
       <section>
         <div class="section-heading"><p class="eyebrow">Folders</p></div>
@@ -70,18 +74,19 @@
         <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
         <div class="chip-bar" data-chips></div>
         <button class="quiet-button" type="button" data-action="add-chip">+ Filter</button>
-        <button class="quiet-button" type="button" data-action="save-view" hidden>Save view…</button>
+        <button class="quiet-button" type="button" data-action="save-view" hidden>Save as album…</button>
         <button class="quiet-button" type="button" data-action="keep-results" hidden>Save results…</button>
-        <span class="refine-progress" data-refine-progress hidden></span>
-        <div class="refine-size" data-refine-size hidden role="group" aria-label="How many at once">
+        <span class="teach-hint" data-teach-hint hidden></span>
+        <span class="rank-progress" data-rank-progress hidden></span>
+        <div class="rank-size" data-rank-size hidden role="group" aria-label="How many at once">
           <button type="button" data-size="2">2</button>
           <button type="button" data-size="4">4</button>
           <button type="button" data-size="6">6</button>
           <button type="button" data-size="9">9</button>
           <button type="button" data-size="12">12</button>
         </div>
-        <button class="quiet-button" type="button" data-action="refine">Refine</button>
-        <button class="quiet-button" type="button" data-action="leave-refine" hidden><kbd>Esc</kbd> Done</button>
+        <button class="quiet-button" type="button" data-action="rank">Rank</button>
+        <button class="quiet-button" type="button" data-action="leave-rank" hidden><kbd>Esc</kbd> Done</button>
         <label>Sort
           <select data-sort>
             <option value="newest">Newest</option>
@@ -98,7 +103,7 @@
         <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
       <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
-      <section class="refine-stage" data-refine aria-label="Refine" hidden></section>
+      <section class="rank-stage" data-rank aria-label="Rank" hidden></section>
       <section class="loupe-stage" data-loupe aria-label="Photo preview" hidden>
         <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
         <img data-loupe-image alt="">
@@ -173,14 +178,10 @@
     <button type="button" data-action="rescan-drive">Re-scan now</button>
   </menu>
 
-  <menu class="context-menu" data-cluster-menu hidden>
-    <button type="button" data-action="keep-cluster">Keep as a collection</button>
-  </menu>
-
-  <menu class="context-menu" data-collection-menu hidden>
-    <button type="button" data-action="rename-collection">Rename…</button>
-    <button type="button" data-action="freeze-collection">Freeze into a fixed collection</button>
-    <button type="button" data-action="delete-collection">Delete collection</button>
+  <menu class="context-menu" data-album-menu hidden>
+    <button type="button" data-action="rename-album">Rename…</button>
+    <button type="button" data-action="freeze-album">Freeze into a plain album</button>
+    <button type="button" data-action="delete-album">Delete album</button>
   </menu>
 
   <menu class="context-menu" data-photo-menu hidden></menu>
@@ -190,7 +191,9 @@
     <button type="button" data-field="camera">Camera</button>
     <button type="button" data-field="status">Pick status</button>
     <button type="button" data-field="orientation">Orientation</button>
-    <button type="button" data-field="in">In collection</button>
+    <button type="button" data-field="person">Person</button>
+    <button type="button" data-field="label">Label</button>
+    <button type="button" data-field="in">In album</button>
   </menu>
   <div class="popover" data-chip-editor hidden></div>
   <div class="popover search-drop" data-search-drop hidden></div>

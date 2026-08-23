@@ -152,10 +152,10 @@ def _sync_keyword(conn: sqlite3.Connection, name: str, parent: str | None) -> st
     """
 
     path = clean_path(f"{parent}{SEPARATOR}{name}" if parent else name)
-    for said in sets.all(conn, kind=sets.KEYWORD):
+    for said in sets.all(conn, kind=sets.LABEL):
         if said["name"].lower() == path.lower():
             return said["id"]
-    return sets.create(conn, path, kind=sets.KEYWORD)
+    return sets.create(conn, path, kind=sets.LABEL)
 
 
 def import_lightroom_keywords(
@@ -238,7 +238,7 @@ def xmp_metadata_for_image(db_path: str, image_id: int) -> dict[str, Any]:
         if digest:
             names = sorted(
                 (sets.describe(conn, i) or {}).get("name", "")
-                for i in sets.sets_of(conn, digest[0], kind=sets.KEYWORD)
+                for i in sets.sets_of(conn, digest[0], kind=sets.LABEL)
             )
         iptc = {k: v for k, v in _iptc_of(conn, image_id).items() if k in IPTC_FIELDS}
         return {

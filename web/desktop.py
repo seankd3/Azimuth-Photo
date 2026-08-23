@@ -182,31 +182,31 @@ class Desktop:
             raise RuntimeError("Choose where Azimuth should live first.")
         return self._wait(self._product.find(str(query or ""), int(limit), int(offset), view))
 
-    # ---- collections ----
+    # ---- albums ----
 
-    def collections(self) -> list[dict]:
-        return self._run(lambda library: library.collections())
+    def albums(self) -> list[dict]:
+        return self._run(lambda library: library.albums())
 
-    def create_collection(self, name: str, chips: list | None = None) -> dict:
-        return self._run(lambda library: library.create_collection(str(name), chips or None))
+    def create_album(self, name: str, chips: list | None = None) -> dict:
+        return self._run(lambda library: library.create_album(str(name), chips or None))
 
-    def rename_collection(self, set_id: str, name: str) -> dict | None:
-        return self._run(lambda library: library.rename_collection(str(set_id), str(name)))
+    def rename_album(self, set_id: str, name: str) -> dict | None:
+        return self._run(lambda library: library.rename_album(str(set_id), str(name)))
 
-    def forget_collection(self, set_id: str) -> bool:
-        return self._run(lambda library: library.forget_collection(str(set_id)))
+    def forget_album(self, set_id: str) -> bool:
+        return self._run(lambda library: library.forget_album(str(set_id)))
 
-    def add_to_collection(self, set_id: str, photo_ids: list[int]) -> dict:
-        return self._run(lambda library: library.add_to_collection(str(set_id), photo_ids))
+    def add_to_album(self, set_id: str, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.add_to_album(str(set_id), photo_ids))
 
-    def remove_from_collection(self, set_id: str, photo_ids: list[int]) -> dict:
-        return self._run(lambda library: library.remove_from_collection(str(set_id), photo_ids))
+    def remove_from_album(self, set_id: str, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.remove_from_album(str(set_id), photo_ids))
 
     def quick(self, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.quick(photo_ids))
 
-    def freeze_collection(self, set_id: str) -> dict:
-        return self._run(lambda library: library.freeze_collection(str(set_id)))
+    def freeze_album(self, set_id: str) -> dict:
+        return self._run(lambda library: library.freeze_album(str(set_id)))
 
     def save_view(self, name: str, view: dict | None = None) -> dict:
         return self._run(lambda library: library.save_view(str(name), view))
@@ -220,8 +220,17 @@ class Desktop:
     def facets(self) -> dict:
         return self._run(lambda library: library.facets())
 
-    def clusters(self) -> list[dict]:
-        return self._run(lambda library: library.clusters())
+    def people(self) -> list[dict]:
+        return self._run(lambda library: library.people())
+
+    def labels(self) -> list[dict]:
+        return self._run(lambda library: library.labels())
+
+    def teach(self, word: str, photo_ids: list[int], yes: bool) -> dict:
+        said = self._run(lambda library: library.teach(str(word), photo_ids, bool(yes)))
+        # The taught word rewrites on the rank lane.
+        self._product.rank_soon()
+        return said
 
     def name_person(self, exemplar: str, called: str) -> dict:
         said = self._run(lambda library: library.name_person(str(exemplar), str(called)))
@@ -229,10 +238,10 @@ class Desktop:
         self._product.rank_soon()
         return said
 
-    # ---- refine ----
+    # ---- rank ----
 
-    def refine(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None) -> dict:
-        return self._run(lambda library: library.refine(int(n), view, list(avoid or [])))
+    def rank(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None) -> dict:
+        return self._run(lambda library: library.rank(int(n), view, list(avoid or [])))
 
     def round(self, winner_id: int, over_ids: list[int]) -> dict:
         recorded = self._run(lambda library: library.round(int(winner_id), over_ids))

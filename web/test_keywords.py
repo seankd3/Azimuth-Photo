@@ -52,7 +52,7 @@ class KeywordTests(BackendTestCase):
         with self._conn() as conn:
             digest = photos.hashes(conn, [image_id])
             self.assertTrue(digest, "the fixture photograph needs a content hash")
-            animals = sets.create(conn, keywords.clean_path("Animals > Cats"), kind=sets.KEYWORD)
+            animals = sets.create(conn, keywords.clean_path("Animals > Cats"), kind=sets.LABEL)
             sets.add(conn, animals, digest)
             conn.commit()
 
@@ -63,7 +63,7 @@ class KeywordTests(BackendTestCase):
         image_id = self.second
         with self._conn() as conn:
             digest = photos.hashes(conn, [image_id])
-            keyword = sets.create(conn, "Travel", kind=sets.KEYWORD)
+            keyword = sets.create(conn, "Travel", kind=sets.LABEL)
             sets.add(conn, keyword, digest)
             sets.remove(conn, keyword, digest)
             conn.commit()

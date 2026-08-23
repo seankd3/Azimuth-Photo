@@ -1,13 +1,13 @@
-// Collections in the sidebar and the verbs around them. One primitive worn
-// two ways: fixed collections hold what you put in them (B, right-click,
+// Albums in the sidebar and the verbs around them. One primitive worn
+// two ways: plain albums hold what you put in them (B, right-click,
 // drag); smart ones hold whatever their chips match, and Freeze turns the
 // second into the first — the album you are about to share elsewhere. The
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
-export function createCollectionsPanel({ product, read, update, notify, reload, moved, selection, describe, viewOf }) {
-  const tree = document.querySelector('[data-collections-tree]');
-  const menu = document.querySelector('[data-collection-menu]');
+export function createAlbumsPanel({ product, read, update, notify, reload, moved, selection, describe, viewOf }) {
+  const tree = document.querySelector('[data-albums-tree]');
+  const menu = document.querySelector('[data-album-menu]');
   const photoMenu = document.querySelector('[data-photo-menu]');
   const namePop = document.querySelector('[data-name-pop]');
   const nameInput = namePop.querySelector('[data-name-input]');
@@ -15,7 +15,7 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
 
   async function refresh() {
     try {
-      update({ collections: await product.collections() });
+      update({ albums: await product.albums() });
     } catch (error) {
       notify(error.message);
     }
@@ -23,9 +23,9 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
 
   function show(id) {
     // The view moves; whichever stage is up follows it. Refine re-scopes in
-    // place, the grid reloads — one rule for folders, collections and chips.
-    if (read().view === 'refine') update({ collection: id, folder: null });
-    else update({ view: 'library', collection: id, folder: null, selected: null, selectedIndex: null });
+    // place, the grid reloads — one rule for folders, albums and chips.
+    if (read().view === 'rank') update({ album: id, folder: null });
+    else update({ view: 'library', album: id, folder: null, selected: null, selectedIndex: null });
     moved();
   }
 
@@ -36,11 +36,11 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
   function render(state) {
     // Rebuilt only when the answer or the active row moved — not on every
     // store beat, which would blink hovers and drop clicks mid-swap.
-    if (treeSeen === state.collections && treeActive === state.collection) return;
-    treeSeen = state.collections;
-    treeActive = state.collection;
-    const held = state.collections || [];
-    // Quick Collection is the standing target for B; Previous import only
+    if (treeSeen === state.albums && treeActive === state.album) return;
+    treeSeen = state.albums;
+    treeActive = state.album;
+    const held = state.albums || [];
+    // Quick album is the standing target for B; Previous import only
     // means something once an import has happened.
     const pinned = ['quick', 'last-import']
       .map((id) => held.find((c) => c.id === id))
@@ -52,8 +52,8 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
     const place = (entry, depth, leaf) => {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'collection-row' + (state.collection === entry.id ? ' is-active' : '');
-      row.dataset.collection = entry.id;
+      row.className = 'side-row' + (state.album === entry.id ? ' is-active' : '');
+      row.dataset.album = entry.id;
       row.dataset.smart = entry.smart ? '1' : '0';
       row.title = entry.name;
       row.style.paddingLeft = `${10 + depth * 14}px`;
@@ -134,10 +134,10 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
   // ---- verbs ----
 
   async function create(anchor) {
-    const name = await prompt('New collection', anchor);
+    const name = await prompt('New album', anchor);
     if (!name) return;
     try {
-      await product.createCollection(name);
+      await product.createAlbum(name);
       await refresh();
     } catch (error) {
       notify(error.message);
@@ -178,10 +178,10 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
     try {
       const moved = await product.quick(ids);
       await refresh();
-      if (read().collection === 'quick') await reload();
+      if (read().album === 'quick') await reload();
       notify('added' in moved
-        ? `${moved.added} in Quick Collection — ${moved.count} held.`
-        : `${moved.removed} out of Quick Collection — ${moved.count} held.`);
+        ? `${moved.added} in Quick album — ${moved.count} held.`
+        : `${moved.removed} out of Quick album — ${moved.count} held.`);
     } catch (error) {
       notify(error.message);
     }
@@ -189,9 +189,9 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
 
   async function addTo(id, ids) {
     try {
-      const added = await product.addToCollection(id, ids);
+      const added = await product.addToAlbum(id, ids);
       await refresh();
-      const name = (read().collections.find((c) => c.id === id) || {}).name || 'the collection';
+      const name = (read().albums.find((c) => c.id === id) || {}).name || 'the album';
       notify(`${added.added} added to “${name}”.`);
     } catch (error) {
       notify(error.message);
@@ -200,7 +200,7 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
 
   async function removeFrom(id, ids) {
     try {
-      await product.removeFromCollection(id, ids);
+      await product.removeFromAlbum(id, ids);
       await refresh();
       await reload();
     } catch (error) {
@@ -211,19 +211,19 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
   // ---- the sidebar's own clicks, menu, and drops ----
 
   tree.addEventListener('click', (event) => {
-    const row = event.target.closest('[data-collection]');
-    if (row) show(row.dataset.collection);
+    const row = event.target.closest('[data-album]');
+    if (row) show(row.dataset.album);
   });
 
   tree.addEventListener('contextmenu', (event) => {
-    const row = event.target.closest('[data-collection]');
+    const row = event.target.closest('[data-album]');
     if (!row) return;
     event.preventDefault();
-    menu.dataset.collection = row.dataset.collection;
-    menu.querySelector('[data-action="freeze-collection"]').hidden = row.dataset.smart !== '1';
-    const pinned = ['quick', 'last-import'].includes(row.dataset.collection);
-    menu.querySelector('[data-action="delete-collection"]').hidden = pinned;
-    menu.querySelector('[data-action="rename-collection"]').hidden = pinned;
+    menu.dataset.album = row.dataset.album;
+    menu.querySelector('[data-action="freeze-album"]').hidden = row.dataset.smart !== '1';
+    const pinned = ['quick', 'last-import'].includes(row.dataset.album);
+    menu.querySelector('[data-action="delete-album"]').hidden = pinned;
+    menu.querySelector('[data-action="rename-album"]').hidden = pinned;
     menu.hidden = false;
     menu.style.left = `${event.clientX}px`;
     menu.style.top = `${event.clientY}px`;
@@ -231,27 +231,27 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
 
   menu.addEventListener('click', async (event) => {
     const action = event.target.closest('[data-action]')?.dataset.action;
-    const id = menu.dataset.collection;
+    const id = menu.dataset.album;
     menu.hidden = true;
     if (!action || !id) return;
     try {
-      if (action === 'rename-collection') {
-        const current = (read().collections.find((c) => c.id === id) || {}).name || '';
-        const row = tree.querySelector(`[data-collection="${id}"]`);
+      if (action === 'rename-album') {
+        const current = (read().albums.find((c) => c.id === id) || {}).name || '';
+        const row = tree.querySelector(`[data-album="${id}"]`);
         const name = await prompt('Rename to', row || tree, current);
         if (name) {
-          const renamed = await product.renameCollection(id, name);
-          if (renamed?.followed) notify(`Renamed. ${renamed.followed} collection${renamed.followed === 1 ? '' : 's'} under it followed.`);
+          const renamed = await product.renameAlbum(id, name);
+          if (renamed?.followed) notify(`Renamed. ${renamed.followed} album${renamed.followed === 1 ? '' : 's'} under it followed.`);
         }
       }
-      if (action === 'freeze-collection') {
-        const frozen = await product.freezeCollection(id);
+      if (action === 'freeze-album') {
+        const frozen = await product.freezeAlbum(id);
         notify(`Frozen — ${frozen.frozen.toLocaleString()} photographs are now yours to edit by hand.`);
       }
-      if (action === 'delete-collection') {
-        await product.forgetCollection(id);
-        if (read().collection === id) {
-          update({ collection: null });
+      if (action === 'delete-album') {
+        await product.forgetAlbum(id);
+        if (read().album === id) {
+          update({ album: null });
           await reload();
         }
       }
@@ -262,24 +262,21 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
   });
 
   tree.addEventListener('dragover', (event) => {
-    const row = event.target.closest('[data-collection]');
+    const row = event.target.closest('[data-album]');
     if (!row) return;
-    if (row.dataset.smart === '1') {
-      // A smart collection fills itself; the row says so instead of nothing.
-      row.classList.add('is-refused');
-      return;
-    }
+    // Smart albums take the drop too: what you drag in is pinned in past
+    // the rules — the exception the pro tools never had.
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     row.classList.add('is-drop');
   });
   tree.addEventListener('dragleave', (event) => {
-    const row = event.target.closest('[data-collection]');
+    const row = event.target.closest('[data-album]');
     // Crossing between a row's own children fires dragleave too.
     if (row && !row.contains(event.relatedTarget)) row.classList.remove('is-drop', 'is-refused');
   });
   tree.addEventListener('drop', (event) => {
-    const row = event.target.closest('[data-collection]');
+    const row = event.target.closest('[data-album]');
     if (!row) return;
     event.preventDefault();
     row.classList.remove('is-drop', 'is-refused');
@@ -287,7 +284,7 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
     try {
       ids = JSON.parse(event.dataTransfer.getData('text/azimuth-ids') || '[]');
     } catch { ids = []; }
-    if (ids.length) void addTo(row.dataset.collection, ids);
+    if (ids.length) void addTo(row.dataset.album, ids);
   });
 
   // ---- the photograph's menu: built for the moment it opens ----
@@ -299,7 +296,7 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
     // Where the mouse asked; menus hide before their verbs run, so the spot
     // is kept as a rect rather than measured off a hidden node.
     const spot = { left: event.clientX, top: event.clientY, bottom: event.clientY };
-    const fixed = (read().collections || []).filter((c) => !c.smart && c.id !== 'last-import');
+    const fixed = (read().albums || []).filter((c) => !c.smart && c.id !== 'last-import');
     const item = (label, run) => {
       const button = document.createElement('button');
       button.type = 'button';
@@ -308,20 +305,22 @@ export function createCollectionsPanel({ product, read, update, notify, reload, 
       return button;
     };
     const rows = verbs.map(({ label, run }) => item(label, run));
-    rows.push(item(`Quick Collection — B`, () => toss(ids)));
+    rows.push(item(`Quick album — B`, () => toss(ids)));
     for (const entry of fixed.filter((c) => c.id !== 'quick')) {
       rows.push(item(`Add to “${entry.name}”`, () => addTo(entry.id, ids)));
     }
-    rows.push(item('New collection from selection…', async () => {
-      const name = await prompt('New collection from selection', spot);
+    rows.push(item('New album from selection…', async () => {
+      const name = await prompt('New album from selection', spot);
       if (!name) return;
       const kept = await product.savePhotos(name, ids).catch((error) => { notify(error.message); return null; });
       if (kept) { await refresh(); notify(`“${name}” keeps ${kept.kept} photographs.`); }
     }));
-    const here = read().collection;
-    const viewing = (read().collections || []).find((c) => c.id === here);
-    if (viewing && !viewing.smart) {
-      rows.push(item(`Remove from “${viewing.name}”`, () => removeFrom(here, ids)));
+    const here = read().album;
+    const viewing = (read().albums || []).find((c) => c.id === here);
+    if (viewing) {
+      rows.push(item(
+        viewing.smart ? `Exclude from “${viewing.name}”` : `Remove from “${viewing.name}”`,
+        () => removeFrom(here, ids)));
     }
     photoMenu.replaceChildren(...rows);
     photoMenu.hidden = false;

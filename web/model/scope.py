@@ -144,6 +144,22 @@ def in_set(set_id: str) -> Scope:
     )
 
 
+def out_of_set(set_id: str) -> Scope:
+    """Explicitly taken out of one set — the denials, as a scope.
+
+    The other half of a smart album's exceptions: a removal writes the same
+    membership row with `false`, and this reads it back, so
+    (rules ∪ pinned) ∖ denied needs no store the sets never had.
+    """
+
+    from model import sets
+
+    return Scope(
+        f"i.content_hash IN (SELECT subject FROM ({decisions.LATEST_IN_FAMILY}) WHERE value = 'false')",
+        (sets.family(set_id),),
+    )
+
+
 def camera(models) -> Scope:
     """Shot on one of these cameras, by the exact model the file names."""
 
@@ -191,26 +207,36 @@ def status(values) -> Scope:
     return Scope(f"i.status IN ({marks})", tuple(wanted))
 
 
-def alike(terms) -> Scope:
-    """Wears one of these names — a proposal, not a fact.
+def _named(kinds: tuple, terms) -> Scope:
+    """Wears one of these names, under the given derived kinds.
 
-    Names are tags, not a partition: each photograph's row holds its
-    strongest few as a JSON list, rewritten whole as the space grows, so
-    this reads whatever the current answer is; a name that no longer exists
-    honestly matches nothing.
+    People and labels ride the same shape — a JSON list of names per
+    identity, rewritten whole by their lanes — so one reader serves both. A
+    name that no longer exists honestly matches nothing.
     """
 
     wanted = sorted({str(t).strip() for t in terms if str(t).strip()})
     if not wanted:
         return EVERYTHING
     marks = ",".join("?" for _ in wanted)
-    # Palette tags and people ride the same shape — a JSON list of names per
-    # identity — under two kinds with two writers; a chip reads both.
+    kind_marks = ",".join("?" for _ in kinds)
     return Scope(
         "i.content_hash IN (SELECT c.hash FROM cache c, json_each(CAST(c.value AS TEXT)) j"
-        f" WHERE c.kind IN ('alike', 'people') AND c.state = 'ready' AND j.value IN ({marks}))",
-        tuple(wanted),
+        f" WHERE c.kind IN ({kind_marks}) AND c.state = 'ready' AND j.value IN ({marks}))",
+        (*kinds, *wanted),
     )
+
+
+def person(names) -> Scope:
+    """Shows one of these people."""
+
+    return _named(("people",), names)
+
+
+def label(terms) -> Scope:
+    """Wears one of these labels."""
+
+    return _named(("label",), terms)
 
 
 def orientation(values) -> Scope:

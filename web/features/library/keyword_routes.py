@@ -81,16 +81,16 @@ def _resolve(conn, path: str) -> dict:
     """The keyword at this path, minted if it is new. Idempotent by name."""
 
     path = keywords.clean_path(path)
-    for said in sets.all(conn, kind=sets.KEYWORD):
+    for said in sets.all(conn, kind=sets.LABEL):
         if said["name"] == path:
             return said
-    return {"id": sets.create(conn, path, kind=sets.KEYWORD), "name": path, "kind": sets.KEYWORD}
+    return {"id": sets.create(conn, path, kind=sets.LABEL), "name": path, "kind": sets.LABEL}
 
 
 @router.get("/api/keywords")
 async def api_keywords(q: str = ""):
     conn = db()
-    found = sets.all(conn, kind=sets.KEYWORD)
+    found = sets.all(conn, kind=sets.LABEL)
     if q:
         needle = q.strip().lower()
         found = [s for s in found if needle in str(s["name"]).lower()]
@@ -169,8 +169,8 @@ async def api_image_keywords(image_id: int):
     if not digest:
         return {"keywords": []}
     tally = sets.counts(conn)
-    by_name = {s["name"]: s for s in sets.all(conn, kind=sets.KEYWORD)}
-    direct = [sets.describe(conn, i) for i in sets.sets_of(conn, digest[0], kind=sets.KEYWORD)]
+    by_name = {s["name"]: s for s in sets.all(conn, kind=sets.LABEL)}
+    direct = [sets.describe(conn, i) for i in sets.sets_of(conn, digest[0], kind=sets.LABEL)]
 
     shown: dict[str, dict] = {}
     for said in (s for s in direct if s):
@@ -196,7 +196,7 @@ async def api_keyword_images(keyword_id: str):
         return {"image_ids": []}
     under = said["name"] + keywords.SEPARATOR
     digests = set()
-    for other in sets.all(conn, kind=sets.KEYWORD):
+    for other in sets.all(conn, kind=sets.LABEL):
         if other["name"] == said["name"] or other["name"].startswith(under):
             digests.update(sets.members(conn, other["id"]))
     return {"image_ids": photos.ids(conn, sorted(digests))}

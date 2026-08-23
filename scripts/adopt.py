@@ -197,11 +197,11 @@ def adopt_keywords(v1, v2, hash_map) -> dict[str, int]:
         wanted.setdefault(name.strip(), set()).add(subject)
 
     made = joined = 0
-    held = {entry["name"]: entry["id"] for entry in sets.all(v2, kind=sets.KEYWORD)}
+    held = {entry["name"]: entry["id"] for entry in sets.all(v2, kind=sets.LABEL)}
     for name, members in sorted(wanted.items()):
         set_id = held.get(name)
         if set_id is None:
-            set_id = sets.create(v2, name, kind=sets.KEYWORD)
+            set_id = sets.create(v2, name, kind=sets.LABEL)
             made += 1
         standing = set(sets.members(v2, set_id))
         fresh = sorted(members - standing)

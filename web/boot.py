@@ -112,8 +112,8 @@ class Library:
 
     def viewing(self, view: dict | None) -> Scope:
         """One scope from what the window says it is looking at: a folder, a
-        collection (with everything shelved under it), and the filter chips.
-        Every surface -- grid, count, Refine, search -- narrows by this one
+        album (with everything shelved under it), and the filter chips.
+        Every surface -- grid, count, Rank, search -- narrows by this one
         answer, which is what keeps them the same view."""
 
         self._open()
@@ -121,14 +121,14 @@ class Library:
         parts = []
         if view.get("folder"):
             parts.append(in_folder(str(view["folder"])))
-        if view.get("collection"):
-            parts.append(self._shelf(str(view["collection"])))
+        if view.get("album"):
+            parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
             parts.append(criteria.compile(self.conn, view["chips"]))
         return all_of(*parts)
 
     def _shelf(self, set_id: str) -> Scope:
-        """A collection and everything shelved under it. The shelf is the
+        """An album and everything shelved under it. The shelf is the
         name: `America/Utah` sits under `America`, so browsing a parent is
         the union of its own answer and its descendants' -- the 07-09 ruling,
         derived from names the way the folder tree derives from tails."""
@@ -137,7 +137,7 @@ class Library:
         if said is None:
             return criteria.resolve(self.conn, set_id)
         prefix = str(said.get("name", "")) + "/"
-        under = [entry["id"] for entry in sets.all(self.conn, kind=sets.COLLECTION)
+        under = [entry["id"] for entry in sets.all(self.conn, kind=sets.ALBUM)
                  if str(entry.get("name", "")).startswith(prefix)]
         return any_of(*(criteria.resolve(self.conn, sid) for sid in (set_id, *under)))
 
@@ -237,31 +237,36 @@ class Library:
         )} if page else {}
         return {"total": len(ranked), "photos": [rows[i] for i in page if i in rows]}
 
-    # ---- collections ----
+    # ---- albums ----
 
     QUICK = "quick"
     LAST_IMPORT = "last-import"
-    PINNED = {QUICK: "Quick Collection", LAST_IMPORT: "Previous import"}
+    PINNED = {QUICK: "Quick album", LAST_IMPORT: "Previous import"}
 
-    def collections(self) -> list[dict]:
-        """Every collection for the sidebar: id, name, whether it is smart,
+    def albums(self) -> list[dict]:
+        """Every album for the sidebar: id, name, whether it is smart,
         and how many photographs it answers with right now. The two pinned
         sets are always present, so the shelf never looks broken before
         first use."""
 
         self._open()
         for set_id, name in self.PINNED.items():
-            if sets.describe(self.conn, set_id) is None:
+            said = sets.describe(self.conn, set_id)
+            if said is None:
                 sets.create(self.conn, name, set_id=set_id)
+            elif said.get("name") != name:
+                # The pinned rows cannot be renamed by hand, so a differing
+                # name is only ever an older vocabulary; it follows quietly.
+                sets.rename(self.conn, set_id, name)
         self.conn.commit()
         out = []
-        for entry in sets.all(self.conn, kind=sets.COLLECTION):
+        for entry in sets.all(self.conn, kind=sets.ALBUM):
             # The number on the row is the number the row opens to: the
             # shelf's union, not the parent's own members alone.
             clause, args = scope_where(all_of(
                 Scope(queries.IN_LIBRARY), self._shelf(entry["id"])))
             count = int(self.conn.execute(
-                f"SELECT COUNT(DISTINCT i.content_hash) FROM images i WHERE {clause}", args
+                f"SELECT COUNT(*) FROM images i WHERE {clause}", args
             ).fetchone()[0])
             out.append({
                 "id": entry["id"], "name": entry["name"],
@@ -272,19 +277,19 @@ class Library:
 
     def _taken_name(self, name: str, but: str | None = None) -> None:
         held = str(name).strip().lower()
-        for entry in sets.all(self.conn, kind=sets.COLLECTION):
+        for entry in sets.all(self.conn, kind=sets.ALBUM):
             if entry["id"] != but and str(entry.get("name", "")).lower() == held:
-                raise ValueError(f"A collection called “{name}” is already there.")
+                raise ValueError(f"An album called “{name}” is already there.")
 
-    def create_collection(self, name: str, chips=None) -> dict:
+    def create_album(self, name: str, chips=None) -> dict:
         self._open()
         self._taken_name(name)
         set_id = sets.create(self.conn, name, criteria=chips)
         self.conn.commit()
         return {"id": set_id, "name": str(name).strip(), "smart": bool(chips)}
 
-    def rename_collection(self, set_id: str, name: str) -> dict | None:
-        """Rename the collection — and the shelf under it. `America/Utah`
+    def rename_album(self, set_id: str, name: str) -> dict | None:
+        """Rename the album — and the shelf under it. `America/Utah`
         means nothing once `America` is `USA`, so the children's prefixes
         follow in the same commit."""
 
@@ -295,7 +300,7 @@ class Library:
         followed = 0
         if said is not None and was is not None:
             prefix = str(was.get("name", "")) + "/"
-            for entry in sets.all(self.conn, kind=sets.COLLECTION):
+            for entry in sets.all(self.conn, kind=sets.ALBUM):
                 held = str(entry.get("name", ""))
                 if entry["id"] != set_id and held.startswith(prefix):
                     sets.rename(self.conn, entry["id"], str(name).strip() + "/" + held[len(prefix):])
@@ -303,10 +308,10 @@ class Library:
         self.conn.commit()
         return {**said, "followed": followed} if said is not None else None
 
-    def forget_collection(self, set_id: str) -> bool:
+    def forget_album(self, set_id: str) -> bool:
         self._open()
         if set_id in self.PINNED:
-            raise ValueError("the pinned collections stay")
+            raise ValueError("the pinned albums stay")
         gone = sets.forget(self.conn, set_id)
         self.conn.commit()
         return gone
@@ -323,17 +328,18 @@ class Library:
             raise ValueError("those photographs have no identity yet")
         return found
 
-    def _fixed_only(self, set_id: str) -> dict:
+    def _album(self, set_id: str) -> dict:
         said = sets.describe(self.conn, set_id)
         if said is None:
-            raise ValueError("no such collection")
-        if said.get("criteria"):
-            raise ValueError("A smart collection fills itself. Freeze it to edit by hand.")
+            raise ValueError("no such album")
         return said
 
-    def add_to_collection(self, set_id: str, photo_ids) -> dict:
+    def add_to_album(self, set_id: str, photo_ids) -> dict:
+        """Into the album — and on a smart one, pinned in past its rules.
+        The same membership row either way; resolve() reads the exceptions."""
+
         self._open()
-        self._fixed_only(set_id)
+        self._album(set_id)
         wanted = self._identities(photo_ids)
         # The count reported is what actually joined, not what was handed in.
         newly = len(set(wanted) - set(sets.members(self.conn, set_id)))
@@ -341,15 +347,17 @@ class Library:
         self.conn.commit()
         return {"added": newly}
 
-    def remove_from_collection(self, set_id: str, photo_ids) -> dict:
+    def remove_from_album(self, set_id: str, photo_ids) -> dict:
+        """Out of the album — and on a smart one, excluded past its rules."""
+
         self._open()
-        self._fixed_only(set_id)
+        self._album(set_id)
         removed = sets.remove(self.conn, set_id, self._identities(photo_ids))
         self.conn.commit()
         return {"removed": removed}
 
     def quick(self, photo_ids) -> dict:
-        """Toss the selection into the Quick Collection -- or, if every one
+        """Toss the selection into the Quick album -- or, if every one
         of them is already there, take them back out. One key either way."""
 
         self._open()
@@ -366,17 +374,17 @@ class Library:
         self.conn.commit()
         return {verb: moved, "count": len(sets.members(self.conn, self.QUICK))}
 
-    def freeze_collection(self, set_id: str) -> dict:
-        """A smart collection becomes fixed: its current answer is written as
+    def freeze_album(self, set_id: str) -> dict:
+        """A smart album becomes plain: its current answer is written as
         membership and the rules leave. From here it is edited by hand --
         the album you are about to share elsewhere."""
 
         self._open()
         said = sets.describe(self.conn, set_id)
         if said is None:
-            raise ValueError("no such collection")
+            raise ValueError("no such album")
         if not said.get("criteria"):
-            raise ValueError("that collection is already fixed")
+            raise ValueError("that album is already fixed")
         clause, args = scope_where(all_of(
             Scope(queries.IN_LIBRARY), criteria.resolve(self.conn, set_id)))
         held = [str(row[0]) for row in self.conn.execute(
@@ -389,21 +397,21 @@ class Library:
         return {"frozen": len(held)}
 
     def save_view(self, name: str, view: dict | None) -> dict:
-        """The current view, kept: folder and collection fold into chips, so
+        """The current view, kept: folder and album fold into chips, so
         what you saved is exactly what you were looking at, live."""
 
         view = dict(view or {})
         chips = list(view.get("chips") or [])
         if view.get("folder"):
             chips.append({"is": "folder", "values": [str(view["folder"])]})
-        if view.get("collection"):
-            chips.append({"is": "in", "values": [str(view["collection"])]})
+        if view.get("album"):
+            chips.append({"is": "in", "values": [str(view["album"])]})
         if not chips:
             raise ValueError("this view is the whole library; narrow it first")
-        return self.create_collection(name, chips)
+        return self.create_album(name, chips)
 
     def save_photos(self, name: str, photo_ids) -> dict:
-        """These exact photographs, kept: a fixed collection from a moment --
+        """These exact photographs, kept: a plain album from a moment --
         a search's results, a hand selection."""
 
         self._open()
@@ -429,11 +437,11 @@ class Library:
 
         self._open()
         ask = self.conn.execute
-        live = f"{queries.IN_LIBRARY} AND i.status != 'trashed'"
+        live = queries.IN_LIBRARY
         years = [
             {"year": row[0], "photos": row[1]}
             for row in ask(
-                "SELECT substr(i.date_taken, 1, 4) AS y, COUNT(DISTINCT i.content_hash)"
+                "SELECT substr(i.date_taken, 1, 4) AS y, COUNT(*)"
                 f" FROM images i WHERE {live} AND i.date_taken IS NOT NULL"
                 " GROUP BY y ORDER BY y DESC")
             if row[0] and len(row[0]) == 4
@@ -445,7 +453,7 @@ class Library:
             for row in ask(
                 f"SELECT CASE WHEN {shown_w} > {shown_h} THEN 'landscape'"
                 f" WHEN {shown_w} < {shown_h} THEN 'portrait' ELSE 'square' END AS o,"
-                " COUNT(DISTINCT i.content_hash)"
+                " COUNT(*)"
                 f" FROM images i WHERE {live} AND i.width > 0 AND i.height > 0"
                 " GROUP BY o ORDER BY 2 DESC")
         ]
@@ -453,7 +461,7 @@ class Library:
             {"folder": row[0], "photos": row[1]}
             for row in ask(
                 "SELECT substr(i.tail, 1, instr(i.tail, '/') - 1) AS root,"
-                " COUNT(DISTINCT i.content_hash)"
+                " COUNT(*)"
                 f" FROM images i WHERE {live} AND instr(i.tail, '/') > 0"
                 " GROUP BY root ORDER BY 2 DESC")
         ]
@@ -497,35 +505,56 @@ class Library:
             out.append({"tile": tile, "view": view})
         return out
 
-    def clusters(self) -> list[dict]:
-        """The clusters proposing themselves right now. Terms carry their
-        three best-ranked tiles; people — introduced or still a Someone —
-        carry their own faces, cropped from the same tiles by the boxes the
-        worker already found. Every entry is browsable: even a Someone wears
-        an interim tag, because seeing their photographs is how you decide
-        who they are."""
+    def people(self) -> list[dict]:
+        """Everyone the library can tell apart: the introduced by name, the
+        rest as Someones — each with their face, cropped from a tile by the
+        box the worker found it in, and each browsable by their tag, because
+        seeing someone's photographs is how you decide who they are."""
 
         import people as persons
-        import clusters as proposing
-        from model.scope import alike
 
         self._open()
-        out = proposing.proposals(self.conn)
-        for entry in out:
-            entry["samples"] = self._sample_tiles(alike([entry["term"]]))
-        # People beside the labels, from their own summary and their own
-        # floor — a person matters at a size that does not grow with the
-        # library. Every one is browsable by their tag; the unintroduced
-        # carry the exemplar face a Name decision would land on.
+        out = []
         for group in persons.groups(self.conn):
-            entry = {
-                "term": group["name"], "count": group["photos"], "people": True,
+            out.append({
+                "term": group["name"], "count": group["photos"],
+                "settled": bool(group.get("settled")),
+                # The exemplar rides along for everyone: naming a Someone and
+                # renaming the named are the same decision on the same face.
+                "person": group["exemplar"],
                 "samples": self._face_samples(group["sample"]),
-            }
-            if not group.get("settled"):
-                entry["person"] = group["exemplar"]
-            out.insert(0, entry)
+            })
         return out
+
+    def labels(self) -> list[dict]:
+        """Every word the owner has taught: tilde-counted, with its three
+        best-ranked tiles. The vocabulary is exactly what has been answered
+        for — an untaught library has no labels at all."""
+
+        import labels as taught
+        from model.scope import label as worn
+
+        self._open()
+        out = []
+        for entry in taught.vocabulary(self.conn):
+            clause, args = scope_where(all_of(
+                Scope(queries.IN_LIBRARY), worn([entry["name"]])))
+            count = int(self.conn.execute(
+                f"SELECT COUNT(*) FROM images i WHERE {clause}",
+                args).fetchone()[0])
+            out.append({"term": entry["name"], "count": count,
+                        "samples": self._sample_tiles(worn([entry["name"]]))})
+        out.sort(key=lambda entry: entry["count"], reverse=True)
+        return out
+
+    def teach(self, word: str, photo_ids, yes: bool) -> dict:
+        """One answer about one word: these photographs are (Y) or are not
+        (N) what it means. The first answer creates the word."""
+
+        import labels as taught
+
+        self._open()
+        return taught.teach(self.conn, word, self._identities(photo_ids), bool(yes))
 
     def name_person(self, exemplar: str, called: str) -> dict:
         """Introduce someone: the name lands on the exemplar face and the
@@ -537,22 +566,22 @@ class Library:
         said = persons.name(self.conn, exemplar, called)
         return said
 
-    # ---- refine ----
+    # ---- rank ----
 
-    def refining(self, view: dict | None) -> Scope:
-        """What Refine ranks: the view you are in, or the library without
+    def ranking(self, view: dict | None) -> Scope:
+        """What Rank draws from: the view you are in, or the library without
         its snapshots -- phone shots rank only when you go to them
         ("Everything, just not by default", 07-31)."""
 
         looking = self.viewing(view)
         return looking if looking else outside(intake.ROOTS[intake.SNAPSHOTS])
 
-    def refine(self, n: int = 9, view: dict | None = None, avoid=()) -> dict:
+    def rank(self, n: int = 9, view: dict | None = None, avoid=()) -> dict:
         """A set worth comparing, from what can be shown this instant, and how
         far the scope has been ranked."""
 
         self._open()
-        scope = self.refining(view)
+        scope = self.ranking(view)
         chosen = rank.candidates(self.conn, n, scope=all_of(scope, self.tiles.ready), avoid=avoid)
         rows = {row["id"]: row for row in self._with_urls(queries.photos(
             self.conn, scope=these([p["id"] for p in chosen]), sort="newest", limit=max(1, len(chosen)),
@@ -747,8 +776,8 @@ class OwnedLibrary:
         self._warming = False
         self._ranked = None            # (last round row, vector count) already written
         self._space = None             # (vector count, subjects, matrix), append-only so count-keyed
-        self._clustered = None         # (vector count, palette stamp) already assigned
         self._peopled = None           # (face rows, last person decision) already grouped
+        self._labeled = None           # (vector count, last teaching) already written
         # Bumped whenever the lane rewrites a derived answer the window shows
         # (clusters, people); rides the pulse so the window knows to re-ask.
         self.shaped = 0
@@ -863,22 +892,27 @@ class OwnedLibrary:
             _count, subjects, vectors = self._space
             queries.rerank(conn, subjects, vectors)
             self._ranked = key
-            # Clusters ride the same rhythm: when the space grew, every
-            # photograph re-names its strongest resemblance, rewritten whole.
-            import clusters
-
-            stamp = clusters.available(self._library.catalog_path)
-            if stamp and self._clustered != (key[1], stamp):
-                clusters.recluster(conn, subjects, vectors, self._library.catalog_path)
-                self._clustered = (key[1], stamp)
-                self.shaped += 1
-            # People too: when faces landed or someone was introduced, the
-            # groups and their names rewrite whole. Needs no model — the
-            # vectors are already in the rows.
+            # People ride the same rhythm: when faces landed or someone was
+            # introduced, the groups and their names rewrite whole. Needs no
+            # model — the vectors are already in the rows.
             if key[2:] != self._peopled and key[2]:
                 persons.repeople(conn)
                 self._peopled = key[2:]
                 self.shaped += 1
+            # Labels too: when a word was taught or the space grew, every
+            # taught word's answer rewrites whole.
+            import labels as taught
+
+            families = [sets.family(entry["id"]) for entry in taught.vocabulary(conn)]
+            if families:
+                marks = ",".join("?" * len(families))
+                latest = conn.execute(
+                    f"SELECT MAX(id) FROM decisions WHERE family IN ({marks})", families
+                ).fetchone()[0]
+                if (key[1], latest) != self._labeled:
+                    taught.relabel(conn, subjects, vectors)
+                    self._labeled = (key[1], latest)
+                    self.shaped += 1
         finally:
             conn.close()
 

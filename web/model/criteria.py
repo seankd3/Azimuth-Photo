@@ -44,6 +44,10 @@ FIELDS = {
     "camera": ("values",),
     "status": ("values",),
     "orientation": ("values",),
+    "person": ("values",),
+    "label": ("values",),
+    # Legacy spelling from the clusters era; compiles as person-or-label so a
+    # saved chip keeps answering. New chips never write it.
     "alike": ("values",),
     "stars": ("least",),
     "taken": ("from", "to"),
@@ -118,8 +122,12 @@ def compile(conn, chips, _seen: frozenset = frozenset()) -> Scope:
             built = scopes.status(chip["values"])
         elif field == "orientation":
             built = scopes.orientation(chip["values"])
+        elif field == "person":
+            built = scopes.person(chip["values"])
+        elif field == "label":
+            built = scopes.label(chip["values"])
         elif field == "alike":
-            built = scopes.alike(chip["values"])
+            built = any_of(scopes.person(chip["values"]), scopes.label(chip["values"]))
         elif field == "stars":
             built = scopes.starred(chip["least"])
         else:
@@ -147,4 +155,11 @@ def resolve(conn, set_id: str, _seen: frozenset = frozenset()) -> Scope:
     rules = said.get("criteria")
     if not rules:
         return scopes.in_set(set_id)
-    return compile(conn, rules, _seen | {set_id})
+    # A smart album takes exceptions: what was dragged in stays in, what was
+    # removed stays out — (rules ∪ pinned) ∖ denied, from the same membership
+    # rows a plain album already stores. No tool in the pro tier has this;
+    # their users fake it with marker keywords.
+    return all_of(
+        any_of(compile(conn, rules, _seen | {set_id}), scopes.in_set(set_id)),
+        not_of(scopes.out_of_set(set_id)),
+    )

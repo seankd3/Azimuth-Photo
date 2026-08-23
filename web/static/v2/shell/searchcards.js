@@ -1,9 +1,9 @@
 // The search box answers before it is asked. Focusing it offers the
-// library's shape — years, cameras, kinds, orientations, collections, and
+// library's shape — years, cameras, kinds, orientations, albums, and
 // what you searched before — and typing narrows those offers while the
 // meaning search runs underneath. Every card is a fact the chip language
 // can say back, so clicking one applies chips: countable, explainable,
-// saveable, and it scopes Refine like any other narrowing. Enter is always
+// saveable, and it scopes Rank like any other narrowing. Enter is always
 // the meaning search; the cards never take it away.
 
 const RECENT_KEY = 'azimuth.recent-searches';
@@ -60,26 +60,31 @@ export function createSearchCards({ product, read, update, box, search, applyChi
         }))]);
       }
     }
-    const collections = (read().collections || [])
+    const albums = (read().albums || [])
       .filter((c) => (!c.pinned || c.count) && c.count && match(c.name))
       .slice(0, 6)
       .map((c) => ({
         label: c.name, count: c.count, glyph: c.smart ? '◇' : '▣',
         run: () => applyChip({ is: 'in', values: [c.id] }),
       }));
-    if (collections.length) sections.push(['Collections', collections]);
+    if (albums.length) sections.push(['Albums', albums]);
 
-    // What the library proposes about itself: tilde-counted until a label
-    // earns its threshold.
-    // The unintroduced wait in the sidebar; the drop offers only what a chip
-    // can already say.
-    const clusters = (read().clusters || []).filter((c) => !c.person && match(c.term)).slice(0, query ? 4 : 5)
-      .map((c) => ({
-        label: c.term, count: `~${c.count.toLocaleString()}`, glyph: '◇',
-        strip: c.samples || [], faces: Boolean(c.people),
-        run: () => applyChip({ is: 'alike', values: [c.term] }),
+    // The introduced, with their faces; Someones wait in the sidebar.
+    const people = (read().people || []).filter((p) => p.settled && match(p.term)).slice(0, query ? 3 : 4)
+      .map((p) => ({
+        label: p.term, count: `~${p.count.toLocaleString()}`, glyph: '◉',
+        strip: p.samples || [],
+        run: () => applyChip({ is: 'person', values: [p.term] }),
       }));
-    if (clusters.length) sections.push(['Clusters', clusters]);
+    if (people.length) sections.push(['People', people]);
+
+    // The words you have taught, tilde-counted until calibration.
+    const labels = (read().labels || []).filter((l) => match(l.term)).slice(0, query ? 4 : 5)
+      .map((l) => ({
+        label: l.term, count: `~${l.count.toLocaleString()}`, glyph: '◇',
+        run: () => applyChip({ is: 'label', values: [l.term] }),
+      }));
+    if (labels.length) sections.push(['Labels', labels]);
 
     const years = held.years.filter((y) => match(y.year)).slice(0, query ? 3 : 6)
       .map((y) => ({

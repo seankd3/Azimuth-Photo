@@ -1,8 +1,9 @@
 const state = {
   chips: [],
-  collection: null,
-  collections: [],
-  clusters: [],
+  album: null,
+  albums: [],
+  people: [],
+  labels: [],
   counts: { photos: 0, starred: 0, unidentified: 0, trash: 0 },
   drives: [],
   folder: null,

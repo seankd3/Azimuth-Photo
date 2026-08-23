@@ -163,18 +163,23 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
         f", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id AND c.drive_id IN ({holes})) AS reachable"
         ", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id) AS placed"
     )
+    # The page's ids are walked first, on the bare table where the partial
+    # indexes cover the whole skip; the joins and per-row subqueries then run
+    # for exactly one page. Measured at 155k rows, offset 60k: the joined
+    # walk paid ~290 ms per page, the covered walk pays single digits.
     return [dict(row) for row in conn.execute(
         f"""
         SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.rotate, i.elo,
                i.content_hash AS hash, i.width, i.height, i.file_size{"".join(columns)}
         FROM images i {" ".join(joins)}
-        WHERE {condition}
+        WHERE i.id IN (SELECT i.id FROM images i WHERE {condition}
+                       ORDER BY {order} LIMIT ? OFFSET ?)
         ORDER BY {order}
-        LIMIT ? OFFSET ?
         """,
         # Bound in SQL text order: the reachability list sits in the SELECT,
-        # before the rendition joins' kinds and recipes.
-        (*here, *bound, *args, *order_args, limit, offset),
+        # before the rendition joins' kinds and recipes, then the inner
+        # walk's condition, order, and window, then the outer order again.
+        (*here, *bound, *args, *order_args, limit, offset, *order_args),
     )]
 
 
@@ -227,10 +232,17 @@ def counts(conn) -> dict:
     condition SQLite cannot see through forces a scan of the table.
     """
 
+    # INDEXED BY because the planner refuses a covering partial index for a
+    # bare COUNT even with fresh statistics: measured 34 ms as a table scan
+    # against 9.5 ms on the index it was built for. These two queries are the
+    # index's reason to exist, so naming it here is the contract, not a hint.
     ask = lambda sql: int(conn.execute(sql).fetchone()[0] or 0)  # noqa: E731
     return {
-        "photos": ask(f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY}"),
-        "starred": ask(f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY} AND i.stars > 0"),
+        "photos": ask(
+            f"SELECT COUNT(*) FROM images i INDEXED BY idx_live_date WHERE {IN_LIBRARY}"),
+        "starred": ask(
+            f"SELECT COUNT(*) FROM images i INDEXED BY idx_live_stars"
+            f" WHERE {IN_LIBRARY} AND i.stars > 0"),
         "unidentified": ask("SELECT COUNT(*) FROM images WHERE content_hash IS NULL"),
     }
 
@@ -476,35 +488,57 @@ def folder_tree(conn) -> list[dict]:
         if row["is_record"] and online:
             record_attached = True
 
-    for row in conn.execute(
-        f"""
-        SELECT i.tail, (SELECT GROUP_CONCAT(c.drive_id) FROM copies c WHERE c.photo_id = i.id) AS drives
-        FROM images i WHERE {IN_LIBRARY} AND i.tail GLOB '*/*'
-        """
-    ):
-        parts = str(row["tail"]).split("/")[:-1]
-        on = [drive_of[int(d)] for d in str(row["drives"] or "").split(",")
-              if d.strip().isdigit() and int(d) in drive_of]
-        # One question per photograph: is there a copy on a drive allowed to
-        # hold the last one? Everything else about where it lives is trivia.
-        held = "safe" if any(d["is_record"] for d in on) else ("only-here" if on else "unknown")
-        for depth in range(1, len(parts) + 1):
-            key = "/".join(parts[:depth])
+    # One streamed join instead of a correlated subquery per photograph —
+    # measured at 155k rows: the subquery shape took thirty seconds, this
+    # takes under one. Rows arrive ordered by photograph, so each one's
+    # copies fold into a single held-state before its ancestors are walked.
+    record_ids = {d for d, held in drive_of.items() if held["is_record"]}
+    known_ids = set(drive_of)
+
+    def fold(tail: str, on_record: bool, on_any: bool) -> None:
+        parts = tail.split("/")[:-1]
+        held = "safe" if on_record else ("only-here" if on_any else "unknown")
+        key = parts[0]
+        for depth in range(len(parts)):
+            if depth:
+                key = key + "/" + parts[depth]
             counts[key] = counts.get(key, 0) + 1
             where.setdefault(key, set()).add(held)
 
+    current_id, current_tail, on_record, on_any = None, None, False, False
+    for row in conn.execute(
+        f"""
+        SELECT i.id, i.tail, c.drive_id FROM images i
+        LEFT JOIN copies c ON c.photo_id = i.id
+        WHERE {IN_LIBRARY} AND i.tail GLOB '*/*' ORDER BY i.id
+        """
+    ):
+        if row["id"] != current_id:
+            if current_id is not None:
+                fold(current_tail, on_record, on_any)
+            current_id, current_tail = row["id"], str(row["tail"])
+            on_record, on_any = False, False
+        drive = row["drive_id"]
+        if drive is not None and drive in known_ids:
+            on_any = True
+            if drive in record_ids:
+                on_record = True
+    if current_id is not None:
+        fold(current_tail, on_record, on_any)
+
+    children_of: dict[str, list] = {}
+    for key in sorted(counts):
+        if "/" in key:
+            children_of.setdefault(key.rsplit("/", 1)[0], []).append(key)
+
     def node(path: str) -> dict:
-        children = sorted(
-            k for k in counts
-            if k.startswith(path + "/") and k.count("/") == path.count("/") + 1
-        )
         return {
             "path": path,
             "name": path.rsplit("/", 1)[-1],
             "total_count": counts[path],
             "safety": _safety(where.get(path) or set(), record_attached),
             "reveal_available": True,
-            "children": [node(child) for child in children],
+            "children": [node(child) for child in children_of.get(path, ())],
         }
 
     return [node(k) for k in sorted(counts) if "/" not in k]

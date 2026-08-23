@@ -1,4 +1,4 @@
-// Refine: you pick the best of a set drawn from what you are looking at, the
+// Rank: you pick the best of a set drawn from what you are looking at, the
 // round is recorded whole, and the order of everything follows. Everything
 // about the stage serves one click being honest and instant: every candidate
 // is shown at the same area so shape never votes, the next photographs are
@@ -20,8 +20,8 @@ const RECENT = 48;
 const ASPECT_MIN = 0.4;
 const ASPECT_MAX = 2.6;
 
-export function createRefineWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
-  const stage = document.querySelector('[data-refine]');
+export function createRankWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
+  const stage = document.querySelector('[data-rank]');
   const state = {
     size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
     rounds: 0, judged: 0, total: 0, busy: false, filling: null, generation: 0,
@@ -30,7 +30,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
   function isOpen() {
-    return read().view === 'refine';
+    return read().view === 'rank';
   }
 
   function remember(photos) {
@@ -45,7 +45,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   async function ask(n) {
     // The whole answer comes back; the caller writes what it holds after its
     // own staleness check, so a superseded ask cannot smear old numbers.
-    return product.refine({ n, view: viewOf(), avoid: avoiding() });
+    return product.rank({ n, view: viewOf(), avoid: avoiding() });
   }
 
   function accept(answer) {
@@ -147,7 +147,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   async function open() {
     if (isOpen()) return;
     state.rounds = 0;
-    update({ view: 'refine', selected: null, selectedIndex: null });
+    update({ view: 'rank', selected: null, selectedIndex: null });
     await load();
   }
 
@@ -318,7 +318,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     // cells with letterboxing showed a portrait at roughly half a landscape's
     // area, so the wider photograph won attention before taste entered -- a
     // bias written into durable ranking data.
-    const cards = [...stage.querySelectorAll('.refine-card')];
+    const cards = [...stage.querySelectorAll('.rank-card')];
     if (!cards.length) return;
     const [cols, rows] = SIZES[state.size];
     const style = getComputedStyle(stage);
@@ -357,23 +357,23 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   function renderSelection() {
-    for (const card of stage.querySelectorAll('.refine-card')) {
+    for (const card of stage.querySelectorAll('.rank-card')) {
       card.classList.toggle('is-selected', Number(card.dataset.index) === state.selected);
     }
   }
 
   function renderProgress() {
     const app = read();
-    const shelf = (app.collections || []).find((c) => c.id === app.collection);
+    const shelf = (app.albums || []).find((c) => c.id === app.album);
     const where = shelf ? `“${shelf.name.split('/').pop()}”`
       : app.folder ? app.folder.split('/').pop() : 'your library';
     const ranked = state.total
       ? `${state.judged.toLocaleString()} of ${state.total.toLocaleString()} in ${where} ranked`
       : '';
     const sitting = state.rounds ? ` · ${state.rounds} round${state.rounds === 1 ? '' : 's'} this sitting` : '';
-    const label = document.querySelector('[data-refine-progress]');
+    const label = document.querySelector('[data-rank-progress]');
     if (label) label.textContent = ranked + sitting;
-    for (const button of document.querySelectorAll('[data-refine-size] button')) {
+    for (const button of document.querySelectorAll('[data-rank-size] button')) {
       button.classList.toggle('is-active', Number(button.dataset.size) === state.size);
     }
   }
@@ -388,16 +388,16 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     stage.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
     if (state.set.length < 2) {
       const empty = document.createElement('div');
-      empty.className = 'refine-empty';
+      empty.className = 'rank-empty';
       // Three honest states: still asking, truly nothing, or the scope is
       // simply spent for now.
       empty.textContent = !state.answered
         ? 'Choosing photographs…'
         : state.total === 0
-          ? 'Nothing here to refine.'
+          ? 'Nothing here to rank.'
           : state.judged >= state.total
             ? 'Everything here has been through a round. Change where you are looking, or keep going another sitting.'
-            : 'Not enough photographs to refine here yet — they join as their previews are made.';
+            : 'Not enough photographs to rank here yet — they join as their previews are made.';
       stage.replaceChildren(empty);
       renderProgress();
       return;
@@ -405,7 +405,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
     stage.replaceChildren(...state.set.map((photo, index) => {
       const card = document.createElement('button');
       card.type = 'button';
-      card.className = 'refine-card' + (index === state.selected ? ' is-selected' : '');
+      card.className = 'rank-card' + (index === state.selected ? ' is-selected' : '');
       card.dataset.index = index;
       card.dataset.turn = photo.rotate || 0;
       card.setAttribute('aria-label', `Pick ${photo.tail.split('/').pop()}`);
@@ -423,7 +423,7 @@ export function createRefineWorkflow({ product, read, update, notify, undo, onLe
   }
 
   stage.addEventListener('click', (event) => {
-    const card = event.target.closest('.refine-card');
+    const card = event.target.closest('.rank-card');
     if (card) void pick(Number(card.dataset.index));
   });
   new ResizeObserver(() => { if (isOpen()) layout(); }).observe(stage);

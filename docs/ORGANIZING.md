@@ -6,6 +6,28 @@ nouns and one law, shaped by what Google Photos, Apple Photos, Lightroom
 Classic, Capture One, Photo Mechanic, Excire, Peakto, PhotoPrism, Immich,
 Mylio, and ACDSee got right and wrong (research briefs, 2026-08-22).
 
+**Sean's 08-22 rulings, which simplified the draft (verbatim in
+MASTER_PLAN 1.17):** labels are a primitive and part of smart-album
+filtering; a label must be dynamically adjustable ("starbase" may mean
+rockets and beach construction sites once taught); labels behave like
+search terms and learn from a ✗ anywhere they appear ("search cat, 90 cats
+and 1 dog — hit no on the dog and the keyword is smarter everywhere");
+**the clustering suggestions are removed**, and **a smart album is simply
+a saved query**. Consequences worked through below:
+
+- **One formula unifies labels and smart albums**:
+  `(derived answer ∪ pinned-in) ∖ said-no`. A label's derived answer is a
+  learned concept (seed word vector + a small head fit on teachings); an
+  album's is its saved query. Pins and denials are the same membership
+  rows the sets primitive has always stored.
+- **Vocabulary is born by teaching.** A searched term is transient until
+  the first ✓/✗ lands on its results; that correction creates the label.
+  The Labels list is exactly the words you have taught.
+- **Deleted:** the 70-term palette auto-tagging, the k-means pair-name
+  groups, the proposals shelf, the Keep verb — the push side of
+  clustering. People and Sessions stay: identity and time are facts, not
+  suggestions.
+
 ## The law: predicted, then earned
 
 The ranking already runs on this law — taste predicts a score, rounds earn

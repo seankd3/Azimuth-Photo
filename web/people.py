@@ -180,19 +180,16 @@ def groups(conn) -> list[dict]:
 def name(conn, exemplar: str, called: str) -> dict:
     """The owner introduces someone: one decision on the exemplar face.
 
-    A palette word is refused — "Cats" the person would silently pool with
-    "Cats" the tag. The same *person* name on a second group is welcome: a
-    split person heals by being introduced twice, because both groups then
-    answer to the one name.
+    The same *person* name on a second group is welcome: a split person
+    heals by being introduced twice, because both groups then answer to
+    the one name.
     """
-
-    from model import palette
 
     called = str(called).strip()
     if not called:
         raise ValueError("a person needs a name")
-    if called in {name for name, _ in palette.PALETTE}:
-        raise ValueError(f"“{called}” is a tag the library already uses — a person needs their own name.")
+    if called.lower().startswith("someone"):
+        raise ValueError("that is the library's word for the unintroduced — give them their own name")
     if ":" not in str(exemplar):
         raise ValueError("that face is not one the groups know")
     decisions.decide(conn, str(exemplar), FAMILY, called)

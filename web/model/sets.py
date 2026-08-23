@@ -51,8 +51,10 @@ IN = "in:"
 # reads to answer "what is this" and a rename that could be applied halfway.
 SET = "set"
 
-COLLECTION, KEYWORD = "collection", "keyword"
-KINDS = frozenset((COLLECTION, KEYWORD))
+# The stored spelling predates the Albums rename; the decision log is
+# append-only, so the bytes keep their old word and the code speaks the new.
+ALBUM, LABEL = "collection", "keyword"
+KINDS = frozenset((ALBUM, LABEL))
 SET_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 PHOTO_HASH = re.compile(r"^[0-9a-f]{64}$")
 
@@ -78,7 +80,7 @@ def describe(conn, set_id: str) -> dict | None:
     return {"id": set_id, **said}
 
 
-def create(conn, name: str, *, kind: str = COLLECTION, criteria=None, set_id: str | None = None) -> str:
+def create(conn, name: str, *, kind: str = ALBUM, criteria=None, set_id: str | None = None) -> str:
     """Mint a set and return its id. The id never changes; the name may.
 
     With `criteria` the set is smart: its members are whatever the stored
