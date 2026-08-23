@@ -134,10 +134,19 @@ measured pair.
    1); the loupe inspector says "Edited" from the projected column. The
    full settings inspector rides the tone phase, when there is something
    to show for each key.
-3. **Tone core, measured** — WB, Exposure/Contrast/H/S/W/B, tone curve +
-   parametric, on the harvested pipeline; acceptance pairs against the
-   golden set; the PV15.4-SDR gap closed here or the miss documented in
-   numbers.
+3. **Tone core, measured** — FIRST LANDING 08-23 (`dedcb928`): the whole
+   RENDERED crs subset renders through V1's pipeline via its display base
+   (identity-exact on untouched pixels), at each surface's own size — the
+   scrub on the grid proxy, the verb's instant answer at grid size, the
+   worker's loupe at Lightroom's standard-preview 2048 (4096 belongs to
+   export). The editing workspace ships with it: D opens Light/Color/
+   Presence/B&W in the inspector's seat, drags preview as look-files
+   (data URIs died silently in the bridge), releases append decisions,
+   double-click and Reset rest sliders, the panel rides the arrows.
+   **The parity gap stands where the harness measured it (0.0445 L,
+   lighter/flatter than Adobe) and closing it is this phase's remaining
+   work — the workspace runs on today's math and inherits every
+   improvement for free.**
 
    *Probed and measured 08-23:* `features.develop.pipeline` and
    `xmp_write` import clean — the color math and the sidecar writer
@@ -155,8 +164,12 @@ measured pair.
 4. **Color** — HSL, ColorGrade, calibration, PointColors; grayscale.
 5. **Detail + lens + effects** — sharpen/NR (the V1 guided filter
    survives), defringe/CA, vignette/grain.
-6. **Write-back + round-trip proof** — edit here, read in Lightroom,
-   edit there, read here; the LRTimelapse loop closed.
+6. **Write-back + round-trip proof** — LANDED 08-23 (`dedcb928`): Save
+   settings to file merges the crs surface into the sidecar — ours
+   exactly, every other block kept element for element — atomically;
+   an unchanged file is not touched. Round-trip pinned by test (crs
+   replaced, tiff:Make survives, resets propagate). The in-Lightroom
+   half of the proof waits for a Lightroom session.
 7. **Export** — the render pipeline at FULL size to JPEG; presets later.
 
 Parked with receipts: **masks/local** (zero occurrences in the library),
