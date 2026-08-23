@@ -1321,7 +1321,11 @@ class CacheRefuses(CoreCase):
         self.assertEqual(cache.evict(self.conn, 0, (self.kind, embedding)), [("test_thumb", "/t.jpg")])
         self.assertIsNotNone(cache.get(self.conn, "h1", embedding))
 
-    def test_a_projection_failure_becomes_one_recorded_answer(self):
+    def test_a_projection_failure_never_costs_the_computed_answer(self):
+        # The projection is a derived index reindex rebuilds on every open;
+        # its failure is a moment, not a fact about the photograph. The old
+        # rule stored it as one and 27 real photos never learned their
+        # shape — a "failed" row with no value blocks the retry forever.
         photo_id = self.photo()
 
         def break_after_writing(conn, projected_id, _entry):
@@ -1337,12 +1341,12 @@ class CacheRefuses(CoreCase):
         entry = cache.get(self.conn, "h1", projected)
 
         self.assertFalse(cache.project(self.conn, "h1", photo_id, projected, entry))
-        failed = cache.get(self.conn, "h1", projected)
-        self.assertEqual(failed["state"], cache.FAILED)
-        self.assertIn("ProjectionError", failed["note"])
+        held = cache.get(self.conn, "h1", projected)
+        self.assertEqual(held["state"], cache.READY)     # the answer survives
+        self.assertEqual(held["value"], "answer")
         self.assertEqual(
             self.conn.execute("SELECT stars FROM images WHERE id = ?", (photo_id,)).fetchone()[0],
-            0,
+            0,                                            # the half-write rolled back
         )
 
 
@@ -2048,6 +2052,33 @@ class SearchNeverRefuses(CoreCase):
         without = finding.search(self.conn, "sunset")
         self.assertEqual(set(without), {agreed, word_only})
 
+    def test_a_teaching_answers_before_any_lane_runs(self):
+        # Y and N recompute the one word inside teach() itself, against the
+        # space the caller already holds — the word's view updates at the
+        # keystroke, and searching the word is smarter everywhere: what the
+        # owner said it is not never comes back.
+        import numpy as np
+
+        cat, cat_hash = self._photo("Raws/2026/cat-01.CR2")
+        twin, twin_hash = self._photo("Raws/2026/cat-02.CR2")
+        _dog, dog_hash = self._photo("Snapshots/2025/dog.jpg")
+        axis = np.eye(4, dtype=np.float32)
+        space = ([cat_hash, twin_hash, dog_hash], np.stack([axis[0], axis[0], axis[1]]))
+
+        def worn():
+            return {row["id"] for row in library_surface.photos(
+                self.conn, scope=scope.label(["cats"]))}
+
+        self.library.teach("cats", [cat], True, space=space)
+        self.assertEqual(worn(), {cat, twin})   # anchor plus its lookalike, at once
+
+        self.library.teach("cats", [twin], False, space=space)
+        self.assertEqual(worn(), {cat})         # the exclusion holds at once
+
+        found = [row["id"] for row in self.library.search("cats", space=space)["photos"]]
+        self.assertIn(cat, found)
+        self.assertNotIn(twin, found)           # denied is denied in search too
+
     def test_days_sum_to_the_grid_and_sessions_wear_names(self):
         # The chapter list is index arithmetic: same scope, same order as the
         # newest-sorted page query, undated photographs one chapter at the
@@ -2120,6 +2151,62 @@ class SearchNeverRefuses(CoreCase):
         self.assertEqual({row["id"] for row in answer}, {first, second})
         for row in answer:
             self.assertIn("tile", row)
+
+
+class ASplitPersonHealsByName(CoreCase):
+    """Two face groups introduced as the same person are one person: one
+    shelf row, all their photographs, and the newest name outvoting the
+    older ones a healed split still carries."""
+
+    def _face(self, tail, direction):
+        import base64
+        import json
+
+        import faces as facing
+        import numpy as np
+
+        photo_id = self.photo(tail)
+        digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
+        self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
+        vec = np.zeros(512, dtype=np.float16)
+        vec[direction] = 1.0
+        value = json.dumps({"n": 1, "boxes": [[0.4, 0.3, 0.2, 0.2]], "scores": [0.9],
+                            "vecs": base64.b64encode(vec.tobytes()).decode("ascii")})
+        self.conn.execute(
+            "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
+            " VALUES (?, 'faces', ?, 'ready', ?, 1)", (digest, facing.RECIPE, value))
+        return digest
+
+    def test_naming_two_groups_alike_folds_them_and_rename_wins(self):
+        import people as persons
+
+        for i in range(3):
+            self._face(f"Raws/left-{i}.CR2", 0)
+        for i in range(3):
+            self._face(f"Raws/right-{i}.CR2", 7)
+        self.conn.commit()
+
+        persons.repeople(self.conn)
+        held = {g["name"]: g for g in persons.groups(self.conn)}
+        self.assertEqual(set(held), {"Someone 1", "Someone 2"})
+
+        persons.name(self.conn, held["Someone 1"]["exemplar"], "Eris")
+        persons.repeople(self.conn)
+        held = {g["name"]: g for g in persons.groups(self.conn)}
+        self.assertEqual(set(held), {"Eris", "Someone 1"})
+
+        # The heal: the other half is introduced under the same name.
+        persons.name(self.conn, held["Someone 1"]["exemplar"], "Eris")
+        persons.repeople(self.conn)
+        whole = persons.groups(self.conn)
+        self.assertEqual([(g["name"], g["photos"]) for g in whole], [("Eris", 6)])
+
+        # Renaming the healed person renames all of it — the new decision
+        # outvotes both older names.
+        persons.name(self.conn, whole[0]["exemplar"], "Iris")
+        persons.repeople(self.conn)
+        self.assertEqual([(g["name"], g["photos"]) for g in persons.groups(self.conn)],
+                         [("Iris", 6)])
 
 
 if __name__ == "__main__":

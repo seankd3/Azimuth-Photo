@@ -235,8 +235,14 @@ class Desktop:
         return self._run(lambda library: library.labels())
 
     def teach(self, word: str, photo_ids: list[int], yes: bool) -> dict:
-        said = self._run(lambda library: library.teach(str(word), photo_ids, bool(yes)))
-        # The taught word rewrites on the rank lane.
+        if self._product is None:
+            raise RuntimeError("Choose where Azimuth should live first.")
+        # The one word recomputes against the memoized space before this
+        # returns, so the window's next read already holds the teaching;
+        # the rank lane reconciles the whole answer behind it.
+        space = self._product.spaced()
+        said = self._run(lambda library: library.teach(str(word), photo_ids, bool(yes), space=space))
+        self._product.shaped += 1
         self._product.rank_soon()
         return said
 

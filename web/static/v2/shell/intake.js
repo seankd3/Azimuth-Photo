@@ -19,6 +19,12 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   const startButton = document.querySelector('[data-action="start-import"]');
   const stopButton = document.querySelector('[data-action="stop-import"]');
   const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false, rolls: {} };
+  // The grid's own selection grammar, in the stage: click, Ctrl adds,
+  // Shift ranges, and a checkbox ticked on a selection answers for all of
+  // it — Lightroom's import hands, Azimuth's one grammar.
+  let order = [];              // candidate keys in rendered (day-grouped) order
+  let selected = new Set();
+  let anchor = null;
   let poll = null;
 
   const thumbs = new IntersectionObserver((entries) => {
@@ -101,39 +107,96 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     }));
   }
 
+  const dayOf = (candidate) => (candidate.taken || '').slice(0, 10);
+
+  function dayTitle(day) {
+    if (!day) return 'Undated';
+    const when = new Date(`${day}T12:00:00`);
+    if (Number.isNaN(when.getTime())) return day;
+    return when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
   // The stage is built once per staging; a checkbox tick or a roll name only
   // re-answers the summary side. Rebuilding the cells threw away every
-  // thumbnail and the focus of the field being typed in.
+  // thumbnail and the focus of the field being typed in. Photographs sit
+  // under their day, newest day first — the day's own checkbox is how you
+  // import just the dates you came for.
   function renderStage() {
-    const cells = state.candidates.map((candidate) => {
-      const cell = document.createElement('label');
-      cell.className = 'stage-cell' + (candidate.suspect ? ' is-suspect' : '') + (state.checked.has(candidate.key) ? ' is-checked' : '');
+    const byDay = new Map();
+    for (const candidate of state.candidates) {
+      const day = dayOf(candidate);
+      if (!byDay.has(day)) byDay.set(day, []);
+      byDay.get(day).push(candidate);
+    }
+    const days = [...byDay.keys()].sort((a, b) => (a === '') - (b === '') || b.localeCompare(a));
+    order = [];
+    const rows = [];
+    for (const day of days) {
+      const members = byDay.get(day);
+      const head = document.createElement('label');
+      head.className = 'stage-day';
       const box = document.createElement('input');
       box.type = 'checkbox';
-      box.checked = state.checked.has(candidate.key);
-      box.dataset.key = candidate.key;
-      const image = document.createElement('img');
-      image.alt = '';
-      image.dataset.key = candidate.key;
-      image.decoding = 'async';
-      const name = document.createElement('span');
-      name.className = 'stage-name';
-      name.textContent = candidate.name;
-      const when = document.createElement('span');
-      when.className = 'stage-when';
-      when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · already imported?' : '');
-      cell.append(box, image, name, when);
-      return cell;
-    });
-    stage.replaceChildren(...cells);
-    for (const image of stage.querySelectorAll('img')) thumbs.observe(image);
+      box.dataset.day = day;
+      const title = document.createElement('span');
+      title.textContent = dayTitle(day);
+      const count = document.createElement('span');
+      count.className = 'stage-day-count';
+      count.textContent = members.length.toLocaleString();
+      head.append(box, title, count);
+      rows.push(head);
+      for (const candidate of members) {
+        order.push(candidate.key);
+        const cell = document.createElement('label');
+        cell.className = 'stage-cell' + (candidate.suspect ? ' is-suspect' : '') + (state.checked.has(candidate.key) ? ' is-checked' : '');
+        cell.dataset.key = candidate.key;
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = state.checked.has(candidate.key);
+        box.dataset.key = candidate.key;
+        const image = document.createElement('img');
+        image.alt = '';
+        image.dataset.key = candidate.key;
+        image.decoding = 'async';
+        const name = document.createElement('span');
+        name.className = 'stage-name';
+        name.textContent = candidate.name;
+        const when = document.createElement('span');
+        when.className = 'stage-when';
+        when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · already imported?' : '');
+        cell.append(box, image, name, when);
+        rows.push(cell);
+      }
+    }
+    stage.replaceChildren(...rows);
+    for (const image of stage.querySelectorAll('.stage-cell img')) thumbs.observe(image);
+    selected = new Set();
+    anchor = null;
+    syncChecks();
   }
 
   function syncChecks() {
-    for (const box of stage.querySelectorAll('input[type="checkbox"]')) {
+    for (const box of stage.querySelectorAll('.stage-cell input[type="checkbox"]')) {
       const checked = state.checked.has(box.dataset.key);
       box.checked = checked;
       box.closest('.stage-cell').classList.toggle('is-checked', checked);
+    }
+    for (const cell of stage.querySelectorAll('.stage-cell')) {
+      cell.classList.toggle('is-selected', selected.has(cell.dataset.key));
+    }
+    // A day's own box says what its photographs say: all, none, or some.
+    const byDay = new Map();
+    for (const candidate of state.candidates) {
+      const day = dayOf(candidate);
+      if (!byDay.has(day)) byDay.set(day, { held: 0, of: 0 });
+      const tally = byDay.get(day);
+      tally.of += 1;
+      if (state.checked.has(candidate.key)) tally.held += 1;
+    }
+    for (const box of stage.querySelectorAll('.stage-day input[type="checkbox"]')) {
+      const tally = byDay.get(box.dataset.day) || { held: 0, of: 0 };
+      box.checked = tally.held > 0 && tally.held === tally.of;
+      box.indeterminate = tally.held > 0 && tally.held < tally.of;
     }
   }
 
@@ -219,8 +282,12 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     if (status.skipped) parts.push(`${status.skipped} already in the library`);
     if (status.failed) parts.push(`${status.failed} could not be imported`);
     const cleared = state.isCard && clearBox.checked && (status.cleared || 0) >= total && status.phase === 'done';
-    progress.textContent = (status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
+    const said = (status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
+    progress.textContent = said;
+    // The dialog may have been put away while the work ran; the outcome
+    // still reaches the person.
+    if (!dialog.open) notify(said);
     await afterImport();
   }
 
@@ -230,24 +297,65 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
   }
 
   function close() {
+    // Closing is always allowed. It puts the conversation away, never the
+    // work: a running import continues, and its outcome arrives as a toast.
+    if (dialog.open) dialog.close();
     if (state.running) {
-      // The key is not broken, the import is running — say so where the eyes are.
-      progress.textContent = 'Finish or stop the import first.';
+      notify('Importing in the background — the library follows as photographs land.');
       return;
     }
-    if (dialog.open) dialog.close();
     stage.replaceChildren();
     state.candidates = [];
     state.checked = new Set();
+    selected = new Set();
+    anchor = null;
   }
 
   stage.addEventListener('change', (event) => {
+    const day = event.target.dataset.day;
+    if (day !== undefined) {
+      // The day answers for its photographs — the whole date in or out.
+      for (const candidate of state.candidates) {
+        if (dayOf(candidate) !== day) continue;
+        if (event.target.checked) state.checked.add(candidate.key);
+        else state.checked.delete(candidate.key);
+      }
+      syncChecks();
+      render();
+      return;
+    }
     const key = event.target.dataset.key;
     if (!key) return;
-    if (event.target.checked) state.checked.add(key);
-    else state.checked.delete(key);
-    event.target.closest('.stage-cell').classList.toggle('is-checked', event.target.checked);
+    // A box ticked on a selection answers for all of it, as Lightroom's
+    // import does; outside one it answers for its own photograph.
+    const keys = selected.has(key) && selected.size > 1 ? [...selected] : [key];
+    for (const held of keys) {
+      if (event.target.checked) state.checked.add(held);
+      else state.checked.delete(held);
+    }
+    syncChecks();
     render();
+  });
+  stage.addEventListener('click', (event) => {
+    if (event.target.matches('input[type="checkbox"]')) return;
+    const cell = event.target.closest('.stage-cell');
+    if (!cell) return;
+    // The grid's grammar: click selects, Ctrl adds, Shift ranges.
+    event.preventDefault();
+    const key = cell.dataset.key;
+    const index = order.indexOf(key);
+    if (event.shiftKey && anchor !== null) {
+      const [from, to] = [Math.min(anchor, index), Math.max(anchor, index)];
+      selected = new Set(order.slice(from, to + 1));
+    } else if (event.ctrlKey || event.metaKey) {
+      if (selected.has(key)) selected.delete(key);
+      else selected.add(key);
+      anchor = index;
+    } else {
+      selected = new Set([key]);
+      anchor = index;
+    }
+    syncChecks();
   });
   document.querySelector('[data-roll-list]').addEventListener('input', (event) => {
     const group = event.target.dataset.group;
@@ -264,10 +372,7 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     renderRolls();
     render();
   });
-  dialog.addEventListener('cancel', (event) => {
-    if (state.running) event.preventDefault();
-  });
-  dialog.addEventListener('close', () => { if (!state.running) close(); });
+  dialog.addEventListener('close', () => close());
 
   return Object.freeze({
     open,
@@ -277,6 +382,17 @@ export function createIntakeWorkflow({ product, notify, afterImport }) {
     checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); },
     checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); syncChecks(); render(); },
     checkNone: () => { state.checked = new Set(); syncChecks(); render(); },
+    // Space over a selection: in or out together, the grid's toggle.
+    toggleSelected: () => {
+      if (!selected.size) return;
+      const everyIn = [...selected].every((key) => state.checked.has(key));
+      for (const key of selected) {
+        if (everyIn) state.checked.delete(key);
+        else state.checked.add(key);
+      }
+      syncChecks();
+      render();
+    },
     isOpen: () => dialog.open,
     finish: () => { if (startButton.textContent === 'Done') close(); else start(); },
   });

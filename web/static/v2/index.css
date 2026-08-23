@@ -437,7 +437,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
   transition: border-color .08s ease, transform .08s ease;
 }
-.rank-card img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; }
+/* contain, not cover: the card is already cut to the photograph's shape, so
+   nothing letterboxes when the shape is known — and a photograph whose
+   dimensions are still unread must letterbox rather than crop, because a
+   ranking judged on a crop is written into durable data. */
+.rank-card img { display: block; position: relative; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .rank-card kbd {
   position: absolute;
   left: 8px;
@@ -763,7 +767,25 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   cursor: pointer;
 }
 .stage-cell.is-checked { border-color: var(--accent); }
+.stage-cell.is-selected { outline: 2px solid var(--focus); outline-offset: 1px; }
 .stage-cell.is-suspect { opacity: .45; }
+/* A day owns its row: the chapter line from the grid, wearing the checkbox
+   that imports just that date. */
+.stage-day {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--text-3);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.stage-day:first-child { margin-top: 0; }
+.stage-day input { accent-color: var(--accent); }
+.stage-day-count { color: var(--text-3); opacity: .7; }
 .stage-cell input { position: absolute; top: 10px; left: 10px; z-index: 1; accent-color: var(--accent); }
 .stage-cell img { display: block; width: 100%; aspect-ratio: 3 / 2; object-fit: cover; background: #000; border-radius: 4px; }
 .stage-name { font-size: 12px; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

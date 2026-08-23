@@ -125,47 +125,115 @@ def _fit(matrix, seed, ys, ns):
     return w
 
 
-def relabel(conn, subjects, matrix) -> int:
-    """Every taught word's answer, rewritten whole. A photograph wears a
-    word when it was anchored, or when it scores at least as high as the
-    word's weakest anchor — and never when it was excluded."""
+def denied(conn, word: str) -> list[str]:
+    """The identities the owner has said are NOT this word — empty for a
+    word never taught. Search reads this so a taught exclusion holds
+    anywhere the word is used."""
+
+    held = _find(conn, word)
+    if held is None:
+        return []
+    return _teachings(conn, held)[1]
+
+
+def _answer(conn, entry, subjects, matrix, where) -> tuple[str, set]:
+    """One word's wearers: anchors always, scorers past the weakest anchor,
+    the denied never."""
 
     import numpy as np
 
+    yes, no = _teachings(conn, entry["id"])
+    word = entry["name"]
+    worn = set(yes)
+    if not len(subjects):
+        return word, worn
+    seed_row = conn.execute(
+        "SELECT value FROM cache WHERE kind = ? AND hash = ? AND state = 'ready'",
+        (SEED, word)).fetchone()
+    seed = np.frombuffer(seed_row["value"], dtype=np.float32).copy() if seed_row else None
+    ys = [where[subject] for subject in yes if subject in where]
+    ns = [where[subject] for subject in no if subject in where]
+    head = _fit(matrix, seed, ys, ns)
+    if head is None or not ys:
+        return word, worn
+    scores = matrix @ head
+    floor = min(float(scores[i]) for i in ys) - 1e-6
+    # The teachings are the head's own test: if anything the owner denied
+    # still scores past the weakest anchor, the head has not learned the
+    # word yet, and extending it would flood the label — a collapsed head
+    # scores everything alike. Anchors alone answer until it separates.
+    if any(float(scores[i]) >= floor for i in ns):
+        return word, worn
+    shut = set(no)
+    for i in np.flatnonzero(scores >= floor):
+        subject = subjects[int(i)]
+        if subject not in shut:
+            worn.add(subject)
+    return word, worn
+
+
+def relabel(conn, subjects, matrix, words=None) -> int:
+    """A taught word's answer, rewritten. A photograph wears a word when it
+    was anchored, or when it scores at least as high as the word's weakest
+    anchor — and never when it was excluded.
+
+    With no `words` the whole answer rewrites — the rank lane's reconciling
+    pass. With `words`, only those words' rows change: the interactive path
+    a Y or N takes, so the view holding the word answers before the key is
+    off its way down."""
+
     vocab = vocabulary(conn)
+    where = {subject: i for i, subject in enumerate(subjects)}
+
+    if words is not None:
+        wanted = {str(w).strip().lower() for w in words}
+        changed = 0
+        for entry in vocab:
+            if entry["name"].lower() not in wanted:
+                continue
+            word, worn = _answer(conn, entry, subjects, matrix, where)
+            had = {str(row["hash"]) for row in conn.execute(
+                "SELECT c.hash FROM cache c, json_each(c.value) w"
+                " WHERE c.kind = ? AND w.value = ?", (KIND, word))}
+            touched = sorted((had - worn) | (worn - had))
+            for start in range(0, len(touched), 20_000):
+                batch = touched[start:start + 20_000]
+                marks = ",".join("?" * len(batch))
+                held = {str(row["hash"]): set(json.loads(row["value"])) for row in conn.execute(
+                    f"SELECT hash, value FROM cache WHERE kind = ? AND hash IN ({marks})",
+                    (KIND, *batch))}
+                writes, drops = [], []
+                for subject in batch:
+                    said = held.get(subject, set())
+                    said.discard(word)
+                    if subject in worn:
+                        said.add(word)
+                    if said:
+                        writes.append((subject, KIND, json.dumps(sorted(said))))
+                    else:
+                        drops.append((subject, KIND))
+                conn.executemany(
+                    "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
+                    " VALUES (?, ?, '', 'ready', ?, unixepoch())", writes)
+                conn.executemany(
+                    "DELETE FROM cache WHERE hash = ? AND kind = ?", drops)
+            changed += len(touched)
+        conn.commit()
+        return changed
+
     conn.execute("DELETE FROM cache WHERE kind = ?", (KIND,))
     if not vocab:
         conn.commit()
         return 0
-    where = {subject: i for i, subject in enumerate(subjects)}
-    worn: dict[str, set] = {}
+    worn_all: dict[str, set] = {}
     for entry in vocab:
-        yes, no = _teachings(conn, entry["id"])
-        word = entry["name"]
-        for subject in yes:
-            worn.setdefault(subject, set()).add(word)
-        if not len(subjects):
-            continue
-        seed_row = conn.execute(
-            "SELECT value FROM cache WHERE kind = ? AND hash = ? AND state = 'ready'",
-            (SEED, word)).fetchone()
-        seed = np.frombuffer(seed_row["value"], dtype=np.float32).copy() if seed_row else None
-        ys = [where[subject] for subject in yes if subject in where]
-        ns = [where[subject] for subject in no if subject in where]
-        head = _fit(matrix, seed, ys, ns)
-        if head is None or not ys:
-            continue
-        scores = matrix @ head
-        floor = min(float(scores[i]) for i in ys) - 1e-6
-        denied = set(no)
-        for i in np.flatnonzero(scores >= floor):
-            subject = subjects[int(i)]
-            if subject not in denied:
-                worn.setdefault(subject, set()).add(word)
+        word, worn = _answer(conn, entry, subjects, matrix, where)
+        for subject in worn:
+            worn_all.setdefault(subject, set()).add(word)
     conn.executemany(
         "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
         " VALUES (?, ?, '', 'ready', ?, unixepoch())",
-        [(subject, KIND, json.dumps(sorted(words))) for subject, words in worn.items()],
+        [(subject, KIND, json.dumps(sorted(worn))) for subject, worn in worn_all.items()],
     )
     conn.commit()
-    return len(worn)
+    return len(worn_all)

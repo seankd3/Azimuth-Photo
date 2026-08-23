@@ -143,9 +143,12 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
-  cell.addEventListener('click', (event) => actions.select(index, {
-    shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey,
-  }));
+  cell.addEventListener('click', (event) => {
+    // Clicking a photograph makes the grid the keyboard's surface — Y/N
+    // and the cull keys must land here even if a search box held focus.
+    cell.focus();
+    actions.select(index, { shift: event.shiftKey, toggle: event.ctrlKey || event.metaKey });
+  });
   cell.draggable = true;
   cell.addEventListener('dragstart', (event) => actions.drag?.(index, event));
   cell.addEventListener('dblclick', () => actions.open(index));

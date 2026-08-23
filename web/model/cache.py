@@ -24,10 +24,13 @@ worker that rediscovers the same unreadable file every pass, forever.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from collections.abc import Iterable
 from typing import Any, Callable
+
+log = logging.getLogger(__name__)
 
 READY = "ready"
 FAILED = "failed"
@@ -199,18 +202,28 @@ def project(
     entry: dict,
     recipe: dict[str, Any] | None = None,
 ) -> bool:
-    """Apply a ready answer to its query index, recording a refusal once."""
+    """Apply a ready answer to its query index.
+
+    A failure here never touches the cache row: the answer was computed and
+    is good, and the projection is a derived index that `reindex` rebuilds
+    on every open. Storing the *moment's* failure — a locked database under
+    write contention — as the *photograph's* answer poisoned 27 real rows
+    with a permanent "failed" and no value, and the grid assumed their
+    shapes forever. An answer that is actually bad is caught where the
+    value is read (`decoded` raising discards the row); a moment that is
+    merely unlucky is simply retried by the next reindex.
+    """
 
     if kind.project is None:
         return True
     conn.execute("SAVEPOINT cache_projection")
     try:
         kind.project(conn, int(photo_id), entry)
-    except Exception as error:  # noqa: BLE001 - projection failure is an answer
+    except Exception as error:  # noqa: BLE001
         conn.execute("ROLLBACK TO cache_projection")
         conn.execute("RELEASE cache_projection")
-        failed(conn, hash, kind, f"ProjectionError: {type(error).__name__}: {error}", recipe)
         conn.commit()
+        log.warning("cache=project kind=%s hash=%s deferred: %s", kind.name, hash, error)
         return False
     conn.execute("RELEASE cache_projection")
     conn.commit()

@@ -77,19 +77,22 @@ def _cluster(owners, scores, matrix):
     return members
 
 
-def _names(conn) -> dict[str, str]:
-    """Every exemplar the owner has named: `hash:index` -> name, latest
-    decision winning, an empty value meaning the name was taken back."""
+def _names(conn) -> dict[str, tuple[str, int]]:
+    """Every exemplar the owner has named: `hash:index` -> (name, when) with
+    the latest decision winning per face, an empty value meaning the name
+    was taken back. `when` orders faces against each other, so a group
+    holding several named faces — a healed split — answers to the newest
+    word said about any of them."""
 
-    out: dict[str, str] = {}
-    for row in conn.execute(
+    out: dict[str, tuple[str, int]] = {}
+    for when, row in enumerate(conn.execute(
         f"SELECT subject, value FROM decisions WHERE family = ? "
         f"ORDER BY {decisions.AUTHORITY_SQL} ASC, at ASC, id ASC",
         (FAMILY,),
-    ):
+    )):
         said = decisions.loaded(row)
-        out[str(row["subject"])] = str(said or "")
-    return {subject: name for subject, name in out.items() if name}
+        out[str(row["subject"])] = (str(said or ""), when)
+    return {subject: held for subject, held in out.items() if held[0]}
 
 
 def repeople(conn) -> int:
@@ -105,13 +108,33 @@ def repeople(conn) -> int:
     members = _cluster(owners, scores, matrix)
     named = _names(conn)
 
+    # A split person heals by name: two groups introduced as the same
+    # person become one group before anything is counted or shown, so the
+    # shelf holds one row with all of them and one better avatar.
+    called: dict[int, str | None] = {}
+    for at, group in enumerate(members):
+        said = [named[key] for face in group
+                if (key := f"{owners[face][0]}:{owners[face][1]}") in named]
+        # The newest word about any of the group's faces: a rename lands on
+        # one exemplar but must outvote the older names a healed split
+        # still carries.
+        called[at] = max(said, key=lambda held: held[1])[0] if said else None
+    folded: dict[str, int] = {}
+    merged: list[tuple[list[int], str | None]] = []
+    for at, group in enumerate(members):
+        who = called[at]
+        if who is not None and who in folded:
+            merged[folded[who]][0].extend(group)
+            continue
+        if who is not None:
+            folded[who] = len(merged)
+        merged.append((list(group), who))
+
     worn: dict[str, set] = {}
     summary = []
     someone = 0
-    for group in sorted(members, key=len, reverse=True):
+    for group, name in sorted(merged, key=lambda pair: len(pair[0]), reverse=True):
         photos = sorted({owners[face][0] for face in group})
-        name = next((named[f"{owners[face][0]}:{owners[face][1]}"] for face in group
-                     if f"{owners[face][0]}:{owners[face][1]}" in named), None)
         settled = name is not None
         if not settled and len(photos) >= FLOOR:
             # An interim handle, so the person is browsable before they are
@@ -182,7 +205,9 @@ def name(conn, exemplar: str, called: str) -> dict:
 
     The same *person* name on a second group is welcome: a split person
     heals by being introduced twice, because both groups then answer to
-    the one name.
+    the one name. Renaming goes the other way whole: every face that
+    answered to the old name takes the new one, so a healed person cannot
+    be split back apart by being renamed on one half.
     """
 
     called = str(called).strip()
@@ -192,6 +217,14 @@ def name(conn, exemplar: str, called: str) -> dict:
         raise ValueError("that is the library's word for the unintroduced — give them their own name")
     if ":" not in str(exemplar):
         raise ValueError("that face is not one the groups know")
+    former = next((str(g["name"]) for g in groups(conn)
+                   if g.get("settled") and g["exemplar"] == str(exemplar)), None)
+    if former is None:
+        former = _names(conn).get(str(exemplar), ("", 0))[0] or None
     decisions.decide(conn, str(exemplar), FAMILY, called)
+    if former and former != called:
+        for subject, (worn, _) in _names(conn).items():
+            if worn == former and subject != str(exemplar):
+                decisions.decide(conn, subject, FAMILY, called)
     conn.commit()
     return {"named": called}

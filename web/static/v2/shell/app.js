@@ -192,20 +192,19 @@ function teachable() {
   return null;
 }
 
-let teachTimer = null;
 async function teach(word, yes) {
   const ids = selection();
   if (!ids.length) return;
   try {
+    // teach() returns after the word's answer has recomputed, so the
+    // refresh right behind it is authoritative: an excluded photograph
+    // leaves the word's view as the key lands, not on the lane's rhythm.
     await product.teach(word, ids, yes);
     notify(yes
       ? (ids.length === 1 ? `Anchored to “${word}”.` : `${ids.length} anchored to “${word}”.`)
       : (ids.length === 1 ? `Not “${word}” — learning.` : `${ids.length} excluded from “${word}” — learning.`));
-    clearTimeout(teachTimer);
-    teachTimer = setTimeout(() => {
-      void labelsPanel.refresh();
-      if (teachable() === word) void refreshInPlace();
-    }, 2500);
+    void labelsPanel.refresh();
+    await refreshInPlace();
   } catch (error) {
     notify(error.message);
   }
@@ -1206,6 +1205,7 @@ document.addEventListener('click', (event) => {
   if (size) rankWorkflow.resize(Number(size));
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
+  if (action === 'turn-right') cullWorkflow.apply(event.shiftKey ? 'turnLeft' : 'turnRight');
   if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
   if (action === 'undo-toast') undo.run();
@@ -1223,6 +1223,10 @@ document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') intakeWorkflow.close();
     if (event.key === 'Enter' && !isTyping) {
       intakeWorkflow.finish();
+      event.preventDefault();
+    }
+    if (event.key === ' ' && !isTyping) {
+      intakeWorkflow.toggleSelected();
       event.preventDefault();
     }
     return;

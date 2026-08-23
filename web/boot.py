@@ -49,6 +49,13 @@ class Library:
         self.looking_at_people = faces.kind(self.tiles)
         self.conn = model.connect(self.catalog_path)
         try:
+            # Residue of the retired rule that stored a projection failure as
+            # the photograph's answer: "failed" rows with no value, poisoned
+            # by a moment's lock contention, which stopped 27 real photos
+            # from ever learning their shape. Dropping them re-owes the work.
+            self.conn.execute(
+                "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
+                " AND note LIKE 'ProjectionError:%'")
             embedded_metadata.reindex(self.conn)
         except Exception:
             self.conn.close()
@@ -234,13 +241,18 @@ class Library:
         """
 
         self._open()
-        omit: frozenset = frozenset()
+        omit: set = set()
         if like:
             held = self._identities(like)
             query_vector = self._centre(held, space)
-            omit = frozenset(held)
+            omit = set(held)
+        # A taught word is smarter wherever it is used: searching it never
+        # answers with what the owner said it is not.
+        import labels as taught
+
+        omit |= set(taught.denied(self.conn, query))
         ranked = finding.search(self.conn, query, space=space, query_vector=query_vector,
-                                scope=self.viewing(view), omit=omit)
+                                scope=self.viewing(view), omit=frozenset(omit))
         page = ranked[int(offset):int(offset) + max(1, int(limit))]
         rows = {row["id"]: row for row in queries.photos(
             self.conn, scope=these(page), sort="newest", limit=max(1, len(page)),
@@ -593,14 +605,22 @@ class Library:
         out.sort(key=lambda entry: entry["count"], reverse=True)
         return out
 
-    def teach(self, word: str, photo_ids, yes: bool) -> dict:
+    def teach(self, word: str, photo_ids, yes: bool, space=None) -> dict:
         """One answer about one word: these photographs are (Y) or are not
-        (N) what it means. The first answer creates the word."""
+        (N) what it means. The first answer creates the word.
+
+        The answer recomputes before this returns — the one word's rows
+        rewrite against the space the caller already holds — so a view
+        filtered to the word can re-ask immediately and see the teaching
+        held. The rank lane's whole pass still reconciles behind it."""
 
         import labels as taught
 
         self._open()
-        return taught.teach(self.conn, word, self._identities(photo_ids), bool(yes))
+        said = taught.teach(self.conn, word, self._identities(photo_ids), bool(yes))
+        subjects, matrix = space if space is not None else ((), None)
+        taught.relabel(self.conn, subjects, matrix, words=[said["word"]])
+        return said
 
     def name_person(self, exemplar: str, called: str) -> dict:
         """Introduce someone: the name lands on the exemplar face and the
@@ -875,10 +895,8 @@ class OwnedLibrary:
 
         import embed
 
-        space = None
-        if self._space is not None:
-            space = (self._space[1], self._space[2])
-        else:
+        space = self.spaced()
+        if space is None:
             self.rank_soon()
         query_vector = None
         if not like:
@@ -893,6 +911,14 @@ class OwnedLibrary:
             query, limit=int(limit), offset=int(offset), space=space,
             query_vector=query_vector, view=view, like=like,
         ))
+
+    def spaced(self):
+        """The memoized space as (subjects, matrix), or None before the
+        first rank pass has read it."""
+
+        if self._space is None:
+            return None
+        return (self._space[1], self._space[2])
 
     def rank_soon(self) -> None:
         """Recompute the ranking behind the sort index, off the interactive
