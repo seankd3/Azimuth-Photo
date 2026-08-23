@@ -31,7 +31,14 @@ def bundled_icon() -> Path:
 
 def wear_the_mark(window) -> None:
     """The compass on the title bar and the taskbar. Python windows otherwise
-    wear the interpreter's icon, and the taskbar groups them under python."""
+    wear the interpreter's icon, and the taskbar groups them under python.
+
+    Win32 messages only: the shown event fires off the UI thread, and
+    WinForms is thread-affine — assigning `native.Icon` from here corrupted
+    window activation (the app stopped coming to the foreground). SendMessage
+    marshals to the window's own thread by design, so WM_SETICON is the safe
+    spelling of the same wish.
+    """
 
     try:
         import ctypes
@@ -45,9 +52,17 @@ def wear_the_mark(window) -> None:
 
     def dress():
         try:
-            from System.Drawing import Icon  # pywebview's WinForms runtime
+            import ctypes
 
-            window.native.Icon = Icon(str(icon))
+            user32 = ctypes.windll.user32
+            hwnd = user32.FindWindowW(None, "Azimuth Photo")
+            if not hwnd:
+                return
+            IMAGE_ICON, LR_LOADFROMFILE, WM_SETICON = 1, 0x0010, 0x0080
+            for which, size in ((0, 16), (1, 32)):   # ICON_SMALL, ICON_BIG
+                handle = user32.LoadImageW(None, str(icon), IMAGE_ICON, size, size, LR_LOADFROMFILE)
+                if handle:
+                    user32.SendMessageW(hwnd, WM_SETICON, which, handle)
         except Exception:
             pass
 

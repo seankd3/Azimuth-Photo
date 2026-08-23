@@ -153,17 +153,27 @@ def recluster(conn, subjects, matrix, catalog_path) -> int:
     return len(rows)
 
 
-def proposals(conn, limit: int = 12) -> list[dict]:
-    """The clusters worth offering: terms with enough members, largest first,
-    excluding any term a kept collection already wears."""
+def kept(conn) -> set:
+    """Every name a kept collection already answers for."""
 
     from model import sets
 
-    kept = set()
+    out = set()
     for entry in sets.all(conn, kind=sets.COLLECTION):
         for chip in entry.get("criteria") or []:
             if chip.get("is") == "alike":
-                kept.update(chip.get("values") or [])
+                out.update(chip.get("values") or [])
+    return out
+
+
+def proposals(conn, limit: int = 12) -> list[dict]:
+    """The palette and space clusters worth offering: terms with enough
+    members, largest first, excluding any name a kept collection already
+    wears. People are deliberately not floored here — a person matters at a
+    size that does not grow with the library — so their entries ride beside
+    these from their own summary."""
+
+    taken = kept(conn)
     # Assignments are identity-keyed and outlive the photographs on purpose
     # (a re-imported file finds its names waiting); a proposal only ever
     # counts what is actually in the library today.
@@ -172,7 +182,7 @@ def proposals(conn, limit: int = 12) -> list[dict]:
     counted = conn.execute(
         "SELECT j.value AS term, COUNT(DISTINCT c.hash) AS photos"
         " FROM cache c, json_each(CAST(c.value AS TEXT)) j"
-        " WHERE c.kind IN (?, 'people') AND c.state = 'ready'"
+        " WHERE c.kind = ? AND c.state = 'ready'"
         "   AND c.hash IN (SELECT i.content_hash FROM images i"
         f"                 WHERE {queries.IN_LIBRARY})"
         " GROUP BY term ORDER BY photos DESC",
@@ -189,7 +199,7 @@ def proposals(conn, limit: int = 12) -> list[dict]:
     floor = max(4, embedded // 200)
     out = []
     for row in counted:
-        if row["term"] in kept or row["photos"] < floor:
+        if row["term"] in taken or row["photos"] < floor:
             continue
         out.append({"term": row["term"], "count": row["photos"]})
         if len(out) >= limit:

@@ -107,10 +107,18 @@ def repeople(conn) -> int:
 
     worn: dict[str, set] = {}
     summary = []
+    someone = 0
     for group in sorted(members, key=len, reverse=True):
         photos = sorted({owners[face][0] for face in group})
         name = next((named[f"{owners[face][0]}:{owners[face][1]}"] for face in group
                      if f"{owners[face][0]}:{owners[face][1]}" in named), None)
+        settled = name is not None
+        if not settled and len(photos) >= FLOOR:
+            # An interim handle, so the person is browsable before they are
+            # introduced — seeing their photographs is how you know who they
+            # are. It renumbers when the groups rewrite; naming settles it.
+            someone += 1
+            name = f"Someone {someone}"
         if name:
             for photo in photos:
                 worn.setdefault(photo, set()).add(name)
@@ -139,7 +147,7 @@ def repeople(conn) -> int:
             sample.append({"hash": owners[face][0], "box": crops[face]})
             if len(sample) == 3:
                 break
-        summary.append({"name": name, "exemplar": exemplar,
+        summary.append({"name": name, "settled": settled, "exemplar": exemplar,
                         "photos": len(photos), "faces": len(group), "sample": sample})
 
     conn.executemany(

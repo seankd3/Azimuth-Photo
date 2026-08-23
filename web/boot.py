@@ -499,9 +499,11 @@ class Library:
 
     def clusters(self) -> list[dict]:
         """The clusters proposing themselves right now. Terms carry their
-        three best-ranked tiles; people — named or waiting as "Someone" —
+        three best-ranked tiles; people — introduced or still a Someone —
         carry their own faces, cropped from the same tiles by the boxes the
-        worker already found."""
+        worker already found. Every entry is browsable: even a Someone wears
+        an interim tag, because seeing their photographs is how you decide
+        who they are."""
 
         import people as persons
         import clusters as proposing
@@ -509,21 +511,20 @@ class Library:
 
         self._open()
         out = proposing.proposals(self.conn)
-        known = {group["name"]: group for group in persons.groups(self.conn) if group.get("name")}
         for entry in out:
-            person = known.get(entry["term"])
-            if person:
-                entry["people"] = True
-                entry["samples"] = self._face_samples(person["sample"])
-            else:
-                entry["samples"] = self._sample_tiles(alike([entry["term"]]))
+            entry["samples"] = self._sample_tiles(alike([entry["term"]]))
+        # People beside the labels, from their own summary and their own
+        # floor — a person matters at a size that does not grow with the
+        # library. Every one is browsable by their tag; the unintroduced
+        # carry the exemplar face a Name decision would land on.
         for group in persons.groups(self.conn):
-            if group.get("name"):
-                continue
-            out.append({
-                "term": "Someone", "person": group["exemplar"], "people": True,
-                "count": group["photos"], "samples": self._face_samples(group["sample"]),
-            })
+            entry = {
+                "term": group["name"], "count": group["photos"], "people": True,
+                "samples": self._face_samples(group["sample"]),
+            }
+            if not group.get("settled"):
+                entry["person"] = group["exemplar"]
+            out.insert(0, entry)
         return out
 
     def name_person(self, exemplar: str, called: str) -> dict:
