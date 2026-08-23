@@ -248,6 +248,20 @@ class Library:
         )} if page else {}
         return {"total": len(ranked), "photos": [rows[i] for i in page if i in rows]}
 
+    def days(self, view: dict | None = None) -> list[dict]:
+        """The grid's chapters: every day in the view with its count, in
+        exactly the newest-sort order, so the window can lay headers by a
+        running sum."""
+
+        self._open()
+        return queries.days(self.conn, self.viewing(view))
+
+    def sessions(self) -> list[dict]:
+        """The latest shoots, named — the search drop's session cards."""
+
+        self._open()
+        return queries.sessions(self.conn)
+
     # ---- albums ----
 
     QUICK = "quick"

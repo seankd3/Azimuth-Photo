@@ -580,6 +580,15 @@ async function loadView() {
     const total = view === 'trash' ? trashCount : found ? page.total : size;
     pages.seed(requestGeneration, found ? page.photos : page, total);
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
+    // The chapters arrive behind the paint: the first page is on screen in
+    // milliseconds, the day headers join when their counts land.
+    if (view === 'library' && sort === 'newest' && !found) {
+      product.days(looking).then((days) => {
+        if (pages.isCurrent(requestGeneration) && JSON.stringify(viewOf()) === key) update({ days });
+      }).catch(() => {});
+    } else if (read().days.length) {
+      update({ days: [] });
+    }
     if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
   } catch (error) {
     if (!pages.isCurrent(requestGeneration)) return;
@@ -642,7 +651,12 @@ async function followLibrary() {
         // Worker ticks re-read the window; the shelves re-count only when a
         // sweep or a lane rewrite actually moved what they say.
         await refreshInPlace({ shelves: swept || shaped });
-        if (swept) await loadFolders();
+        if (swept) {
+          await loadFolders();
+          if (read().view === 'library' && read().sort === 'newest' && !seeking()) {
+            product.days(viewOf()).then((days) => update({ days })).catch(() => {});
+          }
+        }
       } catch (error) {
         notify(error.message);
       }

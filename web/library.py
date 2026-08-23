@@ -289,6 +289,106 @@ def month_label(month: str) -> str:
         return month
 
 
+def days(conn, scope: Scope = EVERYTHING) -> list[dict]:
+    """Every day that holds photographs in a scope, newest first, with a
+    count — the grid's chapter list.
+
+    The same prefix-group trick as `months`, over the same scope the page
+    query uses, so a running sum of the counts is exactly where each day
+    starts in the newest-sorted grid. Undated photographs sort after every
+    date, so their count arrives last under an empty day.
+    """
+
+    clause, args = where(scope)
+    return [
+        {"day": row["day"], "count": row["count"]}
+        for row in conn.execute(
+            f"""
+            SELECT CASE WHEN i.date_taken IS NULL OR i.date_taken = '' THEN ''
+                        ELSE substr(i.date_taken, 1, 10) END AS day,
+                   COUNT(*) AS count
+            FROM images i
+            WHERE {IN_LIBRARY} AND ({clause})
+            GROUP BY day ORDER BY day = '', day DESC
+            """,
+            args,
+        )
+    ]
+
+
+# A shoot ends when the camera rests: the measured gap on the real library
+# that folds 173 dated photographs into 11 legible sessions.
+SESSION_REST = 3 * 3600
+
+
+def sessions(conn, *, limit: int = 8) -> list[dict]:
+    """The most recent shoots, named: capture-gap clustering over the dated
+    library, newest first, titled by who or what was worn plus the day.
+
+    Only the sessions returned are ever named — naming reads the members'
+    worn people and labels, and a whole library holds thousands of
+    sessions nobody asked about.
+    """
+
+    import json as coding
+
+    spans: list[tuple[str, str, int]] = []   # (first, last, count) newest-first
+    last = None
+    for row in conn.execute(
+        f"SELECT i.date_taken AS at FROM images i"
+        f" WHERE {IN_LIBRARY} AND i.date_taken IS NOT NULL AND i.date_taken != ''"
+        f" ORDER BY i.date_taken DESC",
+    ):
+        at = row["at"]
+        if last is not None and _apart(last, at) <= SESSION_REST:
+            first, _, count = spans[-1]
+            spans[-1] = (first, at, count + 1)
+        else:
+            if len(spans) == int(limit):
+                break
+            spans.append((at, at, 1))
+        last = at
+
+    out = []
+    for first, final, count in spans:
+        worn: dict[str, int] = {}
+        for row in conn.execute(
+            "SELECT c.value FROM cache c WHERE c.kind IN ('people', 'label')"
+            " AND c.state = 'ready' AND c.hash IN ("
+            "   SELECT i.content_hash FROM images i"
+            f"  WHERE {IN_LIBRARY} AND i.date_taken BETWEEN ? AND ?"
+            "   AND i.content_hash IS NOT NULL)",
+            (final, first),
+        ):
+            try:
+                for word in coding.loads(row["value"]):
+                    worn[str(word)] = worn.get(str(word), 0) + 1
+            except (ValueError, TypeError):
+                continue
+        # A name a session earns: what most of it wears, if most of it
+        # agrees; the day alone is still a true name.
+        named = max(worn.items(), key=lambda pair: pair[1])[0] if worn else None
+        day = f"{_MONTHS[int(first[5:7]) - 1][:3]} {int(first[8:10])}" if len(first) >= 10 else first
+        out.append({
+            "title": f"{day} · {named}" if named and worn[named] * 2 >= count else day,
+            "from": final[:19], "to": first[:19], "count": count,
+        })
+    return out
+
+
+def _apart(later: str, earlier: str) -> float:
+    """Seconds between two catalog datestamps, largest-first."""
+
+    from datetime import datetime
+
+    try:
+        a = datetime.fromisoformat(later[:19])
+        b = datetime.fromisoformat(earlier[:19])
+    except ValueError:
+        return float("inf")
+    return (a - b).total_seconds()
+
+
 def facets(conn) -> dict:
     """What you can filter by, and how many of each there are.
 

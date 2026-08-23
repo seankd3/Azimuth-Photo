@@ -17,6 +17,9 @@ let aspects = new Float32Array(0);
 let aspectsVersion = 0;
 let layout = null;
 let layoutKey = '';
+let breaks = null;
+let breaksFrom = null;
+let breaksVersion = 0;
 
 function collectAspects(state) {
   if (aspects.length !== state.total) {
@@ -35,10 +38,41 @@ function collectAspects(state) {
   }
 }
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function dayTitle(day, count) {
+  if (!day) return `Undated · ${count.toLocaleString()}`;
+  const when = new Date(`${day}T12:00:00`);
+  const said = Number.isNaN(when.getTime()) ? day
+    : `${WEEKDAYS[when.getDay()]} · ${SHORT_MONTHS[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}`;
+  return `${said} · ${count.toLocaleString()}`;
+}
+
+function collectBreaks(state) {
+  // Chapters exist where their arithmetic is exact: the newest-sorted
+  // library, with the days list summing to precisely the photographs shown.
+  // Anywhere else the grid is flat — a misplaced header is worse than none.
+  const days = state.sort === 'newest' && (state.days || []).length > 1 ? state.days : null;
+  if (breaksFrom && days === breaksFrom.list && state.total === breaksFrom.total) return;
+  if (!days && !breaksFrom) return;
+  breaksFrom = days ? { list: days, total: state.total } : null;
+  breaks = null;
+  breaksVersion += 1;
+  if (!days) return;
+  let at = 0;
+  const built = new Map();
+  for (const entry of days) {
+    built.set(at, dayTitle(entry.day, entry.count));
+    at += entry.count;
+  }
+  if (at === state.total) breaks = built;
+}
+
 function currentLayout(width, rowHeight, count) {
-  const key = `${width}:${rowHeight}:${count}:${aspectsVersion}`;
+  const key = `${width}:${rowHeight}:${count}:${aspectsVersion}:${breaksVersion}`;
   if (key !== layoutKey) {
-    layout = measureGrid(width, rowHeight, aspects, count);
+    layout = measureGrid(width, rowHeight, aspects, count, { breaks });
     layoutKey = key;
   }
   return layout;
@@ -185,6 +219,28 @@ function reconcileGrid(grid, state, actions, layout, range) {
     leftovers.delete(cell);
   }
 
+  // Chapter bands ride the same reconcile: absolutely placed, keyed by the
+  // index they break at, kept only while their chapter is in range.
+  const currentBands = new Map(
+    [...grid.children]
+      .filter((node) => node.dataset.band !== undefined)
+      .map((node) => [node.dataset.band, node]),
+  );
+  for (const band of layout.bands || []) {
+    if (band.index < range.start || band.index > range.end) continue;
+    const key = String(band.index);
+    let node = currentBands.get(key);
+    if (!node) {
+      node = element('div', 'grid-chapter', band.title);
+      node.dataset.band = key;
+    } else if (node.textContent !== band.title) {
+      node.textContent = band.title;
+    }
+    node.style.top = `${band.top}px`;
+    desired.push(node);
+    leftovers.delete(node);
+  }
+
   // Cells are absolutely positioned, so DOM order carries nothing: only what
   // left the range is removed and only what entered is attached. Cells that
   // stay are never detached — their focus, and the breathing of a tile still
@@ -215,6 +271,7 @@ function renderGrid(grid, state, actions) {
 
   const count = state.total || 18;
   collectAspects(state);
+  collectBreaks(state);
   const before = layout;
   const anchor = before && before.count === count && actions.scrollTop > 0
     ? anchorOf(before, actions.scrollTop)

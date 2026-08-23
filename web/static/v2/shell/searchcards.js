@@ -11,6 +11,7 @@ const RECENT_KEY = 'azimuth.recent-searches';
 export function createSearchCards({ product, read, update, box, search, applyChip }) {
   const drop = document.querySelector('[data-search-drop]');
   let facets = null;        // {years, cameras, orientations, roots} once asked
+  let sessions = [];        // the latest shoots, named, fetched with the facets
   let asked = 0;            // when facets were fetched; refreshed quietly
   let items = [];           // flat list of actionable rows, top to bottom
   let cursor = -1;
@@ -32,7 +33,10 @@ export function createSearchCards({ product, read, update, box, search, applyChi
   async function warm() {
     if (facets && Date.now() - asked < 60_000) return;
     try {
-      facets = await product.facets();
+      [facets, sessions] = await Promise.all([
+        product.facets(),
+        product.sessions().catch(() => sessions),
+      ]);
       asked = Date.now();
       // The first focus asks and then answers: the offers appear the moment
       // the shape arrives, as long as the person is still in the box.
@@ -85,6 +89,15 @@ export function createSearchCards({ product, read, update, box, search, applyChi
         run: () => applyChip({ is: 'label', values: [l.term] }),
       }));
     if (labels.length) sections.push(['Labels', labels]);
+
+    // The shoots time itself declares: a session card is a taken chip, so
+    // it counts, composes, and saves like every other fact.
+    const shoots = (sessions || []).filter((s) => match(s.title)).slice(0, query ? 3 : 5)
+      .map((s) => ({
+        label: s.title, count: s.count, glyph: '◷',
+        run: () => applyChip({ is: 'taken', from: s.from.slice(0, 10), to: s.to.slice(0, 10) }),
+      }));
+    if (shoots.length) sections.push(['Sessions', shoots]);
 
     const years = held.years.filter((y) => match(y.year)).slice(0, query ? 3 : 6)
       .map((y) => ({

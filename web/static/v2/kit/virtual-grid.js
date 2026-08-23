@@ -13,9 +13,16 @@ const DEFAULT_PADDING = 4;
 // real shape arrives, and the viewport is anchored across that change.
 const ASSUMED_ASPECT = 1.5;
 
+const DEFAULT_BAND = 34;
+
 export function measureGrid(width, rowHeight, aspects, count, {
   gap = DEFAULT_GAP,
   padding = DEFAULT_PADDING,
+  // Chapter breaks: index -> title. A break closes the row before it and
+  // reserves a title band above the row it starts, so chapters are part of
+  // the same pure geometry rather than a second layout pass.
+  breaks = null,
+  bandHeight = DEFAULT_BAND,
 } = {}) {
   const total = Math.max(0, Math.floor(Number(count)));
   const available = Math.max(1, Number(width) - (2 * padding));
@@ -31,10 +38,15 @@ export function measureGrid(width, rowHeight, aspects, count, {
   const rowOf = new Uint32Array(total);
   const lefts = new Float32Array(total);
   const widths = new Float32Array(total);
+  const bands = [];
 
   let top = padding;
   let index = 0;
   while (index < total) {
+    if (breaks && breaks.has(index)) {
+      bands.push({ top, index, title: breaks.get(index) });
+      top += bandHeight;
+    }
     // A row is as many photographs as fit at the target height plus the one
     // that overflows, all scaled down until the row is exactly the width. So
     // a row is never taller than the target -- the size the person chose is a
@@ -45,6 +57,7 @@ export function measureGrid(width, rowHeight, aspects, count, {
     let end = index;
     let closed = false;
     while (end < total) {
+      if (breaks && end > index && breaks.has(end)) break;
       sum += aspectAt(end);
       end += 1;
       if ((sum * target) + (gap * (end - index - 1)) >= available) {
@@ -73,7 +86,7 @@ export function measureGrid(width, rowHeight, aspects, count, {
   return Object.freeze({
     count: total, gap, padding, width: available, rowHeight: target,
     rowStarts, rowTops, rowHeights, rowOf, lefts, widths, height,
-    rows: rowStarts.length,
+    rows: rowStarts.length, bands,
   });
 }
 

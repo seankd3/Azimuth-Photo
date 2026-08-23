@@ -14,6 +14,7 @@ const state = {
   photos: new Map(),
   query: '',
   like: [],
+  days: [],
   total: 0,
   loading: true,
   scanning: false,

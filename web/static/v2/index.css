@@ -345,6 +345,23 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .photo-cell:hover { border-color: #666a72; }
 .photo-cell.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* A chapter is a quiet line in the stream: the day, its count, no chrome. */
+.grid-chapter {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  height: 34px;
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 7px;
+  color: var(--text-3);
+  font: 500 11px/1 var(--mono);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+}
 /* the keyboard cursor is its own quieter ring, visible inside a marked set */
 .photo-cell.is-focus { outline: 1px solid rgb(238 241 244 / 70%); outline-offset: -4px; }
 .photo-skeleton { position: absolute; background: #18191d; animation: breathe 1.4s ease-in-out infinite alternate; }

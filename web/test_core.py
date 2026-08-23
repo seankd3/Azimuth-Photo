@@ -2048,6 +2048,33 @@ class SearchNeverRefuses(CoreCase):
         without = finding.search(self.conn, "sunset")
         self.assertEqual(set(without), {agreed, word_only})
 
+    def test_days_sum_to_the_grid_and_sessions_wear_names(self):
+        # The chapter list is index arithmetic: same scope, same order as the
+        # newest-sorted page query, undated photographs one chapter at the
+        # end. A session is the same walk with a rest gap, named by what
+        # most of it wears.
+        _a, a_hash = self._photo("Raws/2026/d1.CR2", taken="2026-07-11 10:00:00")
+        _b, b_hash = self._photo("Raws/2026/d2.CR2", taken="2026-07-11 11:00:00")
+        self._photo("Raws/2026/d3.CR2", taken="2026-06-01 09:00:00")
+        self._photo("Raws/2026/d4.CR2")
+        self.conn.executemany(
+            "INSERT INTO cache (hash, kind, recipe, state, value, at)"
+            " VALUES (?, 'label', '', 'ready', ?, 1)",
+            [(a_hash, '["Cats"]'), (b_hash, '["Cats"]')])
+        self.conn.commit()
+
+        chapters = library_surface.days(self.conn)
+        self.assertEqual([(row["day"], row["count"]) for row in chapters],
+                         [("2026-07-11", 2), ("2026-06-01", 1), ("", 1)])
+        self.assertEqual(sum(row["count"] for row in chapters),
+                         library_surface.size(self.conn))
+
+        shoots = library_surface.sessions(self.conn)
+        self.assertEqual([s["count"] for s in shoots], [2, 1])
+        self.assertEqual(shoots[0]["title"], "Jul 11 · Cats")
+        self.assertEqual(shoots[0]["from"], "2026-07-11 10:00:00")
+        self.assertEqual(shoots[0]["to"], "2026-07-11 11:00:00")
+
     def test_a_selection_finds_its_neighbours_and_never_itself(self):
         # More-like-this is the same search asked with photographs: the query
         # vector is the selection's centre in the space -- no words and no

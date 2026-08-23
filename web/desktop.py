@@ -176,6 +176,12 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
+    def days(self, view: dict | None = None) -> list:
+        return self._run(lambda library: library.days(view))
+
+    def sessions(self) -> list:
+        return self._run(lambda library: library.sessions())
+
     def search(self, query: str, limit: int = 200, offset: int = 0,
                view: dict | None = None, like: list | None = None) -> dict:
         if self._product is None:
