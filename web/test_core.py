@@ -2004,7 +2004,7 @@ class CollectionsAreOneSurface(CoreCase):
             self.library.freeze_album(smart["id"])       # already plain
 
         saved = self.library.save_view("May raws", {
-            "folder": "Raws", "chips": [{"is": "stars", "least": 3}]})
+            "folders": ["Raws"], "chips": [{"is": "stars", "least": 3}]})
         rules = sets.describe(self.conn, saved["id"])["criteria"]
         self.assertEqual({chip["is"] for chip in rules}, {"folder", "stars"})
         with self.assertRaises(ValueError):
@@ -2098,6 +2098,19 @@ class SearchNeverRefuses(CoreCase):
         found = [row["id"] for row in self.library.search("cats", space=space)["photos"]]
         self.assertIn(cat, found)
         self.assertNotIn(twin, found)           # denied is denied in search too
+
+    def test_two_folders_are_one_view(self):
+        # A shoot that spanned two days browses as their union — several
+        # folders are one view, the same answer a folder chip with two
+        # values gives.
+        a, _ = self._photo("Raws/2026/2026-04-18/one.cr3")
+        b, _ = self._photo("Raws/2026/2026-04-19/two.cr3")
+        self._photo("Snapshots/other.jpg")
+        looking = self.library.viewing(
+            {"folders": ["Raws/2026/2026-04-18", "Raws/2026/2026-04-19"]})
+        self.assertEqual(
+            {row["id"] for row in library_surface.photos(self.conn, scope=looking)},
+            {a, b})
 
     def test_days_sum_to_the_grid_and_sessions_wear_names(self):
         # The chapter list is index arithmetic: same scope, same order as the

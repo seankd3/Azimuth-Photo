@@ -24,8 +24,8 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
   function show(id) {
     // The view moves; whichever stage is up follows it. Refine re-scopes in
     // place, the grid reloads — one rule for folders, albums and chips.
-    if (read().view === 'rank') update({ album: id, folder: null });
-    else update({ view: 'library', album: id, folder: null, selected: null, selectedIndex: null });
+    if (read().view === 'rank') update({ album: id, folders: [] });
+    else update({ view: 'library', album: id, folders: [], selected: null, selectedIndex: null });
     moved();
   }
 

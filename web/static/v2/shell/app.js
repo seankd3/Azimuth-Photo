@@ -180,9 +180,9 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 // What the window is looking at, as the bridge speaks it. Null when it is
 // the whole library, so the server sees "no view" rather than three empties.
 function viewOf() {
-  const { folder, album, chips } = read();
-  if (!folder && !album && !(chips || []).length) return null;
-  return { folder, album, chips };
+  const { folders, album, chips } = read();
+  if (!(folders || []).length && !album && !(chips || []).length) return null;
+  return { folders, album, chips };
 }
 
 // Which word the view is refining, if any: exactly one label chip, or a
@@ -253,7 +253,7 @@ const intakeWorkflow = createIntakeWorkflow({
   progressed: (text) => update({ importing: text || '' }),
   afterImport: async () => {
     // What just came in is what the person wants to see: Recently added.
-    update({ view: 'library', folder: null, album: null, sort: 'added' });
+    update({ view: 'library', folders: [], album: null, sort: 'added' });
     document.querySelector('[data-sort]').value = 'added';
     await Promise.all([loadView(), loadFolders(), albumsPanel.refresh()]);
   },
@@ -279,8 +279,8 @@ const filterBar = createFilterBar({
 // the same landing through their own chip field.
 function browseChip(chip) {
   searchBox.value = '';
-  if (read().view === 'rank') update({ folder: null, album: null, chips: [chip], query: '', like: [] });
-  else update({ view: 'library', folder: null, album: null, chips: [chip], query: '', like: [],
+  if (read().view === 'rank') update({ folders: [], album: null, chips: [chip], query: '', like: [] });
+  else update({ view: 'library', folders: [], album: null, chips: [chip], query: '', like: [],
                 selected: null, selectedIndex: null });
   viewMoved();
 }
@@ -429,7 +429,7 @@ function moreLikeThis(ids) {
   if (!ids.length) return;
   if (loupeOpen()) closeLoupe();
   searchBox.value = '';
-  update({ view: 'library', folder: null, album: null, chips: [], query: '', like: ids,
+  update({ view: 'library', folders: [], album: null, chips: [], query: '', like: ids,
            selected: null, selectedIndex: null });
   workspace.scrollTo({ top: 0 });
   loadView();
@@ -612,7 +612,7 @@ async function loadView() {
            selected: null, selectedIndex: null, marked: new Set() });
   anchorIndex = null;
   try {
-    const { sort, view, folder, query } = read();
+    const { sort, view, query } = read();
     const looking = viewOf();
     const key = JSON.stringify(looking);
     const [counts, drives, trashCount, size, page] = await Promise.all([
@@ -854,7 +854,7 @@ async function loadFolders() {
   // import changes tails, so it is read at boot and after a sweep, never on
   // the first-paint path.
   try {
-    update({ folders: await product.folders() });
+    update({ tree: await product.folders() });
   } catch (error) {
     notify(error.message);
   }
@@ -872,13 +872,33 @@ function viewMoved() {
   loadView();
 }
 
-function showFolder(path) {
+let folderAnchor = null;
+function showFolder(path, { toggle = false, range = false } = {}) {
+  // The tree speaks the grid's grammar: click browses one folder, Ctrl
+  // adds another — a shoot that spanned two days is their union — and
+  // Shift ranges across the rows between. Toggling the last one off is
+  // the whole library again.
   if (seeking()) {
     searchBox.value = '';
     update({ query: '', like: [] });
   }
-  if (read().view === 'rank') update({ folder: path, album: null });
-  else update({ view: 'library', folder: path, album: null, selected: null, selectedIndex: null });
+  const held = read().folders || [];
+  let next;
+  if (range && folderAnchor !== null && folderAnchor !== path) {
+    const rows = [...document.querySelectorAll('.folder-row')].map((row) => row.dataset.folder);
+    const from = rows.indexOf(folderAnchor);
+    const to = rows.indexOf(path);
+    next = from < 0 || to < 0 ? [path]
+      : rows.slice(Math.min(from, to), Math.max(from, to) + 1);
+  } else if (toggle) {
+    next = held.includes(path) ? held.filter((f) => f !== path) : [...held, path];
+    folderAnchor = path;
+  } else {
+    next = [path];
+    folderAnchor = path;
+  }
+  if (read().view === 'rank') update({ folders: next, album: null });
+  else update({ view: 'library', folders: next, album: null, selected: null, selectedIndex: null });
   viewMoved();
 }
 
@@ -1026,15 +1046,15 @@ function renderFolders(state) {
   const anyRecord = state.drives.some((drive) => drive.is_record);
   // Rebuilt only when its answer would differ — the two-second pulse must
   // not blink hover states or drop a click mid-swap.
-  const key = `${state.view}|${state.folder}|${[...state.open].join(',')}|${anyRecord}`;
-  if (foldersSeen === state.folders && foldersKey === key) return;
-  foldersSeen = state.folders;
+  const key = `${state.view}|${(state.folders || []).join('+')}|${[...state.open].join(',')}|${anyRecord}`;
+  if (foldersSeen === state.tree && foldersKey === key) return;
+  foldersSeen = state.tree;
   foldersKey = key;
   const rows = [];
   const walk = (nodes, depth) => {
     for (const node of nodes) {
       const row = document.createElement('div');
-      row.className = 'folder-row' + (state.view === 'library' && state.folder === node.path ? ' is-active' : '');
+      row.className = 'folder-row' + (state.view === 'library' && (state.folders || []).includes(node.path) ? ' is-active' : '');
       row.style.setProperty('--depth', depth);
       row.dataset.folder = node.path;
       row.title = node.path;
@@ -1058,7 +1078,7 @@ function renderFolders(state) {
       if (open && node.children.length) walk(node.children, depth + 1);
     }
   };
-  walk(state.folders, 0);
+  walk(state.tree, 0);
   document.querySelector('[data-folder-tree]').replaceChildren(...rows);
 }
 
@@ -1138,10 +1158,13 @@ function renderChrome(state) {
   restore.hidden = !restorable;
   restore.textContent = state.marked?.size > 1 ? `Restore ${state.marked.size}` : 'Restore';
   document.querySelector('[data-action="empty-trash"]').hidden = state.view !== 'trash' || !state.counts.trash;
-  document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !state.folder);
+  document.querySelector('.nav-row[data-action="all-photos"]').classList.toggle('is-active', state.view === 'library' && !(state.folders || []).length);
   document.querySelector('.nav-row[data-action="trash-view"]').classList.toggle('is-active', state.view === 'trash');
   const shelf = (state.albums || []).find((c) => c.id === state.album);
-  const where = shelf ? shelf.name : state.folder ? state.folder.split('/').pop() : '';
+  const leafs = (state.folders || []).map((f) => f.split('/').pop());
+  const where = shelf ? shelf.name
+    : leafs.length > 2 ? `${leafs[0]} +${leafs.length - 1}`
+    : leafs.join(' + ');
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
     : walled ? 'People'
@@ -1215,13 +1238,14 @@ document.addEventListener('click', (event) => {
   }
   const folderRow = event.target.closest('.folder-row');
   if (folderRow) {
-    showFolder(folderRow.dataset.folder);
+    showFolder(folderRow.dataset.folder, {
+      toggle: event.ctrlKey || event.metaKey, range: event.shiftKey });
     return;
   }
   if (action === 'all-photos') {
     searchBox.value = '';
-    if (read().view === 'rank') update({ folder: null, album: null, chips: [], query: '' });
-    else update({ view: 'library', folder: null, album: null, chips: [], query: '',
+    if (read().view === 'rank') update({ folders: [], album: null, chips: [], query: '' });
+    else update({ view: 'library', folders: [], album: null, chips: [], query: '',
                   selected: null, selectedIndex: null });
     viewMoved();
   }

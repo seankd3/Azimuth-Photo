@@ -146,8 +146,12 @@ class Library:
         self._open()
         view = view or {}
         parts = []
-        if view.get("folder"):
-            parts.append(in_folder(str(view["folder"])))
+        held = [str(f) for f in (view.get("folders") or ()) if str(f)]
+        if held:
+            # Several folders are one view — a shoot that spanned two days
+            # is browsed as their union, same as a folder chip with two
+            # values.
+            parts.append(any_of(*(in_folder(f) for f in held)))
         if view.get("album"):
             parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
@@ -644,8 +648,9 @@ class Library:
 
         view = dict(view or {})
         chips = list(view.get("chips") or [])
-        if view.get("folder"):
-            chips.append({"is": "folder", "values": [str(view["folder"])]})
+        held = [str(f) for f in (view.get("folders") or ()) if str(f)]
+        if held:
+            chips.append({"is": "folder", "values": held})
         if view.get("album"):
             chips.append({"is": "in", "values": [str(view["album"])]})
         if not chips:

@@ -379,7 +379,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     const app = read();
     const shelf = (app.albums || []).find((c) => c.id === app.album);
     const where = shelf ? `“${shelf.name.split('/').pop()}”`
-      : app.folder ? app.folder.split('/').pop() : 'your library';
+      : (app.folders || []).length ? app.folders.map((f) => f.split('/').pop()).join(' + ') : 'your library';
     const ranked = state.total
       ? `${state.judged.toLocaleString()} of ${state.total.toLocaleString()} in ${where} ranked`
       : '';
