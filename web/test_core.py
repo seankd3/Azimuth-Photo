@@ -2254,8 +2254,10 @@ class AModeIsAnOrdering(CoreCase):
         rank.record(self.conn, pool[5][0], [pool[4][0]])
 
         seated = rank.candidates(self.conn, 4, mode="tournament")
-        self.assertEqual([p["id"] for p in seated],
-                         [pool[7][0], pool[6][0], pool[5][0], pool[4][0]])
+        # The court is the judged top of the table; within it the crown
+        # circulates by wear, so the seating is a set, not a fixed order.
+        self.assertEqual({p["id"] for p in seated},
+                         {pool[7][0], pool[6][0], pool[5][0], pool[4][0]})
 
         spread = rank.candidates(self.conn, 3, mode="diverse")
         ratings = sorted(p["rating"] for p in spread)

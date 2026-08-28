@@ -194,24 +194,15 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
 
-    // The pick is seen the instant it is made; the write and the hold run
-    // underneath it, so the felt beat is the hold — not the hold plus a
-    // round-trip.
+    // The pick is seen the instant it is made, and the stage never waits for
+    // the write: the round records underneath while the next set comes from
+    // photographs already decoded in hand. The felt beat is the hold alone.
     const card = stage.querySelector(`[data-index="${index}"]`);
     card?.classList.add('is-picked');
-    const held = delay(HOLD_MS);
-    let recorded;
-    try {
-      recorded = await product.round(winner.id, losers.map((p) => p.id));
-    } catch (error) {
-      card?.classList.remove('is-picked');
-      notify(error.message);
-      state.busy = false;
-      state.queued = null;
-      return;
-    }
+    const writing = product.round(winner.id, losers.map((p) => p.id));
+    writing.catch(() => {});
     state.rounds += 1;
-    await held;
+    await delay(HOLD_MS);
     if (generation !== state.generation) { state.busy = false; return; }  // left or resized meanwhile
 
     // The pick leaves, credited; so does the card that has sat through the
@@ -263,23 +254,31 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     void fill();
     state.busy = false;
 
-    const over = losers.length;
-    undo.show(
-      `Picked ${winner.tail.split('/').pop()} over ${over === 1 ? 'one other' : `${over} others`}.`,
-      async () => {
-        await product.unround(recorded.decision);
-        if (!isOpen()) { await onLeave(); return; }   // the grid behind may be sorted by it
-        // Anything asked for around the retracted round is stale, numbers
-        // included; the generation moves so an in-flight answer is dropped.
-        state.generation += 1;
-        state.rounds = Math.max(0, state.rounds - 1);
-        state.set = before.set;
-        state.age = before.age;
-        render();
-        state.buffer = [];
-        void fill();
-      },
-    );
+    // Undo waits only for its handle — the write that was already running.
+    writing.then((recorded) => {
+      const over = losers.length;
+      undo.show(
+        `Picked ${winner.tail.split('/').pop()} over ${over === 1 ? 'one other' : `${over} others`}.`,
+        async () => {
+          await product.unround(recorded.decision);
+          if (!isOpen()) { await onLeave(); return; }   // the grid behind may be sorted by it
+          // Anything asked for around the retracted round is stale, numbers
+          // included; the generation moves so an in-flight answer is dropped.
+          state.generation += 1;
+          state.rounds = Math.max(0, state.rounds - 1);
+          state.set = before.set;
+          state.age = before.age;
+          render();
+          state.buffer = [];
+          void fill();
+        },
+      );
+    }).catch((error) => {
+      // The stage moved on; the round did not land. Said plainly — an
+      // unrecorded pick that looked recorded would be worse than the pause.
+      state.rounds = Math.max(0, state.rounds - 1);
+      notify(`That pick was not recorded — ${error.message}`);
+    });
     const queued = state.queued;
     state.queued = null;
     if (queued !== null) void pick(queued);
