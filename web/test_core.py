@@ -1468,6 +1468,30 @@ class DecodingRefuses(unittest.TestCase):
         self.assertEqual(found["date_taken"], "2026:08:17 03:34:08")
         self.assertEqual(found["lens"], "RF 50mm")
 
+    def test_an_exif_ifd_at_the_file_tail_is_still_read(self):
+        # Lightroom's DNG writer puts the Exif IFD *after* the image data —
+        # 38 MB in on a real R5 conversion — so a bounded header read left
+        # 2,086 freshly imported DNGs undated while every date sat plainly
+        # in the file. The IFD graph is a pointer structure over the whole
+        # file; the reader follows it wherever it points.
+        taken = b"2026:08:27 07:35:21\0"
+        far = 5 * 1024 * 1024  # past the old 4 MiB window
+        data = bytearray(far + 32 + len(taken))
+        struct.pack_into("<2sHI", data, 0, b"II", 42, 8)
+        struct.pack_into("<H", data, 8, 1)
+        struct.pack_into("<HHII", data, 10, 0x8769, 4, 1, far)
+        struct.pack_into("<H", data, far, 1)
+        struct.pack_into("<HHII", data, far + 2, 0x9003, 2, len(taken), far + 32)
+        data[far + 32:] = taken
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "frame.dng")
+            with open(path, "wb") as handle:
+                handle.write(data)
+            found = raw_exif.read(path)
+
+        self.assertEqual(found["date_taken"], "2026:08:27 07:35:21")
+
     def test_cr3_cmt2_is_the_exif_ifd_itself(self):
         # In CR3, CMT1 carries IFD0 and CMT2 *is* the Exif IFD — its date
         # and lens tags sit at the top level with no 0x8769 pointer.
@@ -2281,6 +2305,51 @@ class AnEditIsADecision(CoreCase):
 
         # An unchanged sidecar appends nothing on the next sweep.
         self.assertEqual(developing.adopt(self.conn, self.tmp, ["Raws/frame.xmp"]), 0)
+
+    def test_a_dng_is_its_own_sidecar(self):
+        # Lightroom writes sidecars only beside proprietary raws; a DNG's
+        # settings live in its own XMP packet. The sweep hands adopt no
+        # sidecar for it — the unheard DNG is found and read by itself.
+        import develop as developing
+
+        photo_id = self.photo("Raws/inside.dng")
+        digest = "f" * 64
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, file_ext = '.dng' WHERE id = ?",
+            (digest, photo_id))
+        folder = os.path.join(self.tmp, "Raws")
+        os.makedirs(folder, exist_ok=True)
+        packet = self.SIDECAR.replace("frame.cr3", "inside.dng")
+        with open(os.path.join(folder, "inside.dng"), "wb") as handle:
+            handle.write(b"II*\x00" + b"\x00" * 64 + packet.encode() + b"\x00" * 8)
+
+        self.assertEqual(developing.adopt(self.conn, self.tmp, []), 1)
+        held = developing.settings(self.conn, digest)
+        self.assertEqual(held["Exposure2012"], "+0.50")
+        # The next sweep re-reads nothing and appends nothing.
+        self.assertEqual(developing.adopt(self.conn, self.tmp, []), 0)
+
+    def test_a_dng_with_nothing_inside_gets_one_receipt(self):
+        # The receipt — one empty decision — is what keeps every sweep from
+        # re-reading megabytes of every settings-less DNG forever.
+        import develop as developing
+
+        photo_id = self.photo("Raws/plain.dng")
+        digest = "a1" * 32
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, file_ext = '.dng' WHERE id = ?",
+            (digest, photo_id))
+        folder = os.path.join(self.tmp, "Raws")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "plain.dng"), "wb") as handle:
+            handle.write(b"II*\x00" + b"\x00" * 128)
+
+        self.assertEqual(developing.adopt(self.conn, self.tmp, []), 1)
+        self.assertEqual(developing.settings(self.conn, digest), {})
+        self.assertEqual(developing.adopt(self.conn, self.tmp, []), 0)
+        rows = self.conn.execute(
+            "SELECT COUNT(*) FROM decisions WHERE subject = ?", (digest,)).fetchone()[0]
+        self.assertEqual(rows, 1)
 
     def test_the_sql_recipe_splice_is_byte_identical_to_canonical(self):
         import develop as developing

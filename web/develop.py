@@ -130,6 +130,27 @@ def read_sidecar(path: str) -> dict[str, object] | None:
         root = ET.parse(path).getroot()
     except (ET.ParseError, OSError):
         return None
+    return _facts(root)
+
+
+def read_within(path: str) -> dict[str, object] | None:
+    """The crs facts a self-carrying photograph holds inside itself.
+
+    Lightroom writes sidecars only beside proprietary raws; a DNG's settings
+    live in its own XMP packet. Same facts, same spellings, different door.
+    """
+
+    packet = read_embedded(path)
+    if packet is None:
+        return None
+    try:
+        root = ET.fromstring(packet)
+    except ET.ParseError:
+        return None
+    return _facts(root)
+
+
+def _facts(root) -> dict[str, object] | None:
     found: dict[str, object] = {}
     for description in root.iter(f"{{{_RDF}}}Description"):
         for name, value in description.attrib.items():
@@ -250,31 +271,65 @@ def edit(conn, digest: str, patch: dict) -> dict:
     return held
 
 
-def adopt(conn, root: str, sidecar_tails) -> int:
-    """Read the sweep's sidecars into decisions.
+# Formats that carry their settings inside the photograph itself. Lightroom
+# writes sidecars beside proprietary raws and XMP packets into these.
+SELF_CARRYING = (".dng",)
 
-    ``sidecar_tails`` is what the walk saw; each pairs to its photograph by
-    stem. A sidecar whose settings differ from the last Lightroom-authored
-    decision appends one — unchanged files append nothing, so re-sweeping
-    is free.
+
+def adopt(conn, root: str, sidecar_tails, rewritten_tails=()) -> int:
+    """Read what the sweep saw that may carry settings, into decisions.
+
+    Three kinds of carrier: every sidecar the walk noticed (paired to its
+    photograph by stem); every self-carrying photograph the log has never
+    heard from; and every one the sweep saw rewritten — Lightroom saving
+    metadata writes *into* a DNG, so the rewrite is the sidecar changing.
+
+    A carrier whose settings differ from the last file-authored decision
+    appends one — unchanged files append nothing, so re-sweeping is free.
+    A self-carrying photograph with nothing inside gets one empty decision:
+    the receipt that we looked, which is what keeps a sweep from re-reading
+    megabytes of every DNG forever.
     """
 
-    tails = [str(tail) for tail in sidecar_tails or ()]
-    if not tails:
+    plans: dict[str, bool] = {}      # tail -> carries its own settings
+    for tail in sidecar_tails or ():
+        plans[str(tail)] = False
+    for tail in rewritten_tails or ():
+        if str(tail).lower().endswith(SELF_CARRYING):
+            plans[str(tail)] = True
+    marks = ",".join("?" * len(SELF_CARRYING))
+    for row in conn.execute(
+        "SELECT i.tail FROM images i"
+        " WHERE i.tail IS NOT NULL AND i.content_hash IS NOT NULL AND i.vc_of IS NULL"
+        f" AND i.file_ext IN ({marks})"
+        " AND NOT EXISTS (SELECT 1 FROM decisions d WHERE d.subject = i.content_hash"
+        "                 AND d.family = ? AND d.by = ?)",
+        (*SELF_CARRYING, FAMILY, BY_FILE)):
+        plans[row["tail"]] = True
+    if not plans:
         return 0
+
     stems: dict[str, str] = {}
     for row in conn.execute(
         "SELECT tail, content_hash FROM images"
         " WHERE tail IS NOT NULL AND content_hash IS NOT NULL"):
         stems[os.path.splitext(row["tail"])[0]] = row["content_hash"]
     adopted = 0
-    for tail in tails:
+    for tail, carries in sorted(plans.items()):
         digest = stems.get(os.path.splitext(tail)[0])
         if digest is None:
             continue
-        held = read_sidecar(os.path.join(root, tail.replace("/", os.sep)))
-        if held is None:
-            continue
+        path = os.path.join(root, tail.replace("/", os.sep))
+        if carries:
+            # The unheard live on whatever drive holds them; a file that is
+            # not under this root waits for its own drive's sweep.
+            if not os.path.isfile(path):
+                continue
+            held = read_within(path) or {}
+        else:
+            held = read_sidecar(path)
+            if held is None:
+                continue
         before = _last_adopted(conn, digest)
         if before == held:
             continue

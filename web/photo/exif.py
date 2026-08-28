@@ -1,15 +1,23 @@
-"""Bounded EXIF reads for TIFF-family RAW files and Canon CR3.
+"""EXIF reads for TIFF-family RAW files and Canon CR3.
 
 JPEG and display formats use Pillow's EXIF reader. This module exists for RAW
-containers Pillow does not open: it reads at most four MiB and returns only the
-four fields the library actually queries.
+containers Pillow does not open, and it returns only the four fields the
+library actually queries.
+
+A TIFF IFD is a pointer graph over the whole file — Lightroom's DNG writer
+puts the Exif IFD *after* 38 MB of image data, so "read a bounded header"
+is the wrong model for it and left every converted DNG undated. The file is
+mapped instead: the walk follows pointers anywhere while the OS pages in
+only the few KiB each IFD touches. The bound survives where the format
+earns it: CR3's CMT boxes live in the head, so their scan stops at 4 MiB.
 """
 
 from __future__ import annotations
 
+import mmap
 import struct
 
-MAX_HEADER_BYTES = 4 * 1024 * 1024
+MAX_SCAN_BYTES = 4 * 1024 * 1024
 
 IFD0 = {
     0x010F: "make",
@@ -24,12 +32,19 @@ EXIF = {
 TYPE_BYTES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
 
 
-def read(path: str, *, limit: int = MAX_HEADER_BYTES) -> dict[str, object]:
-    """Return the useful embedded fields that fit in a bounded header read."""
+def read(path: str, *, limit: int = MAX_SCAN_BYTES) -> dict[str, object]:
+    """Return the useful embedded fields of one RAW container."""
 
     with open(path, "rb") as handle:
-        data = handle.read(int(limit))
+        try:
+            data = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+        except (ValueError, OSError):
+            return {}
+        with data:
+            return _read(data, int(limit))
 
+
+def _read(data, limit: int) -> dict[str, object]:
     found: dict[str, object] = {}
     if _tiff(data, 0, found, IFD0):
         return found
@@ -40,10 +55,10 @@ def read(path: str, *, limit: int = MAX_HEADER_BYTES) -> dict[str, object]:
     # every CR3 in the library sat "undated" while its stage preview knew
     # the date perfectly well.
     for box, wanted in ((b"CMT1", IFD0), (b"CMT2", EXIF)):
-        start = data.find(box)
-        while start >= 0:
+        start = data.find(box, 0, limit)
+        while 0 <= start < limit:
             _tiff(data, start + len(box), found, wanted)
-            start = data.find(box, start + len(box))
+            start = data.find(box, start + len(box), limit)
     return found
 
 

@@ -59,16 +59,18 @@ class Library:
             self.conn.execute(
                 "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
                 " AND note LIKE 'ProjectionError:%'")
-            # CR3 metadata read before the CMT2 fix has make and model but
-            # no date and no lens — 657 rows on the real library. A Canon
-            # raw always carries a date, so a dateless answer for one is the
-            # old reader's, and dropping it re-owes the read to the fixed
-            # one. No-op once they carry dates.
+            # A camera raw always carries a date, so a dateless metadata
+            # answer for one is an old reader's — CR3s read with IFD0's map
+            # before the CMT2 fix (657 rows), DNGs whose Exif IFD sat past
+            # the old bounded read (2,086 rows: Lightroom's converter writes
+            # it after the image data). Dropping the answer re-owes the read
+            # to the fixed reader. No-op once they carry dates.
             self.conn.execute(
                 "DELETE FROM cache WHERE kind = 'metadata'"
                 " AND value NOT LIKE '%date_taken%'"
                 " AND hash IN (SELECT content_hash FROM images"
-                "              WHERE file_ext = '.cr3' AND content_hash IS NOT NULL)")
+                "              WHERE file_ext IN ('.cr3', '.dng')"
+                "                AND content_hash IS NOT NULL)")
             embedded_metadata.reindex(self.conn)
             # The develop column is an index over the log, same as the
             # metadata columns above it.
@@ -124,8 +126,9 @@ class Library:
         try:
             said = copies.sweep(self.conn, drive_uuid)
             root = drives.root_of(self.conn, drive_uuid)
-            if said.get("applied") and root and said.get("sidecars"):
-                said["edits_adopted"] = developing.adopt(self.conn, root, said["sidecars"])
+            if said.get("applied") and root:
+                said["edits_adopted"] = developing.adopt(
+                    self.conn, root, said["sidecars"], said.get("changed") or ())
             return said
         finally:
             self.chores.nudge()
@@ -1189,11 +1192,12 @@ class OwnedLibrary:
         conn = model.connect(self._library.catalog_path)
         try:
             said = copies.sweep(conn, drive_uuid, under=under)
-            # The walk noticed Lightroom's sidecars; their settings become
-            # decisions here, on the sweep's own lane and rhythm.
+            # The walk noticed Lightroom's sidecars and rewrites; their
+            # settings become decisions here, on the sweep's own lane.
             root = drives.root_of(conn, drive_uuid)
-            if said.get("applied") and root and said.get("sidecars"):
-                said["edits_adopted"] = developing.adopt(conn, root, said["sidecars"])
+            if said.get("applied") and root:
+                said["edits_adopted"] = developing.adopt(
+                    conn, root, said["sidecars"], said.get("changed") or ())
             return said
         finally:
             conn.close()
