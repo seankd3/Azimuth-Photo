@@ -98,11 +98,20 @@ def guess_kind(source_root: str, names: Iterable[str]) -> str | None:
     return None
 
 
-def scan(conn, source_root: str) -> list[dict]:
+def scan(conn, source_root: str, progress=None) -> list[dict]:
     """Every photograph under a source, with what the staged view shows: name,
     where it sits, size, its own date, and whether the library may already
-    hold it (same name and size -- a suspicion, made exact by identity when
-    the copy is made)."""
+    hold it -- a suspicion, made exact by identity when the copy is made.
+
+    Suspicion matches same name and size, or same capture second and size:
+    the import renames files to the date scheme, so a name is exactly the
+    thing a previous import did not keep. The second pair is what lets a
+    re-inserted card default to only the days not yet brought in.
+
+    ``progress``, when given, hears the growing count as the walk reads --
+    a card of thousands takes half a minute, and a count is the difference
+    between "looking" and "looks dead".
+    """
 
     root = os.path.abspath(source_root)
     seen: list[dict] = []
@@ -110,6 +119,12 @@ def scan(conn, source_root: str) -> list[dict]:
         (str(row["filename"]), int(row["file_size"]))
         for row in conn.execute(
             "SELECT filename, file_size FROM images WHERE file_size IS NOT NULL")
+    }
+    known_when = {
+        (str(row["date_taken"]), int(row["file_size"]))
+        for row in conn.execute(
+            "SELECT date_taken, file_size FROM images"
+            " WHERE file_size IS NOT NULL AND date_taken IS NOT NULL")
     }
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
@@ -126,19 +141,23 @@ def scan(conn, source_root: str) -> list[dict]:
             if not stat.S_ISREG(entry.st_mode) or entry.st_size <= 0 or not photos.supported(path):
                 continue
             tags = _tags(path)
+            taken = tags.get("date_taken")
             seen.append({
                 "key": os.path.relpath(path, root).replace(os.sep, "/"),
                 "path": path,
                 "name": name,
                 "group": group,
                 "size": int(entry.st_size),
-                "taken": tags.get("date_taken") or dt.datetime.fromtimestamp(entry.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
+                "taken": taken or dt.datetime.fromtimestamp(entry.st_mtime).strftime("%Y-%m-%d %H:%M:%S"),
                 # A scan carries no capture date; a lab's folder or archive name
                 # often carries the order's, which is the day the roll gets.
                 "folder_date": _date_in(os.path.relpath(dirpath, root)) or _date_in(os.path.basename(root)),
                 "stock": _stock(tags.get("description", "")),
-                "suspect": (name, int(entry.st_size)) in known,
+                "suspect": (name, int(entry.st_size)) in known
+                           or (taken, int(entry.st_size)) in known_when,
             })
+            if progress is not None and len(seen) % 25 == 0:
+                progress(len(seen))
     return seen
 
 
@@ -288,10 +307,14 @@ def _clear(source: str, tally: dict) -> None:
 
 
 def cards() -> list[dict]:
-    """Removable volumes with a DCIM folder -- a camera card that is here now.
-    Cheap on purpose (a drive type and one folder per letter), because it is
-    asked every few seconds; what the card holds is counted when it is staged.
-    Windows only for the moment; elsewhere a card is a folder chosen by hand."""
+    """Volumes with a DCIM folder -- a camera card that is here now.
+
+    The DCIM folder is the signal, not the bus: a CFexpress reader mounts
+    as a *fixed* disk, so filtering on DRIVE_REMOVABLE hid the one card
+    that matters most. Cheap on purpose (a drive type and one folder per
+    letter), because it is asked every few seconds; what the card holds is
+    counted when it is staged. Windows only for the moment; elsewhere a
+    card is a folder chosen by hand."""
 
     import sys
 
@@ -300,10 +323,10 @@ def cards() -> list[dict]:
         return found
     import ctypes
 
-    removable = 2  # DRIVE_REMOVABLE
+    removable, fixed = 2, 3
     for letter in "DEFGHIJKLMNOPQRSTUVWXYZ":
         root = f"{letter}:\\"
-        if ctypes.windll.kernel32.GetDriveTypeW(root) != removable:
+        if ctypes.windll.kernel32.GetDriveTypeW(root) not in (removable, fixed):
             continue
         if not os.path.isdir(os.path.join(root, "DCIM")):
             continue

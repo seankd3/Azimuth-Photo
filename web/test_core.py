@@ -308,6 +308,26 @@ class BringingPhotographsIn(CoreCase):
         self.assertEqual(intake.guess_kind(self.card({}), ["IMG_0001.CR3"]), intake.RAWS)
         self.assertIsNone(intake.guess_kind(os.path.join(self.tmp, "Photos"), ["a.jpg", "b.jpg"]))
 
+    def test_a_renamed_import_is_still_suspected_by_its_capture_second(self):
+        # The import renames files to the date scheme, so a name is exactly
+        # the thing a previous import did not keep — matching on name alone
+        # meant a re-inserted card came back fully checked and the owner
+        # scrolled through every already-culled day unchecking it.
+        held = self.jpeg(seed="r")
+        already = self.write(
+            self.hot_root, "Raws/Digital/2026/2026-05-26/20260526-999999.JPG", held)
+        photos.put(self.conn, already, self.hot["uuid"],
+                   "Raws/Digital/2026/2026-05-26/20260526-999999.JPG")
+        # The metadata worker projects the capture date after the copy lands.
+        self.conn.execute(
+            "UPDATE images SET date_taken = '2026-05-26 18:29:56'"
+            " WHERE tail = 'Raws/Digital/2026/2026-05-26/20260526-999999.JPG'")
+        card = self.card({"IMG_0042.JPG": held})
+
+        staged = intake.scan(self.conn, card)
+        self.assertTrue(staged[0]["suspect"],
+                        "same capture second and size is the same photograph wearing a new name")
+
     def test_bring_verifies_suffixes_skips_by_identity_and_clears_only_after(self):
         one = self.jpeg(seed="a")
         two = self.jpeg(seed="b")   # same name as `one` in another card folder, different bytes

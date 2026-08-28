@@ -1,16 +1,15 @@
 // Bringing photographs in: a card that arrives or a folder chosen, staged so
-// the person sees every photograph before it enters the library (Lightroom's
-// three panes in Azimuth's opinionated form), one kind to confirm, the
-// destination shown as truth, one button. Esc before that button writes
-// nothing. The work itself is the product's; this is its conversation —
-// and clicking Import ends it: the dialog puts itself away, the work
-// reports to the status line, the outcome arrives as a toast, and
-// Import… reopens the details (and Stop) while it runs.
+// the person sees every photograph before it enters the library. Import is
+// its own workspace, Lightroom's shape in Azimuth's chrome: the main stage
+// shows the source's photographs under their days, the inspector's seat
+// holds the kind, the destinations and the one button, and the grid's own
+// selection grammar works unchanged. Esc before that button writes nothing.
+// The work itself is the product's; this is its conversation — and clicking
+// Import ends it: the workspace steps back to the library, the work reports
+// to the status line, the outcome arrives as a toast, and Import… reopens
+// the details (and Stop) while it runs.
 
-const KIND_LABEL = { raws: 'Camera raws', snapshots: 'Snapshots', edits: 'Edits', film: 'Film scans' };
-
-export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {} }) {
-  const dialog = document.querySelector('[data-import-dialog]');
+export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown }) {
   const title = document.querySelector('[data-import-title]');
   const sourceLine = document.querySelector('[data-import-source]');
   const stage = document.querySelector('[data-import-stage]');
@@ -37,21 +36,35 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       const image = entry.target;
       product.thumb(state.source, image.dataset.key).then((url) => { if (url) image.src = url; }).catch(() => {});
     }
-  }, { root: stage, rootMargin: '300px' });
+    // The workspace is the scroller now; watching the stage itself would
+    // count every cell as visible and read the whole card at once.
+  }, { root: document.querySelector('.workspace'), rootMargin: '300px' });
 
   async function open(source, { isCard = false } = {}) {
     if (state.running) {
-      // One import at a time; while it runs the dialog is its detail view.
-      if (!dialog.open) dialog.showModal();
+      // One import at a time; while it runs the workspace is its detail view.
+      enter();
       return;
     }
     notify(`Looking at ${source}…`);
+    // The look at a full card reads thousands of files; the growing count is
+    // what says the app is working rather than wedged.
+    const looking = setInterval(async () => {
+      try {
+        const held = await product.intakeStatus();
+        if (held.phase === 'staging' && held.seen) {
+          notify(`Looking at ${source} — ${held.seen.toLocaleString()} photographs…`);
+        }
+      } catch { /* the count is a courtesy; the stage call itself reports */ }
+    }, 600);
     let staged;
     try {
       staged = await product.stage(source);
     } catch (error) {
       notify(error.message);
       return;
+    } finally {
+      clearInterval(looking);
     }
     state.source = staged.source;
     state.kind = staged.kind;
@@ -78,7 +91,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     renderStage();
     renderRolls();
     render();
-    if (!dialog.open) dialog.showModal();
+    enter();
     startButton.focus();
   }
 
@@ -248,8 +261,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       const rolls = Object.fromEntries(Object.entries(state.rolls).map(([group]) => [group, rollName(group)]));
       await product.bring(state.source, [...state.checked], state.kind, state.isCard && clearBox.checked, '', rolls);
     } catch (error) {
-      // The dialog's own line carries its own refusal — a message behind the
-      // modal backdrop is a message to nobody.
+      // The panel's own line carries its own refusal, right beside the
+      // button that asked.
       progress.textContent = error.message;
       state.running = false;
       startButton.hidden = false;
@@ -300,9 +313,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
     progress.textContent = said;
     progressed('');
-    // The dialog put itself away when the work began; the outcome still
+    // The workspace stepped back when the work began; the outcome still
     // reaches the person.
-    if (!dialog.open) notify(said);
+    if (!isShown()) notify(said);
     await afterImport();
   }
 
@@ -315,7 +328,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     // Closing is always allowed. It puts the conversation away, never the
     // work: a running import continues, the status line carries it, and
     // its outcome arrives as a toast.
-    if (dialog.open) dialog.close();
+    leave();
     if (state.running) return;
     stage.replaceChildren();
     state.candidates = [];
@@ -385,8 +398,6 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     renderRolls();
     render();
   });
-  dialog.addEventListener('close', () => close());
-
   return Object.freeze({
     open,
     start,
@@ -406,7 +417,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       syncChecks();
       render();
     },
-    isOpen: () => dialog.open,
+    isOpen: () => isShown(),
     running: () => state.running,
     finish: () => { if (startButton.textContent === 'Done') close(); else start(); },
   });

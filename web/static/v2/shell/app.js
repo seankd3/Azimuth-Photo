@@ -250,6 +250,11 @@ const trashWorkflow = createTrashWorkflow({
 const intakeWorkflow = createIntakeWorkflow({
   product,
   notify,
+  // Import is its own workspace: entering and leaving it is a view change
+  // like any other, and the chrome follows.
+  enter: () => { if (read().view !== 'import') update({ view: 'import' }); },
+  leave: () => { if (read().view === 'import') update({ view: 'library' }); },
+  isShown: () => read().view === 'import',
   progressed: (text) => update({ importing: text || '' }),
   afterImport: async () => {
     // What just came in is what the person wants to see: Recently added.
@@ -1095,9 +1100,13 @@ function renderChrome(state) {
     if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
   }
   const count = state.counts.photos.toLocaleString();
-  document.querySelector('[data-photo-count]').textContent = state.view === 'people'
-    ? `${(state.people || []).length.toLocaleString()} people`
-    : `${state.total.toLocaleString()} photos`;
+  // The import workspace's own panel carries its counts; the library's
+  // number beside the word Import would be someone else's answer.
+  document.querySelector('[data-photo-count]').textContent = state.view === 'import'
+    ? ''
+    : state.view === 'people'
+      ? `${(state.people || []).length.toLocaleString()} people`
+      : `${state.total.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
@@ -1118,22 +1127,26 @@ function renderChrome(state) {
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
   const walled = state.view === 'people';
+  const intaking = state.view === 'import';
   shell.classList.toggle('hide-left', !state.panels.left);
   shell.classList.toggle('hide-right', !state.panels.right);
   shell.classList.toggle('hide-top', !state.panels.top);
   loupe.hidden = !holding;
-  grid.hidden = ranking || holding || walled;
+  grid.hidden = ranking || holding || walled || intaking;
+  document.querySelector('[data-import-stage]').hidden = !intaking;
+  document.querySelector('[data-import-panel]').hidden = !intaking;
+  inspector.querySelector('[data-inspector-facts]').hidden = intaking || editPanel.isOpen();
   document.querySelector('[data-rank]').hidden = !ranking;
   document.querySelector('[data-rank-progress]').hidden = !ranking;
   document.querySelector('[data-rank-size]').hidden = !ranking;
   document.querySelector('[data-rank-mode]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
-  document.querySelector('[data-result-label]').hidden = ranking || holding || walled;
-  document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled;
+  document.querySelector('[data-result-label]').hidden = ranking || holding || walled || intaking;
+  document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled || intaking;
   // The chips narrow the library view; Trash and the loupe are not places
   // to edit them, so they leave with their + button.
-  document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding || walled;
+  document.querySelector('[data-chips]').hidden = state.view === 'trash' || holding || walled || intaking;
   // The quiet invitation to refine: visible exactly when Y and N would land.
   const hint = document.querySelector('[data-teach-hint]');
   const word = teachable();
@@ -1145,7 +1158,7 @@ function renderChrome(state) {
   const alike = (state.like || []).length;
   pill.hidden = !alike || state.view === 'trash' || holding || walled;
   if (alike) pill.textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`} ✕`;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled;
+  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled || intaking;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = (state.view === 'library' || state.view === 'loupe') && Boolean(state.selected?.hash);
@@ -1167,6 +1180,7 @@ function renderChrome(state) {
     : leafs.join(' + ');
   document.querySelector('.view-title strong').textContent = state.view === 'trash'
     ? 'Trash'
+    : intaking ? 'Import'
     : walled ? 'People'
     : searching
       ? (state.query
@@ -1201,7 +1215,7 @@ function render(state) {
   // Chrome first: it is what shows and hides the grid, and a grid laid out
   // while still hidden measures a zero-width column.
   renderChrome(state);
-  if (state.view !== 'rank' && state.view !== 'loupe') visibleGrid();
+  if (!['rank', 'loupe', 'import'].includes(state.view)) visibleGrid();
 }
 
 driveForm.addEventListener('submit', async (event) => {

@@ -1243,12 +1243,24 @@ class OwnedLibrary:
         import shutil
 
         shutil.rmtree(os.path.join(self._library.tiles.root, ".staging"), ignore_errors=True)
+
+        def looked(count: int) -> None:
+            # A card of thousands reads for half a minute; a count is the
+            # difference between "looking" and "looks dead". Never over a
+            # running import's own words.
+            with self._state:
+                if self._intake.get("phase") in ("idle", "staging"):
+                    self._intake = {"phase": "staging", "source": source, "seen": count}
+
         conn = model.connect(self._library.catalog_path)
         try:
-            candidates = intake.scan(conn, source)
+            candidates = intake.scan(conn, source, progress=looked)
             receiving = drives.receiving(conn)
         finally:
             conn.close()
+            with self._state:
+                if self._intake.get("phase") == "staging":
+                    self._intake = {"phase": "idle"}
         self._staged[source] = candidates
         guess = intake.guess_kind(source, (c["name"] for c in candidates))
         if guess is None and "takeout" in source.lower():
