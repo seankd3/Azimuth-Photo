@@ -100,16 +100,6 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     return (roll.name || '').trim() || roll.proposed || '?';
   }
 
-  function destinationOf(candidate) {
-    // A preview of the rule: root/YYYY/YYYY-MM-DD, and for film the roll; a
-    // scan's day is its lab folder's date when the folder carries one.
-    const root = state.roots[state.kind] || '…';
-    const film = state.kind === 'film';
-    const day = ((film && candidate.folder_date) || candidate.taken || '').slice(0, 10);
-    const roll = film ? `/${rollName(candidate.group)}` : '';
-    return `${root}/${day.slice(0, 4)}/${day}${roll}`;
-  }
-
   function renderRolls() {
     const box = document.querySelector('[data-rolls]');
     box.hidden = state.kind !== 'film';
@@ -227,23 +217,45 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     }
     document.querySelector('[data-kind-choice]').classList.toggle('is-asking', !state.kind);
 
-    const counts = new Map();
+    // One list, two jobs: each day says where it will land *and* wears the
+    // checkbox that imports it — Lightroom's date picking without a scroll
+    // through two thousand thumbnails.
+    const byDay = new Map();
     let bytes = 0;
     for (const candidate of state.candidates) {
-      if (!state.checked.has(candidate.key)) continue;
-      bytes += candidate.size;
-      const where = destinationOf(candidate);
-      counts.set(where, (counts.get(where) || 0) + 1);
+      const day = dayOf(candidate);
+      if (!byDay.has(day)) byDay.set(day, { held: 0, of: 0 });
+      const tally = byDay.get(day);
+      tally.of += 1;
+      if (state.checked.has(candidate.key)) {
+        tally.held += 1;
+        bytes += candidate.size;
+      }
     }
-    destinations.replaceChildren(...[...counts.entries()].sort().map(([where, count]) => {
-      const item = document.createElement('li');
-      const path = document.createElement('span');
-      path.textContent = where;
-      const n = document.createElement('span');
-      n.textContent = count.toLocaleString();
-      item.append(path, n);
-      return item;
-    }));
+    destinations.replaceChildren(...[...byDay.entries()]
+      .sort((a, b) => (a[0] === '') - (b[0] === '') || b[0].localeCompare(a[0]))
+      .map(([day, tally]) => {
+        const item = document.createElement('li');
+        const row = document.createElement('label');
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.dataset.day = day;
+        box.checked = tally.held > 0 && tally.held === tally.of;
+        box.indeterminate = tally.held > 0 && tally.held < tally.of;
+        const when = document.createElement('span');
+        when.textContent = dayTitle(day);
+        const n = document.createElement('span');
+        n.textContent = tally.held === tally.of
+          ? tally.of.toLocaleString()
+          : `${tally.held.toLocaleString()} of ${tally.of.toLocaleString()}`;
+        row.append(box, when, n);
+        item.append(row);
+        return item;
+      }));
+    // The destination said once, as the rule it is — every row repeating
+    // the root was noise wearing a path.
+    document.querySelector('[data-import-into]').textContent =
+      state.kind ? `into ${state.roots[state.kind]}, by date` : 'Choose what these are first.';
     const skipped = state.candidates.length - state.checked.size;
     summary.textContent = `${state.checked.size.toLocaleString()} photographs (${(bytes / 1e9).toFixed(2)} GB)` +
       (skipped ? ` · ${skipped.toLocaleString()} left out` : '');
@@ -337,17 +349,25 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     anchor = null;
   }
 
+  // The day answers for its photographs — the whole date in or out. The
+  // same answer whether it is asked in the stage or in the panel's list.
+  function setDay(day, on) {
+    for (const candidate of state.candidates) {
+      if (dayOf(candidate) !== day) continue;
+      if (on) state.checked.add(candidate.key);
+      else state.checked.delete(candidate.key);
+    }
+    syncChecks();
+    render();
+  }
+
+  destinations.addEventListener('change', (event) => {
+    if (event.target.dataset.day !== undefined) setDay(event.target.dataset.day, event.target.checked);
+  });
   stage.addEventListener('change', (event) => {
     const day = event.target.dataset.day;
     if (day !== undefined) {
-      // The day answers for its photographs — the whole date in or out.
-      for (const candidate of state.candidates) {
-        if (dayOf(candidate) !== day) continue;
-        if (event.target.checked) state.checked.add(candidate.key);
-        else state.checked.delete(candidate.key);
-      }
-      syncChecks();
-      render();
+      setDay(day, event.target.checked);
       return;
     }
     const key = event.target.dataset.key;
