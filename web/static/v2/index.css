@@ -370,8 +370,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 /* Rank: the stage takes the grid's place; cards are equal-area at their own shape */
 .workspace:has(.rank-stage:not([hidden])), .workspace:has(.loupe-stage:not([hidden])) { overflow: hidden; }
 .rank-stage {
-  display: grid;
-  gap: 12px;
+  /* The cards place themselves: equal areas shelf-packed by the layout,
+     so the stage is a canvas, not a grid of uniform cells. */
+  position: relative;
   height: calc(100% - 46px);
   padding: 14px;
 }
@@ -426,9 +427,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .face-card-name-button { margin-top: 6px; width: 100%; }
 .people-door { color: var(--text-3); }
 .rank-card {
-  position: relative;
-  justify-self: center;
-  align-self: center;
+  position: absolute;
   overflow: hidden;
   padding: 0;
   border: 1px solid transparent;

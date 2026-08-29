@@ -409,6 +409,14 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
 
     n = max(2, int(n))
     ordered = _ordered(pool, n, str(mode), space)
+    if ordered:
+        # A set wears its anchor's orientation when the scope can dress it:
+        # two shapes side by side are judged as frames before photographs,
+        # at any set size. The partition is stable, so each mode's own
+        # order holds within the shape — and when the scope runs thin the
+        # set tops up with the rest rather than refusing to deal.
+        like = _orientation(ordered[0])
+        ordered.sort(key=lambda p: _orientation(p) != like)
     chosen: list[dict] = []
     identities: set[str] = set()
     for photo in ordered:
@@ -462,13 +470,12 @@ def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
 
     # close: the least-judged photograph anchors the set; the rest are its
     # nearest neighbours by rating — wear breaks the tie, so the flat crowd
-    # at the default rating rotates instead of repeating.
+    # at the default rating rotates instead of repeating. (Orientation is
+    # not this mode's business: every set is dressed in its anchor's shape
+    # by the one partition in `candidates`.)
     anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
-    if n == 2:
-        return sorted(pool, key=lambda p: (
-            _orientation(p) != _orientation(anchor),
-            abs(p["rating"] - anchor["rating"]), p["comparisons"]))
-    return sorted(pool, key=lambda p: (abs(p["rating"] - anchor["rating"]), p["comparisons"]))
+    return sorted(pool, key=lambda p: (
+        p is not anchor, abs(p["rating"] - anchor["rating"]), p["comparisons"]))
 
 
 def _spread(pool: list[dict], n: int, space) -> list[dict]:

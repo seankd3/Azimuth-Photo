@@ -311,6 +311,20 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     if (event.key === 'ArrowRight') { move(1); return true; }
     if (event.key === 'ArrowUp') { move(-cols); return true; }
     if (event.key === 'ArrowDown') { move(cols); return true; }
+    if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey) {
+      // R turns the card under the mouse (or the keyboard's selection), the
+      // same quick turn the grid gives — a sideways scan shouldn't need a
+      // trip out of the round.
+      const card = stage.querySelector('.rank-card:hover')
+        || (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null);
+      const photo = card && state.set[Number(card.dataset.index)];
+      if (!photo) return false;
+      void product.turn([photo.id], 90).then(() => {
+        photo.rotate = ((photo.rotate || 0) + 90) % 360;
+        render();     // the aspect changed; the shelf re-packs around it
+      }).catch((error) => notify(error.message));
+      return true;
+    }
     if ((event.key === 'Enter' || event.key === ' ') && state.selected >= 0) { void pick(state.selected); return true; }
     return false;
   }
@@ -330,42 +344,87 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     // cells with letterboxing showed a portrait at roughly half a landscape's
     // area, so the wider photograph won attention before taste entered -- a
     // bias written into durable ranking data.
+    //
+    // Equal area, but never uniform cells: a grid sizes every card for the
+    // worst-fitting shape in it and drowns the stage in dead space. The
+    // cards are packed on shelves instead — widest first, rows as tall as
+    // their tallest member — and the area is the largest one whose packing
+    // still fits the stage, found by bisection. The set stays one honest
+    // comparison; the black around it goes to the photographs.
     const cards = [...stage.querySelectorAll('.rank-card')];
     if (!cards.length) return;
-    const [cols, rows] = SIZES[state.size];
     const style = getComputedStyle(stage);
-    const gap = parseFloat(style.gap) || 0;
+    const gap = parseFloat(style.gap) || 12;
     const padX = (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0);
     const padY = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
-    const cell = {
-      width: (stage.clientWidth - padX - gap * (cols - 1)) / cols,
-      height: (stage.clientHeight - padY - gap * (rows - 1)) / rows,
-    };
-    if (cell.width < 1 || cell.height < 1) return;
+    const width = stage.clientWidth - padX;
+    const height = stage.clientHeight - padY;
+    if (width < 1 || height < 1) return;
     const aspects = cards.map((card) => aspectOf(state.set[Number(card.dataset.index)]));
-    const area = Math.min(...aspects.map((ar) => Math.min(cell.height * cell.height * ar, (cell.width * cell.width) / ar)));
-    if (!Number.isFinite(area) || area <= 0) return;
-    cards.forEach((card, i) => {
-      const ar = aspects[i];
-      const width = Math.round(Math.sqrt(area * ar));
-      const height = Math.round(Math.sqrt(area / ar));
-      card.style.width = `${width}px`;
-      card.style.height = `${height}px`;
-      const photo = state.set[Number(card.dataset.index)];
-      const image = card.querySelector('img');
-      const turn = photo.rotate || 0;
-      if (turn === 90 || turn === 270) {
-        image.style.width = `${height}px`;
-        image.style.height = `${width}px`;
-        image.style.left = `${(width - height) / 2}px`;
-        image.style.top = `${(height - width) / 2}px`;
-      } else {
-        image.style.width = '';
-        image.style.height = '';
-        image.style.left = '';
-        image.style.top = '';
+    const order = cards.map((_, i) => i).sort((a, b) => aspects[b] - aspects[a]);
+
+    function shelves(area) {
+      // Greedy shelf packing at one card area; null when it cannot fit.
+      const rows = [];
+      let row = null;
+      for (const i of order) {
+        const w = Math.sqrt(area * aspects[i]);
+        const h = Math.sqrt(area / aspects[i]);
+        if (w > width) return null;
+        if (!row || row.width + gap + w > width) {
+          row = { members: [], width: -gap, tall: 0 };
+          rows.push(row);
+        }
+        row.members.push({ i, w, h });
+        row.width += gap + w;
+        row.tall = Math.max(row.tall, h);
       }
-    });
+      const used = rows.reduce((sum, r) => sum + r.tall, 0) + gap * (rows.length - 1);
+      return used <= height ? rows : null;
+    }
+
+    let low = 1;
+    let high = width * height;
+    for (let step = 0; step < 40; step += 1) {
+      const middle = (low + high) / 2;
+      if (shelves(middle)) low = middle;
+      else high = middle;
+    }
+    const rows = shelves(low);
+    if (!rows) return;
+
+    // Centred as a block: rows share the leftover height evenly, each row
+    // centres its width, each card its own height within the row.
+    const block = rows.reduce((sum, r) => sum + r.tall, 0) + gap * (rows.length - 1);
+    let y = (parseFloat(style.paddingTop) || 0) + (height - block) / 2;
+    for (const row of rows) {
+      let x = (parseFloat(style.paddingLeft) || 0) + (width - row.width) / 2;
+      for (const { i, w, h } of row.members) {
+        const card = cards[i];
+        const cw = Math.round(w);
+        const ch = Math.round(h);
+        card.style.width = `${cw}px`;
+        card.style.height = `${ch}px`;
+        card.style.left = `${Math.round(x)}px`;
+        card.style.top = `${Math.round(y + (row.tall - h) / 2)}px`;
+        x += w + gap;
+        const photo = state.set[Number(card.dataset.index)];
+        const image = card.querySelector('img');
+        const turn = photo.rotate || 0;
+        if (turn === 90 || turn === 270) {
+          image.style.width = `${ch}px`;
+          image.style.height = `${cw}px`;
+          image.style.left = `${(cw - ch) / 2}px`;
+          image.style.top = `${(ch - cw) / 2}px`;
+        } else {
+          image.style.width = '';
+          image.style.height = '';
+          image.style.left = '';
+          image.style.top = '';
+        }
+      }
+      y += row.tall + gap;
+    }
   }
 
   function renderSelection() {
@@ -398,9 +457,6 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
       stage.replaceChildren();
       return;
     }
-    const [cols, rows] = SIZES[state.size];
-    stage.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
-    stage.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
     if (state.set.length < 2) {
       const empty = document.createElement('div');
       empty.className = 'rank-empty';
