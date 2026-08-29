@@ -1726,11 +1726,11 @@ class RankingIsDerived(CoreCase):
         scores = rank.strength(self.conn)
         starred = rank.stars(scores, rank.seen(self.conn))
         self.assertEqual(starred[ids["a"][1]], 5)      # the best of even ten
-        self.assertEqual(starred[ids["b"][1]], 3)      # top 25%: places two and three
-        self.assertEqual(starred[ids["c"][1]], 3)
-        self.assertEqual(starred[ids["d"][1]], 2)      # top 60%
-        self.assertEqual(starred[ids["j"][1]], 1)      # ranked, last
-        self.assertTrue(all(1 <= s <= 5 for s in starred.values()))
+        self.assertEqual(starred[ids["b"][1]], 2)      # each star halves the set
+        self.assertEqual(starred[ids["c"][1]], 1)      # the top third's tail
+        self.assertEqual(starred[ids["d"][1]], 1)
+        self.assertEqual(starred[ids["j"][1]], 0)      # ranked, below the third: bare
+        self.assertTrue(all(0 <= s <= 5 for s in starred.values()))
         # seen fewer than three rounds: ranked but not yet starred
         fresh_id, fresh = self._identified("Raws/fresh.CR2")
         rank.record(self.conn, fresh_id, [ids["j"][0]])
@@ -1741,7 +1741,7 @@ class RankingIsDerived(CoreCase):
         library_surface.rerank(self.conn)
         rows = {row["tail"]: (row["elo"], row["stars"]) for row in self.conn.execute("SELECT tail, elo, stars FROM images")}
         self.assertEqual(rows["Raws/a.CR2"][1], 5)
-        self.assertEqual(rows["Raws/j.CR2"][1], 1)
+        self.assertEqual(rows["Raws/j.CR2"][1], 0)     # ranked, below the third
         self.assertGreater(rows["Raws/a.CR2"][0], rows["Raws/j.CR2"][0])
         self.assertEqual(rows["Raws/fresh.CR2"][1], 0)
         # taking the rounds back empties the order again

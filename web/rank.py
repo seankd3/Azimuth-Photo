@@ -262,12 +262,13 @@ def strength(conn, *, steps: int = 300, rate: float = 1.0, pull: float = 1.0) ->
 # seen in at least this many rounds carries one. One round is luck, two a
 # coincidence, three a pattern.
 EARNED = 3
-# Cumulative shares of the ranked photographs, best first, for five, four,
-# three and two stars; every other ranked photograph has one. A display
+# Cumulative shares of the ranked photographs, best first. One sentence
+# rules the ladder: **each additional star halves the set** — the top third
+# wears a star at all, and every step up is another halving (33% → 16% →
+# 8% → 4% → 2%). Everything below the top third is ranked and unstarred:
+# stars are rare on purpose ("deff not more than half", 08-29). A display
 # choice, not a model one -- the order is the ranking's, this only names it.
-# The shares were sized on the real log (1,488 ranked): one percent is 14
-# five-stars, which is a portfolio, not a pile.
-BANDS = ((5, 0.01), (4, 0.05), (3, 0.25), (2, 0.60))
+BANDS = ((5, 0.02), (4, 0.04), (3, 0.08), (2, 0.16), (1, 1 / 3))
 # The shoot's grace: its top tenth — never fewer than its single best
 # frame — reads three stars even when the world said less.
 GRACE = 0.10
@@ -275,16 +276,18 @@ GRACE = 0.10
 
 def stars(scores: dict[str, float], seen: dict[str, int],
           shoots: dict[str, str] | None = None) -> dict[str, int]:
-    """Every ranked photograph's star: earned in the world, or in the shoot.
+    """Every starred photograph's star: earned in the world, or in the shoot.
 
-    Five and four are absolute — top 1% and top 5% of everything ranked —
-    because they are portfolio currency and travel to Lightroom as plain
-    Ratings; the best of a weak shoot must never mint one. Three is where
-    context belongs: the global top 25%, *or* the top tenth of its own
-    shoot (`shoots` maps subject to its folder), so every shoot keeps a
-    keeper. Top 60% two, the rest one; a photograph never ranked has none.
-    There is no manual star anywhere -- the keys 1 to 5 filter, they do
-    not rate -- so the star cannot disagree with the order.
+    Each additional star halves the set, and only the top third wears one
+    at all. Five and four are absolute — the top 2% and 4% of everything
+    ranked — because they are portfolio currency and travel to Lightroom
+    as plain Ratings; the best of a weak shoot must never mint one. Three
+    is where context belongs: the global top 8%, *or* the top tenth of its
+    own shoot (`shoots` maps subject to its folder), so every shoot keeps
+    a keeper. Below the top third a photograph is ranked and unstarred —
+    stars are rare on purpose. There is no manual star anywhere -- the
+    keys 1 to 5 filter, they do not rate -- so the star cannot disagree
+    with the order.
     """
 
     import math
@@ -297,7 +300,7 @@ def stars(scores: dict[str, float], seen: dict[str, int],
     for place, subject in enumerate(ranked):
         # `place < count * share`, so the best of even a handful is five: a
         # small library has a best frame too.
-        out[subject] = next((star for star, share in BANDS if place < len(ranked) * share), 1)
+        out[subject] = next((star for star, share in BANDS if place < len(ranked) * share), 0)
     if shoots:
         gathered: dict[str, list[str]] = {}
         for subject in ranked:              # ranking order carries into each shoot
