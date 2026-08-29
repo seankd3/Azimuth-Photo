@@ -308,6 +308,37 @@ class BringingPhotographsIn(CoreCase):
         self.assertEqual(intake.guess_kind(self.card({}), ["IMG_0001.CR3"]), intake.RAWS)
         self.assertIsNone(intake.guess_kind(os.path.join(self.tmp, "Photos"), ["a.jpg", "b.jpg"]))
 
+    def test_an_export_is_the_photograph_rendered(self):
+        # A full-resolution JPEG of what the library shows, wearing the
+        # capture facts — never the original leaving through a side door.
+        import exports
+
+        body = self.jpeg(seed="x")
+        src = self.write(self.hot_root, "Raws/2026-05-26/out.jpg", body)
+        said = photos.put(self.conn, src, self.hot["uuid"], "Raws/2026-05-26/out.jpg")
+        self.conn.execute(
+            "UPDATE images SET date_taken = '2026-05-26 18:29:56' WHERE id = ?",
+            (said["id"],))
+        out = os.path.join(self.tmp, "exported")
+        os.makedirs(out)
+
+        self.assertEqual(exports.jpeg(self.conn, said["id"], out), "exported")
+        from PIL import Image as Pillow
+
+        target = os.path.join(out, "out.jpg")
+        with Pillow.open(target) as made:
+            self.assertEqual(made.format, "JPEG")
+            self.assertGreater(made.width, 0)
+            self.assertEqual(made.getexif().get(0x9003) or made.getexif().get_ifd(0x8769).get(0x9003),
+                             "2026:05:26 18:29:56")
+        # A second export steps aside rather than overwriting.
+        self.assertEqual(exports.jpeg(self.conn, said["id"], out), "exported")
+        self.assertTrue(os.path.exists(os.path.join(out, "out-2.jpg")))
+        # A photograph on no drive is said, not failed.
+        self.conn.execute("DELETE FROM copies")
+        self.conn.execute("UPDATE images SET tail = 'Raws/ghost.jpg' WHERE id = ?", (said["id"],))
+        self.assertEqual(exports.jpeg(self.conn, said["id"], out), "missing")
+
     def test_a_renamed_import_is_still_suspected_by_its_capture_second(self):
         # The import renames files to the date scheme, so a name is exactly
         # the thing a previous import did not keep — matching on name alone

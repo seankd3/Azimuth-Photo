@@ -401,6 +401,9 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
             root = None
     if root is None:
         root = ET.fromstring(xmp_write.serialize({}))
+    # Adobe's own sidecars carry an x:xmptk mark; theirs is the toolkit's
+    # name, ours is ours. Readers use it to trust the packet.
+    root.set("{adobe:ns:meta/}xmptk", "Azimuth Photo")
     description = next(root.iter(f"{{{_RDF}}}Description"), None)
     if description is None:
         return {"status": "nothing", "target": target}

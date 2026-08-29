@@ -1195,6 +1195,10 @@ function renderChrome(state) {
         : `More like ${(state.like || []).length === 1 ? 'this photo' : `${(state.like || []).length} photos`}`)
       : (ranking ? 'Rank · ' : '') + (where || 'All photos');
   document.querySelector('[data-action="add-chip"]').hidden = state.view !== 'library' || ranking;
+  // Export acts on the selection; without one there is nothing to offer.
+  document.querySelector('[data-action="export"]').hidden =
+    !['library', 'loupe'].includes(state.view)
+    || !((state.marked && state.marked.size) || state.selected);
   document.querySelector('[data-action="save-view"]').hidden =
     state.view !== 'library' || ranking || searching || !viewOf();
   document.querySelector('[data-action="keep-results"]').hidden = !searching;
@@ -1279,6 +1283,19 @@ document.addEventListener('click', (event) => {
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
   if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
+  if (action === 'export') {
+    const ids = selection();
+    if (!ids.length) return;
+    notify(`Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…`);
+    product.exportPhotos(ids).then((said) => {
+      if (!said.chosen) { notify(''); return; }
+      const parts = [];
+      if (said.exported) parts.push(`${said.exported.toLocaleString()} exported`);
+      if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
+      if (said.failed) parts.push(`${said.failed.toLocaleString()} failed`);
+      notify(`${parts.join(', ') || 'Nothing exported'} — ${said.destination}`);
+    }).catch((error) => notify(error.message));
+  }
   if (action === 'export-folder') {
     const folder = folderMenu.dataset.folder || '';
     folderMenu.hidden = true;

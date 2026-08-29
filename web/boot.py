@@ -1244,6 +1244,31 @@ class OwnedLibrary:
             self._library.swept += 1
             self._library.chores.nudge()
 
+    async def export_files(self, photo_ids, destination: str) -> dict:
+        """Full-resolution JPEGs of the chosen photographs, rendered into
+        one folder of the owner's choosing — the edit applied, the turn
+        honoured, the capture facts carried."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._scan_executor.submit(
+                self._export_files, [int(i) for i in photo_ids], str(destination))
+        return await asyncio.wrap_future(future)
+
+    def _export_files(self, photo_ids, destination: str) -> dict:
+        import exports
+
+        conn = model.connect(self._library.catalog_path)
+        try:
+            os.makedirs(destination, exist_ok=True)
+            tally = {"exported": 0, "missing": 0, "failed": 0}
+            for photo_id in photo_ids:
+                tally[exports.jpeg(conn, photo_id, destination)] += 1
+            return {**tally, "destination": destination}
+        finally:
+            conn.close()
+
     async def adopt_track(self, path: str, offset_hours: float | None = None) -> dict:
         """Read one GPX file and give every dated photograph inside its span
         a place — the phone knew where, the camera knew when."""

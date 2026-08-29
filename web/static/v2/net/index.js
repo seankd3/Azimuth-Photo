@@ -63,6 +63,7 @@ export const library = Object.freeze({
   adoptTrack: () => invoke('adopt_track'),
   identifiers: (view = null, trashed = false) => invoke('identifiers', view, trashed),
   exportFolder: (folder) => invoke('export_settings', null, folder),
+  exportPhotos: (ids) => invoke('export_photos', ids),
   cards: () => invoke('cards'),
   stage: (source) => invoke('stage', source),
   bring: (source, keys, kind, clearSource = false, roll = '', rolls = {}) => invoke('bring', source, keys, kind, clearSource, roll, rolls),
