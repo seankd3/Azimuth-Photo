@@ -1279,6 +1279,18 @@ document.addEventListener('click', (event) => {
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
   if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
+  if (action === 'export-folder') {
+    const folder = folderMenu.dataset.folder || '';
+    folderMenu.hidden = true;
+    notify('Writing sidecars…');
+    product.exportFolder(folder).then((said) => {
+      const parts = [];
+      if (said.written) parts.push(`${said.written.toLocaleString()} written`);
+      if (said.unchanged) parts.push(`${said.unchanged.toLocaleString()} already current`);
+      if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
+      notify(`Lightroom metadata: ${parts.join(', ') || 'nothing to write'}.`);
+    }).catch((error) => notify(error.message));
+  }
   if (action === 'adopt-track') {
     folderMenu.hidden = true;
     product.adoptTrack().then((said) => {
@@ -1362,10 +1374,12 @@ document.addEventListener('keydown', (event) => {
   }
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a' && !isTyping
       && ['library', 'trash'].includes(read().view)) {
-    // Everything the window holds; the label says how many that is.
-    const marked = new Set([...read().photos.values()].map((photo) => photo.id));
-    if (marked.size) update({ marked });
+    // Everything the view holds — the server's whole answer, never just
+    // the pages the scroller happened to load.
     event.preventDefault();
+    product.identifiers(viewOf(), read().view === 'trash').then((ids) => {
+      if (ids.length) update({ marked: new Set(ids) });
+    }).catch((error) => notify(error.message));
     return;
   }
   if (event.key === '/' && !isTyping) {

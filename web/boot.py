@@ -215,6 +215,16 @@ class Library:
         self._open()
         return queries.size(self.conn, scope)
 
+    def identifiers(self, scope: Scope = EVERYTHING, *, trashed: bool = False) -> list[int]:
+        """Every photo id the scope holds — what Select All means, which is
+        the view's whole answer and never just the pages a scroller loaded."""
+
+        self._open()
+        clause, args = scope_where(scope)
+        living = "i.status = 'trashed'" if trashed else queries.IN_LIBRARY
+        return [row["id"] for row in self.conn.execute(
+            f"SELECT i.id FROM images i WHERE {living} AND ({clause})", args)]
+
     def folders(self) -> list[dict]:
         """One tree over every drive, each node with its count and whether
         everything under it has a copy on a record drive."""
@@ -363,12 +373,17 @@ class Library:
             handle.write(render.encode(image, quality=82))
         return Path(target).as_uri() + f"?look={looks}"
 
-    def export_settings(self, photo_ids) -> dict:
-        """The owner's edits, written to sidecars beside the photographs —
-        the round trip's other half. Only the crs surface changes hands;
-        everything else a sidecar holds is kept."""
+    def export_settings(self, photo_ids=None, folder: str = "") -> dict:
+        """The photograph's whole story — settings, stars, pick, words —
+        written to sidecars beside the files; everything else a sidecar
+        holds is kept. Given a folder instead of ids, the whole tree
+        changes hands in one click."""
 
         self._open()
+        if photo_ids is None:
+            clause, args = scope_where(in_folder(folder) if folder else EVERYTHING)
+            photo_ids = [row["id"] for row in self.conn.execute(
+                f"SELECT i.id FROM images i WHERE {queries.IN_LIBRARY} AND ({clause})", args)]
         written = unchanged = missing = 0
         for photo_id in photo_ids:
             row = self.conn.execute(

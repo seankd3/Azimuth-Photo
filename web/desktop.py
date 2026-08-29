@@ -149,6 +149,10 @@ class Desktop:
     def size(self, view: dict | None = None) -> int:
         return self._run(lambda library: library.size(library.viewing(view)))
 
+    def identifiers(self, view: dict | None = None, trashed: bool = False) -> list[int]:
+        return self._run(lambda library: library.identifiers(
+            library.viewing(view), trashed=bool(trashed)))
+
     def folders(self) -> list[dict]:
         return self._run(lambda library: library.folders())
 
@@ -185,8 +189,9 @@ class Desktop:
     def develop_state(self, photo_id: int) -> dict:
         return self._run(lambda library: library.develop_state(int(photo_id)))
 
-    def export_settings(self, photo_ids: list[int]) -> dict:
-        return self._run(lambda library: library.export_settings([int(i) for i in photo_ids]))
+    def export_settings(self, photo_ids: list[int] | None = None, folder: str = "") -> dict:
+        return self._run(lambda library: library.export_settings(
+            None if photo_ids is None else [int(i) for i in photo_ids], folder=str(folder or "")))
 
     def days(self, view: dict | None = None) -> list:
         return self._run(lambda library: library.days(view))
