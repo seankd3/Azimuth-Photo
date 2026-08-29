@@ -520,7 +520,14 @@ def rerank(conn, subjects=None, vectors=None) -> int:
     import rank
 
     scores = rank.ranking(conn, subjects, vectors)
-    starred = rank.stars(scores, rank.seen(conn))
+    # The shoot is the folder: a star can be earned in the world or there.
+    shoots = {
+        row["hash"]: row["tail"].rsplit("/", 1)[0]
+        for row in conn.execute(
+            "SELECT content_hash AS hash, tail FROM images"
+            " WHERE content_hash IS NOT NULL AND tail IS NOT NULL")
+    }
+    starred = rank.stars(scores, rank.seen(conn), shoots)
     conn.execute("UPDATE images SET elo = ?, stars = 0 WHERE elo != ? OR stars != 0", (rank.BASE, rank.BASE))
     conn.executemany(
         "UPDATE images SET elo = ?, stars = ? WHERE content_hash = ?",

@@ -265,17 +265,29 @@ EARNED = 3
 # Cumulative shares of the ranked photographs, best first, for five, four,
 # three and two stars; every other ranked photograph has one. A display
 # choice, not a model one -- the order is the ranking's, this only names it.
-BANDS = ((5, 0.02), (4, 0.10), (3, 0.30), (2, 0.60))
+# The shares were sized on the real log (1,488 ranked): one percent is 14
+# five-stars, which is a portfolio, not a pile.
+BANDS = ((5, 0.01), (4, 0.05), (3, 0.25), (2, 0.60))
+# The shoot's grace: its top tenth — never fewer than its single best
+# frame — reads three stars even when the world said less.
+GRACE = 0.10
 
 
-def stars(scores: dict[str, float], seen: dict[str, int]) -> dict[str, int]:
-    """Every ranked photograph's star, from its place in the ranking.
+def stars(scores: dict[str, float], seen: dict[str, int],
+          shoots: dict[str, str] | None = None) -> dict[str, int]:
+    """Every ranked photograph's star: earned in the world, or in the shoot.
 
-    Top 2% five, top 10% four, top 30% three, top 60% two, the rest one; a
-    photograph never ranked has none. There is no manual star anywhere --
-    the keys 1 to 5 filter, they do not rate -- so the star cannot disagree
-    with the order and Lightroom always receives a real value.
+    Five and four are absolute — top 1% and top 5% of everything ranked —
+    because they are portfolio currency and travel to Lightroom as plain
+    Ratings; the best of a weak shoot must never mint one. Three is where
+    context belongs: the global top 25%, *or* the top tenth of its own
+    shoot (`shoots` maps subject to its folder), so every shoot keeps a
+    keeper. Top 60% two, the rest one; a photograph never ranked has none.
+    There is no manual star anywhere -- the keys 1 to 5 filter, they do
+    not rate -- so the star cannot disagree with the order.
     """
+
+    import math
 
     ranked = sorted(
         (h for h, n in seen.items() if n >= EARNED and h in scores),
@@ -284,8 +296,18 @@ def stars(scores: dict[str, float], seen: dict[str, int]) -> dict[str, int]:
     out: dict[str, int] = {}
     for place, subject in enumerate(ranked):
         # `place < count * share`, so the best of even a handful is five: a
-        # small shoot has a best frame too.
+        # small library has a best frame too.
         out[subject] = next((star for star, share in BANDS if place < len(ranked) * share), 1)
+    if shoots:
+        gathered: dict[str, list[str]] = {}
+        for subject in ranked:              # ranking order carries into each shoot
+            where = shoots.get(subject)
+            if where:
+                gathered.setdefault(where, []).append(subject)
+        for members in gathered.values():
+            for subject in members[: max(1, math.ceil(len(members) * GRACE))]:
+                if out[subject] < 3:
+                    out[subject] = 3
     return out
 
 

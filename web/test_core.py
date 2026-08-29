@@ -1726,7 +1726,7 @@ class RankingIsDerived(CoreCase):
         scores = rank.strength(self.conn)
         starred = rank.stars(scores, rank.seen(self.conn))
         self.assertEqual(starred[ids["a"][1]], 5)      # the best of even ten
-        self.assertEqual(starred[ids["b"][1]], 3)      # top 30%: places two and three
+        self.assertEqual(starred[ids["b"][1]], 3)      # top 25%: places two and three
         self.assertEqual(starred[ids["c"][1]], 3)
         self.assertEqual(starred[ids["d"][1]], 2)      # top 60%
         self.assertEqual(starred[ids["j"][1]], 1)      # ranked, last
@@ -1750,6 +1750,26 @@ class RankingIsDerived(CoreCase):
         library_surface.rerank(self.conn)
         self.assertEqual({row[0] for row in self.conn.execute("SELECT stars FROM images")}, {0})
         self.assertEqual({row[0] for row in self.conn.execute("SELECT elo FROM images")}, {rank.BASE})
+
+    def test_every_shoot_keeps_a_keeper(self):
+        # Five and four stars are absolute — portfolio currency — but the
+        # top tenth of any shoot (never fewer than its best frame) reads
+        # three even when the world ranked it below the global cut.
+        strong = [self._identified(f"Raws/2026-01-01/s{i}.CR2") for i in range(10)]
+        weak = [self._identified(f"Raws/2026-02-02/w{i}.CR2") for i in range(10)]
+        for repeat in range(rank.EARNED):
+            everyone = strong + weak
+            for i in range(len(everyone) - 1):
+                rank.record(self.conn, everyone[i][0], [everyone[i + 1][0]])
+        shoots = {digest: f"Raws/2026-0{1 if (pid, digest) in strong else 2}-0{1 if (pid, digest) in strong else 2}"
+                  for pid, digest in strong + weak}
+        starred = rank.stars(rank.strength(self.conn), rank.seen(self.conn), shoots)
+        best_weak = weak[0][1]
+        self.assertEqual(starred[best_weak], 3, "the weak shoot keeps its keeper")
+        self.assertLess(starred[weak[1][1]], 3, "one keeper, not a tide")
+        self.assertLessEqual(
+            max(starred[d] for _, d in weak), 3,
+            "grace never mints a four or five — those are absolute")
 
     def test_the_worker_grows_the_space_from_the_tiles(self):
         # A vector is computed from the grid tile: owed only where a tile
