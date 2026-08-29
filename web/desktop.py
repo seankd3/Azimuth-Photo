@@ -358,7 +358,8 @@ class Desktop:
         chosen = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         return chosen[0] if chosen else ""
 
-    def export_photos(self, photo_ids: list[int]) -> dict:
+    def export_photos(self, photo_ids: list[int], quality: int = 92,
+                      long_edge: int = 0, rename: str = "") -> dict:
         """Pick a folder and export the chosen photographs into it."""
 
         if self._window is None:
@@ -366,7 +367,9 @@ class Desktop:
         chosen = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         if not chosen:
             return {"chosen": False}
-        return {**self._wait(self._product.export_files(photo_ids, chosen[0])), "chosen": True}
+        return {**self._wait(self._product.export_files(
+            photo_ids, chosen[0], quality=int(quality), long_edge=int(long_edge),
+            rename=str(rename or ""))), "chosen": True}
 
     def adopt_track(self) -> dict:
         """Pick a GPX file and place every photograph its span covers."""

@@ -881,6 +881,16 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .destinations span:first-of-type { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .destinations span:last-child { flex: none; color: var(--text-3); }
 .import-into { margin: 8px 0 0; font: 12px/1.5 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
+.export-dialog { width: 400px; }
+.export-dialog .eyebrow { margin: 16px 0 6px; }
+.export-size button { min-width: 70px; }
+.export-quality, .export-rename { display: block; margin: 14px 0 0; font-size: 13px; color: var(--text-2); }
+.export-quality input[type=range] { width: 100%; margin-top: 6px; accent-color: var(--accent); }
+.export-quality span { color: var(--text); font: 600 12px/1 var(--mono); }
+.export-rename input { display: block; width: 100%; margin-top: 6px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 4px; background: #111215; color: var(--text); font-size: 13px; }
+.export-hint { margin: 10px 0 0; font: 12px/1.5 var(--mono); color: var(--text-3); }
+.export-dialog .primary-button { width: 100%; margin-top: 18px; }
+
 /* A stack's cover wears its count; the badge is the door in. */
 .stack-badge {
   position: absolute;

@@ -761,6 +761,66 @@ async function forgetSelected() {
   }
 }
 
+// The export dialog: the Lightroom essentials and nothing else — long
+// edge, quality, one rename with a chronological sequence. Choices are
+// remembered; the native picker is the last question.
+const exportDialog = document.querySelector('[data-export-dialog]');
+const EXPORT_KEY = 'azimuth.export';
+function openExportDialog() {
+  const ids = selection();
+  if (!ids.length) return;
+  let held = {};
+  try { held = JSON.parse(localStorage.getItem(EXPORT_KEY) || '{}'); } catch { held = {}; }
+  const edge = held.edge ?? 0;
+  for (const button of exportDialog.querySelectorAll('[data-export-size] [data-edge]')) {
+    button.classList.toggle('is-active', Number(button.dataset.edge) === edge);
+  }
+  const quality = exportDialog.querySelector('[data-export-quality]');
+  quality.value = held.quality ?? 92;
+  exportDialog.querySelector('[data-quality-value]').textContent = quality.value;
+  exportDialog.querySelector('[data-export-rename]').value = held.rename ?? '';
+  exportDialog.querySelector('[data-export-count]').textContent =
+    `Export ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}`;
+  renameHint();
+  exportDialog.showModal();
+}
+function renameHint() {
+  const name = exportDialog.querySelector('[data-export-rename]').value.trim();
+  const hint = exportDialog.querySelector('[data-export-hint]');
+  hint.hidden = !name;
+  if (name) hint.textContent = `${name}-001.jpg, ${name}-002.jpg, … in capture order`;
+}
+exportDialog.querySelector('[data-export-rename]').addEventListener('input', renameHint);
+exportDialog.querySelector('[data-export-quality]').addEventListener('input', (event) => {
+  exportDialog.querySelector('[data-quality-value]').textContent = event.target.value;
+});
+exportDialog.querySelector('[data-export-size]').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-edge]');
+  if (!button) return;
+  for (const other of exportDialog.querySelectorAll('[data-export-size] [data-edge]')) {
+    other.classList.toggle('is-active', other === button);
+  }
+});
+document.querySelector('[data-export-form]').addEventListener('submit', (event) => {
+  event.preventDefault();
+  const ids = selection();
+  const edge = Number(exportDialog.querySelector('[data-export-size] .is-active')?.dataset.edge || 0);
+  const quality = Number(exportDialog.querySelector('[data-export-quality]').value);
+  const rename = exportDialog.querySelector('[data-export-rename]').value.trim();
+  localStorage.setItem(EXPORT_KEY, JSON.stringify({ edge, quality, rename }));
+  exportDialog.close();
+  if (!ids.length) return;
+  notify(`Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…`);
+  product.exportPhotos(ids, quality, edge, rename).then((said) => {
+    if (!said.chosen) { notify(''); return; }
+    const parts = [];
+    if (said.exported) parts.push(`${said.exported.toLocaleString()} exported`);
+    if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
+    if (said.failed) parts.push(`${said.failed.toLocaleString()} failed`);
+    notify(`${parts.join(', ') || 'Nothing exported'} — ${said.destination}`);
+  }).catch((error) => notify(error.message));
+});
+
 async function forgetMissing(folder) {
   folderMenu.hidden = true;
   try {
@@ -1283,19 +1343,8 @@ document.addEventListener('click', (event) => {
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
   if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
-  if (action === 'export') {
-    const ids = selection();
-    if (!ids.length) return;
-    notify(`Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…`);
-    product.exportPhotos(ids).then((said) => {
-      if (!said.chosen) { notify(''); return; }
-      const parts = [];
-      if (said.exported) parts.push(`${said.exported.toLocaleString()} exported`);
-      if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
-      if (said.failed) parts.push(`${said.failed.toLocaleString()} failed`);
-      notify(`${parts.join(', ') || 'Nothing exported'} — ${said.destination}`);
-    }).catch((error) => notify(error.message));
-  }
+  if (action === 'export') openExportDialog();
+  if (action === 'close-export') exportDialog.close();
   if (action === 'export-folder') {
     const folder = folderMenu.dataset.folder || '';
     folderMenu.hidden = true;
@@ -1362,7 +1411,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
-  if (homeDialog.open || confirmDialog.open) return;
+  if (homeDialog.open || confirmDialog.open || exportDialog.open) return;
   if (intakeWorkflow.isOpen()) {
     if (event.key === 'Escape') intakeWorkflow.close();
     if (event.key === 'Enter' && !isTyping) {

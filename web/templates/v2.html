@@ -274,6 +274,30 @@
     <button class="primary-button" type="button" data-action="name-ok">Save</button>
   </div>
 
+  <dialog class="confirm-dialog export-dialog" data-export-dialog aria-labelledby="export-title">
+    <form data-export-form>
+      <button class="dialog-close" type="button" data-action="close-export" aria-label="Close">×</button>
+      <p class="eyebrow">Export</p>
+      <h1 id="export-title" data-export-count>Export</h1>
+      <p class="dialog-copy">Full-quality JPEGs of what the library shows — edits applied, capture facts carried.</p>
+      <p class="eyebrow">Long edge</p>
+      <div class="kind-choice export-size" data-export-size>
+        <button type="button" data-edge="0" class="is-active">Full</button>
+        <button type="button" data-edge="4096">4096</button>
+        <button type="button" data-edge="2048">2048</button>
+        <button type="button" data-edge="1024">1024</button>
+      </div>
+      <label class="export-quality">Quality <span data-quality-value>92</span>
+        <input data-export-quality type="range" min="60" max="100" step="1" value="92">
+      </label>
+      <label class="export-rename">Rename to
+        <input data-export-rename type="text" placeholder="Keep original names" autocomplete="off" spellcheck="false">
+      </label>
+      <p class="export-hint" data-export-hint hidden></p>
+      <button class="primary-button" type="submit">Choose where…</button>
+    </form>
+  </dialog>
+
   <div class="toast" data-toast hidden role="status">
     <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
   </div>

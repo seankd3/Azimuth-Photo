@@ -1244,27 +1244,41 @@ class OwnedLibrary:
             self._library.swept += 1
             self._library.chores.nudge()
 
-    async def export_files(self, photo_ids, destination: str) -> dict:
-        """Full-resolution JPEGs of the chosen photographs, rendered into
-        one folder of the owner's choosing — the edit applied, the turn
-        honoured, the capture facts carried."""
+    async def export_files(self, photo_ids, destination: str, *, quality: int = 92,
+                           long_edge: int = 0, rename: str = "") -> dict:
+        """JPEGs of the chosen photographs, rendered into one folder of the
+        owner's choosing — the edit applied, the turn honoured, the capture
+        facts carried. `long_edge` bounds the size (0 is full), `rename`
+        gives every file one name and a chronological sequence."""
 
         with self._state:
             if self._closed:
                 raise RuntimeError("library is closed")
             future = self._scan_executor.submit(
-                self._export_files, [int(i) for i in photo_ids], str(destination))
+                self._export_files, [int(i) for i in photo_ids], str(destination),
+                int(quality), int(long_edge), str(rename or "").strip())
         return await asyncio.wrap_future(future)
 
-    def _export_files(self, photo_ids, destination: str) -> dict:
+    def _export_files(self, photo_ids, destination: str, quality: int,
+                      long_edge: int, rename: str) -> dict:
         import exports
 
         conn = model.connect(self._library.catalog_path)
         try:
             os.makedirs(destination, exist_ok=True)
+            if rename:
+                # The sequence walks capture order, so name-003 was taken
+                # after name-002 no matter how the selection was gathered.
+                marks = ",".join("?" * len(photo_ids))
+                photo_ids = [row["id"] for row in conn.execute(
+                    f"SELECT id FROM images WHERE id IN ({marks})"
+                    " ORDER BY date_taken ASC, id ASC", photo_ids)]
+            wide = max(3, len(str(len(photo_ids))))
             tally = {"exported": 0, "missing": 0, "failed": 0}
-            for photo_id in photo_ids:
-                tally[exports.jpeg(conn, photo_id, destination)] += 1
+            for number, photo_id in enumerate(photo_ids, start=1):
+                stem = f"{rename}-{number:0{wide}d}" if rename else None
+                tally[exports.jpeg(conn, photo_id, destination, quality=quality,
+                                   long_edge=long_edge, stem=stem)] += 1
             return {**tally, "destination": destination}
         finally:
             conn.close()

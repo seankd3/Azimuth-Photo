@@ -18,9 +18,14 @@ from model import photos
 QUALITY = 92
 
 
-def jpeg(conn, photo_id: int, destination: str) -> str:
+def jpeg(conn, photo_id: int, destination: str, *, quality: int = QUALITY,
+         long_edge: int = 0, stem: str | None = None) -> str:
     """Render one photograph into `destination`. Returns the outcome word:
-    exported / missing / failed."""
+    exported / missing / failed.
+
+    `long_edge` bounds the longer side (0 is full resolution); `stem` names
+    the file when a rename asked for one, else the photograph keeps its own.
+    """
 
     row = conn.execute(
         "SELECT content_hash AS hash, tail, file_size, rotate, develop,"
@@ -32,7 +37,7 @@ def jpeg(conn, photo_id: int, destination: str) -> str:
     if source is None:
         return "missing"
 
-    stem = os.path.splitext(os.path.basename(row["tail"]))[0]
+    stem = stem or os.path.splitext(os.path.basename(row["tail"]))[0]
     target = os.path.join(destination, f"{stem}.jpg")
     suffix = 2
     while os.path.exists(target):
@@ -49,9 +54,11 @@ def jpeg(conn, photo_id: int, destination: str) -> str:
     if row["camera_model"]:
         exif[0x0110] = row["camera_model"]
     try:
-        image = render.pixels(source, size=render.FULL, rotate=int(row["rotate"] or 0),
+        image = render.pixels(source, size=max(0, int(long_edge)),
+                              rotate=int(row["rotate"] or 0),
                               edit=developing.parts(row["develop"]) or None)
-        image.save(target, "JPEG", quality=QUALITY, exif=exif.tobytes())
+        image.save(target, "JPEG", quality=max(60, min(100, int(quality))),
+                   exif=exif.tobytes())
     except Exception:  # noqa: BLE001 — one bad frame must not end the batch
         if os.path.exists(target):
             try:

@@ -334,6 +334,12 @@ class BringingPhotographsIn(CoreCase):
         # A second export steps aside rather than overwriting.
         self.assertEqual(exports.jpeg(self.conn, said["id"], out), "exported")
         self.assertTrue(os.path.exists(os.path.join(out, "out-2.jpg")))
+        # A bounded long edge and a rename are honoured.
+        self.assertEqual(
+            exports.jpeg(self.conn, said["id"], out, long_edge=64, stem="client-001"),
+            "exported")
+        with Pillow.open(os.path.join(out, "client-001.jpg")) as small:
+            self.assertLessEqual(max(small.size), 64)
         # A photograph on no drive is said, not failed.
         self.conn.execute("DELETE FROM copies")
         self.conn.execute("UPDATE images SET tail = 'Raws/ghost.jpg' WHERE id = ?", (said["id"],))
