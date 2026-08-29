@@ -41,6 +41,15 @@ def connect(path: str = ":memory:", *, timeout: float = 30.0) -> sqlite3.Connect
         held = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
         if "develop" not in held:
             conn.execute("ALTER TABLE images ADD COLUMN develop TEXT")
+        # `stack_of` names a stacked member's cover frame — a projection of
+        # capture-time cadence (stacks.project), rebuilt whole like every
+        # other decision column.
+        if "stack_of" not in held:
+            conn.execute("ALTER TABLE images ADD COLUMN stack_of INTEGER")
+        # The member set is tiny (covers stay NULL), so the partial index
+        # costs nothing and pays for every cover's member count.
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_stacked"
+                     " ON images(stack_of) WHERE stack_of IS NOT NULL")
         # Without sqlite_stat1 the planner guesses, and at catalog scale it
         # guesses a partial-index scan with a row fetch per entry — measured
         # 587 ms against 42 ms for the plan it picks once it has statistics.

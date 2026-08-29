@@ -2230,6 +2230,70 @@ class SearchNeverRefuses(CoreCase):
             self.assertIn("tile", row)
 
 
+class AStackIsACadence(CoreCase):
+    """Only exactness makes a set: four or more frames on one repeated
+    interval stack behind their first frame; anything less regular is just
+    photographs. The stack is a projection over capture times, the collapse
+    is one scope criterion, and the chip steps inside."""
+
+    def _at(self, tail, when):
+        pid = self.photo(tail)
+        self.conn.execute("UPDATE images SET date_taken = ? WHERE id = ?", (when, pid))
+        return pid
+
+    def test_a_run_at_one_beat_stacks_behind_its_first_frame(self):
+        import stacks
+
+        run = [self._at(f"Raws/t{i}.cr3", f"2026-05-26 18:00:{i * 2:02d}") for i in range(5)]
+        loner = self._at("Raws/loner.cr3", "2026-05-26 18:30:00")
+        trio = [self._at(f"Raws/x{i}.cr3", f"2026-05-26 19:00:{i * 3:02d}") for i in range(3)]
+
+        self.assertEqual(stacks.project(self.conn), 4)
+        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
+        self.assertIsNone(held[run[0]], "the first frame is the cover")
+        self.assertTrue(all(held[i] == run[0] for i in run[1:]))
+        self.assertIsNone(held[loner])
+        self.assertTrue(all(held[i] is None for i in trio), "three frames are not a set")
+
+    def test_a_burst_shares_one_second_and_still_stacks(self):
+        import stacks
+
+        burst = [self._at(f"Raws/b{i}.cr3", "2026-05-26 18:00:07") for i in range(4)]
+        self.assertEqual(stacks.project(self.conn), 3)
+        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
+        self.assertTrue(all(held[i] == burst[0] for i in burst[1:]))
+
+    def test_midnight_dates_carry_no_cadence(self):
+        # Film scans arrive at exact midnight in batches; forty frames "in
+        # one second" there is a save, not a burst.
+        import stacks
+
+        for i in range(6):
+            self._at(f"Raws/scan{i}.tif", "2026-05-26 00:00:00")
+        self.assertEqual(stacks.project(self.conn), 0)
+
+    def test_the_collapse_hides_members_and_the_chip_steps_inside(self):
+        import stacks
+        from model import criteria
+        from model.scope import all_of, covers_only
+
+        run = [self._at(f"Raws/c{i}.cr3", f"2026-05-26 18:00:{i:02d}") for i in range(4)]
+        stacks.project(self.conn)
+
+        resting = [r["id"] for r in library_surface.photos(
+            self.conn, scope=covers_only())]
+        self.assertIn(run[0], resting)
+        self.assertTrue(all(i not in resting for i in run[1:]))
+        cover = next(r for r in library_surface.photos(self.conn, scope=covers_only())
+                     if r["id"] == run[0])
+        self.assertEqual(cover["stack"], 3, "the cover carries its member count")
+
+        inside = [r["id"] for r in library_surface.photos(
+            self.conn,
+            scope=criteria.compile(self.conn, [{"is": "stack", "values": [str(run[0])]}]))]
+        self.assertEqual(sorted(inside), sorted(run))
+
+
 class AModeIsAnOrdering(CoreCase):
     """Rank's selection modes are small pure orderings over one pool —
     tournament seats the judged leaders, diverse spreads across the range,

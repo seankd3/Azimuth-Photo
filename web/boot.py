@@ -25,10 +25,11 @@ import model
 import rank
 import render
 import search as finding
+import stacks
 import tiles
 import work
 from model import cache, copies, criteria, cull, decisions, drives, intake, photos, sets, trash
-from model.scope import EVERYTHING, Scope, all_of, any_of, folder as in_folder, ids as these, outside, where as scope_where
+from model.scope import EVERYTHING, Scope, all_of, any_of, covers_only, folder as in_folder, ids as these, outside, where as scope_where
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -75,6 +76,8 @@ class Library:
             # The develop column is an index over the log, same as the
             # metadata columns above it.
             developing.reindex(self.conn)
+            # And the stack column is an index over capture-time cadence.
+            stacks.project(self.conn)
         except Exception:
             self.conn.close()
             raise
@@ -129,6 +132,7 @@ class Library:
             if said.get("applied") and root:
                 said["edits_adopted"] = developing.adopt(
                     self.conn, root, said["sidecars"], said.get("changed") or ())
+                stacks.project(self.conn)
             return said
         finally:
             self.chores.nudge()
@@ -159,6 +163,10 @@ class Library:
             parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
             parts.append(criteria.compile(self.conn, view["chips"]))
+        # The browse's resting state: stack members wait behind their cover.
+        # A stack chip is the step inside, so it lifts the collapse.
+        if not any(c.get("is") == "stack" for c in (view.get("chips") or ())):
+            parts.append(covers_only())
         return all_of(*parts)
 
     def _shelf(self, set_id: str) -> Scope:
@@ -832,7 +840,11 @@ class Library:
         ("Everything, just not by default", 07-31)."""
 
         looking = self.viewing(view)
-        return looking if looking else outside(intake.ROOTS[intake.SNAPSHOTS])
+        if looking:
+            return looking
+        # The default draw keeps stacks collapsed too: twenty-six frames of
+        # one burst must not flood a round.
+        return all_of(outside(intake.ROOTS[intake.SNAPSHOTS]), covers_only())
 
     def rank(self, n: int = 9, view: dict | None = None, avoid=(),
              mode: str = "close", space=None) -> dict:
@@ -1198,6 +1210,7 @@ class OwnedLibrary:
             if said.get("applied") and root:
                 said["edits_adopted"] = developing.adopt(
                     conn, root, said["sidecars"], said.get("changed") or ())
+                stacks.project(conn)
             return said
         finally:
             conn.close()

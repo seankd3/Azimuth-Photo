@@ -143,6 +143,18 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
+  if (photo.stack) {
+    // A cover fronts its run — a burst, a timelapse, a panorama sweep —
+    // and the badge is the door in.
+    const badge = element('button', 'stack-badge', `▤ ${photo.stack + 1}`);
+    badge.type = 'button';
+    badge.title = `A set of ${photo.stack + 1} — click to open`;
+    badge.addEventListener('click', (event) => {
+      event.stopPropagation();
+      actions.stack?.(photo);
+    });
+    cell.append(badge);
+  }
   cell.addEventListener('click', (event) => {
     // Clicking a photograph makes the grid the keyboard's surface — Y/N
     // and the cull keys must land here even if a search box held focus.

@@ -262,6 +262,20 @@ def orientation(values) -> Scope:
     return Scope(f"i.width > 0 AND i.height > 0 AND ({sql})")
 
 
+def stacked_under(cover_id: int) -> Scope:
+    """Inside one stack: its cover and every member."""
+
+    cover = int(cover_id)
+    return Scope("(i.id = ? OR i.stack_of = ?)", (cover, cover))
+
+
+def covers_only() -> Scope:
+    """The library with its stacks collapsed: members wait behind their
+    cover. The browse's resting state; a stack chip steps inside."""
+
+    return Scope("i.stack_of IS NULL")
+
+
 def ids(image_ids) -> Scope:
     """An explicit list of image ids as one JSON-bound argument.
 

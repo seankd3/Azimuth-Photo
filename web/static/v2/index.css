@@ -881,6 +881,21 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .destinations span:first-of-type { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .destinations span:last-child { flex: none; color: var(--text-3); }
 .import-into { margin: 8px 0 0; font: 12px/1.5 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
+/* A stack's cover wears its count; the badge is the door in. */
+.stack-badge {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  z-index: 2;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 4px;
+  background: rgb(0 0 0 / 62%);
+  color: var(--text);
+  font: 600 11px/1 var(--mono);
+  cursor: pointer;
+}
+.stack-badge:hover { background: rgb(0 0 0 / 85%); }
 .import-choose { display: flex; gap: 6px; }
 .import-progress { margin: 10px 0 0; color: var(--text); font-size: 13px; }
 .toast {

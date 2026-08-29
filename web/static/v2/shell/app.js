@@ -510,6 +510,13 @@ function visibleGrid() {
     emptyAction: inTrash || searching || scanning || inAlbum ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
+    stack: (photo) => {
+      // Stepping into a stack narrows the same view by one chip; its ×
+      // is the step back out.
+      const held = (read().chips || []).filter((c) => c.is !== 'stack');
+      update({ chips: [...held, { is: 'stack', values: [String(photo.id)] }] });
+      viewMoved();
+    },
     drag: (index, event) => {
       const photo = read().photos.get(index);
       if (!photo) return;

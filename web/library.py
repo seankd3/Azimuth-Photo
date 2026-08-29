@@ -178,6 +178,8 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
     columns.append(
         f", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id AND c.drive_id IN ({holes})) AS reachable"
         ", EXISTS (SELECT 1 FROM copies c WHERE c.photo_id = i.id) AS placed"
+        # A cover says how many frames wait behind it; everyone else says 0.
+        ", (SELECT COUNT(*) FROM images s WHERE s.stack_of = i.id) AS stack"
     )
     # The page's ids are walked first, on the bare table where the partial
     # indexes cover the whole skip; the joins and per-row subqueries then run

@@ -51,6 +51,9 @@ FIELDS = {
     "alike": ("values",),
     "stars": ("least",),
     "taken": ("from", "to"),
+    # Inside one stack: the value is the cover frame's id. The chip is how
+    # a collapsed run opens — the browse's resting state hides members.
+    "stack": ("values",),
 }
 
 # fields whose values are a closed set rather than whatever the files say
@@ -130,6 +133,8 @@ def compile(conn, chips, _seen: frozenset = frozenset()) -> Scope:
             built = any_of(scopes.person(chip["values"]), scopes.label(chip["values"]))
         elif field == "stars":
             built = scopes.starred(chip["least"])
+        elif field == "stack":
+            built = any_of(*(scopes.stacked_under(int(v)) for v in chip["values"]))
         else:
             built = scopes.taken(chip["from"], chip["to"])
         parts.append(not_of(built) if chip.get("not") else built)
