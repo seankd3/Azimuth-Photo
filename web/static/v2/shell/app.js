@@ -1534,7 +1534,7 @@ const photoVerbs = () => [
   },
   { label: 'More like this', run: () => moreLikeThis(selection()) },
   {
-    label: 'Save settings to file',
+    label: 'Save metadata for Lightroom',
     run: async () => {
       try {
         const said = await product.exportSettings(selection());

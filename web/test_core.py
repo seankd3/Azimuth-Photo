@@ -2615,6 +2615,43 @@ class AnEditIsADecision(CoreCase):
         # Writing again with nothing changed says so and touches nothing.
         self.assertEqual(developing.write_sidecar(self.conn, digest, raw)["status"], "unchanged")
 
+    def test_the_sidecar_carries_the_verdicts_lightroom_reads(self):
+        # Stars become xmp:Rating, a pick becomes the Green label (XMP has
+        # no flag field Lightroom reads), and the taught words become
+        # dc:subject keywords unioned with the file's own — Lightroom's
+        # vocabulary is never dropped.
+        import develop as developing
+
+        photo_id = self.photo("Raws/told.cr3")
+        digest = "d1" * 32
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, stars = 4, status = 'picked' WHERE id = ?",
+            (digest, photo_id))
+        self.conn.execute(
+            "INSERT INTO cache (hash, kind, recipe, state, value, at)"
+            " VALUES (?, 'alike', '{}', 'ready', ?, 1)", (digest, '["sunset"]'))
+        folder = os.path.join(self.tmp, "Raws")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "told.xmp"), "w", encoding="utf-8") as handle:
+            handle.write(
+                '<x:xmpmeta xmlns:x="adobe:ns:meta/">'
+                '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">'
+                '<rdf:Description rdf:about=""'
+                ' xmlns:dc="http://purl.org/dc/elements/1.1/">'
+                '<dc:subject><rdf:Bag><rdf:li>their-word</rdf:li></rdf:Bag></dc:subject>'
+                '</rdf:Description></rdf:RDF></x:xmpmeta>')
+
+        raw = os.path.join(folder, "told.cr3")
+        said = developing.write_sidecar(self.conn, digest, raw)
+        self.assertEqual(said["status"], "written")
+        text = open(said["target"], encoding="utf-8").read()
+        self.assertIn('Rating="4"', text)
+        self.assertIn('Label="Green"', text)
+        self.assertIn("their-word", text)                # theirs kept
+        self.assertIn("sunset", text)                    # ours joined
+        self.assertEqual(
+            developing.write_sidecar(self.conn, digest, raw)["status"], "unchanged")
+
     def test_a_cropped_tile_is_cut_from_the_plain_loupe_without_the_original(self):
         import develop as developing
         from PIL import Image as Pillow

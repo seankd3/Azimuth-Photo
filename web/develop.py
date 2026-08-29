@@ -364,8 +364,9 @@ def parts(fragment_json: str | None) -> dict:
 
 
 def write_sidecar(conn, digest: str, photo_path: str) -> dict:
-    """The round trip's other half: the photograph's current settings into
-    the sidecar beside it — the LRTimelapse discipline.
+    """The round trip's other half: the photograph's whole story into the
+    sidecar beside it — settings, stars, pick, words — the LRTimelapse
+    discipline.
 
     The crs surface becomes exactly ours (Lightroom's spellings for what it
     wrote, Adobe's spelling for what the owner changed here); every other
@@ -377,15 +378,14 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
     from features.develop import xmp_write
 
     ours = settings(conn, digest)
-    if not ours:
-        return {"status": "nothing"}
     target = os.path.splitext(str(photo_path))[0] + ".xmp"
     for prefix, uri in (
         ("x", "adobe:ns:meta/"), ("rdf", _RDF), ("crs", _CRS),
-        ("xmp", "http://ns.adobe.com/xap/1.0/"),
+        ("xmp", _XMP),
         ("tiff", "http://ns.adobe.com/tiff/1.0/"),
         ("exif", "http://ns.adobe.com/exif/1.0/"),
-        ("dc", "http://purl.org/dc/elements/1.1/"),
+        ("dc", _DC),
+        ("lr", _LR),
         ("aux", "http://ns.adobe.com/exif/1.0/aux/"),
         ("photoshop", "http://ns.adobe.com/photoshop/1.0/"),
         ("xmpMM", "http://ns.adobe.com/xap/1.0/mm/"),
@@ -393,28 +393,86 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
         ("crd", "http://ns.adobe.com/camera-raw-defaults/1.0/"),
     ):
         ET.register_namespace(prefix, uri)
+    root = None
     if os.path.isfile(target):
         try:
-            tree = ET.parse(target)
+            root = ET.parse(target).getroot()
         except (ET.ParseError, OSError):
-            tree = None
-        description = None if tree is None else next(
-            tree.getroot().iter(f"{{{_RDF}}}Description"), None)
-        if description is not None:
-            for name in [n for n in description.attrib if n.startswith(f"{{{_CRS}}}")]:
-                del description.attrib[name]
-            for child in [c for c in description if c.tag.startswith(f"{{{_CRS}}}")]:
-                description.remove(child)
-            xmp_write._append_resource(description, ours)
-            payload = ET.tostring(tree.getroot(), encoding="utf-8")
-        else:
-            payload = xmp_write.serialize(ours).encode("utf-8")
-    else:
-        payload = xmp_write.serialize(ours).encode("utf-8")
+            root = None
+    if root is None:
+        root = ET.fromstring(xmp_write.serialize({}))
+    description = next(root.iter(f"{{{_RDF}}}Description"), None)
+    if description is None:
+        return {"status": "nothing", "target": target}
+    for name in [n for n in description.attrib if n.startswith(f"{{{_CRS}}}")]:
+        del description.attrib[name]
+    for child in [c for c in description if c.tag.startswith(f"{{{_CRS}}}")]:
+        description.remove(child)
+    if ours:
+        xmp_write._append_resource(description, ours)
+    _tell_lightroom(conn, digest, description)
+    payload = ET.tostring(root, encoding="utf-8")
     from pathlib import Path
 
     changed = xmp_write._atomic_write(Path(target), payload)
     return {"status": "written" if changed else "unchanged", "target": target}
+
+
+_XMP = "http://ns.adobe.com/xap/1.0/"
+_DC = "http://purl.org/dc/elements/1.1/"
+_LR = "http://ns.adobe.com/lightroom/1.0/"
+
+
+def _tell_lightroom(conn, digest: str, description) -> None:
+    """The library's own verdicts, in the spellings Lightroom reads.
+
+    Stars become ``xmp:Rating`` and a pick becomes the Green color label —
+    XMP has no flag field Lightroom will read; flags never leave a catalog,
+    and the color label is the honest visible stand-in. The taught words and
+    people become ``dc:subject`` keywords (and the flat half of
+    ``lr:hierarchicalSubject``), *unioned* with whatever keywords the file
+    already carried — Lightroom's own vocabulary is never dropped.
+    """
+
+    import json
+
+    row = conn.execute(
+        "SELECT stars, status FROM images WHERE content_hash = ? LIMIT 1",
+        (str(digest),)).fetchone()
+    if row is None:
+        return
+    rating = f"{{{_XMP}}}Rating"
+    if int(row["stars"] or 0):
+        description.set(rating, str(int(row["stars"])))
+    else:
+        description.attrib.pop(rating, None)
+    label = f"{{{_XMP}}}Label"
+    if row["status"] == "picked":
+        description.set(label, "Green")
+    elif description.get(label) == "Green":
+        del description.attrib[label]
+
+    words: set[str] = set()
+    for held in conn.execute(
+        "SELECT value FROM cache WHERE kind IN ('alike', 'people')"
+        " AND state = 'ready' AND hash = ?", (str(digest),)):
+        try:
+            said = json.loads(held["value"])
+        except (TypeError, ValueError):
+            continue
+        words |= {str(w) for w in (said if isinstance(said, list) else []) if str(w)}
+    if not words:
+        return
+    for tag in (f"{{{_DC}}}subject", f"{{{_LR}}}hierarchicalSubject"):
+        element = description.find(tag)
+        if element is None:
+            element = ET.SubElement(description, tag)
+        bag = element.find(f"{{{_RDF}}}Bag")
+        if bag is None:
+            bag = ET.SubElement(element, f"{{{_RDF}}}Bag")
+        carried = {li.text for li in bag.iter(f"{{{_RDF}}}li") if li.text}
+        for word in sorted(words - carried):
+            ET.SubElement(bag, f"{{{_RDF}}}li").text = word
 
 
 def crop_of(fragment_json: str | None) -> tuple[float, float, float, float] | None:
