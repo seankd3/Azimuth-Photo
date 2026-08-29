@@ -44,6 +44,7 @@ FIELDS = {
     "camera": ("values",),
     "status": ("values",),
     "orientation": ("values",),
+    "look": ("values",),
     "person": ("values",),
     "label": ("values",),
     # Legacy spelling from the clusters era; compiles as person-or-label so a
@@ -60,6 +61,7 @@ FIELDS = {
 CLOSED = {
     "status": ("unflagged", "picked"),
     "orientation": ("landscape", "portrait", "square"),
+    "look": ("color", "bw", "sepia"),
 }
 
 
@@ -125,6 +127,8 @@ def compile(conn, chips, _seen: frozenset = frozenset()) -> Scope:
             built = scopes.status(chip["values"])
         elif field == "orientation":
             built = scopes.orientation(chip["values"])
+        elif field == "look":
+            built = scopes.look(chip["values"])
         elif field == "person":
             built = scopes.person(chip["values"])
         elif field == "label":

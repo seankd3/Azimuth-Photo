@@ -22,6 +22,7 @@ import faces
 import library as queries
 import metadata as embedded_metadata
 import model
+import photostats
 import places
 import rank
 import render
@@ -52,6 +53,9 @@ class Library:
         # Faces ride the same worker: found on the CPU, kept forever, and
         # clustered into people on the rank lane's rhythm.
         self.looking_at_people = faces.kind(self.tiles)
+        # And the photographic facts the embedding throws away — palette,
+        # tone, sharpness, and the color/bw/sepia word the Look chip reads.
+        self.knowing_looks = photostats.kind(self.tiles)
         self.conn = model.connect(self.catalog_path)
         try:
             # Residue of the retired rule that stored a projection failure as
@@ -90,7 +94,8 @@ class Library:
         self.swept = 0
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
-            (embedded_metadata.KIND, *self.tiles.kinds, self.space, self.looking_at_people),
+            (embedded_metadata.KIND, *self.tiles.kinds, self.space,
+             self.looking_at_people, self.knowing_looks),
             on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
             # A decode is one core for a third of a second; a quarter of the

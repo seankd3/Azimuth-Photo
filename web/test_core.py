@@ -2230,6 +2230,41 @@ class SearchNeverRefuses(CoreCase):
             self.assertIn("tile", row)
 
 
+class ALookIsAChromaFact(CoreCase):
+    """Color, black & white, or sepia: chroma statistics over the lit pixels
+    answer outright, and the Look chip reads the measured word."""
+
+    def _tile(self, name, rgb):
+        from PIL import Image
+
+        path = os.path.join(self.tmp, name)
+        Image.new("RGB", (64, 64), rgb).save(path, "JPEG", quality=95)
+        return path
+
+    def test_chroma_names_the_look(self):
+        import photostats
+
+        self.assertEqual(photostats.measure(self._tile("g.jpg", (128, 128, 128)))["look"], "bw")
+        self.assertEqual(photostats.measure(self._tile("s.jpg", (140, 130, 115)))["look"], "sepia")
+        self.assertEqual(photostats.measure(self._tile("c.jpg", (200, 80, 60)))["look"], "color")
+
+    def test_the_look_chip_reads_the_measured_word(self):
+        from model import criteria
+
+        mono = self.photo("Raws/mono.cr3")
+        vivid = self.photo("Raws/vivid.cr3")
+        for pid, digest, look in ((mono, "aa" * 32, "bw"), (vivid, "bb" * 32, "color")):
+            self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, pid))
+            self.conn.execute(
+                "INSERT INTO cache (hash, kind, recipe, state, value, at)"
+                " VALUES (?, 'photostats', '{}', 'ready', ?, 1)",
+                (digest, '{"chroma_mean": 1.0, "look": "%s"}' % look))
+
+        found = [r["id"] for r in library_surface.photos(
+            self.conn, scope=criteria.compile(self.conn, [{"is": "look", "values": ["bw"]}]))]
+        self.assertEqual(found, [mono])
+
+
 class APlaceIsAFunctionOfTime(CoreCase):
     """The camera knows when, the phone knows where: a GPX track places
     every dated photograph inside its span, interpolated between points; a

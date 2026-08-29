@@ -8,7 +8,7 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
-const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', person: 'Person', label: 'Label', alike: 'Alike', in: 'In' };
+const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', look: 'Look', person: 'Person', label: 'Label', alike: 'Alike', in: 'In' };
 
 export function createFilterBar({ product, read, update, onChange }) {
   const bar = document.querySelector('[data-chips]');
@@ -138,6 +138,8 @@ export function createFilterBar({ product, read, update, onChange }) {
         offered = [['picked', 'Picked'], ['unflagged', 'Unflagged']];
       } else if (chip.is === 'orientation') {
         offered = [['landscape', 'Landscape'], ['portrait', 'Portrait'], ['square', 'Square']];
+      } else if (chip.is === 'look') {
+        offered = [['color', 'Color'], ['bw', 'Black & white'], ['sepia', 'Sepia']];
       } else if (chip.is === 'person') {
         const known = (read().people || []).filter((p) => p.settled).map((p) => p.term);
         offered = [...new Set([...chip.values, ...known])].map((t) => [t, t]);

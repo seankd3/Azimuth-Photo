@@ -262,6 +262,23 @@ def orientation(values) -> Scope:
     return Scope(f"i.width > 0 AND i.height > 0 AND ({sql})")
 
 
+def look(values) -> Scope:
+    """Color, black & white, or sepia — chroma statistics answer outright,
+    and the word lives in the photostats cache beside the numbers it is
+    derived from. A photograph not yet measured matches no look."""
+
+    allowed = ("color", "bw", "sepia")
+    wanted = sorted({str(v) for v in values if str(v) in allowed})
+    if not wanted:
+        return EVERYTHING
+    marks = ",".join("?" for _ in wanted)
+    return Scope(
+        "EXISTS (SELECT 1 FROM cache lk WHERE lk.hash = i.content_hash"
+        " AND lk.kind = 'photostats' AND lk.state = 'ready'"
+        f" AND json_extract(lk.value, '$.look') IN ({marks}))",
+        tuple(wanted))
+
+
 def stacked_under(cover_id: int) -> Scope:
     """Inside one stack: its cover and every member."""
 
