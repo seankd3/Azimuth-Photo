@@ -353,6 +353,17 @@ class Desktop:
         chosen = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         return chosen[0] if chosen else ""
 
+    def adopt_track(self) -> dict:
+        """Pick a GPX file and place every photograph its span covers."""
+
+        if self._window is None:
+            raise RuntimeError("desktop window is unavailable")
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.OPEN, file_types=("GPS tracks (*.gpx)",))
+        if not chosen:
+            return {"placed": 0, "chosen": False}
+        return {**self._wait(self._product.adopt_track(chosen[0])), "chosen": True}
+
     def close(self) -> None:
         with self._close_lock:
             if self._closed:

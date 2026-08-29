@@ -23,11 +23,18 @@ IFD0 = {
     0x010F: "make",
     0x0110: "model",
     0x8769: None,
+    0x8825: None,
 }
 EXIF = {
     0x9003: "date_taken",
     0x9004: "date_digitized",
     0xA434: "lens",
+}
+GPS = {
+    0x0001: "gps_lat_ref",
+    0x0002: "gps_lat",
+    0x0003: "gps_lon_ref",
+    0x0004: "gps_lon",
 }
 TYPE_BYTES = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 7: 1, 9: 4, 10: 8}
 
@@ -109,6 +116,9 @@ def _ifd(
         if tag == 0x8769:
             child = struct.unpack_from(endian + "I", data, position + 8)[0]
             _ifd(data, base, child, endian, EXIF, found, depth=depth + 1)
+        elif tag == 0x8825 and wanted is IFD0:
+            child = struct.unpack_from(endian + "I", data, position + 8)[0]
+            _ifd(data, base, child, endian, GPS, found, depth=depth + 1)
         elif tag in wanted and start >= base and start + size <= len(data):
             name = wanted[tag]
             if name:
@@ -125,4 +135,11 @@ def _value(data: bytes, start: int, data_type: int, number: int, endian: str):
         return struct.unpack_from(endian + "H", data, start)[0]
     if data_type == 4:
         return struct.unpack_from(endian + "I", data, start)[0]
+    if data_type == 5:
+        # Unsigned rationals — a GPS coordinate is three of them (d, m, s).
+        parts = []
+        for i in range(min(number, 3)):
+            top, bottom = struct.unpack_from(endian + "II", data, start + 8 * i)
+            parts.append(top / bottom if bottom else 0.0)
+        return tuple(parts)
     return None

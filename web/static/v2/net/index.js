@@ -60,6 +60,7 @@ export const library = Object.freeze({
   round: (winnerId, overIds) => invoke('round', winnerId, overIds),
   unround: (decision) => invoke('unround', decision),
   forgetMissing: (folder = '', dry = false) => invoke('forget_missing', folder, dry),
+  adoptTrack: () => invoke('adopt_track'),
   cards: () => invoke('cards'),
   stage: (source) => invoke('stage', source),
   bring: (source, keys, kind, clearSource = false, roll = '', rolls = {}) => invoke('bring', source, keys, kind, clearSource, roll, rolls),

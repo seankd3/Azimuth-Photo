@@ -22,6 +22,7 @@ import faces
 import library as queries
 import metadata as embedded_metadata
 import model
+import places
 import rank
 import render
 import search as finding
@@ -953,6 +954,12 @@ class Library:
         ):
             return None
         answer = embedded_metadata.decoded(entry)
+        # A place decided (from a track, or one day by hand) outranks the
+        # file's own; the file's stands where nothing was ever decided.
+        placed = places.of(self.conn, digest)
+        if placed:
+            answer["lat"] = placed.get("lat")
+            answer["lon"] = placed.get("lon")
         # How this photograph's score is known: the rounds it was actually
         # in. Zero with a moved score means the ranking predicted it.
         answer["rounds"] = rank.seen(self.conn).get(digest, 0)
@@ -1216,6 +1223,24 @@ class OwnedLibrary:
             conn.close()
             self._library.swept += 1
             self._library.chores.nudge()
+
+    async def adopt_track(self, path: str, offset_hours: float | None = None) -> dict:
+        """Read one GPX file and give every dated photograph inside its span
+        a place — the phone knew where, the camera knew when."""
+
+        with self._state:
+            if self._closed:
+                raise RuntimeError("library is closed")
+            future = self._scan_executor.submit(self._adopt_track, str(path), offset_hours)
+        return await asyncio.wrap_future(future)
+
+    def _adopt_track(self, path: str, offset_hours: float | None) -> dict:
+        conn = model.connect(self._library.catalog_path)
+        try:
+            offset = None if offset_hours is None else float(offset_hours) * 3600.0
+            return {"placed": places.adopt_track(conn, path, offset_seconds=offset)}
+        finally:
+            conn.close()
 
     async def synchronize(self, folder: str = "") -> list[dict]:
         """Sweep one folder (or everything) on every drive that is here now --

@@ -2230,6 +2230,60 @@ class SearchNeverRefuses(CoreCase):
             self.assertIn("tile", row)
 
 
+class APlaceIsAFunctionOfTime(CoreCase):
+    """The camera knows when, the phone knows where: a GPX track places
+    every dated photograph inside its span, interpolated between points; a
+    file that carries its own position is left alone."""
+
+    GPX = """<?xml version="1.0"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" version="1.1">
+ <trk><trkseg>
+  <trkpt lat="37.0" lon="-118.0"><time>2026-05-26T18:00:00Z</time></trkpt>
+  <trkpt lat="38.0" lon="-119.0"><time>2026-05-26T18:10:00Z</time></trkpt>
+ </trkseg></trk></gpx>"""
+
+    def _dated(self, tail, digest, when):
+        pid = self.photo(tail)
+        self.conn.execute(
+            "UPDATE images SET content_hash = ?, date_taken = ? WHERE id = ?",
+            (digest, when, pid))
+        return pid
+
+    def _track(self):
+        path = os.path.join(self.tmp, "walk.gpx")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(self.GPX)
+        return path
+
+    def test_a_track_places_dated_photographs_between_its_points(self):
+        import places
+
+        digest = "ab" * 32
+        self._dated("Raws/here.cr3", digest, "2026-05-26 18:05:00")
+        self._dated("Raws/far.cr3", "cd" * 32, "2026-05-26 23:00:00")
+
+        placed = places.adopt_track(self.conn, self._track(), offset_seconds=0)
+        self.assertEqual(placed, 1, "only the photograph inside the span")
+        held = places.of(self.conn, digest)
+        self.assertAlmostEqual(held["lat"], 37.5, places=4)
+        self.assertAlmostEqual(held["lon"], -118.5, places=4)
+        # Reading the same track twice decides nothing new.
+        self.assertEqual(places.adopt_track(self.conn, self._track(), offset_seconds=0), 0)
+
+    def test_a_file_that_knows_its_own_place_is_left_alone(self):
+        import places
+        from model import cache as caching
+
+        digest = "ef" * 32
+        self._dated("Raws/phone.jpg", digest, "2026-05-26 18:05:00")
+        self.conn.execute(
+            "INSERT INTO cache (hash, kind, recipe, state, value, at)"
+            " VALUES (?, 'metadata', '{}', 'ready', ?, 1)",
+            (digest, '{"width": 100, "height": 100, "lat": 1.0, "lon": 2.0}'))
+        self.assertEqual(places.adopt_track(self.conn, self._track(), offset_seconds=0), 0)
+        self.assertIsNone(places.of(self.conn, digest), "the file already said")
+
+
 class AStackIsACadence(CoreCase):
     """Only exactness makes a set: four or more frames on one repeated
     interval stack behind their first frame; anything less regular is just

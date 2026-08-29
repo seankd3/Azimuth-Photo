@@ -40,9 +40,27 @@ def read(path: str, *, description: bool = False) -> dict:
     ):
         if value:
             answer[name] = value
+    lat = _degrees(tags.get("gps_lat"), _text(tags.get("gps_lat_ref")), "S")
+    lon = _degrees(tags.get("gps_lon"), _text(tags.get("gps_lon_ref")), "W")
+    if lat is not None and lon is not None:
+        answer["lat"] = lat
+        answer["lon"] = lon
     if description:
         answer["description"] = _text(tags.get("description"))
     return answer
+
+
+def _degrees(parts, ref: str, negative: str) -> float | None:
+    """Degrees-minutes-seconds rationals as one signed decimal degree."""
+
+    try:
+        d, m, s = (float(p) for p in (*parts, 0, 0)[:3])
+    except (TypeError, ValueError):
+        return None
+    value = d + m / 60.0 + s / 3600.0
+    if not 0.0 <= value <= 180.0:
+        return None
+    return round(-value if ref.upper().startswith(negative) else value, 6)
 
 
 def make(path: str, _digest: str) -> cache.Made:
@@ -161,6 +179,10 @@ def _display_tags(path: str) -> dict:
                 pass
     except (OSError, SyntaxError, TypeError, ValueError):
         return {}
+    try:
+        gps = dict(embedded.get_ifd(ExifTags.IFD.GPSInfo))
+    except (AttributeError, KeyError, TypeError, ValueError):
+        gps = {}
     return {
         "make": values.get(0x010F),
         "model": values.get(0x0110),
@@ -168,6 +190,10 @@ def _display_tags(path: str) -> dict:
         "date_digitized": values.get(0x9004),
         "lens": values.get(0xA434),
         "description": values.get(0x010E) or values.get(0x9286),
+        "gps_lat_ref": gps.get(1),
+        "gps_lat": gps.get(2),
+        "gps_lon_ref": gps.get(3),
+        "gps_lon": gps.get(4),
     }
 
 

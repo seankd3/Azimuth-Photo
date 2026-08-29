@@ -1279,6 +1279,12 @@ document.addEventListener('click', (event) => {
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
   if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
+  if (action === 'adopt-track') {
+    folderMenu.hidden = true;
+    product.adoptTrack().then((said) => {
+      if (said.chosen) notify(said.placed ? `${said.placed.toLocaleString()} photographs placed from the track.` : 'The track covers none of your photographs — check the camera clock.');
+    }).catch((error) => notify(error.message));
+  }
   if (action === 'rescan-drive') {
     driveMenu.hidden = true;
     const drive = read().drives.find((d) => d.uuid === driveMenu.dataset.drive);

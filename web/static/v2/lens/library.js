@@ -145,9 +145,10 @@ function photoCell(photo, index, actions) {
   cell.append(image, flag);
   if (photo.stack) {
     // A cover fronts its run — a burst, a timelapse, a panorama sweep —
-    // and the badge is the door in.
-    const badge = element('button', 'stack-badge', `▤ ${photo.stack + 1}`);
-    badge.type = 'button';
+    // and the badge is the door in. A span, because the cell is already a
+    // button and a button may not hold another.
+    const badge = element('span', 'stack-badge', `▤ ${photo.stack + 1}`);
+    badge.setAttribute('role', 'button');
     badge.title = `A set of ${photo.stack + 1} — click to open`;
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -353,6 +354,8 @@ function renderInspector(panel, selected) {
     ['Where', !selected.placed ? 'Missing — no drive holds it' : selected.reachable ? 'Here' : 'On a drive that is away'],
     ['Taken', selected.date_taken],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ')],
+    ['Place', selected.lat !== undefined && selected.lon !== undefined
+      ? `${selected.lat.toFixed(5)}, ${selected.lon.toFixed(5)}` : ''],
     ['Lens', selected.lens],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
