@@ -1398,7 +1398,7 @@ document.addEventListener('click', (event) => {
   if (rankMode) void rankWorkflow.remode(rankMode);
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
-  if (action === 'turn-right') cullWorkflow.apply(event.shiftKey ? 'turnLeft' : 'turnRight');
+  if (action === 'turn-right') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
   if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
   if (action === 'undo-toast') undo.run();
@@ -1548,7 +1548,7 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnLeft' : 'turnRight' };
+  const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnRight' : 'turnLeft' };
   if (key in cullActions && ['library', 'loupe'].includes(read().view) && read().selected?.hash) {
     cullWorkflow.apply(cullActions[key]);
     event.preventDefault();

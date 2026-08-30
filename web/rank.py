@@ -347,6 +347,15 @@ def _somewhere(upper: int) -> int:
     return random.randint(0, upper) if upper > 0 else 0
 
 
+def _finding_round() -> bool:
+    """Learn's coin: one round in three finds, the rest teach. Its own
+    function so a test can hold it still."""
+
+    import random
+
+    return random.random() < 1 / 3
+
+
 def seen(conn) -> dict[str, int]:
     """How many rounds each photograph has appeared in, winning or losing.
 
@@ -375,6 +384,9 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
     `mode` is a small pure ordering over the same pool — never a strategy
     engine (the thing with 22 parameters this replaced):
 
+    - ``learn``       the simulation's winner: teaching windows over the
+                      rating-sorted pool where uncertainty is greatest,
+                      one round in three finding among the top band.
     - ``close``       the default above.
     - ``random``      the pool shuffled — a walk with no opinion.
     - ``diverse``     spread apart in the embedding space (by rating when
@@ -424,6 +436,9 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
             f"{select} WHERE {where} ORDER BY i.id LIMIT ?", (*args, window - len(pool)),
         )]
     unwanted = set(avoid)
+    # The wrap can re-take rows the first read already holds; one row per
+    # photograph, or a window could seat the same frame against itself.
+    pool = list({p["id"]: p for p in pool}.values())
     pool = [p for p in pool if p["hash"] not in unwanted]
     if not pool:
         return []
@@ -490,6 +505,9 @@ def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
             return court + leaders[3 * n:]
         # Not enough judged to have leaders yet: fall through to close.
 
+    if mode == "learn":
+        return _learn(pool, n)
+
     if mode == "diverse":
         return _spread(pool, n, space)
 
@@ -501,6 +519,74 @@ def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
     anchor = min(pool, key=lambda p: (p["comparisons"], -p["rating"]))
     return sorted(pool, key=lambda p: (
         p is not anchor, abs(p["rating"] - anchor["rating"]), p["comparisons"]))
+
+
+def _learn(pool: list[dict], n: int) -> list[dict]:
+    """The simulation's winner: the fastest route to the best ranking.
+
+    Two kinds of round, mixed one-in-three once everything has been seen:
+
+    * **Teaching** — the most uncertain photographs that are most evenly
+      matched: a window slid over the rating-sorted pool to where total
+      uncertainty (1/sqrt(1+rounds)) is greatest. Information theory's
+      answer for a softmax model — a round teaches most when its outcome
+      is least foretold — and before anything is judged the flat-rating
+      crowd is one huge uncertain window, so coverage falls out free.
+    * **Finding** — the least-worn of the current top band (15%), spread
+      across it, because pure uncertainty stops visiting the leaders once
+      their ratings separate, and the stars read the top.
+
+    Measured (scripts/sim_learn.py, 3 seeds, 600 rounds of 9 over 2,000):
+    this mixture dominates every other mode on both answers at once —
+    whole-order rho .382 and top-decile recall .457, against close's
+    .371/.397, random's .365/.418 and diverse's .363/.455. Pure teaching
+    reaches rho .406 but finds only .348 of the true top; the third round
+    buys the top back for a twentieth of the order.
+    """
+
+    import math
+    import random
+
+    def wear(photo):
+        return 1.0 / math.sqrt(1.0 + photo["comparisons"])
+
+    import numpy as np
+
+    mu = np.asarray([float(p["rating"]) for p in pool])
+    sigma = np.asarray([wear(p) for p in pool])
+
+    covered = sum(1 for p in pool if p["comparisons"] > 0) >= 0.95 * len(pool)
+    if covered and _finding_round():
+        # The least-worn nearest the band's cut: the bubble. Membership of
+        # the top is decided at its boundary — the extreme leaders are
+        # already safely in, so rounds there change nothing the stars read.
+        # (Learned from the simulation the hard way: spreading over the
+        # band's top instead cost seven points of top-decile recall.)
+        cut = float(np.quantile(mu, 0.85))
+        band = np.flatnonzero(mu >= cut)
+        if len(band) < n:
+            band = np.argsort(-mu)[: max(n * 2, 16)]
+        order = band[np.lexsort((mu[band], -sigma[band]))]     # least-worn first
+        fresh = order[: max(3 * n, 12)]
+        fresh = fresh[np.argsort(mu[fresh], kind="stable")]
+        if len(fresh) > n:
+            step = (len(fresh) - 1) / (n - 1)
+            fresh = [int(fresh[round(i * step)]) for i in range(n)]
+        chosen = [pool[i] for i in fresh]
+        taken = set(fresh)
+        rest = [pool[i] for i in range(len(pool)) if i not in taken]
+        random.shuffle(rest)
+        return chosen + rest
+
+    order = np.argsort(mu, kind="stable")
+    if len(order) <= n:
+        return [pool[int(i)] for i in order]
+    sums = np.convolve(sigma[order], np.ones(n), mode="valid")
+    start = int(np.argmax(sums))
+    window = [int(i) for i in order[start: start + n]]
+    taken = set(window)
+    return [pool[i] for i in window] + [
+        pool[int(i)] for i in order if int(i) not in taken]
 
 
 def _spread(pool: list[dict], n: int, space) -> list[dict]:

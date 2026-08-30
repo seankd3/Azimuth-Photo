@@ -2482,6 +2482,35 @@ class AModeIsAnOrdering(CoreCase):
         # a stale window after an update must still deal a hand.
         self.assertEqual(len(rank.candidates(self.conn, 4, mode="later-idea")), 4)
 
+    def test_learn_teaches_where_unsure_and_finds_among_the_leaders(self):
+        # The simulation's winner: teaching rounds are the most uncertain
+        # window of the rating-sorted pool; once everything has been seen,
+        # one round in three finds among the top band.
+        pool = self._pool()
+        rank.record(self.conn, pool[7][0], [pool[6][0]])
+        rank.record(self.conn, pool[5][0], [pool[4][0]])
+
+        held = rank._finding_round
+        try:
+            rank._finding_round = lambda: True   # would find — but not yet
+            taught = rank.candidates(self.conn, 4, mode="learn")
+            # Half the pool is unseen: no finding rounds before coverage,
+            # and the teaching window is exactly the unseen (most
+            # uncertain, ratings tied — one contiguous window).
+            self.assertTrue(all(p["comparisons"] == 0 for p in taught))
+
+            for i in range(0, 4):
+                rank.record(self.conn, pool[i][0], [pool[(i + 1) % 4][0]])
+            found = rank.candidates(self.conn, 4, mode="learn")
+            tops = {p["hash"] for p in found}
+            self.assertIn(pool[7][1], tops, "the finding round visits the leader")
+
+            rank._finding_round = lambda: False
+            taught = rank.candidates(self.conn, 4, mode="learn")
+            self.assertEqual(len(taught), 4)
+        finally:
+            rank._finding_round = held
+
 
 class AnEditIsADecision(CoreCase):
     """Develop's ground rules: Lightroom's sidecar reads into a decision in

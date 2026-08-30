@@ -7,7 +7,8 @@ export const CULL_MENU = Object.freeze([
   { action: 'pick', label: 'Pick — P' },
   { action: 'clear', label: 'Clear pick — U' },
   { action: 'reject', label: 'Reject — X' },
-  { action: 'turnRight', label: 'Turn right — R' },
+  { action: 'turnLeft', label: 'Turn left — R' },
+  { action: 'turnRight', label: 'Turn right — Shift+R' },
 ]);
 
 const ACTIONS = Object.freeze({

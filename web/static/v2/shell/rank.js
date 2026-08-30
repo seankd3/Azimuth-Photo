@@ -22,13 +22,13 @@ const ASPECT_MAX = 2.6;
 
 export function createRankWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
   const stage = document.querySelector('[data-rank]');
-  const MODES = ['close', 'random', 'diverse', 'tournament'];
+  const MODES = ['learn', 'close', 'random', 'diverse', 'tournament'];
   const MODE_KEY = 'azimuth.rank-mode';
   const state = {
     size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
     rounds: 0, judged: 0, total: 0, busy: false, filling: null, generation: 0,
     answered: false, queued: null,
-    mode: MODES.includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'close',
+    mode: MODES.includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'learn',
   };
   const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -319,8 +319,8 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
         || (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null);
       const photo = card && state.set[Number(card.dataset.index)];
       if (!photo) return false;
-      void product.turn([photo.id], 90).then(() => {
-        photo.rotate = ((photo.rotate || 0) + 90) % 360;
+      void product.turn([photo.id], event.shiftKey ? 90 : 270).then(() => {
+        photo.rotate = ((photo.rotate || 0) + (event.shiftKey ? 90 : 270)) % 360;
         render();     // the aspect changed; the shelf re-packs around it
       }).catch((error) => notify(error.message));
       return true;
