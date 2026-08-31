@@ -291,6 +291,12 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     renderSelection();
   }
 
+  function underMouse() {
+    const card = stage.querySelector('.rank-card:hover')
+      || (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null);
+    return (card && state.set[Number(card.dataset.index)]) || null;
+  }
+
   function key(event) {
     // The keyboard is the fast way through: a digit picks that card, arrows
     // move (or, in a pair, pick a side), Enter picks the selection.
@@ -311,17 +317,60 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     if (event.key === 'ArrowRight') { move(1); return true; }
     if (event.key === 'ArrowUp') { move(-cols); return true; }
     if (event.key === 'ArrowDown') { move(cols); return true; }
-    if (event.key.toLowerCase() === 'r' && !event.ctrlKey && !event.metaKey) {
-      // R turns the card under the mouse (or the keyboard's selection), the
-      // same quick turn the grid gives — a sideways scan shouldn't need a
-      // trip out of the round.
-      const card = stage.querySelector('.rank-card:hover')
-        || (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null);
-      const photo = card && state.set[Number(card.dataset.index)];
-      if (!photo) return false;
+    // The grid's per-photograph verbs work on the card under the mouse (or
+    // the keyboard's selection) — R turns, P picks, U clears, X rejects —
+    // so a stray frame never needs a trip out of the round.
+    const letter = event.key.length === 1 && !event.ctrlKey && !event.metaKey ? event.key.toLowerCase() : '';
+    const photo = letter && 'rpux'.includes(letter) ? underMouse() : null;
+    if (letter === 'r' && photo) {
       void product.turn([photo.id], event.shiftKey ? 90 : 270).then(() => {
         photo.rotate = ((photo.rotate || 0) + (event.shiftKey ? 90 : 270)) % 360;
         render();     // the aspect changed; the shelf re-packs around it
+      }).catch((error) => notify(error.message));
+      return true;
+    }
+    if ((letter === 'p' || letter === 'u') && photo) {
+      void (letter === 'p' ? product.pick([photo.id]) : product.clearPick([photo.id])).then((result) => {
+        if (!result.changed.length) return;
+        undo.show(letter === 'p' ? 'Photograph picked.' : 'Pick cleared.',
+          () => product.undoCull(result.changed));
+      }).catch((error) => notify(error.message));
+      return true;
+    }
+    if (letter === 'x' && photo && !state.busy) {
+      // Rejected is out of the running, not just marked: the card leaves the
+      // round and its seat goes to the next photograph in hand.
+      const before = { set: state.set.slice(), age: state.age.slice() };
+      void product.reject([photo.id]).then((result) => {
+        if (!result.changed.length) return;
+        // The rail keeps telling the truth: the same arithmetic nudge the
+        // grid gives its counts when rows leave for the trash.
+        const moved = result.changed.reduce((total, change) => total + change.photos, 0);
+        const tally = (by) => {
+          const counts = read().counts;
+          update({ counts: { ...counts, photos: Math.max(0, counts.photos - by), trash: Math.max(0, counts.trash + by) } });
+        };
+        tally(moved);
+        const at = state.set.indexOf(photo);
+        if (at >= 0) {
+          const next = state.buffer.shift() || null;
+          if (next) { state.set[at] = next; state.age[at] = 0; remember([next]); }
+          else { state.set.splice(at, 1); state.age.splice(at, 1); }
+          state.selected = Math.min(state.selected, state.set.length - 1);
+          render();
+          void fill();
+        }
+        undo.show('Photograph rejected.', async () => {
+          await product.undoCull(result.changed);
+          tally(-moved);
+          if (!isOpen()) { await onLeave(); return; }   // the grid behind holds it again
+          state.generation += 1;
+          state.set = before.set;
+          state.age = before.age;
+          render();
+          state.buffer = [];
+          void fill();
+        });
       }).catch((error) => notify(error.message));
       return true;
     }
