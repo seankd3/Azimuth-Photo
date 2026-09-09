@@ -148,32 +148,32 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| PE1 | The face wall has no keyboard | a cursor on the wall: arrows, Enter, N, Esc | open |
-| PE2 | Naming is one verb in two grammars (right-click in the shelf, a button on the wall) | one verbsFor(person) for both | open |
-| PE3 | Someone is detected by string prefix while settled is on the entry | pass settled from both callers | open |
-| PE4 | Naming has no Undo | undo.show with the former name; an unname verb | open |
-| PE5 | One person wears three shapes across drop, shelf and wall | one .face primitive sized by a variable | open |
-| PE6 | The wall's empty state is a black rectangle | the grid's empty state, with people's words | open |
-| PE7 | The shelf's order is whatever the cache wrote | named first, biggest first, alphabetical | open |
-| PE8 | The door row is the only row without a count | append the count | open |
-| PE9 | A failed people read is silent | say it, or let the empty state say it | open |
+| PE1 | The face wall has no keyboard | a cursor on the wall: arrows, Enter, N, Esc | shipped |
+| PE2 | Naming is one verb in two grammars (right-click in the shelf, a button on the wall) | one verbsFor(person) for both | shipped |
+| PE3 | Someone is detected by string prefix while settled is on the entry | pass settled from both callers | shipped |
+| PE4 | Naming has no Undo | undo.show with the former name; an unname verb | shipped for a rename (Undo names them what they were); a first naming has no former name to return to |
+| PE5 | One person wears three shapes across drop, shelf and wall | one .face primitive sized by a variable | shipped |
+| PE6 | The wall's empty state is a black rectangle | the grid's empty state, with people's words | shipped |
+| PE7 | The shelf's order is whatever the cache wrote | named first, biggest first, alphabetical | shipped |
+| PE8 | The door row is the only row without a count | append the count | shipped |
+| PE9 | A failed people read is silent | say it, or let the empty state say it | shipped |
 
 ## Import workspace
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| IM1 | The card is erased by default: Clear the card is pre-ticked | off by default, remembered once chosen | open |
-| IM2 | The sticky day header paints over the context bar | top: var(--ctx), lower z-index | open |
-| IM3 | The stage promises the grid's selection grammar and ships only the mouse half | arrows, Shift+arrows, Ctrl+A, Home/End on the stage | open |
-| IM4 | A suspect stays faded after you tick it in | checked suspects are opaque | open |
-| IM5 | A stopped or failed import still yanks you to Recently added | re-scope only when something came in | open |
-| IM6 | Stop says nothing | 'Stopping…', the button disabled until it lands | open |
-| IM7 | A running import has no Stop outside its reopened panel | the status line carries Stop while importing | open |
-| IM8 | The card chip has no count, tooltip, shortcut or announcement | title with the key, aria-live once | open |
-| IM9 | The day list and the day headers are the same control drawn twice | delete the panel's day list; the stage's day rows are the picker | open |
-| IM10 | 'already imported?' asks what the library knows | say what matched | open |
-| IM11 | The chosen kind is not remembered | recall the last answer when the guess fails | open |
-| IM12 | An unnamed roll can become a folder named ? | fall back to the group, then Roll n; refuse illegal names | open |
+| IM1 | The card is erased by default: Clear the card is pre-ticked | off by default, remembered once chosen | shipped |
+| IM2 | The sticky day header paints over the context bar | top: var(--ctx), lower z-index | shipped |
+| IM3 | The stage promises the grid's selection grammar and ships only the mouse half | arrows, Shift+arrows, Ctrl+A, Home/End on the stage | shipped |
+| IM4 | A suspect stays faded after you tick it in | checked suspects are opaque | shipped |
+| IM5 | A stopped or failed import still yanks you to Recently added | re-scope only when something came in | shipped |
+| IM6 | Stop says nothing | 'Stopping…', the button disabled until it lands | shipped |
+| IM7 | A running import has no Stop outside its reopened panel | the status line carries Stop while importing | shipped |
+| IM8 | The card chip has no count, tooltip, shortcut or announcement | title with the key, aria-live once | shipped |
+| IM9 | The day list and the day headers are the same control drawn twice | delete the panel's day list; the stage's day rows are the picker | shipped |
+| IM10 | 'already imported?' asks what the library knows | say what matched | shipped |
+| IM11 | The chosen kind is not remembered | recall the last answer when the guess fails | shipped |
+| IM12 | An unnamed roll can become a folder named ? | fall back to the group, then Roll n; refuse illegal names | shipped |
 
 ## Timeline rail and chapters
 
@@ -204,13 +204,13 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| FR1 | Esc can close the app behind a modal: Rank or the wall are tested before the drive dialog | any open modal is the first rung | open |
-| FR2 | Cancelling the folder picker leaves the drive dialog looking broken | say it, or close | open |
+| FR1 | Esc can close the app behind a modal: Rank or the wall are tested before the drive dialog | any open modal is the first rung | shipped |
+| FR2 | Cancelling the folder picker leaves the drive dialog looking broken | say it, or close | shipped |
 | FR3 | Two clicks and two surfaces to add one folder | picker first, then the dialog about that folder | open |
-| FR4 | If proposing a home throws, first run is a black window | open the dialog first, fill the path after | open |
-| FR5 | Esc on the home dialog is a silent no-op | one sentence saying why | open |
-| FR6 | 'Point me at your photos.' is the product's only first-person sentence | 'Where are your photographs?' | open |
-| FR7 | Two labels for one control: Add folder / Add a folder | one label with the ellipsis | open |
+| FR4 | If proposing a home throws, first run is a black window | open the dialog first, fill the path after | shipped |
+| FR5 | Esc on the home dialog is a silent no-op | one sentence saying why | shipped |
+| FR6 | 'Point me at your photos.' is the product's only first-person sentence | 'Where are your photographs?' | shipped |
+| FR7 | Two labels for one control: Add folder / Add a folder | one label with the ellipsis | shipped |
 | FR8 | Python exception text is the dialog's error copy | map the closed set of refusals | open |
 
 ## Keyboard map
@@ -218,37 +218,37 @@ finding was checked and the numbers said no.
 | # | User impact | Fix | Status |
 |---|---|---|---|
 | KB1 | Tab folds panels instead of moving focus, so the sidebar and bar are unreachable | owner's call: Tab was chosen to fold, LRC's own key | open |
-| KB2 | There is no keyboard map in the app | a sheet generated from one SHORTCUTS table, on ? | open |
-| KB3 | / yanks you out of Rank and runs under the loupe | gate by view; from the loupe close first | open |
-| KB4 | Most controls have no tooltip or shortcut hint | titles from the SHORTCUTS table at boot | open |
-| KB5 | Ctrl+A works in two of six views | route by view: import checks all | open |
-| KB6 | Pick hides itself on click so focus falls and a second click clears | one button whose label changes | open |
-| KB7 | Space means three things, documented nowhere | listed in the sheet; hinted on the chip and stage | open |
-| KB8 | Y and N make a new word out of any search phrase | only a known word, or an explicit Teach | open |
+| KB2 | There is no keyboard map in the app | a sheet generated from one SHORTCUTS table, on ? | shipped |
+| KB3 | / yanks you out of Rank and runs under the loupe | gate by view; from the loupe close first | shipped |
+| KB4 | Most controls have no tooltip or shortcut hint | titles from the SHORTCUTS table at boot | shipped |
+| KB5 | Ctrl+A works in two of six views | route by view: import checks all | shipped |
+| KB6 | Pick hides itself on click so focus falls and a second click clears | one button whose label changes | shipped |
+| KB7 | Space means three things, documented nowhere | listed in the sheet; hinted on the chip and stage | shipped |
+| KB8 | Y and N make a new word out of any search phrase | only a known word, or an explicit Teach | shipped |
 
 ## Details inspector
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| IN1 | No ISO, aperture, shutter or focal length | read them in tags, carry through details, one Exposure row | open |
-| IN2 | A slider edit is described as a crop with the wrong key | cropped and adjusted said apart, D opens Develop | open |
-| IN3 | Missing facts vanish instead of saying so | Taken, Camera, Where always speak | open |
-| IN4 | The inspector shows one photograph while forty are marked | a set branch from the loaded rows | open |
-| IN5 | The path is printed twice; the heading is not the filename | heading is the leaf, Folder is the prefix | open |
-| IN6 | The Folder fact is inert | Folder, Camera and names move the view | open |
-| IN7 | The ranking is stated twice | stars fold into the score row | open |
-| IN8 | Place is raw coordinates | degrees with hemispheres, four decimals | open |
-| IN9 | Nothing can be copied | click a fact to copy it | open |
+| IN1 | No ISO, aperture, shutter or focal length | read them in tags, carry through details, one Exposure row | shipped |
+| IN2 | A slider edit is described as a crop with the wrong key | cropped and adjusted said apart, D opens Develop | shipped |
+| IN3 | Missing facts vanish instead of saying so | Taken, Camera, Where always speak | shipped |
+| IN4 | The inspector shows one photograph while forty are marked | a set branch from the loaded rows | shipped |
+| IN5 | The path is printed twice; the heading is not the filename | heading is the leaf, Folder is the prefix | shipped |
+| IN6 | The Folder fact is inert | Folder, Camera and names move the view | shipped |
+| IN7 | The ranking is stated twice | stars fold into the score row | shipped |
+| IN8 | Place is raw coordinates | degrees with hemispheres, four decimals | shipped |
+| IN9 | Nothing can be copied | click a fact to copy it | shipped |
 
 ## Two things that are one thing (second round)
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| U1 | Three answers to a heading that rides the scroll (rail, import day rows, grid bands) | one sticky-under-the-bar rule | open |
-| U2 | Two day tallies in the import panel | one daysOf(); delete the second list (IM9) | open |
+| U1 | Three answers to a heading that rides the scroll (rail, import day rows, grid bands) | one sticky-under-the-bar rule | shipped by IM2: the day rows now stick under the bar at the same var(--ctx) the rail uses; the grid's bands stay absolute by design (they are cells' own headers, not overlays) |
+| U2 | Two day tallies in the import panel | one daysOf(); delete the second list (IM9) | shipped |
 | U3 | Three spellings of whether a photograph is here (cell, loupe note, inspector) | one presence(photo) in kit | open |
-| U4 | Modals escaped two ways | one open-modal rung (FR1) | open |
-| U5 | Two dayTitle functions and two chapter walks | kit/days.js: title() and chapters() | open |
+| U4 | Modals escaped two ways | one open-modal rung (FR1) | shipped |
+| U5 | Two dayTitle functions and two chapter walks | kit/days.js: title() and chapters() | shipped |
 
 ## Refutation of the polish pass (2026-09-09, second read)
 

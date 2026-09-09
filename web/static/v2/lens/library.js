@@ -1,3 +1,4 @@
+import { title, chapters as chaptersIn } from '../kit/days.js';
 import {
   measureGrid,
   placeGridCell,
@@ -38,16 +39,8 @@ function collectAspects(state) {
   }
 }
 
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function dayTitle(day, count) {
-  if (!day) return `Undated · ${count.toLocaleString()}`;
-  const when = new Date(`${day}T12:00:00`);
-  const said = Number.isNaN(when.getTime()) ? day
-    : `${WEEKDAYS[when.getDay()]} · ${SHORT_MONTHS[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}`;
-  return `${said} · ${count.toLocaleString()}`;
-}
+const dayTitle = (day, count) => `${title(day)} · ${count.toLocaleString()}`;
 
 function collectBreaks(state) {
   // Chapters exist where their arithmetic is exact: a date-sorted library
@@ -65,13 +58,10 @@ function collectBreaks(state) {
   breaks = null;
   breaksVersion += 1;
   if (!days) return;
-  let at = 0;
-  const built = new Map();
-  for (const entry of days) {
-    built.set(at, dayTitle(entry.day, entry.count));
-    at += entry.count;
-  }
-  if (at === state.total) breaks = built;
+  // The same walk the timeline rail makes, from the kit: empty when the
+  // counts and the total disagree, so no chapter sits at a wrong index.
+  const found = chaptersIn(state.days, state.sort, state.total);
+  if (found.length) breaks = new Map(found.map((c) => [c.index, dayTitle(c.day, c.count)]));
 }
 
 function currentLayout(width, rowHeight, count) {
@@ -109,7 +99,7 @@ function element(tag, className = '', text = '') {
   return node;
 }
 
-function emptyState(actions) {
+export function emptyState(actions) {
   const empty = element('div', 'empty-state');
   const mark = element('div', 'empty-mark');
   mark.innerHTML = '<svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"></circle><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"></path><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"></path></g></svg>';
@@ -347,13 +337,38 @@ function indexAt(scrollTop) {
   return layout && layout.count ? anchorOf(layout, scrollTop).index : null;
 }
 
-function renderInspector(panel, selected) {
+// What the selection is, said in facts. One photograph: its own. Several:
+// the set's -- how many, the span of days, the cameras, the cull tally --
+// from the rows the window already holds.
+function renderInspector(panel, selected, actions = {}) {
+  const marked = actions.marked;
+  if (marked && marked.size > 1) {
+    const rows = [...(actions.photos?.values() || [])].filter((p) => marked.has(p.id));
+    const days = rows.map((p) => (p.date_taken || '').slice(0, 10)).filter(Boolean).sort();
+    const cameras = [...new Set(rows.map((p) => p.camera_model).filter(Boolean))];
+    const tally = { picked: 0, trashed: 0, unflagged: 0 };
+    for (const p of rows) tally[p.status in tally ? p.status : 'unflagged'] += 1;
+    const heading = element('div', 'inspector-heading');
+    heading.append(element('p', 'eyebrow', 'Selection'), element('h2', '', `${marked.size.toLocaleString()} photographs`));
+    const facts = element('dl', 'facts');
+    const said = [
+      ['Loaded', rows.length < marked.size ? `${rows.length.toLocaleString()} of them on hand` : ''],
+      ['Taken', days.length ? (days[0] === days.at(-1) ? title(days[0]) : `${title(days[0], { weekday: false })} – ${title(days.at(-1), { weekday: false })}`) : ''],
+      ['Cameras', cameras.join(' · ')],
+      ['Cull', [tally.picked && `${tally.picked} picked`, tally.unflagged && `${tally.unflagged} unflagged`].filter(Boolean).join(' · ')],
+      ['Size', rows.some((p) => p.file_size) ? `${(rows.reduce((n, p) => n + (p.file_size || 0), 0) / 1e9).toFixed(2)} GB` : ''],
+    ];
+    for (const [label, value] of said) if (value) facts.append(element('dt', '', label), element('dd', '', String(value)));
+    panel.replaceChildren(heading, facts);
+    return;
+  }
   if (!selected) {
     panel.replaceChildren(element('div', 'inspector-empty', 'Select a photo to see its details.'));
     return;
   }
   const heading = element('div', 'inspector-heading');
-  heading.append(element('p', 'eyebrow', 'Photo'), element('h2', '', selected.tail || 'Untitled'));
+  // The heading is the photograph's own name; the folder is a fact below.
+  heading.append(element('p', 'eyebrow', 'Photo'), element('h2', '', (selected.tail || 'Untitled').split('/').pop()));
   const facts = element('dl', 'facts');
   // The score, with its provenance: earned from the rounds this photograph
   // was actually in, predicted by the taste direction where it was not, and
@@ -365,26 +380,65 @@ function renderInspector(panel, selected) {
     : rounds ? `${elo.toLocaleString()} · ${rounds} round${rounds === 1 ? '' : 's'}`
       : elo !== 1200 ? `${elo.toLocaleString()} · predicted`
         : 'Not ranked yet';
+  // What the develop recipe holds: a crop, adjustments, or both.
+  let edited = '';
+  try {
+    const recipe = selected.develop ? JSON.parse(selected.develop) : {};
+    const keys = Object.keys(recipe);
+    const cropped = keys.some((k) => k.startsWith('Crop'));
+    const adjusted = keys.some((k) => !k.startsWith('Crop'));
+    edited = [cropped && 'Cropped', adjusted && 'Adjusted'].filter(Boolean).join(' · ');
+    if (edited) edited += ' — D opens Develop';
+  } catch { edited = selected.develop ? 'Edited — D opens Develop' : ''; }
+  const exposure = [
+    selected.f_number && `ƒ/${selected.f_number}`,
+    selected.exposure_time && (selected.exposure_time >= 1 ? `${selected.exposure_time}s` : `1/${Math.round(1 / selected.exposure_time)}s`),
+    selected.iso && `ISO ${selected.iso}`,
+    selected.focal_length && `${Math.round(selected.focal_length)}mm`,
+  ].filter(Boolean).join(' · ');
+  const place = selected.lat !== undefined && selected.lon !== undefined
+    ? `${Math.abs(selected.lat).toFixed(4)}° ${selected.lat >= 0 ? 'N' : 'S'}, ${Math.abs(selected.lon).toFixed(4)}° ${selected.lon >= 0 ? 'E' : 'W'}` : '';
+  const stars = selected.stars ? `${'★'.repeat(selected.stars)} · ` : '';
+  const folder = selected.tail && selected.tail.includes('/') ? selected.tail.slice(0, selected.tail.lastIndexOf('/')) : '';
+  // A fact that should always speak says Unknown rather than vanishing;
+  // one the file may simply not carry is left out.
+  const unknown = selected.hash ? 'Unknown' : 'Reading…';
   const rows = [
-    ['Score', score],
-    ['Edited', selected.develop ? 'Cropped — C adjusts' : ''],
+    ['Score', score ? stars + score : (stars ? stars.slice(0, -3) : '')],
+    ['Edited', edited],
     ['Names', (selected.names || []).join(' · ')],
-    ['Stars', selected.stars ? '★'.repeat(selected.stars) : ''],
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
     ['Where', !selected.placed ? 'Missing — no drive holds it' : selected.reachable ? 'Here' : 'On a drive that is away'],
-    ['Taken', selected.date_taken],
-    ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ')],
-    ['Place', selected.lat !== undefined && selected.lon !== undefined
-      ? `${selected.lat.toFixed(5)}, ${selected.lon.toFixed(5)}` : ''],
+    ['Taken', selected.date_taken || unknown],
+    ['Exposure', exposure],
+    ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],
+    ['Place', place],
     ['Lens', selected.lens],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
-    ['Folder', selected.tail && selected.tail.includes('/') ? selected.tail.slice(0, selected.tail.lastIndexOf('/')) : ''],
+    ['Folder', folder, { folder }],
   ];
-  for (const [label, value] of rows) {
+  for (const [label, value, link] of rows) {
     if (!value) continue;
-    facts.append(element('dt', '', label), element('dd', '', String(value)));
+    facts.append(element('dt', '', label));
+    const cell = element('dd', '', String(value));
+    // A fact that names a place in the library is a way to go there.
+    if (link?.folder && actions.showFolder) {
+      cell.classList.add('is-link');
+      cell.title = 'Browse this folder';
+      cell.addEventListener('click', () => actions.showFolder(link.folder));
+    } else if (link?.chip && actions.applyChip) {
+      cell.classList.add('is-link');
+      cell.title = 'Narrow to this camera';
+      cell.addEventListener('click', () => actions.applyChip(link.chip));
+    } else {
+      cell.title = 'Click to copy';
+      cell.addEventListener('click', () => {
+        navigator.clipboard?.writeText(String(value)).then(() => actions.notify?.('Copied.')).catch(() => {});
+      });
+    }
+    facts.append(cell);
   }
   panel.replaceChildren(heading, facts);
 }

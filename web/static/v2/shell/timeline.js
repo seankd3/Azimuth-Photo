@@ -5,7 +5,8 @@
 // named. It is drawn from the same day list the chapters are, so the two can
 // never disagree about where a month starts.
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+import { MONTHS, chapters as chaptersIn, title } from '../kit/days.js';
+
 // Below this many photographs the grid is shorter than the rail would be.
 const WORTH_IT = 40;
 
@@ -16,25 +17,8 @@ function element(tag, className, text = '') {
   return node;
 }
 
-function chaptersOf(state) {
-  // The day list arrives newest first; the oldest sort reads it backwards.
-  // Either way a running sum of the counts is each day's first index.
-  const days = state.sort === 'oldest' ? [...state.days].reverse() : state.days;
-  const chapters = [];
-  let at = 0;
-  for (const entry of days) {
-    chapters.push({ index: at, day: entry.day });
-    at += entry.count;
-  }
-  return at === state.total ? chapters : [];
-}
-
-function named(day) {
-  if (!day) return 'Undated';
-  const when = new Date(`${day}T12:00:00`);
-  return Number.isNaN(when.getTime()) ? day
-    : `${MONTHS[when.getMonth()]} ${when.getDate()}, ${when.getFullYear()}`;
-}
+const chaptersOf = (state) => chaptersIn(state.days, state.sort, state.total);
+const named = (day) => title(day, { weekday: false });
 
 export function createTimeline({ workspace, before, top, place, indexAt, scrollTo }) {
   const rail = element('div', 'timeline');

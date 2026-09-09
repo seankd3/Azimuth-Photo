@@ -77,6 +77,11 @@ def repair(conn) -> None:
         " AND hash IN (SELECT content_hash FROM images"
         "              WHERE file_ext IN ('.cr3', '.dng')"
         "                AND content_hash IS NOT NULL)")
+    # Answers from a reader older than this one (no exposure facts) are
+    # re-owed to the current reader. No-op once every row carries its version.
+    conn.execute(
+        "DELETE FROM cache WHERE kind = 'metadata' AND recipe = '{}'"
+        " AND value NOT LIKE '%\"v\":2%'")
     conn.commit()
     embedded_metadata.reindex(conn)
     developing.reindex(conn)
@@ -856,7 +861,11 @@ class Library:
 
         self._open()
         out = []
-        for group in persons.groups(self.conn):
+        # Named first, the biggest first, alphabetical as the tiebreak -- the
+        # same rule the labels shelf keeps, so a row stays where the hand
+        # learned it between sessions.
+        for group in sorted(persons.groups(self.conn),
+                            key=lambda g: (not g.get("settled"), -int(g.get("photos") or 0), str(g["name"]).casefold())):
             out.append({
                 "term": group["name"], "count": group["photos"],
                 "settled": bool(group.get("settled")),

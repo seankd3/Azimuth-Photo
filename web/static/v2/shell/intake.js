@@ -9,6 +9,9 @@
 // to the status line, the outcome arrives as a toast, and Import… reopens
 // the details (and Stop) while it runs.
 
+import { recall, remember } from '../kit/remembered.js';
+import { title as dayName } from '../kit/days.js';
+
 export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown }) {
   const title = document.querySelector('[data-import-title]');
   const sourceLine = document.querySelector('[data-import-source]');
@@ -71,7 +74,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       clearInterval(looking);
     }
     state.source = staged.source;
-    state.kind = staged.kind;
+    state.kind = staged.kind || recall('azimuth.import-kind', null);
     state.roots = staged.roots || {};
     // Each roll keeps the proposed name beside the person's own, so an
     // emptied field falls back to the proposal instead of trapping the text.
@@ -85,7 +88,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     sourceLine.textContent = `${staged.source} — ${staged.candidates.length.toLocaleString()} photographs` +
       (staged.receiving ? `, into ${staged.receiving}` : '');
     clearRow.hidden = !isCard;
-    clearBox.checked = isCard;
+    // Erasing the card is never the default: it is chosen once, then
+    // remembered as the person's own answer.
+    clearBox.checked = isCard && recall('azimuth.clear-card', false) === true;
     progress.hidden = true;
     progress.textContent = '';
     stopButton.hidden = true;
@@ -101,7 +106,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
 
   function rollName(group) {
     const roll = state.rolls[group || ''] || {};
-    return (roll.name || '').trim() || roll.proposed || '?';
+    const said = (roll.name || '').trim() || roll.proposed || group || '';
+    const clean = said.replace(/[<>:"/\\|?*]+/g, ' ').trim();
+    return clean || `Roll ${Object.keys(state.rolls).indexOf(group || '') + 1}`;
   }
 
   function renderRolls() {
@@ -124,12 +131,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
 
   const dayOf = (candidate) => (candidate.taken || '').slice(0, 10);
 
-  function dayTitle(day) {
-    if (!day) return 'Undated';
-    const when = new Date(`${day}T12:00:00`);
-    if (Number.isNaN(when.getTime())) return day;
-    return when.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-  }
+  const dayTitle = (day) => dayName(day);
 
   // The stage is built once per staging; a checkbox tick or a roll name only
   // re-answers the summary side. Rebuilding the cells threw away every
@@ -178,7 +180,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         name.textContent = candidate.name;
         const when = document.createElement('span');
         when.className = 'stage-when';
-        when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · already imported?' : '');
+        when.textContent = (candidate.taken || '').slice(0, 16) + (candidate.suspect ? ' · same name and size as one in the library' : '');
         cell.append(box, image, name, when);
         rows.push(cell);
       }
@@ -236,26 +238,11 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         bytes += candidate.size;
       }
     }
-    destinations.replaceChildren(...[...byDay.entries()]
-      .sort((a, b) => (a[0] === '') - (b[0] === '') || b[0].localeCompare(a[0]))
-      .map(([day, tally]) => {
-        const item = document.createElement('li');
-        const row = document.createElement('label');
-        const box = document.createElement('input');
-        box.type = 'checkbox';
-        box.dataset.day = day;
-        box.checked = tally.held > 0 && tally.held === tally.of;
-        box.indeterminate = tally.held > 0 && tally.held < tally.of;
-        const when = document.createElement('span');
-        when.textContent = dayTitle(day);
-        const n = document.createElement('span');
-        n.textContent = tally.held === tally.of
-          ? tally.of.toLocaleString()
-          : `${tally.held.toLocaleString()} of ${tally.of.toLocaleString()}`;
-        row.append(box, when, n);
-        item.append(row);
-        return item;
-      }));
+    // The stage's own day rows are the picker; the panel says the span.
+    const dated = [...byDay.keys()].filter(Boolean).sort();
+    destinations.textContent = dated.length
+      ? `${dated.length === 1 ? 'One day' : `${dated.length} days`} · ${dayTitle(dated[0])}${dated.length > 1 ? ` – ${dayTitle(dated.at(-1))}` : ''}`
+      : '';
     // The destination said once, as the rule it is — every row repeating
     // the root was noise wearing a path.
     document.querySelector('[data-import-into]').textContent =
@@ -317,6 +304,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     poll = null;
     state.running = false;
     stopButton.hidden = true;
+    stopButton.disabled = false;
     startButton.hidden = true;
     backButton.textContent = 'Back';
     const parts = [`${(status.brought || 0).toLocaleString()} imported`];
@@ -330,7 +318,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     progressed('');
     // The outcome reaches the person wherever they are.
     notify(said);
-    await afterImport();
+    await afterImport({ brought: status.brought || 0 });
   }
 
   function formatSeconds(seconds) {
@@ -363,9 +351,6 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     render();
   }
 
-  destinations.addEventListener('change', (event) => {
-    if (event.target.dataset.day !== undefined) setDay(event.target.dataset.day, event.target.checked);
-  });
   stage.addEventListener('change', (event) => {
     const day = event.target.dataset.day;
     if (day !== undefined) {
@@ -413,18 +398,53 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     state.rolls[group].name = event.target.value;
     render();
   });
+  clearBox.addEventListener('change', () => remember('azimuth.clear-card', clearBox.checked));
   document.querySelector('[data-kind-choice]').addEventListener('click', (event) => {
     const kind = event.target.closest('[data-kind]')?.dataset.kind;
     if (!kind) return;
     state.kind = kind;
+    remember('azimuth.import-kind', kind);
     renderRolls();
     render();
   });
   return Object.freeze({
     open,
     start,
-    stop: () => product.stopIntake().catch(() => {}),
+    stop: () => {
+      stopButton.disabled = true;
+      progress.textContent = 'Stopping…';
+      progressed('Stopping the import…');
+      return product.stopIntake().catch(() => {});
+    },
     close,
+    key: (event) => {
+      // The grid's grammar on the stage: arrows move a cursor, Shift
+      // extends from the anchor, Ctrl+A selects all, Home and End jump.
+      if (!order.length) return false;
+      const across = Math.max(1, Math.floor(stage.clientWidth / 200));
+      const at = anchor === null ? -1 : order.indexOf([...selected].at(-1) ?? anchor);
+      const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -across, ArrowDown: across };
+      let next = null;
+      if (event.key in moves) next = Math.max(0, Math.min(order.length - 1, (at < 0 ? 0 : at + moves[event.key])));
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = order.length - 1;
+      else if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+        selected = new Set(order);
+        syncChecks();
+        return true;
+      } else return false;
+      const key = order[next];
+      if (event.shiftKey && anchor !== null) {
+        const a = order.indexOf(anchor);
+        selected = new Set(order.slice(Math.min(a, next), Math.max(a, next) + 1));
+      } else {
+        selected = new Set([key]);
+        anchor = key;
+      }
+      syncChecks();
+      stage.querySelector(`.stage-cell[data-key="${CSS.escape(key)}"]`)?.scrollIntoView({ block: 'nearest' });
+      return true;
+    },
     checkAll: () => { state.checked = new Set(state.candidates.map((c) => c.key)); syncChecks(); render(); },
     checkNew: () => { state.checked = new Set(state.candidates.filter((c) => !c.suspect).map((c) => c.key)); syncChecks(); render(); },
     checkNone: () => { state.checked = new Set(); syncChecks(); render(); },

@@ -29,6 +29,10 @@ EXIF = {
     0x9003: "date_taken",
     0x9004: "date_digitized",
     0xA434: "lens",
+    0x8827: "iso",
+    0x829D: "f_number",
+    0x829A: "exposure_time",
+    0x920A: "focal_length",
 }
 GPS = {
     0x0001: "gps_lat_ref",

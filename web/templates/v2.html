@@ -22,10 +22,10 @@
         <input data-search type="search" placeholder="Search your photos" aria-label="Search your photos" autocomplete="off" spellcheck="false">
       </div>
       <div class="top-actions">
-        <button class="card-chip" type="button" data-action="import-card" hidden>Card · <span data-card-label></span></button>
+        <button class="card-chip" type="button" data-action="import-card" hidden aria-live="polite">Card · <span data-card-label></span></button>
         <button class="quiet-button" type="button" data-action="import-folder">Import…</button>
         <button class="quiet-button" type="button" data-action="export" hidden>Export…</button>
-        <button class="quiet-button" type="button" data-action="add-drive">Add folder</button>
+        <button class="quiet-button" type="button" data-action="add-drive">Add folder…</button>
       </div>
     </header>
 
@@ -69,7 +69,6 @@
         <span data-result-label>Loading your library…</span>
         <div class="cull-actions" data-cull-actions hidden>
           <button class="quiet-button" type="button" data-action="pick"><kbd>P</kbd> Pick</button>
-          <button class="quiet-button" type="button" data-action="clear-pick"><kbd>U</kbd> Clear</button>
           <button class="quiet-button" type="button" data-action="turn" title="Turn left · Shift+click or Shift+R turns right"><kbd>R</kbd> Rotate</button>
           <button class="danger-button" type="button" data-action="reject"><kbd>X</kbd> Reject</button>
         </div>
@@ -166,7 +165,7 @@
           <ul data-roll-list></ul>
         </div>
         <p class="eyebrow">Days</p>
-        <ul class="destinations" data-destinations></ul>
+        <p class="destinations" data-destinations></p>
         <p class="import-into" data-import-into></p>
         <label class="check-row" data-clear-row hidden><input type="checkbox" data-clear> Clear the card as each file is verified</label>
         <p class="eyebrow">Choose</p>
@@ -189,7 +188,7 @@
     <form data-home-form>
       <p class="eyebrow">First things first</p>
       <h1 id="home-title">Where should Azimuth live?</h1>
-      <p class="dialog-copy">One folder holds your catalog and previews — like a Lightroom catalog. Your photographs stay where they are.</p>
+      <p class="dialog-copy">One folder holds your catalog and previews — like a Lightroom catalog. Your photographs stay where they are. Azimuth needs a home before it can open a library, so this cannot be skipped.</p>
       <div class="home-path"><code data-home-path>…</code><button class="quiet-button" type="button" data-action="change-home">Change…</button></div>
       <p class="form-error" data-home-error role="alert"></p>
       <button class="primary-button" type="submit">Use this folder</button>
@@ -200,7 +199,7 @@
     <form data-drive-form>
       <button class="dialog-close" type="button" data-action="close-drive" aria-label="Close">×</button>
       <p class="eyebrow">Your library</p>
-      <h1 id="drive-title">Point me at your photos.</h1>
+      <h1 id="drive-title">Where are your photographs?</h1>
       <p class="dialog-copy">Choose one folder. Azimuth will read it in place and never move or alter your photographs.</p>
       <label class="check-row"><input name="is_record" type="checkbox"> This is an archive — read it when attached and when asked, not every minute</label>
       <p class="form-error" data-drive-error role="alert"></p>
@@ -244,6 +243,14 @@
   </menu>
 
   <menu class="context-menu" data-photo-menu hidden></menu>
+  <dialog class="confirm-dialog keys-dialog" data-keys-dialog aria-labelledby="keys-title">
+    <form method="dialog">
+      <button class="dialog-close" type="submit" aria-label="Close">×</button>
+      <p class="eyebrow">Keys</p>
+      <h1 id="keys-title">Every key, in one place.</h1>
+      <div class="keys-body" data-keys-body></div>
+    </form>
+  </dialog>
   <menu class="context-menu" data-chip-menu hidden></menu>
   <div class="popover" data-chip-editor hidden></div>
   <div class="popover search-drop" data-search-drop hidden></div>

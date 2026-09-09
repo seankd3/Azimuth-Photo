@@ -172,6 +172,13 @@ function toggleFull(on = !loupe.classList.contains('is-full')) {
   loupeView.refresh();
 }
 const status = document.querySelector('[data-status]');
+const stopImport = document.createElement('button');
+stopImport.type = 'button';
+stopImport.className = 'quiet-button status-stop';
+stopImport.dataset.action = 'stop-import';
+stopImport.textContent = 'Stop';
+stopImport.hidden = true;
+status.after(stopImport);
 
 function notify(message) {
   // Every transient message rides the one toast, which floats over any
@@ -225,7 +232,10 @@ function teachable() {
   if (view !== 'library') return null;
   const worn = (chips || []).filter((c) => c.is === 'label' && !c.not && c.values.length === 1);
   if (worn.length === 1 && !query) return worn[0].values[0];
-  if (query && !(chips || []).some((c) => c.is === 'label')) return query;
+  // A typed query teaches only when it is already a word the library has
+  // been taught; a search phrase must not become a label by accident.
+  if (query && !(chips || []).some((c) => c.is === 'label')
+      && (read().labels || []).some((l) => l.term === query)) return query;
   return null;
 }
 
@@ -290,10 +300,13 @@ const intakeWorkflow = createIntakeWorkflow({
   leave: () => { if (read().view === 'import') update({ view: 'library' }); },
   isShown: () => read().view === 'import',
   progressed: (text) => update({ importing: text || '' }),
-  afterImport: async () => {
+  afterImport: async ({ brought = 0 } = {}) => {
     // What just came in is what the person wants to see: Recently added.
-    update({ view: 'library', folders: [], album: null, sort: 'added' });
-    document.querySelector('[data-sort]').value = 'added';
+    // Nothing came in (stopped, failed): the view stays where it was.
+    if (brought > 0) {
+      update({ view: 'library', folders: [], album: null, sort: 'added' });
+      document.querySelector('[data-sort]').value = 'added';
+    }
     await Promise.all([loadView(), loadFolders(), albumsPanel.refresh()]);
   },
 });
@@ -383,6 +396,7 @@ const peoplePanel = createPeoplePanel({
   read,
   update,
   notify,
+  undo,
   browse: (term) => browseChip({ is: 'person', values: [term] }),
   renamed: () => Promise.all([albumsPanel.refresh(), peoplePanel.refresh()]),
   ask: (title, anchor, initial) => albumsPanel.ask(title, anchor, initial),
@@ -494,28 +508,31 @@ document.querySelector('[data-like-pill]').addEventListener('click', () => {
 });
 // The box belongs to the cards: they offer the library's shape on focus,
 // narrow it as you type, and leave Enter meaning what it always meant.
+// Narrowing by one fact, from a card or a fact in the inspector: the chip
+// joins what is worn. It replaces typed words, but narrows a like-search:
+// chips ride into the search's view scope, so "similar, and portrait"
+// composes.
+function applyChip(chip) {
+  if (read().query) {
+    searchBox.value = '';
+    update({ query: '' });
+  }
+  const held = read().chips || [];
+  const same = JSON.stringify(chip);
+  if (!held.some((c) => JSON.stringify(c) === same)) {
+    update({ view: 'library', chips: [...held, chip] });
+  } else if (read().view !== 'library' && read().view !== 'rank') {
+    update({ view: 'library' });
+  }
+  viewMoved();
+}
 const searchCards = createSearchCards({
   product,
   read,
   update,
   box: searchBox,
   search: runSearch,
-  applyChip: (chip) => {
-    // A card replaces typed words, but narrows a like-search: chips ride
-    // into the search's view scope, so "similar, and portrait" composes.
-    if (read().query) {
-      searchBox.value = '';
-      update({ query: '' });
-    }
-    const held = read().chips || [];
-    const same = JSON.stringify(chip);
-    if (!held.some((c) => JSON.stringify(c) === same)) {
-      update({ view: 'library', chips: [...held, chip] });
-    } else if (read().view !== 'library' && read().view !== 'rank') {
-      update({ view: 'library' });
-    }
-    viewMoved();
-  },
+  applyChip,
 });
 
 let lookTimer = null;
@@ -565,7 +582,7 @@ function visibleGrid() {
               : narrowed
                 ? 'Loosen a chip, or take one off with its ×.'
                 : 'Add a folder to start your library.',
-    emptyAction: bare ? { label: 'Add a folder', run: openDriveDialog } : null,
+    emptyAction: bare ? { label: 'Add folder…', run: openDriveDialog } : null,
     select: selectPhoto,
     open: openPhoto,
     stack: (photo) => { void toggleStack(photo.id); },
@@ -616,9 +633,14 @@ function scheduleGrid() {
 // dismissed, because nothing works without one; Change… opens the native
 // chooser, and the proposal is the fixed local disk with the most room.
 async function chooseHome() {
-  homePath.textContent = await product.proposeHome();
   homeDialog.showModal();
   homeForm.querySelector('[type="submit"]').focus();
+  try {
+    homePath.textContent = await product.proposeHome();
+  } catch (error) {
+    homePath.textContent = '';
+    homeError.textContent = error.message;
+  }
 }
 
 homeDialog.addEventListener('cancel', (event) => event.preventDefault());
@@ -945,6 +967,7 @@ async function showCards() {
   if (cards.length) {
     chip.dataset.root = cards[0].root;
     chip.querySelector('[data-card-label]').textContent = cards[0].label;
+    chip.title = `Import from ${cards[0].label} (I)`;
   }
 }
 
@@ -1291,7 +1314,8 @@ function renderChrome(state) {
   labelsPanel.render(state);
   filterBar.render(state);
   timeline.render(state);
-  library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected);
+  library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
+    { marked: state.marked, photos: state.photos, showFolder, applyChip, notify });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
   if (state.view === 'loupe' && state.selected) {
     renderLoupe(state.selected);
@@ -1319,6 +1343,8 @@ function renderChrome(state) {
   // the worker's current kind with what is left and how fast, or the calm.
   const working = state.working;
   const away = (state.drives || []).filter((d) => !d.attached);
+  // While an import runs the line carries the way out too.
+  stopImport.hidden = !state.importing;
   status.textContent = state.home === null
     ? 'Choose where Azimuth should live to begin.'
     : state.importing
@@ -1376,8 +1402,12 @@ function renderChrome(state) {
   const canCull = (state.view === 'library' || state.view === 'loupe') && selection().length > 0;
   document.querySelector('[data-cull-actions]').hidden = !canCull;
   const many = (state.marked?.size || 0) > 1;
-  document.querySelector('[data-action="pick"]').hidden = !canCull || (!many && state.selected?.status === 'picked');
-  document.querySelector('[data-action="clear-pick"]').hidden = !canCull || (!many && state.selected?.status !== 'picked');
+  // One button, one place: it reads Pick or Clear for what is under the
+  // cursor, so focus and the pixel keep their meaning across a click.
+  const pickButton = document.querySelector('[data-action="pick"]');
+  const picked = !many && state.selected?.status === 'picked';
+  pickButton.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: picked ? 'U' : 'P' }), ` ${picked ? 'Clear' : 'Pick'}`);
+  pickButton.dataset.verb = picked ? 'clear' : 'pick';
   document.querySelector('[data-action="forget"]').hidden = !(state.view === 'library' && state.selected && state.selected.placed === 0);
   const restorable = state.view === 'trash' && (state.marked?.size || state.selected);
   const restore = document.querySelector('[data-action="restore"]');
@@ -1442,7 +1472,7 @@ driveForm.addEventListener('submit', async (event) => {
   driveError.textContent = '';
   try {
     const root = await product.chooseFolder();
-    if (!root) return;
+    if (!root) { driveError.textContent = 'No folder chosen.'; return; }
     const drive = await product.attach(root, driveForm.elements.is_record.checked);
     closeDriveDialog();
     await scanDrive(drive);
@@ -1553,8 +1583,7 @@ document.addEventListener('click', (event) => {
   if (action === 'leave-rank') rankWorkflow.close();
   const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
   if (size) rankWorkflow.resize(Number(size));
-  if (action === 'pick') cullWorkflow.apply('pick');
-  if (action === 'clear-pick') cullWorkflow.apply('clear');
+  if (action === 'pick') cullWorkflow.apply(event.target.closest('[data-action]').dataset.verb || 'pick');
   if (action === 'turn') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
   if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
@@ -1567,7 +1596,19 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
-  if (homeDialog.open || exportDialog.open) return;
+  // A modal is the first rung, whichever it is: Esc closes it and nothing
+  // behind it hears the key. The home dialog alone cannot be dismissed.
+  const modal = document.querySelector('dialog[open]');
+  if (modal) {
+    if (event.key === 'Escape' && modal !== homeDialog) {
+      if (modal === driveDialog) closeDriveDialog();
+      else if (modal === exportDialog) exportDialog.close();
+      else if (modal === keysDialog) keysDialog.close();
+      else trashWorkflow.closeDialog();
+      event.preventDefault();
+    }
+    return;
+  }
   if (intakeWorkflow.isOpen()) {
     if (event.key === 'Escape') intakeWorkflow.close();
     if (event.key === 'Enter' && !isTyping) {
@@ -1578,6 +1619,7 @@ document.addEventListener('keydown', (event) => {
       intakeWorkflow.toggleSelected();
       event.preventDefault();
     }
+    if (!isTyping && intakeWorkflow.key(event)) event.preventDefault();
     return;
   }
   if (cropSurface.isOpen()) {
@@ -1609,7 +1651,13 @@ document.addEventListener('keydown', (event) => {
     }).catch((error) => notify(error.message));
     return;
   }
-  if (event.key === '/' && !isTyping) {
+  if (event.key === '?' && !isTyping) {
+    keysDialog.showModal();
+    event.preventDefault();
+    return;
+  }
+  if (event.key === '/' && !isTyping && ['library', 'trash', 'loupe'].includes(read().view)) {
+    if (loupeOpen()) closeLoupe();
     searchBox.focus();
     searchBox.select();
     event.preventDefault();
@@ -1644,8 +1692,6 @@ document.addEventListener('keydown', (event) => {
     }
     else if (rankWorkflow.isOpen()) rankWorkflow.close();
     else if (read().view === 'people') update({ view: 'library' });
-    else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
-    else if (driveDialog.open) closeDriveDialog();
     else if (read().selected || read().marked?.size) {
       // The marks and the selection go; the cursor keeps its place, so the
       // next arrow moves from here and not from the top.
@@ -1657,7 +1703,7 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  if (isTyping || driveDialog.open || trashWorkflow.isOpen()) return;
+  if (isTyping) return;
   if (event.key === 'Tab') {
     // On an empty library the only thing worth reaching is the one button in
     // the empty state; folding panels there would strand the keyboard.
@@ -1687,6 +1733,15 @@ document.addEventListener('keydown', (event) => {
   }
   if ((key === 'z' || event.key === ' ') && loupeOpen() && !event.ctrlKey && !event.metaKey) {
     loupeView.toggle();
+    event.preventDefault();
+    return;
+  }
+  if (key === 'i' && ['library', 'trash'].includes(read().view) && !event.ctrlKey && !event.metaKey) {
+    // I brings the card in, or opens the running import's details.
+    const chip = document.querySelector('[data-action="import-card"]');
+    if (!chip.hidden) intakeWorkflow.open(chip.dataset.root, { isCard: true });
+    else if (intakeWorkflow.running()) intakeWorkflow.open('');
+    else return;
     event.preventDefault();
     return;
   }
@@ -1738,7 +1793,10 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  if (read().view === 'people') return;   // the wall has no grid cursor
+  if (read().view === 'people') {
+    if (peoplePanel.key(event)) event.preventDefault();
+    return;
+  }
   const extend = { shift: event.shiftKey };
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     const move = event.key === 'ArrowLeft' ? -1 : 1;
@@ -1763,6 +1821,60 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
+// Every key, once: the tooltips on the buttons and the ? sheet both read
+// this table, so a key cannot be documented in one place and not the other.
+const SHORTCUTS = [
+  ['Everywhere', [
+    ['?', 'This sheet'], ['/', 'Search'], ['Tab', 'Fold the side panels'], ['Shift+Tab', 'Fold everything'],
+    ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo'], ['Ctrl+A', 'Select all'],
+  ]],
+  ['The grid', [
+    ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
+    ['Enter / Space', 'Open the loupe'], ['P', 'Pick'], ['U', 'Clear the pick'], ['X', 'Reject'],
+    ['R / Shift+R', 'Turn left / right'], ['B', 'Toss into the Quick album'], ['S', 'Open or close a set'],
+    ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
+  ]],
+  ['The loupe', [
+    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous'], ['F', 'Leave the clean room'], ['Esc', 'Fit, then close'],
+  ]],
+  ['Rank', [
+    ['1–9, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
+    ['Z / F', 'Look closer'], ['P / U / X / R', 'The card under the mouse'],
+  ]],
+  ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
+  ['Trash', [['U', 'Restore']]],
+  ['Teaching', [['Y / N', 'This is / is not the word']]],
+];
+const TIPS = {
+  'import-folder': 'Import a folder…', export: 'Export the selection… ', 'add-drive': 'Add a folder to the library',
+  rank: 'Rank the photographs you are looking at', 'leave-rank': 'Back to the grid (Esc)', forget: 'Forget this missing photograph',
+  'add-chip': 'Narrow by a fact', 'save-view': 'Save these filters as an album', 'keep-results': 'Save what the search found',
+  restore: 'Put it back in the library (U)', 'empty-trash': 'Delete everything in Trash for good',
+  'toggle-left': 'Show or hide the sidebar (Tab)', 'toggle-right': 'Show or hide the details (Tab)', 'toggle-top': 'Show or hide the top bar (Shift+Tab)',
+  pick: 'Pick (P) or clear the pick (U)', turn: 'Turn left (R) · Shift turns right', reject: 'Reject (X)',
+};
+for (const [action, tip] of Object.entries(TIPS)) {
+  for (const node of document.querySelectorAll(`[data-action="${action}"]`)) if (!node.title) node.title = tip;
+}
+const keysDialog = document.querySelector('[data-keys-dialog]');
+{
+  const body = keysDialog.querySelector('[data-keys-body]');
+  for (const [where, keys] of SHORTCUTS) {
+    const head = document.createElement('p');
+    head.className = 'eyebrow';
+    head.textContent = where;
+    const list = document.createElement('dl');
+    list.className = 'keys';
+    for (const [key, does] of keys) {
+      const dt = document.createElement('dt');
+      dt.innerHTML = key.split(' / ').map((k) => `<kbd>${k}</kbd>`).join(' / ');
+      const dd = document.createElement('dd');
+      dd.textContent = does;
+      list.append(dt, dd);
+    }
+    body.append(head, list);
+  }
+}
 document.querySelector('[data-sort]').addEventListener('change', async (event) => {
   // The photograph under the cursor is what the person was looking at; a
   // new order finds it again rather than dropping it.

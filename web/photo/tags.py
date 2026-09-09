@@ -56,7 +56,9 @@ def read(path: str, *, description: bool = False) -> dict:
     if make and model.casefold().startswith(make.casefold()):
         model = model[len(make):].strip()
 
-    answer = {"width": int(width), "height": int(height)}
+    # The reader's version rides in the answer: a repair re-owes rows read by
+    # an older reader, so a field added here reaches every photograph.
+    answer = {"v": 2, "width": int(width), "height": int(height)}
     for name, value in (
         ("date_taken", normalize_date(tags.get("date_taken") or tags.get("date_digitized"))),
         ("camera_make", make),
@@ -65,6 +67,12 @@ def read(path: str, *, description: bool = False) -> dict:
     ):
         if value:
             answer[name] = value
+    # The exposure, the four numbers a photographer reads most: kept as
+    # numbers so the panel can spell them (1/250s, ƒ/2.8).
+    for name in ("iso", "f_number", "exposure_time", "focal_length"):
+        number = _number(tags.get(name))
+        if number:
+            answer[name] = number
     lat = _degrees(tags.get("gps_lat"), _text(tags.get("gps_lat_ref")), "S")
     lon = _degrees(tags.get("gps_lon"), _text(tags.get("gps_lon_ref")), "W")
     if lat is not None and lon is not None:
@@ -73,6 +81,24 @@ def read(path: str, *, description: bool = False) -> dict:
     if description:
         answer["description"] = _text(tags.get("description"))
     return answer
+
+
+def _number(value) -> float | None:
+    """An EXIF rational, tuple, or text as one positive number, else None."""
+
+    try:
+        if value is None:
+            return None
+        # The raw reader hands back decoded rationals as a tuple of parts;
+        # PIL hands back one rational that floats.
+        if isinstance(value, (tuple, list)):
+            value = value[0] if value else None
+        number = float(value)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    if number is None or number <= 0 or number != number:
+        return None
+    return round(number, 4) if number < 10 else round(number, 1)
 
 
 def _degrees(parts, ref: str, negative: str) -> float | None:
@@ -116,6 +142,10 @@ def _display_tags(path: str) -> dict:
         "date_taken": values.get(0x9003) or values.get(0x0132),
         "date_digitized": values.get(0x9004),
         "lens": values.get(0xA434),
+        "iso": values.get(0x8827),
+        "f_number": values.get(0x829D),
+        "exposure_time": values.get(0x829A),
+        "focal_length": values.get(0x920A),
         "description": values.get(0x010E) or values.get(0x9286),
         "gps_lat_ref": gps.get(1),
         "gps_lat": gps.get(2),

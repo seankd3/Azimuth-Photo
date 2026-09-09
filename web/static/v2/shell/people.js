@@ -8,16 +8,22 @@
 
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
-export function createPeoplePanel({ product, _read, update, notify, browse, renamed, ask }) {
+import { emptyState } from '../lens/library.js';
+
+export function createPeoplePanel({ product, _read, update, notify, undo, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
   const list = document.querySelector('[data-people-list]');
   const stage = document.querySelector('[data-people-stage]');
+  // The wall's cursor: which card the keys act on.
+  let cursor = -1;
 
   async function refresh() {
     try {
       update({ people: await product.people() });
-    } catch {
-      // a library without faces yet simply has nobody to list
+    } catch (error) {
+      // A library without faces yet has nobody to list; anything else is
+      // said, because a silent read looks exactly like no faces.
+      if (!/no faces|no people/i.test(String(error.message))) notify(error.message);
     }
   }
 
@@ -64,6 +70,7 @@ export function createPeoplePanel({ product, _read, update, notify, browse, rena
       row.className = 'side-row person-row';
       row.dataset.term = entry.term;
       row.dataset.person = entry.person;
+      row.dataset.settled = entry.settled ? '1' : '0';
       row.title = !entry.settled
         ? 'Someone the library keeps seeing — click to see them, right-click to name them'
         : `${entry.term} — right-click to rename`;
@@ -82,18 +89,35 @@ export function createPeoplePanel({ product, _read, update, notify, browse, rena
     door.type = 'button';
     door.className = 'side-row people-door';
     const left = waiting.length - Math.min(waiting.length, WAITING);
-    door.textContent = left > 0 ? `Introduce ${left} more…` : 'All people…';
+    const leaf = document.createElement('span');
+    leaf.className = 'leaf';
+    leaf.textContent = left > 0 ? `Introduce ${left} more…` : 'All people…';
+    const total = document.createElement('span');
+    total.className = 'set-count';
+    total.textContent = held.length.toLocaleString();
+    door.append(leaf, total);
     door.addEventListener('click', () => update({ view: 'people', selected: null, selectedIndex: null }));
     rows.push(door);
     list.replaceChildren(...rows);
   }
 
   function renderWall(held) {
+    if (!held.length) {
+      stage.replaceChildren(emptyState({
+        emptyTitle: 'No faces yet.',
+        emptyCopy: 'Faces appear here as the library reads your photographs.',
+      }));
+      return;
+    }
     const order = [...held.filter((e) => !e.settled), ...held.filter((e) => e.settled)];
-    stage.replaceChildren(...order.map((entry) => {
+    cursor = Math.min(cursor, order.length - 1);
+    stage.replaceChildren(...order.map((entry, index) => {
       const card = document.createElement('div');
-      card.className = 'face-card';
+      card.className = 'face-card' + (index === cursor ? ' is-focus' : '');
       card.dataset.term = entry.term;
+      card.dataset.person = entry.person;
+      card.dataset.index = index;
+      card.dataset.settled = entry.settled ? '1' : '0';
       const look = document.createElement('button');
       look.type = 'button';
       look.className = 'face-card-look';
@@ -110,19 +134,53 @@ export function createPeoplePanel({ product, _read, update, notify, browse, rena
       call.type = 'button';
       call.className = 'quiet-button face-card-name-button';
       call.textContent = entry.settled ? 'Rename' : 'Name…';
-      call.addEventListener('click', () => void introduce(entry.person, entry.term, call));
+      call.addEventListener('click', () => void introduce(entry.person, entry.term, entry.settled, call));
       card.append(look, name, count, call);
       return card;
     }));
   }
 
-  async function introduce(exemplar, current, anchor) {
-    const called = await ask(current.startsWith('Someone') ? 'Name this person' : 'Rename to', anchor,
-                             current.startsWith('Someone') ? '' : current);
+  function markWall() {
+    for (const card of stage.querySelectorAll('.face-card')) {
+      card.classList.toggle('is-focus', Number(card.dataset.index) === cursor);
+    }
+    stage.querySelector('.face-card.is-focus')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function key(event) {
+    // The wall's keys: arrows move by card and row, Enter browses, N names,
+    // Esc leaves -- introducing thirty Someones never needs the mouse.
+    const cards = stage.querySelectorAll('.face-card');
+    if (!cards.length) return false;
+    const across = Math.max(1, Math.floor(stage.clientWidth / 178));
+    const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -across, ArrowDown: across };
+    if (event.key in moves) {
+      cursor = Math.max(0, Math.min(cards.length - 1, (cursor < 0 ? 0 : cursor + moves[event.key])));
+      markWall();
+      return true;
+    }
+    if (event.key === 'Home') { cursor = 0; markWall(); return true; }
+    if (event.key === 'End') { cursor = cards.length - 1; markWall(); return true; }
+    const card = cursor >= 0 ? cards[cursor] : null;
+    if (!card) return false;
+    if (event.key === 'Enter') { browse(card.dataset.term); return true; }
+    if (event.key.toLowerCase() === 'n' && !event.ctrlKey && !event.metaKey) {
+      void introduce(card.dataset.person, card.dataset.term, card.dataset.settled === '1', card.querySelector('.face-card-name-button'));
+      return true;
+    }
+    return false;
+  }
+
+  async function introduce(exemplar, current, settled, anchor) {
+    const called = await ask(settled ? 'Rename to' : 'Name this person', anchor, settled ? current : '');
     if (!called || called === current) return;
     try {
       await product.namePerson(exemplar, called);
-      notify(`“${called}” — the library will gather their photographs now.`);
+      const said = `“${called}” — the library will gather their photographs now.`;
+      // A rename can be taken back by naming them what they were; a first
+      // naming has no former name to return to.
+      if (settled) undo.show(said, async () => { await product.namePerson(exemplar, current); await renamed(); });
+      else notify(said);
       // The lane regroups and the pulse says so; the shelf re-reads then.
       void renamed();
     } catch (error) {
@@ -135,12 +193,17 @@ export function createPeoplePanel({ product, _read, update, notify, browse, rena
     if (row) browse(row.dataset.term);
   });
 
-  list.addEventListener('contextmenu', (event) => {
+  // One verb, one gesture, in both homes: right-click names or renames on
+  // the shelf and on the wall alike.
+  const nameFrom = (event) => {
     const row = event.target.closest('[data-term]');
     if (!row || !row.dataset.person) return;
     event.preventDefault();
-    void introduce(row.dataset.person, row.dataset.term, row);
-  });
+    const settled = row.dataset.settled === '1' || (!row.dataset.settled && !row.dataset.term.startsWith('Someone'));
+    void introduce(row.dataset.person, row.dataset.term, settled, row);
+  };
+  list.addEventListener('contextmenu', nameFrom);
+  stage.addEventListener('contextmenu', nameFrom);
 
-  return Object.freeze({ refresh, render });
+  return Object.freeze({ refresh, render, key });
 }

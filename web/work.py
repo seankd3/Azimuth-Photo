@@ -175,10 +175,13 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
     """
 
     narrowed, scope_args = where(scope)
+    # Trash is small and has its own partial index; the planner needs to be
+    # told, as every partial index here does.
+    table = "images i INDEXED BY idx_trashed" if living == TRASHED else "images i"
     if not keyed:
         return (
             f"""
-            FROM images i
+            FROM {table}
             LEFT JOIN cache c
                    ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
             WHERE {living}
@@ -197,7 +200,7 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
     suffix = "," + base[1:] if base != "{}" else "}"
     return (
         f"""
-        FROM images i
+        FROM {table}
         LEFT JOIN cache c
                ON c.hash = i.content_hash AND c.kind = ?
               AND c.recipe = ? || {expression} || ?

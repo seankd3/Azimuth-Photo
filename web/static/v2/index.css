@@ -415,6 +415,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   width: 164px;
   padding: 12px 12px 10px;
   border: 1px solid var(--line);
+  border-radius: var(--radius);
   background: var(--chrome-2);
   display: flex;
   flex-direction: column;
@@ -429,14 +430,20 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   line-height: 0;
 }
 .face-card-look .smart-mark { font-size: 64px; line-height: 130px; }
-.face-card-face {
-  width: 130px;
-  height: 130px;
+/* One face, three sizes: the drop's strip, the shelf's row, the wall's
+   card. A person is round wherever they appear. */
+.face-card-face, .person-face, .drop-strip img.face {
+  width: var(--face-size, 18px);
+  height: var(--face-size, 18px);
+  flex: none;
   object-fit: cover;
-  border-radius: var(--radius);
-  background: #0d0e10;
+  border-radius: 50%;
+  background: var(--tile);
 }
+.face-card-face { --face-size: 130px; }
+.drop-strip img.face { --face-size: 26px; }
 .face-card-look:hover .face-card-face { outline: 1px solid var(--accent); }
+.face-card.is-focus { outline: 1px solid var(--ring); outline-offset: -4px; }
 .face-card-name {
   margin: 6px 0 0;
   color: var(--text);
@@ -689,7 +696,9 @@ button kbd { color: var(--text-3); font: 10px/1 var(--mono); }
 .inspector-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: 16px; line-height: 1.35; }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px 14px; margin-top: 26px; font-size: 12px; }
 .facts dt { color: var(--text-3); }
-.facts dd { margin: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; }
+.facts dd { margin: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; cursor: copy; }
+.facts dd.is-link { cursor: pointer; text-decoration: underline dotted var(--line-strong); text-underline-offset: 3px; }
+.facts dd:hover { color: var(--text); }
 
 dialog { color: var(--text); }
 dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
@@ -764,6 +773,15 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 /* an armed verb: the first click asked, the second does */
 .context-menu button.is-armed { color: var(--focus); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+/* the key sheet: two columns of the table every tooltip reads */
+.keys-dialog { width: min(720px, calc(100vw - 40px)); }
+.keys-body { columns: 2; column-gap: 32px; max-height: 60vh; overflow-y: auto; }
+.keys-body .eyebrow { margin: 14px 0 6px; break-after: avoid; }
+.keys-body .eyebrow:first-child { margin-top: 0; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: 12px; break-inside: avoid; }
+.keys dt { color: var(--text-2); white-space: nowrap; }
+.keys dt kbd { padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text); font: 11px/1.5 var(--mono); }
+.keys dd { margin: 0; color: var(--text-3); }
 .topbar-search { display: flex; justify-content: center; min-width: 0; padding: 0 18px; }
 .topbar-search input {
   width: min(420px, 100%);
@@ -808,15 +826,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .drop-dismiss:hover { opacity: 1; color: var(--text); }
 .drop-strip { display: flex; flex: none; gap: 3px; }
 .drop-strip img { width: 26px; height: 26px; object-fit: cover; border-radius: 2px; background: var(--tile); }
-.drop-strip img.face { border-radius: 50%; }
-.person-face {
-  flex: none;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--tile);
-}
+
 .drop-everything { justify-content: space-between; color: var(--text); }
 .drop-everything kbd {
   padding: 1px 6px;
@@ -858,13 +868,14 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 }
 .stage-cell.is-checked { border-color: var(--accent); }
 .stage-cell.is-suspect { opacity: .45; }
+.stage-cell.is-suspect.is-checked { opacity: 1; }
 /* A day owns its row: the chapter line from the grid, wearing the checkbox
    that imports just that date. It stays put while its photographs scroll. */
 .stage-day {
   grid-column: 1 / -1;
   position: sticky;
-  top: 0;
-  z-index: 2;
+  top: var(--ctx);
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -910,7 +921,8 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .rolls li { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
 .rolls li span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--well); color: var(--text); font-size: 12px; }
-.destinations { margin: 0; padding: 0; list-style: none; font: 12px/1.6 var(--mono); color: var(--text-2); }
+.destinations { margin: 0; font: 12px/1.6 var(--mono); color: var(--text-2); }
+.status-stop { margin: 8px 10px 0; }
 .destinations label { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
 .destinations label:hover { color: var(--text); }
 .destinations input { accent-color: var(--accent); flex: none; }
