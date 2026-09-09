@@ -127,3 +127,125 @@ finding was checked and the numbers said no.
 | # | User impact | Fix | Status |
 |---|---|---|---|
 | D1 | Too many documents; it is not clear which are current, accurate, or slop (owner's ask, 2026-09-09) | read every one; keep only those that own a durable fact the code cannot say, and are true at HEAD; fold or delete the rest | shipped: 9 deleted, 12 archived with dated banners, 1 folded, 14 fixed; the paths gate now reads the four docs a contributor reads |
+
+## Search box and drop (second round, 2026-09-09)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| SC1 | Arrowing through the drop is hijacked by the resting mouse: scrolling a row under the pointer fires hover and the cursor jumps | hover moves the cursor only after real pointer movement | open |
+| SC2 | The card that searches what you typed is the last of ~30 rows, below the fold | emit the everything row first when there is text | open |
+| SC3 | The ⏎ badge sits on one row while Enter runs whatever the cursor is on | the ⏎ hint rides the cursor row | open |
+| SC4 | The bar says 'Loading your library…' during a search | 'Searching…' when seeking | open |
+| SC5 | Recents vanish the instant you type | recents pass through the same match filter, first | open |
+| SC6 | A recent search cannot be forgotten | a × on each recent row | open |
+| SC7 | The drop is invisible to assistive tech; no announced cursor | combobox/listbox roles and aria-activedescendant | open |
+| SC8 | Folding the top bar with the drop open strands the drop | the panel toggle closes the drop | open |
+| SC9 | More like this silently throws away chips, folders and album | keep the scope; drop only the query | open |
+| SC10 | The like pill floats over the import workspace | hidden while importing, like its siblings | open |
+| SC11 | Nothing shows the seeds of a likeness search; any click on the pill ends it | label opens the seeds, a real × clears | open |
+
+## People wall and shelf
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| PE1 | The face wall has no keyboard | a cursor on the wall: arrows, Enter, N, Esc | open |
+| PE2 | Naming is one verb in two grammars (right-click in the shelf, a button on the wall) | one verbsFor(person) for both | open |
+| PE3 | Someone is detected by string prefix while settled is on the entry | pass settled from both callers | open |
+| PE4 | Naming has no Undo | undo.show with the former name; an unname verb | open |
+| PE5 | One person wears three shapes across drop, shelf and wall | one .face primitive sized by a variable | open |
+| PE6 | The wall's empty state is a black rectangle | the grid's empty state, with people's words | open |
+| PE7 | The shelf's order is whatever the cache wrote | named first, biggest first, alphabetical | open |
+| PE8 | The door row is the only row without a count | append the count | open |
+| PE9 | A failed people read is silent | say it, or let the empty state say it | open |
+
+## Import workspace
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| IM1 | The card is erased by default: Clear the card is pre-ticked | off by default, remembered once chosen | open |
+| IM2 | The sticky day header paints over the context bar | top: var(--ctx), lower z-index | open |
+| IM3 | The stage promises the grid's selection grammar and ships only the mouse half | arrows, Shift+arrows, Ctrl+A, Home/End on the stage | open |
+| IM4 | A suspect stays faded after you tick it in | checked suspects are opaque | open |
+| IM5 | A stopped or failed import still yanks you to Recently added | re-scope only when something came in | open |
+| IM6 | Stop says nothing | 'Stopping…', the button disabled until it lands | open |
+| IM7 | A running import has no Stop outside its reopened panel | the status line carries Stop while importing | open |
+| IM8 | The card chip has no count, tooltip, shortcut or announcement | title with the key, aria-live once | open |
+| IM9 | The day list and the day headers are the same control drawn twice | delete the panel's day list; the stage's day rows are the picker | open |
+| IM10 | 'already imported?' asks what the library knows | say what matched | open |
+| IM11 | The chosen kind is not remembered | recall the last answer when the guess fails | open |
+| IM12 | An unnamed roll can become a folder named ? | fall back to the group, then Roll n; refuse illegal names | open |
+
+## Timeline rail and chapters
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| TL1 | The rail eats clicks on the rightmost column of photographs | reserve a 44px gutter while the rail is up | open |
+| TL2 | After a resize the rail lies until the next store update | render on the grid's resize frame | open |
+| TL3 | When the day counts do not add up the rail shows and says Undated everywhere | fold emptiness into whether the rail shows | open |
+| TL4 | January never gets a tick | no continue after the year mark | open |
+| TL5 | The rail is unreachable from the keyboard | a slider role with arrow and page keys | open |
+| TL6 | Nothing says which way time runs | a title, and the far endpoint year drawn | open |
+| TL7 | Sort changes reflow the grid by a scrollbar width | no scrollbar in every sort; gutter stable | open |
+| TL8 | A hovered rail shows a date label forever | hide on leave and after idle | open |
+
+## Status line and pulse
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| ST1 | A drive going away is never said | an away branch above the calm one | open |
+| ST2 | The number does not match the word: all owed kinds beside one kind's name | the kind's own count | open |
+| ST3 | 'Up to date' flickers while work is owed | say Up to date only when the debt is zero | open |
+| ST4 | The first run has no status line | a home-less sentence | open |
+| ST5 | A screen reader hears the pace every two seconds | no aria-live on the ambient line | open |
+| ST6 | Three sentences mean reading your photos | one vocabulary table | open |
+| ST7 | The pace restarts at a third of the truth after every idle beat | seed from the instant rate | open |
+
+## First run and dialogs
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| FR1 | Esc can close the app behind a modal: Rank or the wall are tested before the drive dialog | any open modal is the first rung | open |
+| FR2 | Cancelling the folder picker leaves the drive dialog looking broken | say it, or close | open |
+| FR3 | Two clicks and two surfaces to add one folder | picker first, then the dialog about that folder | open |
+| FR4 | If proposing a home throws, first run is a black window | open the dialog first, fill the path after | open |
+| FR5 | Esc on the home dialog is a silent no-op | one sentence saying why | open |
+| FR6 | 'Point me at your photos.' is the product's only first-person sentence | 'Where are your photographs?' | open |
+| FR7 | Two labels for one control: Add folder / Add a folder | one label with the ellipsis | open |
+| FR8 | Python exception text is the dialog's error copy | map the closed set of refusals | open |
+
+## Keyboard map
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| KB1 | Tab folds panels instead of moving focus, so the sidebar and bar are unreachable | owner's call: Tab was chosen to fold, LRC's own key | open |
+| KB2 | There is no keyboard map in the app | a sheet generated from one SHORTCUTS table, on ? | open |
+| KB3 | / yanks you out of Rank and runs under the loupe | gate by view; from the loupe close first | open |
+| KB4 | Most controls have no tooltip or shortcut hint | titles from the SHORTCUTS table at boot | open |
+| KB5 | Ctrl+A works in two of six views | route by view: import checks all | open |
+| KB6 | Pick hides itself on click so focus falls and a second click clears | one button whose label changes | open |
+| KB7 | Space means three things, documented nowhere | listed in the sheet; hinted on the chip and stage | open |
+| KB8 | Y and N make a new word out of any search phrase | only a known word, or an explicit Teach | open |
+
+## Details inspector
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| IN1 | No ISO, aperture, shutter or focal length | read them in tags, carry through details, one Exposure row | open |
+| IN2 | A slider edit is described as a crop with the wrong key | cropped and adjusted said apart, D opens Develop | open |
+| IN3 | Missing facts vanish instead of saying so | Taken, Camera, Where always speak | open |
+| IN4 | The inspector shows one photograph while forty are marked | a set branch from the loaded rows | open |
+| IN5 | The path is printed twice; the heading is not the filename | heading is the leaf, Folder is the prefix | open |
+| IN6 | The Folder fact is inert | Folder, Camera and names move the view | open |
+| IN7 | The ranking is stated twice | stars fold into the score row | open |
+| IN8 | Place is raw coordinates | degrees with hemispheres, four decimals | open |
+| IN9 | Nothing can be copied | click a fact to copy it | open |
+
+## Two things that are one thing (second round)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| U1 | Three answers to a heading that rides the scroll (rail, import day rows, grid bands) | one sticky-under-the-bar rule | open |
+| U2 | Two day tallies in the import panel | one daysOf(); delete the second list (IM9) | open |
+| U3 | Three spellings of whether a photograph is here (cell, loupe note, inspector) | one presence(photo) in kit | open |
+| U4 | Modals escaped two ways | one open-modal rung (FR1) | open |
+| U5 | Two dayTitle functions and two chapter walks | kit/days.js: title() and chapters() | open |
