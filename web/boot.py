@@ -39,6 +39,99 @@ Result = TypeVar("Result")
 LOOKING_AT_MOST = 400
 
 
+def attached_now(conn) -> list[int]:
+    """The drives attached right now, answered by looking at each marker."""
+
+    return [
+        int(row["id"]) for row in conn.execute("SELECT id, uuid FROM drives")
+        if drives.online(conn, row["uuid"])
+    ]
+
+
+def repair(conn) -> None:
+    """Bring the derived columns back to what the log and the cache say.
+
+    Every column that is an index over something else -- the metadata
+    columns over the cache, `develop` over the log, `stack_of` over the
+    dates -- is rebuilt here, writing only the rows that differ, so a start
+    where nothing drifted writes nothing. Runs on the sweep lane behind the
+    first paint: at 150,000 rows the reads alone are seconds, and the
+    window used to wait for them before it opened.
+    """
+
+    # Residue of the retired rule that stored a projection failure as the
+    # photograph's answer: "failed" rows with no value, poisoned by a
+    # moment's lock contention, which stopped 27 real photos from ever
+    # learning their shape. Dropping them re-owes the work.
+    conn.execute(
+        "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
+        " AND note LIKE 'ProjectionError:%'")
+    # A camera raw always carries a date, so a dateless metadata answer for
+    # one is an old reader's -- CR3s read with IFD0's map before the CMT2
+    # fix (657 rows), DNGs whose Exif IFD sat past the old bounded read
+    # (2,086 rows: Lightroom's converter writes it after the image data).
+    # Dropping the answer re-owes the read to the fixed reader.
+    conn.execute(
+        "DELETE FROM cache WHERE kind = 'metadata'"
+        " AND value NOT LIKE '%date_taken%'"
+        " AND hash IN (SELECT content_hash FROM images"
+        "              WHERE file_ext IN ('.cr3', '.dng')"
+        "                AND content_hash IS NOT NULL)")
+    conn.commit()
+    embedded_metadata.reindex(conn)
+    developing.reindex(conn)
+    stacks.project(conn)
+
+
+def cameras_of(conn) -> list[dict]:
+    """What the camera chip offers: every model in the library, counted."""
+
+    return [dict(row) for row in conn.execute(
+        "SELECT camera_model AS model, COUNT(*) AS photos FROM images"
+        " WHERE camera_model IS NOT NULL AND status != 'trashed'"
+        " GROUP BY camera_model ORDER BY photos DESC")]
+
+
+def facets_of(conn) -> dict:
+    """The library's shape, for the search drop: years, cameras, the top
+    roots, and orientations, each counted in identities. Every entry is a
+    fact the chip language can say back, so a card is a chip. Five passes
+    over the library (530 ms at 150k rows), which is why the sweep lane
+    makes it and the window reads the made answer."""
+
+    ask = conn.execute
+    live = queries.IN_LIBRARY
+    years = [
+        {"year": row[0], "photos": row[1]}
+        for row in ask(
+            "SELECT substr(i.date_taken, 1, 4) AS y, COUNT(*)"
+            f" FROM images i WHERE {live} AND i.date_taken IS NOT NULL"
+            " GROUP BY y ORDER BY y DESC")
+        if row[0] and len(row[0]) == 4
+    ]
+    shown_w = "CASE WHEN i.rotate IN (90, 270) THEN i.height ELSE i.width END"
+    shown_h = "CASE WHEN i.rotate IN (90, 270) THEN i.width ELSE i.height END"
+    orientations = [
+        {"orientation": row[0], "photos": row[1]}
+        for row in ask(
+            f"SELECT CASE WHEN {shown_w} > {shown_h} THEN 'landscape'"
+            f" WHEN {shown_w} < {shown_h} THEN 'portrait' ELSE 'square' END AS o,"
+            " COUNT(*)"
+            f" FROM images i WHERE {live} AND i.width > 0 AND i.height > 0"
+            " GROUP BY o ORDER BY 2 DESC")
+    ]
+    roots = [
+        {"folder": row[0], "photos": row[1]}
+        for row in ask(
+            "SELECT substr(i.tail, 1, instr(i.tail, '/') - 1) AS root,"
+            " COUNT(*)"
+            f" FROM images i WHERE {live} AND instr(i.tail, '/') > 0"
+            " GROUP BY root ORDER BY 2 DESC")
+    ]
+    return {"years": years, "cameras": cameras_of(conn),
+            "orientations": orientations, "roots": roots}
+
+
 class Library:
     """One open catalog, its tile store, and its one background worker."""
 
@@ -57,35 +150,13 @@ class Library:
         # tone, sharpness, and the color/bw/sepia word the Look chip reads.
         self.knowing_looks = photostats.kind(self.tiles)
         self.conn = model.connect(self.catalog_path)
-        try:
-            # Residue of the retired rule that stored a projection failure as
-            # the photograph's answer: "failed" rows with no value, poisoned
-            # by a moment's lock contention, which stopped 27 real photos
-            # from ever learning their shape. Dropping them re-owes the work.
-            self.conn.execute(
-                "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
-                " AND note LIKE 'ProjectionError:%'")
-            # A camera raw always carries a date, so a dateless metadata
-            # answer for one is an old reader's — CR3s read with IFD0's map
-            # before the CMT2 fix (657 rows), DNGs whose Exif IFD sat past
-            # the old bounded read (2,086 rows: Lightroom's converter writes
-            # it after the image data). Dropping the answer re-owes the read
-            # to the fixed reader. No-op once they carry dates.
-            self.conn.execute(
-                "DELETE FROM cache WHERE kind = 'metadata'"
-                " AND value NOT LIKE '%date_taken%'"
-                " AND hash IN (SELECT content_hash FROM images"
-                "              WHERE file_ext IN ('.cr3', '.dng')"
-                "                AND content_hash IS NOT NULL)")
-            embedded_metadata.reindex(self.conn)
-            # The develop column is an index over the log, same as the
-            # metadata columns above it.
-            developing.reindex(self.conn)
-            # And the stack column is an index over capture-time cadence.
-            stacks.project(self.conn)
-        except Exception:
-            self.conn.close()
-            raise
+        # Which drives are here, by their markers. Looked at once now and by
+        # the follower every few seconds, so a page read never probes a disk
+        # -- an absent share made every page wait on its timeout.
+        self.here: list[int] = attached_now(self.conn)
+        # The search drop's shape, made on the sweep lane after a sweep that
+        # changed something; None until asked or swept.
+        self._facets: dict | None = None
         # What the window says it is looking at, most recent statement wins.
         # Read by the worker on every step, so the first tiles made are the
         # ones on screen; nothing else about the worker's order changes.
@@ -128,7 +199,9 @@ class Library:
         """Remember one chosen folder immediately; scanning is a separate verb."""
 
         self._open()
-        return drives.attach(self.conn, root, label=label, is_record=is_record)
+        said = drives.attach(self.conn, root, label=label, is_record=is_record)
+        self.here = attached_now(self.conn)
+        return said
 
     def refresh(self, drive_uuid: str) -> dict:
         self._open()
@@ -146,7 +219,7 @@ class Library:
     def attached(self) -> list[dict]:
         self._open()
         return [
-            {**dict(row), "attached": drives.online(self.conn, row["uuid"])}
+            {**dict(row), "attached": int(row["id"]) in self.here}
             for row in self.conn.execute("SELECT * FROM drives ORDER BY id")
         ]
 
@@ -205,12 +278,7 @@ class Library:
         ))
 
     def _here(self) -> list[int]:
-        """The drives attached right now, answered by looking at each marker."""
-
-        return [
-            int(row["id"]) for row in self.conn.execute("SELECT id, uuid FROM drives")
-            if drives.online(self.conn, row["uuid"])
-        ]
+        return self.here
 
     def size(self, scope: Scope = EVERYTHING) -> int:
         self._open()
@@ -702,51 +770,16 @@ class Library:
         return {"id": set_id, "name": str(name).strip(), "kept": len(identities)}
 
     def cameras(self) -> list[dict]:
-        """What the camera chip offers: every model in the library, counted."""
-
         self._open()
-        return [dict(row) for row in self.conn.execute(
-            "SELECT camera_model AS model, COUNT(*) AS photos FROM images"
-            " WHERE camera_model IS NOT NULL AND status != 'trashed'"
-            " GROUP BY camera_model ORDER BY photos DESC")]
+        return cameras_of(self.conn)
 
     def facets(self) -> dict:
-        """The library's shape, for the search drop: years, cameras, the top
-        roots, and orientations, each counted in identities. Every entry is a
-        fact the chip language can say back, so a card is a chip."""
+        """The made answer, or made now the first time it is asked."""
 
         self._open()
-        ask = self.conn.execute
-        live = queries.IN_LIBRARY
-        years = [
-            {"year": row[0], "photos": row[1]}
-            for row in ask(
-                "SELECT substr(i.date_taken, 1, 4) AS y, COUNT(*)"
-                f" FROM images i WHERE {live} AND i.date_taken IS NOT NULL"
-                " GROUP BY y ORDER BY y DESC")
-            if row[0] and len(row[0]) == 4
-        ]
-        shown_w = "CASE WHEN i.rotate IN (90, 270) THEN i.height ELSE i.width END"
-        shown_h = "CASE WHEN i.rotate IN (90, 270) THEN i.width ELSE i.height END"
-        orientations = [
-            {"orientation": row[0], "photos": row[1]}
-            for row in ask(
-                f"SELECT CASE WHEN {shown_w} > {shown_h} THEN 'landscape'"
-                f" WHEN {shown_w} < {shown_h} THEN 'portrait' ELSE 'square' END AS o,"
-                " COUNT(*)"
-                f" FROM images i WHERE {live} AND i.width > 0 AND i.height > 0"
-                " GROUP BY o ORDER BY 2 DESC")
-        ]
-        roots = [
-            {"folder": row[0], "photos": row[1]}
-            for row in ask(
-                "SELECT substr(i.tail, 1, instr(i.tail, '/') - 1) AS root,"
-                " COUNT(*)"
-                f" FROM images i WHERE {live} AND instr(i.tail, '/') > 0"
-                " GROUP BY root ORDER BY 2 DESC")
-        ]
-        return {"years": years, "cameras": self.cameras(),
-                "orientations": orientations, "roots": roots}
+        if self._facets is None:
+            self._facets = facets_of(self.conn)
+        return self._facets
 
     def _sample_tiles(self, scope) -> list[dict]:
         rows = self._with_urls(queries.photos(
@@ -1067,6 +1100,9 @@ class OwnedLibrary:
     def __init__(self, catalog_path: str, tile_root: str):
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="library")
         self._scan_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sweep")
+        # Derivations (the ranking, people, labels) have their own lane: a
+        # round's rerank must not queue behind a minute's walk of the archive.
+        self._derive_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="derive")
         self._state = threading.Lock()
         self._closed = False
         self._close_future = None
@@ -1092,6 +1128,7 @@ class OwnedLibrary:
         try:
             self._library = self._executor.submit(Library, catalog_path, tile_root).result()
         except BaseException:
+            self._derive_executor.shutdown(wait=True, cancel_futures=True)
             self._scan_executor.shutdown(wait=True, cancel_futures=True)
             self._executor.shutdown(wait=True, cancel_futures=True)
             raise
@@ -1163,7 +1200,7 @@ class OwnedLibrary:
             if self._closed or self._ranking:
                 return
             self._ranking = True
-            self._scan_executor.submit(self._rank)
+            self._derive_executor.submit(self._rank)
 
     def _rank(self) -> None:
         with self._state:
@@ -1239,11 +1276,23 @@ class OwnedLibrary:
                 said["edits_adopted"] = developing.adopt(
                     conn, root, said["sidecars"], said.get("changed") or ())
                 stacks.project(conn)
+            # A sweep that found nothing new is not news: the window re-reads
+            # its shelves, folders and chapters on `swept`, and a quiet
+            # minute must not cost that.
+            if any(said.get(k) for k in ("photos_added", "photos_moved", "copies_retired", "edits_adopted")):
+                self._library._facets = facets_of(conn)
+                self._library.swept += 1
             return said
         finally:
             conn.close()
-            self._library.swept += 1
             self._library.chores.nudge()
+
+    def _repair(self) -> None:
+        conn = model.connect(self._library.catalog_path)
+        try:
+            repair(conn)
+        finally:
+            conn.close()
 
     async def export_files(self, photo_ids, destination: str, *, quality: int = 92,
                            long_edge: int = 0, rename: str = "") -> dict:
@@ -1481,28 +1530,41 @@ class OwnedLibrary:
             first = True
             passes = 0
             while not self._stop_following.wait(0 if first else 5.0):
-                # A card that arrives is noticed within seconds; the folders are
-                # swept every `every` seconds (each fifth pass of five).
+                # A card that arrives is noticed within seconds, and so is a
+                # drive: the attached list is looked at here, once a pass,
+                # and every page read answers from it. A drive that came or
+                # went is news the way a changed sweep is.
                 try:
                     self.cards = intake.cards()
                 except Exception:  # noqa: BLE001
                     self.cards = []
-                # Ranking follows the library on every pass, not only the
-                # minute sweeps: `_rank` skips in two cheap queries when
-                # nothing moved, and a vector the worker just made reaches
-                # Best and search within seconds instead of a minute.
-                self.rank_soon()
+                conn = model.connect(self._library.catalog_path)
+                try:
+                    here = attached_now(conn)
+                finally:
+                    conn.close()
+                if here != self._library.here:
+                    self._library.here = here
+                    self._library.swept += 1
                 passes += 1
                 if not first and (passes % max(1, int(every // 5))):
                     continue
+                # The folders are swept every `every` seconds, and the
+                # ranking follows the library on the same rhythm: a round
+                # reranks at once through its own verb, but the vectors the
+                # worker makes reach Best by the minute, because each pass
+                # that sees the count move re-reads the whole space.
                 with self._state:
                     if self._closed:
                         return
+                    if first:
+                        self._scan_executor.submit(self._repair)
                     future = self._scan_executor.submit(self._synchronize, "", not first)
                 try:
                     future.result()
                 except Exception:  # noqa: BLE001 - a failed sweep is logged by its lane
                     pass
+                self.rank_soon()
                 first = False
 
         self._stop_following = threading.Event()
@@ -1521,6 +1583,7 @@ class OwnedLibrary:
                     self._intake_stop.set()
                     self._intake_executor.shutdown(wait=True, cancel_futures=False)
                     self._scan_executor.shutdown(wait=True, cancel_futures=False)
+                    self._derive_executor.shutdown(wait=True, cancel_futures=False)
                     self._library.close()
 
                 self._close_future = self._executor.submit(finish)
