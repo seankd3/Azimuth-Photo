@@ -16,6 +16,9 @@ const PATHS = {
   portrait: 'M4.5 1.5h7v13h-7z',
   drive: 'M2 9.5h12v3.5H2z M2 9.5L4 3h8l2 6.5 M11 11.5h1',
   label: 'M2 3h7l5 5-5.5 5.5L2 8z M5 6h.01',
+  chevron: 'M6 3.5L10.5 8 6 12.5',
+  trash: 'M3 4.5h10 M6.5 4.5V3h3v1.5 M4 4.5l.7 9h6.6l.7-9',
+  close: 'M4 4l8 8 M12 4l-8 8',
 };
 
 export function icon(name, className = 'icon') {
@@ -24,7 +27,8 @@ export function icon(name, className = 'icon') {
   svg.setAttribute('aria-hidden', 'true');
   svg.classList.add(className, `icon-${name}`);
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-  path.setAttribute('d', PATHS[name] || PATHS.album);
+  if (!(name in PATHS)) throw new Error(`No icon named ${name}`);
+  path.setAttribute('d', PATHS[name]);
   svg.append(path);
   return svg;
 }

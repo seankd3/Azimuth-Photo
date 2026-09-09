@@ -53,11 +53,15 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
 
   function draw() {
     track.replaceChildren();
+    // One clock places every word on the rail, year or month: a name is
+    // written only where the last name left room for it, and a month that
+    // has room for a tick but not a name gets the tick. Two clocks (one per
+    // kind) printed the first year over the first month.
     let year = '';
     let month = '';
-    let lastMonthY = -Infinity;
-    let lastYearY = -Infinity;
-    const months = [];
+    let lastWordY = -Infinity;
+    let lastTickY = -Infinity;
+    let lastYearDrawn = '';
     for (const chapter of chapters) {
       if (!chapter.day) continue;
       const top = y(chapter.index);
@@ -65,34 +69,35 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       const thisMonth = chapter.day.slice(0, 7);
       if (thisYear !== year) {
         year = thisYear;
-        if (top - lastYearY >= 14) {
+        if (top - lastWordY >= 14) {
           const mark = element('div', 'timeline-year', year);
-          mark.style.top = `${top}px`;
+          mark.style.top = `${Math.max(6, top)}px`;
           track.append(mark);
-          lastYearY = top;
+          lastWordY = top;
+          lastTickY = top;
+          lastYearDrawn = year;
         }
+        continue;
       }
-      if (thisMonth !== month) {
-        month = thisMonth;
-        months.push({ top, name: MONTHS[Number(thisMonth.slice(5, 7)) - 1] });
-      }
-    }
-    // Months get a tick when there is room for one and a name when there is
-    // room for that; a rail with every label on top of the next says nothing.
-    for (const entry of months) {
-      if (entry.top - lastMonthY < 8) continue;
+      if (thisMonth === month) continue;
+      month = thisMonth;
+      if (top - lastTickY < 8) continue;
       const tick = element('div', 'timeline-month');
-      tick.style.top = `${entry.top}px`;
-      if (entry.top - lastMonthY >= 26) tick.textContent = entry.name;
+      tick.style.top = `${top}px`;
+      if (top - lastWordY >= 26) {
+        tick.textContent = MONTHS[Number(thisMonth.slice(5, 7)) - 1];
+        lastWordY = top;
+      }
       track.append(tick);
-      lastMonthY = entry.top;
+      lastTickY = top;
     }
-    // The far end says where time runs to, dimmer, when the last year mark
-    // is not already near it.
+    // The far end names the year time runs to, dimmer, only when it is not
+    // the year already written above it.
     const last = chapters.filter((c) => c.day).at(-1);
-    if (last && height - lastYearY > 30) {
-      const end = element('div', 'timeline-year is-end', last.day.slice(0, 4));
-      end.style.top = `${height - 8}px`;
+    const endYear = last ? last.day.slice(0, 4) : '';
+    if (endYear && endYear !== lastYearDrawn && height - lastWordY > 30) {
+      const end = element('div', 'timeline-year is-end', endYear);
+      end.style.top = `${height - 10}px`;
       track.append(end);
     }
   }

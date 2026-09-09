@@ -87,11 +87,10 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     const left = waiting.length - Math.min(waiting.length, WAITING);
     const leaf = document.createElement('span');
     leaf.className = 'leaf';
-    leaf.textContent = left > 0 ? `Introduce ${left} more…` : 'All people…';
-    const total = document.createElement('span');
-    total.className = 'set-count';
-    total.textContent = held.length.toLocaleString();
-    door.append(leaf, total);
+    leaf.textContent = left > 0
+      ? `Introduce ${left} more…`
+      : `All ${held.length.toLocaleString()} ${held.length === 1 ? 'person' : 'people'}…`;
+    door.append(icon('person'), leaf);
     door.addEventListener('click', () => update({ view: 'people', selected: null, selectedIndex: null }));
     rows.push(door);
     list.replaceChildren(...rows);

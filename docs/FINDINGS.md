@@ -299,21 +299,21 @@ finding was checked and the numbers said no.
 | F6 | The stack badge is mouse-only and invalid markup; the cover trails its members in newest sort | tabindex and keys on the badge; the band says the set wherever the cover sits | shipped |
 | F7 | Ctrl+wheel outside the library zooms the whole app; inside it steps in 17 notches | preventDefault first; continuous by delta; the layout on the next frame | shipped |
 | F8 | Stars are spelled four ways | one spelling: the text star; the unused drawn star leaves the set | shipped |
-| F9 | Sidebar label edges zig-zag: no reserved icon slot | one 18px slot on every row; Library rows get their marks | open |
-| F10 | FOLDERS and DRIVES show a heading over a void; the button that fills them is across the window | an empty section shows one quiet row that fills it | open |
-| F11 | Nothing says a section folds until it is folded | a drawn chevron always, rotated by state | open |
-| F12 | The active row's accent bar pokes out of its rounded corner | a rounded bar inside the row | open |
-| F13 | Fold memory keyed on the English word; the door row mixes units | data-section ids; '2 people' | open |
-| F14 | Four surfaces say the same count at once | the calm status line says Up to date, without the number | open |
+| F9 | Sidebar label edges zig-zag: no reserved icon slot | one 18px slot on every row; Library rows get their marks | shipped |
+| F10 | FOLDERS and DRIVES show a heading over a void; the button that fills them is across the window | an empty section shows one quiet row that fills it | shipped |
+| F11 | Nothing says a section folds until it is folded | a drawn chevron always, rotated by state | shipped |
+| F12 | The active row's accent bar pokes out of its rounded corner | a rounded bar inside the row | shipped |
+| F13 | Fold memory keyed on the English word; the door row mixes units | data-section ids; '2 people' | shipped |
+| F14 | Four surfaces say the same count at once | the calm status line says Up to date, without the number | shipped |
 | F15 | The bar's controls sit 1000px from the photographs | keep as designed | rejected: the verbs sit left with what they act on, the view controls right, as in Lightroom; the resting bar is empty by design |
-| F16 | The top fold tab is drawn over the context bar | a 12px handle on the seam | open |
-| F17 | Five control idioms in one bar; the range track is the brightest thing in the window | the range styled to the palette; Rank at the end | open |
-| F18 | 'Stacks open' states a status, not an action; shown with no stacks | an action label with aria-pressed; shown only when a stack is in view | open |
-| F19 | Searching makes Sort vanish | kept, disabled, with the reason | open |
-| F20 | The rail's first year and month print on top of each other | one placement clock for both | open |
-| F21 | A one-year library reads 2026 … 2026, half cut off | the end year only when it differs, inside the track | open |
-| F22 | The right fold tab covers the rail | the tab steps aside by the rail's width while the rail is up | open |
-| F23 | The fold tabs are hover-gated at 55% opacity | rest visible; hover lifts the ground only | open |
+| F16 | The top fold tab is drawn over the context bar | a 12px handle on the seam | shipped |
+| F17 | Five control idioms in one bar; the range track is the brightest thing in the window | the range styled to the palette; Rank at the end | shipped |
+| F18 | 'Stacks open' states a status, not an action; shown with no stacks | an action label with aria-pressed; shown only when a stack is in view | shipped |
+| F19 | Searching makes Sort vanish | kept, disabled, with the reason | shipped |
+| F20 | The rail's first year and month print on top of each other | one placement clock for both | shipped |
+| F21 | A one-year library reads 2026 … 2026, half cut off | the end year only when it differs, inside the track | shipped |
+| F22 | The right fold tab covers the rail | the tab steps aside by the rail's width while the rail is up | shipped |
+| F23 | The fold tabs are hover-gated at 55% opacity | rest visible; hover lifts the ground only | shipped |
 | F24 | The loupe hard-cuts in | a 120 ms fade and settle, reduced motion honoured | open |
 | F25 | Reopening the loupe flashes an empty strip | the strip's DOM survives a close | open |
 | F26 | Esc in the search box blurs to nowhere | clear and keep focus; a further Esc hands focus to the grid | open |
@@ -331,16 +331,16 @@ finding was checked and the numbers said no.
 | F38 | The drawn set is worn almost only in the drop; an unknown name draws the wrong glyph | chevrons and the stack chip wear the set; an unknown name throws | open |
 | F39 | 85 raw font sizes remain beside the four tokens | swept onto the scale; two display tokens for the dialogs | open |
 | F40 | Icons render at 14 on a 16 grid; filled marks drawn as outlines | 16px; smart fills | open |
-| F41 | Esc un-narrows chips but not an album, a folder, or Trash | one rung un-narrows the scope one step | open |
+| F41 | Esc un-narrows chips but not an album, a folder, or Trash | one rung un-narrows the scope one step | shipped |
 | F42 | Two key tables say four facts twice | one table: the sheet and every tooltip read it | open |
 | F43 | The sheet lacks the mouse grammar, chip keys and rail keys; one row renders as one wide cap | rows added; caps split on commas too | open |
 | U6 | Two key tables | one (F42) | open |
 | U7 | A chapter joined with ' · ' and split again on it | the break carries title and count apart | shipped |
 | U8 | Four spellings of a star | one (F8) | shipped |
 | U9 | Two spellings of a stack in one bar | the chip says 'In this stack' without a glyph | open |
-| U10 | Two policies for an empty sidebar section | one: a quiet row that fills it (F10) | open |
-| U11 | Two byte-identical row rules | deleted | open |
-| U12 | Two chevrons drawn as text | the drawn chevron (F11, F38) | open |
-| U13 | Two cursors for 'cannot press' | one | open |
-| U14 | One verb, three names (Add folder… / add-drive / add a folder) | add-folder everywhere | open |
+| U10 | Two policies for an empty sidebar section | one: a quiet row that fills it (F10) | shipped |
+| U11 | Two byte-identical row rules | deleted | shipped |
+| U12 | Two chevrons drawn as text | the drawn chevron (F11, F38) | shipped |
+| U13 | Two cursors for 'cannot press' | one | shipped |
+| U14 | One verb, three names (Add folder… / add-drive / add a folder) | add-folder everywhere | shipped |
 | F44 | The mark's ring and the hover line have been invisible since A1: an inset shadow on the cell paints under its image | the rings are drawn on a veil above the picture | shipped |

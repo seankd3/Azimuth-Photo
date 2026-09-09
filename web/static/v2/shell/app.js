@@ -1377,7 +1377,7 @@ function renderFolders(state) {
       disclosure.className = 'disclosure' + (node.children.length ? ' has-children' : '') + (open ? ' is-open' : '');
       disclosure.dataset.toggle = node.path;
       disclosure.setAttribute('aria-label', open ? 'Collapse' : 'Expand');
-      disclosure.textContent = '▶';
+      disclosure.append(icon('chevron'));
       const safety = document.createElement('span');
       safety.className = `safety ${node.safety === 'unknown' && !anyRecord ? 'quiet' : node.safety}`;
       const name = document.createElement('span');
@@ -1449,7 +1449,7 @@ function renderChrome(state) {
             ? `${away.length === 1 ? (away[0].label || 'A drive') : `${away.length} drives`} away · those photographs are here when it is`
             : state.counts.unidentified
               ? `Catching up · ${state.counts.unidentified.toLocaleString()} left`
-              : `Up to date · ${count} photos`;
+              : 'Up to date';
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
@@ -1485,7 +1485,10 @@ function renderChrome(state) {
   const alike = (state.like || []).length;
   pill.hidden = !alike || state.view === 'trash' || holding || walled || intaking;
   if (alike) pill.querySelector('[data-like-seeds]').textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`}`;
-  document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled || intaking;
+  const sortBox = document.querySelector('[data-sort]');
+  sortBox.closest('label').hidden = state.view === 'trash' || ranking || holding || walled || intaking;
+  sortBox.disabled = searching;
+  sortBox.closest('label').title = searching ? 'A search is ordered by how well each photograph matches' : '';
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
   const canCull = (state.view === 'library' || state.view === 'loupe') && selection().length > 0;
@@ -1494,7 +1497,7 @@ function renderChrome(state) {
   // One button, one place: it reads Pick or Clear for what is under the
   // cursor, so focus and the pixel keep their meaning across a click.
   renderStacksToggle(state);
-  stacksToggle.hidden = state.view !== 'library' || holding;
+  stacksToggle.hidden = state.view !== 'library' || holding || stacksToggle.dataset.any !== 'true';
   const pickButton = document.querySelector('[data-action="pick"]');
   const picked = !many && state.selected?.status === 'picked';
   pickButton.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: picked ? 'U' : 'P' }), ` ${picked ? 'Clear' : 'Pick'}`);
@@ -1531,6 +1534,13 @@ function renderChrome(state) {
   document.querySelector('[data-action="keep-results"]').hidden = !searching;
   renderFolders(state);
 
+  // An empty section is hidden unless the person can fill it, and then it
+  // shows the one row that fills it: Folders offers the folder; Drives
+  // appears with the first drive, since a drive is what a folder is on.
+  document.querySelector('[data-folders-empty]').hidden = state.home === null || state.drives.length > 0;
+  // A flat drive has no folders to list; its section waits for one.
+  document.querySelector('[data-section="folders"]').hidden = state.drives.length > 0 && !(state.tree || []).length;
+  document.querySelector('[data-drives-section]').hidden = state.drives.length === 0;
   const drivesKey = state.drives.map((drive) => `${drive.uuid}.${drive.attached ? 1 : 0}.${drive.label || drive.root}`).join('|');
   if (drivesKey !== drivesSeen) {
     drivesSeen = drivesKey;
@@ -1576,7 +1586,7 @@ driveForm.addEventListener('submit', async (event) => {
 
 document.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]')?.dataset.action;
-  if (action === 'add-drive') void openDriveDialog();
+  if (action === 'add-folder') void openDriveDialog();
   if (action === 'change-home') {
     product.chooseFolder().then((chosen) => { if (chosen) homePath.textContent = chosen; }).catch((error) => { homeError.textContent = error.message; });
   }
@@ -1800,6 +1810,8 @@ document.addEventListener('keydown', (event) => {
       anchorIndex = null;
     } else if (seeking()) { searchBox.value = ''; runSearch(''); }
     else if (read().chips.length) { update({ chips: [] }); viewMoved(); }
+    else if (read().album || (read().folders || []).length) { update({ album: null, folders: [] }); viewMoved(); }
+    else if (read().view === 'trash') document.querySelector('[data-action="all-photos"]').click();
     else return;
     event.preventDefault();
     return;
@@ -1947,7 +1959,7 @@ const SHORTCUTS = [
   ['Teaching', [['Y / N', 'This is / is not the word']]],
 ];
 const TIPS = {
-  'import-folder': 'Import a folder…', export: 'Export the selection… ', 'add-drive': 'Add a folder to the library',
+  'import-folder': 'Import a folder…', export: 'Export the selection… ', 'add-folder': 'Add a folder to the library',
   rank: 'Rank the photographs you are looking at', 'leave-rank': 'Back to the grid (Esc)', forget: 'Forget this missing photograph',
   'add-chip': 'Narrow by a fact', 'save-view': 'Save these filters as an album', 'keep-results': 'Save what the search found',
   restore: 'Put it back in the library (U)', 'empty-trash': 'Delete everything in Trash for good',
@@ -1978,8 +1990,16 @@ const keysDialog = document.querySelector('[data-keys-dialog]');
 }
 const stacksToggle = document.querySelector('[data-action="collapse-stacks"]');
 function renderStacksToggle(state) {
-  stacksToggle.replaceChildren(icon('stack'), state.collapsed ? ' Stacks collapsed' : ' Stacks open');
-  stacksToggle.title = state.collapsed ? 'Show every frame of every stack' : 'Collapse every stack behind its cover';
+  // The button names what it would do, and is offered only where there is
+  // a stack among the photographs held for this view.
+  stacksToggle.replaceChildren(icon('stack'), state.collapsed ? ' Open stacks' : ' Collapse stacks');
+  stacksToggle.setAttribute('aria-pressed', String(state.collapsed));
+  stacksToggle.title = state.collapsed ? 'Show every frame of every stack' : 'Fold every stack behind its cover';
+  let any = false;
+  for (const photo of state.photos.values()) {
+    if (photo.stack || photo.stack_of) { any = true; break; }
+  }
+  stacksToggle.dataset.any = String(any);
 }
 update({ collapsed: recall('azimuth.stacks-collapsed', false) === true });
 document.querySelector('[data-sort]').addEventListener('change', async (event) => {
@@ -2105,24 +2125,29 @@ loupeStrip.addEventListener('wheel', (event) => {
 
 // Sidebar sections fold from their headings, and the folds are remembered —
 // a long library keeps only the shelves it is using in view.
-const FOLDED_KEY = 'azimuth.folded-sections';
+const FOLDED_KEY = 'azimuth.folded';
 const folded = new Set(recall(FOLDED_KEY, []));
 function applyFolds() {
-  for (const section of document.querySelectorAll('.sidebar section')) {
-    const name = section.querySelector('.eyebrow')?.textContent || '';
-    section.classList.toggle('is-folded', folded.has(name));
+  for (const section of document.querySelectorAll('.sidebar section[data-section]')) {
+    const head = section.querySelector('.eyebrow');
+    if (head && !head.querySelector('.icon')) head.append(icon('chevron'));
+    const shut = folded.has(section.dataset.section);
+    section.classList.toggle('is-folded', shut);
+    head?.setAttribute('aria-expanded', String(!shut));
   }
 }
 document.querySelector('.sidebar').addEventListener('click', (event) => {
   const head = event.target.closest('.eyebrow');
   if (!head) return;
-  const name = head.textContent;
+  const name = head.closest('section').dataset.section;
   if (folded.has(name)) folded.delete(name);
   else folded.add(name);
   remember(FOLDED_KEY, [...folded]);
   applyFolds();
 });
 applyFolds();
+// F9: every sidebar row has the same mark slot; the library rows wear theirs.
+for (const row of document.querySelectorAll('.sidebar [data-icon]')) row.prepend(icon(row.dataset.icon));
 
 setPanels(loadPanels(), { keep: false });
 subscribe(render);

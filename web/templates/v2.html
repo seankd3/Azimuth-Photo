@@ -28,39 +28,40 @@
         <button class="card-chip" type="button" data-action="import-card" hidden aria-live="polite">Card · <span data-card-label></span></button>
         <button class="quiet-button" type="button" data-action="import-folder">Import…</button>
         <button class="quiet-button" type="button" data-action="export" hidden>Export…</button>
-        <button class="quiet-button" type="button" data-action="add-drive">Add folder…</button>
+        <button class="quiet-button" type="button" data-action="add-folder">Add folder…</button>
       </div>
     </header>
 
     <aside class="sidebar" aria-label="Library navigation">
-      <section>
+      <section data-section="library">
         <button class="eyebrow" type="button">Library</button>
-        <button class="nav-row is-active" type="button" data-action="all-photos">
+        <button class="nav-row is-active" type="button" data-action="all-photos" data-icon="landscape">
           <span>All photos</span><span data-sidebar-count>—</span>
         </button>
-        <button class="nav-row" type="button" data-action="trash-view">
+        <button class="nav-row" type="button" data-action="trash-view" data-icon="trash">
           <span>Trash</span><span data-trash-count>—</span>
         </button>
       </section>
-      <section>
+      <section data-section="albums">
         <div class="section-heading"><button class="eyebrow" type="button">Albums</button>
           <button class="mini-button" type="button" data-action="new-album" aria-label="New album">+</button>
         </div>
         <div class="side-list" data-albums-tree></div>
       </section>
-      <section data-people-section hidden>
+      <section data-section="people" data-people-section hidden>
         <div class="section-heading"><button class="eyebrow" type="button">People</button></div>
         <div class="side-list" data-people-list></div>
       </section>
-      <section data-labels-section hidden>
+      <section data-section="labels" data-labels-section hidden>
         <div class="section-heading"><button class="eyebrow" type="button">Labels</button></div>
         <div class="side-list" data-labels-list></div>
       </section>
-      <section>
+      <section data-section="folders">
         <div class="section-heading"><button class="eyebrow" type="button">Folders</button></div>
         <div class="folder-tree" data-folder-tree></div>
+        <button class="nav-row is-quiet" type="button" data-action="add-folder" data-icon="folder" data-folders-empty hidden><span>Add a folder…</span></button>
       </section>
-      <section>
+      <section data-section="drives" data-drives-section>
         <div class="section-heading"><button class="eyebrow" type="button">Drives</button></div>
         <div class="drive-list" data-drive-list></div>
       </section>
@@ -100,9 +101,8 @@
           <option value="diverse" title="Spread across the scope's looks">Diverse</option>
           <option value="tournament" title="The leaders meet">Tournament</option>
         </select>
-        <button class="quiet-button" type="button" data-action="rank">Rank</button>
         <button class="quiet-button" type="button" data-action="leave-rank" hidden><kbd>Esc</kbd> Done</button>
-        <button class="quiet-button" type="button" data-action="collapse-stacks"></button>
+        <button class="quiet-button" type="button" data-action="collapse-stacks" aria-pressed="false"></button>
         <label>Sort
           <select data-sort>
             <option value="newest">Newest</option>
@@ -115,6 +115,7 @@
         <label>Size
           <input data-density type="range" min="150" max="320" value="180" step="10">
         </label>
+        <button class="quiet-button" type="button" data-action="rank">Rank</button>
         <button class="quiet-button" type="button" data-action="restore" hidden>Restore</button>
         <button class="danger-button" type="button" data-action="empty-trash" hidden>Empty Trash</button>
       </div>
