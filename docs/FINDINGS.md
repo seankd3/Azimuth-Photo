@@ -78,7 +78,7 @@ finding was checked and the numbers said no.
 | R4 | No look-closer inside a round | Z or F opens the loupe on the hovered card, Esc returns | open |
 | R5 | Progress counts coverage, not what was earned | `earned` (seen ≥ 3) plus percent sorted | open |
 | R6 | Rerank queues behind sweeps on the scan lane; no star on Best tiles | own derive lane; star on tiles in Best sort | shipped (lane); the star on Best tiles is open under V-wave |
-| R7 | The empty state is pinned top-left | absolute, grid-centred | open |
+| R7 | The empty state is pinned top-left | absolute, grid-centred | shipped |
 | R8 | Title and progress ignore chips | use the filters' `describe` | open |
 | R9 | Size not remembered; resizing reloads the set | remember; grow or shrink in place | open |
 | R10 | Five mode buttons, and net/desktop/boot disagree on the default | one select, drop Close, one default | open |
@@ -107,20 +107,20 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| V1 | `.quiet-button` inherits size and colour: three looks | its own scale: 13px, `--text-2` | open |
-| V2 | Sidebar rows differ in size (nav 16px vs side 13px) | one row primitive, one `.is-active`, one `.count` | open |
-| V3 | Fold tabs overlap content | position at the `--left`, `--right`, `--top` seams | open |
-| V4 | Classic scrollbars; the rail sits beside the scrollbar | `scrollbar-width: thin`; hide the workspace scrollbar under the rail | open |
-| V5 | A single selection wears both rings | `is-focus` only when more than one is marked; drop `.is-member.is-focus` | open |
-| V6 | Rank empty state pinned top-left | same as R7 | open |
-| V7 | Import stage selection language differs | the shared `is-focus` rule | open |
-| V8 | 62 colour literals against 9 tokens; two radii | tokens: `--row-active --accent-tint --well --raised --hover-line --radius` | open |
-| V9 | 46px, 86px, 228px typed repeatedly | `--ctx --strip --brand` | open |
-| V10 | Inter and Plex Mono are not shipped | self-host, weights 500 and 600 | open |
-| V11 | `.contextbar > span { margin-right: auto }` floats the teach hint | scope to the result label and rank progress | open |
-| V12 | Top-action spacing by whitespace | flex gap | open |
-| V13 | The eyebrow fold is a `<p>`; + misaligned | button eyebrows | open |
-| V14 | Dead CSS (brand-mark i, repeated `[hidden]`, month `::after` twice, loupe-close); unstyled kbd in the crop bar | delete; style | open |
+| V1 | `.quiet-button` inherits size and colour: three looks | its own scale: 13px, `--text-2` | shipped |
+| V2 | Sidebar rows differ in size (nav 16px vs side 13px) | one row primitive, one `.is-active`, one `.count` | shipped |
+| V3 | Fold tabs overlap content | position at the `--left`, `--right`, `--top` seams | shipped |
+| V4 | Classic scrollbars; the rail sits beside the scrollbar | `scrollbar-width: thin`; hide the workspace scrollbar under the rail | shipped |
+| V5 | A single selection wears both rings | `is-focus` only when more than one is marked; drop `.is-member.is-focus` | shipped |
+| V6 | Rank empty state pinned top-left | same as R7 | shipped |
+| V7 | Import stage selection language differs | the shared `is-focus` rule | shipped |
+| V8 | 62 colour literals against 9 tokens; two radii | tokens: `--row-active --accent-tint --well --raised --hover-line --radius` | shipped: 62 literals → 20, all surfaces named; the reds of the danger button and the amber of a warning stay literal on purpose |
+| V9 | 46px, 86px, 228px typed repeatedly | `--ctx --strip --brand` | shipped |
+| V10 | Inter and Plex Mono are not shipped | self-host, weights 500 and 600 | shipped |
+| V11 | `.contextbar > span { margin-right: auto }` floats the teach hint | scope to the result label and rank progress | shipped |
+| V12 | Top-action spacing by whitespace | flex gap | shipped |
+| V13 | The eyebrow fold is a `<p>`; + misaligned | button eyebrows | shipped |
+| V14 | Dead CSS (brand-mark i, repeated `[hidden]`, month `::after` twice, loupe-close); unstyled kbd in the crop bar | delete; style | shipped |
 
 ## Documents
 

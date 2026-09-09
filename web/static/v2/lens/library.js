@@ -222,7 +222,10 @@ function reconcileGrid(grid, state, actions, layout, range) {
     // Marked wears the accent; the keyboard cursor is its own quieter ring,
     // so where you are is visible inside what you have.
     cell.classList.toggle('is-selected', Boolean(photo && state.marked?.has(photo.id)) || (!photo && index === state.selectedIndex));
-    cell.classList.toggle('is-focus', index === state.selectedIndex);
+    // The lone marked photograph wears the accent alone; the cursor's own
+    // ring appears inside a set, or on a bare cursor with nothing marked.
+    const alone = photo && state.marked?.size === 1 && state.marked.has(photo.id);
+    cell.classList.toggle('is-focus', index === state.selectedIndex && !alone);
     if (cell.dataset.kind === 'photo') {
       showTile(cell, photo);
       const picked = photo.status === 'picked';

@@ -16,7 +16,30 @@ OUTPUT = ROOT / "build" / "desktop" / "index.html"
 ESBUILD = ROOT / "node_modules" / "esbuild" / "bin" / "esbuild"
 
 
+FONTS = {
+    "inter": ROOT / "node_modules" / "@fontsource" / "inter" / "files",
+    "ibm-plex-mono": ROOT / "node_modules" / "@fontsource" / "ibm-plex-mono" / "files",
+}
+
+
+def with_fonts(css: str) -> str:
+    """Every `url("font:<file>")` becomes the face itself, base64, so the one
+    document carries its type and a fresh machine wears the same face."""
+
+    import base64
+    import re
+
+    def inline(match: re.Match) -> str:
+        name = match.group(1)
+        family = name.rsplit("-latin-", 1)[0]
+        data = (FONTS[family] / name).read_bytes()
+        return f'url("data:font/woff2;base64,{base64.b64encode(data).decode()}")'
+
+    return re.sub(r'url\("font:([^"]+)"\)', inline, css)
+
+
 def render(template: str, css: str, javascript: str) -> str:
+    css = with_fonts(css)
     style = f"<style>{css.replace('</style', '<\\/style')}</style>"
     script = f"<script>{javascript.replace('</script', '<\\/script')}</script>"
     document = template.replace('<link rel="stylesheet" href="/static/index.css">', style)
