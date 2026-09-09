@@ -80,11 +80,21 @@ code file is unregistered in `docs/REWRITE_LEDGER.md`.
 
 ## Proofs
 
-A change to the running app is proven by running it: an isolated home, real
-photographs, the native window, and a screenshot. `test_desktop.py` crosses the
-real bridge; `sim_rank.py` and `sim_learn.py` are the instruments the ranking
-modes were chosen with; `make_test_library.py` builds a few hundred real photos
-on fast disk to develop against instead of the archive.
+A change to the running app is proven by running it, and none of it has to
+touch the screen:
+
+- `scripts/harness.py` serves the bundled UI with a stub bridge on :8765. The
+  whole shell runs in a browser tab with no window and no catalog; read its
+  DOM, drive it, screenshot it. Shape and behaviour, never pixels.
+- `scripts/native_proof.py <home> <out.png> --probe probe.js` opens the real
+  app off-screen on an isolated `AZIMUTH_HOME`, evaluates a JavaScript probe in
+  the page, captures the window with `PrintWindow`, and closes. Pixels, tiles,
+  the worker, the lot, with nothing on the desktop.
+- `test_desktop.py` crosses the real bridge with no window at all.
+
+`sim_rank.py` and `sim_learn.py` are the instruments the ranking modes were
+chosen with; `make_test_library.py` builds a few hundred real photos on fast
+disk to develop against instead of the archive.
 
 ## Build the app
 
