@@ -201,7 +201,8 @@ export function createEditPanel({ product, notify, undo, preview, applied, shown
     clearTimeout(gatherTimer);
     gatherTimer = setTimeout(flush, 400);
   });
-  groups.addEventListener('pointerup', flush);
+  // A release fires change after pointerup, so the flush waits a task.
+  groups.addEventListener('pointerup', () => setTimeout(flush, 0));
   groups.addEventListener('focusout', flush);
 
   function rest(key) {

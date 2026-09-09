@@ -389,8 +389,8 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || (menu.hidden && photoMenu.hidden && namePop.hidden)) return;
-    menu.hidden = true;
-    photoMenu.hidden = true;
+    hideMenu(menu);
+    hideMenu(photoMenu);
     if (!namePop.hidden) answer(null);
     event.preventDefault();
     event.stopImmediatePropagation();

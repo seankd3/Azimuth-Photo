@@ -5,10 +5,13 @@
 // screen and none is mouse-only. Shift+F10 and the Menu key open a row's
 // menu from the keyboard by asking for the same contextmenu event.
 
-let opener = null;
+const openers = new WeakMap();
 
 export function showMenu(menu, x, y) {
-  opener = document.activeElement;
+  // One menu at a time: whatever else is open goes first, so two never
+  // stack and the focus always has one place to return to.
+  for (const other of document.querySelectorAll('.context-menu:not([hidden])')) if (other !== menu) hideMenu(other);
+  openers.set(menu, document.activeElement);
   menu.hidden = false;
   const { offsetWidth: width, offsetHeight: height } = menu;
   menu.style.left = `${Math.max(8, Math.min(x, window.innerWidth - width - 8))}px`;
@@ -19,6 +22,8 @@ export function showMenu(menu, x, y) {
 export function hideMenu(menu) {
   if (menu.hidden) return;
   menu.hidden = true;
+  const opener = openers.get(menu);
+  openers.delete(menu);
   if (menu.contains(document.activeElement) && opener?.isConnected) opener.focus({ preventScroll: true });
 }
 
@@ -31,13 +36,15 @@ document.addEventListener('keydown', (event) => {
   const menu = openOf(event.target);
   if (!menu) {
     if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      // A text field keeps its own menu (cut, copy, paste); a row asks for
+      // its menu, and the key is taken only if a menu answered.
       const at = document.activeElement;
-      if (!at || at === document.body) return;
+      if (!at || at === document.body || at.matches('input, textarea, [contenteditable="true"]')) return;
       const rect = at.getBoundingClientRect();
       at.dispatchEvent(new MouseEvent('contextmenu', {
         bubbles: true, cancelable: true, clientX: rect.left + Math.min(24, rect.width / 2), clientY: rect.bottom - 4,
       }));
-      event.preventDefault();
+      if (document.querySelector('.context-menu:not([hidden])')) event.preventDefault();
     }
     return;
   }

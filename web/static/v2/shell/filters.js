@@ -299,7 +299,7 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
     closeEditor();
     menu.hidden = true;
     // The keyboard goes back to the chip it came from, or to the + button.
-    (at !== null ? bar.querySelector(`[data-chip="${at}"]`) : null || document.querySelector('[data-action="add-chip"]'))?.focus();
+    ((at !== null && bar.querySelector(`[data-chip="${at}"]`)) || document.querySelector('[data-action="add-chip"]'))?.focus();
     event.preventDefault();
     event.stopImmediatePropagation();
   });

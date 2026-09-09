@@ -129,6 +129,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     state.set = [];
     state.age = [];
     state.selected = -1;
+    state.queued = null;
     state.answered = false;
     render();
     try {
@@ -230,7 +231,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     if (state.busy) {
       // The fastest part of the loop must never eat a keystroke: the pick
       // waits out the beat and lands, instead of vanishing.
-      state.queued = index;
+      state.queued = { index, byMouse };
       return;
     }
     if (!winner || state.set.length < 2) return;
@@ -239,7 +240,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     // The pick is seen for a beat before it leaves.
     stage.querySelector(`[data-index="${index}"]`)?.classList.add('is-picked');
     await delay(120);
-    if (generation !== state.generation) { state.busy = false; return; }
+    if (generation !== state.generation) { state.busy = false; state.queued = null; return; }
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
 
@@ -267,7 +268,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     let missing = arrivals.filter(([, next]) => !next).length;
     if (missing && state.filling) {
       await state.filling;
-      if (generation !== state.generation) { state.busy = false; return; }  // undone or left meanwhile
+      if (generation !== state.generation) { state.busy = false; state.queued = null; return; }  // undone or left meanwhile
       for (const entry of arrivals) {
         if (!entry[1]) entry[1] = state.buffer.shift() || null;
       }
@@ -276,7 +277,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     if (missing) {
       try {
         const answer = await ask(missing);
-        if (generation !== state.generation) { state.busy = false; return; }
+        if (generation !== state.generation) { state.busy = false; state.queued = null; return; }
         accept(answer);
         const fresh = [...answer.photos];
         for (const entry of arrivals) {
@@ -330,7 +331,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     });
     const queued = state.queued;
     state.queued = null;
-    if (queued !== null) void pick(queued);
+    if (queued !== null) void pick(queued.index, queued);
   }
 
   function move(by) {

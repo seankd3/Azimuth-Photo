@@ -42,7 +42,7 @@ STUB = r"""<script>
     const count = day === dates[dates.length - 1] ? N - photos.length : Math.min(5, N - photos.length);
     days.push({ day, count });
     for (let i = 0; i < count; i += 1, id += 1) {
-      photos.push({ id, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null,
+      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null,
         width: 6000, height: 4000, status: 'unflagged', rotate: 0, stack: 0, stars: 0,
         reachable: true, tile_failed: false, date_taken: `${day} 12:00:00`, camera_model: 'EOS R5' });
     }
@@ -69,7 +69,16 @@ STUB = r"""<script>
     sessions: () => [],
     albums: () => [], cameras: () => [], facets: () => ({}), people: () => [], labels: () => [], cards: () => [],
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
-    intake_status: () => ({ running: false }), develop_state: () => ({}), forget_missing: () => ({}),
+    intake_status: () => ({ running: false }), forget_missing: () => ({}),
+    rank: (n) => ({ photos: photos.slice(0, n), judged: 0, earned: 0, total: N }),
+    round: () => ({ decision: 1 }), unround: () => ({}),
+    pick: (ids) => ({ changed: ids.map((id) => ({ subject: `h${id}`, family: 'status', after: 'picked', photos: 1 })), unidentified: 0 }),
+    clear_pick: (ids) => ({ changed: ids.map((id) => ({ subject: `h${id}`, family: 'status', after: null, photos: 1 })), unidentified: 0 }),
+    reject: (ids) => ({ changed: ids.map((id) => ({ subject: `h${id}`, family: 'status', after: 'trashed', photos: 1 })), unidentified: 0 }),
+    turn: (ids, by) => ({ changed: ids.map((id) => ({ subject: `h${id}`, family: 'rotate', after: by, photos: 1 })), unidentified: 0 }),
+    undo_cull: () => ({}),
+    develop_state: () => ({ plain: 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', settings: {}, box: null }),
+    develop: () => ({}),
   };
   window.__calls = [];
   window.pywebview = { api: new Proxy(api, { get: (target, name) => {

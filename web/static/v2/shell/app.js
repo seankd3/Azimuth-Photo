@@ -1085,8 +1085,8 @@ document.addEventListener('contextmenu', (event) => {
   const row = event.target.closest('.folder-row');
   const all = event.target.closest('.nav-row[data-action="all-photos"]');
   if (!row && !all) {
-    folderMenu.hidden = true;
-    driveMenu.hidden = true;
+    hideMenu(folderMenu);
+    hideMenu(driveMenu);
     return;
   }
   event.preventDefault();
@@ -1867,6 +1867,8 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (rankWorkflow.isOpen()) {
+    // A focused control (a size or mode button) keeps Enter and Space.
+    if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
     if (rankWorkflow.key(event)) event.preventDefault();
     return;
   }
@@ -1941,6 +1943,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (read().view === 'people') {
+    if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
     if (peoplePanel.key(event)) event.preventDefault();
     return;
   }

@@ -414,3 +414,13 @@ finding was checked and the numbers said no.
 | X23 | The filmstrip opened uncentred: laid out while the stage was hidden | laid out after the stage is shown | shipped |
 | X25 | MASTER_PLAN recorded the old status line | updated | shipped |
 | X24 | An unknown icon name at boot is a blank window | keep as designed: a typo in a static name is a build-time fault the throw surfaces at once | rejected: fail loud beats a wrong glyph |
+| X26 | Enter on the wall's Name… button browsed the person | a focused control keeps Enter and Space on every stage | shipped |
+| X27 | Enter or Space on a Rank size or mode button cast a vote | same guard in the Rank branch | shipped |
+| X28 | A pick queued during an abandoned beat fired on the next pick | the queue is dropped with the beat and on load | shipped |
+| X29 | A queued mouse pick replayed as a keyboard pick | the queue carries how the pick was made | shipped |
+| X30 | Two context menus could open at once; the opener went stale and focus fell to the body | one menu at a time; the opener remembered per menu; every hide through the one door | shipped |
+| X31 | Shift+F10 in a text field killed cut, copy and paste | text fields keep their own menu; the key is taken only when a menu answered | shipped |
+| X32 | Esc from the chip editor could focus nothing (a precedence slip) | the chip, else the + button | shipped |
+| X33 | Import's rows were measured from its newest day, not its grid | the grid template's column count | shipped |
+| X34 | Letting go of a Develop slider kept it 400 ms late | the release flushes after the change it causes | shipped |
+| X35 | Rank, Crop and Develop could not be driven in the harness | stubs for rank, round, the cull verbs and develop_state | shipped |
