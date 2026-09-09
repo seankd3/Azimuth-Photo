@@ -66,6 +66,8 @@ function loadPanels() {
 function setPanels(panels, { keep = true } = {}) {
   update({ panels });
   if (keep) remember(PANELS_KEY, panels);
+  // The drop hangs off the box; a box that folds away takes it along.
+  if (!panels.top) searchCards?.close();
 }
 function togglePanel(side) {
   const panels = { ...read().panels, [side]: !read().panels[side] };
@@ -473,15 +475,14 @@ function runSearch(text) {
   workspace.scrollTo({ top: 0 });
   loadView();
 }
-// More like this: the same search door, asked with photographs. It always
-// asks the whole library — you narrow afterwards with chips if you want —
-// and the seeds themselves stay out of the answer.
+// More like this: the same search door, asked with photographs. It asks
+// inside where you are -- the folder, the album, the chips stay -- with
+// the seeds themselves kept out of the answer.
 function moreLikeThis(ids) {
   if (!ids.length) return;
   if (loupeOpen()) closeLoupe();
   searchBox.value = '';
-  update({ view: 'library', folders: [], album: null, chips: [], query: '', like: ids,
-           selected: null, selectedIndex: null });
+  update({ view: 'library', query: '', like: ids, selected: null, selectedIndex: null });
   workspace.scrollTo({ top: 0 });
   loadView();
 }
@@ -491,7 +492,7 @@ document.querySelector('[data-like-pill]').addEventListener('click', () => {
 });
 // The box belongs to the cards: they offer the library's shape on focus,
 // narrow it as you type, and leave Enter meaning what it always meant.
-createSearchCards({
+const searchCards = createSearchCards({
   product,
   read,
   update,
@@ -542,7 +543,7 @@ function visibleGrid() {
   const bare = !inTrash && !scanning && !inAlbum && !searching && !inFolder && !narrowed;
   library.renderGrid(grid, read(), {
     emptyTitle: inTrash ? 'Trash is empty.'
-      : scanning ? 'Reading your photos…'
+      : scanning ? SAYING.finding
         : inAlbum ? 'Nothing in this album yet.'
           : searching ? 'Nothing matches.'
             : inFolder ? (read().folders.length === 1 ? 'Nothing in this folder yet.' : 'Nothing in these folders yet.')
@@ -603,7 +604,9 @@ function scheduleGrid() {
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = null;
     visibleGrid();
-    timeline.follow();
+    // The rail is keyed on its own height, so this is free when nothing
+    // moved and right after a resize.
+    timeline.render(read());
   });
 }
 
@@ -750,6 +753,9 @@ async function refreshInPlace({ shelves = true } = {}) {
 
 // What each kind of owed work is called when the sidebar says what the
 // worker is doing. The keys are the cache kinds' own names.
+// What the line says for each state, in one place: finding is the sweep
+// walking disks, reading is the worker opening files.
+const SAYING = { finding: 'Finding your photographs…' };
 const WORKING = {
   identity: 'Identifying photographs',
   metadata: 'Reading photographs',
@@ -780,10 +786,16 @@ async function followLibrary() {
     if (last === null || pulse.cards !== last.cards) showCards();
     // The status line: the kind the worker is on, what it counted as left,
     // and the pace, smoothed so two seconds of luck do not make it jump.
-    const pace = last === null ? 0 : Math.round((rate * 2 + (pulse.done - last.done) * 30) / 3);
+    const instant = last === null ? 0 : (pulse.done - last.done) * 30;
+    const pace = rate ? Math.round((rate * 2 + instant) / 3) : instant;
     rate = pulse.doing ? pace : 0;
-    const left = Object.values(pulse.left || {}).reduce((sum, n) => sum + n, 0);
-    const working = pulse.doing ? { word: WORKING[pulse.doing] || 'Working', left, rate } : null;
+    // The number beside the word is that kind's own debt; the whole debt
+    // decides whether the line may say Up to date at all -- a worker idling
+    // between kinds for a beat has not caught up.
+    const owed = Object.values(pulse.left || {}).reduce((sum, n) => sum + n, 0);
+    const left = (pulse.left || {})[pulse.doing] || 0;
+    const working = pulse.doing ? { word: WORKING[pulse.doing] || 'Working', left, rate }
+      : owed ? { word: 'Catching up', left: owed, rate: 0 } : null;
     if (JSON.stringify(working) !== JSON.stringify(read().working)) update({ working });
     last = pulse;
     if ((moved || swept || shaped) && !read().loading && !read().scanning) {
@@ -1295,25 +1307,30 @@ function renderChrome(state) {
   // The label speaks about the person's photographs, not the app's memory:
   // how many are selected, or nothing — the title already carries the count.
   document.querySelector('[data-result-label]').textContent = state.loading
-    ? 'Loading your library…'
+    ? (seeking() ? 'Searching…' : 'Loading your library…')
     : state.marked?.size > 1 ? `${state.marked.size.toLocaleString()} selected` : '';
   // The running import outranks the reading chatter: it is the one thing
   // the person just asked for.
   // Always a sentence, never a blank: the import you asked for, the sweep,
   // the worker's current kind with what is left and how fast, or the calm.
   const working = state.working;
-  status.textContent = state.importing
-    ? state.importing
-    : state.scanning
-      ? 'Reading your photos…'
-      : working
-        ? [working.word,
-           working.left ? `${working.left.toLocaleString()} left` : null,
-           working.rate ? `${working.rate.toLocaleString()} / min` : null,
-          ].filter(Boolean).join(' · ')
-        : state.counts.unidentified
-          ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
-          : `Up to date · ${count} photos`;
+  const away = (state.drives || []).filter((d) => !d.attached);
+  status.textContent = state.home === null
+    ? 'Choose where Azimuth should live to begin.'
+    : state.importing
+      ? state.importing
+      : state.scanning
+        ? SAYING.finding
+        : working
+          ? [working.word,
+             working.left ? `${working.left.toLocaleString()} left` : null,
+             working.rate ? `${working.rate.toLocaleString()} / min` : null,
+            ].filter(Boolean).join(' · ')
+          : away.length
+            ? `${away.length === 1 ? (away[0].label || 'A drive') : `${away.length} drives`} away · those photographs are here when it is`
+            : state.counts.unidentified
+              ? `Catching up · ${state.counts.unidentified.toLocaleString()} left`
+              : `Up to date · ${count} photos`;
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
@@ -1347,7 +1364,7 @@ function renderChrome(state) {
   // the question being asked, and its ✕ is how the question ends.
   const pill = document.querySelector('[data-like-pill]');
   const alike = (state.like || []).length;
-  pill.hidden = !alike || state.view === 'trash' || holding || walled;
+  pill.hidden = !alike || state.view === 'trash' || holding || walled || intaking;
   if (alike) pill.textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`} ✕`;
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled || intaking;
   // A decision is keyed on identity, and identity arrives shortly after a
@@ -1871,7 +1888,10 @@ applyFolds();
 
 setPanels(loadPanels(), { keep: false });
 subscribe(render);
-product.home().then((where) => (where
-  ? Promise.all([loadView(), loadFolders(), albumsPanel.refresh(), peoplePanel.refresh(), labelsPanel.refresh()])
-  : chooseHome()));
+product.home().then((where) => {
+  update({ home: where || null });
+  return where
+    ? Promise.all([loadView(), loadFolders(), albumsPanel.refresh(), peoplePanel.refresh(), labelsPanel.refresh()])
+    : chooseHome();
+});
 followLibrary();

@@ -132,16 +132,16 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| SC1 | Arrowing through the drop is hijacked by the resting mouse: scrolling a row under the pointer fires hover and the cursor jumps | hover moves the cursor only after real pointer movement | open |
-| SC2 | The card that searches what you typed is the last of ~30 rows, below the fold | emit the everything row first when there is text | open |
-| SC3 | The ⏎ badge sits on one row while Enter runs whatever the cursor is on | the ⏎ hint rides the cursor row | open |
-| SC4 | The bar says 'Loading your library…' during a search | 'Searching…' when seeking | open |
-| SC5 | Recents vanish the instant you type | recents pass through the same match filter, first | open |
-| SC6 | A recent search cannot be forgotten | a × on each recent row | open |
-| SC7 | The drop is invisible to assistive tech; no announced cursor | combobox/listbox roles and aria-activedescendant | open |
-| SC8 | Folding the top bar with the drop open strands the drop | the panel toggle closes the drop | open |
-| SC9 | More like this silently throws away chips, folders and album | keep the scope; drop only the query | open |
-| SC10 | The like pill floats over the import workspace | hidden while importing, like its siblings | open |
+| SC1 | Arrowing through the drop is hijacked by the resting mouse: scrolling a row under the pointer fires hover and the cursor jumps | hover moves the cursor only after real pointer movement | shipped |
+| SC2 | The card that searches what you typed is the last of ~30 rows, below the fold | emit the everything row first when there is text | shipped |
+| SC3 | The ⏎ badge sits on one row while Enter runs whatever the cursor is on | the ⏎ hint rides the cursor row | shipped |
+| SC4 | The bar says 'Loading your library…' during a search | 'Searching…' when seeking | shipped |
+| SC5 | Recents vanish the instant you type | recents pass through the same match filter, first | shipped |
+| SC6 | A recent search cannot be forgotten | a × on each recent row | shipped |
+| SC7 | The drop is invisible to assistive tech; no announced cursor | combobox/listbox roles and aria-activedescendant | shipped |
+| SC8 | Folding the top bar with the drop open strands the drop | the panel toggle closes the drop | shipped |
+| SC9 | More like this silently throws away chips, folders and album | keep the scope; drop only the query | shipped |
+| SC10 | The like pill floats over the import workspace | hidden while importing, like its siblings | shipped |
 | SC11 | Nothing shows the seeds of a likeness search; any click on the pill ends it | label opens the seeds, a real × clears | open |
 
 ## People wall and shelf
@@ -179,26 +179,26 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| TL1 | The rail eats clicks on the rightmost column of photographs | reserve a 44px gutter while the rail is up | open |
-| TL2 | After a resize the rail lies until the next store update | render on the grid's resize frame | open |
-| TL3 | When the day counts do not add up the rail shows and says Undated everywhere | fold emptiness into whether the rail shows | open |
-| TL4 | January never gets a tick | no continue after the year mark | open |
-| TL5 | The rail is unreachable from the keyboard | a slider role with arrow and page keys | open |
-| TL6 | Nothing says which way time runs | a title, and the far endpoint year drawn | open |
-| TL7 | Sort changes reflow the grid by a scrollbar width | no scrollbar in every sort; gutter stable | open |
-| TL8 | A hovered rail shows a date label forever | hide on leave and after idle | open |
+| TL1 | The rail eats clicks on the rightmost column of photographs | reserve a 44px gutter while the rail is up | shipped |
+| TL2 | After a resize the rail lies until the next store update | render on the grid's resize frame | shipped |
+| TL3 | When the day counts do not add up the rail shows and says Undated everywhere | fold emptiness into whether the rail shows | shipped |
+| TL4 | January never gets a tick | no continue after the year mark | shipped |
+| TL5 | The rail is unreachable from the keyboard | a slider role with arrow and page keys | shipped |
+| TL6 | Nothing says which way time runs | a title, and the far endpoint year drawn | shipped |
+| TL7 | Sort changes reflow the grid by a scrollbar width | no scrollbar in every sort; gutter stable | rejected: the rail's gutter and a thin scrollbar differ by design, and a change of sort re-lays the grid anyway |
+| TL8 | A hovered rail shows a date label forever | hide on leave and after idle | shipped |
 
 ## Status line and pulse
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| ST1 | A drive going away is never said | an away branch above the calm one | open |
-| ST2 | The number does not match the word: all owed kinds beside one kind's name | the kind's own count | open |
-| ST3 | 'Up to date' flickers while work is owed | say Up to date only when the debt is zero | open |
-| ST4 | The first run has no status line | a home-less sentence | open |
-| ST5 | A screen reader hears the pace every two seconds | no aria-live on the ambient line | open |
-| ST6 | Three sentences mean reading your photos | one vocabulary table | open |
-| ST7 | The pace restarts at a third of the truth after every idle beat | seed from the instant rate | open |
+| ST1 | A drive going away is never said | an away branch above the calm one | shipped |
+| ST2 | The number does not match the word: all owed kinds beside one kind's name | the kind's own count | shipped |
+| ST3 | 'Up to date' flickers while work is owed | say Up to date only when the debt is zero | shipped |
+| ST4 | The first run has no status line | a home-less sentence | shipped |
+| ST5 | A screen reader hears the pace every two seconds | no aria-live on the ambient line | shipped |
+| ST6 | Three sentences mean reading your photos | one vocabulary table | shipped |
+| ST7 | The pace restarts at a third of the truth after every idle beat | seed from the instant rate | shipped |
 
 ## First run and dialogs
 

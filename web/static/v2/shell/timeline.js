@@ -50,6 +50,11 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
   let total = 0;
   let height = 0;
   let built = '';
+  let idle = null;
+  // The rail is a scroll control: it takes the keyboard like one.
+  track.tabIndex = 0;
+  track.setAttribute('role', 'slider');
+  track.setAttribute('aria-label', 'Timeline');
 
   const y = (index) => (total ? (index / total) * height : 0);
   const at = (offsetY) => Math.max(0, Math.min(total - 1, Math.floor((offsetY / height) * total)));
@@ -76,14 +81,12 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       const thisMonth = chapter.day.slice(0, 7);
       if (thisYear !== year) {
         year = thisYear;
-        month = thisMonth;
         if (top - lastYearY >= 14) {
           const mark = element('div', 'timeline-year', year);
           mark.style.top = `${top}px`;
           track.append(mark);
           lastYearY = top;
         }
-        continue;
       }
       if (thisMonth !== month) {
         month = thisMonth;
@@ -100,6 +103,14 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       track.append(tick);
       lastMonthY = entry.top;
     }
+    // The far end says where time runs to, dimmer, when the last year mark
+    // is not already near it.
+    const last = chapters.filter((c) => c.day).at(-1);
+    if (last && height - lastYearY > 30) {
+      const end = element('div', 'timeline-year is-end', last.day.slice(0, 4));
+      end.style.top = `${height - 8}px`;
+      track.append(end);
+    }
   }
 
   function follow() {
@@ -107,14 +118,50 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
     const index = indexAt(workspace.scrollTop);
     if (index === null) return;
     marker.style.top = `${y(index)}px`;
+    track.setAttribute('aria-valuenow', String(index));
+    track.setAttribute('aria-valuetext', named(dayAt(index)));
   }
 
+  // The keyboard walks chapters: arrows a day, Page keys a year, Home and
+  // End the ends. The same place() and scrollTo() the pointer uses.
+  function jump(index) {
+    const cell = place(Math.max(0, Math.min(total - 1, index)));
+    if (cell) scrollTo(cell.top);
+  }
+  track.addEventListener('keydown', (event) => {
+    if (!chapters.length) return;
+    const current = indexAt(workspace.scrollTop) ?? 0;
+    let k = 0;
+    for (let i = 0; i < chapters.length; i += 1) if (chapters[i].index <= current) k = i;
+    const yearOf = (i) => (chapters[i].day || '').slice(0, 4);
+    let next = null;
+    if (event.key === 'ArrowDown') next = chapters[Math.min(chapters.length - 1, k + 1)].index;
+    else if (event.key === 'ArrowUp') next = chapters[Math.max(0, k - 1)].index;
+    else if (event.key === 'PageDown') {
+      let j = k;
+      while (j < chapters.length - 1 && yearOf(j) === yearOf(k)) j += 1;
+      next = chapters[j].index;
+    } else if (event.key === 'PageUp') {
+      let j = k;
+      while (j > 0 && yearOf(j - 1) === yearOf(k)) j -= 1;
+      next = chapters[Math.max(0, j === k ? j - 1 : j)].index;
+    } else if (event.key === 'Home') next = 0;
+    else if (event.key === 'End') next = total - 1;
+    if (next === null) return;
+    jump(next);
+    event.preventDefault();
+  });
+
   function render(state) {
-    const on = state.view === 'library'
+    const dated = state.view === 'library'
       && !state.query && !(state.like || []).length
       && (state.sort === 'newest' || state.sort === 'oldest')
       && (state.days || []).length > 1
       && state.total >= WORTH_IT;
+    // While the day counts and the total disagree (a sweep in flight, a
+    // stack opened in place) there is nothing true to draw, so nothing is.
+    const found = dated ? chaptersOf(state) : [];
+    const on = found.length > 0;
     rail.hidden = !on;
     if (!on) {
       built = '';
@@ -125,8 +172,11 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
     if (key !== built) {
       built = key;
       total = state.total;
-      chapters = chaptersOf(state);
+      chapters = found;
       track.style.height = `${height}px`;
+      rail.title = state.sort === 'oldest' ? 'Oldest at the top' : 'Newest at the top';
+      track.setAttribute('aria-valuemin', '0');
+      track.setAttribute('aria-valuemax', String(Math.max(0, total - 1)));
       draw();
     }
     follow();
@@ -153,7 +203,12 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
   track.addEventListener('pointermove', (event) => {
     const offsetY = Math.max(0, Math.min(height, event.clientY - track.getBoundingClientRect().top));
     const index = say(offsetY);
-    if (!pressed) return;
+    clearTimeout(idle);
+    if (!pressed) {
+      // A hand that comes to rest on the rail is not asking; the date goes.
+      idle = setTimeout(() => { label.hidden = true; }, 1500);
+      return;
+    }
     const cell = place(index);
     if (cell) scrollTo(cell.top);
   });
@@ -163,7 +218,7 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
   };
   track.addEventListener('pointerup', release);
   track.addEventListener('pointercancel', release);
-  track.addEventListener('pointerleave', () => { if (!pressed) label.hidden = true; });
+  track.addEventListener('pointerleave', () => { clearTimeout(idle); label.hidden = true; });
 
   return { render, follow };
 }

@@ -30,6 +30,10 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     localStorage.setItem(RECENT_KEY, JSON.stringify(held));
   }
 
+  function forget(text) {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(recents().filter((v) => v !== text)));
+  }
+
   async function warm() {
     if (facets && Date.now() - asked < 60_000) return;
     try {
@@ -56,13 +60,14 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const held = facets || { years: [], cameras: [], orientations: [], roots: [] };
     const sections = [];
 
-    if (!query) {
-      const past = recents();
-      if (past.length) {
-        sections.push(['Recent', past.map((q) => ({
-          label: q, glyph: '↻', run: () => { box.value = q; search(q); },
-        }))]);
-      }
+    // What you asked before, first, narrowed by what you type -- a half-typed
+    // repeat is exactly what these complete. Each can be forgotten.
+    const past = recents().filter(match);
+    if (past.length) {
+      sections.push(['Recent', past.map((q) => ({
+        label: q, glyph: '↻', run: () => { box.value = q; search(q); },
+        dismiss: () => { forget(q); render(); },
+      }))]);
     }
     const albums = (read().albums || [])
       .filter((c) => (!c.pinned || c.count) && c.count && match(c.name))
@@ -130,11 +135,26 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
   // ---- drawing ----
 
+  const hint = document.createElement('kbd');
+  hint.textContent = '⏎';
+
   function render() {
     const text = box.value;
     const sections = offers(text);
     items = [];
     const rows = [];
+    // The row that does what was typed comes first, where the eye and
+    // ArrowDown both land; the offers narrow underneath it.
+    if (text.trim()) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'drop-row drop-everything';
+      row.dataset.item = items.length;
+      row.textContent = `Search everything for “${text.trim()}”`;
+      row.append(hint);
+      rows.push(row);
+      items.push({ run: () => commit(text) });
+    }
     for (const [title, entries] of sections) {
       const head = document.createElement('p');
       head.className = 'eyebrow';
@@ -176,25 +196,31 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
           count.textContent = typeof entry.count === 'number' ? entry.count.toLocaleString() : entry.count;
           row.append(count);
         }
-        rows.push(row);
+        if (entry.dismiss) {
+          // A button beside a button, never inside one: the row is wrapped.
+          const dismiss = document.createElement('button');
+          dismiss.type = 'button';
+          dismiss.className = 'drop-dismiss';
+          dismiss.textContent = '×';
+          dismiss.setAttribute('aria-label', 'Forget this search');
+          dismiss.addEventListener('click', (event) => { event.stopPropagation(); entry.dismiss(); });
+          const pair = document.createElement('span');
+          pair.className = 'drop-pair';
+          pair.append(row, dismiss);
+          rows.push(pair);
+        } else rows.push(row);
         items.push(entry);
       }
     }
-    if (text.trim()) {
-      const row = document.createElement('button');
-      row.type = 'button';
-      row.className = 'drop-row drop-everything';
-      row.dataset.item = items.length;
-      row.textContent = `Search everything for “${text.trim()}”`;
-      const hint = document.createElement('kbd');
-      hint.textContent = '⏎';
-      row.append(hint);
-      rows.push(row);
-      items.push({ run: () => commit(text) });
+    for (const row of rows) {
+      const option = row.matches('.drop-row') ? row : row.querySelector('.drop-row');
+      if (option) { option.id = `search-offer-${option.dataset.item}`; option.setAttribute('role', 'option'); }
     }
     cursor = -1;
     drop.replaceChildren(...rows);
     drop.hidden = rows.length === 0;
+    box.setAttribute('aria-expanded', String(!drop.hidden));
+    box.removeAttribute('aria-activedescendant');
     place();
   }
 
@@ -209,13 +235,21 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     for (const row of drop.querySelectorAll('.drop-row')) {
       row.classList.toggle('is-cursor', Number(row.dataset.item) === cursor);
     }
-    drop.querySelector('.is-cursor')?.scrollIntoView({ block: 'nearest' });
+    // The ⏎ rides whatever Enter would run: the cursor row, else the
+    // everything row when there is one.
+    const current = drop.querySelector('.is-cursor') || drop.querySelector('.drop-everything');
+    if (current) current.append(hint);
+    if (current) box.setAttribute('aria-activedescendant', current.id);
+    else box.removeAttribute('aria-activedescendant');
+    current?.scrollIntoView({ block: 'nearest' });
   }
 
   function close() {
     drop.hidden = true;
     items = [];
     cursor = -1;
+    box.setAttribute('aria-expanded', 'false');
+    box.removeAttribute('aria-activedescendant');
   }
 
   function commit(text) {
@@ -234,6 +268,16 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
   // ---- the box, owned here ----
 
   let typeTimer = null;
+  // Where the pointer is, and where it was when the keyboard last moved the
+  // cursor: a row scrolled under a still mouse must not take the cursor.
+  let pointerAt = null;
+  let keyedAt = null;
+  box.setAttribute('role', 'combobox');
+  box.setAttribute('aria-autocomplete', 'list');
+  box.setAttribute('aria-expanded', 'false');
+  box.setAttribute('aria-controls', 'search-drop');
+  drop.id = 'search-drop';
+  drop.setAttribute('role', 'listbox');
 
   box.addEventListener('focus', () => { void warm(); render(); });
   box.addEventListener('input', () => {
@@ -250,6 +294,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       const step = event.key === 'ArrowDown' ? 1 : -1;
       cursor = (cursor + step + items.length + 1) % (items.length + 1);
       if (cursor === items.length) cursor = -1;   // back to the box itself
+      keyedAt = pointerAt;
       mark();
       event.preventDefault();
       return;
@@ -284,9 +329,11 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const row = event.target.closest('.drop-row');
     if (row) pick(Number(row.dataset.item));
   });
+  drop.addEventListener('pointermove', (event) => { pointerAt = [event.clientX, event.clientY]; });
   drop.addEventListener('pointerover', (event) => {
     const row = event.target.closest('.drop-row');
     if (!row) return;
+    if (keyedAt && pointerAt && keyedAt[0] === pointerAt[0] && keyedAt[1] === pointerAt[1]) return;
     cursor = Number(row.dataset.item);
     mark();
   });

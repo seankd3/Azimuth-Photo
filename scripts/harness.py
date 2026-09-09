@@ -55,7 +55,7 @@ STUB = r"""<script>
   const api = {
     home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p,
     counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 0 }),
-    drives: () => [{ id: 1, uuid: 'u-1', root: 'C:/harness/photos', label: 'Harness', is_record: 0, here: true, seen_at: 0 }],
+    drives: () => [{ id: 1, uuid: 'u-1', root: 'C:/harness/photos', label: 'Harness', is_record: 0, attached: true, seen_at: 0 }],
     pulse: () => ({ done: 0, swept: 1, shaped: 0, cards: 0, doing: null, left: {} }),
     look: () => 0,
     photos: (sort, limit, offset, view) => (sort === 'oldest' ? [...shown(view)].reverse() : shown(view)).slice(offset, offset + limit),
