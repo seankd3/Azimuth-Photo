@@ -37,7 +37,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from model import cache, decisions
+from model import cache, decisions, projection
 from model.scope import EVERYTHING, Scope, where
 
 # The one predicate. Spelled once, imported everywhere, never inlined.
@@ -477,25 +477,15 @@ def reindex(conn) -> dict[str, int]:
     repair is to stop having duplicate rows, not to key decisions on `id`.
     """
 
-    plans: list[tuple[str, str, object, str]] = []
     counts: dict[str, int] = {}
     for family, (column, default, valid) in decisions.PROJECTED.items():
-        latest = decisions.current(conn, family)
-        for subject, value in latest.items():
+        intended = {}
+        for subject, value in decisions.current(conn, family).items():
             value = default if value is None else value
             if not valid(value):
                 raise ValueError(f"invalid {family} decision: {value!r}")
-            plans.append((family, column, value, subject))
-        counts[family] = 0
-
-    for family, column, value, subject in plans:
-        cursor = conn.execute(
-            f"UPDATE images SET {column} = ? WHERE content_hash = ?",
-            (value, subject),
-        )
-        counts[family] += cursor.rowcount
-
-    conn.commit()
+            intended[subject] = (value,)
+        counts[family] = projection.project(conn, "content_hash", (column,), intended)
     return counts
 
 
@@ -528,12 +518,12 @@ def rerank(conn, subjects=None, vectors=None) -> int:
             " WHERE content_hash IS NOT NULL AND tail IS NOT NULL")
     }
     starred = rank.stars(scores, rank.seen(conn), shoots)
-    conn.execute("UPDATE images SET elo = ?, stars = 0 WHERE elo != ? OR stars != 0", (rank.BASE, rank.BASE))
-    conn.executemany(
-        "UPDATE images SET elo = ?, stars = ? WHERE content_hash = ?",
-        [(score, starred.get(subject, 0), subject) for subject, score in scores.items()],
-    )
-    conn.commit()
+    # Every identified row is intended: what the ranking scores gets its
+    # score and star, everything else returns to base and none.
+    intended = {
+        digest: (scores.get(digest, rank.BASE), starred.get(digest, 0)) for digest in shoots
+    }
+    projection.project(conn, "content_hash", ("elo", "stars"), intended)
     return len(scores)
 
 

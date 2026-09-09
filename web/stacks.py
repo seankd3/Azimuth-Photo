@@ -34,6 +34,8 @@ from __future__ import annotations
 import datetime as dt
 import statistics
 
+from model import projection
+
 # One frame is a photograph, two a coincidence, three could be a fumbled
 # double-tap; four on one beat is a set.
 RUN = 4
@@ -78,27 +80,25 @@ def project(conn) -> int:
     # archives arrive at exact midnight, and forty frames "in one second"
     # there is a batch save, not a burst. (An actual midnight astro frame
     # loses nothing — it just stays unstacked.)
-    rows = conn.execute(
-        "SELECT id, date_taken FROM images"
-        " WHERE date_taken IS NOT NULL AND date_taken NOT LIKE '% 00:00:00'"
-        " AND tail IS NOT NULL AND vc_of IS NULL"
-        " ORDER BY date_taken ASC, id ASC").fetchall()
     ids: list[int] = []
     times: list[dt.datetime] = []
-    for row in rows:
+    intended: dict[int, tuple] = {}
+    for row in conn.execute(
+        "SELECT id, date_taken FROM images"
+        " WHERE tail IS NOT NULL AND vc_of IS NULL ORDER BY date_taken ASC, id ASC"):
+        intended[row["id"]] = (None,)
+        when = row["date_taken"]
+        if not when or len(when) < 19 or when.endswith(" 00:00:00"):
+            continue
         try:
-            when = dt.datetime.strptime(row["date_taken"], "%Y-%m-%d %H:%M:%S")
+            times.append(dt.datetime.fromisoformat(when))
         except ValueError:
             continue
         ids.append(row["id"])
-        times.append(when)
-
-    members = [
-        (ids[first], ids[i])
-        for first, last in runs(times)
-        for i in range(first + 1, last + 1)
-    ]
-    conn.execute("UPDATE images SET stack_of = NULL WHERE stack_of IS NOT NULL")
-    conn.executemany("UPDATE images SET stack_of = ? WHERE id = ?", members)
-    conn.commit()
-    return len(members)
+    members = 0
+    for first, last in runs(times):
+        for i in range(first + 1, last + 1):
+            intended[ids[i]] = (ids[first],)
+            members += 1
+    projection.project(conn, "id", ("stack_of",), intended)
+    return members

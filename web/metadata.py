@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 
-from model import cache, decisions
+from model import cache, decisions, projection
 from photo import tags
 
 
@@ -28,7 +28,7 @@ def project(conn, photo_id: int, entry: dict) -> None:
     ).fetchone()
     if row is None:
         return
-    values = _values(conn, row["content_hash"], answer)
+    values = _values(answer, decisions.latest(conn, row["content_hash"], decisions.DATE))
     conn.execute(
         "UPDATE images SET date_taken = ?, camera_make = ?, camera_model = ?, "
         "lens = ?, width = ?, height = ? WHERE content_hash = ?",
@@ -37,43 +37,37 @@ def project(conn, photo_id: int, entry: dict) -> None:
 
 
 def reindex(conn) -> dict[str, int]:
-    """Rebuild query columns from ready metadata rows after opening a catalog."""
+    """Rebuild query columns from ready metadata rows after opening a catalog.
 
-    plans = []
+    The chosen dates are read once for the whole pass: asking the log per
+    photograph was 150,000 queries, and the whole of a sixteen-second start.
+    """
+
+    chosen = decisions.current(conn, decisions.DATE)
+    intended = {}
     discarded = 0
-    rows = conn.execute(
-        "SELECT c.hash, c.value, c.state, MIN(i.id) AS photo_id FROM cache c "
-        "JOIN images i ON i.content_hash = c.hash "
-        "WHERE c.kind = ? AND c.recipe = '{}' AND c.state = ? GROUP BY c.hash",
+    for row in conn.execute(
+        "SELECT c.hash, c.value, c.state FROM cache c"
+        " WHERE c.kind = ? AND c.recipe = '{}' AND c.state = ?"
+        " AND EXISTS (SELECT 1 FROM images i WHERE i.content_hash = c.hash)",
         (KIND.name, cache.READY),
-    ).fetchall()
-    for row in rows:
+    ).fetchall():
         entry = {"state": row["state"], "value": row["value"]}
         try:
-            answer = decoded(entry)
+            intended[row["hash"]] = _values(decoded(entry), chosen.get(row["hash"]))
         except ValueError:
             conn.execute(
                 "DELETE FROM cache WHERE hash = ? AND kind = ? AND recipe = '{}'",
                 (row["hash"], KIND.name),
             )
             discarded += 1
-            continue
-        plans.append((row["hash"], _values(conn, row["hash"], answer)))
-
-    projected = 0
-    for digest, values in plans:
-        cursor = conn.execute(
-            "UPDATE images SET date_taken = ?, camera_make = ?, camera_model = ?, "
-            "lens = ?, width = ?, height = ? WHERE content_hash = ?",
-            (*values, digest),
-        )
-        projected += cursor.rowcount
-    conn.commit()
+    projected = projection.project(
+        conn, "content_hash",
+        ("date_taken", "camera_make", "camera_model", "lens", "width", "height"), intended)
     return {"projected": projected, "discarded": discarded}
 
 
-def _values(conn, digest: str, answer: dict) -> tuple:
-    chosen_date = decisions.latest(conn, digest, decisions.DATE)
+def _values(answer: dict, chosen_date) -> tuple:
     date_taken = answer.get("date_taken")
     if chosen_date is not None:
         date_taken = tags.normalize_date(chosen_date)
