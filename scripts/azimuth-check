@@ -1,246 +1,32 @@
 #!/usr/bin/env bash
+# One check for the whole tree.
+#
+#   ./scripts/azimuth-check          lint, the suite, the gates, the ledger
+#   ./scripts/azimuth-check --quick  lint and the gates only, a few seconds
+#
+# Everything here fails loudly and finishes in well under a minute; a check
+# that does not get run protects nothing.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENV="${AZIMUTH_VENV:-$ROOT/web/.venv}"
 PYTHON="$VENV/bin/python"
-if [[ ! -x "$PYTHON" && -x "$VENV/Scripts/python.exe" ]]; then
-    PYTHON="$VENV/Scripts/python.exe" # Windows venv layout
+[[ -x "$PYTHON" ]] || PYTHON="$VENV/Scripts/python.exe"
+[[ -x "$PYTHON" ]] || { echo "azimuth-check: no interpreter in $VENV (install web/requirements-v2.txt and web/requirements-dev.txt)" >&2; exit 2; }
+
+cd "$ROOT"
+git diff --check
+"$ROOT/scripts/lint"
+"$PYTHON" scripts/gates/check.py
+
+if [[ "${1:-}" == "--quick" ]]; then
+    echo "azimuth-check: quick ok"
+    exit 0
 fi
-NODE_BIN="${NODE:-node}"
-MODE="unit"
-AREA=""
 
-declare -A AREA_TARGETS=(
-    [background-work]="test_ui_contracts"
-    [ai-search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit test_search_stability test_search_experience"
-    [previews]="test_cache_status test_thumbnails"
-    [people-work]="test_people"
-    [compare]="test_compare"
-    [settings]="test_settings_status"
-    [imports]="test_imports test_import_staging test_modular_contracts"
-    [frontend]="test_ui_contracts"
-    [search]="test_search test_embedding_worker test_search_evaluation test_intelligence_audit test_search_stability test_search_experience"
-    [cache]="test_cache_status test_thumbnails"
-    [people]="test_people"
-)
-
-declare -A AREA_DESCRIPTIONS=(
-    [background-work]="Frontend shell contracts and browser smoke expectations"
-    [ai-search]="Search/query constraints, search routes/service, and embedding worker query-cache behavior"
-    [previews]="Preview/cache status, cache routes, and thumbnail pregeneration"
-    [people-work]="People routes, worker, and status behavior"
-    [compare]="Compare routes and service behavior"
-    [settings]="Settings/status behavior"
-    [imports]="Legacy and staged import routes, card safety pipeline, and API contracts"
-    [frontend]="Alias for background-work"
-    [search]="Alias for ai-search"
-    [cache]="Alias for previews"
-    [people]="Alias for people-work"
-)
-
-usage() {
-    cat <<'USAGE'
-Usage: azimuth-check [--quick|--unit|--full] [--area AREA] [--list-areas]
-
-  --quick   Run scripts/lint, diff whitespace checks, Python compile, and JS syntax.
-  --unit    Run quick checks (incl. lint) plus the unit suite. This is the default.
-  --full    Run unit checks plus the opt-in browser smoke test against AZIMUTH_SMOKE_URL.
-  --area    After quick checks, run a focused unit subset for one subsystem.
-  --list-areas
-            Print available focused areas and their target test modules.
-
-Focused areas:
-  background-work, ai-search, previews, people-work, compare, settings, imports
-  compatibility aliases: frontend, search, cache, people
-USAGE
-}
-
-list_areas() {
-    local area
-    for area in background-work ai-search previews people-work compare settings imports frontend search cache people; do
-        printf "%-16s %s\n    %s\n" "$area" "${AREA_TARGETS[$area]}" "${AREA_DESCRIPTIONS[$area]}"
-    done
-}
-
-while (($#)); do
-    case "$1" in
-        --quick)
-            MODE="quick"
-            ;;
-        --unit)
-            MODE="unit"
-            ;;
-        --full)
-            MODE="full"
-            ;;
-        --area)
-            if [[ $# -lt 2 || "$2" == --* ]]; then
-                echo "--area requires a value." >&2
-                usage >&2
-                exit 1
-            fi
-            AREA="$2"
-            shift
-            ;;
-        --list-areas)
-            list_areas
-            exit 0
-            ;;
-        --help|-h)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown argument: $1" >&2
-            usage >&2
-            exit 1
-            ;;
-    esac
-    shift
+(cd web && "$PYTHON" -m pytest -q -p no:cacheprovider .)
+for spec in web/test_v2_*.mjs; do
+    node "$spec"
 done
-
-if [[ ! -x "$PYTHON" ]]; then
-    echo "Missing $PYTHON. Set AZIMUTH_VENV or run the documented setup." >&2
-    exit 1
-fi
-
-if ! command -v "$NODE_BIN" >/dev/null 2>&1; then
-    echo "Missing node runtime for JavaScript syntax checks." >&2
-    exit 1
-fi
-
-unit_targets_for_area() {
-    if [[ -z "$1" ]]; then
-        return 0
-    fi
-    if [[ -n "${AREA_TARGETS[$1]:-}" ]]; then
-        echo "${AREA_TARGETS[$1]}"
-        return 0
-    fi
-    echo "Unknown area: $1" >&2
-    usage >&2
-    exit 1
-}
-
-run_quick_checks() {
-    if [[ -x "$ROOT/scripts/lint" ]]; then
-        "$ROOT/scripts/lint"
-    fi
-    git -C "$ROOT" diff --check
-    git -C "$ROOT" diff --cached --check
-
-    mapfile -t py_files < <(cd "$ROOT" && rg --files web -g '*.py' -g '!web/.venv/**' -g '!web/.models/**')
-    if ((${#py_files[@]})); then
-        (cd "$ROOT" && "$PYTHON" -m py_compile "${py_files[@]}")
-    fi
-
-    while IFS= read -r js_file; do
-        "$NODE_BIN" --check "$ROOT/$js_file"
-    done < <(cd "$ROOT" && rg --files web/static -g '*.js')
-
-    run_reference_checks
-    run_node_checks
-}
-
-# Renames and deletions leave references behind that nothing else sees: a
-# patched attribute that no longer exists, a JS import of a file that moved, a
-# name used but never imported. Each of those passes lint and fails only when
-# the test runs or the page opens. Both sweeps read the source without running
-# it and exit with the number of problems.
-run_reference_checks() {
-    local checker
-    for checker in scripts_stale_refs.py scripts_js_imports.py; do
-        [[ -f "$ROOT/web/$checker" ]] || continue
-        (cd "$ROOT/web" && "$PYTHON" "$checker")
-    done
-}
-
-run_node_checks() {
-    local node_tests=()
-    local test_file
-    for test_file in "$ROOT"/web/test_*.mjs; do
-        [[ -e "$test_file" ]] && node_tests+=("$test_file")
-    done
-    if ((${#node_tests[@]})); then
-        # Quiet on success: node --test TAP output only surfaces on failure.
-        local output
-        if ! output="$(cd "$ROOT/web" && "$NODE_BIN" --test "${node_tests[@]}" 2>&1)"; then
-            printf '%s\n' "$output" >&2
-            return 1
-        fi
-    fi
-}
-
-run_unit_checks() {
-    # pytest, never unittest: the suite's function-style tests are invisible to
-    # unittest discovery, so a unittest "OK" can skip the security/data-safety
-    # proofs entirely. -rsfE keeps skips AND failures in the short summary
-    # (a bare -r spec would drop pytest's default failure lines).
-    local targets
-    targets="$(unit_targets_for_area "$AREA")"
-    if [[ -n "$targets" ]]; then
-        local target_files=()
-        local target
-        for target in $targets; do
-            target_files+=("$target.py")
-        done
-        (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE "${target_files[@]}")
-        if [[ "$AREA" == "background-work" || "$AREA" == "frontend" ]]; then
-            run_background_work_smoke_if_available
-        fi
-    else
-        # Restate "not bench": a CLI -m replaces the pytest.ini addopts filter.
-        # Parallel first, then the serial-marked tests alone — that marker
-        # exists because those cannot share an xdist wave. Measured on an
-        # 8-core box: 45s of suite time becomes 19s, so a full gate stops
-        # being something you schedule your work around.
-        local jobs="${AZIMUTH_CHECK_JOBS:-auto}"
-        if [[ "$jobs" != "1" ]] && "$PYTHON" -c "import xdist" >/dev/null 2>&1; then
-            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -n "$jobs" \
-                -m "not slow and not bench and not serial")
-            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "serial and not bench")
-        else
-            (cd "$ROOT/web" && "$PYTHON" -m pytest -q -rsfE -m "not slow and not bench")
-        fi
-    fi
-}
-
-run_background_work_smoke_if_available() {
-    local base_url="${AZIMUTH_SMOKE_URL:-http://127.0.0.1:8000}"
-    if "$PYTHON" - "$base_url" <<'PY'
-import sys
-import urllib.request
-
-url = sys.argv[1].rstrip("/") + "/api/dev/status"
-try:
-    with urllib.request.urlopen(url, timeout=0.75) as response:
-        ok = 200 <= response.status < 500
-except Exception:
-    ok = False
-sys.exit(0 if ok else 1)
-PY
-    then
-        "$ROOT/scripts/azimuth-browser-smoke" --base-url "$base_url"
-    else
-        echo "Skipping frontend browser smoke: no server available at $base_url."
-    fi
-}
-
-run_browser_smoke() {
-    (cd "$ROOT/web" && AZIMUTH_BROWSER_SMOKE=1 "$PYTHON" -m pytest -q -rsfE test_browser_smoke.py)
-}
-
-run_quick_checks
-
-case "$MODE" in
-    quick)
-        ;;
-    unit)
-        run_unit_checks
-        ;;
-    full)
-        run_unit_checks
-        run_browser_smoke
-        ;;
-esac
+"$PYTHON" scripts/rewrite_status.py --check
+echo "azimuth-check: ok"

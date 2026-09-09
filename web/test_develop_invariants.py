@@ -9,9 +9,47 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import ops_constants as C  # noqa: E402
-from features.develop.pipeline import apply_pipeline  # noqa: E402
-from test_develop_parity import synthetic_linear_image, torture_settings  # noqa: E402
+from pixels import ops_constants as C  # noqa: E402
+from pixels.pipeline import apply_pipeline, hsv_to_rgb  # noqa: E402
+
+
+def synthetic_linear_image() -> np.ndarray:
+    """64x64 hue field with an independent linear value gradient."""
+    y, x = np.mgrid[0:64, 0:64].astype(np.float32)
+    hue = np.mod(x * (360.0 / 63.0) + y * 0.75, 360.0)
+    saturation = 0.15 + 0.85 * (x / 63.0)
+    value = 0.03 + 0.97 * (y / 63.0)
+    return hsv_to_rgb(hue, saturation, value).astype(np.float32)
+
+
+def torture_settings() -> dict[str, object]:
+    settings: dict[str, object] = {
+        "WhiteBalance": "Custom", "Temperature": 6850, "Tint": -31,
+        "Exposure2012": 0.73, "Contrast2012": -37, "Highlights2012": -48,
+        "Shadows2012": 62, "Whites2012": 29, "Blacks2012": -34,
+        "Texture": 41, "Clarity2012": -28, "Dehaze": 36, "Vibrance": 47, "Saturation": -22,
+        "ColorGradeShadowHue": 28, "ColorGradeShadowSat": 43, "ColorGradeShadowLum": -17,
+        "ColorGradeMidtoneHue": 192, "ColorGradeMidtoneSat": 28, "ColorGradeMidtoneLum": 12,
+        "ColorGradeHighlightHue": 236, "ColorGradeHighlightSat": 36, "ColorGradeHighlightLum": 9,
+        "ColorGradeGlobalHue": 328, "ColorGradeGlobalSat": 14, "ColorGradeGlobalLum": -4,
+        "ColorGradeBlending": 57, "ColorGradeBalance": -18,
+        "ToneCurvePV2012": ["0, 0", "96, 80", "255, 255"],
+        "ToneCurvePV2012Red": ["0, 0", "128, 154", "255, 255"],
+        "ToneCurvePV2012Green": ["0, 0", "128, 105", "255, 255"],
+        "ToneCurvePV2012Blue": ["0, 0", "128, 139", "255, 255"],
+        "ConvertToGrayscale": "False", "Sharpness": 92, "SharpenRadius": 1.7,
+        "SharpenEdgeMasking": 48,
+        "PostCropVignetteAmount": -42, "PostCropVignetteMidpoint": 44,
+        "PostCropVignetteFeather": 59, "PostCropVignetteRoundness": -27,
+        "GrainAmount": 37, "GrainSize": 53, "GrainFrequency": 61,
+        "CropLeft": 0.08, "CropTop": 0.11, "CropRight": 0.91, "CropBottom": 0.87,
+    }
+    for index, name in enumerate(("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")):
+        settings[f"HueAdjustment{name}"] = -70 + index * 19
+        settings[f"SaturationAdjustment{name}"] = 64 - index * 15
+        settings[f"LuminanceAdjustment{name}"] = -45 + index * 12
+        settings[f"GrayMixer{name}"] = -50 + index * 13
+    return settings
 
 
 class DevelopSliderInvariantTests(unittest.TestCase):

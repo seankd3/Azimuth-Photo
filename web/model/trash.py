@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import stat
 
-from model import copies, cull, decisions, drives, photos
+from model import copies, cull, drives, photos
 
 TRASHED = cull.TRASHED
 

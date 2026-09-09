@@ -53,6 +53,16 @@ vocabulary:
 Only this layer writes durable facts. It never knows about windows, UI state,
 JSON, background presentation, or transport.
 
+### `web/photo/` and `web/pixels/` — pure reads and pure mathematics
+
+`photo` reads a photograph's bytes and nothing else: what format it is, the
+bounded EXIF of a raw, the embedded tags and shape of any file. It sits below
+`model`, which may read through it. `pixels` is the colour mathematics — linear
+in, sRGB out, numpy over arrays, fitted against real acceptance data — and it
+imports nothing of the product; `render.developed` is its one door in. Neither
+knows what a catalog, a window, or a drive letter is, and `scripts/gates/layers.py`
+counts any line that would teach them.
+
 ### Product modules — derived behavior
 
 `library.py`, `work.py`, `metadata.py`, `render.py`, and `tiles.py` turn model

@@ -143,7 +143,7 @@ class DesktopTests(unittest.TestCase):
             def create_file_dialog(_kind):
                 return (r"C:\Photos",)
 
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory():
             product = desktop.Desktop(None)
             try:
                 product.bind(Window())

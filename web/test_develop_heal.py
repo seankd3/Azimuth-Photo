@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from features.develop.heal import RETOUCH_SETTINGS_KEY, apply_retouch_spots, import_adobe_retouch_info, spots_from_settings
+from pixels.heal import RETOUCH_SETTINGS_KEY, apply_retouch_spots, import_adobe_retouch_info, spots_from_settings
 
 
 def _spot(**changes):

@@ -1,5 +1,15 @@
 # The gates
 
+> **2026-09-08.** The V1 application left the tree, and two gates went with
+> the layer they counted: `seam` (UI `/api/` literals against route
+> decorators) and `routes` (the `app.py` registration list) count things that
+> no longer exist. `layers` was rewritten for the V2 direction — `model`,
+> `photo` and `pixels` import nothing above them; only `desktop` imports
+> `boot`; a UI layer imports only `kit ← net ← store ← lens ← shell` — and
+> `tables`, `paths`, `names`, `collects` and `imports` stand as written below.
+> Every number in `scripts/gates/budget.txt` is 0. The measurements below are
+> the study that chose these gates and are kept as its record.
+
 > **Supporting study.** This records measurements and rejected instruments.
 > `ARCHITECTURE.md` owns the V2 rules; a number here is evidence, not authority.
 

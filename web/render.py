@@ -326,7 +326,7 @@ def developed(image: Image.Image, edit: dict) -> Image.Image:
     if toned:
         import numpy as np
 
-        from features.develop import pipeline as color
+        from pixels import pipeline as color
 
         held = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
         out = color.apply_pipeline(
@@ -348,30 +348,3 @@ def cut(image: Image.Image, crop) -> Image.Image:
     x1 = max(x0 + 1, min(width, round(right * width)))
     y1 = max(y0 + 1, min(height, round(bottom * height)))
     return image.crop((x0, y0, x1, y1))
-
-
-def dimensions(path: str) -> tuple[int, int]:
-    """The shape the photograph is *shown* at. A header read, not a picture.
-
-    Shown, not stored, because every caller wants the former: the grid sizes
-    each cell from these numbers, and a cell that disagrees with its tile is
-    the letterboxed-portrait bug. Keeping the sensor's shape here would mean
-    each caller had to re-derive the turn, which is how two decoders start.
-
-    A raw's flip is the camera's own, already honoured by `postprocess`, so it
-    has to be honoured here too or the two disagree. Measured across this
-    archive: `flip=5` (8224x5490 sensor) and `flip=6` (8191x5463) both decode
-    portrait, `flip=0` decodes landscape, and `flip=3` is a half turn that
-    swaps nothing.
-    """
-
-    if kind.is_raw(path):
-        import rawpy
-
-        with rawpy.imread(path) as raw:
-            width, height = int(raw.sizes.width), int(raw.sizes.height)
-            return (height, width) if raw.sizes.flip in (5, 6) else (width, height)
-    with Image.open(path) as image:
-        width, height = int(image.width), int(image.height)
-        orientation = int(image.getexif().get(0x0112, 1) or 1)
-        return (height, width) if orientation in (5, 6, 7, 8) else (width, height)

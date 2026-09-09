@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import os
-import json
-import re
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,8 +12,49 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import masks, ops_constants as C, pipeline  # noqa: E402
-from test_develop_parity import synthetic_linear_image, torture_settings  # noqa: E402
+from pixels import masks, ops_constants as C, pipeline  # noqa: E402
+from pixels.pipeline import hsv_to_rgb  # noqa: E402
+
+
+def synthetic_linear_image() -> np.ndarray:
+    """64x64 hue field with an independent linear value gradient."""
+    y, x = np.mgrid[0:64, 0:64].astype(np.float32)
+    hue = np.mod(x * (360.0 / 63.0) + y * 0.75, 360.0)
+    saturation = 0.15 + 0.85 * (x / 63.0)
+    value = 0.03 + 0.97 * (y / 63.0)
+    return hsv_to_rgb(hue, saturation, value).astype(np.float32)
+
+
+def torture_settings() -> dict[str, object]:
+    settings: dict[str, object] = {
+        "WhiteBalance": "Custom", "Temperature": 6850, "Tint": -31,
+        "Exposure2012": 0.73, "Contrast2012": -37, "Highlights2012": -48,
+        "Shadows2012": 62, "Whites2012": 29, "Blacks2012": -34,
+        "Texture": 41, "Clarity2012": -28, "Dehaze": 36, "Vibrance": 47, "Saturation": -22,
+        "ColorGradeShadowHue": 28, "ColorGradeShadowSat": 43, "ColorGradeShadowLum": -17,
+        "ColorGradeMidtoneHue": 192, "ColorGradeMidtoneSat": 28, "ColorGradeMidtoneLum": 12,
+        "ColorGradeHighlightHue": 236, "ColorGradeHighlightSat": 36, "ColorGradeHighlightLum": 9,
+        "ColorGradeGlobalHue": 328, "ColorGradeGlobalSat": 14, "ColorGradeGlobalLum": -4,
+        "ColorGradeBlending": 57, "ColorGradeBalance": -18,
+        "ToneCurvePV2012": ["0, 0", "96, 80", "255, 255"],
+        "ToneCurvePV2012Red": ["0, 0", "128, 154", "255, 255"],
+        "ToneCurvePV2012Green": ["0, 0", "128, 105", "255, 255"],
+        "ToneCurvePV2012Blue": ["0, 0", "128, 139", "255, 255"],
+        "ConvertToGrayscale": "False", "Sharpness": 92, "SharpenRadius": 1.7,
+        "SharpenEdgeMasking": 48,
+        "PostCropVignetteAmount": -42, "PostCropVignetteMidpoint": 44,
+        "PostCropVignetteFeather": 59, "PostCropVignetteRoundness": -27,
+        "GrainAmount": 37, "GrainSize": 53, "GrainFrequency": 61,
+        "CropLeft": 0.08, "CropTop": 0.11, "CropRight": 0.91, "CropBottom": 0.87,
+    }
+    for index, name in enumerate(("Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple", "Magenta")):
+        settings[f"HueAdjustment{name}"] = -70 + index * 19
+        settings[f"SaturationAdjustment{name}"] = 64 - index * 15
+        settings[f"LuminanceAdjustment{name}"] = -45 + index * 12
+        settings[f"GrayMixer{name}"] = -50 + index * 13
+    return settings
+
+
 
 
 def synthetic_local_settings() -> dict[str, object]:
@@ -138,44 +176,9 @@ class MaskRasterTests(unittest.TestCase):
     def test_render_cap_preserves_but_only_rasterizes_first_sixteen(self):
         correction = {"CorrectionMasks": [{"What": "Mask/Gradient", "ZeroX": 0, "ZeroY": 0, "FullX": 1, "FullY": 0}]}
         settings = {"MaskGroupBasedCorrections": [correction] * 18}
-        with self.assertLogs("features.develop.masks", level="WARNING"):
+        with self.assertLogs("pixels.masks", level="WARNING"):
             rasters = masks.rasterize_corrections(settings, 8, 8)
         self.assertEqual(len(rasters), C.LOCAL_RENDER_CAP)
-
-    def test_javascript_raster_math_matches_numpy_analytics(self):
-        module_url = (Path(__file__).parent / "static/js/desktop/develop/mask_raster.js").as_uri()
-        script = f"""
-            import * as M from {json.dumps(module_url)};
-            const image = {{width:3,height:1,data:new Float32Array([1,0,0, 0,1,0, .9,.08,.04])}};
-            const gray = {{width:5,height:1,data:new Float32Array([0,0,0, .25,.25,.25, .5,.5,.5, .75,.75,.75, 1,1,1])}};
-            const result = {{
-              gradient:Array.from(M.rasterizeGradient({{ZeroX:0,ZeroY:0,FullX:1,FullY:0}},5,1)),
-              radial:Array.from(M.rasterizeRadial({{Left:.2,Top:.2,Right:.8,Bottom:.8,Feather:.5}},5,5)),
-              brush:Array.from(M.rasterizeBrush({{Dabs:['d .25 .75','r .05'],Flow:1,CenterWeight:1}},150,50)),
-              luminance:Array.from(M.rasterizeLuminanceRange({{LumRange:'0.2 0.4 0.6 0.8'}},gray,5,1)),
-              color:Array.from(M.rasterizeColorRange({{ColorAmount:.15,SampledColors:['1 0 0']}},image,3,1)),
-            }};
-            console.log(JSON.stringify(result));
-        """
-        completed = subprocess.run(
-            ["node", "--input-type=module", "-e", script],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        javascript = json.loads(completed.stdout)
-        image = np.array([[[1, 0, 0], [0, 1, 0], [0.9, 0.08, 0.04]]], dtype=np.float32)
-        gray = np.repeat(np.array([[[0], [0.25], [0.5], [0.75], [1]]], dtype=np.float32), 3, axis=-1)
-        expected = {
-            "gradient": masks.rasterize_gradient({"ZeroX": 0, "ZeroY": 0, "FullX": 1, "FullY": 0}, 5, 1),
-            "radial": masks.rasterize_radial({"Left": 0.2, "Top": 0.2, "Right": 0.8, "Bottom": 0.8, "Feather": 0.5}, 5, 5),
-            "brush": masks.rasterize_brush({"Dabs": ["d .25 .75", "r .05"], "Flow": 1, "CenterWeight": 1}, 150, 50),
-            "luminance": masks.rasterize_luminance_range({"LumRange": "0.2 0.4 0.6 0.8"}, gray, 5, 1),
-            "color": masks.rasterize_color_range({"ColorAmount": 0.15, "SampledColors": ["1 0 0"]}, image, 3, 1),
-        }
-        for name, values in expected.items():
-            np.testing.assert_allclose(np.asarray(javascript[name]).reshape(values.shape), values, atol=2e-6, err_msg=name)
-
 
 class LocalCorrectionTests(unittest.TestCase):
     def test_catalog_exposure_fraction_maps_to_documented_ev(self):
@@ -219,18 +222,6 @@ class LocalCorrectionTests(unittest.TestCase):
             rtol=0.0,
             atol=2e-6,
         )
-
-    def test_local_constant_names_and_values_match_javascript_twin(self):
-        javascript = (Path(__file__).parent / "static/js/desktop/develop/ops_constants.js").read_text()
-        for name, value in C.PARITY_TABLE.items():
-            if not name.startswith("LOCAL_") or not isinstance(value, (int, float)):
-                continue
-            match = re.search(rf"export const {name} = ([^;]+);", javascript)
-            self.assertIsNotNone(match, name)
-            expression = match.group(1).strip()
-            actual = eval(expression, {"__builtins__": {}}, {})  # Constants are numeric literals or 1/3.
-            self.assertAlmostEqual(float(actual), float(value), places=12, msg=name)
-
 
 if __name__ == "__main__":
     unittest.main()

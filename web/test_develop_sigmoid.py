@@ -7,8 +7,8 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import ops_constants as C  # noqa: E402
-from features.develop import pipeline, sigmoid_view  # noqa: E402
+from pixels import ops_constants as C  # noqa: E402
+from pixels import pipeline, sigmoid_view  # noqa: E402
 
 
 class SigmoidViewTests(unittest.TestCase):

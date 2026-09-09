@@ -162,10 +162,10 @@ def scan(conn, source_root: str, progress=None) -> list[dict]:
 
 
 def _tags(path: str) -> dict:
-    import metadata
+    from photo import tags
 
     try:
-        return metadata.read(path, description=True)
+        return tags.read(path, description=True)
     except Exception:  # noqa: BLE001 - an unreadable header is no tags
         return {}
 

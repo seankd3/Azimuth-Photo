@@ -1,1 +1,0 @@
-"""Search route package."""

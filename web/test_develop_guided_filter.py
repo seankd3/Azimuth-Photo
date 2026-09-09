@@ -12,8 +12,8 @@ import pytest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import guided_filter as gf  # noqa: E402
-from features.develop import masks, ops_constants as C  # noqa: E402
+from pixels import guided_filter as gf  # noqa: E402
+from pixels import masks, ops_constants as C  # noqa: E402
 
 
 def _step_image(height: int = 64, width: int = 64) -> tuple[np.ndarray, np.ndarray]:

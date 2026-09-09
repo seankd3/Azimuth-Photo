@@ -1,7 +1,0 @@
--r requirements.txt
-
-# Local subject masks in Develop. Sky masks remain dependency-free.
-onnxruntime
-# Lens distortion/vignetting corrections from the Lensfun database; without it
-# Develop still works and lens corrections quietly resolve to none.
-lensfunpy

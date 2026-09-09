@@ -5,7 +5,7 @@ import numpy as np
 
 os.environ.setdefault("AZIMUTH_SMOKE_MODE", "1")
 
-from features.develop import film
+from pixels import film
 
 # Stocks added 2026-07-11 (library expansion). fuji-velvia-50 is the first
 # positive/slide stock and exercises the non-negative print path.

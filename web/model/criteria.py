@@ -35,7 +35,7 @@ drift from what the grid, Refine, search, and export mean by the same words.
 from __future__ import annotations
 
 from model import scope as scopes
-from model.scope import EVERYTHING, Scope, all_of, any_of, not_of
+from model.scope import Scope, all_of, any_of, not_of
 
 # field -> the keys a chip of that field may carry (beyond "is" and "not").
 FIELDS = {

@@ -1,6 +1,7 @@
-"""How a photo becomes bytes.
+"""Pure functions over pixel arrays: the colour mathematics, and nothing else.
 
-Decode, render, cache, serve. This layer may use :mod:`photo`, and nothing from
-``features``. If something here needs a route, a worker or the database, it
-belongs a layer up.
+Linear in, sRGB out. Fitted against real acceptance data and expensive to be
+wrong about, so it imports numpy and its own siblings and never the catalog,
+the window, or a file's place on disk. `render.developed` is its one door into
+the product; the rest of the tree is queries over facts.
 """

@@ -36,11 +36,11 @@ The model is described in [the core](docs/CORE.md): drives, photographs, copies,
 decisions, and cache entries, with seven operations around them. The surrounding
 code shape lives in [the architecture](docs/ARCHITECTURE.md).
 
-The V2 executable is now one native process with a direct in-process bridge;
-its temporary FastAPI and Tauri path has been deleted. The repository still
-contains inherited V1 server, route, UI, and worker code while each remaining
-surface is rebuilt or removed. Those are rewrite inventory, not product
-concepts to preserve.
+The executable is one native process with a direct in-process bridge. The V1
+server, routes, workers and browser UI are gone from the tree (2026-09-08);
+what remains is the core, the surfaces over it, the colour mathematics in
+`web/pixels/`, and one bundled UI. `docs/REWRITE_LEDGER.md` registers every
+code file with the evidence that proved it.
 
 ## Documentation
 

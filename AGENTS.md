@@ -57,21 +57,24 @@ any instruction here names a folder or file that is not tracked. If a line below
 is wrong, the gate is the thing to satisfy -- correct the line, do not recreate
 the folder.
 
-- `web/model/` owns the V2 core: the tables and the small vocabulary every
+- `web/model/` owns the core: the five tables and the small vocabulary every
   other layer derives from. Read it first.
+- `web/boot.py` is the one product boundary (`Library` / `OwnedLibrary`);
+  `web/desktop.py` is the native edge that puts it in a window.
 - `web/work.py` owns owed work -- what should exist minus what is cached.
-- `web/tiles.py` and `web/render.py` own preview generation.
-- `web/features/<surface>/` owns backend behavior and routes.
-- `web/data/repositories/` owns SQL and persistent queries.
-- `web/core/` owns application wiring and cross-cutting runtime code.
-- `web/static/v2/` owns the V2 shell; `web/static/js/desktop/` owns the
-  inherited desktop ES modules it is replacing.
-- `desktop/` is the Windows shell; `android/` is the native Android client.
+- `web/tiles.py` and `web/render.py` own preview generation; `web/pixels/` is
+  the colour mathematics, pure functions that import nothing of the product.
+- Every other `web/*.py` is one surface: queries over the facts plus the
+  decisions it writes (`library`, `rank`, `search`, `develop`, `labels`, …).
+- `web/static/v2/` and `web/templates/v2.html` are the whole UI, bundled by
+  `scripts/build_desktop_ui.py` into one document the window opens.
+- `desktop/` holds the build guidance and the icon; `android/` is a parked
+  client that is not a V2 dependency.
 - `scripts/` contains repeatable developer/operator entry points only.
 
-Keep routes thin, SQL in repositories, and UI state close to its owning
-surface. Preserve public routes and response shapes unless the task explicitly
-changes the contract.
+A surface may not own a table, run a loop, or hold state between calls; a
+feature is a query with a name plus the decisions it writes, and anything that
+is not a query, a decision or a cache kind has no layer to live in.
 
 ## Data and safety
 
@@ -129,25 +132,21 @@ changes the contract.
 
 ## Verification
 
-Use the smallest check that proves the change, then expand in proportion to
-risk:
+One command, and the smallest half of it when the change is small:
 
 ```bash
-./scripts/azimuth-check --quick
-./scripts/azimuth-check --list-areas
-./scripts/azimuth-check --area <area>
-./scripts/azimuth-check --unit
+./scripts/azimuth-check --quick   # lint and the gates, a few seconds
+./scripts/azimuth-check           # plus the suite, the node specs, and the ledger
 ```
 
 - Docs-only: `git diff --check`, link/path review, and instruction-conflict
   search.
-- Focused change: quick checks plus the owning test module or named area.
-- Desktop behavior: verify the actual workflow in the running app against an
-  isolated application home.
-- Sync, deletion, imports, recovery, or catalog changes: add focused safety
-  tests and verify final persisted state.
-- Deployment: verify listener, working directory, health endpoint, catalog,
-  cache, and rollback route.
+- Desktop behavior: rebuild the document (`scripts/build_desktop_ui.py`) and
+  verify the actual workflow in the running app against an isolated home
+  (`AZIMUTH_HOME`). Edits to `web/static/v2/` are invisible until the bundle
+  is rebuilt.
+- Deletion, imports, recovery, or catalog changes: add a focused refuter and
+  verify the final persisted state.
 
 Report exact commands and results. Never claim a UI reproduction or passing
 suite that did not occur.

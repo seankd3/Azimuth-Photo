@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import lens, pipeline  # noqa: E402
+from pixels import pipeline  # noqa: E402
 
 
 class DevelopLensTests(unittest.TestCase):
@@ -69,24 +69,6 @@ class DevelopLensTests(unittest.TestCase):
                 canvas_size=(32, 24),
             )
         np.testing.assert_allclose(tiled, full, atol=2e-6)
-
-    def test_modern_rf_lens_resolves_from_exif_names(self):
-        try:
-            import lensfunpy  # noqa: F401
-        except ImportError:
-            self.skipTest("lensfunpy not installed (requirements-ai-develop.txt)")
-        correction = lens.resolve_lens_correction(
-            {
-                "camera_make": "Canon",
-                "camera_model": "Canon EOS R5",
-                "lens_model": "RF24-105mm F4 L IS USM",
-                "focal_length": 37,
-                "aperture": 11,
-            }
-        )
-        self.assertIsNotNone(correction)
-        self.assertEqual(correction["distortion"]["model"], "ptlens")
-        self.assertIn("Canon RF 24-105mm", correction["lens"])
 
 
 if __name__ == "__main__":

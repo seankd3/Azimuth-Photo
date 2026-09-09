@@ -2364,7 +2364,6 @@ class APlaceIsAFunctionOfTime(CoreCase):
 
     def test_a_file_that_knows_its_own_place_is_left_alone(self):
         import places
-        from model import cache as caching
 
         digest = "ef" * 32
         self._dated("Raws/phone.jpg", digest, "2026-05-26 18:05:00")
@@ -2421,7 +2420,7 @@ class AStackIsACadence(CoreCase):
     def test_the_collapse_hides_members_and_the_chip_steps_inside(self):
         import stacks
         from model import criteria
-        from model.scope import all_of, covers_only
+        from model.scope import covers_only
 
         run = [self._at(f"Raws/c{i}.cr3", f"2026-05-26 18:00:{i:02d}") for i in range(4)]
         stacks.project(self.conn)
@@ -2778,7 +2777,6 @@ class ASliderIsADecision(CoreCase):
             return float(np.asarray(image.convert("L"), dtype=np.float32).mean())
 
     def test_exposure_brightens_the_tile_and_none_takes_it_back(self):
-        import develop as developing
         from PIL import Image as Pillow
 
         photo_id = self.photo("Raws/lit.cr3")

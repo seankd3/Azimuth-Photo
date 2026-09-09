@@ -7,7 +7,7 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import pipeline  # noqa: E402
+from pixels import pipeline  # noqa: E402
 
 
 class DevelopCalibrationTests(unittest.TestCase):

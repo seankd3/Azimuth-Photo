@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from features.develop import adobe_profiles as profiles
+from pixels import adobe_profiles as profiles
 
 
 class _Tags(dict):

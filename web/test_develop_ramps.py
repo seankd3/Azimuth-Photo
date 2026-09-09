@@ -10,8 +10,8 @@ import unittest
 
 import numpy as np
 
-from features.develop import ops_constants as C
-from features.develop.ramps import gaussian_ev, smoothstep
+from pixels import ops_constants as C
+from pixels.ramps import gaussian_ev, smoothstep
 
 VALUES = np.array([-1.0, 0.0, 0.25, 0.5, 0.75, 1.0, 2.0], dtype=np.float32)
 
@@ -70,7 +70,7 @@ class GaussianTests(unittest.TestCase):
 
 class NobodyKeepsAPrivateCopyTests(unittest.TestCase):
     def test_no_develop_module_redefines_these(self):
-        package = pathlib.Path(__file__).with_name("features") / "develop"
+        package = pathlib.Path(__file__).with_name("pixels")
         strays = [
             path.name
             for path in package.glob("*.py")

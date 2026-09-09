@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-import json
 import os
 from pathlib import Path
 import threading
@@ -21,6 +20,7 @@ import embed
 import faces
 import library as queries
 import metadata as embedded_metadata
+from photo import tags
 import model
 import photostats
 import places
@@ -1003,7 +1003,7 @@ class Library:
         """Correct one capture date as an owner decision and reproject it."""
 
         self._open()
-        normalized = embedded_metadata.normalize_date(value)
+        normalized = tags.normalize_date(value)
         if normalized is None:
             raise ValueError(f"invalid capture date: {value!r}")
         found = self._source_identity(photo_id)

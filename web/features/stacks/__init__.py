@@ -1,1 +1,0 @@
-"""Stack feature package."""

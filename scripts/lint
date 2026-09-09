@@ -1,68 +1,19 @@
 #!/usr/bin/env bash
-# Fast programmatic lint: ruff + eslint + luacheck (fail-fast).
+# ruff over the product, eslint over the UI. Fail fast; skip nothing silently.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-export PATH="/usr/bin:/usr/local/bin:${PATH}"
-
-# Windows (Git Bash) checkouts skip linters that have no supported install
-# there — loudly. Linux keeps the fail-fast install contract.
-WINDOWS=0
-case "$(uname -s)" in
-  MINGW* | MSYS* | CYGWIN*) WINDOWS=1 ;;
-esac
-
-if [[ -n "${AZIMUTH_VENV:-}" && -x "$AZIMUTH_VENV/bin/ruff" ]]; then
-  RUFF="$AZIMUTH_VENV/bin/ruff"
-elif [[ -n "${AZIMUTH_VENV:-}" && -x "$AZIMUTH_VENV/Scripts/ruff.exe" ]]; then
-  RUFF="$AZIMUTH_VENV/Scripts/ruff.exe"
-elif [[ -x "$ROOT/web/.venv/bin/ruff" ]]; then
-  RUFF="$ROOT/web/.venv/bin/ruff"
-elif [[ -x "$ROOT/web/.venv/Scripts/ruff.exe" ]]; then
-  RUFF="$ROOT/web/.venv/Scripts/ruff.exe"
-elif command -v ruff >/dev/null 2>&1; then
-  RUFF="$(command -v ruff)"
-else
-  echo "lint: ruff not found (install web/requirements-dev.txt into web/.venv)" >&2
-  exit 2
-fi
-
-if [[ -x "$ROOT/node_modules/.bin/eslint" ]]; then
-  ESLINT="$ROOT/node_modules/.bin/eslint"
-elif command -v eslint >/dev/null 2>&1; then
-  ESLINT="$(command -v eslint)"
-elif [[ "$WINDOWS" == 1 ]]; then
-  ESLINT=""
-  echo "lint: eslint not found — SKIPPING on Windows (npm install at repo root for full lint)" >&2
-else
-  echo "lint: eslint not found (run npm install at repo root)" >&2
-  exit 2
-fi
-
-LUACHECK=1
-if ! command -v luacheck >/dev/null 2>&1; then
-  if [[ "$WINDOWS" == 1 ]]; then
-    LUACHECK=0
-    echo "lint: luacheck not found — SKIPPING on Windows" >&2
-  else
-    echo "lint: luacheck not found (pacman -S luacheck)" >&2
-    exit 2
-  fi
-fi
+VENV="${AZIMUTH_VENV:-$ROOT/web/.venv}"
+RUFF="$VENV/bin/ruff"
+[[ -x "$RUFF" ]] || RUFF="$VENV/Scripts/ruff.exe"
+[[ -x "$RUFF" ]] || { echo "lint: ruff not found (install web/requirements-dev.txt into web/.venv)" >&2; exit 2; }
+ESLINT="$ROOT/node_modules/.bin/eslint"
+[[ -x "$ESLINT" ]] || { echo "lint: eslint not found (run npm ci at the repository root)" >&2; exit 2; }
 
 echo "==> ruff"
-(cd "$ROOT/web" && "$RUFF" check .)
-
-if [[ -n "$ESLINT" ]]; then
-  echo "==> eslint"
-  "$ESLINT" web/static/js web/static/sw.js
-fi
-
-if [[ "$LUACHECK" == 1 ]]; then
-  echo "==> luacheck"
-  luacheck clients/lightroom
-fi
-
+(cd web && "$RUFF" check .)
+echo "==> eslint"
+"$ESLINT" web/static/v2 web/test_v2_page_cache.mjs web/test_v2_virtual_grid.mjs
 echo "lint: ok"

@@ -7,15 +7,10 @@ import unittest
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import lens, pipeline  # noqa: E402
+from pixels import pipeline  # noqa: E402
 
 
 class DevelopGradeTests(unittest.TestCase):
-    def test_distortion_auto_crop_is_identity_for_identity_polynomials(self):
-        for distortion in (None, {"model": "poly3", "terms": [0.0]}, {"model": "poly5", "terms": [0.0, 0.0]}):
-            self.assertEqual(lens.distortion_auto_crop_scale(distortion, 6000, 4000), 1.0)
-        self.assertLess(lens.distortion_auto_crop_scale({"model": "poly3", "terms": [0.25]}, 6000, 4000), 1.0)
-
     def test_global_wheel_pushes_neutral_toward_selected_hue(self):
         source = np.full((5, 5, 3), 0.36, dtype=np.float32)
         graded = pipeline._color_grade(source, {"ColorGradeGlobalHue": 0, "ColorGradeGlobalSat": 70})

@@ -1,5 +1,0 @@
--r requirements.txt
-
-# Local face detection and People clustering.
-insightface
-onnxruntime

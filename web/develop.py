@@ -23,8 +23,13 @@ it — the same one rule the whole decision log lives by.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
+import tempfile
 import xml.etree.ElementTree as ET
+from collections.abc import Mapping, Sequence
+from pathlib import Path
 
 from model import decisions
 
@@ -375,8 +380,6 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
     Lightroom reads the same way.
     """
 
-    from features.develop import xmp_write
-
     ours = settings(conn, digest)
     target = os.path.splitext(str(photo_path))[0] + ".xmp"
     for prefix, uri in (
@@ -400,7 +403,7 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
         except (ET.ParseError, OSError):
             root = None
     if root is None:
-        root = ET.fromstring(xmp_write.serialize({}))
+        root = ET.fromstring(serialize({}))
     # Adobe's own sidecars carry an x:xmptk mark; theirs is the toolkit's
     # name, ours is ours. Readers use it to trust the packet.
     root.set("{adobe:ns:meta/}xmptk", "Azimuth Photo")
@@ -412,12 +415,10 @@ def write_sidecar(conn, digest: str, photo_path: str) -> dict:
     for child in [c for c in description if c.tag.startswith(f"{{{_CRS}}}")]:
         description.remove(child)
     if ours:
-        xmp_write._append_resource(description, ours)
+        _append_resource(description, ours)
     _tell_lightroom(conn, digest, description)
     payload = ET.tostring(root, encoding="utf-8")
-    from pathlib import Path
-
-    changed = xmp_write._atomic_write(Path(target), payload)
+    changed = _atomic_write(Path(target), payload)
     return {"status": "written" if changed else "unchanged", "target": target}
 
 
@@ -489,3 +490,117 @@ def crop_of(fragment_json: str | None) -> tuple[float, float, float, float] | No
     except (TypeError, ValueError):
         return None
 
+
+# ---- Writing crs: Adobe's spelling, deterministic ----------------------------
+#
+# A scalar becomes an attribute on the rdf:Description; a list becomes an
+# rdf:Seq of rdf:li; a mapping becomes a nested rdf:Description — exactly the
+# three shapes Lightroom itself writes, so a sidecar we wrote reads back in
+# Lightroom, LRTimelapse and here alike. Numbers keep round-trip fidelity and
+# carry Adobe's leading ``+`` on positives.
+
+_XML_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]*$")
+_XPACKET_ID = "W5M0MpCehiHzreSzNTczkc9d"
+
+
+def adobe_value(value: object) -> str:
+    """One scalar, spelled as Lightroom spells it."""
+
+    if isinstance(value, bool):
+        return "True" if value else "False"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("XMP numbers must be finite")
+        if value.is_integer():
+            return str(int(value))
+        rendered = repr(value)
+        if "e" not in rendered.lower():
+            whole, dot, fraction = rendered.partition(".")
+            if dot and len(fraction) == 1:
+                rendered = f"{whole}.{fraction}0"
+        return f"+{rendered}" if value > 0 else rendered
+    if value is None:
+        raise TypeError("XMP settings cannot contain null scalar values")
+    return str(value)
+
+
+def _crs(key: object) -> str:
+    local = str(key)
+    if not _XML_KEY.fullmatch(local):
+        raise ValueError(f"invalid Camera Raw setting name: {local!r}")
+    return f"{{{_CRS}}}{local}"
+
+
+def _append_resource(parent: ET.Element, values: Mapping[str, object]) -> None:
+    for key, value in values.items():
+        if isinstance(value, (Mapping, list, tuple)):
+            _append_property(parent, key, value)
+        else:
+            parent.set(_crs(key), adobe_value(value))
+
+
+def _append_property(parent: ET.Element, key: object, value: object) -> None:
+    element = ET.SubElement(parent, _crs(key))
+    if isinstance(value, Mapping):
+        _append_resource(ET.SubElement(element, f"{{{_RDF}}}Description"), value)
+    elif isinstance(value, (list, tuple)):
+        _append_sequence(element, str(key), value)
+    else:
+        element.text = adobe_value(value)
+
+
+def _append_sequence(element: ET.Element, key: str, values: Sequence[object]) -> None:
+    sequence = ET.SubElement(element, f"{{{_RDF}}}Seq")
+    for value in values:
+        item = ET.SubElement(sequence, f"{{{_RDF}}}li")
+        if isinstance(value, Mapping):
+            # Lightroom wraps correction groups in rdf:Description, while
+            # masks inside CorrectionMasks carry their crs attributes on li.
+            resource = item
+            if key == "MaskGroupBasedCorrections":
+                resource = ET.SubElement(item, f"{{{_RDF}}}Description")
+            _append_resource(resource, value)
+        elif isinstance(value, (list, tuple)):
+            nested = ET.SubElement(item, f"{{{_RDF}}}Seq")
+            for held in value:
+                ET.SubElement(nested, f"{{{_RDF}}}li").text = adobe_value(held)
+        else:
+            item.text = adobe_value(value)
+
+
+def serialize(held: Mapping[str, object]) -> str:
+    """A whole crs-only sidecar packet for these settings, deterministic."""
+
+    if not isinstance(held, Mapping):
+        raise TypeError("settings must be an object")
+    root = ET.Element("{adobe:ns:meta/}xmpmeta")
+    rdf = ET.SubElement(root, f"{{{_RDF}}}RDF")
+    description = ET.SubElement(rdf, f"{{{_RDF}}}Description")
+    description.set(f"{{{_RDF}}}about", "")
+    _append_resource(description, held)
+    ET.indent(root, space="  ")
+    xml = ET.tostring(root, encoding="unicode", short_empty_elements=True)
+    return f'<?xpacket begin="" id="{_XPACKET_ID}"?>\n{xml}\n<?xpacket end="w"?>'
+
+
+def _atomic_write(path: Path, payload: bytes) -> bool:
+    """Write the file whole or not at all; False when it already says this."""
+
+    if path.is_file() and path.read_bytes() == payload:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    mode = path.stat().st_mode & 0o777 if path.exists() else 0o644
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return True

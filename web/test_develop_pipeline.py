@@ -9,8 +9,8 @@ from unittest import mock
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import ops_constants as C  # noqa: E402
-from features.develop import camera_profile, pipeline  # noqa: E402
+from pixels import ops_constants as C  # noqa: E402
+from pixels import pipeline  # noqa: E402
 
 
 class DevelopPipelineTests(unittest.TestCase):
@@ -34,12 +34,6 @@ class DevelopPipelineTests(unittest.TestCase):
         np.testing.assert_allclose(profiled, pipeline.linear_to_srgb(source), atol=2e-6)
         generic = pipeline.apply_pipeline(source, {})
         self.assertGreater(float(np.max(np.abs(profiled - generic))), 0.05)
-
-    def test_camera_profile_loader_uses_fitter_slug(self):
-        fitted = camera_profile.load_camera_profile("Canon EOS R5")
-        self.assertIsNotNone(fitted)
-        self.assertEqual(fitted["slug"], "canon-eos-r5")
-        self.assertEqual(np.asarray(fitted["oklab_ab_delta"]).shape, (12, 3, 2))
 
     def test_white_balance_is_planckian_white_point_adaptation(self):
         source = np.ones((1, 1, 3), dtype=np.float32)

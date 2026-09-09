@@ -3,12 +3,11 @@
 import os
 import sys
 import unittest
-from pathlib import Path
 
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
-from features.develop import pipeline  # noqa: E402
+from pixels import pipeline  # noqa: E402
 
 
 class DevelopDetail2Tests(unittest.TestCase):
@@ -34,14 +33,6 @@ class DevelopDetail2Tests(unittest.TestCase):
         paper, warning = pipeline.soft_proof_transform(source, "paper")
         self.assertLess(float(paper[0, 0, 0]), float(source[0, 0, 0]))
         self.assertEqual(warning.shape, source.shape[:2])
-
-    def test_compare_and_proof_ui_owns_the_declared_interactions(self):
-        javascript = (Path(__file__).parent / "static/js/desktop/develop/compare_view.js").read_text()
-        self.assertIn("DevelopCompareView", javascript)
-        self.assertIn("holdReference", javascript)
-        self.assertIn("SoftProofPopover", javascript)
-        self.assertIn("gamut", javascript.lower())
-
 
 if __name__ == "__main__":
     unittest.main()
