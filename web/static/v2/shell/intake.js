@@ -49,18 +49,21 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       // One import at a time; while it runs the workspace is its detail
       // view, and the way out is Back -- nothing here is cancelled by it.
       backButton.textContent = 'Back';
+      backButton.title = 'Back to the library — the import keeps running (Esc)';
       enter();
       return;
     }
     backButton.textContent = 'Cancel';
-    notify(`Looking at ${source}…`);
+    backButton.title = 'Cancel — nothing is written (Esc)';
+    // Work in progress goes to the status line; the toast is for outcomes.
+    progressed(`Looking at ${source}…`);
     // The look at a full card reads thousands of files; the growing count is
     // what says the app is working rather than wedged.
     const looking = setInterval(async () => {
       try {
         const held = await product.intakeStatus();
         if (held.phase === 'staging' && held.seen) {
-          notify(`Looking at ${source} — ${held.seen.toLocaleString()} photographs…`);
+          progressed(`Looking at ${source} — ${held.seen.toLocaleString()} photographs…`);
         }
       } catch { /* the count is a courtesy; the stage call itself reports */ }
     }, 600);
@@ -72,6 +75,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       return;
     } finally {
       clearInterval(looking);
+      progressed('');
     }
     state.source = staged.source;
     state.kind = staged.kind || recall('azimuth.import-kind', null);
@@ -171,6 +175,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
         box.type = 'checkbox';
         box.checked = state.checked.has(candidate.key);
         box.dataset.key = candidate.key;
+        // The stage is one tab stop; the arrows and Space walk its cells.
+        box.tabIndex = -1;
         const image = document.createElement('img');
         image.alt = '';
         image.dataset.key = candidate.key;
@@ -307,6 +313,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     stopButton.disabled = false;
     startButton.hidden = true;
     backButton.textContent = 'Back';
+    backButton.title = 'Back to the library (Esc)';
     const parts = [`${(status.brought || 0).toLocaleString()} imported`];
     if (status.already) parts.push(`${status.already} already there`);
     if (status.skipped) parts.push(`${status.skipped} already in the library`);
@@ -377,16 +384,18 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     event.preventDefault();
     const key = cell.dataset.key;
     const index = order.indexOf(key);
+    // The anchor is a key, here and on the keyboard, so a Shift+Arrow
+    // after a click extends from the photograph that was clicked.
     if (event.shiftKey && anchor !== null) {
-      const [from, to] = [Math.min(anchor, index), Math.max(anchor, index)];
-      selected = new Set(order.slice(from, to + 1));
+      const from = order.indexOf(anchor);
+      selected = new Set(order.slice(Math.min(from, index), Math.max(from, index) + 1));
     } else if (event.ctrlKey || event.metaKey) {
       if (selected.has(key)) selected.delete(key);
       else selected.add(key);
-      anchor = index;
+      anchor = key;
     } else {
       selected = new Set([key]);
-      anchor = index;
+      anchor = key;
     }
     syncChecks();
   });

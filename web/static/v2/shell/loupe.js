@@ -10,6 +10,10 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   chip.type = 'button';
   chip.className = 'loupe-zoom';
   chip.title = 'Fit or 100% (Z, Space)';
+  const cap = document.createElement('kbd');
+  cap.textContent = 'Z';
+  const word = document.createElement('span');
+  chip.append(cap, word);
   stage.append(chip);
 
   const state = { scale: 1, fit: 1, full: 1, tx: 0, ty: 0, turn: 0, mode: 'fit', native: null };
@@ -64,7 +68,8 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
       ` scale(${state.scale}) rotate(${state.turn}deg)`;
     const zoomed = state.scale > state.fit + 1e-4;
     image.style.cursor = zoomed ? (pointer ? 'grabbing' : 'grab') : 'zoom-in';
-    chip.textContent = zoomed ? `${Math.round(state.scale * (window.devicePixelRatio || 1) * 100)}%` : 'Fit';
+    // The chip names what pressing it does, with where you are as a suffix.
+    word.textContent = zoomed ? `Fit · ${Math.round(state.scale * (window.devicePixelRatio || 1) * 100)}%` : '100%';
   }
 
   function toFit() {

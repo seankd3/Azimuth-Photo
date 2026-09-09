@@ -68,8 +68,8 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
       row.dataset.person = entry.person;
       row.dataset.settled = entry.settled ? '1' : '0';
       row.title = !entry.settled
-        ? 'Someone the library keeps seeing — click to see them, right-click to name them'
-        : `${entry.term} — right-click to rename`;
+        ? 'Someone the library keeps seeing — click to see them; N or right-click names them'
+        : `${entry.term} — N or right-click renames`;
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
@@ -124,7 +124,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
       name.textContent = entry.term;
       const count = document.createElement('p');
       count.className = 'face-card-count';
-      count.textContent = `~${entry.count.toLocaleString()} photos`;
+      count.textContent = `~${entry.count.toLocaleString()} photographs`;
       const call = document.createElement('button');
       call.type = 'button';
       call.className = 'quiet-button face-card-name-button';
@@ -199,6 +199,10 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
   };
   list.addEventListener('contextmenu', nameFrom);
   stage.addEventListener('contextmenu', nameFrom);
+  list.addEventListener('keydown', (event) => {
+    if (event.key.toLowerCase() !== 'n' || event.ctrlKey || event.metaKey) return;
+    nameFrom(event);
+  });
 
   return Object.freeze({ refresh, render, key });
 }

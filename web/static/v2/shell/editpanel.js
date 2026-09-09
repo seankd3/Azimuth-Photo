@@ -27,7 +27,7 @@ const GROUPS = [
 ];
 const KEYS = GROUPS.flatMap(([, rows]) => rows.map(([key]) => key));
 
-export function createEditPanel({ product, notify, undo, preview, applied }) {
+export function createEditPanel({ product, notify, undo, preview, applied, shown = () => {} }) {
   const panel = document.querySelector('[data-edit-panel]');
   const groups = panel.querySelector('[data-edit-groups]');
   const hint = panel.querySelector('.edit-hint');
@@ -115,14 +115,15 @@ export function createEditPanel({ product, notify, undo, preview, applied }) {
     groups.classList.toggle('is-waiting', !state.ready);
     hint.textContent = state.ready ? HINT : 'Preparing the full picture… the sliders wake when it is here.';
     panel.hidden = false;
-    document.querySelector('[data-inspector-facts]').hidden = true;
+    shown();
     // Warm the held base now, so the first drag pays only the pipeline.
     if (state.ready) look();
   }
 
   function close() {
+    flush();
     panel.hidden = true;
-    document.querySelector('[data-inspector-facts]').hidden = false;
+    shown();
     clearTimeout(state.timer);
     state.photo = null;
     state.pending = {};
@@ -177,6 +178,18 @@ export function createEditPanel({ product, notify, undo, preview, applied }) {
     readouts.get(key).textContent = spell(key, event.target.value);
     look();
   });
+  // A slider fires change on every arrow press; the presses gather into
+  // one decision, written when the hand pauses, leaves the control, or
+  // lets go of the pointer -- one Undo for the nudge, not twenty.
+  let gathered = {};
+  let gatherTimer = null;
+  function flush() {
+    clearTimeout(gatherTimer);
+    gatherTimer = null;
+    const patch = gathered;
+    gathered = {};
+    if (Object.keys(patch).length) void keep(patch);
+  }
   groups.addEventListener('change', (event) => {
     const key = event.target.dataset.key;
     if (!key || !state.ready) { if (key) show(state.settings); return; }
@@ -184,8 +197,12 @@ export function createEditPanel({ product, notify, undo, preview, applied }) {
       ? (event.target.checked || null)
       : Number(event.target.value);
     state.pending = {};
-    void keep({ [key]: value === 0 ? null : value });
+    gathered[key] = value === 0 ? null : value;
+    clearTimeout(gatherTimer);
+    gatherTimer = setTimeout(flush, 400);
   });
+  groups.addEventListener('pointerup', flush);
+  groups.addEventListener('focusout', flush);
 
   function rest(key) {
     if (!inputs.has(key)) return;
@@ -206,11 +223,6 @@ export function createEditPanel({ product, notify, undo, preview, applied }) {
   });
   panel.querySelector('[data-action="edit-close"]').addEventListener('click', close);
 
-  function key(event) {
-    if (event.key === 'Escape') { close(); return true; }
-    return false;
-  }
-
   function follows(photo) {
     // The panel rides the arrows: a new photograph under the loupe means
     // its own settings on the sliders; leaving the loupe puts it away.
@@ -219,5 +231,5 @@ export function createEditPanel({ product, notify, undo, preview, applied }) {
     if (state.photo && photo.id !== state.photo.id) void open(photo);
   }
 
-  return Object.freeze({ open, close, isOpen, key, follows });
+  return Object.freeze({ open, close, isOpen, follows });
 }

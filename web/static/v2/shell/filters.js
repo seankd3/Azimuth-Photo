@@ -8,6 +8,8 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
+import { icon } from '../kit/icons.js';
+
 // The one vocabulary: what a field is called wherever it appears (the
 // menu, the editor's title), and what a stored value is called on a chip.
 const FIELD_LABEL = { stars: 'Stars', taken: 'Date taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', look: 'Look', person: 'Person', label: 'Label', alike: 'Alike', in: 'In album', folder: 'Folder', stack: 'Stack' };
@@ -17,7 +19,7 @@ const VALUE_LABEL = { picked: 'Picked', unflagged: 'Unflagged', landscape: 'Land
 const OFFERED = ['stars', 'taken', 'camera', 'status', 'orientation', 'look', 'person', 'label', 'in'];
 const said = (value) => VALUE_LABEL[value] || value;
 
-export function createFilterBar({ product, read, update, onChange }) {
+export function createFilterBar({ product, read, update, onChange, undo = null }) {
   const bar = document.querySelector('[data-chips]');
   const menu = document.querySelector('[data-chip-menu]');
   const editor = document.querySelector('[data-chip-editor]');
@@ -71,7 +73,7 @@ export function createFilterBar({ product, read, update, onChange }) {
       drop.type = 'button';
       drop.className = 'drop-chip';
       drop.dataset.drop = index;
-      drop.textContent = '×';
+      drop.append(icon('close'));
       drop.setAttribute('aria-label', 'Remove this filter');
       pill.append(label, drop);
       return pill;
@@ -232,13 +234,17 @@ export function createFilterBar({ product, read, update, onChange }) {
   }));
 
   function dropChip(dropped) {
-    const next = chips().slice();
-    next.splice(dropped, 1);
+    const held = chips().slice();
+    const next = held.slice();
+    const [gone] = next.splice(dropped, 1);
     if (editing && editing.index !== null) {
       if (editing.index === dropped) closeEditor();
       else if (editing.index > dropped) editing.index -= 1;
     }
     commit(next);
+    // A filter taken off is a change to what is being looked at; it has
+    // the same way back as any other.
+    undo?.show(`Filter removed — ${say(gone, read())}.`, () => commit(held));
   }
 
   bar.addEventListener('keydown', (event) => {
@@ -289,8 +295,11 @@ export function createFilterBar({ product, read, update, onChange }) {
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || (editor.hidden && menu.hidden)) return;
+    const at = editing?.index ?? null;
     closeEditor();
     menu.hidden = true;
+    // The keyboard goes back to the chip it came from, or to the + button.
+    (at !== null ? bar.querySelector(`[data-chip="${at}"]`) : null || document.querySelector('[data-action="add-chip"]'))?.focus();
     event.preventDefault();
     event.stopImmediatePropagation();
   });

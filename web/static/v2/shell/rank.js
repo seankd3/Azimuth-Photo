@@ -148,6 +148,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
       // beat, then the stage paints and the stragglers pop in.
       await Promise.race([Promise.all(answer.photos.map(preload)), delay(180)]);
       if (generation !== state.generation) return;
+      state.selected = state.set.length ? 0 : -1;
       render();
       void fill();
     } catch (error) {
@@ -223,7 +224,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     else render();
   }
 
-  async function pick(index) {
+  async function pick(index, { byMouse = false } = {}) {
     const winner = state.set[index];
     if (state.busy) {
       // The fastest part of the loop must never eat a keystroke: the pick
@@ -234,6 +235,10 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     if (!winner || state.set.length < 2) return;
     state.busy = true;
     const generation = state.generation;
+    // The pick is seen for a beat before it leaves.
+    stage.querySelector(`[data-index="${index}"]`)?.classList.add('is-picked');
+    await delay(120);
+    if (generation !== state.generation) { state.busy = false; return; }
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
 
@@ -290,7 +295,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     // Nothing left to bring in: the set shrinks rather than repeating.
     const gone = arrivals.filter(([, next]) => !next).map(([slot]) => slot).sort((a, b) => b - a);
     for (const slot of gone) { state.set.splice(slot, 1); state.age.splice(slot, 1); }
-    state.selected = Math.min(index, state.set.length - 1);
+    // A keyboard pick keeps its seat; a mouse pick leaves no cursor on the
+    // stranger that just arrived there.
+    state.selected = byMouse ? -1 : Math.min(index, state.set.length - 1);
     render();
     void fill();
     state.busy = false;
@@ -346,9 +353,12 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     renderSelection();
   }
 
+  // The keyboard's cursor wins whenever there is one; the mouse answers
+  // only when nothing is selected, so X never rejects a card the hand
+  // happened to be resting on.
   function underMouse() {
-    const card = stage.querySelector('.rank-card:hover')
-      || (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null);
+    const card = (state.selected >= 0 ? stage.querySelector(`[data-index="${state.selected}"]`) : null)
+      || stage.querySelector('.rank-card:hover');
     return (card && state.set[Number(card.dataset.index)]) || null;
   }
 
@@ -615,7 +625,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
 
   stage.addEventListener('click', (event) => {
     const card = event.target.closest('.rank-card');
-    if (card) void pick(Number(card.dataset.index));
+    if (card) void pick(Number(card.dataset.index), { byMouse: true });
   });
   new ResizeObserver(() => { if (isOpen()) layout(); }).observe(stage);
 

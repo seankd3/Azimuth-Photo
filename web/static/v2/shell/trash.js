@@ -44,8 +44,12 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
   }
 
   form.addEventListener('input', () => {
-    form.querySelector('[type="submit"]').disabled =
-      form.elements.count.value.trim() !== dialog.dataset.expected;
+    // The number is compared as digits: the dialog printed it with a
+    // thousands separator, and typing exactly what it showed must count.
+    const typed = form.elements.count.value.replace(/[^0-9]/g, '');
+    const right = typed === dialog.dataset.expected;
+    form.querySelector('[type="submit"]').disabled = !right;
+    error.textContent = typed && !right ? 'That is not the number.' : '';
   });
 
   form.addEventListener('submit', async (event) => {

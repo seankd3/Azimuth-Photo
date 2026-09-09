@@ -55,6 +55,10 @@ export function createCropSurface({ product, notify, undo, applied }) {
   async function apply() {
     if (!state.photo) return;
     const whole = isWhole();
+    if (!whole && (state.unit[2] - state.unit[0] < LEAST || state.unit[3] - state.unit[1] < LEAST)) {
+      notify('Too small to crop.');
+      return;
+    }
     const id = state.photo.id;
     const keys = ['CropLeft', 'CropTop', 'CropRight', 'CropBottom'];
     const box = state.unit.map((v) => Math.round(v * 1e6) / 1e6);
@@ -74,9 +78,11 @@ export function createCropSurface({ product, notify, undo, applied }) {
     });
   }
 
+  // Remove crop is an act, not a preview: the whole frame is written at once.
   async function reset() {
     state.unit = [0, 0, 1, 1];
     place();
+    await apply();
   }
 
   // ---- geometry: the oriented image, worn turn and all, on this screen ----
@@ -209,6 +215,8 @@ export function createCropSurface({ product, notify, undo, applied }) {
       const [cx, cy] = fromScreen([Math.min(1, Math.max(0, sx)), Math.min(1, Math.max(0, sy))]);
       l = Math.min(held.from[0], cx); r = Math.max(held.from[0], cx);
       t = Math.min(held.from[1], cy); b = Math.max(held.from[1], cy);
+      // A twitch is not a crop: under the floor the box stays as it was.
+      if (r - l < LEAST || b - t < LEAST) [l, t, r, b] = held.unit;
     } else if (on.move) {
       const w = r - l;
       const h = b - t;
@@ -253,7 +261,8 @@ export function createCropSurface({ product, notify, undo, applied }) {
 
   function key(event) {
     if (event.key === 'Escape') { close(); return true; }
-    if (event.key === 'Enter') { void apply(); return true; }
+    // Enter on a focused button presses that button, not Apply.
+    if (event.key === 'Enter' && !document.activeElement?.closest('.crop-bar')) { void apply(); return true; }
     return false;
   }
 

@@ -449,6 +449,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 /* The face wall: everyone at a size a face can be recognized at. Someones
    first — the wall exists to introduce them. */
 .face-wall {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-content: flex-start;
@@ -784,7 +785,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   cursor: pointer;
 }
 .dialog-close:hover, .loupe-close:hover { background: #292b30; color: var(--text); }
-.loupe-close, .drop-chip { display: inline-grid; place-items: center; }
+.loupe-close, .dialog-close, .drop-chip { display: inline-grid; place-items: center; }
 .home-path { display: flex; gap: 10px; align-items: center; margin: 0 0 22px; }
 .home-path code {
   flex: 1;
@@ -988,11 +989,6 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .rolls input { width: 140px; padding: 5px 7px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--well); color: var(--text); font-size: var(--t-meta); }
 .destinations { margin: 0; font: var(--t-meta)/1.6 var(--mono); color: var(--text-2); }
 .status-stop { margin: 8px 10px 0; }
-.destinations label { display: flex; align-items: center; gap: 8px; padding: 2px 0; cursor: pointer; }
-.destinations label:hover { color: var(--text); }
-.destinations input { accent-color: var(--accent); flex: none; }
-.destinations span:first-of-type { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.destinations span:last-child { flex: none; color: var(--text-3); }
 .import-into { margin: 8px 0 0; font: var(--t-meta)/1.5 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
 .export-dialog { width: 400px; }
 .export-dialog .eyebrow { margin: 16px 0 6px; }

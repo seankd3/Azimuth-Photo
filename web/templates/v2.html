@@ -136,7 +136,7 @@
           </div>
           <div class="crop-bar">
             <span class="crop-hint">Edges resize, the middle moves, a drag outside starts over</span>
-            <button class="quiet-button" type="button" data-action="crop-reset">Full frame</button>
+            <button class="quiet-button" type="button" data-action="crop-reset">Remove crop</button>
             <button class="quiet-button" type="button" data-action="crop-cancel">Cancel</button>
             <button class="primary-button" type="button" data-action="crop-apply"><kbd>⏎</kbd> Apply</button>
           </div>
@@ -193,7 +193,7 @@
       </section>
     </aside>
   <div class="toast" data-toast hidden role="status">
-    <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
+    <span data-toast-copy></span><button type="button" data-action="undo-toast" hidden>Undo</button>
   </div>
   </div>
 
@@ -210,7 +210,7 @@
 
   <dialog class="drive-dialog" data-drive-dialog aria-labelledby="drive-title">
     <form data-drive-form>
-      <button class="dialog-close" type="button" data-action="close-drive" aria-label="Close">×</button>
+      <button class="dialog-close" type="button" data-action="close-drive" data-icon-only="close" aria-label="Close"></button>
       <p class="eyebrow">Add to the library</p>
       <h1 id="drive-title" data-drive-name>This folder</h1>
       <p class="home-path"><code data-drive-path></code></p>
@@ -224,7 +224,7 @@
 
   <dialog class="confirm-dialog" data-empty-dialog aria-labelledby="empty-title">
     <form data-empty-form>
-      <button class="dialog-close" type="button" data-action="close-empty" aria-label="Close">×</button>
+      <button class="dialog-close" type="button" data-action="close-empty" data-icon-only="close" aria-label="Close"></button>
       <p class="eyebrow">Permanent deletion</p>
       <h1 id="empty-title">Empty Trash?</h1>
       <p class="dialog-copy">This permanently deletes <strong data-empty-count></strong> photographs from every attached drive. Type the number to continue.</p>
@@ -256,7 +256,7 @@
   <menu class="context-menu" data-photo-menu hidden></menu>
   <dialog class="confirm-dialog keys-dialog" data-keys-dialog aria-labelledby="keys-title">
     <form method="dialog">
-      <button class="dialog-close" type="submit" aria-label="Close">×</button>
+      <button class="dialog-close" type="submit" data-icon-only="close" aria-label="Close"></button>
       <p class="eyebrow">Keys</p>
       <h1 id="keys-title">Every key, in one place.</h1>
       <div class="keys-body" data-keys-body></div>
@@ -273,7 +273,7 @@
 
   <dialog class="confirm-dialog export-dialog" data-export-dialog aria-labelledby="export-title">
     <form data-export-form>
-      <button class="dialog-close" type="button" data-action="close-export" aria-label="Close">×</button>
+      <button class="dialog-close" type="button" data-action="close-export" data-icon-only="close" aria-label="Close"></button>
       <p class="eyebrow">Export</p>
       <h1 id="export-title" data-export-count>Export</h1>
       <p class="dialog-copy">Full-quality JPEGs of what the library shows — edits applied, capture facts carried.</p>

@@ -178,9 +178,10 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const moved = await product.quick(ids);
       await refresh();
       if (read().album === 'quick') await reload();
+      const word = (n) => `${n.toLocaleString()} photograph${n === 1 ? '' : 's'}`;
       notify('added' in moved
-        ? `${moved.added} in Quick album — ${moved.count} held.`
-        : `${moved.removed} out of Quick album — ${moved.count} held.`);
+        ? `${word(moved.added)} added to Quick album — ${moved.count.toLocaleString()} there now.`
+        : `${word(moved.removed)} out of Quick album — ${moved.count.toLocaleString()} there now.`);
     } catch (error) {
       notify(error.message);
     }
@@ -199,9 +200,10 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const out = await product.removeFromAlbum(here.id, ids);
       await refresh();
       await reload();
+      const word = `${out.removed.toLocaleString()} photograph${out.removed === 1 ? '' : 's'}`;
       notify(here.smart
-        ? `${out.removed} excluded from “${here.name}”.`
-        : `${out.removed} out of “${here.name}”.`);
+        ? `${word} excluded from “${here.name}”.`
+        : `${word} out of “${here.name}”.`);
     } catch (error) {
       notify(error.message);
     }
@@ -212,7 +214,13 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const added = await product.addToAlbum(id, ids);
       await refresh();
       const name = (read().albums.find((c) => c.id === id) || {}).name || 'the album';
-      notify(`${added.added} added to “${name}”.`);
+      // A drop into the wrong album has the same way back as every other
+      // change to a set.
+      undo.show(`${added.added.toLocaleString()} photograph${added.added === 1 ? '' : 's'} added to “${name}”.`, async () => {
+        await product.removeFromAlbum(id, ids);
+        await refresh();
+        if (read().album === id) await reload();
+      });
     } catch (error) {
       notify(error.message);
     }
@@ -344,6 +352,14 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     // album, the Quick toss everywhere else.
     const pruning = viewing && here !== 'quick' && here !== 'last-import';
     const rows = verbs.map(({ label, run }) => item(label, run));
+    // Trash is not a place to file from: its menu is its own verbs.
+    if (read().view === 'trash') {
+      photoMenu.replaceChildren(...rows);
+      photoMenu.hidden = false;
+      photoMenu.style.left = `${event.clientX}px`;
+      photoMenu.style.top = `${event.clientY}px`;
+      return;
+    }
     rows.push(item(pruning ? 'Quick album' : 'Quick album — B', () => quickToss(ids)));
     for (const entry of fixed.filter((c) => c.id !== 'quick')) {
       rows.push(item(`Add to “${entry.name}”`, () => addTo(entry.id, ids)));

@@ -152,7 +152,7 @@ function renderStrip(state) {
     cell.classList.add('is-current');
     loupeStrip.scrollTo({
       left: cell.offsetLeft - (loupeStrip.clientWidth - cell.offsetWidth) / 2,
-      behavior: rebuilt ? 'auto' : 'smooth',
+      behavior: rebuilt || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
     });
   }
 }
@@ -336,6 +336,7 @@ const albumsPanel = createAlbumsPanel({
   viewOf,
 });
 const filterBar = createFilterBar({
+  undo,
   product,
   read,
   update,
@@ -359,6 +360,7 @@ const editPanel = createEditPanel({
   product,
   notify,
   undo,
+  shown: () => renderChrome(read()),
   preview: (uri) => {
     // The look rides over the rendition without touching the loupe's
     // source memory, so passive renders skip it and the look survives;
@@ -621,7 +623,7 @@ function visibleGrid() {
               ? 'Photographs appear as the folder is read. If it is empty on disk, there is nothing to show.'
               : narrowed
                 ? 'Loosen a chip, or take one off with its ×.'
-                : 'Add a folder to start your library.',
+                : 'Add a folder to start your library. Azimuth reads it in place and never moves or alters your photographs.',
     emptyAction: bare ? { label: 'Add folder…', run: openDriveDialog } : null,
     select: selectPhoto,
     open: openPhoto,
@@ -674,10 +676,13 @@ function scheduleGrid() {
 // dismissed, because nothing works without one; Change… opens the native
 // chooser, and the proposal is the fixed local disk with the most room.
 async function chooseHome() {
+  const submit = homeForm.querySelector('[type="submit"]');
+  submit.disabled = true;
   homeDialog.showModal();
-  homeForm.querySelector('[type="submit"]').focus();
+  submit.focus();
   try {
     homePath.textContent = await product.proposeHome();
+    submit.disabled = !homePath.textContent;
   } catch (error) {
     homePath.textContent = '';
     homeError.textContent = error.message;
@@ -786,7 +791,6 @@ async function loadView() {
     } else if (read().days.length) {
       update({ days: [] });
     }
-    if (view === 'library' && !drives.length && !counts.photos) openDriveDialog();
   } catch (error) {
     if (!pages.isCurrent(requestGeneration)) return;
     update({ loading: false });
@@ -1040,7 +1044,11 @@ async function synchronizeFolder(folder) {
     const moved = results.reduce((n, r) => n + (r.photos_moved || 0), 0);
     const retired = results.reduce((n, r) => n + (r.copies_retired || 0), 0);
     await Promise.all([refreshInPlace(), loadFolders()]);
-    notify(`Synchronized: ${added} added, ${moved} moved, ${retired} no longer there.`);
+    const parts = [];
+    if (added) parts.push(`${added.toLocaleString()} added`);
+    if (moved) parts.push(`${moved.toLocaleString()} moved`);
+    if (retired) parts.push(`${retired.toLocaleString()} no longer there`);
+    notify(parts.length ? `Synchronized: ${parts.join(', ')}.` : 'Synchronized — nothing changed.');
   } catch (error) {
     notify(error.message);
   } finally {
@@ -1416,8 +1424,8 @@ function renderChrome(state) {
     : state.view === 'people'
       ? `${(state.people || []).length.toLocaleString()} people`
       : state.view === 'library' && !seeking() && !(state.folders || []).length && !state.album && !(state.chips || []).length && state.counts.photos > state.total
-        ? `${state.total.toLocaleString()} photos · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
-        : `${state.total.toLocaleString()} photos`;
+        ? `${state.total.toLocaleString()} photographs · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
+        : `${state.total.toLocaleString()} photographs`;
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
@@ -1703,6 +1711,9 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
+  // A slider takes the arrows, not the letters: Esc and D still work on it.
+  const isSliding = target.matches('input[type="range"]');
+  const onControl = Boolean(target.closest('button'));
   // A modal is the first rung, whichever it is: Esc closes it and nothing
   // behind it hears the key. The home dialog alone cannot be dismissed.
   const modal = document.querySelector('dialog[open]');
@@ -1718,11 +1729,11 @@ document.addEventListener('keydown', (event) => {
   }
   if (intakeWorkflow.isOpen()) {
     if (event.key === 'Escape') intakeWorkflow.close();
-    if (event.key === 'Enter' && !isTyping) {
+    if (event.key === 'Enter' && !isTyping && !onControl) {
       intakeWorkflow.finish();
       event.preventDefault();
     }
-    if (event.key === ' ' && !isTyping) {
+    if (event.key === ' ' && !isTyping && !onControl) {
       intakeWorkflow.toggleSelected();
       event.preventDefault();
     }
@@ -1733,7 +1744,7 @@ document.addEventListener('keydown', (event) => {
     if (cropSurface.key(event)) event.preventDefault();
     return;
   }
-  if (editPanel.isOpen() && event.key === 'Escape' && !isTyping) {
+  if (editPanel.isOpen() && (event.key === 'Escape' || event.key === 'd' || event.key === 'D') && (!isTyping || isSliding)) {
     editPanel.close();
     event.preventDefault();
     return;
@@ -1969,7 +1980,7 @@ const SHORTCUTS = [
   ]],
   ['Rank', [
     ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
-    ['Z / F', 'Look closer'], ['P / U / X / R', 'The card under the mouse'],
+    ['Z / F', 'Look closer'], ['P / U / X / R', 'The selected card, else the one under the mouse'],
   ]],
   ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
   ['Trash', [['U', 'Restore', ['restore']]]],
@@ -2104,9 +2115,11 @@ const photoVerbs = () => (read().view === 'trash' ? [
     run: async () => {
       try {
         const said = await product.exportSettings(selection());
-        notify(`${said.written} sidecar${said.written === 1 ? '' : 's'} written`
-          + (said.unchanged ? `, ${said.unchanged} already current` : '')
-          + (said.missing ? `, ${said.missing} not here` : '') + '.');
+        const parts = [];
+        if (said.written) parts.push(`${said.written.toLocaleString()} written`);
+        if (said.unchanged) parts.push(`${said.unchanged.toLocaleString()} already current`);
+        if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
+        notify(`Lightroom metadata: ${parts.join(', ') || 'nothing to write'}.`);
       } catch (error) {
         notify(error.message);
       }
