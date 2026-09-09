@@ -70,14 +70,16 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       if (thisYear !== year) {
         year = thisYear;
         if (top - lastWordY >= 14) {
+          // The year's word stands where its first month would have.
           const mark = element('div', 'timeline-year', year);
           mark.style.top = `${Math.max(6, top)}px`;
           track.append(mark);
           lastWordY = top;
           lastTickY = top;
           lastYearDrawn = year;
+          month = thisMonth;
+          continue;
         }
-        continue;
       }
       if (thisMonth === month) continue;
       month = thisMonth;
