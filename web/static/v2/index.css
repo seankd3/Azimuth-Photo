@@ -28,6 +28,11 @@
   --warn: #d9a441;
   --ok: #66bfa0;
   --radius: 4px;
+  /* the type scale, four steps: a label, a meta line, body, a title */
+  --t-label: 11px;
+  --t-meta: 12px;
+  --t-body: 13px;
+  --t-title: 15px;
   /* the measures every surface shares: the context bar's height, the loupe
      strip's band, the brand column */
   --ctx: 46px;
@@ -132,6 +137,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .brand svg.mark, .empty-mark svg.mark { display: block; width: 22px; height: 22px; color: var(--text-2); }
 .brand .wm-dim { color: var(--text-3); }
 .empty-mark { display: flex; }
+.icon { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.side-row .icon, .drop-glyph .icon { color: var(--text-3); }
+.drop-row.is-cursor .drop-glyph .icon, .side-row.is-active .icon { color: var(--accent); }
+.stack-badge .icon, button kbd .icon { width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; }
 
 .view-title { display: flex; align-items: baseline; gap: 10px; padding: 0 18px; }
 .view-title span { color: var(--text-3); font-size: 13px; }
@@ -170,7 +179,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   margin: 0 8px 9px;
   color: var(--text-3);
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--t-label);
   font-weight: 500;
   letter-spacing: .18em;
   text-transform: uppercase;
@@ -297,11 +306,13 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   position: absolute;
   overflow: hidden;
   padding: 0;
-  border: 1px solid transparent;
+  border: 0;
   background: var(--tile);
   cursor: default;
 }
-.photo-cell img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; }
+/* a tile arrives, it does not pop: the picture fades in once it has loaded */
+.photo-cell img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .16s ease; }
+.photo-cell img.is-loaded { opacity: 1; }
 /* a turn is how a picture is shown, wherever it is shown */
 [data-turn="90"] img { transform: rotate(90deg); }
 [data-turn="180"] img { transform: rotate(180deg); }
@@ -367,8 +378,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   /* a hollow ring: the drive that holds it is away */
   border-style: dashed;
 }
-.photo-cell:hover { border-color: var(--hover-line); }
-.photo-cell.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+/* no stroke on a photograph: the only rings are the hand's and the mark's */
+.photo-cell:hover { box-shadow: inset 0 0 0 1px var(--hover-line); }
+.photo-cell.is-selected { box-shadow: inset 0 0 0 2px var(--accent); }
 /* A chapter is a quiet line in the stream: the day, its count, no chrome. */
 .grid-chapter {
   position: absolute;
@@ -377,15 +389,15 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   height: 34px;
   display: flex;
   align-items: flex-end;
-  padding-bottom: 7px;
-  color: var(--text-3);
-  font: 500 11px/1 var(--mono);
-  letter-spacing: .06em;
-  text-transform: uppercase;
+  gap: 8px;
+  padding-bottom: 8px;
+  color: var(--text-2);
+  font: 500 var(--t-meta)/1 var(--sans);
   white-space: nowrap;
   overflow: hidden;
   pointer-events: none;
 }
+.grid-chapter .count { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 /* the keyboard cursor is its own quieter ring: on the import stage too,
    where the checked cell is the mark and the cursor is the ring */
 .photo-cell.is-focus, .stage-cell.is-selected { outline: 1px solid var(--ring); outline-offset: -4px; }
@@ -430,7 +442,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
   line-height: 0;
 }
-.face-card-look .smart-mark { font-size: 64px; line-height: 130px; }
+.face-card-look .icon-big { width: 64px; height: 64px; margin: 33px; color: var(--text-3); }
 /* One face, three sizes: the drop's strip, the shelf's row, the wall's
    card. A person is round wherever they appear. */
 .face-card-face, .person-face, .drop-strip img.face {
@@ -562,7 +574,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .rank-card:hover { border-color: var(--hover-line); }
 .rank-card.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .rank-card.is-picked { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); transform: scale(.985); }
-.rank-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--text-3); font-size: 14px; }
+.rank-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--text-3); font-size: var(--t-body); }
 .rank-progress { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .teach-hint { color: var(--text-3); font: 11px/1.4 var(--mono); white-space: nowrap; }
 .chip-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -666,7 +678,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 }
 .rank-size button.is-active { background: var(--accent-tint); color: var(--text); }
 /* a key cap on a button: the same small mono everywhere it appears */
-button kbd { color: var(--text-3); font: 10px/1 var(--mono); }
+button kbd { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 .contextbar [data-action="leave-rank"] kbd { margin-right: 4px; }
 
 .empty-state {
@@ -696,9 +708,12 @@ button kbd { color: var(--text-3); font: 10px/1 var(--mono); }
 }
 .primary-button:disabled { opacity: .45; cursor: wait; }
 
-.inspector-empty { margin-top: 38vh; color: var(--text-3); text-align: center; font-size: 13px; }
+.inspector-empty { margin-top: 38vh; color: var(--text-3); text-align: center; font-size: var(--t-body); }
+.glance { display: grid; gap: 22px; }
+.glance .facts { margin-top: 12px; }
+.glance-hint { margin: 0; color: var(--text-3); font-size: var(--t-meta); line-height: 1.5; }
 .inspector-heading .eyebrow { margin-left: 0; }
-.inspector-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: 16px; line-height: 1.35; }
+.inspector-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: var(--t-title); line-height: 1.35; }
 .facts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 11px 14px; margin-top: 26px; font-size: 12px; }
 .facts dt { color: var(--text-3); }
 .facts dd { margin: 0; color: var(--text-2); text-align: right; overflow-wrap: anywhere; cursor: copy; }
@@ -963,7 +978,8 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 /* A stack wears a band: each cell's halo is half the gap, so cover and
    members meet in one continuous frame around the set, row to row. */
 .photo-cell.is-stacked { box-shadow: 0 0 0 2px var(--stack-band); }
-.photo-cell.is-stacked.is-selected { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 1px var(--accent); }
+.photo-cell.is-stacked:hover { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 1px var(--hover-line); }
+.photo-cell.is-stacked.is-selected { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 2px var(--accent); }
 .import-choose { display: flex; gap: 6px; }
 .import-progress { margin: 10px 0 0; color: var(--text); font-size: 13px; }
 .toast {

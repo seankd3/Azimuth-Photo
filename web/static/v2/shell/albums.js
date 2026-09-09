@@ -5,6 +5,8 @@
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
+import { icon } from '../kit/icons.js';
+
 export function createAlbumsPanel({ product, read, update, notify, undo, reload, moved, selection, describe, viewOf }) {
   const tree = document.querySelector('[data-albums-tree]');
   const menu = document.querySelector('[data-album-menu]');
@@ -63,13 +65,8 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       name.className = 'leaf';
       name.textContent = leaf;
       row.append(name);
-      if (entry.smart) {
-        const mark = document.createElement('span');
-        mark.className = 'smart-mark';
-        mark.textContent = '◇';
-        mark.title = 'Smart — fills itself from its filters';
-        row.append(mark);
-      }
+      row.prepend(icon(entry.smart ? 'smart' : 'album'));
+      if (entry.smart) row.title = `${entry.name} — smart: fills itself from its filters`;
       const count = document.createElement('span');
       count.className = 'set-count';
       count.textContent = entry.count.toLocaleString();

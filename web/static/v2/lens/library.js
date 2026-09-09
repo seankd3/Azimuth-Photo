@@ -1,5 +1,6 @@
 import { title, chapters as chaptersIn } from '../kit/days.js';
 import { presence } from '../kit/presence.js';
+import { icon } from '../kit/icons.js';
 import {
   measureGrid,
   placeGridCell,
@@ -90,8 +91,12 @@ function showTile(cell, photo) {
   if (cell.dataset.empty !== empty) cell.dataset.empty = empty;
   if (image.dataset.source === source) return;
   image.dataset.source = source;
-  if (source) image.src = source;
-  else image.removeAttribute('src');
+  image.classList.remove('is-loaded');
+  if (source) {
+    image.src = source;
+    if (image.complete && image.naturalWidth) image.classList.add('is-loaded');
+    else image.onload = () => image.classList.add('is-loaded');
+  } else image.removeAttribute('src');
 }
 
 function element(tag, className = '', text = '') {
@@ -150,7 +155,8 @@ function photoCell(photo, index, actions) {
     // cover and leave again on the next click. A span, because the cell is
     // already a button and a button may not hold another.
     const open = actions.stackOpen?.(photo.id);
-    const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''), `▤ ${photo.stack + 1}`);
+    const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''));
+    badge.append(icon('stack'), String(photo.stack + 1));
     badge.setAttribute('role', 'button');
     badge.title = open ? `A stack of ${photo.stack + 1} — fold it (S)` : `A stack of ${photo.stack + 1} — open it (S)`;
     badge.addEventListener('click', (event) => {
@@ -258,10 +264,15 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const key = String(band.index);
     let node = currentBands.get(key);
     if (!node) {
-      node = element('div', 'grid-chapter', band.title);
+      node = element('div', 'grid-chapter');
       node.dataset.band = key;
-    } else if (node.textContent !== band.title) {
-      node.textContent = band.title;
+    }
+    if (node.dataset.title !== band.title) {
+      // The day is the anchor; its count sits beside it, quieter.
+      node.dataset.title = band.title;
+      const at = band.title.lastIndexOf(' · ');
+      node.replaceChildren(element('span', 'day', at > 0 ? band.title.slice(0, at) : band.title),
+        element('span', 'count', at > 0 ? band.title.slice(at + 3) : ''));
     }
     node.style.top = `${band.top}px`;
     desired.push(node);
@@ -371,7 +382,23 @@ function renderInspector(panel, selected, actions = {}) {
     return;
   }
   if (!selected) {
-    panel.replaceChildren(element('div', 'inspector-empty', 'Select a photo to see its details.'));
+    // Nothing selected: the library at a glance, from what the window
+    // already holds, instead of an empty column.
+    const counts = actions.counts || {};
+    const drives = actions.drives || [];
+    const glance = element('div', 'glance');
+    const heading = element('div', 'inspector-heading');
+    heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', `${(counts.photos || 0).toLocaleString()} photographs`));
+    const facts = element('dl', 'facts');
+    const rows = [
+      ['Starred', counts.starred ? counts.starred.toLocaleString() : ''],
+      ['In Trash', counts.trash ? counts.trash.toLocaleString() : ''],
+      ['Drives', drives.length ? drives.map((d) => `${d.label || d.root}${d.attached ? '' : ' · away'}`).join(' · ') : ''],
+      ['Working', actions.working ? [actions.working.word, actions.working.left ? `${actions.working.left.toLocaleString()} left` : ''].filter(Boolean).join(' · ') : ''],
+    ];
+    for (const [label, value] of rows) if (value) facts.append(element('dt', '', label), element('dd', '', value));
+    glance.append(heading, facts, element('p', 'glance-hint', 'Select a photograph to see its facts. ? shows every key.'));
+    panel.replaceChildren(glance);
     return;
   }
   const heading = element('div', 'inspector-heading');

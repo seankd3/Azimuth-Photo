@@ -2,6 +2,8 @@
 // Clicking a word browses it; refining happens inside that view, where Y
 // anchors and N excludes — the vocabulary is exactly what you have
 // answered for, so an untaught library shows no section at all.
+import { icon } from '../kit/icons.js';
+
 export function createLabelsPanel({ product, update, browse }) {
   const section = document.querySelector('[data-labels-section]');
   const list = document.querySelector('[data-labels-list]');
@@ -30,9 +32,7 @@ export function createLabelsPanel({ product, update, browse }) {
       row.className = 'side-row';
       row.dataset.term = entry.term;
       row.title = `${entry.term} — a word you taught; Y and N inside its view refine it`;
-      const mark = document.createElement('span');
-      mark.className = 'smart-mark';
-      mark.textContent = '◇';
+      const mark = icon('label');
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;

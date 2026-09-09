@@ -273,3 +273,16 @@ finding was checked and the numbers said no.
 | # | User impact | Fix | Status |
 |---|---|---|---|
 | K1 | Cadence stacks over-group and hide frames; every stack is collapsed by default | a stack is a decision (S makes one from marked frames, or from the burst the cadence law proposes around one frame; Shift+S unstacks; Undo on both); stacks open by default with a band; the badge folds one, a bar toggle collapses all | shipped |
+
+## Appearance (owner's ask, 2026-09-09)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| A1 | Every tile wore a hairline; on black it read as a wire fence | no stroke on a photograph: the hand's ring and the mark's ring are the only rings; stacks wear a band | shipped |
+| A2 | Seven type sizes and three kinds of caps | four steps as tokens (label 11 · meta 12 · body 13 · title 15); eyebrows on the label step | shipped |
+| A3 | An empty inspector column said "Select a photo" | the library at a glance: photographs, starred, Trash, drives, what the worker is doing | shipped |
+| A4 | Unicode glyphs stood in for icons and rendered unevenly | one drawn 16px set (kit/icons.js) for albums, smart, labels, people, stacks, cameras, calendar, clock, recent, shapes | shipped |
+| A5 | Day chapters were tiny caps mono, easy to miss | the day in Inter 12 medium, its count beside it quieter in mono | shipped |
+| A6 | Two counts disagreed (title vs sidebar) with no explanation | "121 photos · 3 behind covers" whenever frames wait behind covers | shipped |
+| A7 | Tiles popped in as they loaded | a 160 ms fade on arrival; reduced motion honoured | shipped |
+| A8 | Rows of five at 220px left a lot of black | default density 180, remembered once changed | shipped |

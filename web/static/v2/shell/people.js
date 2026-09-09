@@ -9,6 +9,7 @@
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
 import { emptyState } from '../lens/library.js';
+import { icon } from '../kit/icons.js';
 
 export function createPeoplePanel({ product, _read, update, notify, undo, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
@@ -29,12 +30,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
 
   function face(entry, className) {
     const sample = entry.samples?.[0];
-    if (!sample) {
-      const mark = document.createElement('span');
-      mark.className = 'smart-mark';
-      mark.textContent = '◉';
-      return mark;
-    }
+    if (!sample) return icon('person', className === 'face-card-face' ? 'icon icon-big' : 'icon');
     const mark = document.createElement('img');
     mark.className = className;
     mark.src = sample.tile;

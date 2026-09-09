@@ -6,6 +6,8 @@
 // saveable, and it scopes Rank like any other narrowing. Enter is always
 // the meaning search; the cards never take it away.
 
+import { icon } from '../kit/icons.js';
+
 const RECENT_KEY = 'azimuth.recent-searches';
 
 export function createSearchCards({ product, read, _update, box, search, applyChip }) {
@@ -65,7 +67,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const past = recents().filter(match);
     if (past.length) {
       sections.push(['Recent', past.map((q) => ({
-        label: q, glyph: '↻', run: () => { box.value = q; search(q); },
+        label: q, glyph: 'recent', run: () => { box.value = q; search(q); },
         dismiss: () => { forget(q); render(); },
       }))]);
     }
@@ -73,7 +75,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       .filter((c) => (!c.pinned || c.count) && c.count && match(c.name))
       .slice(0, 6)
       .map((c) => ({
-        label: c.name, count: c.count, glyph: c.smart ? '◇' : '▣',
+        label: c.name, count: c.count, glyph: c.smart ? 'smart' : 'album',
         run: () => applyChip({ is: 'in', values: [c.id] }),
       }));
     if (albums.length) sections.push(['Albums', albums]);
@@ -81,7 +83,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     // The introduced, with their faces; Someones wait in the sidebar.
     const people = (read().people || []).filter((p) => p.settled && match(p.term)).slice(0, query ? 3 : 4)
       .map((p) => ({
-        label: p.term, count: `~${p.count.toLocaleString()}`, glyph: '◉',
+        label: p.term, count: `~${p.count.toLocaleString()}`, glyph: 'person',
         strip: p.samples || [],
         run: () => applyChip({ is: 'person', values: [p.term] }),
       }));
@@ -90,7 +92,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     // The words you have taught, tilde-counted until calibration.
     const labels = (read().labels || []).filter((l) => match(l.term)).slice(0, query ? 4 : 5)
       .map((l) => ({
-        label: l.term, count: `~${l.count.toLocaleString()}`, glyph: '◇',
+        label: l.term, count: `~${l.count.toLocaleString()}`, glyph: 'label',
         run: () => applyChip({ is: 'label', values: [l.term] }),
       }));
     if (labels.length) sections.push(['Labels', labels]);
@@ -99,33 +101,33 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     // it counts, composes, and saves like every other fact.
     const shoots = (sessions || []).filter((s) => match(s.title)).slice(0, query ? 3 : 5)
       .map((s) => ({
-        label: s.title, count: s.count, glyph: '◷',
+        label: s.title, count: s.count, glyph: 'clock',
         run: () => applyChip({ is: 'taken', from: s.from.slice(0, 10), to: s.to.slice(0, 10) }),
       }));
     if (shoots.length) sections.push(['Sessions', shoots]);
 
     const years = held.years.filter((y) => match(y.year)).slice(0, query ? 3 : 6)
       .map((y) => ({
-        label: y.year, count: y.photos, glyph: '▤',
+        label: y.year, count: y.photos, glyph: 'calendar',
         run: () => applyChip({ is: 'taken', from: `${y.year}-01-01`, to: `${y.year}-12-31` }),
       }));
     if (years.length) sections.push(['Years', years]);
 
     const cameras = held.cameras.filter((c) => match(c.model)).slice(0, query ? 4 : 5)
       .map((c) => ({
-        label: c.model, count: c.photos, glyph: '⊙',
+        label: c.model, count: c.photos, glyph: 'camera',
         run: () => applyChip({ is: 'camera', values: [c.model] }),
       }));
     if (cameras.length) sections.push(['Cameras', cameras]);
 
     const kinds = held.roots.filter((r) => match(r.folder))
       .map((r) => ({
-        label: r.folder, count: r.photos, glyph: '▸',
+        label: r.folder, count: r.photos, glyph: 'folder',
         run: () => applyChip({ is: 'folder', values: [r.folder] }),
       }));
     const shapes = held.orientations.filter((o) => match(SAY[o.orientation] || ''))
       .map((o) => ({
-        label: SAY[o.orientation], count: o.photos, glyph: o.orientation === 'portrait' ? '▯' : '▭',
+        label: SAY[o.orientation], count: o.photos, glyph: o.orientation === 'portrait' ? 'portrait' : 'landscape',
         run: () => applyChip({ is: 'orientation', values: [o.orientation] }),
       }));
     if (kinds.length || shapes.length) sections.push(['Kind and shape', [...kinds, ...shapes]]);
@@ -167,7 +169,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
         row.dataset.item = items.length;
         const glyph = document.createElement('span');
         glyph.className = 'drop-glyph';
-        glyph.textContent = entry.glyph;
+        glyph.append(icon(entry.glyph));
         const label = document.createElement('span');
         label.className = 'drop-label';
         label.textContent = entry.label;

@@ -16,6 +16,7 @@ import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
 import { recall, remember } from '../kit/remembered.js';
 import { presence } from '../kit/presence.js';
+import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
 
 const PAGE = 200;
@@ -193,7 +194,7 @@ let drivesSeen = '';
 
 const DENSITY_KEY = 'azimuth.row-height';
 const SORT_KEY = 'azimuth.sort';
-let rowHeight = recall(DENSITY_KEY, 220);
+let rowHeight = recall(DENSITY_KEY, 180);
 let scrollFrame = null;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -1384,7 +1385,7 @@ function renderChrome(state) {
   filterBar.render(state);
   timeline.render(state);
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
-    { marked: state.marked, photos: state.photos, showFolder, applyChip, notify });
+    { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
   if (state.view === 'loupe' && state.selected) {
     renderLoupe(state.selected);
@@ -1398,7 +1399,9 @@ function renderChrome(state) {
     ? ''
     : state.view === 'people'
       ? `${(state.people || []).length.toLocaleString()} people`
-      : `${state.total.toLocaleString()} photos`;
+      : state.view === 'library' && !seeking() && !(state.folders || []).length && !state.album && !(state.chips || []).length && state.counts.photos > state.total
+        ? `${state.total.toLocaleString()} photos · ${(state.counts.photos - state.total).toLocaleString()} behind covers`
+        : `${state.total.toLocaleString()} photos`;
   document.querySelector('[data-sidebar-count]').textContent = count;
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
@@ -1958,8 +1961,7 @@ const keysDialog = document.querySelector('[data-keys-dialog]');
 }
 const stacksToggle = document.querySelector('[data-action="collapse-stacks"]');
 function renderStacksToggle(state) {
-  stacksToggle.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: '▤' }),
-    state.collapsed ? ' Stacks collapsed' : ' Stacks open');
+  stacksToggle.replaceChildren(icon('stack'), state.collapsed ? ' Stacks collapsed' : ' Stacks open');
   stacksToggle.title = state.collapsed ? 'Show every frame of every stack' : 'Collapse every stack behind its cover';
 }
 update({ collapsed: recall('azimuth.stacks-collapsed', false) === true });
