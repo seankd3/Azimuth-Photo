@@ -6,11 +6,13 @@
 // and a turn is part of the same transform — the file is never rewritten.
 
 export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {} }) {
-  const chip = document.createElement('span');
+  const chip = document.createElement('button');
+  chip.type = 'button';
   chip.className = 'loupe-zoom';
+  chip.title = 'Fit or 100% (Z, Space)';
   stage.append(chip);
 
-  const state = { scale: 1, fit: 1, full: 1, tx: 0, ty: 0, turn: 0, mode: 'fit' };
+  const state = { scale: 1, fit: 1, full: 1, tx: 0, ty: 0, turn: 0, mode: 'fit', native: null };
   let pointer = null;   // {id, x, y, moved} while a drag may be happening
 
   function turned() {
@@ -35,7 +37,12 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   function measure() {
     const box = area();
     const { w, h } = sizes();
-    state.fit = Math.min(box.width / w, box.height / h, 1);
+    // The picture on hand may be a grid tile standing in for the loupe
+    // rendition: fit is the photograph's fit, so a stand-in fills the stage
+    // as the real picture will, up to the photograph's own pixels.
+    const ceiling = state.native && image.naturalWidth
+      ? Math.max(1, (turned() ? state.native.h : state.native.w) / image.naturalWidth) : 1;
+    state.fit = Math.min(box.width / w, box.height / h, ceiling);
     // 100% is one image pixel to one device pixel — the sharpness read.
     state.full = 1 / (window.devicePixelRatio || 1);
   }
@@ -87,6 +94,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     // refresh must not snap a pan or a wheel zoom back to centre.
     if (!fresh && (photo.rotate || 0) === state.turn) return;
     state.turn = photo.rotate || 0;
+    state.native = photo.width && photo.height ? { w: photo.width, h: photo.height } : null;
     if (fresh) {
       image.dataset.source = source;
       image.src = source;
@@ -94,10 +102,9 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     const settle = () => {
       measure();
       if (state.mode === 'zoom') {
-        // Sharpness runs survive the arrows: stay at 100%, centred.
+        // Sharpness runs survive the arrows and a look laid over the
+        // picture: stay at 100%, where the eyes were; clamp does the rest.
         state.scale = Math.max(state.full, state.fit);
-        state.tx = 0;
-        state.ty = 0;
         apply();
       } else {
         toFit();
@@ -133,6 +140,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   // ---- hands ----
 
   image.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
     pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false };
     try {
       image.setPointerCapture(event.pointerId);
@@ -194,5 +202,16 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     else { measure(); apply(); }
   }
 
-  return Object.freeze({ show, toFit, escape, clear, reset, refresh });
+  function toggle() {
+    // Z, Space, or the chip: the sharpness question at the centre, or the
+    // whole picture again.
+    if (state.mode === 'zoom') { toFit(); return; }
+    measure();
+    const box = area();
+    const target = Math.max(state.full, state.fit * 1.0001);
+    if (target > state.fit + 1e-3) zoomAt(box.cx, box.cy, target);
+  }
+  chip.addEventListener('click', toggle);
+
+  return Object.freeze({ show, toFit, escape, clear, reset, refresh, toggle });
 }

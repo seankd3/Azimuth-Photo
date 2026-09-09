@@ -1015,11 +1015,14 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
   z-index: 2;
   padding: 5px 11px;
   border-radius: 999px;
+  border: 0;
   background: rgb(20 21 24 / 75%);
   color: var(--text-2);
   font: 12px/1.4 var(--mono);
-  pointer-events: none;
+  cursor: pointer;
 }
+.loupe-zoom:hover { color: var(--text); }
+.edit-groups.is-waiting { opacity: .45; }
 .loupe-stage.is-full .loupe-zoom { bottom: 14px; }
 .loupe-stage .loupe-close { z-index: 2; position: absolute; top: 12px; right: 12px; background: rgb(20 21 24 / 75%); }
 .loupe-note { position: absolute; inset: 0; display: grid; place-items: center; color: var(--text-2); font-size: 15px; }

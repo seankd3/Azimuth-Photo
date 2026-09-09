@@ -55,18 +55,18 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| L1 | The edit panel opens before `state.photo` is set when the photo is not plain | set photo and blank sliders first | open |
-| L2 | Right-click zooms | check the button in pointerdown | open |
-| L3 | The filmstrip re-centres on every render | scroll only when rebuilt or the current changed | open |
-| L4 | Fit clamps to the bitmap, not the photograph | fit against photo width and height | open |
-| L5 | Previewing a look re-centres the zoom | `loupe.look(uri)` keeps tx and ty | open |
-| L6 | D inside F opens an invisible panel | leave the clean room first | open |
-| L7 | No Z or Space zoom toggle; the chip is inert | add both | open |
-| L8 | At 100%, arrows re-centre | keep tx and ty across photos | open |
-| L9 | Crop, Reset and sliders have no Undo | pass reverts to undo | open |
-| L10 | Export toast timing and copy; the folder is not remembered | one toast, one remembered folder | open |
-| L11 | Crop cursor and handle affordances missing | cursors and handles | open |
-| L12 | Copy: "arrives with its tiles", "Drag to look, release to keep", Rotate tooltip vs action | product words | open |
+| L1 | The edit panel opens before `state.photo` is set when the photo is not plain | set photo and blank sliders first | shipped |
+| L2 | Right-click zooms | check the button in pointerdown | shipped |
+| L3 | The filmstrip re-centres on every render | scroll only when rebuilt or the current changed | shipped |
+| L4 | Fit clamps to the bitmap, not the photograph | fit against photo width and height | shipped |
+| L5 | Previewing a look re-centres the zoom | `loupe.look(uri)` keeps tx and ty | shipped |
+| L6 | D inside F opens an invisible panel | leave the clean room first | shipped |
+| L7 | No Z or Space zoom toggle; the chip is inert | add both | shipped |
+| L8 | At 100%, arrows re-centre | keep tx and ty across photos | shipped |
+| L9 | Crop, Reset and sliders have no Undo | pass reverts to undo | shipped |
+| L10 | Export toast timing and copy; the folder is not remembered | one toast, one remembered folder | shipped |
+| L11 | Crop cursor and handle affordances missing | cursors and handles | shipped: the cursor says what a press would do (resize, move, draw); drawn handles are not needed with the cursor speaking |
+| L12 | Copy: "arrives with its tiles", "Drag to look, release to keep", Rotate tooltip vs action | product words | shipped |
 
 ## Rank
 

@@ -9,7 +9,7 @@
 const EDGE = 14;          // how close counts as grabbing an edge, in px
 const LEAST = 0.02;       // no crop thinner than 2% survives a drag
 
-export function createCropSurface({ product, notify, applied }) {
+export function createCropSurface({ product, notify, undo, applied }) {
   const surface = document.querySelector('[data-crop]');
   const picture = surface.querySelector('img');
   const box = surface.querySelector('.crop-box');
@@ -28,7 +28,7 @@ export function createCropSurface({ product, notify, applied }) {
       return;
     }
     if (!held.plain) {
-      notify('The full picture is not here yet — it arrives with its tiles.');
+      notify('The full picture is still being made — try again in a moment.');
       return;
     }
     state.photo = photo;
@@ -59,6 +59,7 @@ export function createCropSurface({ product, notify, applied }) {
     const keys = ['CropLeft', 'CropTop', 'CropRight', 'CropBottom'];
     const box = state.unit.map((v) => Math.round(v * 1e6) / 1e6);
     const patch = Object.fromEntries(keys.map((key, i) => [key, whole ? null : box[i]]));
+    const before = Object.fromEntries(keys.map((key, i) => [key, state.had ? state.had[i] : null]));
     try {
       await product.develop(id, patch);
     } catch (error) {
@@ -66,8 +67,11 @@ export function createCropSurface({ product, notify, applied }) {
       return;
     }
     close();
-    notify(whole ? 'Crop removed.' : 'Cropped.');
     await applied(id);
+    undo.show(whole ? 'Crop removed.' : 'Cropped.', async () => {
+      await product.develop(id, before);
+      await applied(id);
+    });
   }
 
   async function reset() {
@@ -173,9 +177,22 @@ export function createCropSurface({ product, notify, applied }) {
     event.preventDefault();
   });
 
+  function cursorFor(on) {
+    if (!on) return 'crosshair';
+    if (on.move) return 'move';
+    if ((on.left && on.top) || (on.right && on.bottom)) return 'nwse-resize';
+    if ((on.right && on.top) || (on.left && on.bottom)) return 'nesw-resize';
+    return on.left || on.right ? 'ew-resize' : 'ns-resize';
+  }
+
   surface.addEventListener('pointermove', (event) => {
     const held = state.held;
-    if (!held || event.pointerId !== held.id) return;
+    if (!held) {
+      // The cursor says what a press here would do, before it is pressed.
+      surface.style.cursor = event.target.closest('button') ? '' : cursorFor(grip(event));
+      return;
+    }
+    if (event.pointerId !== held.id) return;
     const at = frame();
     const dx = (event.clientX - held.x) / at.width;
     const dy = (event.clientY - held.y) / at.height;

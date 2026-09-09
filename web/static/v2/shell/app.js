@@ -139,9 +139,12 @@ function renderStrip(state) {
     loupeStrip.replaceChildren(...cells);
   }
   const held = loupeStrip.querySelector('.is-current');
-  if (Number(held?.dataset.index) !== current) held?.classList.remove('is-current');
+  const moved = Number(held?.dataset.index) !== current;
+  if (moved) held?.classList.remove('is-current');
   const cell = loupeStrip.querySelector(`[data-index="${current}"]`);
-  if (cell) {
+  if (cell && (rebuilt || moved)) {
+    // Centring only when the strip was rebuilt or the cursor moved: every
+    // other render leaves a hand-scrolled strip where the hand put it.
     cell.classList.add('is-current');
     loupeStrip.scrollTo({
       left: cell.offsetLeft - (loupeStrip.clientWidth - cell.offsetWidth) / 2,
@@ -156,9 +159,9 @@ function toggleFull(on = !loupe.classList.contains('is-full')) {
   loupe.classList.toggle('is-full', on);
   if (on) {
     panelsBeforeFull = { ...read().panels };
-    setPanels({ left: false, right: false, top: false }, { remember: false });
+    setPanels({ left: false, right: false, top: false }, { keep: false });
   } else {
-    setPanels(panelsBeforeFull || loadPanels(), { remember: false });
+    setPanels(panelsBeforeFull || loadPanels(), { keep: false });
     panelsBeforeFull = null;
     stripKey = '';
     stripStart = null;
@@ -324,6 +327,7 @@ const labelsPanel = createLabelsPanel({
 const editPanel = createEditPanel({
   product,
   notify,
+  undo,
   preview: (uri) => {
     // The look rides over the rendition without touching the loupe's
     // source memory, so passive renders skip it and the look survives;
@@ -352,6 +356,7 @@ const editPanel = createEditPanel({
 const cropSurface = createCropSurface({
   product,
   notify,
+  undo,
   applied: async (photoId) => {
     // The verb published the cropped tiles before returning; re-reading the
     // window is all it takes for the new look to be everywhere.
@@ -1634,6 +1639,11 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  if ((key === 'z' || event.key === ' ') && loupeOpen() && !event.ctrlKey && !event.metaKey) {
+    loupeView.toggle();
+    event.preventDefault();
+    return;
+  }
   if (key === 'f' && ['library', 'loupe'].includes(read().view)) {
     if (loupeOpen()) toggleFull();
     else if (read().selected) {
@@ -1656,6 +1666,8 @@ document.addEventListener('keydown', (event) => {
     if (editPanel.isOpen()) editPanel.close();
     else {
       if (!loupeOpen()) showPhoto(read().selected);
+      // The panel lives in the inspector; the clean room has none.
+      if (loupe.classList.contains('is-full')) toggleFull(false);
       void editPanel.open(read().selected);
     }
     event.preventDefault();

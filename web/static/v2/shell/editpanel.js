@@ -27,10 +27,14 @@ const GROUPS = [
 ];
 const KEYS = GROUPS.flatMap(([, rows]) => rows.map(([key]) => key));
 
-export function createEditPanel({ product, notify, preview, applied }) {
+export function createEditPanel({ product, notify, undo, preview, applied }) {
   const panel = document.querySelector('[data-edit-panel]');
   const groups = panel.querySelector('[data-edit-groups]');
-  const state = { photo: null, pending: {}, timer: null, showing: 0 };
+  const hint = panel.querySelector('.edit-hint');
+  const HINT = hint.textContent;
+  // `settings` is what the photograph wears now, the way back for Undo;
+  // `ready` says the plain loupe is here, which a look needs.
+  const state = { photo: null, pending: {}, timer: null, showing: 0, settings: {}, ready: false };
 
   // ---- the sliders, built once ----
 
@@ -92,6 +96,11 @@ export function createEditPanel({ product, notify, preview, applied }) {
   }
 
   async function open(photo) {
+    // The photograph is the panel's subject from this moment, so an arrow
+    // pressed while its state is read can never edit the one before it.
+    state.photo = photo;
+    state.pending = {};
+    state.ready = false;
     let held;
     try {
       held = await product.developState(photo.id);
@@ -99,17 +108,16 @@ export function createEditPanel({ product, notify, preview, applied }) {
       notify(error.message);
       return;
     }
-    if (!held.plain) {
-      notify('The full picture is not here yet — it arrives with its tiles.');
-      return;
-    }
-    state.photo = photo;
-    state.pending = {};
-    show(held.settings || {});
+    if (state.photo !== photo) return;
+    state.settings = held.settings || {};
+    state.ready = Boolean(held.plain);
+    show(state.settings);
+    groups.classList.toggle('is-waiting', !state.ready);
+    hint.textContent = state.ready ? HINT : 'Preparing the full picture… the sliders wake when it is here.';
     panel.hidden = false;
     document.querySelector('[data-inspector-facts]').hidden = true;
     // Warm the held base now, so the first drag pays only the pipeline.
-    look();
+    if (state.ready) look();
   }
 
   function close() {
@@ -140,20 +148,30 @@ export function createEditPanel({ product, notify, preview, applied }) {
     }, 80);
   }
 
-  async function keep(patch) {
+  async function keep(patch, said = 'Edited.') {
     if (!state.photo) return;
+    const id = state.photo.id;
+    // The way back: what these keys said before, absent keys as null.
+    const before = Object.fromEntries(Object.keys(patch).map((key) => [key, state.settings[key] ?? null]));
     try {
-      await product.develop(state.photo.id, patch);
+      await product.develop(id, patch);
     } catch (error) {
       notify(error.message);
       return;
     }
-    await applied(state.photo.id);
+    state.settings = { ...state.settings, ...patch };
+    for (const [key, value] of Object.entries(patch)) if (value === null) delete state.settings[key];
+    await applied(id);
+    undo.show(said, async () => {
+      await product.develop(id, before);
+      if (state.photo?.id === id) { state.settings = { ...state.settings, ...before }; show(state.settings); }
+      await applied(id);
+    });
   }
 
   groups.addEventListener('input', (event) => {
     const key = event.target.dataset.key;
-    if (!key) return;
+    if (!key || !state.ready) return;
     if (event.target.type === 'checkbox') return;
     state.pending[key] = Number(event.target.value);
     readouts.get(key).textContent = spell(key, event.target.value);
@@ -161,7 +179,7 @@ export function createEditPanel({ product, notify, preview, applied }) {
   });
   groups.addEventListener('change', (event) => {
     const key = event.target.dataset.key;
-    if (!key) return;
+    if (!key || !state.ready) { if (key) show(state.settings); return; }
     const value = event.target.type === 'checkbox'
       ? (event.target.checked || null)
       : Number(event.target.value);
@@ -184,7 +202,7 @@ export function createEditPanel({ product, notify, preview, applied }) {
     }
     grayBox.checked = false;
     state.pending = {};
-    void keep(Object.fromEntries([...KEYS, 'ConvertToGrayscale'].map((key) => [key, null])));
+    void keep(Object.fromEntries([...KEYS, 'ConvertToGrayscale'].map((key) => [key, null])), 'Edits reset.');
   });
   panel.querySelector('[data-action="edit-close"]').addEventListener('click', close);
 

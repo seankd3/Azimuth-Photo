@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 import sys
 import threading
@@ -83,6 +84,7 @@ class Desktop:
         self._product: boot.OwnedLibrary | None = None
         self._home: str | None = None
         self._window = None
+        self._exported_to: str | None = None
         self._close_lock = threading.Lock()
         self._closed = False
         if home_path:
@@ -367,9 +369,13 @@ class Desktop:
 
         if self._window is None:
             raise RuntimeError("desktop window is unavailable")
-        chosen = self._window.create_file_dialog(webview.FileDialog.FOLDER)
+        # The chooser opens where the last export went: one less walk.
+        chosen = self._window.create_file_dialog(
+            webview.FileDialog.FOLDER,
+            directory=self._exported_to if self._exported_to and os.path.isdir(self._exported_to) else "")
         if not chosen:
             return {"chosen": False}
+        self._exported_to = str(chosen[0])
         return {**self._wait(self._product.export_files(
             photo_ids, chosen[0], quality=int(quality), long_edge=int(long_edge),
             rename=str(rename or ""))), "chosen": True}
