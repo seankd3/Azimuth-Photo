@@ -50,7 +50,7 @@ def write_marker(root: str, drive_uuid: str) -> None:
 
     existing = read_marker(root)
     if existing and existing != drive_uuid:
-        raise ValueError(f"{root} already belongs to drive {existing}")
+        raise ValueError(f"That folder is already in the library as “{existing}”.")
     with open(_marker_path(root), "w", encoding="utf-8") as handle:
         handle.write(f"{drive_uuid}\n")
 
@@ -65,7 +65,7 @@ def attach(conn, root: str, *, label: str = "", is_record: bool = False) -> dict
 
     root = os.path.normpath(root)
     if not os.path.isdir(root):
-        raise ValueError(f"not a directory: {root}")
+        raise ValueError(f"{root} is not a folder.")
 
     claimed = read_marker(root)
     if claimed:

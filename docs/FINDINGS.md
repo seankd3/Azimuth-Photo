@@ -142,7 +142,7 @@ finding was checked and the numbers said no.
 | SC8 | Folding the top bar with the drop open strands the drop | the panel toggle closes the drop | shipped |
 | SC9 | More like this silently throws away chips, folders and album | keep the scope; drop only the query | shipped |
 | SC10 | The like pill floats over the import workspace | hidden while importing, like its siblings | shipped |
-| SC11 | Nothing shows the seeds of a likeness search; any click on the pill ends it | label opens the seeds, a real × clears | open |
+| SC11 | Nothing shows the seeds of a likeness search; any click on the pill ends it | label opens the seeds, a real × clears | shipped |
 
 ## People wall and shelf
 
@@ -206,18 +206,18 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | FR1 | Esc can close the app behind a modal: Rank or the wall are tested before the drive dialog | any open modal is the first rung | shipped |
 | FR2 | Cancelling the folder picker leaves the drive dialog looking broken | say it, or close | shipped |
-| FR3 | Two clicks and two surfaces to add one folder | picker first, then the dialog about that folder | open |
+| FR3 | Two clicks and two surfaces to add one folder | picker first, then the dialog about that folder | shipped |
 | FR4 | If proposing a home throws, first run is a black window | open the dialog first, fill the path after | shipped |
 | FR5 | Esc on the home dialog is a silent no-op | one sentence saying why | shipped |
 | FR6 | 'Point me at your photos.' is the product's only first-person sentence | 'Where are your photographs?' | shipped |
 | FR7 | Two labels for one control: Add folder / Add a folder | one label with the ellipsis | shipped |
-| FR8 | Python exception text is the dialog's error copy | map the closed set of refusals | open |
+| FR8 | Python exception text is the dialog's error copy | map the closed set of refusals | shipped |
 
 ## Keyboard map
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| KB1 | Tab folds panels instead of moving focus, so the sidebar and bar are unreachable | owner's call: Tab was chosen to fold, LRC's own key | open |
+| KB1 | Tab folds panels instead of moving focus, so the sidebar and bar are unreachable | owner's call: Tab was chosen to fold, LRC's own key | owner's call: Tab was chosen to fold the panels (Lightroom's own key); giving Tab back to focus traversal and moving the fold to \ is a product decision, not a defect |
 | KB2 | There is no keyboard map in the app | a sheet generated from one SHORTCUTS table, on ? | shipped |
 | KB3 | / yanks you out of Rank and runs under the loupe | gate by view; from the loupe close first | shipped |
 | KB4 | Most controls have no tooltip or shortcut hint | titles from the SHORTCUTS table at boot | shipped |
@@ -246,7 +246,7 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | U1 | Three answers to a heading that rides the scroll (rail, import day rows, grid bands) | one sticky-under-the-bar rule | shipped by IM2: the day rows now stick under the bar at the same var(--ctx) the rail uses; the grid's bands stay absolute by design (they are cells' own headers, not overlays) |
 | U2 | Two day tallies in the import panel | one daysOf(); delete the second list (IM9) | shipped |
-| U3 | Three spellings of whether a photograph is here (cell, loupe note, inspector) | one presence(photo) in kit | open |
+| U3 | Three spellings of whether a photograph is here (cell, loupe note, inspector) | one presence(photo) in kit | shipped |
 | U4 | Modals escaped two ways | one open-modal rung (FR1) | shipped |
 | U5 | Two dayTitle functions and two chapter walks | kit/days.js: title() and chapters() | shipped |
 

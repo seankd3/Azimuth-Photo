@@ -15,6 +15,7 @@ import { createSearchCards } from './searchcards.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
 import { recall, remember } from '../kit/remembered.js';
+import { presence } from '../kit/presence.js';
 import { createTimeline } from './timeline.js';
 
 const PAGE = 200;
@@ -50,7 +51,7 @@ const loupeView = createLoupe({
   onTrouble: () => {
     // The file was promised and did not load — a black stage explains itself.
     const note = document.querySelector('[data-loupe-note]');
-    note.textContent = 'This photograph cannot be shown.';
+    note.textContent = presence({ tile_failed: true }, false).said;
     note.hidden = false;
   },
 });
@@ -502,9 +503,36 @@ function moreLikeThis(ids) {
   workspace.scrollTo({ top: 0 });
   loadView();
 }
-document.querySelector('[data-like-pill]').addEventListener('click', () => {
+document.querySelector('[data-like-clear]').addEventListener('click', () => {
+  document.querySelector('[data-like-pop]').hidden = true;
   update({ like: [] });
   loadView();
+});
+// The seeds, on request: the photographs the search is like, from the
+// rows in hand or asked for one by one, as a strip under the pill.
+document.querySelector('[data-like-seeds]').addEventListener('click', async (event) => {
+  const pop = document.querySelector('[data-like-pop]');
+  if (!pop.hidden) { pop.hidden = true; return; }
+  const ids = read().like || [];
+  const held = new Map([...read().photos.values()].map((p) => [p.id, p]));
+  const seeds = await Promise.all(ids.slice(0, 12).map(async (id) => held.get(id) || product.photo(id).catch(() => null)));
+  pop.replaceChildren(...seeds.filter(Boolean).map((seed) => {
+    const tile = document.createElement('img');
+    tile.src = seed.tile || '';
+    tile.alt = seed.tail || '';
+    tile.title = (seed.tail || '').split('/').pop();
+    tile.dataset.turn = seed.rotate || 0;
+    return tile;
+  }));
+  if (ids.length > 12) pop.append(Object.assign(document.createElement('span'), { className: 'like-more', textContent: `+${ids.length - 12}` }));
+  const at = event.currentTarget.getBoundingClientRect();
+  pop.style.left = `${at.left}px`;
+  pop.style.top = `${at.bottom + 6}px`;
+  pop.hidden = false;
+});
+document.addEventListener('click', (event) => {
+  const pop = document.querySelector('[data-like-pop]');
+  if (!pop.hidden && !pop.contains(event.target) && !event.target.closest('[data-like-seeds]')) pop.hidden = true;
 });
 // The box belongs to the cards: they offer the library's shape on focus,
 // narrow it as you type, and leave Enter meaning what it always meant.
@@ -661,8 +689,21 @@ homeForm.addEventListener('submit', async (event) => {
   }
 });
 
-function openDriveDialog() {
+async function openDriveDialog() {
+  // The native picker is the question; the dialog is about the folder
+  // just chosen -- its name, the one checkbox, and the verb.
   if (driveDialog.open) return;
+  let root = '';
+  try {
+    root = await product.chooseFolder();
+  } catch (error) {
+    notify(error.message);
+    return;
+  }
+  if (!root) return;
+  driveDialog.dataset.root = root;
+  driveDialog.querySelector('[data-drive-name]').textContent = root.split(/[\\/]/).filter(Boolean).pop() || root;
+  driveDialog.querySelector('[data-drive-path]').textContent = root;
   driveDialog.showModal();
   driveForm.querySelector('[type="submit"]').focus();
 }
@@ -1235,10 +1276,8 @@ function showPhoto(photo) {
 function renderLoupe(photo) {
   const source = photo.loupe || photo.tile || '';
   const note = document.querySelector('[data-loupe-note]');
-  note.textContent = source ? ''
-    : photo.tile_failed || photo.loupe_failed ? 'This photograph cannot be shown.'
-      : photo.reachable ? 'Preparing this photograph…'
-        : 'The drive that holds this photograph is away.';
+  const { state, said } = presence(photo, Boolean(source));
+  note.textContent = state === 'here' ? '' : said;
   note.hidden = Boolean(source);
   // An <img> with no source still renders its alt text; while the note is
   // the whole message, the img says nothing.
@@ -1395,7 +1434,7 @@ function renderChrome(state) {
   const pill = document.querySelector('[data-like-pill]');
   const alike = (state.like || []).length;
   pill.hidden = !alike || state.view === 'trash' || holding || walled || intaking;
-  if (alike) pill.textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`} ✕`;
+  if (alike) pill.querySelector('[data-like-seeds]').textContent = `≈ More like ${alike === 1 ? 'this photo' : `${alike} photos`}`;
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled || intaking;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
@@ -1471,7 +1510,7 @@ driveForm.addEventListener('submit', async (event) => {
   submit.disabled = true;
   driveError.textContent = '';
   try {
-    const root = await product.chooseFolder();
+    const root = driveDialog.dataset.root;
     if (!root) { driveError.textContent = 'No folder chosen.'; return; }
     const drive = await product.attach(root, driveForm.elements.is_record.checked);
     closeDriveDialog();
@@ -1485,7 +1524,7 @@ driveForm.addEventListener('submit', async (event) => {
 
 document.addEventListener('click', (event) => {
   const action = event.target.closest('[data-action]')?.dataset.action;
-  if (action === 'add-drive') openDriveDialog();
+  if (action === 'add-drive') void openDriveDialog();
   if (action === 'change-home') {
     product.chooseFolder().then((chosen) => { if (chosen) homePath.textContent = chosen; }).catch((error) => { homeError.textContent = error.message; });
   }

@@ -1,4 +1,5 @@
 import { title, chapters as chaptersIn } from '../kit/days.js';
+import { presence } from '../kit/presence.js';
 import {
   measureGrid,
   placeGridCell,
@@ -84,8 +85,9 @@ function showTile(cell, photo) {
   // An empty cell is one of three honest states: the worker will make the
   // picture (pending), it was tried and cannot be made (unshowable), or no
   // copy is on a drive that is here (away). The cell says which.
-  const state = source ? '' : photo.tile_failed ? 'unshowable' : photo.reachable ? 'pending' : 'away';
-  if (cell.dataset.empty !== state) cell.dataset.empty = state;
+  const { state } = presence({ ...photo, placed: undefined }, Boolean(source));
+  const empty = state === 'here' ? '' : state;
+  if (cell.dataset.empty !== empty) cell.dataset.empty = empty;
   if (image.dataset.source === source) return;
   image.dataset.source = source;
   if (source) image.src = source;
@@ -223,7 +225,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
       const picked = photo.status === 'picked';
       cell.classList.toggle('is-picked', picked);
       cell.dataset.missing = photo.placed ? '0' : '1';
-      const why = !photo.placed ? ', missing' : cell.dataset.empty === 'unshowable' ? ', cannot be shown' : cell.dataset.empty === 'away' ? ', drive away' : '';
+      const { state: where, said } = presence(photo, cell.dataset.empty === '');
+      const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
       cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
       // A cell that stays keeps its badge; the badge keeps up with the set.
@@ -409,7 +412,7 @@ function renderInspector(panel, selected, actions = {}) {
     ['Names', (selected.names || []).join(' · ')],
     ['Cull', !selected.hash ? 'Reading…'
       : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
-    ['Where', !selected.placed ? 'Missing — no drive holds it' : selected.reachable ? 'Here' : 'On a drive that is away'],
+    ['Where', presence(selected, true).said],
     ['Taken', selected.date_taken || unknown],
     ['Exposure', exposure],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],

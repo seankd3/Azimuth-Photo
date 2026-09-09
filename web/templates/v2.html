@@ -73,7 +73,11 @@
           <button class="danger-button" type="button" data-action="reject"><kbd>X</kbd> Reject</button>
         </div>
         <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
-        <button class="like-pill" type="button" data-like-pill hidden title="Stop searching by likeness"></button>
+        <span class="like-pill" data-like-pill hidden>
+          <button class="chip-label" type="button" data-like-seeds title="See the photographs this search is like"></button>
+          <button class="drop-chip" type="button" data-like-clear aria-label="Stop searching by likeness">×</button>
+        </span>
+        <div class="popover like-pop" data-like-pop hidden></div>
         <div class="chip-bar" data-chips></div>
         <button class="quiet-button" type="button" data-action="add-chip">+ Filter</button>
         <button class="quiet-button" type="button" data-action="save-view" hidden>Save as album…</button>
@@ -198,12 +202,13 @@
   <dialog class="drive-dialog" data-drive-dialog aria-labelledby="drive-title">
     <form data-drive-form>
       <button class="dialog-close" type="button" data-action="close-drive" aria-label="Close">×</button>
-      <p class="eyebrow">Your library</p>
-      <h1 id="drive-title">Where are your photographs?</h1>
-      <p class="dialog-copy">Choose one folder. Azimuth will read it in place and never move or alter your photographs.</p>
+      <p class="eyebrow">Add to the library</p>
+      <h1 id="drive-title" data-drive-name>This folder</h1>
+      <p class="home-path"><code data-drive-path></code></p>
+      <p class="dialog-copy">Azimuth reads it in place and never moves or alters your photographs.</p>
       <label class="check-row"><input name="is_record" type="checkbox"> This is an archive — read it when attached and when asked, not every minute</label>
       <p class="form-error" data-drive-error role="alert"></p>
-      <button class="primary-button" type="submit">Choose folder</button>
+      <button class="primary-button" type="submit">Add folder</button>
     </form>
   </dialog>
 

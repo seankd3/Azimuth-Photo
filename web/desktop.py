@@ -120,7 +120,7 @@ class Desktop:
 
     def settle_home(self, path: str) -> str:
         if self._product is not None:
-            raise RuntimeError("this library is already open")
+            raise RuntimeError("This library is already open.")
         settled = home.remember(path)
         self._settle(settled)
         return settled
