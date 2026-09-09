@@ -206,6 +206,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .folder-row { gap: 4px; padding: 5px 8px 5px calc(8px + var(--depth, 0) * 14px); }
 .side-row.is-drop { background: var(--accent-tint); outline: 1px solid var(--accent); }
 .side-row .smart-mark { color: var(--accent); font-size: 11px; }
+/* a drop that is refused says so where it is refused */
+.side-row.is-refused { outline: 1px dashed var(--accent); outline-offset: -1px; cursor: not-allowed; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 9px; }
 .section-heading .eyebrow { margin-bottom: 0; }
 /* sections fold from their headings; the fold is a quiet chevron */
@@ -545,6 +547,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   align-items: center;
   gap: 7px;
   padding: 4px 6px 4px 10px;
+  /* the pill is a span; its words and its × are the buttons */
+  cursor: default;
   border: 1px solid var(--line-strong);
   border-radius: 999px;
   background: var(--chrome-2);
@@ -570,6 +574,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   white-space: nowrap;
 }
 .like-pill:hover { border-color: var(--accent); }
+.chip-label { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .chip .drop-chip {
   width: 16px;
   height: 16px;
@@ -740,6 +745,8 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 }
 .context-menu button:hover { background: var(--row-active); }
 .context-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--line); }
+/* an armed verb: the first click asked, the second does */
+.context-menu button.is-armed { color: var(--focus); }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .topbar-search { display: flex; justify-content: center; min-width: 0; padding: 0 18px; }
 .topbar-search input {

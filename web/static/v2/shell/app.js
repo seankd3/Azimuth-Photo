@@ -297,6 +297,7 @@ const albumsPanel = createAlbumsPanel({
   product,
   read,
   update,
+  undo,
   notify,
   reload: () => loadView(),
   moved: () => viewMoved(),
@@ -534,13 +535,18 @@ function visibleGrid() {
   // say "Add a folder" inside a place made for gathering.
   const shelf = read().album && (read().albums || []).find((a) => a.id === read().album);
   const inAlbum = Boolean(shelf) && !searching && !scanning && read().view === 'library';
+  const inFolder = !inAlbum && !searching && !scanning && (read().folders || []).length > 0;
+  const narrowed = !inAlbum && !searching && !scanning && !inFolder && (read().chips || []).length > 0;
+  // The empty state says where you are: "Add a folder" is only for a
+  // library with nothing in it, never for a place or a filter that is empty.
+  const bare = !inTrash && !scanning && !inAlbum && !searching && !inFolder && !narrowed;
   library.renderGrid(grid, read(), {
-    // While a sweep is reading a folder the library is not empty, it is
-    // arriving — the one moment "Add a folder" must not be the message.
     emptyTitle: inTrash ? 'Trash is empty.'
       : scanning ? 'Reading your photos…'
         : inAlbum ? 'Nothing in this album yet.'
-          : searching ? 'Nothing matches.' : 'No photos here yet.',
+          : searching ? 'Nothing matches.'
+            : inFolder ? (read().folders.length === 1 ? 'Nothing in this folder yet.' : 'Nothing in these folders yet.')
+              : narrowed ? 'Nothing matches these filters.' : 'No photos here yet.',
     emptyCopy: inTrash
       ? 'Rejected photographs stay recoverable here until you empty Trash.'
       : scanning
@@ -551,8 +557,12 @@ function visibleGrid() {
             : 'Drag photos onto its name, or right-click any photo anywhere in the library.')
           : searching
             ? 'Try fewer words, or a different idea — meaning works too, not just names.'
-            : 'Add a folder to start your library.',
-    emptyAction: inTrash || searching || scanning || inAlbum ? null : { label: 'Add a folder', run: openDriveDialog },
+            : inFolder
+              ? 'Photographs appear as the folder is read. If it is empty on disk, there is nothing to show.'
+              : narrowed
+                ? 'Loosen a chip, or take one off with its ×.'
+                : 'Add a folder to start your library.',
+    emptyAction: bare ? { label: 'Add a folder', run: openDriveDialog } : null,
     select: selectPhoto,
     open: openPhoto,
     stack: (photo) => { void toggleStack(photo.id); },
@@ -795,22 +805,6 @@ async function followLibrary() {
 }
 
 const folderMenu = document.querySelector('[data-folder-menu]');
-const confirmDialog = document.querySelector('[data-confirm-dialog]');
-
-// One plain question for the acts that deserve a beat: a title, what it
-// means, and the verb itself on the button. Emptying Trash keeps its typed
-// count — that one is irreversible; these are merely large.
-function askConfirm({ title, copy, verb }) {
-  return new Promise((resolve) => {
-    confirmDialog.querySelector('[data-confirm-title]').textContent = title;
-    confirmDialog.querySelector('[data-confirm-copy]').textContent = copy;
-    confirmDialog.querySelector('[data-confirm-yes]').textContent = verb;
-    confirmDialog.returnValue = '';
-    confirmDialog.addEventListener('close', () => resolve(confirmDialog.returnValue === 'yes'), { once: true });
-    confirmDialog.showModal();
-    confirmDialog.querySelector('[data-confirm-yes]').focus();
-  });
-}
 
 async function forgetSelected() {
   const { selected, selectedIndex } = read();
@@ -887,27 +881,38 @@ document.querySelector('[data-export-form]').addEventListener('submit', (event) 
   }).catch((error) => notify(error.message));
 });
 
+// Forgetting the missing is a large act with no undo, so it is armed: the
+// first click counts and says the number on the verb itself, the second
+// does it. No modal, no "Are you sure" -- the menu item is the question.
+const forgetItem = folderMenu.querySelector('[data-action="forget-missing"]');
+function disarmForget() {
+  delete forgetItem.dataset.armed;
+  forgetItem.classList.remove('is-armed');
+  forgetItem.textContent = 'Forget missing photos…';
+}
 async function forgetMissing(folder) {
-  folderMenu.hidden = true;
+  const where = folder || '*';
   try {
-    // Count first, then ask with the number in the question.
-    const probe = await product.forgetMissing(folder || '', true);
-    if (!probe.forgotten) {
-      notify('Nothing is missing here.');
+    if (forgetItem.dataset.armed !== where) {
+      const probe = await product.forgetMissing(folder || '', true);
+      if (!probe.forgotten) {
+        folderMenu.hidden = true;
+        notify('Nothing is missing here.');
+        return;
+      }
+      forgetItem.dataset.armed = where;
+      forgetItem.classList.add('is-armed');
+      forgetItem.textContent = `Forget ${probe.forgotten.toLocaleString()} missing — click again`;
       return;
     }
-    const n = probe.forgotten;
-    const where = folder ? `under ${folder.split('/').pop()}` : 'everywhere in the library';
-    const sure = await askConfirm({
-      title: `Forget ${n.toLocaleString()} missing photograph${n === 1 ? '' : 's'}?`,
-      copy: `Rows ${where} whose files no attached drive holds leave the catalog. They come back, with their decisions, if the files ever do.`,
-      verb: n === 1 ? 'Forget it' : `Forget ${n.toLocaleString()}`,
-    });
-    if (!sure) return;
+    folderMenu.hidden = true;
+    disarmForget();
     const result = await product.forgetMissing(folder || '');
     await Promise.all([loadView(), loadFolders()]);
-    notify(`${result.forgotten.toLocaleString()} missing photograph${result.forgotten === 1 ? '' : 's'} forgotten.`);
+    notify(`${result.forgotten.toLocaleString()} missing photograph${result.forgotten === 1 ? '' : 's'} forgotten. They come back, with their decisions, if the files ever do.`);
   } catch (error) {
+    folderMenu.hidden = true;
+    disarmForget();
     notify(error.message);
   }
 }
@@ -977,6 +982,7 @@ document.addEventListener('contextmenu', (event) => {
   }
   event.preventDefault();
   folderMenu.dataset.folder = row ? row.dataset.folder : '';
+  disarmForget();
   folderMenu.style.left = `${event.clientX}px`;
   folderMenu.style.top = `${event.clientY}px`;
   folderMenu.hidden = false;
@@ -1335,7 +1341,7 @@ function renderChrome(state) {
   // The quiet invitation to refine: visible exactly when Y and N would land.
   const hint = document.querySelector('[data-teach-hint]');
   const word = teachable();
-  hint.hidden = !word;
+  hint.hidden = !word || !selection().length;
   if (word) hint.textContent = `Refining “${word}” — Y anchors · N excludes`;
   // The likeness search wears a pill where the chips live: it is part of
   // the question being asked, and its ✕ is how the question ends.
@@ -1469,7 +1475,7 @@ document.addEventListener('click', (event) => {
   if (action === 'restore') trashWorkflow.restoreSelected();
   if (action === 'forget') forgetSelected();
   if (action === 'synchronize-folder') synchronizeFolder(folderMenu.dataset.folder);
-  if (action === 'forget-missing') forgetMissing(folderMenu.dataset.folder);
+  if (action === 'forget-missing') { forgetMissing(folderMenu.dataset.folder); return; }
   if (action === 'export') openExportDialog();
   if (action === 'close-export') exportDialog.close();
   if (action === 'export-folder') {
@@ -1528,7 +1534,6 @@ document.addEventListener('click', (event) => {
   if (action === 'empty-trash') trashWorkflow.openDialog();
   if (action === 'undo-toast') undo.run();
   if (action === 'close-drive') closeDriveDialog();
-  if (action === 'confirm-no') confirmDialog.close('');
   if (action === 'close-empty') trashWorkflow.closeDialog();
   if (action === 'close-loupe') closeLoupe();
 });
@@ -1536,7 +1541,7 @@ document.addEventListener('click', (event) => {
 document.addEventListener('keydown', (event) => {
   const target = event.target;
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
-  if (homeDialog.open || confirmDialog.open || exportDialog.open) return;
+  if (homeDialog.open || exportDialog.open) return;
   if (intakeWorkflow.isOpen()) {
     if (event.key === 'Escape') intakeWorkflow.close();
     if (event.key === 'Enter' && !isTyping) {

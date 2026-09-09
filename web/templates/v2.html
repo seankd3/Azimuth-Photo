@@ -202,7 +202,7 @@
       <p class="eyebrow">Your library</p>
       <h1 id="drive-title">Point me at your photos.</h1>
       <p class="dialog-copy">Choose one folder. Azimuth will read it in place and never move or alter your photographs.</p>
-      <label class="check-row"><input name="is_record" type="checkbox"> This is an archive drive</label>
+      <label class="check-row"><input name="is_record" type="checkbox"> This is an archive — read it when attached and when asked, not every minute</label>
       <p class="form-error" data-drive-error role="alert"></p>
       <button class="primary-button" type="submit">Choose folder</button>
     </form>
@@ -232,17 +232,6 @@
     <button type="button" data-action="export-folder">Save metadata for Lightroom</button>
   </menu>
 
-  <dialog class="confirm-dialog" data-confirm-dialog aria-labelledby="confirm-title">
-    <form method="dialog">
-      <p class="eyebrow">Are you sure</p>
-      <h1 id="confirm-title" data-confirm-title></h1>
-      <p class="dialog-copy" data-confirm-copy></p>
-      <div class="confirm-actions">
-        <button class="quiet-button" type="button" data-action="confirm-no">Cancel</button>
-        <button class="danger-button" type="submit" value="yes" data-confirm-yes></button>
-      </div>
-    </form>
-  </dialog>
 
   <menu class="context-menu" data-drive-menu hidden>
     <button type="button" data-action="rescan-drive">Re-scan now</button>
@@ -255,17 +244,7 @@
   </menu>
 
   <menu class="context-menu" data-photo-menu hidden></menu>
-  <menu class="context-menu" data-chip-menu hidden>
-    <button type="button" data-field="stars">Stars</button>
-    <button type="button" data-field="taken">Date taken</button>
-    <button type="button" data-field="camera">Camera</button>
-    <button type="button" data-field="status">Pick status</button>
-    <button type="button" data-field="orientation">Orientation</button>
-    <button type="button" data-field="look">Look</button>
-    <button type="button" data-field="person">Person</button>
-    <button type="button" data-field="label">Label</button>
-    <button type="button" data-field="in">In album</button>
-  </menu>
+  <menu class="context-menu" data-chip-menu hidden></menu>
   <div class="popover" data-chip-editor hidden></div>
   <div class="popover search-drop" data-search-drop hidden></div>
   <div class="popover name-pop" data-name-pop hidden>

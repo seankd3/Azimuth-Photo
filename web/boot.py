@@ -646,6 +646,12 @@ class Library:
         self.conn.commit()
         return gone
 
+    def remember_album(self, set_id: str) -> bool:
+        self._open()
+        back = sets.remember(self.conn, set_id)
+        self.conn.commit()
+        return back
+
     @staticmethod
     def _centre(identities, space):
         """Where a selection sits in the space: the normalized mean of its
@@ -735,7 +741,7 @@ class Library:
         if said is None:
             raise ValueError("no such album")
         if not said.get("criteria"):
-            raise ValueError("that album is already fixed")
+            raise ValueError("That album is already plain; there is nothing to freeze.")
         clause, args = scope_where(all_of(
             Scope(queries.IN_LIBRARY), criteria.resolve(self.conn, set_id)))
         held = [str(row[0]) for row in self.conn.execute(

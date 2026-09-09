@@ -53,7 +53,8 @@ def _empty_plans(conn) -> tuple[int, list[dict]]:
     for row in conn.execute("SELECT * FROM drives ORDER BY is_record, id"):
         drive = dict(row)
         if drives.root_of(conn, drive["uuid"]) is None:
-            raise ValueError(f"drive is away: {drive['label'] or drive['uuid']}")
+            raise ValueError(
+                f"{drive['label'] or 'A drive'} is away. Attach it, then empty Trash.")
         attached_drives.append(drive)
 
     plans = []
@@ -78,7 +79,7 @@ def _empty_plans(conn) -> tuple[int, list[dict]]:
             except ValueError as error:
                 raise ValueError(f"invalid copy address for photo {holder['photo_id']}") from error
             if path is None:
-                raise ValueError(f"drive is away for photo {holder['photo_id']}")
+                raise ValueError("A drive holding a photograph in Trash is away. Attach it, then empty Trash.")
             key = os.path.normcase(os.path.abspath(path))
             entry = paths.setdefault(
                 key,
@@ -141,14 +142,10 @@ def empty(conn, *, expected_count: int, dry_run: bool = False) -> dict:
     expected_count = int(expected_count)
     before = count(conn)
     if expected_count != before:
-        raise ValueError(
-            f"Trash count changed: expected {expected_count}, found {before}"
-        )
+        raise ValueError(f"Trash changed while you were looking: {before} photographs are in it now.")
     visible_count, plans = _empty_plans(conn)
     if expected_count != visible_count:
-        raise ValueError(
-            f"Trash count changed: expected {expected_count}, found {visible_count}"
-        )
+        raise ValueError(f"Trash changed while you were looking: {visible_count} photographs are in it now.")
     if dry_run:
         return {
             "count": visible_count,

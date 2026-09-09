@@ -123,7 +123,8 @@ export function createPeoplePanel({ product, _read, update, notify, browse, rena
     try {
       await product.namePerson(exemplar, called);
       notify(`“${called}” — the library will gather their photographs now.`);
-      setTimeout(() => void renamed(), 3000);
+      // The lane regroups and the pulse says so; the shelf re-reads then.
+      void renamed();
     } catch (error) {
       notify(error.message);
     }

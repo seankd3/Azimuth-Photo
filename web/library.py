@@ -672,7 +672,6 @@ def folder_tree(conn) -> list[dict]:
             "name": path.rsplit("/", 1)[-1],
             "total_count": counts[path],
             "safety": _safety(where.get(path) or set(), record_attached),
-            "reveal_available": True,
             "children": [node(child) for child in children_of.get(path, ())],
         }
 

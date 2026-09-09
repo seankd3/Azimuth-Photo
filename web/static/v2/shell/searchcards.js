@@ -240,7 +240,8 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     render();
     // The meaning search runs underneath as it always has.
     clearTimeout(typeTimer);
-    typeTimer = setTimeout(() => commit(box.value), 300);
+    // Typing searches; only Enter or a card remembers the words.
+    typeTimer = setTimeout(() => search(box.value.trim()), 300);
   });
   box.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {

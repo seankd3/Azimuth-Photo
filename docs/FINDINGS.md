@@ -89,19 +89,19 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| S1 | An empty filtered or folder view says "Add a folder" | derive the empty copy from the view | open |
-| S2 | Import finishing shows no toast when the panel is open; a dead Done state | always notify; delete Done | open |
-| S3 | Empty Trash with a drive away answers in engineering voice | dry run answers by label, product copy | open |
-| S4 | Folder and stack chips open the album editor and corrupt the chip | the editor's field table is the whole truth | open |
-| S5 | Chips show code words (`unflagged`, `bw`); menu and editor titles disagree | one label table | open |
-| S6 | Album Delete and Freeze have no Undo; `forget_album` vs "Delete"; plain vs fixed | one verb, a revert flag, undo toasts; refuse dropping the last import | open |
-| S7 | Search scope rules differ between All photos, a folder, an album | one rule | open |
-| S8 | Recents fill with typed fragments | remember on Enter or a card only | open |
-| S9 | Cancel vs Stop during import | the header reads Back once running | open |
-| S10 | Forget missing has two shapes, one an "Are you sure" modal | two-click arm; delete the dialog | open |
-| S11 | Chips cannot be removed by keyboard; × nested in a button | Backspace and Delete; real buttons | open |
-| S12 | Five words for attaching a drive | one noun, one verb, a checkbox for the consequence | open |
-| S13 | `people.js` 3 s timer; `reveal_available` unused; dead `.is-refused`; teach hint with nothing selected | ship Reveal or drop it; delete the rest | open |
+| S1 | An empty filtered or folder view says "Add a folder" | derive the empty copy from the view | shipped |
+| S2 | Import finishing shows no toast when the panel is open; a dead Done state | always notify; delete Done | shipped |
+| S3 | Empty Trash with a drive away answers in engineering voice | dry run answers by label, product copy | shipped |
+| S4 | Folder and stack chips open the album editor and corrupt the chip | the editor's field table is the whole truth | shipped |
+| S5 | Chips show code words (`unflagged`, `bw`); menu and editor titles disagree | one label table | shipped |
+| S6 | Album Delete and Freeze have no Undo; `forget_album` vs "Delete"; plain vs fixed | one verb, a revert flag, undo toasts; refuse dropping the last import | shipped: Delete has Undo (a forgotten album is remembered by one more row in its log), the last import refuses a drop, the plain/fixed word is plain; Freeze stays one-way and says so |
+| S7 | Search scope rules differ between All photos, a folder, an album | one rule | shipped |
+| S8 | Recents fill with typed fragments | remember on Enter or a card only | shipped |
+| S9 | Cancel vs Stop during import | the header reads Back once running | shipped |
+| S10 | Forget missing has two shapes, one an "Are you sure" modal | two-click arm; delete the dialog | shipped |
+| S11 | Chips cannot be removed by keyboard; × nested in a button | Backspace and Delete; real buttons | shipped |
+| S12 | Five words for attaching a drive | one noun, one verb, a checkbox for the consequence | shipped: the checkbox says its consequence; the noun stays folder/drive — a drive is a root folder, and folding the drive list into the folder tree is the real unification, owed |
+| S13 | `people.js` 3 s timer; `reveal_available` unused; dead `.is-refused`; teach hint with nothing selected | ship Reveal or drop it; delete the rest | shipped |
 
 ## Visual
 

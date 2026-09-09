@@ -226,6 +226,9 @@ class Desktop:
     def forget_album(self, set_id: str) -> bool:
         return self._run(lambda library: library.forget_album(str(set_id)))
 
+    def remember_album(self, set_id: str) -> bool:
+        return self._run(lambda library: library.remember_album(str(set_id)))
+
     def add_to_album(self, set_id: str, photo_ids: list[int]) -> dict:
         return self._run(lambda library: library.add_to_album(str(set_id), photo_ids))
 

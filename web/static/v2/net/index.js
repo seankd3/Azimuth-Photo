@@ -45,6 +45,7 @@ export const library = Object.freeze({
   createAlbum: (name, chips = null) => invoke('create_album', name, chips),
   renameAlbum: (id, name) => invoke('rename_album', id, name),
   forgetAlbum: (id) => invoke('forget_album', id),
+  rememberAlbum: (id) => invoke('remember_album', id),
   addToAlbum: (id, ids) => invoke('add_to_album', id, ids),
   removeFromAlbum: (id, ids) => invoke('remove_from_album', id, ids),
   quick: (ids) => invoke('quick', ids),

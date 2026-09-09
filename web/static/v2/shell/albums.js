@@ -5,7 +5,7 @@
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
-export function createAlbumsPanel({ product, read, update, notify, reload, moved, selection, describe, viewOf }) {
+export function createAlbumsPanel({ product, read, update, notify, undo, reload, moved, selection, describe, viewOf }) {
   const tree = document.querySelector('[data-albums-tree]');
   const menu = document.querySelector('[data-album-menu]');
   const photoMenu = document.querySelector('[data-photo-menu]');
@@ -22,10 +22,12 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
   }
 
   function show(id) {
-    // The view moves; whichever stage is up follows it. Refine re-scopes in
-    // place, the grid reloads — one rule for folders, albums and chips.
-    if (read().view === 'rank') update({ album: id, folders: [] });
-    else update({ view: 'library', album: id, folders: [], selected: null, selectedIndex: null });
+    // The view moves; whichever stage is up follows it. Rank re-scopes in
+    // place, the grid reloads. One rule for every place -- a folder, an
+    // album, All photos: choosing it ends the search and keeps the chips.
+    document.querySelector('[data-search]').value = '';
+    if (read().view === 'rank') update({ album: id, folders: [], query: '', like: [] });
+    else update({ view: 'library', album: id, folders: [], query: '', like: [], selected: null, selectedIndex: null });
     moved();
   }
 
@@ -270,11 +272,16 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
         notify(`Frozen — ${frozen.frozen.toLocaleString()} photographs are now yours to edit by hand.`);
       }
       if (action === 'delete-album') {
+        const name = (read().albums.find((c) => c.id === id) || {}).name || 'Album';
         await product.forgetAlbum(id);
         if (read().album === id) {
           update({ album: null });
           await reload();
         }
+        undo.show(`“${name.split('/').pop()}” deleted.`, async () => {
+          await product.rememberAlbum(id);
+          await refresh();
+        });
       }
       await refresh();
     } catch (error) {
@@ -285,9 +292,16 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
   tree.addEventListener('dragover', (event) => {
     const row = event.target.closest('[data-album]');
     if (!row) return;
+    event.preventDefault();
+    if (row.dataset.album === 'last-import') {
+      // What came in last is a fact, not a shelf: a drop here is refused,
+      // and the row says so.
+      event.dataTransfer.dropEffect = 'none';
+      row.classList.add('is-refused');
+      return;
+    }
     // Smart albums take the drop too: what you drag in is pinned in past
     // the rules — the exception the pro tools never had.
-    event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
     row.classList.add('is-drop');
   });
@@ -300,7 +314,9 @@ export function createAlbumsPanel({ product, read, update, notify, reload, moved
     const row = event.target.closest('[data-album]');
     if (!row) return;
     event.preventDefault();
+    const refused = row.dataset.album === 'last-import';
     row.classList.remove('is-drop', 'is-refused');
+    if (refused) return;
     let ids = [];
     try {
       ids = JSON.parse(event.dataTransfer.getData('text/azimuth-ids') || '[]');

@@ -20,6 +20,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   const clearBox = document.querySelector('[data-clear]');
   const startButton = document.querySelector('[data-action="start-import"]');
   const stopButton = document.querySelector('[data-action="stop-import"]');
+  const backButton = document.querySelector('[data-action="close-import"]');
   const state = { source: '', kind: null, roots: {}, candidates: [], checked: new Set(), isCard: false, running: false, rolls: {} };
   // The grid's own selection grammar, in the stage: click, Ctrl adds,
   // Shift ranges, and a checkbox ticked on a selection answers for all of
@@ -42,10 +43,13 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
 
   async function open(source, { isCard = false } = {}) {
     if (state.running) {
-      // One import at a time; while it runs the workspace is its detail view.
+      // One import at a time; while it runs the workspace is its detail
+      // view, and the way out is Back -- nothing here is cancelled by it.
+      backButton.textContent = 'Back';
       enter();
       return;
     }
+    backButton.textContent = 'Cancel';
     notify(`Looking at ${source}…`);
     // The look at a full card reads thousands of files; the growing count is
     // what says the app is working rather than wedged.
@@ -313,9 +317,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     poll = null;
     state.running = false;
     stopButton.hidden = true;
-    startButton.hidden = false;
-    startButton.textContent = 'Done';
-    startButton.disabled = false;
+    startButton.hidden = true;
+    backButton.textContent = 'Back';
     const parts = [`${(status.brought || 0).toLocaleString()} imported`];
     if (status.already) parts.push(`${status.already} already there`);
     if (status.skipped) parts.push(`${status.skipped} already in the library`);
@@ -325,9 +328,8 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
     progress.textContent = said;
     progressed('');
-    // The workspace stepped back when the work began; the outcome still
-    // reaches the person.
-    if (!isShown()) notify(said);
+    // The outcome reaches the person wherever they are.
+    notify(said);
     await afterImport();
   }
 
@@ -439,6 +441,6 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     },
     isOpen: () => isShown(),
     running: () => state.running,
-    finish: () => { if (startButton.textContent === 'Done') close(); else start(); },
+    finish: () => { if (state.running) return; if (startButton.hidden) close(); else start(); },
   });
 }

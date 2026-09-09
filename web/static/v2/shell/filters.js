@@ -8,7 +8,14 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
-const FIELD_LABEL = { stars: 'Stars', taken: 'Taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', look: 'Look', person: 'Person', label: 'Label', alike: 'Alike', in: 'In' };
+// The one vocabulary: what a field is called wherever it appears (the
+// menu, the editor's title), and what a stored value is called on a chip.
+const FIELD_LABEL = { stars: 'Stars', taken: 'Date taken', camera: 'Camera', status: 'Pick', orientation: 'Orientation', look: 'Look', person: 'Person', label: 'Label', alike: 'Alike', in: 'In album', folder: 'Folder', stack: 'Stack' };
+const VALUE_LABEL = { picked: 'Picked', unflagged: 'Unflagged', landscape: 'Landscape', portrait: 'Portrait', square: 'Square', color: 'Color', bw: 'Black & white', sepia: 'Sepia' };
+// The fields the + menu offers, and the ones an editor can change; a
+// folder or stack chip is lifted from the view and only ever removed.
+const OFFERED = ['stars', 'taken', 'camera', 'status', 'orientation', 'look', 'person', 'label', 'in'];
+const said = (value) => VALUE_LABEL[value] || value;
 
 export function createFilterBar({ product, read, update, onChange }) {
   const bar = document.querySelector('[data-chips]');
@@ -35,7 +42,7 @@ export function createFilterBar({ product, read, update, onChange }) {
     }
     if (chip.is === 'alike') return `${not}≈ ${chip.values.join(' or ')}`;
     if (chip.is === 'stack') return `${not}▤ In this stack`;
-    return `${not}${chip.values.join(' or ')}`;
+    return `${not}${chip.values.map(said).join(' or ')}`;
   }
 
   function describe(state) {
@@ -51,17 +58,20 @@ export function createFilterBar({ product, read, update, onChange }) {
     if (key === shown) return;
     shown = key;
     bar.replaceChildren(...chips().map((chip, index) => {
-      const pill = document.createElement('button');
-      pill.type = 'button';
+      // Two real buttons in one pill: the words open the editor, × removes.
+      const pill = document.createElement('span');
       pill.className = 'chip' + (chip.not ? ' is-not' : '');
-      pill.dataset.chip = index;
-      const label = document.createElement('span');
+      const label = document.createElement('button');
+      label.type = 'button';
+      label.className = 'chip-label';
+      label.dataset.chip = index;
       label.textContent = say(chip, state);
-      const drop = document.createElement('span');
+      label.title = OFFERED.includes(chip.is) ? `${FIELD_LABEL[chip.is]} — click to change, Backspace removes` : 'Backspace removes';
+      const drop = document.createElement('button');
+      drop.type = 'button';
       drop.className = 'drop-chip';
       drop.dataset.drop = index;
       drop.textContent = '×';
-      drop.setAttribute('role', 'button');
       drop.setAttribute('aria-label', 'Remove this filter');
       pill.append(label, drop);
       return pill;
@@ -141,11 +151,11 @@ export function createFilterBar({ product, read, update, onChange }) {
       if (chip.is === 'camera') {
         offered = (await product.cameras()).map((c) => [c.model, `${c.model} · ${c.photos.toLocaleString()}`]);
       } else if (chip.is === 'status') {
-        offered = [['picked', 'Picked'], ['unflagged', 'Unflagged']];
+        offered = ['picked', 'unflagged'].map((v) => [v, said(v)]);
       } else if (chip.is === 'orientation') {
-        offered = [['landscape', 'Landscape'], ['portrait', 'Portrait'], ['square', 'Square']];
+        offered = ['landscape', 'portrait', 'square'].map((v) => [v, said(v)]);
       } else if (chip.is === 'look') {
-        offered = [['color', 'Color'], ['bw', 'Black & white'], ['sepia', 'Sepia']];
+        offered = ['color', 'bw', 'sepia'].map((v) => [v, said(v)]);
       } else if (chip.is === 'person') {
         const known = (read().people || []).filter((p) => p.settled).map((p) => p.term);
         offered = [...new Set([...chip.values, ...known])].map((t) => [t, t]);
@@ -212,6 +222,34 @@ export function createFilterBar({ product, read, update, onChange }) {
 
   // ---- wiring ----
 
+  // The + menu is the vocabulary, spoken once.
+  menu.replaceChildren(...OFFERED.map((field) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.dataset.field = field;
+    item.textContent = FIELD_LABEL[field];
+    return item;
+  }));
+
+  function dropChip(dropped) {
+    const next = chips().slice();
+    next.splice(dropped, 1);
+    if (editing && editing.index !== null) {
+      if (editing.index === dropped) closeEditor();
+      else if (editing.index > dropped) editing.index -= 1;
+    }
+    commit(next);
+  }
+
+  bar.addEventListener('keydown', (event) => {
+    if (event.key !== 'Backspace' && event.key !== 'Delete') return;
+    const held = event.target.closest('[data-chip], [data-drop]');
+    if (!held) return;
+    dropChip(Number(held.dataset.chip ?? held.dataset.drop));
+    bar.querySelector('[data-chip]:last-of-type')?.focus();
+    event.preventDefault();
+  });
+
   document.querySelector('[data-action="add-chip"]').addEventListener('click', (event) => {
     place(menu, event.currentTarget);
     menu.querySelector('[data-field]')?.focus();
@@ -230,21 +268,12 @@ export function createFilterBar({ product, read, update, onChange }) {
 
   bar.addEventListener('click', (event) => {
     const drop = event.target.closest('[data-drop]');
-    if (drop) {
-      const dropped = Number(drop.dataset.drop);
-      const next = chips().slice();
-      next.splice(dropped, 1);
-      if (editing && editing.index !== null) {
-        if (editing.index === dropped) closeEditor();
-        else if (editing.index > dropped) editing.index -= 1;
-      }
-      commit(next);
-      return;
-    }
+    if (drop) { dropChip(Number(drop.dataset.drop)); return; }
     const pill = event.target.closest('[data-chip]');
     if (pill) {
       const index = Number(pill.dataset.chip);
-      void openEditor({ ...chips()[index] }, index, pill);
+      // A folder or stack chip has no editor; it is the view, lifted.
+      if (OFFERED.includes(chips()[index]?.is)) void openEditor({ ...chips()[index] }, index, pill);
     }
   });
 

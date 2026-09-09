@@ -1203,7 +1203,7 @@ class CullIsAReversibleDecision(CoreCase):
 
         with open(cold_path, "wb") as handle:
             handle.write(b"one complete photograph")
-        with self.assertRaisesRegex(ValueError, "count changed"):
+        with self.assertRaisesRegex(ValueError, "Trash changed while you were looking"):
             trash.empty(self.conn, expected_count=2)
         self.assertTrue(os.path.exists(hot_path))
         self.assertTrue(os.path.exists(cold_path))

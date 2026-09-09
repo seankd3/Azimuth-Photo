@@ -149,6 +149,17 @@ def forget(conn, set_id: str) -> bool:
     return True
 
 
+def remember(conn, set_id: str) -> bool:
+    """Offer a forgotten set again -- the way back from `forget`, one more
+    row in the same log, everything it held still there."""
+
+    kind = family(set_id)
+    if not decisions.latest(conn, kind, decisions.FORGET):
+        return False
+    decisions.decide(conn, kind, decisions.FORGET, False)
+    return True
+
+
 def all(conn, *, kind: str | None = None) -> list[dict]:
     """Every set that still exists, by name."""
 
