@@ -259,11 +259,35 @@ export function createCropSurface({ product, notify, undo, applied }) {
   surface.querySelector('[data-action="crop-cancel"]').addEventListener('click', close);
   new ResizeObserver(() => { if (isOpen()) place(); }).observe(surface);
 
+  // Arrows nudge the box by 1% (Shift: 5%); Alt+arrows grow or shrink it
+  // from its right and bottom edges; 0 is the whole frame.
+  function nudge(event) {
+    const step = event.shiftKey ? 0.05 : 0.01;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+    if (!d) return false;
+    let [l, t, r, b] = state.unit;
+    if (event.altKey) {
+      r = Math.max(l + LEAST, Math.min(1, r + d[0]));
+      b = Math.max(t + LEAST, Math.min(1, b + d[1]));
+    } else {
+      const w = r - l;
+      const h = b - t;
+      l = Math.min(1 - w, Math.max(0, l + d[0]));
+      t = Math.min(1 - h, Math.max(0, t + d[1]));
+      r = l + w;
+      b = t + h;
+    }
+    state.unit = [l, t, r, b];
+    place();
+    return true;
+  }
+
   function key(event) {
     if (event.key === 'Escape') { close(); return true; }
     // Enter on a focused button presses that button, not Apply.
     if (event.key === 'Enter' && !document.activeElement?.closest('.crop-bar')) { void apply(); return true; }
-    return false;
+    if (event.key === '0') { void reset(); return true; }
+    return nudge(event);
   }
 
   return Object.freeze({ open, close, apply, isOpen, key });

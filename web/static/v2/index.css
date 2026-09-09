@@ -440,6 +440,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 /* Rank: the stage takes the grid's place; cards are equal-area at their own shape */
 .workspace:has(.rank-stage:not([hidden])), .workspace:has(.loupe-stage:not([hidden])) { overflow: hidden; }
 .rank-stage {
+  position: relative;
   /* The cards place themselves: equal areas shelf-packed by the layout,
      so the stage is a canvas, not a grid of uniform cells. */
   position: relative;
@@ -490,7 +491,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .face-card-face { --face-size: 130px; }
 .drop-strip img.face { --face-size: 26px; }
 .face-card-look:hover .face-card-face { outline: 1px solid var(--accent); }
-.face-card.is-focus { outline: 1px solid var(--ring); outline-offset: -4px; }
+.face-card:focus-visible, .face-card.is-focus { outline: 1px solid var(--ring); outline-offset: -4px; }
+.face-card { cursor: pointer; }
 .face-card-name {
   margin: 6px 0 0;
   color: var(--text);
@@ -608,7 +610,6 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .rank-card:hover { border-color: var(--hover-line); }
 .rank-card.is-selected { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .rank-card.is-picked { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent); transform: scale(.985); }
-.rank-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--text-3); font-size: var(--t-body); }
 .rank-progress { color: var(--text-3); font-variant-numeric: tabular-nums; }
 .teach-hint { color: var(--text-3); font: var(--t-label)/1.4 var(--mono); white-space: nowrap; }
 .chip-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

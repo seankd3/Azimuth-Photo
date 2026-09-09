@@ -1,3 +1,4 @@
+import { showMenu, hideMenu } from '../kit/menu.js';
 import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
 import { getLens, read, subscribe, update } from '../store/index.js';
@@ -129,6 +130,8 @@ function renderStrip(state) {
       cell.type = 'button';
       cell.className = 'strip-cell' + (photo?.status === 'picked' ? ' is-picked' : '');
       cell.dataset.index = index;
+      cell.setAttribute('role', 'option');
+      cell.tabIndex = index === current ? 0 : -1;
       cell.dataset.turn = photo?.rotate || 0;
       cell.setAttribute('aria-label', photo?.tail || `Photo ${index + 1}`);
       if (photo?.tile) {
@@ -140,16 +143,26 @@ function renderStrip(state) {
       }
       cells.push(cell);
     }
+    const hadFocus = loupeStrip.contains(document.activeElement);
     loupeStrip.replaceChildren(...cells);
+    // A rebuild under the keyboard keeps the keyboard: focus lands on the
+    // current cell instead of falling to the body.
+    if (hadFocus) loupeStrip.querySelector(`[data-index="${current}"]`)?.focus({ preventScroll: true });
   }
   const held = loupeStrip.querySelector('.is-current');
   const moved = Number(held?.dataset.index) !== current;
-  if (moved) held?.classList.remove('is-current');
+  if (moved && held) {
+    held.classList.remove('is-current');
+    held.tabIndex = -1;
+    held.setAttribute('aria-selected', 'false');
+  }
   const cell = loupeStrip.querySelector(`[data-index="${current}"]`);
   if (cell && (rebuilt || moved)) {
     // Centring only when the strip was rebuilt or the cursor moved: every
     // other render leaves a hand-scrolled strip where the hand put it.
     cell.classList.add('is-current');
+    cell.tabIndex = 0;
+    cell.setAttribute('aria-selected', 'true');
     loupeStrip.scrollTo({
       left: cell.offsetLeft - (loupeStrip.clientWidth - cell.offsetWidth) / 2,
       behavior: rebuilt || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
@@ -439,9 +452,7 @@ const rankWorkflow = createRankWorkflow({
     await loadView();
   },
 });
-document.querySelector('[data-rank-mode]').addEventListener('change', (event) => {
-  void rankWorkflow.remode(event.target.value);
-});
+
 let albumsTimer = null;
 function refreshAlbumsSoon() {
   // Smart-album counts follow a cull within a beat, not on the next import.
@@ -1066,9 +1077,7 @@ document.addEventListener('contextmenu', (event) => {
     if (!held?.attached) return;
     event.preventDefault();
     driveMenu.dataset.drive = drive.dataset.drive;
-    driveMenu.style.left = `${event.clientX}px`;
-    driveMenu.style.top = `${event.clientY}px`;
-    driveMenu.hidden = false;
+    showMenu(driveMenu, event.clientX, event.clientY);
     return;
   }
   const row = event.target.closest('.folder-row');
@@ -1081,13 +1090,11 @@ document.addEventListener('contextmenu', (event) => {
   event.preventDefault();
   folderMenu.dataset.folder = row ? row.dataset.folder : '';
   disarmForget();
-  folderMenu.style.left = `${event.clientX}px`;
-  folderMenu.style.top = `${event.clientY}px`;
-  folderMenu.hidden = false;
+  showMenu(folderMenu, event.clientX, event.clientY);
 });
 document.addEventListener('click', (event) => {
-  if (!event.target.closest('[data-folder-menu]')) folderMenu.hidden = true;
-  if (!event.target.closest('[data-drive-menu]')) driveMenu.hidden = true;
+  if (!event.target.closest('[data-folder-menu]')) hideMenu(folderMenu);
+  if (!event.target.closest('[data-drive-menu]')) hideMenu(driveMenu);
 });
 
 async function loadFolders() {
@@ -1695,6 +1702,8 @@ document.addEventListener('click', (event) => {
   if (action === 'leave-rank') rankWorkflow.close();
   const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
   if (size) rankWorkflow.resize(Number(size));
+  const mode = event.target.closest('[data-rank-mode] [data-mode]')?.dataset.mode;
+  if (mode) void rankWorkflow.remode(mode);
   if (action === 'pick') cullWorkflow.apply(event.target.closest('[data-action]').dataset.verb || 'pick');
   if (action === 'collapse-stacks') {
     const collapsed = !read().collapsed;
@@ -1807,8 +1816,8 @@ document.addEventListener('keydown', (event) => {
     // handlers.
     if (undo.visible() && undo.pending()) undo.dismiss();
     else if (!folderMenu.hidden || !driveMenu.hidden) {
-      folderMenu.hidden = true;
-      driveMenu.hidden = true;
+      hideMenu(folderMenu);
+      hideMenu(driveMenu);
     }
     else if (loupeOpen()) {
       // A look from a round goes straight back to it; otherwise one rung.
@@ -1985,7 +1994,9 @@ const SHORTCUTS = [
   ['Rank', [
     ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
     ['Z / F', 'Look closer'], ['P / U / X / R', 'The selected card, else the one under the mouse'],
+    ['[ / ]', 'Fewer or more at once'], ['M', 'How the set is drawn'],
   ]],
+  ['Crop', [['Arrows', 'Nudge 1%'], ['Shift+Arrows', 'Nudge 5%'], ['Alt+Arrows', 'Grow or shrink'], ['0', 'Remove the crop'], ['Enter', 'Apply']]],
   ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
   ['Trash', [['U', 'Restore', ['restore']]]],
   ['Teaching', [['Y / N', 'This is / is not the word']]],

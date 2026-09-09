@@ -8,6 +8,7 @@
 
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
+import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
 import { icon } from '../kit/icons.js';
 
@@ -109,6 +110,11 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     stage.replaceChildren(...order.map((entry, index) => {
       const card = document.createElement('div');
       card.className = 'face-card' + (index === cursor ? ' is-focus' : '');
+      // One cursor: the card itself takes the keyboard; the ring is the
+      // browser's own focus, and the whole card is the way to the person.
+      card.tabIndex = index === cursor ? 0 : -1;
+      card.addEventListener('click', (event) => { if (!event.target.closest('button')) browse(entry.term); });
+      card.addEventListener('focus', () => { cursor = index; markWall(false); });
       card.dataset.term = entry.term;
       card.dataset.person = entry.person;
       card.dataset.index = index;
@@ -135,11 +141,15 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     }));
   }
 
-  function markWall() {
+  function markWall(focus = true) {
     for (const card of stage.querySelectorAll('.face-card')) {
-      card.classList.toggle('is-focus', Number(card.dataset.index) === cursor);
+      const here = Number(card.dataset.index) === cursor;
+      card.classList.toggle('is-focus', here);
+      card.tabIndex = here ? 0 : -1;
     }
-    stage.querySelector('.face-card.is-focus')?.scrollIntoView({ block: 'nearest' });
+    const held = stage.querySelector('.face-card.is-focus');
+    held?.scrollIntoView({ block: 'nearest' });
+    if (focus) held?.focus({ preventScroll: true });
   }
 
   function key(event) {
@@ -147,7 +157,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     // Esc leaves -- introducing thirty Someones never needs the mouse.
     const cards = stage.querySelectorAll('.face-card');
     if (!cards.length) return false;
-    const across = Math.max(1, Math.floor(stage.clientWidth / 178));
+    const across = columnsOf(cards);
     const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -across, ArrowDown: across };
     if (event.key in moves) {
       cursor = Math.max(0, Math.min(cards.length - 1, (cursor < 0 ? 0 : cursor + moves[event.key])));

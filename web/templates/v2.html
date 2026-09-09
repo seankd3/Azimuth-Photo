@@ -96,12 +96,12 @@
           <button type="button" data-size="9">9</button>
           <button type="button" data-size="12">12</button>
         </div>
-        <select data-rank-mode hidden aria-label="How the set is drawn" title="How the set is drawn">
-          <option value="learn" title="The fastest route to the best ranking — teaches where it is least sure, finds among the leaders">Learn</option>
-          <option value="random" title="A walk with no opinion">Random</option>
-          <option value="diverse" title="Spread across the scope's looks">Diverse</option>
-          <option value="tournament" title="The leaders meet">Tournament</option>
-        </select>
+        <div class="rank-size" data-rank-mode hidden role="group" aria-label="How the set is drawn">
+          <button type="button" data-mode="learn" title="The fastest route to the best ranking — teaches where it is least sure, finds among the leaders (M cycles)">Learn</button>
+          <button type="button" data-mode="random" title="A walk with no opinion">Random</button>
+          <button type="button" data-mode="diverse" title="Spread across the scope's looks">Diverse</button>
+          <button type="button" data-mode="tournament" title="The leaders meet">Tournament</button>
+        </div>
         <button class="quiet-button" type="button" data-action="leave-rank" hidden><kbd>Esc</kbd> Done</button>
         <button class="quiet-button" type="button" data-action="collapse-stacks" aria-pressed="false"></button>
         <label>Sort
@@ -135,7 +135,7 @@
             <span class="crop-thirds"></span>
           </div>
           <div class="crop-bar">
-            <span class="crop-hint">Edges resize, the middle moves, a drag outside starts over</span>
+            <span class="crop-hint">Edges resize, the middle moves, a drag outside starts over · arrows nudge</span>
             <button class="quiet-button" type="button" data-action="crop-reset">Remove crop</button>
             <button class="quiet-button" type="button" data-action="crop-cancel">Cancel</button>
             <button class="primary-button" type="button" data-action="crop-apply"><kbd>⏎</kbd> Apply</button>

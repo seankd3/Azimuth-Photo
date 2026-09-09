@@ -5,6 +5,7 @@
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
+import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
 
 export function createAlbumsPanel({ product, read, update, notify, undo, reload, moved, selection, describe, viewOf }) {
@@ -252,9 +253,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     const pinned = ['quick', 'last-import'].includes(row.dataset.album);
     menu.querySelector('[data-action="delete-album"]').hidden = pinned;
     menu.querySelector('[data-action="rename-album"]').hidden = pinned;
-    menu.hidden = false;
-    menu.style.left = `${event.clientX}px`;
-    menu.style.top = `${event.clientY}px`;
+    showMenu(menu, event.clientX, event.clientY);
   });
 
   menu.addEventListener('click', async (event) => {
@@ -343,7 +342,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       const button = document.createElement('button');
       button.type = 'button';
       button.textContent = label;
-      button.addEventListener('click', () => { photoMenu.hidden = true; void run(); });
+      button.addEventListener('click', () => { hideMenu(photoMenu); void run(); });
       return button;
     };
     const here = read().album;
@@ -355,9 +354,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     // Trash is not a place to file from: its menu is its own verbs.
     if (read().view === 'trash') {
       photoMenu.replaceChildren(...rows);
-      photoMenu.hidden = false;
-      photoMenu.style.left = `${event.clientX}px`;
-      photoMenu.style.top = `${event.clientY}px`;
+      showMenu(photoMenu, event.clientX, event.clientY);
       return;
     }
     rows.push(item(pruning ? 'Quick album' : 'Quick album — B', () => quickToss(ids)));
@@ -377,14 +374,12 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         () => removeFrom(here, ids)));
     }
     photoMenu.replaceChildren(...rows);
-    photoMenu.hidden = false;
-    photoMenu.style.left = `${event.clientX}px`;
-    photoMenu.style.top = `${event.clientY}px`;
+    showMenu(photoMenu, event.clientX, event.clientY);
   }
 
   document.addEventListener('click', (event) => {
-    if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
-    if (!photoMenu.hidden && !photoMenu.contains(event.target)) photoMenu.hidden = true;
+    if (!menu.hidden && !menu.contains(event.target)) hideMenu(menu);
+    if (!photoMenu.hidden && !photoMenu.contains(event.target)) hideMenu(photoMenu);
     // The click that just opened the popover bubbles here in the same
     // dispatch; it must not also be the click that closes it. Every later
     // outside click answers "no", whatever else it goes on to do.

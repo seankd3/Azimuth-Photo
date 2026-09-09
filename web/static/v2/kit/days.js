@@ -4,6 +4,19 @@
 // the arithmetic.
 
 const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+// How many of these cells share the first row: the column count of any
+// wrapped or auto-filled layout, read from the layout itself.
+export function columnsOf(cells) {
+  const first = cells[0];
+  if (!first) return 1;
+  let across = 0;
+  for (const cell of cells) {
+    if (cell.offsetTop !== first.offsetTop) break;
+    across += 1;
+  }
+  return Math.max(1, across);
+}
+
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 // "Tue · Sep 8, 2026" for a YYYY-MM-DD day; the day itself when it will

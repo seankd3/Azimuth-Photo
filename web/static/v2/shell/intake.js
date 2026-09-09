@@ -10,7 +10,7 @@
 // the details (and Stop) while it runs.
 
 import { recall, remember } from '../kit/remembered.js';
-import { title as dayName } from '../kit/days.js';
+import { title as dayName, columnsOf } from '../kit/days.js';
 
 export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown }) {
   const title = document.querySelector('[data-import-title]');
@@ -430,7 +430,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
       // The grid's grammar on the stage: arrows move a cursor, Shift
       // extends from the anchor, Ctrl+A selects all, Home and End jump.
       if (!order.length) return false;
-      const across = Math.max(1, Math.floor(stage.clientWidth / 200));
+      const across = columnsOf(stage.querySelectorAll('.stage-cell'));
       const at = anchor === null ? -1 : order.indexOf([...selected].at(-1) ?? anchor);
       const moves = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -across, ArrowDown: across };
       let next = null;

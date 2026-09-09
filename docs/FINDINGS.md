@@ -360,19 +360,19 @@ finding was checked and the numbers said no.
 | Q9 | The pick in Rank is never seen | the winner wears is-picked for a beat before the swap | shipped |
 | Q10 | Rank's cursor starts nowhere, then lands on a stranger after a mouse pick | cursor starts at 0; a mouse pick leaves the cursor off the fresh slot | shipped |
 | Q11 | The toast offers Undo for things that cannot be undone | the button starts hidden | shipped |
-| Q12 | Right-click menus are mouse-only and fall off the screen near an edge | one placed menu: clamped, focusable, arrows, Shift+F10 | open |
+| Q12 | Right-click menus are mouse-only and fall off the screen near an edge | one placed menu: clamped, focusable, arrows, Shift+F10 | shipped |
 | Q13 | Trash offers album verbs and a key that refuses to work there | no album rows in Trash | shipped |
 | Q14 | A person can only be named by right-clicking | a Name… control on the row; N on a focused row | shipped |
 | Q15 | In Import, Shift+Arrow after a click selects the wrong range | the anchor is a key everywhere | shipped |
-| Q16 | Up and Down in Import and on the People wall land on the wrong card | columns measured from the cells, not guessed | open |
-| Q17 | The filmstrip is 29 tab stops and an arrow throws focus to the body | roving tabindex; focus survives a rebuild; option roles | open |
+| Q16 | Up and Down in Import and on the People wall land on the wrong card | columns measured from the cells, not guessed | shipped |
+| Q17 | The filmstrip is 29 tab stops and an arrow throws focus to the body | roving tabindex; focus survives a rebuild; option roles | shipped |
 | Q18 | The filmstrip glides under reduced motion | smooth only when motion is welcome | shipped |
 | Q19 | Enter on the first-run dialog can settle the home at … | submit disabled until the path is real | shipped |
-| Q20 | The crop rectangle cannot be touched from the keyboard | arrows nudge, Alt+arrows an edge, 0 full frame; on the sheet | open |
+| Q20 | The crop rectangle cannot be touched from the keyboard | arrows nudge, Alt+arrows an edge, 0 full frame; on the sheet | shipped |
 | Q21 | A twitch of the mouse writes a sliver crop | a drawn box under the floor is dropped; apply refuses a degenerate box | shipped |
 | Q22 | Tabbing through a card import means thousands of checkbox stops | cell boxes leave the tab order; the stage is one stop | shipped |
-| Q23 | The People wall has two cursors that never agree | the card is the focusable thing | open |
-| Q24 | Rank's two settings are two kinds of control and neither has a key | one segmented shape; [ ] step the size, M cycles the mode; on the sheet | open |
+| Q23 | The People wall has two cursors that never agree | the card is the focusable thing | shipped |
+| Q24 | Rank's two settings are two kinds of control and neither has a key | one segmented shape; [ ] step the size, M cycles the mode; on the sheet | shipped |
 | Q25 | Synchronize reports zeros | empty parts dropped; nothing changed said plainly | shipped |
 | Q26 | Album messages count nothing in particular | photographs named, no bookkeeping words | shipped |
 | Q27 | Looking at a card talks through the toast every 600 ms | progress goes to the status line | shipped |
@@ -384,19 +384,19 @@ finding was checked and the numbers said no.
 | Q33 | The zoom chip says where you are, not what pressing it does | the chip names the act, shows the state and its key | shipped |
 | Q34 | Full frame looks like it removed the crop; nothing is written until Apply | Remove crop applies at once | shipped |
 | U15 | Close marks drawn from the set vs typed × | drawn everywhere | shipped |
-| U16 | The cull verbs implemented twice (cull.js, rank.js) | one path | open |
-| U17 | Pick means the cull flag and the winner of a round | the round's word is chosen | open |
+| U16 | The cull verbs implemented twice (cull.js, rank.js) | one path: the rank stage's verbs through cull.apply with an after-hook for the seat swap | open: owed, the stage's follow-up (swap the card, keep the round) needs the hook first |
+| U17 | Pick means the cull flag and the winner of a round | the round's word is chosen | shipped |
 | U18 | photographs vs photos for one count | photographs | shipped |
 | U19 | The sidecar act reported two ways | one sentence | shipped |
 | U20 | Reset in Develop vs Full frame in Crop | Remove crop (Q34); Reset stays for a recipe | shipped |
 | U21 | inspector-facts hidden has two owners | one owner | shipped |
-| U22 | Popovers clamp to the viewport; context menus do not | one placer (Q12) | open |
-| U23 | Two empty-state idioms | emptyState() for Rank too | open |
-| U24 | Go to this person is the whole row on the shelf, only the face on the wall | the whole card | open |
+| U22 | Popovers clamp to the viewport; context menus do not | one placer (Q12) | shipped |
+| U23 | Two empty-state idioms | emptyState() for Rank too | shipped |
+| U24 | Go to this person is the whole row on the shelf, only the face on the wall | the whole card | shipped |
 | U25 | One anchor variable holds an index and a key | a key (Q15) | shipped |
-| U26 | Two cursors on the face wall | one (Q23) | open |
+| U26 | Two cursors on the face wall | one (Q23) | shipped |
 | U27 | One import reports progress in two places | the status line (Q27) | shipped |
-| U28 | The column count derived three ways | measured (Q16) | open |
+| U28 | The column count derived three ways | measured (Q16) | shipped |
 
 ## Refutation (feel round)
 

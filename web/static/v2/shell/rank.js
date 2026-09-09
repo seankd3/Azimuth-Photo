@@ -18,6 +18,7 @@ const RECENT = 48;
 const ASPECT_MIN = 0.4;
 const ASPECT_MAX = 2.6;
 
+import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
 
 export function createRankWorkflow({ product, read, update, notify, undo, onLeave, onLook, viewOf, describe }) {
@@ -306,7 +307,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     writing.then((recorded) => {
       const over = losers.length;
       undo.show(
-        `Picked ${winner.tail.split('/').pop()} over ${over === 1 ? 'one other' : `${over} others`}.`,
+        `Chose ${winner.tail.split('/').pop()} over ${over === 1 ? 'one other' : `${over} others`}.`,
         async () => {
           await product.unround(recorded.decision);
           if (!isOpen()) { await onLeave(); return; }   // the grid behind may be sorted by it
@@ -375,6 +376,19 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     }
     if (state.size === 2 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       void pick(state.order[event.key === 'ArrowLeft' ? 0 : 1] ?? 0);
+      return true;
+    }
+    // The two settings from the keys: [ and ] step how many at once, M
+    // cycles how the set is drawn.
+    if (event.key === '[' || event.key === ']') {
+      const sizes = Object.keys(SIZES).map(Number).sort((a, b) => a - b);
+      const at = sizes.indexOf(state.size);
+      const next = sizes[Math.max(0, Math.min(sizes.length - 1, at + (event.key === ']' ? 1 : -1)))];
+      if (next !== state.size) void resize(next);
+      return true;
+    }
+    if ((event.key === 'm' || event.key === 'M') && !event.ctrlKey && !event.metaKey) {
+      void remode(MODES[(MODES.indexOf(state.mode) + 1) % MODES.length]);
       return true;
     }
     if (event.key === 'ArrowLeft') { move(-1); return true; }
@@ -576,10 +590,15 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     const label = document.querySelector('[data-rank-progress]');
     if (label) label.textContent = ranked + sitting;
     for (const button of document.querySelectorAll('[data-rank-size] button')) {
-      button.classList.toggle('is-active', Number(button.dataset.size) === state.size);
+      const on = Number(button.dataset.size) === state.size;
+      button.classList.toggle('is-active', on);
+      button.setAttribute('aria-pressed', String(on));
     }
-    const mode = document.querySelector('[data-rank-mode]');
-    if (mode && mode.value !== state.mode) mode.value = state.mode;
+    for (const button of document.querySelectorAll('[data-rank-mode] button')) {
+      const on = button.dataset.mode === state.mode;
+      button.classList.toggle('is-active', on);
+      button.setAttribute('aria-pressed', String(on));
+    }
   }
 
   function render() {
@@ -588,18 +607,17 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
       return;
     }
     if (state.set.length < 2) {
-      const empty = document.createElement('div');
-      empty.className = 'rank-empty';
       // Three honest states: still asking, truly nothing, or the scope is
-      // simply spent for now.
-      empty.textContent = !state.answered
-        ? 'Choosing photographs…'
+      // simply spent for now — in the one empty-state shape the grid and
+      // the wall use.
+      const said = !state.answered
+        ? ['Choosing photographs…', '']
         : state.total === 0
-          ? 'Nothing here to rank.'
+          ? ['Nothing here to rank.', 'Rank works on the photographs you are looking at.']
           : state.judged >= state.total
-            ? 'Everything here has been through a round. Change where you are looking, or keep going another sitting.'
-            : 'Not enough photographs to rank here yet — they join as their previews are made.';
-      stage.replaceChildren(empty);
+            ? ['Everything here has been through a round.', 'Change where you are looking, or keep going another sitting.']
+            : ['Not enough photographs to rank here yet.', 'They join as their previews are made.'];
+      stage.replaceChildren(emptyState({ emptyTitle: said[0], emptyCopy: said[1] }));
       renderProgress();
       return;
     }
