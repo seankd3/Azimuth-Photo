@@ -1024,3 +1024,37 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(86px + 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+
+/* The timeline: a quiet rail at the grid's right edge on date sorts. Sticky
+   under the contextbar with no height of its own, so the grid's geometry is
+   untouched; everything visible hangs off it absolutely. */
+.timeline { position: sticky; top: 46px; height: 0; z-index: 3; }
+.timeline-track, .timeline-marker, .timeline-label { position: absolute; }
+.timeline-track {
+  right: 0; top: 0; width: 44px;
+  cursor: pointer;
+}
+.timeline { pointer-events: none; }
+.timeline-track { pointer-events: auto; }
+.timeline-year, .timeline-month {
+  position: absolute; right: 10px; transform: translateY(-50%);
+  font: 500 11px/1 var(--mono); letter-spacing: .04em; white-space: nowrap;
+  pointer-events: none;
+}
+.timeline-year { color: var(--text-2); }
+.timeline-month { color: var(--text-3); font-size: 10px; }
+.timeline-month::after {
+  content: ''; position: absolute; right: -8px; top: 50%; width: 5px; height: 1px;
+  background: var(--line-strong);
+}
+.timeline-month:empty::after { right: -8px; }
+.timeline-marker {
+  right: 3px; width: 3px; height: 14px; margin-top: -7px; border-radius: 2px;
+  background: var(--accent); pointer-events: none;
+}
+.timeline-label {
+  right: 50px; transform: translateY(-50%);
+  padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: 3px;
+  background: var(--chrome-2); color: var(--text); font-size: 12px; white-space: nowrap;
+  pointer-events: none;
+}

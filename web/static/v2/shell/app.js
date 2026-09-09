@@ -14,12 +14,21 @@ import { createRankWorkflow } from './rank.js';
 import { createSearchCards } from './searchcards.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
+import { createTimeline } from './timeline.js';
 
 const PAGE = 200;
 const CONTEXTBAR_HEIGHT = 46;
 const library = getLens('library');
 const workspace = document.querySelector('.workspace');
 const grid = document.querySelector('[data-grid]');
+const timeline = createTimeline({
+  workspace,
+  before: grid,
+  top: CONTEXTBAR_HEIGHT,
+  place: (index) => library.place(index),
+  indexAt: (scrollTop) => library.indexAt(scrollTop),
+  scrollTo: (top) => { workspace.scrollTop = top; },
+});
 const inspector = document.querySelector('[data-inspector]');
 const homeDialog = document.querySelector('[data-home-dialog]');
 const homeForm = document.querySelector('[data-home-form]');
@@ -445,7 +454,7 @@ document.querySelector('[data-like-pill]').addEventListener('click', () => {
 });
 // The box belongs to the cards: they offer the library's shape on focus,
 // narrow it as you type, and leave Enter meaning what it always meant.
-const searchCards = createSearchCards({
+createSearchCards({
   product,
   read,
   update,
@@ -510,10 +519,12 @@ function visibleGrid() {
     emptyAction: inTrash || searching || scanning || inAlbum ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
-    stack: (photo) => {
+    stack: (photo, index) => {
       // Stepping into a stack narrows the same view by one chip; its ×
-      // is the step back out.
+      // is the step back out, and it lands where you left: the cover,
+      // selected, at the same scroll.
       const held = (read().chips || []).filter((c) => c.is !== 'stack');
+      stackFrom = { id: photo.id, index, top: workspace.scrollTop };
       update({ chips: [...held, { is: 'stack', values: [String(photo.id)] }] });
       viewMoved();
     },
@@ -553,6 +564,7 @@ function scheduleGrid() {
   scrollFrame = requestAnimationFrame(() => {
     scrollFrame = null;
     visibleGrid();
+    timeline.follow();
   });
 }
 
@@ -646,7 +658,7 @@ async function loadView() {
     update({ counts: { ...counts, trash: trashCount }, drives, loading: false });
     // The chapters arrive behind the paint: the first page is on screen in
     // milliseconds, the day headers join when their counts land.
-    if (view === 'library' && sort === 'newest' && !found) {
+    if (view === 'library' && (sort === 'newest' || sort === 'oldest') && !found) {
       product.days(looking).then((days) => {
         if (pages.isCurrent(requestGeneration) && JSON.stringify(viewOf()) === key) update({ days });
       }).catch(() => {});
@@ -692,11 +704,24 @@ async function refreshInPlace({ shelves = true } = {}) {
   }
 }
 
+// What each kind of owed work is called when the sidebar says what the
+// worker is doing. The keys are the cache kinds' own names.
+const WORKING = {
+  identity: 'Identifying photographs',
+  metadata: 'Reading photographs',
+  grid: 'Making tiles',
+  loupe: 'Making tiles',
+  embedding: 'Mapping the space',
+  faces: 'Finding faces',
+  photostats: 'Measuring light',
+};
+
 async function followLibrary() {
   // The worker identifies, reads and renders in the background. The window
   // learns of it by asking one free question every couple of seconds and
   // re-reading what it holds only when the answer moved.
   let last = null;
+  let rate = 0;
   for (;;) {
     await delay(2000);
     let pulse;
@@ -709,6 +734,13 @@ async function followLibrary() {
     const swept = last !== null && pulse.swept !== last.swept;
     const shaped = last !== null && pulse.shaped !== last.shaped;
     if (last === null || pulse.cards !== last.cards) showCards();
+    // The status line: the kind the worker is on, what it counted as left,
+    // and the pace, smoothed so two seconds of luck do not make it jump.
+    const pace = last === null ? 0 : Math.round((rate * 2 + (pulse.done - last.done) * 30) / 3);
+    rate = pulse.doing ? pace : 0;
+    const left = Object.values(pulse.left || {}).reduce((sum, n) => sum + n, 0);
+    const working = pulse.doing ? { word: WORKING[pulse.doing] || 'Working', left, rate } : null;
+    if (JSON.stringify(working) !== JSON.stringify(read().working)) update({ working });
     last = pulse;
     if ((moved || swept || shaped) && !read().loading && !read().scanning) {
       try {
@@ -717,7 +749,7 @@ async function followLibrary() {
         await refreshInPlace({ shelves: swept || shaped });
         if (swept) {
           await loadFolders();
-          if (read().view === 'library' && read().sort === 'newest' && !seeking()) {
+          if (read().view === 'library' && (read().sort === 'newest' || read().sort === 'oldest') && !seeking()) {
             product.days(viewOf()).then((days) => update({ days })).catch(() => {});
           }
         }
@@ -935,13 +967,32 @@ async function loadFolders() {
 // The view moved under whatever stage is up: Rank re-scopes in place, the
 // grid starts from the top of the new answer. Folders, albums, All
 // photos and the chips all route through here — one rule, one place.
-function viewMoved() {
+// Where the grid was when a stack was opened; the step back out returns
+// there instead of to the top.
+let stackFrom = null;
+
+async function viewMoved() {
   if (rankWorkflow.isOpen()) {
     rankWorkflow.resize(rankWorkflow.size());
     return;
   }
-  workspace.scrollTo({ top: 0 });
-  loadView();
+  const inStack = (read().chips || []).some((c) => c.is === 'stack');
+  const back = !inStack && stackFrom ? stackFrom : null;
+  if (!inStack) stackFrom = null;
+  workspace.scrollTo({ top: back ? back.top : 0 });
+  await loadView();
+  if (!back || read().view !== 'library') return;
+  // The page under the old scroll arrives behind the paint; wait for the
+  // cover's row, then take it up again.
+  for (let tries = 0; tries < 20; tries += 1) {
+    workspace.scrollTo({ top: back.top });
+    const photo = read().photos.get(back.index);
+    if (photo) {
+      if (photo.id === back.id) update({ selected: photo, selectedIndex: back.index, marked: new Set([photo.id]) });
+      return;
+    }
+    await delay(50);
+  }
 }
 
 let folderAnchor = null;
@@ -1159,6 +1210,7 @@ function renderChrome(state) {
   peoplePanel.render(state);
   labelsPanel.render(state);
   filterBar.render(state);
+  timeline.render(state);
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected);
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
   if (state.view === 'loupe' && state.selected) {
@@ -1183,13 +1235,21 @@ function renderChrome(state) {
     : state.marked?.size > 1 ? `${state.marked.size.toLocaleString()} selected` : '';
   // The running import outranks the reading chatter: it is the one thing
   // the person just asked for.
+  // Always a sentence, never a blank: the import you asked for, the sweep,
+  // the worker's current kind with what is left and how fast, or the calm.
+  const working = state.working;
   status.textContent = state.importing
     ? state.importing
     : state.scanning
       ? 'Reading your photos…'
-      : state.counts.unidentified
-        ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
-        : '';
+      : working
+        ? [working.word,
+           working.left ? `${working.left.toLocaleString()} left` : null,
+           working.rate ? `${working.rate.toLocaleString()} / min` : null,
+          ].filter(Boolean).join(' · ')
+        : state.counts.unidentified
+          ? `Reading ${state.counts.unidentified.toLocaleString()} photos…`
+          : `Up to date · ${count} photos`;
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
@@ -1475,7 +1535,7 @@ document.addEventListener('keydown', (event) => {
       update({ selected: null, selectedIndex: null, marked: new Set() });
       anchorIndex = null;
     } else if (seeking()) { searchBox.value = ''; runSearch(''); }
-    else if (read().chips.length) { update({ chips: [] }); loadView(); }
+    else if (read().chips.length) { update({ chips: [] }); viewMoved(); }
     else return;
     event.preventDefault();
     return;

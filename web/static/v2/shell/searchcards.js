@@ -8,7 +8,7 @@
 
 const RECENT_KEY = 'azimuth.recent-searches';
 
-export function createSearchCards({ product, read, update, box, search, applyChip }) {
+export function createSearchCards({ product, read, _update, box, search, applyChip }) {
   const drop = document.querySelector('[data-search-drop]');
   let facets = null;        // {years, cameras, orientations, roots} once asked
   let sessions = [];        // the latest shoots, named, fetched with the facets

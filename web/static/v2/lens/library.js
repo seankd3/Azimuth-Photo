@@ -50,13 +50,18 @@ function dayTitle(day, count) {
 }
 
 function collectBreaks(state) {
-  // Chapters exist where their arithmetic is exact: the newest-sorted
-  // library, with the days list summing to precisely the photographs shown.
-  // Anywhere else the grid is flat — a misplaced header is worse than none.
-  const days = state.sort === 'newest' && (state.days || []).length > 1 ? state.days : null;
-  if (breaksFrom && days === breaksFrom.list && state.total === breaksFrom.total) return;
+  // Chapters exist where their arithmetic is exact: a date-sorted library
+  // with the days list summing to precisely the photographs shown. The list
+  // arrives newest first and the oldest sort reads it backwards. Anywhere
+  // else the grid is flat — a misplaced header is worse than none.
+  const dated = state.sort === 'newest' || state.sort === 'oldest';
+  const days = dated && (state.days || []).length > 1
+    ? (state.sort === 'oldest' ? [...state.days].reverse() : state.days)
+    : null;
+  if (breaksFrom && days !== null && breaksFrom.list === state.days && breaksFrom.sort === state.sort
+      && state.total === breaksFrom.total) return;
   if (!days && !breaksFrom) return;
-  breaksFrom = days ? { list: days, total: state.total } : null;
+  breaksFrom = days ? { list: state.days, sort: state.sort, total: state.total } : null;
   breaks = null;
   breaksVersion += 1;
   if (!days) return;
@@ -152,7 +157,7 @@ function photoCell(photo, index, actions) {
     badge.title = `A set of ${photo.stack + 1} — click to open`;
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
-      actions.stack?.(photo);
+      actions.stack?.(photo, index);
     });
     cell.append(badge);
   }
@@ -326,6 +331,11 @@ function neighbour(index, direction) {
   return layout ? verticalNeighbour(layout, index, direction) : null;
 }
 
+// The first cell under a scroll position — what the timeline's marker rides.
+function indexAt(scrollTop) {
+  return layout && layout.count ? anchorOf(layout, scrollTop).index : null;
+}
+
 function renderInspector(panel, selected) {
   if (!selected) {
     panel.replaceChildren(element('div', 'inspector-empty', 'Select a photo to see its details.'));
@@ -368,4 +378,4 @@ function renderInspector(panel, selected) {
   panel.replaceChildren(heading, facts);
 }
 
-registerLens('library', { neighbour, place, renderGrid, renderInspector });
+registerLens('library', { indexAt, neighbour, place, renderGrid, renderInspector });

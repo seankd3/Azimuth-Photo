@@ -1028,13 +1028,15 @@ class Library:
     def pulse(self) -> dict[str, int]:
         """What a window asks every couple of seconds: did anything land?
 
-        Two integers and no query, so asking costs nothing: what the worker
-        finished, and how many sweeps of the folders have completed. The window
-        already holds the counts it would want next; a moved pulse is its cue
-        to re-read them. `debt` is the expensive full accounting.
+        No query, so asking costs nothing: what the worker finished, how many
+        sweeps of the folders have completed, the kind it is on, and what it
+        counted as still owed. The window already holds the counts it would
+        want next; a moved pulse is its cue to re-read them. `debt` is the
+        expensive full accounting, asked directly only by tests.
         """
 
-        return {"done": self.chores.done, "swept": self.swept}
+        return {"done": self.chores.done, "swept": self.swept,
+                "doing": self.chores.doing, "left": self.chores.left}
 
     def _source_identity(self, photo_id: int) -> tuple[str, str] | None:
         row = self.conn.execute(

@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import threading
+import time
 from typing import Callable, Iterable
 
 from model import cache, decisions, photos
@@ -421,6 +422,14 @@ class Chores:
         # what it holds only when it moved -- the whole of how the grid learns
         # that identity, metadata or a tile landed behind it.
         self.done = 0
+        # What the status line says: the kind finished last (None when idle),
+        # and how much is owed per kind, counted by lane 0 on its own
+        # connection every half minute while there is work. The window reads
+        # both off the pulse for free; the count costs the worker, never the
+        # person's lane (measured: 362 ms per kind on 144k rows).
+        self.doing: str | None = None
+        self.left: dict[str, int] = {}
+        self._counted_at = 0.0
 
     @property
     def running(self) -> bool:
@@ -481,6 +490,14 @@ class Chores:
                     did = None
                 if did:
                     self.done += 1
+                self.doing = did["did"] if did else None
+
+                if lane == 0 and (did or self.left) and time.monotonic() - self._counted_at > 30.0:
+                    self._counted_at = time.monotonic()
+                    try:
+                        self.left = {k: n for k, n in debt(conn, self._kinds).items() if n}
+                    except Exception:
+                        log.exception("worker=chores debt failed")
 
                 if did is None and lane == 0 and self._ceiling_bytes is not None:
                     try:

@@ -8,7 +8,7 @@
 
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
-export function createPeoplePanel({ product, read, update, notify, browse, renamed, ask }) {
+export function createPeoplePanel({ product, _read, update, notify, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
   const list = document.querySelector('[data-people-list]');
   const stage = document.querySelector('[data-people-stage]');
