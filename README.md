@@ -77,22 +77,23 @@ that never changed.
 
 ![The Develop editor](docs/assets/screens/develop.jpg)
 
-Press **D** and any photo opens in a full non-destructive **Develop** module: a
-live WebGL2 editor with Lightroom-ordered panels — white balance, tone,
-presence, an interactive tone curve, HSL, masking (brush / linear / radial /
-luminance / colour-range), heal, crop, and history.
+Press **D** and the photograph opens for editing, non-destructively, in
+Lightroom's own dialect: an edit is a decision that names the same crs settings
+Lightroom writes into a sidecar, so import and export are transcription, never
+translation. Crop with **C**, adjust light, colour and presence, and *Save
+metadata for Lightroom* writes the sidecar back with every other block kept
+element for element, the LRTimelapse discipline.
 
-- **Its own RAW pipeline.** DNG colour science pixel-matched to Lightroom, and a
-  decoder for the lossy JPEG-XL DNGs LibRaw cannot open — a 2048px base in 0.4 s.
-- **The twin.** Every edit runs *twice* — a WebGL shader for the live preview, a
-  NumPy pipeline for export — pinned to a shared constants table so they stay
-  identical to within **0.4 of 255** on every pixel. What you see is exactly
-  what you export.
+- **One pipeline.** The colour mathematics lives in `web/pixels/`, pure NumPy
+  over arrays, and the grid tile, the loupe and the export all render through
+  the same function at different sizes. What you see is what you export.
 - **A physically-modeled film engine.** Not a LUT. It models the photochemistry:
   spectral layer exposure, halation, H&D characteristic curves, DIR couplers,
-  per-layer grain. Eight stocks tuned against **53 real lab scans** — the
-  CineStill 800T glow *emerges* from the physics rather than being painted on.
-  [Play with the halation model →](https://azimuthphoto.com/log/#ch-darkroom)
+  per-layer grain. Fourteen stocks, eight of them tuned against **53 real lab
+  scans**. [Play with the halation model →](https://azimuthphoto.com/log/#ch-darkroom)
+- **Honest about the gap.** The full Lightroom-shaped workspace (presets,
+  curves, colour grading wheels, HDR) is the next phase, and the tone parity gap
+  to Adobe's render is measured, not assumed.
 
 ## The library
 
@@ -123,20 +124,21 @@ photograph.
 
 ## Search
 
-Two engines answer every query and their results are fused: **metadata**
-(filenames, folders, cameras, lenses, dates via trigram FTS) and **semantic
-embeddings**, so "night sky over trees" finds the frame you meant. The omnibox
-shows live results, facet completions (`camera:`, `lens:`, `folder:`…) and
-natural date parsing as you type.
+Three doors answer every query and their results are fused by rank: the
+**words** (filenames, folders, cameras, lenses, dates), the **sets you named**
+(an album and a label are one door), and the **embedding space**, so "night sky
+over trees" finds the frame you meant. Focusing the box offers the library's
+own shape as cards (years, cameras, kinds, orientations, albums) that apply as
+chips; typing narrows them while the meaning search runs underneath.
 
 Everything runs locally against vectors stored in your own catalog — nothing is
 sent anywhere, and search answers whether or not a model is loaded.
 
 ## Built for speed
 
-- **A tiered preview cache** (small / medium / large / originals) with size
-  budgets, pre-generated in the background so browsing never waits on a slow
-  external drive.
+- **Two tiles per photograph**, a grid tile kept forever and a screen-sized
+  loupe tile under one ceiling, made once from one decode and read by the
+  window as files, so browsing never waits on a slow external drive.
 - **A virtualized grid** keeps the DOM tiny no matter how deep you scroll —
   50,000 photos feel like 50.
 - **Work is a query, not a queue.** Everything computed — tiles, embeddings,
@@ -203,7 +205,8 @@ Windows, Python 3.12, Node 22:
 git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
 cd azimuth-photo
 python -m venv web\.venv
-web\.venv\Scripts\python.exe -m pip install -r webequirements-v2.txt
+web\.venv\Scripts\python.exe -m pip install -r web
+equirements-v2.txt
 npm ci
 .\scripts\start_azimuth_windows.ps1
 ```
