@@ -24,6 +24,7 @@
   --accent-tint: #241512;
   --hover-line: #666a72;
   --ring: rgb(238 241 244 / 70%);
+  --stack-band: rgb(238 241 244 / 16%);
   --warn: #d9a441;
   --ok: #66bfa0;
   --radius: 4px;
@@ -959,9 +960,10 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 }
 .stack-badge:hover { background: rgb(0 0 0 / 85%); }
 .stack-badge.is-open { color: var(--accent); }
-/* A run that is open: its members wear a thin tie to the cover, so a row
-   of near-identical frames reads as one set rather than a repeat. */
-.photo-cell.is-member { box-shadow: inset 3px 0 0 var(--line-strong); }
+/* A stack wears a band: each cell's halo is half the gap, so cover and
+   members meet in one continuous frame around the set, row to row. */
+.photo-cell.is-stacked { box-shadow: 0 0 0 2px var(--stack-band); }
+.photo-cell.is-stacked.is-selected { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 1px var(--accent); }
 .import-choose { display: flex; gap: 6px; }
 .import-progress { margin: 10px 0 0; color: var(--text); font-size: 13px; }
 .toast {

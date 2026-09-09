@@ -267,3 +267,9 @@ finding was checked and the numbers said no.
 | X11 | The loupe's fit ceiling mixed axes for a turned photograph | matching axes | shipped |
 | X12 | A pick that waited on a fill could write onto an undone set | the generation is checked after the wait | shipped |
 | X13 | An unreadable date decision churned a good metadata cache row every repair | a bad decision raises; only a bad row is dropped | shipped |
+
+## Stacks (owner's ask, 2026-09-09)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| K1 | Cadence stacks over-group and hide frames; every stack is collapsed by default | a stack is a decision (S makes one from marked frames, or from the burst the cadence law proposes around one frame; Shift+S unstacks; Undo on both); stacks open by default with a band; the badge folds one, a bar toggle collapses all | shipped |

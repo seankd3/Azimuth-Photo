@@ -31,7 +31,7 @@ import stacks
 import tiles
 import work
 from model import cache, copies, criteria, cull, decisions, drives, intake, photos, sets, trash
-from model.scope import EVERYTHING, Scope, all_of, any_of, covers_only, folder as in_folder, ids as these, outside, where as scope_where
+from model.scope import EVERYTHING, Scope, all_of, any_of, covers_only, folded, folder as in_folder, ids as these, outside, where as scope_where
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -255,11 +255,13 @@ class Library:
             parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
             parts.append(criteria.compile(self.conn, view["chips"]))
-        # The browse's resting state: stack members wait behind their cover,
-        # except the covers the person has opened. A stack chip is the step
-        # inside one, so it lifts the collapse entirely.
+        # Stacks are open unless the person collapsed them: collapsed, the
+        # members wait behind their cover except the covers opened; open,
+        # they sit in place except the covers folded. A stack chip is the
+        # step inside one, so it lifts either.
         if not any(c.get("is") == "stack" for c in (view.get("chips") or ())):
-            parts.append(covers_only(view.get("expanded") or ()))
+            parts.append(covers_only(view.get("expanded") or ()) if view.get("collapsed")
+                         else folded(view.get("folded") or ()))
         return all_of(*parts)
 
     def _shelf(self, set_id: str) -> Scope:
@@ -371,6 +373,17 @@ class Library:
     def turn(self, photo_ids, by: int = 90) -> dict:
         self._open()
         return cull.turn(self.conn, photo_ids, by=int(by))
+
+    def stack(self, photo_ids) -> dict:
+        """These photographs become one stack; one photograph means the
+        cadence run around it."""
+
+        self._open()
+        return self.changed(stacks.stack(self.conn, photo_ids))
+
+    def unstack(self, photo_ids) -> dict:
+        self._open()
+        return self.changed(stacks.unstack(self.conn, photo_ids))
 
     def _photo_row(self, photo_id: int):
         row = self.conn.execute(

@@ -185,6 +185,12 @@ class Desktop:
     def turn(self, photo_ids: list[int], by: int = 90) -> dict:
         return self._run(lambda library: library.turn(photo_ids, by=int(by)))
 
+    def stack(self, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.stack(photo_ids))
+
+    def unstack(self, photo_ids: list[int]) -> dict:
+        return self._run(lambda library: library.unstack(photo_ids))
+
     def develop(self, photo_id: int, patch: dict) -> dict:
         return self._run(lambda library: library.develop(int(photo_id), patch or {}))
 

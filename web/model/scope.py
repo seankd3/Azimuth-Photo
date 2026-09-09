@@ -287,16 +287,26 @@ def stacked_under(cover_id: int) -> Scope:
 
 
 def covers_only(expanded=()) -> Scope:
-    """The library with its stacks collapsed: members wait behind their
-    cover. The browse's resting state. A cover the person has opened shows
-    its members in place -- in a date sort they sit right after it, because
-    a run is consecutive by construction."""
+    """Every stack collapsed: members wait behind their cover, except the
+    covers the person has opened. Rank draws this way, so a burst never
+    floods a round; the grid draws this way only when asked to collapse."""
 
     opened = [int(cover) for cover in expanded]
     if not opened:
         return Scope("i.stack_of IS NULL")
     marks = ",".join("?" for _ in opened)
     return Scope(f"(i.stack_of IS NULL OR i.stack_of IN ({marks}))", tuple(opened))
+
+
+def folded(covers=()) -> Scope:
+    """Every stack open -- members sit in place after their cover -- except
+    the covers the person has folded. The grid's resting state."""
+
+    closed = [int(cover) for cover in covers]
+    if not closed:
+        return EVERYTHING
+    marks = ",".join("?" for _ in closed)
+    return Scope(f"(i.stack_of IS NULL OR i.stack_of NOT IN ({marks}))", tuple(closed))
 
 
 def ids(image_ids) -> Scope:

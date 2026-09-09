@@ -45,6 +45,7 @@ ROTATE = "rotate"      # 0/90/180/270, when the file itself is filed sideways
 DATE = "date"          # a corrected capture date
 PLACE = "place"        # where it was taken: {lat, lon}, from a track or you
 FORGET = "forget"      # this subject is no longer wanted
+STACK = "stack"        # this photograph sits behind another (the cover's hash), or None
 
 # Decisions that are also browse columns: the family, its column on `images`,
 # what a photograph has before any decision, and what counts as a value. The

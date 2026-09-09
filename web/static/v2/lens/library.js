@@ -130,7 +130,9 @@ function photoCell(photo, index, actions) {
   cell.dataset.index = index;
   cell.dataset.kind = 'photo';
   cell.dataset.photoId = photo.id;
-  cell.dataset.photoKey = `${photo.id}:${photo.tail}`;
+  // The key carries the stacking too: a frame that joined or left a stack
+  // is a different cell, rebuilt with its band and badge.
+  cell.dataset.photoKey = `${photo.id}:${photo.tail}:${photo.stack_of || 0}:${photo.stack || 0}`;
   cell.setAttribute('aria-pressed', 'false');
 
   const image = element('img');
@@ -143,20 +145,23 @@ function photoCell(photo, index, actions) {
   // A star earned by the ranking, worn where the ranking is the order.
   if (photo.stars > 0) cell.dataset.stars = photo.stars;
   if (photo.stack) {
-    // A cover fronts its run — a burst, a timelapse, a panorama sweep —
-    // and the badge opens it in place: the members take their seats right
-    // after the cover and leave again on the next click. A span, because
-    // the cell is already a button and a button may not hold another.
-    const open = actions.expanded?.has(photo.id);
+    // A cover fronts its stack and wears its count; the badge folds it or
+    // opens it in place: the members take their seats right after the
+    // cover and leave again on the next click. A span, because the cell is
+    // already a button and a button may not hold another.
+    const open = actions.stackOpen?.(photo.id);
     const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''), `▤ ${photo.stack + 1}`);
     badge.setAttribute('role', 'button');
-    badge.title = open ? 'Close the set (S)' : `A set of ${photo.stack + 1} — open it (S)`;
+    badge.title = open ? `A stack of ${photo.stack + 1} — fold it (S)` : `A stack of ${photo.stack + 1} — open it (S)`;
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
       actions.stack?.(photo, index);
     });
     cell.append(badge);
   }
+  // A stack wears a band: cover and members alike, so a row of frames
+  // reads as one set. Members carry the tie, covers the badge.
+  if (photo.stack_of || photo.stack) cell.classList.add('is-stacked');
   if (photo.stack_of) cell.classList.add('is-member');
   cell.addEventListener('click', (event) => {
     // Clicking a photograph makes the grid the keyboard's surface — Y/N
@@ -209,7 +214,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const key = String(index);
     let cell = current.get(key);
     const matches = photo
-      ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}`
+      ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}:${photo.stack_of || 0}:${photo.stack || 0}`
       : cell?.dataset.kind === 'skeleton';
     if (!matches) cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
     positionCell(cell, layout, index, photo);
@@ -232,9 +237,9 @@ function reconcileGrid(grid, state, actions, layout, range) {
       // A cell that stays keeps its badge; the badge keeps up with the set.
       const badge = cell.querySelector('.stack-badge');
       if (badge) {
-        const open = Boolean(actions.expanded?.has(photo.id));
+        const open = Boolean(actions.stackOpen?.(photo.id));
         badge.classList.toggle('is-open', open);
-        badge.title = open ? 'Close the set (S)' : `A set of ${photo.stack + 1} — open it (S)`;
+        badge.title = open ? `A stack of ${photo.stack + 1} — fold it (S)` : `A stack of ${photo.stack + 1} — open it (S)`;
       }
     }
     desired.push(cell);

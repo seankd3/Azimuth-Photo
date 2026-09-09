@@ -2403,97 +2403,88 @@ class APlaceIsAFunctionOfTime(CoreCase):
         self.assertIsNone(places.of(self.conn, digest), "the file already said")
 
 
-class AStackIsACadence(CoreCase):
-    """A beat makes a set: four or more frames on one repeated interval stack
-    behind their first frame, keeping the jitter a camera adds -- focus and
-    exposure -- and nothing looser; anything less regular is just
-    photographs. The stack is a projection over capture times, the collapse
-    is one scope criterion, and the chip steps inside."""
+class AStackIsADecision(CoreCase):
+    """A stack is a decision the person makes: S on marked frames makes
+    one, S on a lone frame stacks the cadence run around it (four or more
+    frames on one beat, with a camera's jitter), Shift+S takes it apart.
+    Nothing is stacked unasked. The grid shows stacks open with a band; the
+    collapse is one scope criterion, and the chip steps inside."""
 
     def _at(self, tail, when):
+        # A stack is a decision, and a decision is keyed on identity.
+        import hashlib
         pid = self.photo(tail)
-        self.conn.execute("UPDATE images SET date_taken = ? WHERE id = ?", (when, pid))
+        digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
+        self.conn.execute("UPDATE images SET date_taken = ?, content_hash = ? WHERE id = ?", (when, digest, pid))
         return pid
 
-    def test_a_run_at_one_beat_stacks_behind_its_first_frame(self):
+    def _held(self):
+        return {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
+
+    def test_nothing_is_stacked_unasked(self):
+        import stacks
+
+        run = [self._at(f"Raws/t{i}.cr3", f"2026-05-26 18:00:{i * 2:02d}") for i in range(5)]
+        self.assertEqual(stacks.project(self.conn), 0)
+        self.assertTrue(all(v is None for v in self._held().values()))
+        self.assertEqual(stacks.around(self.conn, run[2]), run, "but the law knows the run")
+
+    def test_s_on_a_lone_frame_stacks_the_run_around_it(self):
         import stacks
 
         run = [self._at(f"Raws/t{i}.cr3", f"2026-05-26 18:00:{i * 2:02d}") for i in range(5)]
         loner = self._at("Raws/loner.cr3", "2026-05-26 18:30:00")
         trio = [self._at(f"Raws/x{i}.cr3", f"2026-05-26 19:00:{i * 3:02d}") for i in range(3)]
 
-        self.assertEqual(stacks.project(self.conn), 4)
-        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
-        self.assertIsNone(held[run[0]], "the first frame is the cover")
+        said = stacks.stack(self.conn, [run[3]])
+        held = self._held()
+        self.assertEqual(said["cover"], run[0], "the earliest frame is the cover")
         self.assertTrue(all(held[i] == run[0] for i in run[1:]))
-        self.assertIsNone(held[loner])
-        self.assertTrue(all(held[i] is None for i in trio), "three frames are not a set")
+        self.assertIsNone(held[run[0]])
+        self.assertEqual(stacks.stack(self.conn, [loner]), {"cover": None, "members": []})
+        self.assertEqual(stacks.around(self.conn, trio[1]), [trio[1]], "three frames are not a set")
 
-    def test_a_burst_shares_one_second_and_still_stacks(self):
-        import stacks
-
-        burst = [self._at(f"Raws/b{i}.cr3", "2026-05-26 18:00:07") for i in range(4)]
-        self.assertEqual(stacks.project(self.conn), 3)
-        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
-        self.assertTrue(all(held[i] == burst[0] for i in burst[1:]))
-
-    def test_an_intervalometer_run_keeps_its_beat_through_focus_and_exposure(self):
-        # A 33 s beat whose frames start 31, 38, 30 and 34 s apart: the
-        # shutter ran longer in one, autofocus hunted before another.
+    def test_the_law_keeps_a_beat_through_focus_and_exposure_and_refuses_a_stroll(self):
         import stacks
 
         seconds = [0, 31, 69, 99, 133, 166]
-        run = [self._at(f"Raws/i{i}.cr3", f"2026-09-07 21:00:{0:02d}") for i in range(len(seconds))]
-        for pid, at in zip(run, seconds):
-            self.conn.execute("UPDATE images SET date_taken = ? WHERE id = ?",
-                              (f"2026-09-07 21:{at // 60:02d}:{at % 60:02d}", pid))
-        self.assertEqual(stacks.project(self.conn), 5)
-        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
-        self.assertTrue(all(held[i] == run[0] for i in run[1:]))
+        run = [self._at(f"Raws/i{i}.cr3", f"2026-09-07 21:{at // 60:02d}:{at % 60:02d}") for i, at in enumerate(seconds)]
+        self.assertEqual(stacks.around(self.conn, run[0]), run)
+        burst = [self._at(f"Raws/a{i}.cr3", f"2026-09-07 12:00:{at:02d}") for i, at in enumerate([10, 10, 11, 13, 13, 14])]
+        self.assertEqual(stacks.around(self.conn, burst[5]), burst)
+        stroll = [self._at(f"Raws/w{i}.cr3", f"2026-09-07 15:{at // 60:02d}:{at % 60:02d}") for i, at in enumerate([0, 20, 65, 155, 183])]
+        self.assertEqual(stacks.around(self.conn, stroll[2]), [stroll[2]])
+        scan = self._at("Raws/scan.tif", "2026-05-26 00:00:00")
+        self.assertEqual(stacks.around(self.conn, scan), [scan], "midnight carries no cadence")
 
-    def test_a_stroll_is_not_a_set(self):
-        # Gaps of 20, 45, 90 and 28 s have no beat to keep.
+    def test_marked_frames_become_a_stack_and_shift_s_takes_it_apart(self):
         import stacks
 
-        for i, at in enumerate([0, 20, 65, 155, 183]):
-            self._at(f"Raws/w{i}.cr3", f"2026-09-07 15:{at // 60:02d}:{at % 60:02d}")
-        self.assertEqual(stacks.project(self.conn), 0)
+        frames = [self._at(f"Raws/m{i}.cr3", f"2026-05-2{i} 10:00:00") for i in range(3)]
+        said = stacks.stack(self.conn, [frames[2], frames[0], frames[1]])
+        self.assertEqual(said["cover"], frames[0])
+        self.assertEqual(sorted(said["members"]), sorted(frames[1:]))
+        self.assertEqual(sorted(stacks.unstack(self.conn, [frames[0]])["unstacked"]), sorted(frames[1:]))
+        self.assertTrue(all(v is None for v in self._held().values()))
+        stacks.stack(self.conn, frames)
+        self.assertEqual(stacks.unstack(self.conn, [frames[2]])["unstacked"], [frames[2]], "a member steps out alone")
+        self.assertEqual(self._held()[frames[1]], frames[0])
 
-    def test_a_burst_survives_one_autofocus_pause(self):
-        # Continuous drive at 0-1 s with one 2 s hunt in the middle.
-        import stacks
-
-        burst = [self._at(f"Raws/a{i}.cr3", f"2026-09-07 12:00:{at:02d}")
-                 for i, at in enumerate([10, 10, 11, 13, 13, 14])]
-        self.assertEqual(stacks.project(self.conn), 5)
-        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
-        self.assertTrue(all(held[i] == burst[0] for i in burst[1:]))
-
-    def test_midnight_dates_carry_no_cadence(self):
-        # Film scans arrive at exact midnight in batches; forty frames "in
-        # one second" there is a save, not a burst.
-        import stacks
-
-        for i in range(6):
-            self._at(f"Raws/scan{i}.tif", "2026-05-26 00:00:00")
-        self.assertEqual(stacks.project(self.conn), 0)
-
-    def test_the_collapse_hides_members_and_the_chip_steps_inside(self):
+    def test_open_by_default_the_collapse_hides_members_and_the_chip_steps_inside(self):
         import stacks
         from model import criteria
-        from model.scope import covers_only
+        from model.scope import covers_only, folded
 
         run = [self._at(f"Raws/c{i}.cr3", f"2026-05-26 18:00:{i:02d}") for i in range(4)]
-        stacks.project(self.conn)
+        stacks.stack(self.conn, run)
 
-        resting = [r["id"] for r in library_surface.photos(
-            self.conn, scope=covers_only())]
-        self.assertIn(run[0], resting)
-        self.assertTrue(all(i not in resting for i in run[1:]))
-        cover = next(r for r in library_surface.photos(self.conn, scope=covers_only())
-                     if r["id"] == run[0])
+        shown = [r["id"] for r in library_surface.photos(self.conn, scope=folded())]
+        self.assertEqual(sorted(shown), sorted(run), "open: every frame in place")
+        self.assertEqual([r["id"] for r in library_surface.photos(self.conn, scope=folded([run[0]]))], [run[0]])
+        resting = [r["id"] for r in library_surface.photos(self.conn, scope=covers_only())]
+        self.assertEqual(resting, [run[0]])
+        cover = next(r for r in library_surface.photos(self.conn, scope=covers_only()) if r["id"] == run[0])
         self.assertEqual(cover["stack"], 3, "the cover carries its member count")
-
         inside = [r["id"] for r in library_surface.photos(
             self.conn,
             scope=criteria.compile(self.conn, [{"is": "stack", "values": [str(run[0])]}]))]

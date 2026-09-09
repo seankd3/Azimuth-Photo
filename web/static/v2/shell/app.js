@@ -201,21 +201,32 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 // What the window is looking at, as the bridge speaks it. Null when it is
 // the whole library, so the server sees "no view" rather than three empties.
 function viewOf() {
-  const { folders, album, chips, expanded } = read();
-  const opened = [...(expanded || [])];
-  if (!(folders || []).length && !album && !(chips || []).length && !opened.length) return null;
-  return opened.length ? { folders, album, chips, expanded: opened } : { folders, album, chips };
+  const { folders, album, chips, collapsed, expanded, folded } = read();
+  const exceptions = [...((collapsed ? expanded : folded) || [])];
+  if (!(folders || []).length && !album && !(chips || []).length && !exceptions.length && !collapsed) return null;
+  const view = { folders, album, chips };
+  if (collapsed) view.collapsed = true;
+  if (exceptions.length) view[collapsed ? 'expanded' : 'folded'] = exceptions;
+  return view;
 }
 
 // Open or close one stack in place: its members take their seats after the
-// cover and the rest of the grid stays where it is.
+// cover and the rest of the grid stays where it is. Which set the cover
+// joins depends on the resting state: an exception to collapsed, or to open.
+function stackIsOpen(coverId) {
+  const { collapsed, expanded, folded } = read();
+  return collapsed ? expanded.has(coverId) : !folded.has(coverId);
+}
 async function toggleStack(coverId) {
-  const expanded = new Set(read().expanded);
-  if (expanded.has(coverId)) expanded.delete(coverId);
-  else expanded.add(coverId);
-  update({ expanded });
+  const key = read().collapsed ? 'expanded' : 'folded';
+  const held = new Set(read()[key]);
+  if (held.has(coverId)) held.delete(coverId);
+  else held.add(coverId);
+  update({ [key]: held });
   try {
-    await refreshInPlace({ shelves: false });
+    // The view's size moved -- members came or went -- so this is a full
+    // re-read, not a worker tick's.
+    await refreshInPlace();
     const { view, sort } = read();
     if (view === 'library' && (sort === 'newest' || sort === 'oldest') && !seeking()) {
       update({ days: await product.days(viewOf()) });
@@ -614,7 +625,7 @@ function visibleGrid() {
     select: selectPhoto,
     open: openPhoto,
     stack: (photo) => { void toggleStack(photo.id); },
-    expanded: read().expanded,
+    stackOpen: stackIsOpen,
     drag: (index, event) => {
       const photo = read().photos.get(index);
       if (!photo) return;
@@ -1094,6 +1105,25 @@ function viewMoved() {
   loadView();
 }
 
+// Making and unmaking stacks, with the way back: a stack made is undone by
+// taking it apart, a stack taken apart is undone by making it again.
+async function restack(verb, ids) {
+  try {
+    const said = verb === 'stack' ? await product.stack(ids) : await product.unstack(ids);
+    const members = verb === 'stack' ? (said.cover ? [said.cover, ...said.members] : []) : said.unstacked;
+    if (!members.length) { notify(verb === 'stack' ? 'No burst around this frame — mark the frames and press S.' : 'Nothing here is stacked.'); return; }
+    await refreshInPlace();
+    const n = members.length;
+    undo.show(verb === 'stack' ? `Stacked ${n} frames.` : `Unstacked ${n} frames.`, async () => {
+      if (verb === 'stack') await product.unstack([members[0]]);
+      else await product.stack(members);
+      await refreshInPlace();
+    });
+  } catch (error) {
+    notify(error.message);
+  }
+}
+
 let parked = null;
 async function unpark() {
   const held = parked;
@@ -1443,6 +1473,8 @@ function renderChrome(state) {
   const many = (state.marked?.size || 0) > 1;
   // One button, one place: it reads Pick or Clear for what is under the
   // cursor, so focus and the pixel keep their meaning across a click.
+  renderStacksToggle(state);
+  stacksToggle.hidden = state.view !== 'library' || holding;
   const pickButton = document.querySelector('[data-action="pick"]');
   const picked = !many && state.selected?.status === 'picked';
   pickButton.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: picked ? 'U' : 'P' }), ` ${picked ? 'Clear' : 'Pick'}`);
@@ -1623,6 +1655,12 @@ document.addEventListener('click', (event) => {
   const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
   if (size) rankWorkflow.resize(Number(size));
   if (action === 'pick') cullWorkflow.apply(event.target.closest('[data-action]').dataset.verb || 'pick');
+  if (action === 'collapse-stacks') {
+    const collapsed = !read().collapsed;
+    remember('azimuth.stacks-collapsed', collapsed);
+    update({ collapsed, expanded: new Set(), folded: new Set() });
+    viewMoved();
+  }
   if (action === 'turn') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
   if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
@@ -1703,15 +1741,19 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key.toLowerCase() === 's' && !isTyping && !event.ctrlKey && !event.metaKey
-      && read().view === 'library' && read().selected) {
-    // S opens or closes the set the selected photograph belongs to, cover or
-    // member alike — Lightroom's key, the grid's own grammar.
+      && read().view === 'library' && selection().length) {
+    // S is the stack key, Lightroom's: on a marked set it makes one; on a
+    // frame in a stack it opens or folds that stack; on a lone frame it
+    // stacks the burst the cadence law finds around it. Shift+S takes a
+    // stack apart. Every one has its way back.
+    const ids = selection();
     const held = read().selected;
-    const cover = held.stack_of || (held.stack ? held.id : null);
-    if (cover) {
-      void toggleStack(cover);
-      event.preventDefault();
-    }
+    const cover = held?.stack_of || (held?.stack ? held.id : null);
+    if (event.shiftKey) void restack('unstack', cover ? [cover] : ids);
+    else if (ids.length > 1) void restack('stack', ids);
+    else if (cover) void toggleStack(cover);
+    else void restack('stack', ids);
+    event.preventDefault();
     return;
   }
   if (event.key === 'Escape') {
@@ -1870,7 +1912,7 @@ const SHORTCUTS = [
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
     ['Enter / Space', 'Open the loupe'], ['P', 'Pick'], ['U', 'Clear the pick'], ['X', 'Reject'],
-    ['R / Shift+R', 'Turn left / right'], ['B', 'Toss into the Quick album'], ['S', 'Open or close a set'],
+    ['R / Shift+R', 'Turn left / right'], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
   ]],
   ['The loupe', [
@@ -1914,6 +1956,13 @@ const keysDialog = document.querySelector('[data-keys-dialog]');
     body.append(head, list);
   }
 }
+const stacksToggle = document.querySelector('[data-action="collapse-stacks"]');
+function renderStacksToggle(state) {
+  stacksToggle.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: '▤' }),
+    state.collapsed ? ' Stacks collapsed' : ' Stacks open');
+  stacksToggle.title = state.collapsed ? 'Show every frame of every stack' : 'Collapse every stack behind its cover';
+}
+update({ collapsed: recall('azimuth.stacks-collapsed', false) === true });
 document.querySelector('[data-sort]').addEventListener('change', async (event) => {
   // The photograph under the cursor is what the person was looking at; a
   // new order finds it again rather than dropping it.

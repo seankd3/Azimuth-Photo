@@ -1,7 +1,11 @@
 const state = {
   chips: [],
   // Covers the person has opened: their members sit in the grid after them.
+  // Stacks open by default: `folded` holds the covers closed while open,
+  // `expanded` the covers opened while collapsed.
+  collapsed: false,
   expanded: new Set(),
+  folded: new Set(),
   album: null,
   albums: [],
   people: [],

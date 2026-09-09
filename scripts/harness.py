@@ -50,8 +50,11 @@ STUB = r"""<script>
   photos[0].stack = 3;
   const members = [1, 2, 3].map((n) => ({ ...photos[0], id: 1000 + n, stack: 0, stack_of: 1,
     tail: `Raws/Digital/2026/2026-09-08/m${n}.cr3` }));
-  const shown = (view) => (view && view.expanded && view.expanded.includes(1))
-    ? [photos[0], ...members, ...photos.slice(1)] : photos;
+  const shown = (view) => {
+    const collapsed = view && view.collapsed;
+    const open = collapsed ? (view.expanded || []).includes(1) : !((view && view.folded) || []).includes(1);
+    return open ? [photos[0], ...members, ...photos.slice(1)] : photos;
+  };
   const api = {
     home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p,
     counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 0 }),
@@ -59,7 +62,8 @@ STUB = r"""<script>
     pulse: () => ({ done: 0, swept: 1, shaped: 0, cards: 0, doing: null, left: {} }),
     look: () => 0,
     photos: (sort, limit, offset, view) => (sort === 'oldest' ? [...shown(view)].reverse() : shown(view)).slice(offset, offset + limit),
-    size: (view) => shown(view).length, folders: () => [], photo: (pid) => shown({ expanded: [1] }).find((p) => p.id === pid),
+    size: (view) => shown(view).length, folders: () => [], photo: (pid) => shown(null).find((p) => p.id === pid),
+    stack: (ids) => ({ cover: ids[0], members: ids.slice(1) }), unstack: (ids) => ({ unstacked: ids }),
     trash_photos: () => [], trash_count: () => 0,
     days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
     sessions: () => [],
