@@ -124,34 +124,12 @@ Sidebar (sections collapsible, state remembered):
 - **No second browse grammar for any new noun** — people, labels, sessions
   are all chips; there is one grid, one loupe, one Refine.
 
-## Build order — all six landed 08-22 (commits ead39c0f…)
+## Status
 
-1. **The rename and the calm sidebar** — DONE (`ead39c0f`): Albums/Labels/
-   People, collapsible sections, place-aware empty states.
-2. **The face wall** — DONE: a workspace stage of big faces; the sidebar
-   keeps the named plus three Someones and a door row; Name… is a button
-   on the card; browse-before-name everywhere.
-3. **Smart-album exceptions** — DONE (`ead39c0f`): (rules ∪ pinned) ∖
-   denied in `criteria.resolve`; drag-in and Exclude legal on smart.
-   Target-album for B — DONE (`c9a577db`): the album being viewed is the
-   target; B prunes inside it, fills Quick everywhere else.
-4. **Sessions** — DONE (`1b61d325`), reshaped by arithmetic: 3-hour
-   sessions number ~10k at 155k photos, a header per fifteen frames — so
-   the grid chapters are **days** (exact index math, one GROUP BY) and
-   named sessions are **cards** in the search drop applying an ordinary
-   taken chip. Folder-date fallback for film scans is deliberately parked
-   until the E: originals are attached and real scan folders exist to
-   design against.
-5. **The teach loop** — DONE (`ead39c0f`): labels born by teaching, Y/N
-   from any search or label view, exclusions as denials. Per-label
-   calibration still parked behind the E: backfill. The Teach strip
-   (borderline row inside a label) remains open.
-6. **More like this** — DONE (`c9a577db`): selection-seeded find, seeds
-   omitted from their own answer; album growing = More like this over
-   exemplars + Add to album (composed, not bespoke).
-
-Performance rides alongside (measured 2026-08-22 at 155k rows): the folder
-tree's 30 s correlated subquery, the index spelling that costs counts and
-chip totals hundreds of milliseconds, deep-scroll OFFSET, and the shelf
-query that must become a written summary. Browsing stays instant when the
-archive arrives.
+All six surfaces landed on 08-22 (`ead39c0f` … `c9a577db`); the ledger
+(`REWRITE_LEDGER.md`) carries the proof. Two things stay deliberately parked
+until the archive drive's originals are attached and real scan folders exist
+to design against: the folder-date fallback for film scans, and per-label
+calibration. The Teach strip (the borderline row inside a label) remains
+open. Performance was measured alongside (2026-08-22 at 155k rows) and the
+findings ledger carries what is left.

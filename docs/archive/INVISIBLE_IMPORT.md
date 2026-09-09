@@ -1,5 +1,7 @@
 # INVISIBLE_IMPORT — local-first ingest, silent drain (design, 2026-07-16)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** The local-first, silent, honest
 > product intent remains valuable. Satellite, hub, route, and Tauri mechanisms
 > below describe the rejected V1 implementation and are not V2 architecture.

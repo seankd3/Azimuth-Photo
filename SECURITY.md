@@ -6,9 +6,8 @@ Please report security issues privately through [GitHub security advisories](htt
 
 Include a clear description, reproduction steps, affected version, and any proof of impact. We will confirm receipt, investigate, and coordinate disclosure with you.
 
-## Supported versions
+## Scope
 
-| Version | Supported |
-| --- | --- |
-| Latest release | Yes |
-| Older releases | No |
+2.0 is pre-release: report against `main`. The app is one local desktop
+process with no listening port and no accounts, so the realistic surface is
+file handling (RAW and sidecar parsing) and the frozen bundle itself.

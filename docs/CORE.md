@@ -1,16 +1,10 @@
 # Azimuth 2.0 — the core
 
-**Status (08-18):** the core has landed on the `v2-carve` rewrite branch. The
-rewrite is in progress, has not been merged or installed as the finished
-product, and does not inherit a release claim from the old application.
-
-| | |
-|---|---|
-| the 2.0 core, proven on the live catalog | ~3,500 lines |
-| `web/` production Python | 74,283 → **64,259** |
-| tests | 32,657 → **25,327** |
-| judgements in the log | 88,690 |
-| embedding vectors keyed on content hashes | 42,937 |
+**Status (09-09):** the rewrite is `main`. The V1 application left the tree
+on 09-08; the ledger (`REWRITE_LEDGER.md`) reads Proven or Removed for every
+file, the six gates read 0, and the owner's working library runs on it. The
+numbers in the sections below are the measurements that shaped the design,
+dated where they were taken; `development.md` has the tree as it is.
 
 Rebuilt on the core and their machinery deleted, each verified in the running
 app: tiles and media, the grid and library queries, search, comparisons and
@@ -101,7 +95,7 @@ Three rules:
 
 ```sql
 drives    (id, uuid, root, is_record)
-photos    (id, hash, version_of, tail, taste, <your decisions>, <computed memo>)
+images    (id, content_hash, version_of, tail, elo, <your decisions>, <computed memo>)
 copies    (photo_id, drive_id, tail NULL, seen_at)
 decisions (subject, family, value, at)
 cache     (hash, kind, recipe, state, path NULL, value NULL, bytes)
@@ -197,9 +191,14 @@ ui         renders queries, calls verbs
 
 ### The whole backend, as files
 
-Not a diagram — the actual target tree, with a line budget per file. A surface
-that will not fit its budget is a surface whose shape is still wrong, and that
-is the useful thing about writing the numbers down before the code.
+Not a diagram — the target tree as it was written on 08-16, with a line
+budget per file. A surface that will not fit its budget is a surface whose
+shape is still wrong, and that is the useful thing about writing the numbers
+down before the code. The tree that exists is in `development.md`: `app.py`
+never came (the seven functions are the API, and `desktop.py` is the edge),
+`develop/` became `pixels/` plus `develop.py`, `importer.py` became
+`model/intake.py`, and `ai.py` became the cache kinds `embed.py`,
+`faces.py` and `photostats.py`.
 
 | | Lines | What it is |
 |---|---|---|
@@ -423,8 +422,8 @@ One person, one machine. Everything that exists because the app was reachable
 over a network is deleted: owner auth, the unlock page, device tokens,
 browser-origin and rebinding checks, CORS, remote access, Tailscale serving,
 pairing. **The seven functions are the API**; HTTP is a transport and it goes
-too. The phone is parked — the Android client stops working until a transport is
-deliberately rebuilt.
+too. The phone is parked — the Android client was deleted on 09-08, and comes
+back only when a transport is deliberately rebuilt.
 
 ---
 
@@ -503,69 +502,26 @@ first time the archive is plugged in warm. Everything else may land in any
 order, which is itself a result of the core: surfaces no longer share state, so
 they no longer share a schedule.
 
-**Step 0 — purge the phantoms (blocks step 2).** `make_test_library` output was
-scanned into the live catalog and its files later deleted, leaving **17,132 rows
-that point at nothing** — 89.7% of source 5. That, not the Lightroom work, is
-what would trip the mass-missing breaker on the next scan and stall reconcile
-permanently.
-
-They are unmistakable: sequential names `20260520-000000.CR3` onward, no
-dimensions, no camera, no content hash, all stamped exactly noon, files on
-neither drive, and no judgment of any kind. But **`2026-05-20` is also a real
-shoot folder** — an EOS R5 row with EXIF `03:34:08`, real dimensions and a hash
-sits among them — so the folder is not the discriminator and a folder-wide
-delete would take photographs.
-
-The rule that cannot: purge a row only when it is *simultaneously* absent from
-disk, hash-less, dimension-less, camera-less, not EXIF-dated, and judgment-free.
-Measured: 18,911 evidence-free rows, of which **1,779 exist on disk and are kept**
-(real photos merely not scanned yet) and **17,132 are purged**. Source 5 lands at
-2,050 against 2,240 image files on `D:\Pictures`.
-
-Every source-5 figure quoted before this was ~89% phantom: the hot tier is 2,050
-rows, and hash coverage is **13%**, not 1.4%.
-
-**Also found, and fixed before any migration runs:** `data/schema.py:2307`
-commits `PRAGMA user_version = SCHEMA_VERSION` *before* returning the answer
-computed from the old value — so a migration that fails after that point stamps
-the new version anyway and is silently skipped forever after.
-
-**And the one that would have shipped.** `model/schema.sql` describes the
-core's four tables, and until 08-16 **nothing in the running application read
-it** — only `test_core.py` did. `drives`, `copies`, `decisions` and `cache`
-existed in this catalog only because the migration steps that built the core
-created them along the way. Measured on a catalog built from nothing through
-the real boot path:
-
-```
-drives MISSING · copies MISSING · decisions MISSING · cache MISSING
-images.tail MISSING · images.drive_id MISSING
-idx_photos_tail MISSING · idx_decisions_subject MISSING
--> "table images has no column named tail"
-```
-
-Every flag, status, rotation, tile, sweep and synchronize would have failed on
-a first run. This is the same shape as the `cache_image_presence` gap and it is
-worth stating as a rule: **a table created once by hand is a table that does
-not exist.** The schema is the only place a claim about the catalog is true for
-every install, and the way to check is to build one from nothing rather than to
-read the file.
-
-Both were found the same way, too — by repairing the test fixture rather than
-by reading code. Two dead lines in `test_support.py`, each left behind by a
-deletion (`_tce._clear_disk_index` from the thumbnail cache, and a
-`_drain_test_tasks` call holding only its label), were failing 201 tests before
-any assertion ran. A suite that fails everywhere reports nothing; fixing the
-harness is what made the real defect visible.
-
-**Guard rails.** Cold backup with the app stopped before any data step — one
-exists at `C:\Azimuth Photo\data\manual-backups\2026-08-15-pre-core\`, verified.
-`AZIMUTH_ALLOW_MASS_MISSING` stays unset; it is the switch that turns a stuck
-scan into 142,024 photos marked missing. Do **not** run a full scan of E: after
-step 6 — it overwrites `file_modified_at` on 143,263 rows and churns every
-thumbnail signature. Reconcile is enough, watched, not left unattended.
+*(The migration steps that stood here — purging 17,132 phantom rows, the
+cold backup, the guard rails around the first scan — were carried out on
+08-15 and 08-16 and are recorded in `archive/SIMPLIFY_LOG.md`.)*
 
 ---
+
+## Duplicate cleanup, when it is built
+
+There is no duplicate-cleanup surface yet; a stack today is a run of frames
+at one cadence (`web/stacks.py`). When byte-identical cleanup is built, the
+contract is fixed here so no surface can weaken it: the fast identity (head
+digest plus size) only nominates candidates; every candidate is read whole
+and the full digests compared; each file's device, inode, size and modified
+time must hold still across the check and be rechecked immediately before
+anything moves; the oldest filesystem-modified file is kept, ties to the
+earliest catalog record and then the lowest id; a group with an away drive, a
+changed file or disagreeing digests is deferred, never partly done; and the
+redundant copies go to Trash, whose restore is the undo. The result reads as
+a plain plan: groups verified, copies removable, bytes recoverable, exceptions
+deferred.
 
 ## The surfaces that serve nothing
 

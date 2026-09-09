@@ -63,7 +63,7 @@ const JUDGED = {
   properties: {
     is_defect: { type: 'boolean' },
     reason: { type: 'string' },
-    already_known: { type: 'boolean', description: 'true if docs/SIMPLIFY_LOG.md or MASTER_PLAN.md already records it' },
+    already_known: { type: 'boolean', description: 'true if docs/FINDINGS.md or MASTER_PLAN.md already records it' },
     fix: { type: 'string' },
   },
 }
@@ -98,7 +98,7 @@ const judged = await parallel(
     agent(
       `${HOUSE}\n\nIs this a defect, or is it how the system is meant to work?\n\n` +
         `${f.title}\nObserved: ${f.observed}\nClaimed to matter because: ${f.why_it_matters}\n\n` +
-        `Read docs/SIMPLIFY_LOG.md and MASTER_PLAN.md before answering — several of these are known ` +
+        `Read docs/FINDINGS.md and MASTER_PLAN.md before answering — several of these are known ` +
         `and recorded, and re-reporting them wastes the owner's attention. A cold cache is not a ` +
         `defect. Background work being slow is not a defect. Say is_defect=false freely.`,
       { label: `judge:${f.title.slice(0, 28)}`, phase: 'Judge', schema: JUDGED },

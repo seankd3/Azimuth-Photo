@@ -1,5 +1,7 @@
 # Camera noise profiles (dt-noise)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, setting and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** Preserve measured profile data;
 > do not infer that the V1 Develop integration is complete.
 
@@ -51,10 +53,10 @@ High-ISO fixture: `/mnt/expansion/Photos/RAWS/2024/2024-10-24/20241024-191116-7.
 
 | | Path |
 |--|------|
-| Before (NR off) | [examples/noise-profiles/20241024-191116-7-R7-ISO3200-before.png](examples/noise-profiles/20241024-191116-7-R7-ISO3200-before.png) |
-| After (profile NR) | [examples/noise-profiles/20241024-191116-7-R7-ISO3200-after.png](examples/noise-profiles/20241024-191116-7-R7-ISO3200-after.png) |
-| Diff ×8 | [examples/noise-profiles/20241024-191116-7-R7-ISO3200-diff.png](examples/noise-profiles/20241024-191116-7-R7-ISO3200-diff.png) |
-| Receipt | [examples/noise-profiles/20241024-191116-7-R7-ISO3200-receipt.json](examples/noise-profiles/20241024-191116-7-R7-ISO3200-receipt.json) |
+| Before (NR off) | [noise-profiles/20241024-191116-7-R7-ISO3200-before.png](noise-profiles/20241024-191116-7-R7-ISO3200-before.png) |
+| After (profile NR) | [noise-profiles/20241024-191116-7-R7-ISO3200-after.png](noise-profiles/20241024-191116-7-R7-ISO3200-after.png) |
+| Diff ×8 | [noise-profiles/20241024-191116-7-R7-ISO3200-diff.png](noise-profiles/20241024-191116-7-R7-ISO3200-diff.png) |
+| Receipt | [noise-profiles/20241024-191116-7-R7-ISO3200-receipt.json](noise-profiles/20241024-191116-7-R7-ISO3200-receipt.json) |
 
 Profile applied ≈ luma 37.7 / color 21.5 (R7 ISO 3200 σ at 18% grey).
 

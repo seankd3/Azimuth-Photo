@@ -1,5 +1,7 @@
 # Client Auto-Update — "The hub carries its clients" (frozen spec, Fable 2026-07-17)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Historical V1 architecture.** The hub no longer carries clients. Retain the
 > version-skew incidents as release learning, not as a V2 mechanism.
 

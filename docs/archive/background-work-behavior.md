@@ -1,5 +1,7 @@
 # Background Work Behavior Anchor
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, setting and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** The honesty and responsiveness
 > requirements survive; the named V1 workers, rows, hub roles, and schedulers do
 > not.

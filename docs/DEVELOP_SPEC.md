@@ -1,21 +1,22 @@
-# Azimuth Photo Develop Module — Architecture Spec (v1, frozen)
+# Develop — the colour-math reference (§-numbered, frozen)
 
-> **Behavior and color-math reference awaiting V2 adoption.** This is no longer
-> the source of truth for repository architecture. V2 keeps only behavior that
-> can be accepted against explicit photographs and output.
+> **The maths is the contract; the architecture is history.** `web/pixels/`
+> cites the section numbers below (§12, §22, §23, §24, §26, §28, §30) as the
+> spec each op implements. Sections 2, 3, 7, 9, 10 and 19 describe the V1
+> database, module paths, UI, lanes and definitions of done; they are
+> superseded by `DEVELOP.md` and `CORE.md` and kept only so the numbering
+> holds. There is one implementation of the maths, in NumPy; a second in
+> shaders is forbidden by `ARCHITECTURE.md`.
 
-Branch: `main`, checkout `/home/photographer/Projects/azimuth-photo`. Goal: a Lightroom-Classic-class
-non-destructive RAW develop module inside Azimuth Photo. This spec is the single source of
-truth; the WebGL renderer and the Python export renderer MUST implement the same math.
-Reference for raw-handling ideas: `/home/photographer/Projects/darktable-ref` (read, never copy GPL code verbatim —
-learn the approach, write original code).
+Goal: a Lightroom-Classic-class non-destructive RAW develop module inside
+Azimuth Photo. Reference for raw-handling ideas: the darktable study (read,
+never copy GPL code verbatim — learn the approach, write original code).
 
 ## 0. Assets & constraints
-- RAWs: `/mnt/expansion/Photos/RAWS/<year>/<YYYY-MM-DD>/...` — 82k DNG, 7k CR3, 1.2k CR2.
+- RAWs: the owner's archive, `Raws/Digital/<year>/<YYYY-MM-DD>/...` — 82k DNG, 7k CR3, 1.2k CR2.
 - 59k `.xmp` sidecars beside the raws with full `crs:*` Lightroom develop settings.
 - Active Develop caches use the configured SSD runtime cache; preserved old
   generated data lives separately on the Expansion archive.
-- Dev server: port 8022, `AZIMUTH_SMOKE_MODE=1` for tests as usual.
 - rawpy + numpy are in `web/.venv`. `darktable-cli` exists system-wide (fallback/export experiments only).
 
 ## 1. Edit state — canonical JSON
@@ -214,7 +215,7 @@ matches canvas within tolerance; suite green; screenshots captured. Honest notes
 - rawpy 0.27 decode of a 38MB DNG: **1.2s warm**, but cold file read off /mnt/expansion is **17–45s**
   (HDD at ~2MB/s under caption/embedding worker contention). Decode cost is I/O, not CPU.
 - Therefore: base cache (**.bin.gz + .jpg + .json**) lives on the root SSD at
-  `/home/photographer/.cache/azimuth-develop/base/` with LRU eviction capped at 12GB (evict by atime/mtime,
+  the Develop cache with LRU eviction capped at 12GB (evict by atime/mtime,
   check on each write). Exports stay in the configured runtime export directory.
 - UI: first-open of an uncached raw takes ~20–60s — show an honest staged progress state
   ("Reading RAW from disk…" → "Developing preview…"), never a dead spinner. Filmstrip warm-ahead
@@ -455,7 +456,7 @@ Stage order (both twins; after WB/exposure/region-tone in linear, replacing stag
 Stocks v1 (data files web/features/develop/film_stocks/<slug>.json — curves as control points +
 matrices + grain/halation params): CineStill 800T, Portra 400, Portra 160, Ektar 100, Kodak Gold 200,
 Fuji Superia X-TRA 400, Kodak Tri-X 400 (B&W path: single layer, panchromatic weighting), Ilford HP5+.
-**Validation, honest**: Sean's real film scans live at /mnt/expansion/Photos/Film Scans (lab scans incl.
+**Validation, honest**: Sean's real film scans live in the archive's `Raws/Film Scans` (lab scans incl.
 800T-era rolls; the Tungsten800 project implies 800T familiarity). Numeric parity with a specific scan
 isn't the bar (scenes differ) — the bar is characteristic behavior: halation on point highlights,
 grain structure at 1:1, palette on skin/sky/tungsten. Produce comparison contact sheets.

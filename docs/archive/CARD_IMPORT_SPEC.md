@@ -1,5 +1,7 @@
 # CARD_IMPORT_SPEC — card → satellite ingest (v1, addendum to FIELD_SPEC, 2026-07-11)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** Preserve verified-copy and
 > clear-card safety, not the satellite job architecture.
 

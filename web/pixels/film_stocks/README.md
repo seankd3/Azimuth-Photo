@@ -38,6 +38,12 @@ Honesty rule: H&D curves and spectral matrices started as **faithful approximati
 | `fuji-superia-xtra-400.json` | Fuji Superia X-TRA 400 | **Fujifilm Superia X-TRA 400** technical data. | **Sourced:** daylight Fuji consumer. **Approximated:** cooler/green H&D + crosstalk, RMS ~5. | **Tuned against 15 real San Marcos Filmlab Fuji 400 scans** (nearest Superia X-TRA proxy — folders say “Fuji 400”, not X-TRA). Cool/green `scan_matrix`. |
 | `kodak-tri-x-400.json` | Kodak Tri-X 400 | **Kodak Tri-X 400 (400TX)** datasheet. | **Sourced:** RMS **17**. **Approximated:** H&D, weights. | Grain flattened only — **no local Tri-X rolls**. |
 | `ilford-hp5-plus.json` | Ilford HP5 Plus | **Ilford HP5 Plus** technical data. | **Sourced:** ISO 400 family. **Approximated:** H&D, RMS ~14. | **Tuned against 5 real San Marcos Filmlab HP5 JPEG scans.** Grain flattened (engine now differentiates vs color); paper slightly brighter mids. JPEG HF may inflate measured grain. |
+| `fuji-velvia-50.json` | Fuji Velvia 50 | no provenance recorded when written | treat every number as approximated | none |
+| `fujicolor-c200.json` | Fujicolor C200 | no provenance recorded when written | treat every number as approximated | none |
+| `kodak-colorplus-200.json` | Kodak ColorPlus 200 | no provenance recorded when written | treat every number as approximated | none — Colorplus scans exist on disk, untuned |
+| `kodak-tmax-400.json` | Kodak T-Max 400 | no provenance recorded when written | treat every number as approximated | none |
+| `kodak-ultramax-400.json` | Kodak Ultramax 400 | no provenance recorded when written | treat every number as approximated | none — Ultramax scans exist on disk, untuned |
+| `portra-800.json` | Kodak Portra 800 | no provenance recorded when written | treat every number as approximated | none — Portra 800 scans exist on disk, untuned |
 
 ### What is never “from the datasheet”
 
@@ -46,7 +52,7 @@ Honesty rule: H&D curves and spectral matrices started as **faithful approximati
 - **`orange_mask_rgb` / `print_paper` / `scan_matrix`** — densitometry Status M ≠ scanner RGB. Calibrated against lab scans where possible.
 - **`size_px_at_4k` / `shadow_bias`** — derived for the grain model, not printed on datasheets.
 
-## Validation against `/mnt/expansion/Photos/Film Scans` (2026-07-10)
+## Validation against the owner's film-scan folder (2026-07-10)
 
 Numeric parity with one scan is not the bar (scenes/labs differ). Check **characteristic behavior**.
 
@@ -62,7 +68,7 @@ Scanner: San Marcos Filmlab Noritsu EZ Controller, ~6048×4011 TIFF (HP5 deliver
 | HP5 → HP5 Plus | **high** | `2024-12-23/HP5` | JPEG-only delivery |
 | Cinestill 50 | brand ref | `2024-12-23/Cinestill 50` | Remjet-removed sibling; **not** 800T |
 | Aurora 800 / Portra 800 | high-ISO color refs | `2024-12-23/Aurora 800`, `Portra 800` | **Not** 800T halation GT |
-| Ultramax / Colorplus / Metropolis / Fuji 200 | other stocks | present | No matching engine stock (or Gold/Fuji nearest) |
+| Ultramax / Colorplus / Metropolis / Fuji 200 | other stocks | present | Ultramax and Colorplus now have stock files, untuned; Metropolis and Fuji 200 have none |
 | 1Hour / Self Develop / unlabeled `2025-09-01/{1–6}` | **unknown** | numeric roll IDs only | No stock in path/EXIF |
 | Portra 160, Ektar 100, Tri-X, **true 800T** | **missing** | — | No path/EXIF hits |
 

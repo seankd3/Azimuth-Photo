@@ -44,10 +44,10 @@ The model owns the five-table catalog, transactions, and the smallest durable
 vocabulary:
 
 - `drives`: explicitly attached roots identified by stable markers;
-- `photos`: identity and safe access to originals;
+- `images`: identity and safe access to originals (the module is `photos.py`);
 - `copies`: observations of a photo on a drive;
 - `decisions`: the append-only owner log;
-- `sets` and `scope`: organization expressed over the same facts;
+- `sets` and `scope`: organization expressed over the same facts, with no table of their own;
 - `cache`: immutable computed answers and their recipes.
 
 Only this layer writes durable facts. It never knows about windows, UI state,

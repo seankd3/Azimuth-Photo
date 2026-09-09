@@ -103,7 +103,7 @@ const OUTCOME = {
 // rediscovered the expensive way.
 const HOUSE = `
 You are working in Azimuth Photo (FastAPI + vanilla JS + SQLite), on branch "simplify".
-Read AGENTS.md and docs/SIMPLIFY_LOG.md before you touch anything.
+Read AGENTS.md and docs/FINDINGS.md before you touch anything.
 
 Rules that cost this project real time to learn:
 
@@ -221,7 +221,7 @@ const report = await agent(
     `Held for a decision:\n${JSON.stringify(held.map((r) => ({ title: r.finding.title, why: r.outcome.summary })), null, 1)}\n\n` +
     `Say what landed and what it is worth, what the refutations reveal about where the survey was ` +
     `weak, and the single highest-value thing to do next. Append a dated section to ` +
-    `docs/SIMPLIFY_LOG.md recording this round, matching the file's existing voice. ` +
+    `docs/FINDINGS.md recording this round, matching the file's existing voice. ` +
     `Do not overstate: a refuted finding is the workflow working.`,
   { label: 'report', phase: 'Report' },
 )

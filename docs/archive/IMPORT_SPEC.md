@@ -1,5 +1,7 @@
 # IMPORT_SPEC — Lightroom-Classic-grade import (v1, 2026-07-12)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** Preserve the custody and UX
 > guarantees, not the V1 routes, tables, jobs, or module layout.
 

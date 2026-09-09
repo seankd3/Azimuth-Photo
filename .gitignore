@@ -16,12 +16,6 @@ web/*.db-wal
 web/pixels/profiles/adobe/
 __pycache__/
 
-# Android
-android/.gradle/
-android/.gradle-dist/
-android/build/
-android/app/build/
-
 # Tools
 .codex
 .gstack/

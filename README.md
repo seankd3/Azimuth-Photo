@@ -16,7 +16,7 @@ darkroom — all on your own machine, with nothing uploaded anywhere.
 > mosaic and the fused search engine, running in your browser on real catalog data.
 >
 > **📖 Why it looks like this — [the Field Log](https://azimuthphoto.com/log/)**
-> The honest build history across 2,304 commits, with interactive demos: the
+> The honest build history, with interactive demos: the
 > film engine's halation, the GL↔NumPy twin, and the month we deleted 42% of
 > the codebase.
 
@@ -43,7 +43,7 @@ So the machine's opinions were deleted, and the app got faster:
 | Grid page | 180 ms | **0.22 ms** | 86 indexes on one table became 5 |
 | Semantic search | 19,538 ms | **50 ms** | vectors keyed on content hashes |
 | Status counts | 188 ms | **8.3 ms** | computed, not stored |
-| The codebase | 182,688 lines | **105,632** | and still descending |
+| The codebase | 182,688 lines | **31,033** | five tables, seven functions |
 
 Not because anything was written tersely — the core is heavily commented — but
 because most of what was there had **stopped being asked**. Five separate
@@ -89,7 +89,7 @@ element for element, the LRTimelapse discipline.
   the same function at different sizes. What you see is what you export.
 - **A physically-modeled film engine.** Not a LUT. It models the photochemistry:
   spectral layer exposure, halation, H&D characteristic curves, DIR couplers,
-  per-layer grain. Fourteen stocks, eight of them tuned against **53 real lab
+  per-layer grain. Fourteen stocks, four of them tuned against **fifty real lab
   scans**. [Play with the halation model →](https://azimuthphoto.com/log/#ch-darkroom)
 - **Honest about the gap.** The full Lightroom-shaped workspace (presets,
   curves, colour grading wheels, HDR) is the next phase, and the tone parity gap
@@ -206,8 +206,7 @@ Windows, Python 3.12, Node 22:
 git clone https://github.com/Sean-Kenneth-Doherty/azimuth-photo.git
 cd azimuth-photo
 python -m venv web\.venv
-web\.venv\Scripts\python.exe -m pip install -r web
-equirements-v2.txt
+web\.venv\Scripts\python.exe -m pip install -r web\requirements-v2.txt
 npm ci
 .\scripts\start_azimuth_windows.ps1
 ```
@@ -216,14 +215,13 @@ It asks where it should live, then for a folder of photographs, and the
 library fills while you watch. Semantic search, Best and labels sharpen as the
 embedding space grows; everything else works from the first tile.
 
-[Install](docs/INSTALL.md) covers the frozen build; [Getting started](docs/getting-started.md)
-covers the first library.
+[Install](docs/INSTALL.md) covers the frozen build and the first library.
 
 ## Docs
 
 - [**docs/CORE.md**](docs/CORE.md) — the 2.0 design. Start here.
-- [**The Field Log**](https://azimuthphoto.com/log/) — the build story, 2,304 commits, with live demos
-- [Documentation index](docs/README.md) · [Features in depth](docs/features.md)
+- [**The Field Log**](https://azimuthphoto.com/log/) — the build story, with live demos
+- [Documentation index](docs/README.md) · [Findings ledger](docs/FINDINGS.md)
 - [Development guide](docs/development.md) · [Agent guide](AGENTS.md)
 - [Data & privacy](docs/data-and-privacy.md)
 

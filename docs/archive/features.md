@@ -1,5 +1,7 @@
 # Feature Guide
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, setting and surface it names is gone.
+
 > **V1 behavior inventory.** This describes what the prior product attempted,
 > not what V2 has completed. Each surface must be re-adopted through the core
 > and verified in the running desktop app.

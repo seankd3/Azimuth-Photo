@@ -1,21 +1,19 @@
 # Guided-filter masking (dt-gfilter)
 
-Edge-aware mask refine for Develop local adjustments, per
-`darktable-study/SYNTHESIS.md` P1 #1 + #4.
+Edge-aware mask refine for Develop local adjustments, adopted from the
+darktable study (guided filter as the mask-refine primitive).
 
 ## What landed
 
-- Shared primitive: `web/features/develop/guided_filter.py` (+ JS twin
-  `web/static/js/desktop/develop/guided_filter.js`)
+- Shared primitive: `web/pixels/guided_filter.py`
   - O(n) integral-image box means
   - Classic He–Sun guided filter with darktable-style ×4 fast path
   - EIGF variant for linear HDR guides
   - `soft_mask(...)` wraps the old gaussian softener when no guide is present
 - Feather → `(radius, ε)` uses existing 0–1 Feather sliders:
   `radius = Feather × min_side × 0.04`, `ε = 1 / feathering`
-- Wired into `masks.rasterize_correction` / `mask_raster.js` after combine,
-  guided by preview luma (radial Feather, range LumRange soft width, AI default)
-- `ai_masks` sky path now calls the shared `guided_filter`
+- Called by `web/pixels/masks.py` after the mask combine, guided by preview
+  luma (radial Feather, range LumRange soft width)
 
 ## Non-goals honored
 
@@ -45,6 +43,6 @@ Latest measured run (also in `PERF.txt`): guided **58.5–101 ms**, gaussian **1
 
 ## Tests
 
-```bash
-cd web && .venv/bin/python -m unittest test_develop_guided_filter test_develop_masks test_develop_ai_masks
+```powershell
+cd web; .venv\Scripts\python.exe -m pytest -q test_develop_guided_filter.py test_develop_masks.py
 ```

@@ -6,16 +6,11 @@ without pretending signing or updates are finished.
 
 ## Before a tag
 
-1. Run the focused V2 refuters from `web/`:
-
-   ```powershell
-   .\.venv\Scripts\python.exe -W error::ResourceWarning -m unittest test_core.py test_owned_library.py test_desktop.py
-   ```
-
-2. Run `npm audit` and the reviewed Python lint set. From the repository root,
-   run `node web/test_v2_virtual_grid.mjs` and
-   `node web/test_v2_page_cache.mjs`.
-3. Run `.\scripts\build_windows_desktop.ps1`.
+1. Run the one check from the repository root: `./scripts/azimuth-check`
+   (lint, the gates, the suite, the node specs, the ledger).
+2. Run `npm audit`.
+3. Run `.\scripts\build_windows_desktop.ps1`, which is what
+   `.github/workflows/release.yml` runs through `scripts/build_desktop.py`.
 4. Launch the frozen executable with an empty `AZIMUTH_HOME`.
 5. Open the native folder chooser, attach a real photo folder, and verify the
    progressive grid, direct first-to-last keyboard navigation, details, and

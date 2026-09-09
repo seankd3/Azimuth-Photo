@@ -1,5 +1,7 @@
 # Publishing Static Galleries
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, setting and surface it names is gone.
+
 > **Behavior reference awaiting V2 adoption.** Publishing is parked until the
 > installed desktop core is finished; its privacy and reproducibility lessons
 > remain requirements if the surface returns.
@@ -103,7 +105,7 @@ Point nginx at `/srv/www` and serve `/g/<slug>/` directly. The site must route `
 Set:
 
 ```text
-publish_dir=/home/photographer/azimuth-publish/g
+publish_dir=/path/to/publish/g
 publish_hook=rsync -az --delete ./ user@example.com:/var/www/photos/g/
 publish_site_base_url=https://photos.example.com
 ```
@@ -115,7 +117,7 @@ Azimuth Photo writes locally, then the hook mirrors the gallery folder to the se
 One real install looks like this (paths and project name are Sean’s portfolio — treat as a pattern, not a requirement):
 
 ```text
-publish_dir=/home/photographer/Projects/sean-kenneth-doherty/app/public/g
+publish_dir=/path/to/site/public/g
 publish_hook=scripts/deploy-galleries.sh
 publish_site_base_url=https://www.seankennethdoherty.com
 ```

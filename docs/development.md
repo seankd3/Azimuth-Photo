@@ -103,4 +103,16 @@ disk to develop against instead of the archive.
 ```
 
 produces `dist\azimuth-photo\azimuth-photo.exe`, one directory, no installer
-yet. `desktop/BUILD.md` has the first-install smoke.
+yet. The frozen directory carries the Python runtime, the one inlined UI
+document, the schema and the native dependencies; the person running it
+installs nothing. App data lives in the home `web/home.py` resolves.
+
+First-install smoke, on a Windows account with no Azimuth data:
+
+1. Launch `azimuth-photo.exe` without a terminal.
+2. The welcome asks where Azimuth should live; no browser address or engine
+   window appears.
+3. Choose a photo folder in the native chooser; the library fills.
+4. Quit; no Azimuth process remains and the catalog file can be renamed.
+5. Relaunch; the same library opens without asking again.
+6. Repeat with a mapped drive and a UNC folder.

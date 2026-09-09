@@ -1,11 +1,21 @@
 # Simplify — running log
 
+> **Archived 2026-09-09.** The V1 shrink's incident ledger, closed. What an audit finds now goes to `docs/FINDINGS.md`; the rules this log ends with named scripts that no longer exist.
+
 **Merged to `main` 2026-08-04** — 149 commits, a clean fast-forward, and the
 branch is gone. Work continues on `main`; the shrink is not finished, it just
 stopped needing a branch. Prod on omarchy follows `main` from here.
 
 This is a retrospective, not a plan: what was cut, what was learned, and what is
 known to be broken. Newest first.
+
+## Startup handlers had no ordering against the schema (07-16, recorded 09-09)
+
+Carried over from the archived `background-work-behavior.md`: in V1 a startup
+handler that queried `collection_publishes` ran before `init_db` on a fresh
+install and bricked every new home (`5a1b5017`). The V2 answer is structural,
+not a guard: `model.connect()` installs the whole schema, so a fresh catalog is
+a normal case and nothing that opens one can run ahead of its tables.
 
 ## The film loop closed end to end, and the facade fell (08-13, evening)
 

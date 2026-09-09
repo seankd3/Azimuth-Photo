@@ -38,9 +38,13 @@ code produces more of them, never fewer.
 
 ---
 
-## The gate set
+## The gate set (as measured 2026-08-16 on the V1 tree)
 
-| Gate | Counts | Today | Command |
+The gates that exist are `layers`, `tables`, `paths`, `names`, `collects` and
+`imports`, and every number in `scripts/gates/budget.txt` is 0; `seam` and
+`routes` below counted a layer that no longer exists.
+
+| Gate | Counts | On 08-16 | Command |
 |---|---|---:|---|
 | `seam` | UI `/api/` literals no handler serves | **16** | `python scripts/gates/check.py` |
 | `layers` | imports pointing up the stack | **33** | " |

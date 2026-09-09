@@ -48,12 +48,12 @@ written waits for the day it appears in a sidecar.
 
 ## What already exists — harvest, don't rewrite
 
-V1 carries ~11,700 lines under `features/develop/`: a pure-NumPy PV-2012
-pipeline (`pipeline.py`), camera/Adobe profile emulation, XMP write
-(`xmp_write.py`), `.lrcat` import, DNG pipeline, masks, film emulation, AI
-machinery. The acceptance method survives unchanged: **each DNG's own
-embedded XMP is ground truth** (`test_dng_acceptance.py`) — render our answer
-next to Lightroom's for the same settings and measure.
+The colour mathematics survived the deletion as `web/pixels/`: a pure-NumPy
+PV-2012 pipeline (`pipeline.py`), camera/Adobe profile emulation, the DNG
+pipeline, masks, healing, looks, film emulation; the sidecar writer is in
+`web/develop.py`. The acceptance method survives unchanged: **each DNG's own
+embedded XMP is ground truth** (`web/test_dng_pipeline.py`) — render our
+answer next to Lightroom's for the same settings and measure.
 
 The 08-16 acceptance verdict stands: the color math is close and **the real
 gap is PV15.4 tone** — now sharpened by the census: Sean edits in HDR mode,
@@ -148,16 +148,16 @@ measured pair.
    work — the workspace runs on today's math and inherits every
    improvement for free.**
 
-   *Probed and measured 08-23:* `features.develop.pipeline` and
-   `xmp_write` import clean — the color math and the sidecar writer
-   survive as-is. The profile/DNG chains were de-V1'd (rawproc's kind no
+   *Probed and measured 08-23:* the pipeline (now `pixels/pipeline.py`)
+   and the sidecar writer (now in `develop.py`) import clean and survive
+   as-is. The profile/DNG chains were de-V1'd (rawproc's kind no
    longer registers into a registry that does not exist; the embedded-XMP
    reader moved home to `develop.read_embedded`, where DNG adoption will
    want it anyway), and **the 40-DNG acceptance harness runs again**: 8
    minutes over the working disk's DNGs against Adobe's own embedded
    renders. Baseline: **clean mean |ΔL| = 0.0445 against the 0.035 bar**
    (ab within bounds, lossy-gain gate passing). The worst pairs
-   (`D:\azimuth-bench\out\dng-acceptance\accept_*.jpg`) show the
+   (the acceptance harness's `accept_*.jpg` pairs) show the
    direction: our render is lighter and flatter — Adobe's camera-profile
    tone digs deeper shadows. That 0.0095 of L, mostly shadow contrast, is
    the tone phase's first target.
@@ -172,8 +172,8 @@ measured pair.
    half of the proof waits for a Lightroom session.
 7. **Export** — the render pipeline at FULL size to JPEG; presets later.
 
-Parked with receipts: **masks/local** (zero occurrences in the library),
-**heal/AI** (same), **HDR display path** (every Azimuth surface is SDR;
+Parked with receipts: **HDR display path** (every Azimuth surface is SDR;
 the SDR rendition is the target), **.lrcat import** (sidecars are the
-bridge, per the 08-16 ruling), **virtual copies** (no VC in the census),
-**presets/looks** (nothing in the census beyond camera profiles).
+bridge, per the 08-16 ruling), **virtual copies** (no VC in the census).
+The mask, heal, looks and film maths moved down into `web/pixels/` with
+their tests and wait for a surface, not for a decision.

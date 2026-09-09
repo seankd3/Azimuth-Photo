@@ -54,7 +54,7 @@ stay isolated; it does not select a V1 catalog or compatibility mode.
 
 ## Run from source
 
-After installing `web/requirements-v2.txt` into `web/.venv` and running
+After installing `web\requirements-v2.txt` into `web\.venv` and running
 `npm ci`, use:
 
 ```powershell
@@ -65,4 +65,4 @@ Pass `-DataRoot C:\some\empty\folder` for an isolated source run. The launcher
 builds the current modular UI and opens the same one-process desktop boundary
 used by the frozen app.
 
-The complete build and smoke procedure is in [`desktop/BUILD.md`](../desktop/BUILD.md).
+The first-install smoke is in [`development.md`](development.md).

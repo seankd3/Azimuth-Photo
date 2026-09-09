@@ -51,10 +51,8 @@ in ignored `AGENTS.local.md`, not this portable document.
 ## Application boundary
 
 The V2 application is one native process. Its UI calls the Python product
-boundary directly; the temporary FastAPI routes, loopback server, Tauri parent,
-and child engine are deleted. Inherited V1 server and route modules elsewhere
-in the repository are unreachable from the V2 executable and remain explicit
-rewrite debt, not an alternative runtime mode.
+boundary directly; the FastAPI routes, loopback server, Tauri parent, child
+engine and the whole V1 application are deleted (09-08).
 
 See [CORE.md](CORE.md) for data and safety invariants,
 [ARCHITECTURE.md](ARCHITECTURE.md) for the intended code layers, and

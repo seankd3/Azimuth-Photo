@@ -1,5 +1,7 @@
 # FIELD_SPEC v2 addendum — one library everywhere (frozen 2026-07-11 evening)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Historical V1 architecture.** The hub/satellite mirror was retired. This
 > document preserves failure modes and offline UX expectations only.
 

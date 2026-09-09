@@ -4,15 +4,11 @@ This is the design charter for Azimuth Photo's interface. Every UI change should
 be checkable against it. The production desktop shell is the reference
 implementation of this architecture.
 
-## The two bars
+## The bar
 
-- **Mobile: Google Photos replacement.** The phone experience is judged against
-  Google Photos — instant timeline, effortless search, people, one-thumb
-  viewer, long-press selection. Where Google Photos has cloud lock-in, we have
-  Tailscale + local truth. Where it has Memories, we have Refine and Best-of.
 - **Desktop: Lightroom Classic replacement** — culling, organizing, ranking,
-  developing, and notably stronger publishing tools (collections to share
-  links to website galleries).
+  developing. A phone client is parked (`product-roadmap.md`); when it comes
+  it is the same nouns and verbs in a tab-bar shell.
 - Editing ships as the **Develop** module (`docs/DEVELOP_SPEC.md`): a verb on
   Photo entered with `D` that takes over the canvas full-bleed (like Loupe, a
   canvas-scale surface rather than a scrimmed overlay). Esc parks it and
@@ -38,12 +34,11 @@ Every piece of UI is exactly one of:
 1. **Shell** — permanent chrome: the scope omnibox, left panel (collections,
    library, sources, tools), right panel (info), context bar. The shell never
    grows when features are added.
-2. **Lens** — a way of seeing the current scope: Grid, Collections, People, Map,
-   Suggestions, Stacks, Trash, Shared. Persistent everyday lenses live in the
-   top switcher; tool lenses live in the left panel. A lens renders a scope or
-   review surface; it does not own app navigation.
-3. **Overlay** — a verb performed in place: Refine, Loupe, Export, Share,
-   Publish, Import.
+2. **Lens** — a way of seeing the current scope. Today there is one, the grid
+   (`web/static/v2/lens/library.js`), and Trash, People and Rank are views of
+   it; Map and Suggestions are intent. A lens renders a scope or review
+   surface; it does not own app navigation.
+3. **Overlay** — a verb performed in place: Rank, Loupe, Export, Import.
    Overlays dim the app behind them and Esc always returns exactly where the
    user was. Verbs never navigate.
 
@@ -52,11 +47,10 @@ new lens, a new overlay verb, a new scope type, or an annotation inside an
 existing lens. If it can't, redesign the feature — not the app.
 
 Roadmap phases expressed in the grammar:
-- Private sharing → a verb (overlay) on Collection plus Shared triage.
-- Website publishing → a second verb on Collection plus Shared triage.
+- Sharing and publishing (parked) → verbs on Collection plus one triage lens.
 - AI assistance → annotations inside existing lenses (suggested stacks in
-  Grid, suggested collections in Collections, suggested keepers in Refine).
-- Mobile → the same nouns and verbs in a tab-bar shell.
+  Grid, suggested collections in Collections, suggested keepers in Rank).
+- Mobile (parked) → the same nouns and verbs in a tab-bar shell.
 
 ## Controls: the disclosure ladder
 
@@ -81,9 +75,9 @@ promise of the app: your archive gets measurably better every session.
 
 ## The glass box
 
-Local-first earns trust through transparency. Background work, sources, cache,
-and AI state are always inspectable in the system drawer — never modal, never
-interrupting, one entry point (⚙).
+Local-first earns trust through transparency. What the worker is doing, and
+how much is left, is always one line in the sidebar — never modal, never
+interrupting.
 
 ## Speed covenant
 
@@ -109,56 +103,6 @@ Patterns adopted deliberately (and their sources):
   active states only. Amber strictly for offline/simulated warnings.
 - Keyboard map documented in-app (?); every icon-only control has a tooltip
   with its shortcut.
-
-## The Deliver grammar
-
-Delivery is one verb with three destinations, one triage surface, and one job
-model. Every surface below already exists; this section is the contract they
-converge on.
-
-**One verb: Deliver.** `Deliver(collection)` is an overlay with exactly three
-tabs — **Private link**, **Client gallery**, **Website** — one per destination.
-Anything that hands photos to someone else starts here: the collection ⋯ menu,
-the command palette, and settings return-flows all open this overlay and
-nothing else. Legacy names (`openPublishOverlay`) are gone, not shimmed.
-
-**One triage surface: the Shared lens.** The lens (sidebar + `h`) reviews
-everything delivered — links, galleries, published site — with rename, revoke,
-password, and snapshot review. The overlay creates and edits one collection's
-deliveries; the lens manages all of them. The word is **Shared** in nav, aria,
-and copy; "Publishing" survives only inside the Website tab and its settings
-section.
-
-**State and return flows.** The overlay's dataset (`collectionId`, `name`,
-`activeTab`) is the single source of truth for reopen/return targets and is
-updated on every tab switch. Reopening Deliver lands on the tab with an active
-delivery, else the last-used tab (localStorage, like the export dialog).
-Drafts (title, slug, password, expiry) persist per collection until delivered
-or discarded — never silently lost on Esc.
-
-**One job grammar.** Every delivery job (publish, zip, batch export) runs
-through one poll helper: token-gated, cancelled with its surface, interval not
-loop-count. Progress shows inside the invoking surface while it is open and in
-the System peek's Background work when it isn't. No fire-and-forget downloads:
-every job ends in a success or failure toast. A job is **settling** until it
-reaches a final state — automatic retries (e.g. website hook retries) count
-as settling: surfaces stay busy, polls keep running, and the copy says what
-is being retried.
-
-**One confirm grammar.** Reversible actions execute immediately with an Undo
-toast (unpublish, remove from lens). Irreversible-but-scoped actions use the
-two-click arm (revoke link, rotate token). Typed-count confirmation is
-reserved for bulk data destruction. Never a modal "are you sure".
-
-**One export pipeline.** All zip/data exports flow through the export dialog's
-option store (tab, sizes, prefs). Scope wrappers (selection, folder, source,
-context menu, omnibox) share one `exportScope` helper and its toast copy;
-none of them bypass saved preferences.
-
-**One layer registry.** The foreground-layer inventory (which overlays block
-shortcuts, what Esc closes first) lives in one module; keyboard.js and every
-lens consume it. Adding a delivery surface means one registration, not a
-selector hunt.
 
 ## Vocabulary
 

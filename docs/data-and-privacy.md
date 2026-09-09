@@ -1,100 +1,46 @@
-# Data And Privacy
+# Data and privacy
 
-> **Behavior reference awaiting V2 adoption.** Original safety and privacy are
-> current invariants. Satellite, hub, token, and server instructions below are
-> historical until rewritten on the V2 core.
+Azimuth Photo is one local process. It needs no account, no server, and no
+cloud service to catalog, browse, rank, cull, develop, and export a library,
+and it uploads nothing.
 
-Azimuth Photo is built for local personal archives. It does not need a hosted
-account or a cloud photo service to catalog, browse, compare, flag, and export
-your library.
+## Originals are read in place
 
-## Source Photo Safety
+- Attaching a folder reads it and records what is there. It never moves,
+  renames, or rewrites a photograph.
+- Browsing, ranking, search, People, Develop and export write nothing into a
+  source folder. Develop keeps its settings as decisions in the catalog; the
+  only file it ever writes beside a photograph is a Lightroom sidecar, and
+  only when you ask for one.
+- Trash is the one exception: rejecting moves the original into a `.trash`
+  folder on the same drive, and **Empty trash** deletes those moved files.
+- A drive that is away keeps its rows. Previews, rankings, search and People
+  stay usable until it is attached again.
 
-Original photo folders remain the source of truth unless a satellite owner
-explicitly uses **Free up space** after the hub has accepted the same original.
+## Where the app keeps its own data
 
-- Scanning reads source folders and records catalog metadata.
-- Normal browsing, scanning, AI work, People, captions, sharing, publishing,
-  and export do not edit original image files.
-- Trash is the explicit exception: deleting moves originals into a `.trash`
-  area on the same source root, and **Empty trash** permanently deletes those
-  moved files.
-- On a satellite, **Free up space** is a second explicit exception. It asks the
-  authenticated hub to confirm each synced original, re-hashes the local file
-  immediately before deletion, and skips locally changed or pending photos. The
-  catalog row stays in place and the original remains available on demand from
-  the hub.
-- Removing a source from the catalog changes app catalog/cache state, not the
-  source folder itself.
-- Generated cache files and database rows can be rebuilt from the original
-  folders.
-- Temporarily offline source drives do not make catalog rows disappear. Cached
-  previews, rankings, search data, and People labels remain usable until the
-  drive is reachable again.
+Everything Azimuth makes for itself lives in the one home you chose at first
+launch, beside each other like a Lightroom catalog:
 
-## Runtime Data
+```text
+<home>\catalog\azimuth.db
+<home>\previews\
+```
 
-On a clean install, Azimuth Photo uses platform-native application-data roots.
-The SQLite catalog and downloaded models live in the platform data directory;
-settings live in its config directory; previews, embedding snapshots, and
-Develop intermediates live in its cache directory; process files and logs live
-in its state directory. Durable library exports default to
-`~/Pictures/Azimuth Exports`.
-
-Older installations are detected from their exact runtime paths and remain
-there. In particular, Azimuth Photo does not automatically move or rebuild an
-existing catalog, preview cache, model store, settings file, Develop cache, or
-backup folder. This protects large established libraries and makes an upgrade
-behaviorally identical until the owner explicitly chooses new storage.
-
-All runtime files stay on the machine running the app and remain ignored by
-git. `AZIMUTH_HOME` selects one managed root; granular environment
-overrides can select the catalog, settings, previews, models, embedding cache,
-Develop cache, exports, backups, run directory, and log directory separately.
-
-## Owner Authentication
-
-Everything the owner can do is protected by a single **owner key**, created by
-the setup wizard on first run (only its scrypt hash is stored). Browsers unlock
-once at `/unlock` and receive a signed 90-day session cookie; scripts and
-satellites send `Authorization: Bearer <owner key>`; paired devices authenticate
-with their existing device tokens. Requests from the server's own loopback
-address are exempt — sitting at the server keyboard is also the recovery path
-if the key is lost (visit Settings from the server machine and set a new key,
-which signs out every browser session but keeps paired devices working).
-
-Installs that predate owner authentication stay unlocked until a key is set;
-`/api/auth/status` reports `configured: false` so the UI can surface an
-"Unsecured" notice. Share links, published client galleries, the unlock page,
-static assets, `/api/version`, and pairing-code redemption (single-use,
-expiring, rate-limited) are the only routes reachable without a credential.
-
-The after-publish hook (`publish_hook`) executes a shell command, so it is
-server-side configuration only: set the `AZIMUTH_PUBLISH_HOOK` environment
-variable or edit the settings file on the server. The settings API rejects
-writes to it and never returns the configured command.
+The one file outside the home is the pointer that names it, at
+`%LOCALAPPDATA%\Azimuth Photo\home`. `AZIMUTH_HOME` names a home directly
+without reading or writing the pointer; that is the only environment variable
+the app reads. Everything in the home can be rebuilt from the originals except
+your decisions, which are the catalog's reason to exist.
 
 ## Local AI
 
-The embedding model is installed locally from Hugging Face when you choose to
-install it. After download, embedding and search work happens on the local
-machine.
+The embedding and face models are downloaded once, on request, and run on
+this machine. Without them the app still browses, culls, and exports; search,
+Best and labels sharpen as the space grows.
 
-The app can still browse, rank, flag, and export without local AI models.
+## Presentation assets
 
-## Presentation Assets
-
-Public repo visuals should not use personal archive screenshots or personal
-photo assets. The checked-in preview artwork under `docs/assets/` uses
-synthetic demo content only.
-
-Safe presentation assets should avoid:
-
-- Real personal photos.
-- Real folder paths, filenames, or drive names.
-- Recognizable people.
-- GPS coordinates, camera serial numbers, or other private metadata.
-- Crops that accidentally reveal private thumbnails in the UI.
-
-Prefer synthetic mockups, generated demo images, or a small dedicated demo
-catalog with non-private files.
+Public repository visuals under `docs/assets/` use synthetic or demo-safe
+content only: no personal photographs, real paths, recognizable people, or
+private metadata.

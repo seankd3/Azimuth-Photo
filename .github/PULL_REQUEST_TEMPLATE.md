@@ -4,10 +4,10 @@ Describe the user-facing result.
 
 ## Proof
 
-List the checks you ran and their output.
+Paste the tail of `./scripts/azimuth-check`, and what you ran in the app.
 
 ## Checklist
 
 - [ ] The change is focused and the commits are atomic.
-- [ ] Tests cover the fix or feature.
+- [ ] A refuter fails before the change and passes after.
 - [ ] I updated user-facing docs when needed.

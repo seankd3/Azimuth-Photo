@@ -1,80 +1,59 @@
 # Azimuth Photo documentation
 
-The documentation has four owners. Read them in this order:
+The documentation has five owners. Read them in this order:
 
 1. [`MASTER_PLAN.md`](../MASTER_PLAN.md) owns Sean's exact product decisions.
 2. [`CORE.md`](CORE.md) owns the V2 model and its safety invariants.
 3. [`ARCHITECTURE.md`](ARCHITECTURE.md) owns the code shape around the core.
 4. [`AGENTS.md`](../AGENTS.md) owns how work is performed and verified.
+5. [`FINDINGS.md`](FINDINGS.md) owns what the audits found and what became of it.
 
 [`REWRITE_LEDGER.md`](REWRITE_LEDGER.md) is the exhaustive V2 completion gate.
-It does not own design; it records whether each area and exact code file
-has satisfied the authorities above. Anything absent from its proven register
-is legacy by default.
+It does not own design; it records whether each area and exact code file has
+satisfied the authorities above.
 
-When documents disagree, the owner for that kind of fact wins. A document may
-preserve useful V1 behavior without preserving V1 architecture.
+When documents disagree, the owner for that kind of fact wins.
 
 ## Current V2 guidance
 
+- [Development](development.md) — setup, the edit map, checks, proofs, and
+  the first-install smoke.
+- [Install](INSTALL.md) — the frozen build, first launch, and where data lives.
+- [Data and privacy](data-and-privacy.md) — originals are read in place.
+- [Releasing](RELEASING.md) and [distribution](DISTRIBUTION_SPEC.md) — what a
+  tag produces today.
 - [Topology](TOPOLOGY.md) — laptop-first runtime and storage roles.
-- [Product vision](product-vision.md) — intended finished product.
-- [Product roadmap](product-roadmap.md) — rewrite order and release outcomes.
-- [UI architecture](ui-architecture.md) — interaction doctrine that survives
-  the rewrite.
-- [Development](development.md) — local setup and verification; commands must
-  be checked against the current branch before use.
-- [Install](INSTALL.md), [distribution](DISTRIBUTION_SPEC.md), and
-  [releasing](RELEASING.md) — the current one-process Windows artifact.
+- [Product vision](product-vision.md) and [roadmap](product-roadmap.md) — the
+  finished product, and the order surfaces are rebuilt in.
+- [UI architecture](ui-architecture.md) — the interaction doctrine.
+- [Organizing](ORGANIZING.md) — albums, labels, people, sessions as decisions.
+- [Develop](DEVELOP.md) — the colour pipeline as it is; [the spec](DEVELOP_SPEC.md)
+  is the parked Lightroom-shaped workspace.
+- [Lightroom bridge](LR_BRIDGE_SPEC.md) — what a sidecar carries each way.
+- [Guided-filter masking](guided-filter.md) — the mask-refine primitive and its
+  measurements in [`examples/guided-filter/`](examples/guided-filter/).
 - [Performance budgets](PERF_BUDGETS.md) — user-visible latency constraints.
-- [Recovery](recovery.md) — catalog recovery behavior.
-- [Stacks](STACKS_V2.md) — duplicate-safety distinctions and cleanup rules.
-- [Gate study](GATES.md) — evidence behind the architecture's mechanical
-  constraints; the architecture owns the rules themselves.
-- [Rewrite ledger](REWRITE_LEDGER.md) — exact rebuilt, proven, legacy, and
-  removed inventory.
+- [Gate study](GATES.md) — evidence behind the mechanical constraints.
+- [Rewrite ledger](REWRITE_LEDGER.md) — exact rebuilt, proven, and removed
+  inventory.
+- [`assets/`](assets/) — demo-safe visuals for the public README.
 
-## Behavior references awaiting V2 adoption
-
-These documents contain expensive product learning. They do not authorize V1
-tables, routes, workers, server roles, or synchronization machinery. A V2
-surface adopts the behavior it still needs through the core, then updates the
-document in the same commit.
-
-- [Feature guide](features.md)
-- [Develop](DEVELOP_SPEC.md)
-- [Lightroom bridge](LR_BRIDGE_SPEC.md)
-- [Background work](background-work-behavior.md)
-- [Data and privacy](data-and-privacy.md)
-- [Publishing](publishing.md)
-- [Camera noise profiles](noise-profiles.md)
-
-## Historical V1 architecture
+## Historical
 
 These describe the retired networked product. They are evidence about failure
-modes and user expectations, not V2 instructions:
+modes and user expectations, not instructions:
 
-- [Authentication](AUTH_SPEC.md)
-- [Import](IMPORT_SPEC.md), [card import](CARD_IMPORT_SPEC.md) and
-  [invisible import](INVISIBLE_IMPORT.md) — the V1 import and drain designs;
-  their custody and UX lessons were adopted on 08-19 by `model/intake.py`,
-  the sweep, and the import overlay, and the rest is evidence.
-- [Hub/satellite sync](FIELD_SPEC_V2.md)
-- [Client updates](CLIENT_AUTOUPDATE_SPEC.md)
-- [Tailscale HTTPS](FIELD_HTTPS.md)
-- [`archive/`](archive/) — quality programs, release waves, and superseded UX
-  specifications.
-
-The chronological [`SIMPLIFY_LOG.md`](SIMPLIFY_LOG.md) is an incident ledger.
-Use it to recover why a rule exists, never as current architecture. Git history
-and Claude's project memories are also evidence, not authority.
-
-[`CARVE.md`](CARVE.md) is a point-in-time measurement of one rewrite commit.
-Re-run its instruments before using any ranked item.
+- [`archive/`](archive/) — every V1 specification (authentication, the three
+  import designs, hub/satellite sync, client updates), the V1 feature guide,
+  publishing, background work, noise profiles, the changelog, the simplify
+  log, quality programs, release waves, and superseded UX specifications.
+  The import designs' custody and UX lessons were adopted on 08-19 by
+  `web/model/intake.py`, the sweep, and the import overlay.
 
 ## Documentation rule
 
 Do not add another overview, handoff, status report, or competing source of
-truth. Update the owner above or the rewrite ledger. Preserve a historical
-document when it contains learning the code cannot reveal, but label it
-historical and remove it from the current path.
+truth. Update the owner above or the ledgers. A document that has stopped
+being true is folded or moved to `archive/` with a dated banner in the same
+commit that made it untrue. `scripts/gates/paths.py` fails the build when a
+guide names a path that is not there.

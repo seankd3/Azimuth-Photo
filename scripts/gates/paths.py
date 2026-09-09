@@ -15,7 +15,8 @@ import re
 
 from common import read, tracked
 
-GUIDES = ("AGENTS.md", ".claude/skills/azimuth-orient/SKILL.md")
+GUIDES = ("AGENTS.md", ".claude/skills/azimuth-orient/SKILL.md",
+          "docs/README.md", "docs/development.md", "docs/INSTALL.md", "CONTRIBUTING.md")
 QUOTED = re.compile(r"`([\w][\w./-]*/[\w./-]*)`")
 
 

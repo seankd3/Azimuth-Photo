@@ -1,5 +1,7 @@
 # AUTH_SPEC v1 — Owner authentication (frozen 2026-07-15)
 
+> **Archived 2026-09-09.** This describes the V1 product, which is deleted; it is kept for the learning in it, not as instructions. Every path, route, table and surface it names is gone.
+
 > **Historical V1 architecture.** V2 is a single-user local desktop app and
 > does not preserve network authentication, pairing, or accounts.
 
