@@ -157,6 +157,7 @@ Each durable fact has one owner:
 - `AGENTS.md` — public agent rules and safety boundaries.
 - `AGENTS.local.md` — ignored installation-specific deployment truth.
 - `MASTER_PLAN.md` — what the user asked for, verbatim, and whether it is done.
+- `docs/FINDINGS.md` — what the audits found, ranked; a row closes only with the commit that fixes it, or a stated rejection.
 - `docs/TOPOLOGY.md` — portable runtime roles and storage architecture.
 - `docs/development.md` — setup, edit map, and verification commands.
 - `docs/README.md` — documentation index.
