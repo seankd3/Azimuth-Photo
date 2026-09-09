@@ -310,14 +310,13 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     }
     if (event.key === 'Escape') {
       clearTimeout(typeTimer);
-      if (!drop.hidden) {
-        // First Esc puts the offers away; the second clears as it always did.
-        close();
-      } else {
-        box.value = '';
-        search('');
-        box.blur();
-      }
+      // First Esc puts the offers away; the second clears the words and
+      // keeps the focus, so a new search can start at once. An empty box
+      // with nothing to put away lets Esc through to the app's own ladder,
+      // whose last rung hands the keyboard back to the photographs.
+      if (!drop.hidden) close();
+      else if (box.value) { box.value = ''; search(''); }
+      else return;
       event.stopPropagation();
       event.preventDefault();
     }

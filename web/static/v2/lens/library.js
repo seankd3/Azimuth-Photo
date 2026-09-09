@@ -404,6 +404,16 @@ function indexAt(scrollTop) {
 // from the rows the window already holds.
 function renderInspector(panel, selected, actions = {}) {
   const marked = actions.marked;
+  // The panel is rebuilt only when what it would say has changed: the
+  // store beats every two seconds, and a hover on a copied value must not
+  // blink away under it.
+  const shown = marked && marked.size > 1
+    ? `set:${[...marked].join(',')}:${[...(actions.photos?.values() || [])].filter((p) => marked.has(p.id)).map((p) => `${p.id}.${p.status}.${p.file_size}`).join('|')}`
+    : selected
+      ? `one:${JSON.stringify(selected)}`
+      : `glance:${JSON.stringify([actions.counts, actions.drives, actions.working])}`;
+  if (panel.dataset.shown === shown) return;
+  panel.dataset.shown = shown;
   if (marked && marked.size > 1) {
     const rows = [...(actions.photos?.values() || [])].filter((p) => marked.has(p.id));
     const days = rows.map((p) => (p.date_taken || '').slice(0, 10)).filter(Boolean).sort();
@@ -433,14 +443,18 @@ function renderInspector(panel, selected, actions = {}) {
     const heading = element('div', 'inspector-heading');
     heading.append(element('p', 'eyebrow', 'Library'), element('h2', '', `${(counts.photos || 0).toLocaleString()} photographs`));
     const facts = element('dl', 'facts');
+    // A zero is an answer: None and Empty are said, not left out. The
+    // worker is an event, not a fact, so it appears only while it works.
     const rows = [
-      ['Starred', counts.starred ? counts.starred.toLocaleString() : ''],
-      ['In Trash', counts.trash ? counts.trash.toLocaleString() : ''],
-      ['Drives', drives.length ? drives.map((d) => `${d.label || d.root}${d.attached ? '' : ' · away'}`).join(' · ') : ''],
+      ['Starred', counts.starred ? counts.starred.toLocaleString() : 'None'],
+      ['In Trash', counts.trash ? counts.trash.toLocaleString() : 'Empty'],
+      ['Drives', drives.length ? drives.map((d) => `${d.label || d.root}${d.attached ? '' : ' · away'}`).join(' · ') : 'None yet'],
       ['Working', actions.working ? [actions.working.word, actions.working.left ? `${actions.working.left.toLocaleString()} left` : ''].filter(Boolean).join(' · ') : ''],
     ];
     for (const [label, value] of rows) if (value) facts.append(element('dt', '', label), element('dd', '', value));
-    glance.append(heading, facts, element('p', 'glance-hint', 'Select a photograph to see its facts. ? shows every key.'));
+    const hint = element('p', 'glance-hint');
+    hint.append(Object.assign(document.createElement('kbd'), { textContent: '?' }), ' shows every key');
+    glance.append(heading, facts, hint);
     panel.replaceChildren(glance);
     return;
   }
@@ -477,45 +491,57 @@ function renderInspector(panel, selected, actions = {}) {
   const place = selected.lat !== undefined && selected.lon !== undefined
     ? `${Math.abs(selected.lat).toFixed(4)}° ${selected.lat >= 0 ? 'N' : 'S'}, ${Math.abs(selected.lon).toFixed(4)}° ${selected.lon >= 0 ? 'E' : 'W'}` : '';
   const stars = selected.stars ? `${'★'.repeat(selected.stars)} · ` : '';
+  // A photograph at a drive's root has a folder too: the root.
   const folder = selected.tail && selected.tail.includes('/') ? selected.tail.slice(0, selected.tail.lastIndexOf('/')) : '';
   // A fact that should always speak says Unknown rather than vanishing;
   // one the file may simply not carry is left out.
   const unknown = selected.hash ? 'Unknown' : 'Reading…';
+  // A row is a fact of the photograph (copied, or a way somewhere) or the
+  // app's own word about it (said: read, never copied).
   const rows = [
-    ['Score', score ? stars + score : (stars ? stars.slice(0, -3) : '')],
-    ['Edited', edited],
+    ['Score', score ? stars + score : (stars ? stars.slice(0, -3) : ''), { said: true }],
+    ['Edited', edited, { said: true }],
     ['Names', (selected.names || []).join(' · ')],
     ['Cull', !selected.hash ? 'Reading…'
-      : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged'],
-    ['Where', presence(selected, true).said],
+      : selected.status === 'picked' ? 'Picked' : selected.status === 'trashed' ? 'Rejected' : 'Unflagged', { said: true }],
+    ['Where', presence(selected, true).said, { said: true }],
     ['Taken', selected.date_taken || unknown],
-    ['Exposure', exposure],
+    ['Exposure', exposure || unknown],
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],
     ['Place', place],
-    ['Lens', selected.lens],
+    ['Lens', selected.lens || unknown],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
-    ['Folder', folder, { folder }],
+    ['Folder', folder || 'The drive\u2019s root', folder ? { folder } : { said: true }],
   ];
-  for (const [label, value, link] of rows) {
+  for (const [label, value, how = {}] of rows) {
     if (!value) continue;
     facts.append(element('dt', '', label));
-    const cell = element('dd', '', String(value));
-    // A fact that names a place in the library is a way to go there.
-    if (link?.folder && actions.showFolder) {
-      cell.classList.add('is-link');
-      cell.title = 'Browse this folder';
-      cell.addEventListener('click', () => actions.showFolder(link.folder));
-    } else if (link?.chip && actions.applyChip) {
-      cell.classList.add('is-link');
-      cell.title = 'Narrow to this camera';
-      cell.addEventListener('click', () => actions.applyChip(link.chip));
+    const cell = element('dd');
+    if (how.said || value === unknown) {
+      cell.textContent = String(value);
+      facts.append(cell);
+      continue;
+    }
+    // A value is a control: the keyboard reaches it, and pressing it copies
+    // the fact or goes where it points.
+    const control = element('button', 'fact', String(value));
+    control.type = 'button';
+    if (how.folder && actions.showFolder) {
+      control.classList.add('is-link');
+      control.title = 'Browse this folder';
+      control.addEventListener('click', () => actions.showFolder(how.folder));
+    } else if (how.chip && actions.applyChip) {
+      control.classList.add('is-link');
+      control.title = 'Narrow to this camera';
+      control.addEventListener('click', () => actions.applyChip(how.chip));
     } else {
-      cell.title = 'Click to copy';
-      cell.addEventListener('click', () => {
+      control.title = 'Copy';
+      control.addEventListener('click', () => {
         navigator.clipboard?.writeText(String(value)).then(() => actions.notify?.('Copied.')).catch(() => {});
       });
     }
+    cell.append(control);
     facts.append(cell);
   }
   panel.replaceChildren(heading, facts);

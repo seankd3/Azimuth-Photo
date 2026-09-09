@@ -7,6 +7,8 @@
 // seconds are up, and never a decision the person has stopped thinking
 // about.
 const SHOWN_MS = 8000;
+// A notice with no way back has nothing to wait for.
+const NOTICE_MS = 3500;
 
 export function createUndo() {
   const toast = document.querySelector('[data-toast]');
@@ -38,7 +40,14 @@ export function createUndo() {
     // A notice without a way back leaves the live Undo where it is.
     if (nextRevert) button.hidden = false;
     toast.hidden = false;
-    timer = setTimeout(() => { toast.hidden = true; }, SHOWN_MS);
+    timer = setTimeout(() => { toast.hidden = true; }, nextRevert ? SHOWN_MS : NOTICE_MS);
+  }
+
+  // Esc puts the surface away; the way back keeps its own clock, so Ctrl+Z
+  // still works for the moment it was promised.
+  function dismiss() {
+    clearTimeout(timer);
+    toast.hidden = true;
   }
 
   async function run() {
@@ -52,5 +61,5 @@ export function createUndo() {
     }
   }
 
-  return Object.freeze({ hide, run, show, pending: () => revert !== null });
+  return Object.freeze({ hide, run, show, dismiss, pending: () => revert !== null, visible: () => !toast.hidden });
 }

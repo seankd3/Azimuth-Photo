@@ -733,9 +733,8 @@ function closeLoupe() {
   const back = loupeReturnsTo || 'library';
   loupeReturnsTo = null;
   if (loupeOpen()) update({ view: back, ...(back === 'rank' ? { selected: null } : {}) });
-  loupeStrip.replaceChildren();
-  stripKey = '';
-  stripStart = null;
+  // The strip keeps its cells: a reopen finds them where they were and
+  // rebuilds only what differs, instead of flashing an empty band.
   loupeView.reset();
   loupeImage.removeAttribute('src');
   delete loupeImage.dataset.source;
@@ -1698,6 +1697,7 @@ document.addEventListener('click', (event) => {
   if (action === 'close-drive') closeDriveDialog();
   if (action === 'close-empty') trashWorkflow.closeDialog();
   if (action === 'close-loupe') closeLoupe();
+  if (action === 'search-clear') { searchBox.value = ''; runSearch(''); searchBox.focus(); }
 });
 
 document.addEventListener('keydown', (event) => {
@@ -1787,9 +1787,11 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (event.key === 'Escape') {
-    // One rung at a time: a menu, then the zoom, then the clean room, then
-    // the loupe itself — the popovers close in their own earlier handlers.
-    if (!folderMenu.hidden || !driveMenu.hidden) {
+    // One rung at a time: a toast, a menu, then the zoom, then the clean
+    // room, then the loupe itself — the popovers close in their own earlier
+    // handlers.
+    if (undo.visible()) undo.dismiss();
+    else if (!folderMenu.hidden || !driveMenu.hidden) {
       folderMenu.hidden = true;
       driveMenu.hidden = true;
     }
@@ -1803,6 +1805,12 @@ document.addEventListener('keydown', (event) => {
     }
     else if (rankWorkflow.isOpen()) rankWorkflow.close();
     else if (read().view === 'people') update({ view: 'library' });
+    else if (document.activeElement === searchBox) {
+      // An empty box with nothing left to put away: the keyboard goes back
+      // to the photographs, where the next key means something.
+      searchBox.blur();
+      (grid.querySelector('.photo-cell.is-focus') || grid.querySelector('.photo-cell.is-selected') || grid.querySelector('.photo-cell'))?.focus();
+    }
     else if (read().selected || read().marked?.size) {
       // The marks and the selection go; the cursor keeps its place, so the
       // next arrow moves from here and not from the top.
@@ -1936,38 +1944,51 @@ document.addEventListener('keydown', (event) => {
 
 // Every key, once: the tooltips on the buttons and the ? sheet both read
 // this table, so a key cannot be documented in one place and not the other.
+// The one table of keys. A row may name the button that does the same
+// thing; that button's tooltip reads its key from here, so the sheet and
+// the tooltips can never disagree.
 const SHORTCUTS = [
   ['Everywhere', [
-    ['?', 'This sheet'], ['/', 'Search'], ['Tab', 'Fold the side panels'], ['Shift+Tab', 'Fold everything'],
-    ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo'], ['Ctrl+A', 'Select all'],
+    ['?', 'This sheet'], ['/', 'Search'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
+    ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'],
   ]],
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
-    ['Enter / Space', 'Open the loupe'], ['P', 'Pick'], ['U', 'Clear the pick'], ['X', 'Reject'],
-    ['R / Shift+R', 'Turn left / right'], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
+    ['Enter / Space', 'Open the loupe'], ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
+    ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
   ]],
+  ['The mouse', [
+    ['Click', 'Select'], ['Shift+Click', 'Extend the selection'], ['Ctrl+Click', 'Add or take out'],
+    ['Double-click', 'Open the loupe'], ['A day\u2019s name', 'Select the day'], ['Drag to an album', 'Add'],
+  ]],
+  ['Filters', [['Backspace, Delete', 'Remove the chip'], ['Esc', 'Close the editor']]],
+  ['The rail', [['Arrows', 'A day'], ['PageUp / PageDown', 'A year'], ['Home / End', 'The ends']]],
   ['The loupe', [
-    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous'], ['F', 'Leave the clean room'], ['Esc', 'Fit, then close'],
+    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous'], ['F', 'Leave the clean room'], ['Esc', 'Fit, then close', ['close-loupe', 'leave-rank']],
   ]],
   ['Rank', [
-    ['1–9, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
+    ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
     ['Z / F', 'Look closer'], ['P / U / X / R', 'The card under the mouse'],
   ]],
   ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
-  ['Trash', [['U', 'Restore']]],
+  ['Trash', [['U', 'Restore', ['restore']]]],
   ['Teaching', [['Y / N', 'This is / is not the word']]],
 ];
 const TIPS = {
-  'import-folder': 'Import a folder…', export: 'Export the selection… ', 'add-folder': 'Add a folder to the library',
-  rank: 'Rank the photographs you are looking at', 'leave-rank': 'Back to the grid (Esc)', forget: 'Forget this missing photograph',
+  'import-folder': 'Import a folder\u2026', export: 'Export the selection\u2026', 'add-folder': 'Add a folder to the library',
+  rank: 'Rank the photographs you are looking at', 'leave-rank': 'Back to the grid', forget: 'Forget this missing photograph',
   'add-chip': 'Narrow by a fact', 'save-view': 'Save these filters as an album', 'keep-results': 'Save what the search found',
-  restore: 'Put it back in the library (U)', 'empty-trash': 'Delete everything in Trash for good',
-  'toggle-left': 'Show or hide the sidebar (Tab)', 'toggle-right': 'Show or hide the details (Tab)', 'toggle-top': 'Show or hide the top bar (Shift+Tab)',
-  pick: 'Pick (P) or clear the pick (U)', turn: 'Turn left (R) · Shift turns right', reject: 'Reject (X)',
+  restore: 'Put it back in the library', 'empty-trash': 'Delete everything in Trash for good',
+  'toggle-left': 'Show or hide the sidebar', 'toggle-right': 'Show or hide the details', 'toggle-top': 'Show or hide the top bar',
+  pick: 'Pick, or clear the pick', turn: 'Turn left \u00b7 Shift turns right', reject: 'Reject', 'search-clear': 'Clear the search',
+  'undo-toast': 'Take it back', 'close-loupe': 'Close the loupe',
 };
+const KEY_OF = new Map();
+for (const [, keys] of SHORTCUTS) for (const [key, , actions] of keys) for (const action of actions || []) if (!KEY_OF.has(action)) KEY_OF.set(action, key);
 for (const [action, tip] of Object.entries(TIPS)) {
-  for (const node of document.querySelectorAll(`[data-action="${action}"]`)) if (!node.title) node.title = tip;
+  const key = KEY_OF.get(action);
+  for (const node of document.querySelectorAll(`[data-action="${action}"]`)) if (!node.title) node.title = key ? `${tip} (${key})` : tip;
 }
 const keysDialog = document.querySelector('[data-keys-dialog]');
 {
@@ -1980,7 +2001,8 @@ const keysDialog = document.querySelector('[data-keys-dialog]');
     list.className = 'keys';
     for (const [key, does] of keys) {
       const dt = document.createElement('dt');
-      dt.innerHTML = key.split(' / ').map((k) => `<kbd>${k}</kbd>`).join(' / ');
+      // Caps split where the words do: on a slash and on a comma alike.
+      dt.replaceChildren(...key.split(/( \/ |, )/).map((part, i) => (i % 2 ? part : Object.assign(document.createElement('kbd'), { textContent: part }))));
       const dd = document.createElement('dd');
       dd.textContent = does;
       list.append(dt, dd);
@@ -2146,8 +2168,9 @@ document.querySelector('.sidebar').addEventListener('click', (event) => {
   applyFolds();
 });
 applyFolds();
-// F9: every sidebar row has the same mark slot; the library rows wear theirs.
+// Every row and every close mark wears the drawn set, never a typed glyph.
 for (const row of document.querySelectorAll('.sidebar [data-icon]')) row.prepend(icon(row.dataset.icon));
+for (const mark of document.querySelectorAll('[data-icon-only]')) mark.replaceChildren(icon(mark.dataset.iconOnly));
 
 setPanels(loadPanels(), { keep: false });
 subscribe(render);

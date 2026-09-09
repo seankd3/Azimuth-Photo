@@ -41,7 +41,7 @@ export function createFilterBar({ product, read, update, onChange }) {
       return `${not}in ${chip.values.map((v) => names.get(v) || v).join(' or ')}`;
     }
     if (chip.is === 'alike') return `${not}≈ ${chip.values.join(' or ')}`;
-    if (chip.is === 'stack') return `${not}▤ In this stack`;
+    if (chip.is === 'stack') return `${not}In this stack`;
     return `${not}${chip.values.map(said).join(' or ')}`;
   }
 

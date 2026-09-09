@@ -23,6 +23,7 @@
       </div>
       <div class="topbar-search">
         <input data-search type="search" placeholder="Search your photos" aria-label="Search your photos" autocomplete="off" spellcheck="false">
+        <button class="search-clear" type="button" data-action="search-clear" data-icon-only="close" aria-label="Clear the search"></button>
       </div>
       <div class="top-actions">
         <button class="card-chip" type="button" data-action="import-card" hidden aria-live="polite">Card · <span data-card-label></span></button>
@@ -79,7 +80,7 @@
         <button class="quiet-button" type="button" data-action="forget" hidden>Forget missing</button>
         <span class="like-pill" data-like-pill hidden>
           <button class="chip-label" type="button" data-like-seeds title="See the photographs this search is like"></button>
-          <button class="drop-chip" type="button" data-like-clear aria-label="Stop searching by likeness">×</button>
+          <button class="drop-chip" type="button" data-like-clear data-icon-only="close" aria-label="Stop searching by likeness"></button>
         </span>
         <div class="popover like-pop" data-like-pop hidden></div>
         <div class="chip-bar" data-chips></div>
@@ -124,7 +125,7 @@
       <section class="rank-stage" data-rank aria-label="Rank" hidden></section>
       <section class="face-wall" data-people-stage aria-label="People" hidden></section>
       <section class="loupe-stage" data-loupe aria-label="Photo preview" hidden>
-        <button class="loupe-close" type="button" data-action="close-loupe" aria-label="Close preview">×</button>
+        <button class="loupe-close" type="button" data-action="close-loupe" data-icon-only="close" aria-label="Close preview"></button>
         <img data-loupe-image alt="">
         <p class="loupe-note" data-loupe-note hidden></p>
         <div class="loupe-strip" data-loupe-strip role="listbox" aria-label="Nearby photographs"></div>
@@ -191,6 +192,9 @@
         </div>
       </section>
     </aside>
+  <div class="toast" data-toast hidden role="status">
+    <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
+  </div>
   </div>
 
   <dialog class="drive-dialog" data-home-dialog aria-labelledby="home-title">
@@ -291,9 +295,6 @@
     </form>
   </dialog>
 
-  <div class="toast" data-toast hidden role="status">
-    <span data-toast-copy></span><button type="button" data-action="undo-toast">Undo</button>
-  </div>
 
   <script type="module" src="/static/index.js"></script>
 </body>

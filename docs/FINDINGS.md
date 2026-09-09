@@ -314,30 +314,30 @@ finding was checked and the numbers said no.
 | F21 | A one-year library reads 2026 … 2026, half cut off | the end year only when it differs, inside the track | shipped |
 | F22 | The right fold tab covers the rail | the tab steps aside by the rail's width while the rail is up | shipped |
 | F23 | The fold tabs are hover-gated at 55% opacity | rest visible; hover lifts the ground only | shipped |
-| F24 | The loupe hard-cuts in | a 120 ms fade and settle, reduced motion honoured | open |
-| F25 | Reopening the loupe flashes an empty strip | the strip's DOM survives a close | open |
-| F26 | Esc in the search box blurs to nowhere | clear and keep focus; a further Esc hands focus to the grid | open |
-| F27 | Esc never reaches the ladder from a focused empty box | propagation stops only when the drop was open or the box had text | open |
-| F28 | Chromium's own × in the search pill | hidden; the app's clear is the one clear | open |
-| F29 | The toast paints under menus, the drop and dialogs | above every non-modal layer | open |
-| F30 | One 8-second clock for a notice and an undo alike; no way to dismiss | 3.5 s for a notice, 8 s with a way back; Esc's first rung hides a toast | open |
-| F31 | The toast is off the palette and asks for a weight the fonts do not ship | named surfaces; weight 600 | open |
-| F32 | The toast centres on the window, not the photographs | centred on the workspace | open |
-| F33 | The glance suppresses zero rows and keeps a leftover sentence | None is said; the ? is a key cap; the sentence goes | open |
-| F34 | Exposure and Lens vanish when unread; Folder vanishes on a flat drive | Unknown for Exposure and Lens; the drive's root as the folder | open |
-| F35 | Label and value 400px apart | a tight label column, values left-aligned | open |
-| F36 | Copy is mouse-only and copies app vocabulary | values are buttons; vocabulary rows are not copied | open |
-| F37 | The inspector is rebuilt on every store beat | keyed on what it shows | open |
-| F38 | The drawn set is worn almost only in the drop; an unknown name draws the wrong glyph | chevrons and the stack chip wear the set; an unknown name throws | open |
-| F39 | 85 raw font sizes remain beside the four tokens | swept onto the scale; two display tokens for the dialogs | open |
-| F40 | Icons render at 14 on a 16 grid; filled marks drawn as outlines | 16px; smart fills | open |
+| F24 | The loupe hard-cuts in | a 120 ms fade and settle, reduced motion honoured | shipped |
+| F25 | Reopening the loupe flashes an empty strip | the strip's DOM survives a close | shipped |
+| F26 | Esc in the search box blurs to nowhere | clear and keep focus; a further Esc hands focus to the grid | shipped |
+| F27 | Esc never reaches the ladder from a focused empty box | propagation stops only when the drop was open or the box had text | shipped |
+| F28 | Chromium's own × in the search pill | hidden; the app's clear is the one clear | shipped |
+| F29 | The toast paints under menus, the drop and dialogs | above every non-modal layer | shipped |
+| F30 | One 8-second clock for a notice and an undo alike; no way to dismiss | 3.5 s for a notice, 8 s with a way back; Esc's first rung hides a toast | shipped |
+| F31 | The toast is off the palette and asks for a weight the fonts do not ship | named surfaces; weight 600 | shipped |
+| F32 | The toast centres on the window, not the photographs | centred on the workspace | shipped |
+| F33 | The glance suppresses zero rows and keeps a leftover sentence | None is said; the ? is a key cap; the sentence goes | shipped |
+| F34 | Exposure and Lens vanish when unread; Folder vanishes on a flat drive | Unknown for Exposure and Lens; the drive's root as the folder | shipped |
+| F35 | Label and value 400px apart | a tight label column, values left-aligned | shipped |
+| F36 | Copy is mouse-only and copies app vocabulary | values are buttons; vocabulary rows are not copied | shipped |
+| F37 | The inspector is rebuilt on every store beat | keyed on what it shows | shipped |
+| F38 | The drawn set is worn almost only in the drop; an unknown name draws the wrong glyph | chevrons and the stack chip wear the set; an unknown name throws | shipped |
+| F39 | 85 raw font sizes remain beside the four tokens | swept onto the scale; two display tokens for the dialogs | shipped |
+| F40 | Icons render at 14 on a 16 grid; filled marks drawn as outlines | 16px; smart fills | shipped |
 | F41 | Esc un-narrows chips but not an album, a folder, or Trash | one rung un-narrows the scope one step | shipped |
-| F42 | Two key tables say four facts twice | one table: the sheet and every tooltip read it | open |
-| F43 | The sheet lacks the mouse grammar, chip keys and rail keys; one row renders as one wide cap | rows added; caps split on commas too | open |
-| U6 | Two key tables | one (F42) | open |
+| F42 | Two key tables say four facts twice | one table: the sheet and every tooltip read it | shipped |
+| F43 | The sheet lacks the mouse grammar, chip keys and rail keys; one row renders as one wide cap | rows added; caps split on commas too | shipped |
+| U6 | Two key tables | one (F42) | shipped |
 | U7 | A chapter joined with ' · ' and split again on it | the break carries title and count apart | shipped |
 | U8 | Four spellings of a star | one (F8) | shipped |
-| U9 | Two spellings of a stack in one bar | the chip says 'In this stack' without a glyph | open |
+| U9 | Two spellings of a stack in one bar | the chip says 'In this stack' without a glyph | shipped |
 | U10 | Two policies for an empty sidebar section | one: a quiet row that fills it (F10) | shipped |
 | U11 | Two byte-identical row rules | deleted | shipped |
 | U12 | Two chevrons drawn as text | the drawn chevron (F11, F38) | shipped |
