@@ -42,7 +42,7 @@ function collectAspects(state) {
 }
 
 
-const dayTitle = (day, count) => `${title(day)} · ${count.toLocaleString()}`;
+
 
 function collectBreaks(state) {
   // Chapters exist where their arithmetic is exact: a date-sorted library
@@ -63,7 +63,7 @@ function collectBreaks(state) {
   // The same walk the timeline rail makes, from the kit: empty when the
   // counts and the total disagree, so no chapter sits at a wrong index.
   const found = chaptersIn(state.days, state.sort, state.total);
-  if (found.length) breaks = new Map(found.map((c) => [c.index, dayTitle(c.day, c.count)]));
+  if (found.length) breaks = new Map(found.map((c) => [c.index, { title: title(c.day), count: c.count }]));
 }
 
 function currentLayout(width, rowHeight, count) {
@@ -158,7 +158,14 @@ function photoCell(photo, index, actions) {
     const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''));
     badge.append(icon('stack'), String(photo.stack + 1));
     badge.setAttribute('role', 'button');
+    badge.tabIndex = 0;
     badge.title = open ? `A stack of ${photo.stack + 1} — fold it (S)` : `A stack of ${photo.stack + 1} — open it (S)`;
+    badge.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      event.stopPropagation();
+      actions.stack?.(photo, index);
+    });
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
       actions.stack?.(photo, index);
@@ -264,17 +271,53 @@ function reconcileGrid(grid, state, actions, layout, range) {
     const key = String(band.index);
     let node = currentBands.get(key);
     if (!node) {
-      node = element('div', 'grid-chapter');
+      // The day is a control: a click marks its frames, Shift extends.
+      node = element('button', 'grid-chapter');
+      node.type = 'button';
       node.dataset.band = key;
+      node.addEventListener('click', (event) => {
+        actions.markRange?.(band.index, band.title.count, { extend: event.shiftKey });
+      });
     }
-    if (node.dataset.title !== band.title) {
-      // The day is the anchor; its count sits beside it, quieter.
-      node.dataset.title = band.title;
-      const at = band.title.lastIndexOf(' · ');
-      node.replaceChildren(element('span', 'day', at > 0 ? band.title.slice(0, at) : band.title),
-        element('span', 'count', at > 0 ? band.title.slice(at + 3) : ''));
+    const said = `${band.title.title}\u0001${band.title.count}`;
+    if (node.dataset.title !== said) {
+      node.dataset.title = said;
+      node.title = `Select the ${band.title.count.toLocaleString()} of this day`;
+      node.replaceChildren(element('span', 'day', band.title.title),
+        element('span', 'count', band.title.count.toLocaleString()));
     }
     node.style.top = `${band.top}px`;
+    desired.push(node);
+    leftovers.delete(node);
+  }
+
+  // A stack wears one band per row it crosses, drawn behind its cells: the
+  // cells' own boxes plus half the gap around, so the set reads as one.
+  const segments = new Map();
+  for (let index = range.start; index < range.end; index += 1) {
+    const photo = state.photos.get(index);
+    const cover = photo && (photo.stack_of || (photo.stack ? photo.id : null));
+    if (!cover) continue;
+    const place = placeGridCell(layout, index);
+    const key = `${cover}:${place.top}`;
+    const held = segments.get(key) || { left: place.left, right: place.left + place.width, top: place.top, height: place.height };
+    held.left = Math.min(held.left, place.left);
+    held.right = Math.max(held.right, place.left + place.width);
+    segments.set(key, held);
+  }
+  const currentSegments = new Map([...grid.children].filter((n) => n.dataset.segment !== undefined).map((n) => [n.dataset.segment, n]));
+  const half = layout.gap / 2;
+  for (const [key, seg] of segments) {
+    let node = currentSegments.get(key);
+    if (!node) {
+      node = element('div', 'stack-band');
+      node.dataset.segment = key;
+      grid.prepend(node);
+    }
+    node.style.left = `${seg.left - half}px`;
+    node.style.top = `${seg.top - half}px`;
+    node.style.width = `${seg.right - seg.left + layout.gap}px`;
+    node.style.height = `${seg.height + layout.gap}px`;
     desired.push(node);
     leftovers.delete(node);
   }

@@ -627,6 +627,7 @@ function visibleGrid() {
     open: openPhoto,
     stack: (photo) => { void toggleStack(photo.id); },
     stackOpen: stackIsOpen,
+    markRange: (start, count, { extend = false } = {}) => { void markRange(start, count, extend); },
     drag: (index, event) => {
       const photo = read().photos.get(index);
       if (!photo) return;
@@ -1217,6 +1218,22 @@ function selectPhoto(index, modifiers = {}) {
   }
   const chosen = read().photos.get(focus) || photo;
   update({ selected: chosen, selectedIndex: focus, marked });
+  detailsSoon(chosen);
+}
+
+// A chapter's frames, marked: the rows are brought in if they are not, so a
+// day is a day whether or not it has scrolled past.
+async function markRange(start, count, extend) {
+  await pages.ensureRange(start, start + count);
+  const marked = extend ? new Set(read().marked) : new Set();
+  for (let i = start; i < start + count; i += 1) {
+    const held = read().photos.get(i);
+    if (held) marked.add(held.id);
+  }
+  const first = read().photos.get(start);
+  anchorIndex = start;
+  const chosen = first || read().selected;
+  update({ marked, selected: chosen, selectedIndex: first ? start : read().selectedIndex });
   detailsSoon(chosen);
 }
 
@@ -1999,16 +2016,26 @@ density.addEventListener('input', (event) => {
     visibleGrid();
   }
 });
+let wheelFrame = null;
+let wheelHeight = null;
 workspace.addEventListener('wheel', (event) => {
   // Ctrl+wheel is the grid's own zoom: the same slider, driven from where
-  // the eyes already are.
-  if (!event.ctrlKey || read().view !== 'library') return;
+  // the eyes already are, continuous with the wheel's travel. It is never
+  // the page's zoom, in any view.
+  if (!event.ctrlKey) return;
   event.preventDefault();
-  const next = Math.max(Number(density.min), Math.min(Number(density.max),
-    rowHeight - Math.sign(event.deltaY) * Number(density.step || 10)));
-  if (next === rowHeight) return;
-  density.value = next;
-  density.dispatchEvent(new Event('input'));
+  if (read().view !== 'library') return;
+  wheelHeight = Math.max(Number(density.min), Math.min(Number(density.max),
+    (wheelHeight ?? rowHeight) - event.deltaY * 0.15));
+  if (wheelFrame !== null) return;
+  wheelFrame = requestAnimationFrame(() => {
+    wheelFrame = null;
+    const next = Math.round(wheelHeight);
+    wheelHeight = null;
+    if (next === rowHeight) return;
+    density.value = next;
+    density.dispatchEvent(new Event('input'));
+  });
 }, { passive: false });
 
 // The same verbs under the mouse as in the bar and on the keys — one list

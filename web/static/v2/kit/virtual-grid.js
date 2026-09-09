@@ -14,6 +14,10 @@ const DEFAULT_PADDING = 4;
 const ASSUMED_ASPECT = 1.5;
 
 const DEFAULT_BAND = 34;
+// How much taller than the target a row may grow to fill the width when a
+// chapter or the end closes it short: past this the row stays at the target,
+// left-aligned -- a lone panorama, not a shoot of five.
+const STRETCH = 1.6;
 
 export function measureGrid(width, rowHeight, aspects, count, {
   gap = DEFAULT_GAP,
@@ -48,11 +52,12 @@ export function measureGrid(width, rowHeight, aspects, count, {
       top += bandHeight;
     }
     // A row is as many photographs as fit at the target height plus the one
-    // that overflows, all scaled down until the row is exactly the width. So
-    // a row is never taller than the target -- the size the person chose is a
-    // ceiling -- and the only rows shorter than that by much are a lone
-    // panorama and the last row, which is left at the target rather than
-    // stretched across the width.
+    // that overflows, all scaled down until the row is exactly the width. A
+    // row that a chapter or the end closes short is scaled *up* to the width
+    // as long as that stays within STRETCH of the target -- on a library of
+    // small daily shoots every row is a chapter's last row, and a grid that
+    // left them all short was half black. Past the stretch (a lone panorama)
+    // the row keeps the target, left-aligned.
     let sum = 0;
     let end = index;
     let closed = false;
@@ -66,7 +71,8 @@ export function measureGrid(width, rowHeight, aspects, count, {
       }
     }
     const length = end - index;
-    const height = closed ? (available - (gap * (length - 1))) / sum : target;
+    const filled = (available - (gap * (length - 1))) / sum;
+    const height = closed || filled <= target * STRETCH ? filled : target;
 
     rowStarts.push(index);
     rowTops.push(top);

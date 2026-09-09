@@ -16,7 +16,6 @@ const PATHS = {
   portrait: 'M4.5 1.5h7v13h-7z',
   drive: 'M2 9.5h12v3.5H2z M2 9.5L4 3h8l2 6.5 M11 11.5h1',
   label: 'M2 3h7l5 5-5.5 5.5L2 8z M5 6h.01',
-  star: 'M8 2l1.8 3.9 4.2.5-3.1 2.9.8 4.2L8 11.4 4.3 13.5l.8-4.2L2 6.4l4.2-.5z',
 };
 
 export function icon(name, className = 'icon') {

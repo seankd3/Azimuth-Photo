@@ -24,7 +24,7 @@
   --accent-tint: #241512;
   --hover-line: #666a72;
   --ring: rgb(238 241 244 / 70%);
-  --stack-band: rgb(238 241 244 / 16%);
+  --stack-band: rgb(238 241 244 / 9%);
   --warn: #d9a441;
   --ok: #66bfa0;
   --radius: 4px;
@@ -308,8 +308,12 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   padding: 0;
   border: 0;
   background: var(--tile);
-  cursor: default;
+  cursor: pointer;
 }
+.photo-cell:active { cursor: grabbing; }
+/* one band per stack, drawn behind its cells */
+.stack-band { position: absolute; z-index: 0; border-radius: var(--radius); background: var(--stack-band); pointer-events: none; }
+.photo-cell { z-index: 1; }
 /* a tile arrives, it does not pop: the picture fades in once it has loaded */
 .photo-cell img { display: block; position: relative; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .16s ease; }
 .photo-cell img.is-loaded { opacity: 1; }
@@ -378,9 +382,13 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   /* a hollow ring: the drive that holds it is away */
   border-style: dashed;
 }
-/* no stroke on a photograph: the only rings are the hand's and the mark's */
-.photo-cell:hover { box-shadow: inset 0 0 0 1px var(--hover-line); }
-.photo-cell.is-selected { box-shadow: inset 0 0 0 2px var(--accent); }
+/* no stroke on a photograph: the only rings are the hand's and the mark's,
+   drawn on a veil above the picture (an inset shadow on the cell itself
+   paints under its image); the mark keeps a dark companion so it survives
+   an orange photograph */
+.photo-cell::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
+.photo-cell:hover::after { box-shadow: inset 0 0 0 1px var(--hover-line); }
+.photo-cell.is-selected::after { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px rgb(0 0 0 / 55%); }
 /* A chapter is a quiet line in the stream: the day, its count, no chrome. */
 .grid-chapter {
   position: absolute;
@@ -390,13 +398,17 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  padding-bottom: 8px;
+  padding: 0 4px 8px;
+  border: 0;
+  background: transparent;
   color: var(--text-2);
   font: 500 var(--t-meta)/1 var(--sans);
+  text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  pointer-events: none;
+  cursor: pointer;
 }
+.grid-chapter:hover { color: var(--text); }
 .grid-chapter .count { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 /* the keyboard cursor is its own quieter ring: on the import stage too,
    where the checked cell is the mark and the cursor is the ring */
@@ -977,9 +989,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .stack-badge.is-open { color: var(--accent); }
 /* A stack wears a band: each cell's halo is half the gap, so cover and
    members meet in one continuous frame around the set, row to row. */
-.photo-cell.is-stacked { box-shadow: 0 0 0 2px var(--stack-band); }
-.photo-cell.is-stacked:hover { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 1px var(--hover-line); }
-.photo-cell.is-stacked.is-selected { box-shadow: 0 0 0 2px var(--stack-band), inset 0 0 0 2px var(--accent); }
+
 .import-choose { display: flex; gap: 6px; }
 .import-progress { margin: 10px 0 0; color: var(--text); font-size: 13px; }
 .toast {
