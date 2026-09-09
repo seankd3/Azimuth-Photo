@@ -15,6 +15,7 @@ export class PageCache {
     this.loaded = new Set();
     this.pending = new Map();
     this.failed = new Set();
+    this.wanted = [0, this.pageSize];
     return this.generation;
   }
 
@@ -64,9 +65,20 @@ export class PageCache {
   }
 
   refresh(total) {
-    // Re-read every loaded page in place. The generation and the positions
-    // stay, only the rows change, so a selection survives and nothing flashes.
+    // Re-read, in place, the pages around what the window last asked for,
+    // and let the others go. The generation and the positions stay, only the
+    // rows change, so a selection survives and nothing flashes. A refresh is
+    // every worker tick while tiles are made; re-reading every page a long
+    // scroll ever loaded was three hundred reads a tick at depth. A page
+    // that failed is owed again: the library may be back.
     this.total = Math.max(0, Number(total));
+    this.failed = new Set();
+    const [from, to] = this.wanted;
+    for (const offset of [...this.loaded]) {
+      if (offset >= from - this.pageSize && offset < to + this.pageSize) continue;
+      this.loaded.delete(offset);
+      for (let position = offset; position < offset + this.pageSize; position += 1) this.values.delete(position);
+    }
     const generation = this.generation;
     const reads = [...this.loaded].map((offset) => this.load(offset, this.pageSize).then((items) => {
       if (!this.isCurrent(generation)) return;
@@ -110,6 +122,8 @@ export class PageCache {
   }
 
   ensureRange(start, end) {
+    // What the window is looking at, remembered: the pages a refresh keeps.
+    this.wanted = [this.pageOffset(start), Math.max(end, start + 1)];
     const requests = [];
     for (let offset = this.pageOffset(start); offset < end; offset += this.pageSize) {
       requests.push(this.ensure(offset));

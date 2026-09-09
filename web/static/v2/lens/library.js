@@ -210,9 +210,6 @@ function reconcileGrid(grid, state, actions, layout, range) {
   );
   const leftovers = new Set(grid.children);
   const desired = [];
-  let firstMissing = null;
-  let lastMissing = null;
-
   for (let index = range.start; index < range.end; index += 1) {
     const photo = state.photos.get(index);
     const key = String(index);
@@ -221,10 +218,6 @@ function reconcileGrid(grid, state, actions, layout, range) {
       ? cell?.dataset.photoKey === `${photo.id}:${photo.tail}`
       : cell?.dataset.kind === 'skeleton';
     if (!matches) cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
-    if (!photo) {
-      firstMissing ??= index;
-      lastMissing = index + 1;
-    }
     positionCell(cell, layout, index, photo);
     // Marked wears the accent; the keyboard cursor is its own quieter ring,
     // so where you are is visible inside what you have.
@@ -280,7 +273,9 @@ function reconcileGrid(grid, state, actions, layout, range) {
   for (const cell of desired) {
     if (cell.parentNode !== grid) grid.append(cell);
   }
-  if (firstMissing !== null) actions.need(firstMissing, lastMissing);
+  // What is on screen, every frame: pages not yet held are asked for, and
+  // the cache learns which pages a refresh must keep fresh.
+  actions.need(range.start, range.end);
   actions.look(desired.filter((cell) => cell.dataset.kind === 'photo').map((cell) => Number(cell.dataset.photoId)));
 }
 

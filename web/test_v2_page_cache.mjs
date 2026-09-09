@@ -47,4 +47,25 @@ const touched = cache.patch((item) => item.hash === 'a', (item) => ({ ...item, s
 assert.equal(touched, 2, 'a change to an identity lands on every row that holds it');
 assert.deepEqual([...pages.at(-1).values.values()].map((item) => item.status), ['picked', 'picked', 'unflagged']);
 
+generation = cache.reset();
+cache.seed(generation, [{ id: 1 }], 47_000);
+for (const offset of [200, 400, 20_000, 20_200]) {
+  const ensured = cache.ensure(offset);
+  requests.at(-1).resolve([{ id: offset }]);
+  await ensured;
+}
+const stormed = cache.ensure(30_000);
+requests.at(-1).reject(new Error('offline'));
+await stormed;
+await cache.ensureRange(20_000, 20_400);
+const before = requests.length;
+const refreshed = cache.refresh(47_000);
+assert.equal(requests.length - before, 2, 'a refresh re-reads only the pages around what the window asked for');
+assert.deepEqual(requests.slice(before).map((r) => r.offset).sort((a, b) => a - b), [20_000, 20_200]);
+for (const request of requests.slice(before)) request.resolve([{ id: request.offset }]);
+await refreshed;
+assert.equal(cache.values.has(200), false, 'pages far from the window are let go');
+assert.equal(cache.values.has(20_200), true, 'pages in the window stay');
+assert.equal(cache.failed.has(30_000), false, 'a failed page is owed again after a refresh');
+
 console.log('page cache refuters passed');

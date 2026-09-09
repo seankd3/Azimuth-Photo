@@ -687,19 +687,22 @@ async function loadView() {
 
 async function refreshInPlace({ shelves = true } = {}) {
   // The library changed under the window -- a sweep admitted photographs or
-  // the worker finished one -- so re-read what is loaded without resetting
-  // it. The shelves (albums, people, labels) are many small count queries;
-  // a caller re-reading on every worker tick skips them and asks only when
-  // the lane says something derived was rewritten.
+  // the worker finished one -- so re-read what is on screen without
+  // resetting it. A worker tick changes only the tiles, so it re-reads only
+  // the pages; the counts, drives, Trash and shelves (albums, people,
+  // labels) are asked again when a sweep or a lane rewrite says they moved.
   const generation = pages.generation;
   const { view, query } = read();
   const key = JSON.stringify(viewOf());
+  const held = read();
   const [counts, drives, trashCount, size, albums, people, labels] = await Promise.all([
-    product.counts(), product.drives(), product.trashCount(),
-    view === 'trash' || seeking() ? Promise.resolve(0) : product.size(viewOf()),
-    shelves ? product.albums() : read().albums,
-    shelves ? product.people().catch(() => read().people) : read().people,
-    shelves ? product.labels().catch(() => read().labels) : read().labels,
+    shelves ? product.counts() : held.counts,
+    shelves ? product.drives() : held.drives,
+    shelves ? product.trashCount() : held.counts.trash,
+    view === 'trash' || seeking() ? Promise.resolve(0) : shelves ? product.size(viewOf()) : held.total,
+    shelves ? product.albums() : held.albums,
+    shelves ? product.people().catch(() => held.people) : held.people,
+    shelves ? product.labels().catch(() => held.labels) : held.labels,
   ]);
   if (!pages.isCurrent(generation) || read().view !== view
       || JSON.stringify(viewOf()) !== key || read().query !== query) return;
