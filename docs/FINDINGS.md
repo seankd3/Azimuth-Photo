@@ -7,14 +7,15 @@ one holds what a read of the product found wrong, ranked.
 **The process, whole.** A finding enters with four things: the user impact in
 product words, the evidence (file and line, verified at the branch's HEAD),
 the concrete fix, and its rank within its surface. It leaves in one of two
-ways, and only in the same commit that does the work: the status becomes the
-commit hash, or it becomes *rejected* with the reason in the row. Rows are
-never deleted and never renumbered. A fix commit names its row
-(`G3`, `L7`) in its subject. An audit runs against HEAD and lists what earlier
-waves already covered, so the same finding is not found twice.
+ways, and only in the same commit that does the work: the status becomes
+*shipped*, or *rejected* with the reason in the row. The commit that shipped
+a row is the one whose subject starts with its number (`git log --grep '^P6'`),
+so the ledger never carries a hash it cannot know yet. Rows are never
+deleted and never renumbered. An audit runs against HEAD and lists what
+earlier waves already covered, so the same finding is not found twice.
 
-Status: `open` · `<hash>` shipped · `rejected: <why>` · `measured: <what>`
-when the finding was checked and the numbers said no.
+Status: `open` · `shipped` · `rejected: <why>` · `measured: <what>` when the
+finding was checked and the numbers said no.
 
 ## Performance (measured on a fresh 150,000-row catalog, 2026-09-09)
 
@@ -23,12 +24,12 @@ when the finding was checked and the numbers said no.
 | P1 | Every worker tick re-reads every page the grid ever loaded (300 calls at depth) and the drives and Trash on top; browsing stutters while tiles are made | `PageCache.refresh` re-reads only what the grid last asked for and evicts the rest; drives, Trash and size re-read only when a sweep or a lane rewrite moved them | open |
 | P2 | A rerank holds the write lock for seconds (24 s when every row moves), so a cull key waits behind it; during a backfill it fires every five seconds | one projection helper writes only rows whose value changed, in short lock slices; the ranking follows rounds instantly and the library by the minute | open |
 | P3 | The window opens after 11–20 s of reindexing (metadata 16 s, stacks 4 s at 150k) | the repairs run behind the first paint on the sweep lane, through the same changed-rows helper; a rebuild that changes nothing writes nothing | open |
-| P4 | The worker's owed scan sorts the whole table per step (1.7 s) because it omits the live predicate the index carries | `i.status != 'trashed'` in `_owed_from`: 1.7 s → 0.6 ms | open |
+| P4 | The worker's owed scan sorts the whole table per step (1.7 s) because it omits the live predicate the index carries | `i.status != 'trashed'` in `_owed_from`: 1.7 s → 0.6 ms | shipped |
 | P5 | Every minute sweep bumps `swept`, so the window re-reads shelves, folders and chapters for nothing | `swept` moves only when the sweep changed something | open |
-| P6 | Deep pages in Best sort take 889 ms since stacks collapsed: the browse indexes cannot see `stack_of` | `stack_of` appended to the three browse indexes: 889 → 20 ms; newest 62 → 23 ms | open |
-| P7 | Each Rank round waits 1.7 s for `COUNT(DISTINCT content_hash)` | `COUNT(*)` on the browse index: 62 ms | open |
+| P6 | Deep pages in Best sort take 889 ms since stacks collapsed: the browse indexes cannot see `stack_of` | `stack_of` appended to the three browse indexes: 889 → 20 ms; newest 62 → 23 ms | shipped |
+| P7 | Each Rank round waits 1.7 s for `COUNT(DISTINCT content_hash)` | `COUNT(*)` on the browse index: 62 ms | shipped |
 | P8 | Every page read probes every drive's marker on disk; an absent share costs seconds per page | the follower publishes the attached list each pass; page reads use it | open |
-| P9 | Trash count is a table scan on every tick (71 ms) | partial index `idx_trashed`, named in the count; and asked only when something moved | open |
+| P9 | Trash count is a table scan on every tick (71 ms) | partial index `idx_trashed`, named in the count; and asked only when something moved | shipped |
 | P10 | Focusing search runs five GROUP BY scans (530 ms) on the interactive lane | the sweep lane computes facets after a changed sweep and publishes them | open |
 | P11 | An album page re-derives membership from the log each read | measured: 18 ms for an 800-photo album; not worth a memo | measured: 18 ms |
 
@@ -120,3 +121,9 @@ when the finding was checked and the numbers said no.
 | V12 | Top-action spacing by whitespace | flex gap | open |
 | V13 | The eyebrow fold is a `<p>`; + misaligned | button eyebrows | open |
 | V14 | Dead CSS (brand-mark i, repeated `[hidden]`, month `::after` twice, loupe-close); unstyled kbd in the crop bar | delete; style | open |
+
+## Documents
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| D1 | Too many documents; it is not clear which are current, accurate, or slop (owner's ask, 2026-09-09) | read every one; keep only those that own a durable fact the code cannot say, and are true at HEAD; fold or delete the rest | open |

@@ -14,14 +14,14 @@ TRASHED = cull.TRASHED
 
 
 def count(conn) -> int:
-    """Photographs currently in Trash, using the projected browse index."""
+    """Photographs currently in Trash. The predicate is spelled in literals
+    because a partial index can only serve a query it can read: with the
+    status bound as a parameter the planner walked the whole table (82 ms
+    at 150k rows), and it is asked on every tick of the window."""
 
-    return int(
-        conn.execute(
-            "SELECT COUNT(*) FROM images WHERE status = ? AND tail IS NOT NULL",
-            (TRASHED,),
-        ).fetchone()[0]
-    )
+    return int(conn.execute(
+        "SELECT COUNT(*) FROM images INDEXED BY idx_trashed"
+        f" WHERE status = '{TRASHED}' AND tail IS NOT NULL").fetchone()[0])
 
 
 def _file_token(path: str) -> tuple[int, int, int, int]:

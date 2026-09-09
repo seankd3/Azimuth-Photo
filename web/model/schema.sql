@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS images (
     -- Transitional only. A V1 virtual copy has no file of its own; it leaves
     -- when Develop is rebuilt as decisions plus cached pixels.
     vc_of            INTEGER REFERENCES images(id) ON DELETE CASCADE,
+    -- The photograph's current geometry fragment (the crop, as canonical
+    -- JSON), so a rendition can key its recipe on it in SQL.
+    develop          TEXT,
+    -- A stacked member's cover frame: a projection of capture-time cadence
+    -- (stacks.project), rebuilt from the dates like every decision column.
+    stack_of         INTEGER,
     created_at       REAL    NOT NULL DEFAULT (unixepoch())
 );
 
@@ -127,12 +133,26 @@ CREATE INDEX IF NOT EXISTS idx_cache_kind_age ON cache(kind, at);
 DROP INDEX IF EXISTS idx_photos_date;
 DROP INDEX IF EXISTS idx_photos_best;
 DROP INDEX IF EXISTS idx_photos_stars;
-CREATE INDEX IF NOT EXISTS idx_live_date
-    ON images(date_taken ASC, id ASC) WHERE status != 'trashed' AND tail IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_live_best
-    ON images(elo DESC, id DESC) WHERE status != 'trashed' AND tail IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_live_stars
-    ON images(stars DESC, date_taken DESC) WHERE status != 'trashed' AND tail IS NOT NULL;
+-- `stack_of` rides at the end of each: browsing collapses stacks with
+-- `stack_of IS NULL` on every page, and an index that cannot answer that
+-- pays a row lookup per entry walked past. Measured at 150k rows, a Best
+-- page at depth 60,000: 889 ms without the column, 20 ms with it. The
+-- second names are dropped so a catalog built with them migrates on open.
+DROP INDEX IF EXISTS idx_live_date;
+DROP INDEX IF EXISTS idx_live_best;
+DROP INDEX IF EXISTS idx_live_stars;
+CREATE INDEX IF NOT EXISTS idx_browse_date
+    ON images(date_taken ASC, id ASC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_browse_best
+    ON images(elo DESC, id DESC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_browse_stars
+    ON images(stars DESC, date_taken DESC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
+-- The member set is small (covers stay NULL), so the partial index costs
+-- nothing and pays for every cover's member count.
+CREATE INDEX IF NOT EXISTS idx_stacked ON images(stack_of) WHERE stack_of IS NOT NULL;
+-- Trash, counted on every tick of the window: the same shape, other side.
+CREATE INDEX IF NOT EXISTS idx_trashed
+    ON images(id) WHERE status = 'trashed' AND tail IS NOT NULL;
 -- Folder browsing is a prefix of a tail, and a sweep looks photos up by one.
 CREATE INDEX IF NOT EXISTS idx_photos_tail ON images(tail);
 -- Identity: what `identify()` asks, and what every cache row is keyed on.

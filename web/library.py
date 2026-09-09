@@ -258,9 +258,9 @@ def counts(conn) -> dict:
     ask = lambda sql: int(conn.execute(sql).fetchone()[0] or 0)  # noqa: E731
     return {
         "photos": ask(
-            f"SELECT COUNT(*) FROM images i INDEXED BY idx_live_date WHERE {IN_LIBRARY}"),
+            f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_date WHERE {IN_LIBRARY}"),
         "starred": ask(
-            f"SELECT COUNT(*) FROM images i INDEXED BY idx_live_stars"
+            f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_stars"
             f" WHERE {IN_LIBRARY} AND i.stars > 0"),
         "unidentified": ask("SELECT COUNT(*) FROM images WHERE content_hash IS NULL"),
     }

@@ -32,24 +32,15 @@ def connect(path: str = ":memory:", *, timeout: float = 30.0) -> sqlite3.Connect
         if path != ":memory:":
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
-        conn.executescript(SCHEMA.read_text(encoding="utf-8"))
-        # SQLite has no ALTER ... IF NOT EXISTS, so a column added after
-        # catalogs exist is checked for here — the one migration shape the
-        # schema file cannot say. `develop` carries the photo's current
-        # geometry fragment (the crop, as canonical JSON) so renditions can
-        # key their recipes on it in SQL.
+        # SQLite has no ALTER ... IF NOT EXISTS, so a column the schema
+        # gained after catalogs existed is added here first — the one
+        # migration shape the schema file cannot say — and the schema's own
+        # indexes over those columns then install like any other.
         held = {row[1] for row in conn.execute("PRAGMA table_info(images)")}
-        if "develop" not in held:
-            conn.execute("ALTER TABLE images ADD COLUMN develop TEXT")
-        # `stack_of` names a stacked member's cover frame — a projection of
-        # capture-time cadence (stacks.project), rebuilt whole like every
-        # other decision column.
-        if "stack_of" not in held:
-            conn.execute("ALTER TABLE images ADD COLUMN stack_of INTEGER")
-        # The member set is tiny (covers stay NULL), so the partial index
-        # costs nothing and pays for every cover's member count.
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_stacked"
-                     " ON images(stack_of) WHERE stack_of IS NOT NULL")
+        for column, kind in (("develop", "TEXT"), ("stack_of", "INTEGER")):
+            if held and column not in held:
+                conn.execute(f"ALTER TABLE images ADD COLUMN {column} {kind}")
+        conn.executescript(SCHEMA.read_text(encoding="utf-8"))
         # Without sqlite_stat1 the planner guesses, and at catalog scale it
         # guesses a partial-index scan with a row fetch per entry — measured
         # 587 ms against 42 ms for the plan it picks once it has statistics.

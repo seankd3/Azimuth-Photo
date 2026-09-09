@@ -1282,7 +1282,7 @@ class SetsAreDecisions(CoreCase):
             for column in row
         )
 
-        self.assertIn("idx_live_stars", plan)
+        self.assertIn("idx_browse_stars", plan)
 
     def test_ambiguous_identifiers_and_non_photo_members_are_refused(self):
         with self.assertRaises(ValueError):

@@ -147,6 +147,11 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
                *, keyed: bool = False) -> tuple[str, tuple]:
     """The anti-join itself: what is owed, before anyone says what to do with it.
 
+    Trash owes nothing: a photograph waits there to be forgotten, and the
+    predicate spelled as the browse index's own lets the newest-first walk
+    read the index instead of sorting the table (1.7 s a step at 150k rows,
+    against 0.6 ms).
+
     A `keyed` pass owes the per-photograph variant: the recipe is the base
     recipe with the photo's own fragment spliced in as the first key, built
     in SQL so the anti-join stays one query. The base pass is unchanged —
@@ -161,7 +166,8 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
             FROM images i
             LEFT JOIN cache c
                    ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
-            WHERE i.content_hash IS NOT NULL
+            WHERE i.status != 'trashed'
+              AND i.content_hash IS NOT NULL
               AND i.tail IS NOT NULL
               AND i.vc_of IS NULL
               AND c.hash IS NULL
@@ -180,7 +186,8 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
         LEFT JOIN cache c
                ON c.hash = i.content_hash AND c.kind = ?
               AND c.recipe = ? || {expression} || ?
-        WHERE i.content_hash IS NOT NULL
+        WHERE i.status != 'trashed'
+          AND i.content_hash IS NOT NULL
           AND i.tail IS NOT NULL
           AND i.vc_of IS NULL
           AND {expression} IS NOT NULL
