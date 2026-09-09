@@ -344,3 +344,56 @@ finding was checked and the numbers said no.
 | U13 | Two cursors for 'cannot press' | one | shipped |
 | U14 | One verb, three names (Add folder… / add-drive / add a folder) | add-folder everywhere | shipped |
 | F44 | The mark's ring and the hover line have been invisible since A1: an inset shadow on the cell paints under its image | the rings are drawn on a veil above the picture | shipped |
+
+## Feel (fourth round, 2026-09-09)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| Q1 | Empty Trash cannot be confirmed as shown: the dialog prints 12,043 and compares against 12043 | compare on digits; say when the number is wrong | open |
+| Q2 | First run pops the OS folder chooser with no warning, again on every navigation | never auto-open the picker; the empty state carries the promise and the button | open |
+| Q3 | In Import, Enter or Space on a focused button starts the import instead of pressing the button | the workspace keys yield to a focused control | open |
+| Q4 | In Crop, Enter on the focused Cancel button applies the crop | Enter on the crop bar presses the button | open |
+| Q5 | In Rank, X rejects the card under the mouse, not the keyboard cursor | the cursor wins when it exists; hover answers only without one | open |
+| Q6 | Dropping 400 photographs into the wrong album cannot be taken back | Undo on add-to-album | open |
+| Q7 | Nudging a Develop slider with arrows writes a decision and a toast per key press | keyboard changes coalesce into one decision | open |
+| Q8 | Esc and D do nothing while a Develop slider has focus | range and checkbox inputs are not typing | open |
+| Q9 | The pick in Rank is never seen | the winner wears is-picked for a beat before the swap | open |
+| Q10 | Rank's cursor starts nowhere, then lands on a stranger after a mouse pick | cursor starts at 0; a mouse pick leaves the cursor off the fresh slot | open |
+| Q11 | The toast offers Undo for things that cannot be undone | the button starts hidden | open |
+| Q12 | Right-click menus are mouse-only and fall off the screen near an edge | one placed menu: clamped, focusable, arrows, Shift+F10 | open |
+| Q13 | Trash offers album verbs and a key that refuses to work there | no album rows in Trash | open |
+| Q14 | A person can only be named by right-clicking | a Name… control on the row; N on a focused row | open |
+| Q15 | In Import, Shift+Arrow after a click selects the wrong range | the anchor is a key everywhere | open |
+| Q16 | Up and Down in Import and on the People wall land on the wrong card | columns measured from the cells, not guessed | open |
+| Q17 | The filmstrip is 29 tab stops and an arrow throws focus to the body | roving tabindex; focus survives a rebuild; option roles | open |
+| Q18 | The filmstrip glides under reduced motion | smooth only when motion is welcome | open |
+| Q19 | Enter on the first-run dialog can settle the home at … | submit disabled until the path is real | open |
+| Q20 | The crop rectangle cannot be touched from the keyboard | arrows nudge, Alt+arrows an edge, 0 full frame; on the sheet | open |
+| Q21 | A twitch of the mouse writes a sliver crop | a drawn box under the floor is dropped; apply refuses a degenerate box | open |
+| Q22 | Tabbing through a card import means thousands of checkbox stops | cell boxes leave the tab order; the stage is one stop | open |
+| Q23 | The People wall has two cursors that never agree | the card is the focusable thing | open |
+| Q24 | Rank's two settings are two kinds of control and neither has a key | one segmented shape; [ ] step the size, M cycles the mode; on the sheet | open |
+| Q25 | Synchronize reports zeros | empty parts dropped; nothing changed said plainly | open |
+| Q26 | Album messages count nothing in particular | photographs named, no bookkeeping words | open |
+| Q27 | Looking at a card talks through the toast every 600 ms | progress goes to the status line | open |
+| Q28 | The Import button says Cancel and its tooltip says Back | the title follows the label | open |
+| Q29 | No faces yet is drawn across the whole window | the wall is a positioned box | open |
+| Q30 | Removing a chip cannot be undone; Esc from the editor drops focus | Undo on chip removal; focus returns to the chip | open |
+| Q31 | Dead stylesheet for the destinations list | deleted | open |
+| Q32 | Dead key handler in the edit panel | deleted | open |
+| Q33 | The zoom chip says where you are, not what pressing it does | the chip names the act, shows the state and its key | open |
+| Q34 | Full frame looks like it removed the crop; nothing is written until Apply | Remove crop applies at once | open |
+| U15 | Close marks drawn from the set vs typed × | drawn everywhere | open |
+| U16 | The cull verbs implemented twice (cull.js, rank.js) | one path | open |
+| U17 | Pick means the cull flag and the winner of a round | the round's word is chosen | open |
+| U18 | photographs vs photos for one count | photographs | open |
+| U19 | The sidecar act reported two ways | one sentence | open |
+| U20 | Reset in Develop vs Full frame in Crop | Remove crop (Q34); Reset stays for a recipe | open |
+| U21 | inspector-facts hidden has two owners | one owner | open |
+| U22 | Popovers clamp to the viewport; context menus do not | one placer (Q12) | open |
+| U23 | Two empty-state idioms | emptyState() for Rank too | open |
+| U24 | Go to this person is the whole row on the shelf, only the face on the wall | the whole card | open |
+| U25 | One anchor variable holds an index and a key | a key (Q15) | open |
+| U26 | Two cursors on the face wall | one (Q23) | open |
+| U27 | One import reports progress in two places | the status line (Q27) | open |
+| U28 | The column count derived three ways | measured (Q16) | open |
