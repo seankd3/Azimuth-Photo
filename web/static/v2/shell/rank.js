@@ -21,7 +21,7 @@ const ASPECT_MAX = 2.6;
 import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
 
-export function createRankWorkflow({ product, read, update, notify, undo, onLeave, onLook, viewOf, describe }) {
+export function createRankWorkflow({ product, read, update, notify, undo, cull, onLeave, onLook, viewOf, describe }) {
   const stage = document.querySelector('[data-rank]');
   const MODES = ['learn', 'random', 'diverse', 'tournament'];
   const MODE_KEY = 'azimuth.rank-mode';
@@ -401,52 +401,42 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
       const photo = underMouse();
       if (photo) { onLook(photo); return true; }
     }
-    // The grid's per-photograph verbs work on the card under the mouse (or
-    // the keyboard's selection) — R turns, P picks, U clears, X rejects —
-    // so a stray frame never needs a trip out of the round.
+    // The grid's per-photograph verbs, on the selected card (else the one
+    // under the mouse): the same path the grid and the loupe take, with a
+    // seat for how this stage's own rows take the change -- a turn re-packs
+    // the shelf, a reject gives the seat to the next photograph in hand,
+    // and Undo puts the set back as it was.
     const letter = event.key.length === 1 && !event.ctrlKey && !event.metaKey ? event.key.toLowerCase() : '';
-    const photo = letter && 'rpux'.includes(letter) ? underMouse() : null;
-    if (letter === 'r' && photo) {
-      void product.turn([photo.id], event.shiftKey ? 90 : 270).then(() => {
-        photo.rotate = ((photo.rotate || 0) + (event.shiftKey ? 90 : 270)) % 360;
-        render();     // the aspect changed; the shelf re-packs around it
-      }).catch((error) => notify(error.message));
-      return true;
-    }
-    if ((letter === 'p' || letter === 'u') && photo) {
-      void (letter === 'p' ? product.pick([photo.id]) : product.clearPick([photo.id])).then((result) => {
-        if (!result.changed.length) return;
-        undo.show(letter === 'p' ? 'Photograph picked.' : 'Pick cleared.',
-          () => product.undoCull(result.changed));
-      }).catch((error) => notify(error.message));
-      return true;
-    }
-    if (letter === 'x' && photo && !state.busy) {
-      // Rejected is out of the running, not just marked: the card leaves the
-      // round and its seat goes to the next photograph in hand.
+    const verb = { r: event.shiftKey ? 'turnRight' : 'turnLeft', p: 'pick', u: 'clear', x: 'reject' }[letter];
+    const photo = verb ? underMouse() : null;
+    if (verb && photo && !state.busy) {
       const before = { set: state.set.slice(), age: state.age.slice() };
-      void product.reject([photo.id]).then((result) => {
-        if (!result.changed.length) return;
-        // The rail keeps telling the truth: the same arithmetic nudge the
-        // grid gives its counts when rows leave for the trash.
-        const moved = result.changed.reduce((total, change) => total + change.photos, 0);
-        const tally = (by) => {
-          const counts = read().counts;
-          update({ counts: { ...counts, photos: Math.max(0, counts.photos - by), trash: Math.max(0, counts.trash + by) } });
-        };
-        tally(moved);
-        const at = state.set.indexOf(photo);
-        if (at >= 0) {
+      let moved = 0;
+      const tally = (by) => {
+        const counts = read().counts;
+        update({ counts: { ...counts, photos: Math.max(0, counts.photos - by), trash: Math.max(0, counts.trash + by) } });
+      };
+      void cull(verb, { ids: [photo.id], seat: {
+        patched: (changed) => {
+          for (const change of changed) for (const held of state.set) if (held.hash === change.subject) held[change.family] = change.after;
+          render();     // a turn changed the aspect; the shelf re-packs around it
+        },
+        removed: (changed) => {
+          // The rail keeps telling the truth: the same arithmetic nudge the
+          // grid gives its counts when rows leave for the trash.
+          moved = changed.reduce((total, change) => total + change.photos, 0);
+          tally(moved);
+          const at = state.set.indexOf(photo);
+          if (at < 0) return;
           const next = state.buffer.shift() || null;
           if (next) { state.set[at] = next; state.age[at] = 0; remember([next]); }
           else { state.set.splice(at, 1); state.age.splice(at, 1); }
           state.selected = Math.min(state.selected, state.set.length - 1);
           render();
           void fill();
-        }
-        undo.show('Photograph rejected.', async () => {
-          await product.undoCull(result.changed);
-          tally(-moved);
+        },
+        restored: async () => {
+          if (moved) tally(-moved);
           if (!isOpen()) { await onLeave(); return; }   // the grid behind holds it again
           state.generation += 1;
           state.set = before.set;
@@ -454,8 +444,8 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
           render();
           state.buffer = [];
           void fill();
-        });
-      }).catch((error) => notify(error.message));
+        },
+      } });
       return true;
     }
     if ((event.key === 'Enter' || event.key === ' ') && state.selected >= 0) { void pick(state.selected); return true; }

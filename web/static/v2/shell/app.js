@@ -438,6 +438,8 @@ const rankWorkflow = createRankWorkflow({
   update,
   notify,
   undo,
+  // The cull workflow is made after this one; the stage calls it at key time.
+  cull: (verb, options) => cullWorkflow.apply(verb, options),
   viewOf,
   describe: () => filterBar.describe(read()),
   onLook: (photo) => {

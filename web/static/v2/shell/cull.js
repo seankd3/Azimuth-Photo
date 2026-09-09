@@ -22,11 +22,17 @@ const ACTIONS = Object.freeze({
 export function createCullWorkflow({ product, read, reload, patch, removed, selection, selectIndex, notify, undo }) {
   let busy = false;
 
-  async function apply(name) {
+  // The one path for a decision, from the grid, the loupe or a stage that
+  // holds its own rows. A stage passes the ids and a `seat`: how its rows
+  // take the change (`patched`), how a row that leaves is replaced
+  // (`removed`), and how Undo puts its rows back (`restored`). The library's
+  // own rows are patched either way, so the grid behind the stage agrees.
+  async function apply(name, { ids: given = null, seat = null } = {}) {
     const action = ACTIONS[name];
     const state = read();
-    const ids = selection();
-    if (!action || busy || !['library', 'loupe'].includes(state.view) || !ids.length) return;
+    const ids = given || selection();
+    if (!action || busy || !ids.length) return;
+    if (!seat && !['library', 'loupe'].includes(state.view)) return;
 
     busy = true;
     const { selectedIndex } = state;
@@ -40,17 +46,19 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
       }
 
       if (action.removes) {
-        await removed(result.changed, selectedIndex);
+        if (seat) await seat.removed(result.changed);
+        else await removed(result.changed, selectedIndex);
       } else {
         patch(result.changed);
+        if (seat) seat.patched(result.changed);
         // Advancing is the one-at-a-time rhythm; a marked set stays put so
         // the next verb hits the same photographs.
-        if (action.advance && ids.length === 1) await selectIndex(selectedIndex + 1);
+        else if (action.advance && ids.length === 1) await selectIndex(selectedIndex + 1);
       }
       const passed = result.unidentified
         ? ` ${result.unidentified === 1 ? 'One is' : `${result.unidentified} are`} not identified yet.` : '';
       undo.show(action.message(ids.length - result.unidentified) + passed,
-        () => product.undoCull(result.changed).then(reload));
+        () => product.undoCull(result.changed).then(seat ? seat.restored : reload));
     } catch (reason) {
       notify(reason.message);
     } finally {

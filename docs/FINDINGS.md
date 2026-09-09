@@ -384,7 +384,7 @@ finding was checked and the numbers said no.
 | Q33 | The zoom chip says where you are, not what pressing it does | the chip names the act, shows the state and its key | shipped |
 | Q34 | Full frame looks like it removed the crop; nothing is written until Apply | Remove crop applies at once | shipped |
 | U15 | Close marks drawn from the set vs typed × | drawn everywhere | shipped |
-| U16 | The cull verbs implemented twice (cull.js, rank.js) | one path: the rank stage's verbs through cull.apply with an after-hook for the seat swap | open: owed, the stage's follow-up (swap the card, keep the round) needs the hook first |
+| U16 | The cull verbs implemented twice (cull.js, rank.js) | one path: the rank stage's verbs through cull.apply with an after-hook for the seat swap | shipped |
 | U17 | Pick means the cull flag and the winner of a round | the round's word is chosen | shipped |
 | U18 | photographs vs photos for one count | photographs | shipped |
 | U19 | The sidecar act reported two ways | one sentence | shipped |
