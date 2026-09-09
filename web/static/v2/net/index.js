@@ -40,7 +40,7 @@ export const library = Object.freeze({
   developPreview: (id, patch, size = 1280) => invoke('develop_preview', id, patch, size),
   developState: (id) => invoke('develop_state', id),
   exportSettings: (ids) => invoke('export_settings', ids),
-  rank: ({ n, view = null, avoid = [], mode = 'close' }) => invoke('rank', n, view, avoid, mode),
+  rank: ({ n, view = null, avoid = [], mode = 'learn' }) => invoke('rank', n, view, avoid, mode),
   albums: () => invoke('albums'),
   createAlbum: (name, chips = null) => invoke('create_album', name, chips),
   renameAlbum: (id, name) => invoke('rename_album', id, name),

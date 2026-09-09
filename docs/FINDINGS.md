@@ -72,18 +72,18 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| R1 | A 120 ms hold after each pick; deletes feel queued | swap on click with a departing-card animation | open |
-| R2 | RECENT=48 memory dead-ends small scopes | cap the avoid list at total − n, or drop it | open |
-| R3 | Digits and arrows do not follow the packed order | renumber to reading order | open |
-| R4 | No look-closer inside a round | Z or F opens the loupe on the hovered card, Esc returns | open |
-| R5 | Progress counts coverage, not what was earned | `earned` (seen ≥ 3) plus percent sorted | open |
+| R1 | A 120 ms hold after each pick; deletes feel queued | swap on click with a departing-card animation | shipped |
+| R2 | RECENT=48 memory dead-ends small scopes | cap the avoid list at total − n, or drop it | shipped |
+| R3 | Digits and arrows do not follow the packed order | renumber to reading order | shipped |
+| R4 | No look-closer inside a round | Z or F opens the loupe on the hovered card, Esc returns | shipped |
+| R5 | Progress counts coverage, not what was earned | `earned` (seen ≥ 3) plus percent sorted | shipped |
 | R6 | Rerank queues behind sweeps on the scan lane; no star on Best tiles | own derive lane; star on tiles in Best sort | shipped (lane); the star on Best tiles is open under V-wave |
 | R7 | The empty state is pinned top-left | absolute, grid-centred | shipped |
-| R8 | Title and progress ignore chips | use the filters' `describe` | open |
-| R9 | Size not remembered; resizing reloads the set | remember; grow or shrink in place | open |
-| R10 | Five mode buttons, and net/desktop/boot disagree on the default | one select, drop Close, one default | open |
-| R11 | Search results cannot be ranked | open design; at least say why | open |
-| R12 | `judged` and the DISTINCT total on every ask | see P7; split the read | open |
+| R8 | Title and progress ignore chips | use the filters' `describe` | shipped |
+| R9 | Size not remembered; resizing reloads the set | remember; grow or shrink in place | shipped |
+| R10 | Five mode buttons, and net/desktop/boot disagree on the default | one select, drop Close, one default | shipped |
+| R11 | Search results cannot be ranked | open design; at least say why | rejected: a search is an ordering by likeness to a question, not a set of photographs; ranking inside one would rank the question. Rank draws from the scope the chips and folders make, which a search can be saved as (Save results…) and then ranked |
+| R12 | `judged` and the DISTINCT total on every ask | see P7; split the read | shipped |
 
 ## Sidebar and organizing
 

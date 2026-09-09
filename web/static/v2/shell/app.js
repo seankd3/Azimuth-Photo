@@ -382,6 +382,9 @@ const peoplePanel = createPeoplePanel({
   renamed: () => Promise.all([albumsPanel.refresh(), peoplePanel.refresh()]),
   ask: (title, anchor, initial) => albumsPanel.ask(title, anchor, initial),
 });
+// Where the loupe returns to on Esc when it was opened from somewhere
+// other than the grid: a look at one card mid-round goes back to the round.
+let loupeReturnsTo = null;
 const rankWorkflow = createRankWorkflow({
   product,
   read,
@@ -389,11 +392,21 @@ const rankWorkflow = createRankWorkflow({
   notify,
   undo,
   viewOf,
+  describe: () => filterBar.describe(read()),
+  onLook: (photo) => {
+    loupeReturnsTo = 'rank';
+    update({ selected: photo, selectedIndex: null });
+    showPhoto(photo);
+    toggleFull(true);
+  },
   onLeave: async () => {
     // Rounds moved the ranking, and the view may have moved under the
     // sitting; the grid comes back re-read either way.
     await loadView();
   },
+});
+document.querySelector('[data-rank-mode]').addEventListener('change', (event) => {
+  void rankWorkflow.remode(event.target.value);
 });
 let albumsTimer = null;
 function refreshAlbumsSoon() {
@@ -626,7 +639,9 @@ function closeDriveDialog() {
 
 function closeLoupe() {
   if (loupe.classList.contains('is-full')) toggleFull(false);
-  if (loupeOpen()) update({ view: 'library' });
+  const back = loupeReturnsTo || 'library';
+  loupeReturnsTo = null;
+  if (loupeOpen()) update({ view: back, ...(back === 'rank' ? { selected: null } : {}) });
   loupeStrip.replaceChildren();
   stripKey = '';
   stripStart = null;
@@ -988,7 +1003,7 @@ async function loadFolders() {
 // photos and the chips all route through here — one rule, one place.
 function viewMoved() {
   if (rankWorkflow.isOpen()) {
-    rankWorkflow.resize(rankWorkflow.size());
+    void rankWorkflow.reload();
     return;
   }
   workspace.scrollTo({ top: 0 });
@@ -1506,8 +1521,6 @@ document.addEventListener('click', (event) => {
   if (action === 'leave-rank') rankWorkflow.close();
   const size = event.target.closest('[data-rank-size] [data-size]')?.dataset.size;
   if (size) rankWorkflow.resize(Number(size));
-  const rankMode = event.target.closest('[data-rank-mode] [data-mode]')?.dataset.mode;
-  if (rankMode) void rankWorkflow.remode(rankMode);
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
   if (action === 'turn') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
@@ -1591,7 +1604,9 @@ document.addEventListener('keydown', (event) => {
       driveMenu.hidden = true;
     }
     else if (loupeOpen()) {
-      if (!loupeView.escape()) {
+      // A look from a round goes straight back to it; otherwise one rung.
+      if (loupeReturnsTo) closeLoupe();
+      else if (!loupeView.escape()) {
         if (loupe.classList.contains('is-full')) toggleFull(false);
         else closeLoupe();
       }

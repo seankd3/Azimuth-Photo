@@ -906,7 +906,7 @@ class Library:
         return all_of(outside(intake.ROOTS[intake.SNAPSHOTS]), covers_only())
 
     def rank(self, n: int = 9, view: dict | None = None, avoid=(),
-             mode: str = "close", space=None) -> dict:
+             mode: str = "learn", space=None) -> dict:
         """A set worth comparing, from what can be shown this instant, and how
         far the scope has been ranked. `mode` picks the ordering — close,
         random, diverse, tournament — never a different question."""
@@ -922,7 +922,7 @@ class Library:
         return {
             "photos": [{**rows[p["id"]], "comparisons": p["comparisons"], "rating": p["rating"]}
                        for p in chosen if p["id"] in rows],
-            "judged": rank.judged(self.conn, scope),
+            **rank.progress(self.conn, scope),
             # Rows, not distinct identities: the same photograph filed twice
             # counts twice here, a rounding error in a progress figure, and
             # the distinct count cost 1.7 s of every round at 150k rows.

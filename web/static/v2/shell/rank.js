@@ -9,26 +9,32 @@
 // How many at once -> the cells they sit in. Five sizes, all the person
 // needs: a duel, and four grids up to the twelve a maximized window holds.
 const SIZES = { 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3] };
-// The pick is seen before it leaves. Below this the swap read as the app
-// thinking; above it, as waiting.
-const HOLD_MS = 120;
 // Identities kept out of the next sets, so a frame does not come straight
-// back round.
+// back round -- never more than the scope can spare, so a small album is
+// not dead-ended by its own memory.
 const RECENT = 48;
 // Extreme shapes are clamped for sizing only, so one panorama cannot shrink
 // every other card in the set.
 const ASPECT_MIN = 0.4;
 const ASPECT_MAX = 2.6;
 
-export function createRankWorkflow({ product, read, update, notify, undo, onLeave, viewOf }) {
+import { recall, remember as keep } from '../kit/remembered.js';
+
+export function createRankWorkflow({ product, read, update, notify, undo, onLeave, onLook, viewOf, describe }) {
   const stage = document.querySelector('[data-rank]');
-  const MODES = ['learn', 'close', 'random', 'diverse', 'tournament'];
+  const MODES = ['learn', 'random', 'diverse', 'tournament'];
   const MODE_KEY = 'azimuth.rank-mode';
+  const SIZE_KEY = 'azimuth.rank-size';
   const state = {
-    size: 9, set: [], age: [], buffer: [], recent: [], selected: -1,
-    rounds: 0, judged: 0, total: 0, busy: false, filling: null, generation: 0,
+    size: SIZES[recall(SIZE_KEY, 9)] ? recall(SIZE_KEY, 9) : 9,
+    set: [], age: [], buffer: [], recent: [], selected: -1,
+    rounds: 0, judged: 0, earned: 0, total: 0, busy: false, filling: null, generation: 0,
     answered: false, queued: null,
-    mode: MODES.includes(localStorage.getItem(MODE_KEY)) ? localStorage.getItem(MODE_KEY) : 'learn',
+    // Reading order of the cards on stage, set by the layout: order[k] is
+    // the set index of the k-th card left to right, top to bottom; rows
+    // hold the same indices row by row, for the arrows.
+    order: [], rows: [],
+    mode: MODES.includes(recall(MODE_KEY, 'learn')) ? recall(MODE_KEY, 'learn') : 'learn',
   };
   const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
@@ -38,7 +44,8 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
 
   function remember(photos) {
     for (const photo of photos) state.recent.push(photo.hash);
-    if (state.recent.length > RECENT) state.recent.splice(0, state.recent.length - RECENT);
+    const cap = Math.min(RECENT, Math.max(0, state.total - state.size * 2));
+    if (state.recent.length > cap) state.recent.splice(0, state.recent.length - cap);
   }
 
   function avoiding() {
@@ -53,6 +60,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
 
   function accept(answer) {
     state.judged = answer.judged;
+    state.earned = answer.earned || 0;
     state.total = answer.total;
     state.answered = true;
   }
@@ -164,16 +172,51 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   }
 
   async function resize(n) {
+    // The set grows or shrinks in place: the cards already judged against
+    // each other stay; a smaller set lets its longest-standing cards go, a
+    // larger one brings in what is in hand and asks for the rest.
     if (!SIZES[n]) return;
     state.size = n;
-    if (isOpen()) await load();
-    else render();
+    keep(SIZE_KEY, n);
+    if (!isOpen()) { render(); return; }
+    const generation = state.generation;
+    while (state.set.length > n) {
+      let oldest = 0;
+      for (let i = 1; i < state.age.length; i += 1) if (state.age[i] > state.age[oldest]) oldest = i;
+      state.set.splice(oldest, 1);
+      state.age.splice(oldest, 1);
+    }
+    while (state.set.length < n && state.buffer.length) {
+      const photo = state.buffer.shift();
+      state.set.push(photo);
+      state.age.push(0);
+      remember([photo]);
+    }
+    if (state.set.length < n) {
+      try {
+        const answer = await ask(n - state.set.length);
+        if (generation !== state.generation) return;
+        accept(answer);
+        const onStage = new Set(state.set.map((p) => p.hash));
+        for (const photo of answer.photos) {
+          if (onStage.has(photo.hash) || state.set.length >= n) continue;
+          state.set.push(photo);
+          state.age.push(0);
+          remember([photo]);
+        }
+      } catch (error) {
+        notify(error.message);
+      }
+    }
+    state.selected = Math.min(state.selected, state.set.length - 1);
+    render();
+    void fill();
   }
 
   async function remode(mode) {
     if (!MODES.includes(mode) || mode === state.mode) return;
     state.mode = mode;
-    localStorage.setItem(MODE_KEY, mode);
+    keep(MODE_KEY, mode);
     // The buffer was drawn under the old opinion; a fresh deal says the new one.
     state.buffer = [];
     if (isOpen()) await load();
@@ -194,16 +237,13 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
 
-    // The pick is seen the instant it is made, and the stage never waits for
-    // the write: the round records underneath while the next set comes from
-    // photographs already decoded in hand. The felt beat is the hold alone.
-    const card = stage.querySelector(`[data-index="${index}"]`);
-    card?.classList.add('is-picked');
+    // The stage never waits for the write: the round records underneath
+    // while the next set comes from photographs already decoded in hand.
+    // The pick leaves the instant it is made; the arrivals fade in, so the
+    // swap reads as motion rather than a stall.
     const writing = product.round(winner.id, losers.map((p) => p.id));
     writing.catch(() => {});
     state.rounds += 1;
-    await delay(HOLD_MS);
-    if (generation !== state.generation) { state.busy = false; return; }  // left or resized meanwhile
 
     // The pick leaves, credited; so does the card that has sat through the
     // most rounds. In a pair that is both -- a decided pair is spent.
@@ -285,9 +325,23 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   }
 
   function move(by) {
+    // Along the reading order the layout wrote, not the set's slot order.
     if (!state.set.length) return;
-    const next = state.selected < 0 ? 0 : Math.min(state.set.length - 1, Math.max(0, state.selected + by));
-    state.selected = next;
+    const order = state.order.length === state.set.length ? state.order : state.set.map((_, i) => i);
+    const at = state.selected < 0 ? -1 : order.indexOf(state.selected);
+    const next = at < 0 ? 0 : Math.min(order.length - 1, Math.max(0, at + by));
+    state.selected = order[next];
+    renderSelection();
+  }
+
+  function moveRow(by) {
+    // The card in the row above or below at the same place across.
+    if (!state.rows.length) { move(by * 3); return; }
+    const where = state.rows.findIndex((row) => row.includes(state.selected));
+    if (where < 0) { move(0); return; }
+    const row = state.rows[Math.min(state.rows.length - 1, Math.max(0, where + by))];
+    const across = state.rows[where].indexOf(state.selected);
+    state.selected = row[Math.min(row.length - 1, across)];
     renderSelection();
   }
 
@@ -305,18 +359,23 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     // carry on to eleven and twelve, so every card at twelve-up has a key.
     const digit = event.key === '0' ? 10 : event.key === '-' ? 11 : event.key === '=' ? 12 : Number(event.key);
     if (Number.isInteger(digit) && digit >= 1 && digit <= state.set.length && event.key.length === 1) {
-      void pick(digit - 1);
+      void pick(state.order[digit - 1] ?? digit - 1);
       return true;
     }
-    const [cols] = SIZES[state.size];
     if (state.size === 2 && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
-      void pick(event.key === 'ArrowLeft' ? 0 : 1);
+      void pick(state.order[event.key === 'ArrowLeft' ? 0 : 1] ?? 0);
       return true;
     }
     if (event.key === 'ArrowLeft') { move(-1); return true; }
     if (event.key === 'ArrowRight') { move(1); return true; }
-    if (event.key === 'ArrowUp') { move(-cols); return true; }
-    if (event.key === 'ArrowDown') { move(cols); return true; }
+    if (event.key === 'ArrowUp') { moveRow(-1); return true; }
+    if (event.key === 'ArrowDown') { moveRow(1); return true; }
+    // A closer look at one card, without leaving the round: Z or F opens
+    // the loupe on it, and Esc comes straight back.
+    if ((event.key === 'z' || event.key === 'f' || event.key === 'Z' || event.key === 'F') && !event.ctrlKey && !event.metaKey) {
+      const photo = underMouse();
+      if (photo) { onLook(photo); return true; }
+    }
     // The grid's per-photograph verbs work on the card under the mouse (or
     // the keyboard's selection) — R turns, P picks, U clears, X rejects —
     // so a stray frame never needs a trip out of the round.
@@ -446,6 +505,15 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     // centres its width, each card its own height within the row.
     const block = rows.reduce((sum, r) => sum + r.tall, 0) + gap * (rows.length - 1);
     let y = (parseFloat(style.paddingTop) || 0) + (height - block) / 2;
+    // The layout writes the reading order the keys follow, and numbers the
+    // cards by it: 1 is the top-left card, whatever slot it sits in.
+    state.rows = rows.map((row) => row.members.map(({ i }) => Number(cards[i].dataset.index)));
+    state.order = state.rows.flat();
+    state.order.forEach((setIndex, k) => {
+      const number = k + 1;
+      const key = cards.find((card) => Number(card.dataset.index) === setIndex)?.querySelector('kbd');
+      if (key) key.textContent = number === 10 ? '0' : number === 11 ? '-' : number === 12 ? '=' : String(number);
+    });
     for (const row of rows) {
       let x = (parseFloat(style.paddingLeft) || 0) + (width - row.width) / 2;
       for (const { i, w, h } of row.members) {
@@ -485,10 +553,13 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   function renderProgress() {
     const app = read();
     const shelf = (app.albums || []).find((c) => c.id === app.album);
-    const where = shelf ? `“${shelf.name.split('/').pop()}”`
+    const place = shelf ? `“${shelf.name.split('/').pop()}”`
       : (app.folders || []).length ? app.folders.map((f) => f.split('/').pop()).join(' + ') : 'your library';
+    const narrowed = describe ? describe() : '';
+    const where = narrowed ? `${place} · ${narrowed}` : place;
+    // Sorted is earned: three rounds settle a place. Seen is one.
     const ranked = state.total
-      ? `${state.judged.toLocaleString()} of ${state.total.toLocaleString()} in ${where} ranked`
+      ? `${state.earned.toLocaleString()} sorted · ${state.judged.toLocaleString()} seen of ${state.total.toLocaleString()} in ${where}`
       : '';
     const sitting = state.rounds ? ` · ${state.rounds} round${state.rounds === 1 ? '' : 's'} this sitting` : '';
     const label = document.querySelector('[data-rank-progress]');
@@ -496,9 +567,8 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     for (const button of document.querySelectorAll('[data-rank-size] button')) {
       button.classList.toggle('is-active', Number(button.dataset.size) === state.size);
     }
-    for (const button of document.querySelectorAll('[data-rank-mode] button')) {
-      button.classList.toggle('is-active', button.dataset.mode === state.mode);
-    }
+    const mode = document.querySelector('[data-rank-mode]');
+    if (mode && mode.value !== state.mode) mode.value = state.mode;
   }
 
   function render() {
@@ -548,5 +618,5 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
   });
   new ResizeObserver(() => { if (isOpen()) layout(); }).observe(stage);
 
-  return Object.freeze({ open, close, resize, remode, pick, key, isOpen, render, size: () => state.size });
+  return Object.freeze({ open, close, reload: load, resize, remode, pick, key, isOpen, render, size: () => state.size });
 }

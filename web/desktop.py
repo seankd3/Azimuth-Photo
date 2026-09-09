@@ -277,10 +277,10 @@ class Desktop:
     # ---- rank ----
 
     def rank(self, n: int = 9, view: dict | None = None, avoid: list[str] | None = None,
-             mode: str = "close") -> dict:
+             mode: str = "learn") -> dict:
         space = self._product.spaced()
         return self._run(lambda library: library.rank(
-            int(n), view, list(avoid or []), mode=str(mode or "close"), space=space))
+            int(n), view, list(avoid or []), mode=str(mode or "learn"), space=space))
 
     def round(self, winner_id: int, over_ids: list[int]) -> dict:
         recorded = self._run(lambda library: library.round(int(winner_id), over_ids))

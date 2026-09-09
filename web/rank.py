@@ -648,25 +648,40 @@ def _orientation(photo: dict) -> str:
     return "landscape" if width > height else "portrait" if height > width else "square"
 
 
-def judged(conn, scope: Scope = EVERYTHING) -> int:
-    """How many photographs in a scope have been in at least one round.
+# Rounds a photograph has been in before its place is earned rather than
+# guessed: the same three `stars` waits for.
+EARNED = 3
 
-    The progress a ranking surface shows: not a percentage of anything
-    invented, just how much of what you are looking at you have looked at.
+
+def progress(conn, scope: Scope = EVERYTHING) -> dict[str, int]:
+    """How much of a scope has been looked at: `judged` have been in a round,
+    `earned` in three or more, which is when a place stops being a guess.
+
+    Not a percentage of anything invented, just how much of what you are
+    looking at you have looked at, and how much of that is settled.
     """
 
     import json
 
-    members = {h for picked, over in rounds(conn) for h in (picked, *over)}
-    if not members:
-        return 0
+    counts = seen(conn)
+    if not counts:
+        return {"judged": 0, "earned": 0}
     clause, args = scope_where(scope)
-    return int(conn.execute(
-        f"SELECT COUNT(DISTINCT i.content_hash) FROM images i"
-        f" WHERE i.status != 'trashed' AND i.tail IS NOT NULL AND ({clause})"
-        f" AND i.content_hash IN (SELECT value FROM json_each(?))",
-        (*args, json.dumps(sorted(members))),
-    ).fetchone()[0])
+
+    def within(members) -> int:
+        return int(conn.execute(
+            f"SELECT COUNT(DISTINCT i.content_hash) FROM images i"
+            f" WHERE i.status != 'trashed' AND i.tail IS NOT NULL AND ({clause})"
+            f" AND i.content_hash IN (SELECT value FROM json_each(?))",
+            (*args, json.dumps(sorted(members))),
+        ).fetchone()[0])
+
+    return {"judged": within(counts),
+            "earned": within([h for h, n in counts.items() if n >= EARNED])}
+
+
+def judged(conn, scope: Scope = EVERYTHING) -> int:
+    return progress(conn, scope)["judged"]
 
 
 def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, float]:
