@@ -2376,8 +2376,9 @@ class APlaceIsAFunctionOfTime(CoreCase):
 
 
 class AStackIsACadence(CoreCase):
-    """Only exactness makes a set: four or more frames on one repeated
-    interval stack behind their first frame; anything less regular is just
+    """A beat makes a set: four or more frames on one repeated interval stack
+    behind their first frame, keeping the jitter a camera adds -- focus and
+    exposure -- and nothing looser; anything less regular is just
     photographs. The stack is a projection over capture times, the collapse
     is one scope criterion, and the chip steps inside."""
 
@@ -2405,6 +2406,38 @@ class AStackIsACadence(CoreCase):
 
         burst = [self._at(f"Raws/b{i}.cr3", "2026-05-26 18:00:07") for i in range(4)]
         self.assertEqual(stacks.project(self.conn), 3)
+        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
+        self.assertTrue(all(held[i] == burst[0] for i in burst[1:]))
+
+    def test_an_intervalometer_run_keeps_its_beat_through_focus_and_exposure(self):
+        # A 33 s beat whose frames start 31, 38, 30 and 34 s apart: the
+        # shutter ran longer in one, autofocus hunted before another.
+        import stacks
+
+        seconds = [0, 31, 69, 99, 133, 166]
+        run = [self._at(f"Raws/i{i}.cr3", f"2026-09-07 21:00:{0:02d}") for i in range(len(seconds))]
+        for pid, at in zip(run, seconds):
+            self.conn.execute("UPDATE images SET date_taken = ? WHERE id = ?",
+                              (f"2026-09-07 21:{at // 60:02d}:{at % 60:02d}", pid))
+        self.assertEqual(stacks.project(self.conn), 5)
+        held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
+        self.assertTrue(all(held[i] == run[0] for i in run[1:]))
+
+    def test_a_stroll_is_not_a_set(self):
+        # Gaps of 20, 45, 90 and 28 s have no beat to keep.
+        import stacks
+
+        for i, at in enumerate([0, 20, 65, 155, 183]):
+            self._at(f"Raws/w{i}.cr3", f"2026-09-07 15:{at // 60:02d}:{at % 60:02d}")
+        self.assertEqual(stacks.project(self.conn), 0)
+
+    def test_a_burst_survives_one_autofocus_pause(self):
+        # Continuous drive at 0-1 s with one 2 s hunt in the middle.
+        import stacks
+
+        burst = [self._at(f"Raws/a{i}.cr3", f"2026-09-07 12:00:{at:02d}")
+                 for i, at in enumerate([10, 10, 11, 13, 13, 14])]
+        self.assertEqual(stacks.project(self.conn), 5)
         held = {r[0]: r[1] for r in self.conn.execute("SELECT id, stack_of FROM images")}
         self.assertTrue(all(held[i] == burst[0] for i in burst[1:]))
 
