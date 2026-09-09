@@ -9,6 +9,9 @@
 </head>
 <body>
   <div class="app-shell">
+    <button class="panel-tab tab-left" type="button" data-action="toggle-left" aria-label="Show or hide the left panel">‹</button>
+    <button class="panel-tab tab-right" type="button" data-action="toggle-right" aria-label="Show or hide the right panel">›</button>
+    <button class="panel-tab tab-top" type="button" data-action="toggle-top" aria-label="Show or hide the top bar">˄</button>
     <header class="topbar">
       <button class="brand" type="button" data-action="all-photos" aria-label="Show all photos">
         <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"></circle><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"></path><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"></path></g></svg>
@@ -212,9 +215,6 @@
     </form>
   </dialog>
 
-  <button class="panel-tab tab-left" type="button" data-action="toggle-left" aria-label="Show or hide the left panel">‹</button>
-  <button class="panel-tab tab-right" type="button" data-action="toggle-right" aria-label="Show or hide the right panel">›</button>
-  <button class="panel-tab tab-top" type="button" data-action="toggle-top" aria-label="Show or hide the top bar">˄</button>
 
   <dialog class="confirm-dialog" data-empty-dialog aria-labelledby="empty-title">
     <form data-empty-form>
