@@ -68,8 +68,7 @@ the folder.
   decisions it writes (`library`, `rank`, `search`, `develop`, `labels`, …).
 - `web/static/v2/` and `web/templates/v2.html` are the whole UI, bundled by
   `scripts/build_desktop_ui.py` into one document the window opens.
-- `desktop/` holds the build guidance and the icon; `android/` is a parked
-  client that is not a V2 dependency.
+- `desktop/` holds the build guidance and the icon.
 - `scripts/` contains repeatable developer/operator entry points only.
 
 A surface may not own a table, run a loop, or hold state between calls; a

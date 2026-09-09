@@ -2,13 +2,15 @@
 """The real app, off-screen: open it on an isolated home, ask the page a
 question, capture its own window, close. Nothing touches the foreground.
 
-    python scripts/native_proof.py <home> <out.png> [--probe probe.js] [--wait 25]
+    python scripts/native_proof.py <home> <out.png> [--probe a.js --probe b.js] [--wait 25] [--gap 2]
 
 `home` is an `AZIMUTH_HOME` with a catalog already attached and swept (build
 one with `boot.Library` first, or point at a proof home from an earlier run).
 The window opens at x = -2400, beyond the left edge of any screen, and is
-still rendered, so `PrintWindow` captures it; the probe is JavaScript
-evaluated in the page whose JSON result is printed on one `PROBE` line.
+still rendered, so `PrintWindow` captures it. Each probe is JavaScript
+evaluated in the page, in order with `--gap` seconds between them so one may
+act (click a badge) and the next may read what happened; every result is
+printed on its own `PROBE` line, and the capture follows the last.
 """
 
 from __future__ import annotations
@@ -70,8 +72,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("home")
     parser.add_argument("out")
-    parser.add_argument("--probe", help="a JavaScript file evaluated in the page; its result is printed")
+    parser.add_argument("--probe", action="append", default=[],
+                        help="a JavaScript file evaluated in the page; its result is printed (repeatable)")
     parser.add_argument("--wait", type=float, default=25.0, help="seconds to let the library settle")
+    parser.add_argument("--gap", type=float, default=2.0, help="seconds between probes, and before the capture")
     args = parser.parse_args()
 
     os.environ["AZIMUTH_HOME"] = str(Path(args.home).resolve())
@@ -94,15 +98,16 @@ def main() -> int:
     )
     product.bind(window)
     window.events.closed += product.close
-    probe = Path(args.probe).read_text(encoding="utf-8") if args.probe else None
+    probes = [Path(name).read_text(encoding="utf-8") for name in args.probe]
 
     def run():
         time.sleep(args.wait)
-        if probe:
+        for probe in probes:
             try:
                 print("PROBE " + json.dumps(window.evaluate_js(probe)), flush=True)
             except Exception as error:  # noqa: BLE001 - the probe is the person's own script
                 print(f"PROBE failed: {error!r}", flush=True)
+            time.sleep(args.gap)
         try:
             w, h = snap(int(window.native.Handle.ToInt64()), Path(args.out))
             print(f"SNAP {w}x{h} {args.out}", flush=True)

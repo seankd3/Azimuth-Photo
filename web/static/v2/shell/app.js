@@ -189,9 +189,28 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 // What the window is looking at, as the bridge speaks it. Null when it is
 // the whole library, so the server sees "no view" rather than three empties.
 function viewOf() {
-  const { folders, album, chips } = read();
-  if (!(folders || []).length && !album && !(chips || []).length) return null;
-  return { folders, album, chips };
+  const { folders, album, chips, expanded } = read();
+  const opened = [...(expanded || [])];
+  if (!(folders || []).length && !album && !(chips || []).length && !opened.length) return null;
+  return opened.length ? { folders, album, chips, expanded: opened } : { folders, album, chips };
+}
+
+// Open or close one stack in place: its members take their seats after the
+// cover and the rest of the grid stays where it is.
+async function toggleStack(coverId) {
+  const expanded = new Set(read().expanded);
+  if (expanded.has(coverId)) expanded.delete(coverId);
+  else expanded.add(coverId);
+  update({ expanded });
+  try {
+    await refreshInPlace({ shelves: false });
+    const { view, sort } = read();
+    if (view === 'library' && (sort === 'newest' || sort === 'oldest') && !seeking()) {
+      update({ days: await product.days(viewOf()) });
+    }
+  } catch (error) {
+    notify(error.message);
+  }
 }
 
 // Which word the view is refining, if any: exactly one label chip, or a
@@ -519,15 +538,8 @@ function visibleGrid() {
     emptyAction: inTrash || searching || scanning || inAlbum ? null : { label: 'Add a folder', run: openDriveDialog },
     select: selectPhoto,
     open: openPhoto,
-    stack: (photo, index) => {
-      // Stepping into a stack narrows the same view by one chip; its ×
-      // is the step back out, and it lands where you left: the cover,
-      // selected, at the same scroll.
-      const held = (read().chips || []).filter((c) => c.is !== 'stack');
-      stackFrom = { id: photo.id, index, top: workspace.scrollTop };
-      update({ chips: [...held, { is: 'stack', values: [String(photo.id)] }] });
-      viewMoved();
-    },
+    stack: (photo) => { void toggleStack(photo.id); },
+    expanded: read().expanded,
     drag: (index, event) => {
       const photo = read().photos.get(index);
       if (!photo) return;
@@ -967,32 +979,13 @@ async function loadFolders() {
 // The view moved under whatever stage is up: Rank re-scopes in place, the
 // grid starts from the top of the new answer. Folders, albums, All
 // photos and the chips all route through here — one rule, one place.
-// Where the grid was when a stack was opened; the step back out returns
-// there instead of to the top.
-let stackFrom = null;
-
-async function viewMoved() {
+function viewMoved() {
   if (rankWorkflow.isOpen()) {
     rankWorkflow.resize(rankWorkflow.size());
     return;
   }
-  const inStack = (read().chips || []).some((c) => c.is === 'stack');
-  const back = !inStack && stackFrom ? stackFrom : null;
-  if (!inStack) stackFrom = null;
-  workspace.scrollTo({ top: back ? back.top : 0 });
-  await loadView();
-  if (!back || read().view !== 'library') return;
-  // The page under the old scroll arrives behind the paint; wait for the
-  // cover's row, then take it up again.
-  for (let tries = 0; tries < 20; tries += 1) {
-    workspace.scrollTo({ top: back.top });
-    const photo = read().photos.get(back.index);
-    if (photo) {
-      if (photo.id === back.id) update({ selected: photo, selectedIndex: back.index, marked: new Set([photo.id]) });
-      return;
-    }
-    await delay(50);
-  }
+  workspace.scrollTo({ top: 0 });
+  loadView();
 }
 
 let folderAnchor = null;
@@ -1512,6 +1505,18 @@ document.addEventListener('keydown', (event) => {
     searchBox.focus();
     searchBox.select();
     event.preventDefault();
+    return;
+  }
+  if (event.key.toLowerCase() === 's' && !isTyping && !event.ctrlKey && !event.metaKey
+      && read().view === 'library' && read().selected) {
+    // S opens or closes the set the selected photograph belongs to, cover or
+    // member alike — Lightroom's key, the grid's own grammar.
+    const held = read().selected;
+    const cover = held.stack_of || (held.stack ? held.id : null);
+    if (cover) {
+      void toggleStack(cover);
+      event.preventDefault();
+    }
     return;
   }
   if (event.key === 'Escape') {

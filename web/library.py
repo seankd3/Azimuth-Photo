@@ -189,7 +189,7 @@ def _page(conn, condition: str, args: tuple, order: str, order_args: tuple,
         f"""
         SELECT i.id, i.tail, i.date_taken, i.status, i.stars, i.rotate, i.elo,
                i.content_hash AS hash, i.width, i.height, i.file_size,
-               i.develop{"".join(columns)}
+               i.develop, i.stack_of{"".join(columns)}
         FROM images i {" ".join(joins)}
         WHERE i.id IN (SELECT i.id FROM images i WHERE {condition}
                        ORDER BY {order} LIMIT ? OFFSET ?)

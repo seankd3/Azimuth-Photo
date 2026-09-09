@@ -68,7 +68,7 @@ settings, or network protocols.
 | Rank, search, and AI | Proven | Decisions drive rank; enrichment improves results but never gates the product | Rounds are whole decisions, strength is fitted, Learn is the simulation-chosen default, the space grows from tiles, search is one ranked fusion that never waits for a model, faces and photostats are cache kinds |
 | Desktop UI | Proven | One fast native-feeling surface with one state and interaction vocabulary | `kit <- net <- store <- lens <- shell`, one document, one toast, one Esc ladder, one selection grammar; every surface above proven in the maximized native window |
 | Desktop packaging | Proven | A dependable install launches the local product and owns its lifecycle | One frozen directory from one command; no server, port, parent process or child engine. An installer and signing remain future work |
-| Android | Legacy | Explicit product decision after desktop V2 is coherent | The desktop is coherent as of 09-08; the client speaks to a hub that no longer exists and cannot run. The decision is put to the owner in the 09-08 report |
+| Android | Removed | Explicit product decision after desktop V2 is coherent | Deleted 09-08 on the owner's word: the client spoke to a hub that no longer exists and could not run. A phone returns as new work against the V2 vocabulary; `27f07752` holds the Kotlin |
 | V1 remote hub/satellite system | Removed | Delete it; retain only user-data lessons that inform the new storage design | Gone from the tree 09-08; the lessons live in `CORE.md`'s appendix |
 
 ## Exact code-file register

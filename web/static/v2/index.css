@@ -906,6 +906,11 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
   cursor: pointer;
 }
 .stack-badge:hover { background: rgb(0 0 0 / 85%); }
+.stack-badge.is-open { color: var(--accent); }
+/* A run that is open: its members wear a thin tie to the cover, so a row
+   of near-identical frames reads as one set rather than a repeat. */
+.photo-cell.is-member { box-shadow: inset 3px 0 0 var(--line-strong); }
+.photo-cell.is-member.is-focus { box-shadow: inset 3px 0 0 var(--accent); }
 .import-choose { display: flex; gap: 6px; }
 .import-progress { margin: 10px 0 0; color: var(--text); font-size: 13px; }
 .toast {

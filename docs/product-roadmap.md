@@ -82,7 +82,7 @@ Only after this step is V2 reviewed for merge, installation, and release.
 ## Parked until the desktop product earns them
 
 - Full-library embedding backfill as a deadline.
-- Android and phone replacement work.
+- A phone client (the V1 Android app is deleted; it spoke to the hub).
 - Hub/satellite synchronization and remote compute.
 - Account, pairing, auto-update, and server distribution systems.
 - Public publishing expansion and social-platform integrations.

@@ -11,7 +11,6 @@ the current product architecture.
 azimuth-photo/
 ├── web/              V2 model, product boundary, native edge, and modular UI
 ├── desktop/          Desktop build guidance and canonical executable icon
-├── android/          Parked client, not a V2 dependency
 ├── scripts/          Repeatable development and operating commands
 └── docs/             Current guidance and preserved behavior references
 ```

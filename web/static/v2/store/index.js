@@ -1,5 +1,7 @@
 const state = {
   chips: [],
+  // Covers the person has opened: their members sit in the grid after them.
+  expanded: new Set(),
   album: null,
   albums: [],
   people: [],

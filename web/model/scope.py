@@ -286,11 +286,17 @@ def stacked_under(cover_id: int) -> Scope:
     return Scope("(i.id = ? OR i.stack_of = ?)", (cover, cover))
 
 
-def covers_only() -> Scope:
+def covers_only(expanded=()) -> Scope:
     """The library with its stacks collapsed: members wait behind their
-    cover. The browse's resting state; a stack chip steps inside."""
+    cover. The browse's resting state. A cover the person has opened shows
+    its members in place -- in a date sort they sit right after it, because
+    a run is consecutive by construction."""
 
-    return Scope("i.stack_of IS NULL")
+    opened = [int(cover) for cover in expanded]
+    if not opened:
+        return Scope("i.stack_of IS NULL")
+    marks = ",".join("?" for _ in opened)
+    return Scope(f"(i.stack_of IS NULL OR i.stack_of IN ({marks}))", tuple(opened))
 
 
 def ids(image_ids) -> Scope:

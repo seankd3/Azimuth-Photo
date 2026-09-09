@@ -169,10 +169,11 @@ class Library:
             parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
             parts.append(criteria.compile(self.conn, view["chips"]))
-        # The browse's resting state: stack members wait behind their cover.
-        # A stack chip is the step inside, so it lifts the collapse.
+        # The browse's resting state: stack members wait behind their cover,
+        # except the covers the person has opened. A stack chip is the step
+        # inside one, so it lifts the collapse entirely.
         if not any(c.get("is") == "stack" for c in (view.get("chips") or ())):
-            parts.append(covers_only())
+            parts.append(covers_only(view.get("expanded") or ()))
         return all_of(*parts)
 
     def _shelf(self, set_id: str) -> Scope:

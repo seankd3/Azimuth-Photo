@@ -150,17 +150,20 @@ function photoCell(photo, index, actions) {
   cell.append(image, flag);
   if (photo.stack) {
     // A cover fronts its run — a burst, a timelapse, a panorama sweep —
-    // and the badge is the door in. A span, because the cell is already a
-    // button and a button may not hold another.
-    const badge = element('span', 'stack-badge', `▤ ${photo.stack + 1}`);
+    // and the badge opens it in place: the members take their seats right
+    // after the cover and leave again on the next click. A span, because
+    // the cell is already a button and a button may not hold another.
+    const open = actions.expanded?.has(photo.id);
+    const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''), `▤ ${photo.stack + 1}`);
     badge.setAttribute('role', 'button');
-    badge.title = `A set of ${photo.stack + 1} — click to open`;
+    badge.title = open ? 'Close the set (S)' : `A set of ${photo.stack + 1} — open it (S)`;
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
       actions.stack?.(photo, index);
     });
     cell.append(badge);
   }
+  if (photo.stack_of) cell.classList.add('is-member');
   cell.addEventListener('click', (event) => {
     // Clicking a photograph makes the grid the keyboard's surface — Y/N
     // and the cull keys must land here even if a search box held focus.
@@ -235,6 +238,13 @@ function reconcileGrid(grid, state, actions, layout, range) {
       const why = !photo.placed ? ', missing' : cell.dataset.empty === 'unshowable' ? ', cannot be shown' : cell.dataset.empty === 'away' ? ', drive away' : '';
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
       cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
+      // A cell that stays keeps its badge; the badge keeps up with the set.
+      const badge = cell.querySelector('.stack-badge');
+      if (badge) {
+        const open = Boolean(actions.expanded?.has(photo.id));
+        badge.classList.toggle('is-open', open);
+        badge.title = open ? 'Close the set (S)' : `A set of ${photo.stack + 1} — open it (S)`;
+      }
     }
     desired.push(cell);
     leftovers.delete(cell);

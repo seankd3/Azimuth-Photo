@@ -190,7 +190,8 @@ v1 and are not in 2.0 today:
   share is a drive; a helper is another machine doing owed work.
 - **VLM captions**: the derivation fleet was removed. People, faces and a
   learned label vocabulary are back, on the laptop's own CPU and card.
-- **The phone**: parked until the desktop is finished.
+- **The phone**: the old Android client is deleted; a phone returns as new
+  work against the V2 vocabulary once the desktop is finished.
 
 If you need those today, the last full v1 build is commit
 [`d8aa7b8f`](https://github.com/Sean-Kenneth-Doherty/azimuth-photo/commit/d8aa7b8f),

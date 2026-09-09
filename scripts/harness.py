@@ -48,15 +48,21 @@ STUB = r"""<script>
     }
   }
   photos[0].stack = 3;
+  const members = [1, 2, 3].map((n) => ({ ...photos[0], id: 1000 + n, stack: 0, stack_of: 1,
+    tail: `Raws/Digital/2026/2026-09-08/m${n}.cr3` }));
+  const shown = (view) => (view && view.expanded && view.expanded.includes(1))
+    ? [photos[0], ...members, ...photos.slice(1)] : photos;
   const api = {
     home: () => 'C:/harness/home', propose_home: () => 'C:/harness/home', settle_home: (p) => p,
     counts: () => ({ photos: N, starred: 0, unidentified: 0, trash: 0 }),
     drives: () => [{ id: 1, uuid: 'u-1', root: 'C:/harness/photos', label: 'Harness', is_record: 0, here: true, seen_at: 0 }],
     pulse: () => ({ done: 0, swept: 1, shaped: 0, cards: 0, doing: null, left: {} }),
     look: () => 0,
-    photos: (sort, limit, offset) => (sort === 'oldest' ? [...photos].reverse() : photos).slice(offset, offset + limit),
-    size: () => N, folders: () => [], photo: (pid) => photos[pid - 1],
-    trash_photos: () => [], trash_count: () => 0, days: () => days, sessions: () => [],
+    photos: (sort, limit, offset, view) => (sort === 'oldest' ? [...shown(view)].reverse() : shown(view)).slice(offset, offset + limit),
+    size: (view) => shown(view).length, folders: () => [], photo: (pid) => shown({ expanded: [1] }).find((p) => p.id === pid),
+    trash_photos: () => [], trash_count: () => 0,
+    days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
+    sessions: () => [],
     albums: () => [], cameras: () => [], facets: () => ({}), people: () => [], labels: () => [], cards: () => [],
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
     intake_status: () => ({ running: false }), develop_state: () => ({}), forget_missing: () => ({}),
