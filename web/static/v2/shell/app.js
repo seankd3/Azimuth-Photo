@@ -1231,7 +1231,7 @@ function selectPhoto(index, modifiers = {}) {
 // A chapter's frames, marked: the rows are brought in if they are not, so a
 // day is a day whether or not it has scrolled past.
 async function markRange(start, count, extend) {
-  await pages.ensureRange(start, start + count);
+  await pages.ensureRange(start, start + count, { look: false });
   const marked = extend ? new Set(read().marked) : new Set();
   for (let i = start; i < start + count; i += 1) {
     const held = read().photos.get(i);
@@ -1241,7 +1241,7 @@ async function markRange(start, count, extend) {
   anchorIndex = start;
   const chosen = first || read().selected;
   update({ marked, selected: chosen, selectedIndex: first ? start : read().selectedIndex });
-  detailsSoon(chosen);
+  if (chosen) detailsSoon(chosen);
 }
 
 function nearestMarked(index, marked) {
@@ -1411,11 +1411,6 @@ function renderChrome(state) {
   library.renderInspector(inspector.querySelector('[data-inspector-facts]'), state.selected,
     { marked: state.marked, photos: state.photos, counts: state.counts, drives: state.drives, working: state.working, showFolder, applyChip, notify });
   editPanel.follows(state.view === 'loupe' ? state.selected : null);
-  if (state.view === 'loupe' && state.selected) {
-    renderLoupe(state.selected);
-    renderStrip(state);
-    if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
-  }
   const count = state.counts.photos.toLocaleString();
   // The import workspace's own panel carries its counts; the library's
   // number beside the word Import would be someone else's answer.
@@ -1466,6 +1461,13 @@ function renderChrome(state) {
   shell.classList.toggle('hide-right', !state.panels.right);
   shell.classList.toggle('hide-top', !state.panels.top);
   loupe.hidden = !holding;
+  // The strip measures itself to centre the current frame: laid out only
+  // once the stage is shown, so the first centring is a real one.
+  if (holding && state.selected) {
+    renderLoupe(state.selected);
+    renderStrip(state);
+    if (state.selectedIndex !== null) warmNeighbours(state.selectedIndex);
+  }
   grid.hidden = ranking || holding || walled || intaking;
   document.querySelector('[data-import-stage]').hidden = !intaking;
   document.querySelector('[data-import-panel]').hidden = !intaking;
@@ -1504,7 +1506,9 @@ function renderChrome(state) {
   // One button, one place: it reads Pick or Clear for what is under the
   // cursor, so focus and the pixel keep their meaning across a click.
   renderStacksToggle(state);
-  stacksToggle.hidden = state.view !== 'library' || holding || stacksToggle.dataset.any !== 'true';
+  // Offered while a stack is among the rows held, and always while
+  // collapsed: the way back must never scroll out of reach.
+  stacksToggle.hidden = state.view !== 'library' || holding || (!state.collapsed && stacksToggle.dataset.any !== 'true');
   const pickButton = document.querySelector('[data-action="pick"]');
   const picked = !many && state.selected?.status === 'picked';
   pickButton.replaceChildren(Object.assign(document.createElement('kbd'), { textContent: picked ? 'U' : 'P' }), ` ${picked ? 'Clear' : 'Pick'}`);
@@ -1801,7 +1805,7 @@ document.addEventListener('keydown', (event) => {
     // One rung at a time: a toast, a menu, then the zoom, then the clean
     // room, then the loupe itself — the popovers close in their own earlier
     // handlers.
-    if (undo.visible()) undo.dismiss();
+    if (undo.visible() && undo.pending()) undo.dismiss();
     else if (!folderMenu.hidden || !driveMenu.hidden) {
       folderMenu.hidden = true;
       driveMenu.hidden = true;

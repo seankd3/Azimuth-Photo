@@ -219,10 +219,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .nav-row .icon, .side-row .icon, .side-row .person-face { flex: none; }
 .nav-row.is-quiet { color: var(--text-3); }
 .nav-row.is-quiet:hover { color: var(--text-2); }
-.nav-row > span:first-child, .side-row .leaf, .folder-row .folder-name {
+.nav-row > span:not(:last-child), .nav-row > span:only-of-type, .side-row .leaf, .folder-row .folder-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.nav-row > span:last-child, .side-row .set-count, .folder-row .folder-count {
+.nav-row > span:last-child:not(:only-of-type), .side-row .set-count, .folder-row .folder-count {
   color: var(--text-3); font-variant-numeric: tabular-nums; font-size: var(--t-meta);
 }
 .folder-tree, .side-list { display: flex; flex-direction: column; }
@@ -407,9 +407,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
    drawn on a veil above the picture (an inset shadow on the cell itself
    paints under its image); the mark keeps a dark companion so it survives
    an orange photograph */
-.photo-cell::after { content: ''; position: absolute; inset: 0; pointer-events: none; }
-.photo-cell:hover::after { box-shadow: inset 0 0 0 1px var(--hover-line); }
-.photo-cell.is-selected::after { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px rgb(0 0 0 / 55%); }
+.veil { position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+.photo-cell:hover .veil { box-shadow: inset 0 0 0 1px var(--hover-line); }
+.is-selected > .veil { box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 3px rgb(0 0 0 / 55%); }
 /* A chapter is a quiet line in the stream: the day, its count, no chrome. */
 .grid-chapter {
   position: absolute;

@@ -397,3 +397,20 @@ finding was checked and the numbers said no.
 | U26 | Two cursors on the face wall | one (Q23) | open |
 | U27 | One import reports progress in two places | the status line (Q27) | shipped |
 | U28 | The column count derived three ways | measured (Q16) | open |
+
+## Refutation (feel round)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| X14 | In Best order every starred photograph wore a black veil: the ring veil and the star chip shared ::after | the veil is a real child element | shipped |
+| X15 | On an away or unshowable cell the mark's ring shrank to the 22px circle | same: the veil is its own element | shipped |
+| X16 | Sidebar counts stopped sitting flush right once an icon came first; Add a folder… rendered in the count style | row rules name what they style, not where it sits | shipped |
+| X17 | The stacks button could vanish while collapsed, with no way back | kept whenever collapsed | shipped |
+| X18 | A plain notice ate Esc for 3.5 s | the toast takes Esc only with a way back | shipped |
+| X19 | Marking a day pinned every page of that day into the refresh set | a read that is not a look leaves the refresh memory alone | shipped |
+| X20 | markRange could detail a null cursor | guarded | shipped |
+| X21 | A crowded year was never named on the rail | named at its next chapter with room | shipped |
+| X22 | The clamped first year could be overprinted | the mark records where it sits | shipped |
+| X23 | The filmstrip opened uncentred: laid out while the stage was hidden | laid out after the stage is shown | shipped |
+| X25 | MASTER_PLAN recorded the old status line | updated | shipped |
+| X24 | An unknown icon name at boot is a blank window | keep as designed: a typo in a static name is a build-time fault the throw surfaces at once | rejected: fail loud beats a wrong glyph |

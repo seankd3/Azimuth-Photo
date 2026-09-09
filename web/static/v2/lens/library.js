@@ -126,6 +126,7 @@ function skeletonCell(index) {
   const cell = element('div', 'photo-skeleton');
   cell.dataset.index = index;
   cell.dataset.kind = 'skeleton';
+  cell.append(element('span', 'veil'));
   return cell;
 }
 
@@ -146,7 +147,8 @@ function photoCell(photo, index, actions) {
   image.decoding = 'async';
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
-  cell.append(image, flag);
+  // The veil carries the hand's line and the mark's ring above the picture.
+  cell.append(image, flag, element('span', 'veil'));
   // A star earned by the ranking, worn where the ranking is the order.
   if (photo.stars > 0) cell.dataset.stars = photo.stars;
   if (photo.stack) {

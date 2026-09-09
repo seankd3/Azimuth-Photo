@@ -67,19 +67,19 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
       const top = y(chapter.index);
       const thisYear = chapter.day.slice(0, 4);
       const thisMonth = chapter.day.slice(0, 7);
-      if (thisYear !== year) {
+      if (thisYear !== year && top - lastWordY >= 14) {
+        // The year's word stands where its first month would have; a year
+        // that finds no room here is named at its next chapter with room.
         year = thisYear;
-        if (top - lastWordY >= 14) {
-          // The year's word stands where its first month would have.
-          const mark = element('div', 'timeline-year', year);
-          mark.style.top = `${Math.max(6, top)}px`;
-          track.append(mark);
-          lastWordY = top;
-          lastTickY = top;
-          lastYearDrawn = year;
-          month = thisMonth;
-          continue;
-        }
+        const at = Math.max(6, top);
+        const mark = element('div', 'timeline-year', year);
+        mark.style.top = `${at}px`;
+        track.append(mark);
+        lastWordY = at;
+        lastTickY = at;
+        lastYearDrawn = year;
+        month = thisMonth;
+        continue;
       }
       if (thisMonth === month) continue;
       month = thisMonth;

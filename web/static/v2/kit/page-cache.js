@@ -121,9 +121,10 @@ export class PageCache {
     return request;
   }
 
-  ensureRange(start, end) {
+  ensureRange(start, end, { look = true } = {}) {
     // What the window is looking at, remembered: the pages a refresh keeps.
-    this.wanted = [this.pageOffset(start), Math.max(end, start + 1)];
+    // A read that is not a look (marking a day) leaves that memory alone.
+    if (look) this.wanted = [this.pageOffset(start), Math.max(end, start + 1)];
     const requests = [];
     for (let offset = this.pageOffset(start); offset < end; offset += this.pageSize) {
       requests.push(this.ensure(offset));

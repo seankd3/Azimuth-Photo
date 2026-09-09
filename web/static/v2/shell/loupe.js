@@ -13,6 +13,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   const cap = document.createElement('kbd');
   cap.textContent = 'Z';
   const word = document.createElement('span');
+  word.textContent = '100%';
   chip.append(cap, word);
   stage.append(chip);
 
