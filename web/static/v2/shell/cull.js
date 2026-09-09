@@ -42,7 +42,10 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
         // the next verb hits the same photographs.
         if (action.advance && ids.length === 1) await selectIndex(selectedIndex + 1);
       }
-      undo.show(action.message(ids.length), () => product.undoCull(result.changed).then(reload));
+      const passed = result.unidentified
+        ? ` ${result.unidentified === 1 ? 'One is' : `${result.unidentified} are`} not identified yet.` : '';
+      undo.show(action.message(ids.length - result.unidentified) + passed,
+        () => product.undoCull(result.changed).then(reload));
     } catch (reason) {
       notify(reason.message);
     } finally {

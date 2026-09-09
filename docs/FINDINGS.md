@@ -37,19 +37,19 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| G1 | Ctrl+A marks everything but the cull keys and bar stay dead until one photo is clicked | gate the verbs on `selection().length`, give the cursor a home | open |
-| G2 | Ctrl-clicking the focused photo out of the set leaves focus outside it | focus moves to the nearest marked photo | open |
-| G3 | Esc clears the cursor, so the next arrow jumps to the top | Esc clears the marks and the selection, keeps the index | open |
-| G4 | Fast arrow keys drop presses at page boundaries | move the index synchronously, then ensure the page | open |
-| G5 | Every arrow waits on a details read before it lands | details fetched from the 120 ms settle timer | open |
+| G1 | Ctrl+A marks everything but the cull keys and bar stay dead until one photo is clicked | gate the verbs on `selection().length`, give the cursor a home | shipped |
+| G2 | Ctrl-clicking the focused photo out of the set leaves focus outside it | focus moves to the nearest marked photo | shipped |
+| G3 | Esc clears the cursor, so the next arrow jumps to the top | Esc clears the marks and the selection, keeps the index | shipped |
+| G4 | Fast arrow keys drop presses at page boundaries | move the index synchronously, then ensure the page | shipped |
+| G5 | Every arrow waits on a details read before it lands | details fetched from the 120 ms settle timer | shipped |
 | G6 | Same as P1: every tick re-reads every loaded page | viewport-only refresh with eviction | shipped |
-| G7 | Any toast kills a pending Undo | the revert stack lives apart from the toast copy | open |
-| G8 | Row height and sort are forgotten between runs; no Ctrl+wheel density | one `remembered(key, fallback)`; wheel handler | open |
+| G7 | Any toast kills a pending Undo | the revert stack lives apart from the toast copy | shipped |
+| G8 | Row height and sort are forgotten between runs; no Ctrl+wheel density | one `remembered(key, fallback)`; wheel handler | shipped |
 | G9 | A page that failed once shows skeletons forever | `refresh()` clears `failed` | shipped |
-| G10 | Peeking at Trash loses scroll and selection | remember and restore on return | open |
-| G11 | The right-click menu is not the bar's twin: no status filter, no Restore in Trash, `turn-right` named backwards | one `verbsFor(photo, view)` feeds both | open |
-| G12 | Changing sort drops the selection | `position(id, sort, view)` verb re-finds it | open |
-| G13 | `filters.js` rebuilds the chip bar on every update | key the chips | open |
+| G10 | Peeking at Trash loses scroll and selection | remember and restore on return | shipped |
+| G11 | The right-click menu is not the bar's twin: no status filter, no Restore in Trash, `turn-right` named backwards | one `verbsFor(photo, view)` feeds both | shipped: Restore in Trash, the rotate button named for what it does; rejected: a status filter is a chip, not a verb, and does not belong in a photograph's menu |
+| G12 | Changing sort drops the selection | `position(id, sort, view)` verb re-finds it | shipped |
+| G13 | `filters.js` rebuilds the chip bar on every update | key the chips | shipped |
 
 ## Loupe
 

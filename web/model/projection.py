@@ -34,16 +34,17 @@ def project(conn, key: str, columns: Iterable[str], intended: dict) -> int:
 
     columns = tuple(columns)
     listed = ", ".join(columns)
-    differing: list[tuple] = []
+    differing: dict = {}
     for row in conn.execute(f"SELECT {key}, {listed} FROM images WHERE {key} IS NOT NULL"):
         wanted = intended.get(row[0])
         if wanted is not None and tuple(row)[1:] != tuple(wanted):
-            differing.append((*wanted, row[0]))
+            differing[row[0]] = (*wanted, row[0])
     assignments = ", ".join(f"{column} = ?" for column in columns)
     written = 0
-    for start in range(0, len(differing), SLICE):
+    rows = list(differing.values())
+    for start in range(0, len(rows), SLICE):
         cursor = conn.executemany(
-            f"UPDATE images SET {assignments} WHERE {key} = ?", differing[start:start + SLICE])
+            f"UPDATE images SET {assignments} WHERE {key} = ?", rows[start:start + SLICE])
         written += cursor.rowcount
         conn.commit()
     conn.commit()

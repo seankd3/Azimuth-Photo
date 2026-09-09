@@ -209,6 +209,7 @@ class FreshCatalogTests(unittest.TestCase):
                 product.conn.commit()
 
             with boot.Library(catalog, tile_root) as reopened:
+                boot.repair(reopened.conn)
                 repaired = reopened.browse()[0]
 
         self.assertEqual((answer["width"], answer["height"]), (600, 900))
@@ -223,7 +224,7 @@ class FreshCatalogTests(unittest.TestCase):
         self.assertEqual(repaired["date_taken"], "2020-01-02 04:05:06")
         self.assertEqual(repaired["width"], 600)
 
-    def test_a_damaged_disposable_metadata_answer_cannot_stop_boot(self):
+    def test_a_damaged_disposable_metadata_answer_is_discarded_by_repair(self):
         with tempfile.TemporaryDirectory() as directory:
             catalog = os.path.join(directory, "catalog.db")
             digest = "f" * 64
@@ -242,6 +243,8 @@ class FreshCatalogTests(unittest.TestCase):
             conn.close()
 
             with boot.Library(catalog, os.path.join(directory, "tiles")) as product:
+                # The repair runs behind the first paint, on the sweep lane.
+                boot.repair(product.conn)
                 repaired = cache.get(product.conn, digest, embedded_metadata.KIND)
 
         self.assertIsNone(repaired)
@@ -1111,14 +1114,13 @@ class CullIsAReversibleDecision(CoreCase):
         self.assertEqual(trash.count(self.conn), 0)
         self.assertEqual(decisions.latest(self.conn, "c" * 64, decisions.STATUS), "unflagged")
 
-    def test_an_invalid_member_refuses_the_whole_selection(self):
+    def test_a_member_that_is_not_there_is_passed_over_and_counted(self):
         photo = self.add("frame.jpg", "d" * 64)
 
-        with self.assertRaisesRegex(ValueError, "missing"):
-            cull.reject(self.conn, (photo, 999_999))
+        said = cull.reject(self.conn, (photo, 999_999))
 
-        self.assertEqual(trash.count(self.conn), 0)
-        self.assertEqual(self.conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0], 0)
+        self.assertEqual((said["missing"], len(said["changed"])), (1, 1))
+        self.assertEqual(trash.count(self.conn), 1)
         for limit, offset in ((0, 0), (501, 0), (20, -1)):
             with self.assertRaises(ValueError):
                 library_surface.trash(self.conn, limit=limit, offset=offset)
@@ -1302,6 +1304,32 @@ class SetsAreDecisions(CoreCase):
 
 
 class LibraryQueriesRefuse(CoreCase):
+    def test_a_position_is_where_the_page_puts_the_photograph(self):
+        # A change of sort finds the photograph again by asking where it
+        # sits; the answer must be the index the page query gives it.
+        for n, when in enumerate(("2026-01-03 10:00:00", "2026-01-01 10:00:00", "2026-01-02 10:00:00")):
+            self.conn.execute(
+                "INSERT INTO images(tail, content_hash, date_taken, elo) VALUES (?, ?, ?, ?)",
+                (f"Raws/p{n}.jpg", chr(97 + n) * 64, when, 1500 + n * 10))
+        self.conn.commit()
+        for sort in ("newest", "oldest", "best", "folder"):
+            page = library_surface.photos(self.conn, sort=sort, limit=10, offset=0)
+            for at, row in enumerate(page):
+                self.assertEqual(library_surface.position(self.conn, row["id"], sort), at, sort)
+        self.assertIsNone(library_surface.position(self.conn, 999, "newest"))
+
+    def test_a_cull_passes_over_the_unidentified_and_says_so(self):
+        # Select All then P: the identified are picked, the rest counted,
+        # never a refusal of the whole act.
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash) VALUES (?, ?)",
+            (("Raws/known.jpg", "f" * 64), ("Raws/fresh.jpg", None)))
+        self.conn.commit()
+        ids = [row[0] for row in self.conn.execute("SELECT id FROM images ORDER BY id")]
+        said = cull.pick(self.conn, [*ids, 4242])
+        self.assertEqual([c["after"] for c in said["changed"]], ["picked"])
+        self.assertEqual((said["unidentified"], said["missing"]), (1, 1))
+
     def test_pagination_cannot_accidentally_request_the_whole_catalog(self):
         for limit, offset in ((0, 0), (501, 0), (20, -1)):
             with self.assertRaises(ValueError):

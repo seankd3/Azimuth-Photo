@@ -14,6 +14,7 @@ import { createRankWorkflow } from './rank.js';
 import { createSearchCards } from './searchcards.js';
 import { createTrashWorkflow } from './trash.js';
 import { createUndo } from './undo.js';
+import { recall, remember } from '../kit/remembered.js';
 import { createTimeline } from './timeline.js';
 
 const PAGE = 200;
@@ -59,16 +60,12 @@ const loupeView = createLoupe({
 // sides, Shift+Tab everything; the choice is remembered across launches.
 const PANELS_KEY = 'azimuth.panels';
 function loadPanels() {
-  try {
-    const held = JSON.parse(localStorage.getItem(PANELS_KEY) || '');
-    return { left: held.left !== false, right: held.right !== false, top: held.top !== false };
-  } catch {
-    return { left: true, right: true, top: true };
-  }
+  const held = recall(PANELS_KEY, {});
+  return { left: held.left !== false, right: held.right !== false, top: held.top !== false };
 }
-function setPanels(panels, { remember = true } = {}) {
+function setPanels(panels, { keep = true } = {}) {
   update({ panels });
-  if (remember) localStorage.setItem(PANELS_KEY, JSON.stringify(panels));
+  if (keep) remember(PANELS_KEY, panels);
 }
 function togglePanel(side) {
   const panels = { ...read().panels, [side]: !read().panels[side] };
@@ -181,7 +178,9 @@ function notify(message) {
 const driveList = document.querySelector('[data-drive-list]');
 let drivesSeen = '';
 
-let rowHeight = 220;
+const DENSITY_KEY = 'azimuth.row-height';
+const SORT_KEY = 'azimuth.sort';
+let rowHeight = recall(DENSITY_KEY, 220);
 let scrollFrame = null;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -991,6 +990,16 @@ function viewMoved() {
   loadView();
 }
 
+let parked = null;
+async function unpark() {
+  const held = parked;
+  parked = null;
+  await loadView();
+  if (!held || read().view !== 'library') return;
+  workspace.scrollTop = held.scrollTop;
+  if (held.index !== null) await selectIndex(held.index, { open: false });
+}
+
 let folderAnchor = null;
 function showFolder(path, { toggle = false, range = false } = {}) {
   // The tree speaks the grid's grammar: click browses one folder, Ctrl
@@ -1045,11 +1054,12 @@ async function scanDrive(drive) {
   }
 }
 
-async function selectPhoto(index, modifiers = {}) {
+function selectPhoto(index, modifiers = {}) {
   // The row as it is now; a cell's click never carries a row of its own.
   const photo = read().photos.get(index);
   if (!photo) return;
   const marked = new Set(read().marked);
+  let focus = index;
   if (modifiers.shift && anchorIndex !== null) {
     // The range covers what is loaded between the anchor and here; sparse
     // pages contribute what they hold.
@@ -1058,21 +1068,48 @@ async function selectPhoto(index, modifiers = {}) {
       if (held) marked.add(held.id);
     }
   } else if (modifiers.toggle) {
-    if (marked.has(photo.id)) marked.delete(photo.id);
-    else marked.add(photo.id);
+    if (marked.has(photo.id)) {
+      // Taking a photograph out of the set moves the cursor to the nearest
+      // one still in it, so the focus ring never sits outside the marks.
+      marked.delete(photo.id);
+      focus = nearestMarked(index, marked) ?? index;
+    } else marked.add(photo.id);
     anchorIndex = index;
   } else {
     marked.clear();
     marked.add(photo.id);
     anchorIndex = index;
   }
-  update({ selected: photo, selectedIndex: index, marked });
-  try {
-    const details = await product.photo(photo.id);
-    if (read().selected?.id === photo.id) update({ selected: { ...read().selected, ...details } });
-  } catch (error) {
-    if (read().selected?.id === photo.id) notify(error.message);
+  const chosen = read().photos.get(focus) || photo;
+  update({ selected: chosen, selectedIndex: focus, marked });
+  detailsSoon(chosen);
+}
+
+function nearestMarked(index, marked) {
+  const { photos, total } = read();
+  for (let step = 1; step < total; step += 1) {
+    for (const at of [index - step, index + step]) {
+      const held = photos.get(at);
+      if (held && marked.has(held.id)) return at;
+    }
+    if (index - step < 0 && index + step >= total) break;
   }
+  return null;
+}
+
+// The inspector's facts arrive behind the cursor, once it settles: an
+// arrow run does not wait on a read per step.
+let detailTimer = null;
+function detailsSoon(photo) {
+  clearTimeout(detailTimer);
+  detailTimer = setTimeout(async () => {
+    try {
+      const details = await product.photo(photo.id);
+      if (read().selected?.id === photo.id) update({ selected: { ...read().selected, ...details } });
+    } catch (error) {
+      if (read().selected?.id === photo.id) notify(error.message);
+    }
+  }, 120);
 }
 
 function scrollIndexIntoView(index) {
@@ -1092,7 +1129,12 @@ async function selectIndex(index, { open = loupeOpen(), shift = false } = {}) {
   }
   const bounded = Math.max(0, Math.min(read().total - 1, index));
   if (!Number.isFinite(bounded)) return;
+  // The cursor moves now; the row it lands on may still be on its way. A
+  // run of arrows then counts from where the cursor is, not where the last
+  // row arrived, so no press is lost at a page boundary.
+  update({ selectedIndex: bounded });
   if (!read().photos.has(bounded)) await pages.ensure(bounded);
+  if (read().selectedIndex !== bounded) return;
   const photo = read().photos.get(bounded);
   if (!photo) return;
   // Behind an open loupe the grid is display: none; laying it out there
@@ -1284,10 +1326,11 @@ function renderChrome(state) {
   document.querySelector('[data-sort]').closest('label').hidden = state.view === 'trash' || ranking || searching || holding || walled || intaking;
   // A decision is keyed on identity, and identity arrives shortly after a
   // sweep; until then the photograph cannot take one, so nothing offers to.
-  const canCull = (state.view === 'library' || state.view === 'loupe') && Boolean(state.selected?.hash);
+  const canCull = (state.view === 'library' || state.view === 'loupe') && selection().length > 0;
   document.querySelector('[data-cull-actions]').hidden = !canCull;
-  document.querySelector('[data-action="pick"]').hidden = !canCull || state.selected.status === 'picked';
-  document.querySelector('[data-action="clear-pick"]').hidden = !canCull || state.selected.status !== 'picked';
+  const many = (state.marked?.size || 0) > 1;
+  document.querySelector('[data-action="pick"]').hidden = !canCull || (!many && state.selected?.status === 'picked');
+  document.querySelector('[data-action="clear-pick"]').hidden = !canCull || (!many && state.selected?.status !== 'picked');
   document.querySelector('[data-action="forget"]').hidden = !(state.view === 'library' && state.selected && state.selected.placed === 0);
   const restorable = state.view === 'trash' && (state.marked?.size || state.selected);
   const restore = document.querySelector('[data-action="restore"]');
@@ -1386,11 +1429,19 @@ document.addEventListener('click', (event) => {
   if (action === 'all-photos') {
     searchBox.value = '';
     if (read().view === 'rank') update({ folders: [], album: null, chips: [], query: '' });
-    else update({ view: 'library', folders: [], album: null, chips: [], query: '',
-                  selected: null, selectedIndex: null });
+    else if (read().view === 'trash' && parked?.key === JSON.stringify({ ...viewOf() })) {
+      update({ view: 'library', selected: null, selectedIndex: null });
+      void unpark();
+      return;
+    } else update({ view: 'library', folders: [], album: null, chips: [], query: '',
+                    selected: null, selectedIndex: null });
     viewMoved();
   }
-  if (action === 'trash-view') {
+  if (action === 'trash-view' && read().view !== 'trash') {
+    // A peek at Trash remembers where the library was; leaving lands back
+    // there, cursor and scroll intact, if the view is the same one.
+    parked = { key: JSON.stringify(viewOf()), scrollTop: workspace.scrollTop,
+               index: read().selectedIndex, id: read().selected?.id ?? null };
     update({ view: 'trash' });
     workspace.scrollTo({ top: 0 });
     loadView();
@@ -1454,7 +1505,7 @@ document.addEventListener('click', (event) => {
   if (rankMode) void rankWorkflow.remode(rankMode);
   if (action === 'pick') cullWorkflow.apply('pick');
   if (action === 'clear-pick') cullWorkflow.apply('clear');
-  if (action === 'turn-right') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
+  if (action === 'turn') cullWorkflow.apply(event.shiftKey ? 'turnRight' : 'turnLeft');
   if (action === 'reject') cullWorkflow.apply('reject');
   if (action === 'empty-trash') trashWorkflow.openDialog();
   if (action === 'undo-toast') undo.run();
@@ -1500,7 +1551,12 @@ document.addEventListener('keydown', (event) => {
     // the pages the scroller happened to load.
     event.preventDefault();
     product.identifiers(viewOf(), read().view === 'trash').then((ids) => {
-      if (ids.length) update({ marked: new Set(ids) });
+      if (!ids.length) return;
+      // The cursor keeps its place, or takes the first photograph on
+      // screen, so the keys and the bar have something to act from.
+      const home = read().selectedIndex ?? library.indexAt(workspace.scrollTop) ?? 0;
+      update({ marked: new Set(ids), selectedIndex: home,
+               selected: read().selected ?? read().photos.get(home) ?? null });
     }).catch((error) => notify(error.message));
     return;
   }
@@ -1540,7 +1596,9 @@ document.addEventListener('keydown', (event) => {
     else if (trashWorkflow.isOpen()) trashWorkflow.closeDialog();
     else if (driveDialog.open) closeDriveDialog();
     else if (read().selected || read().marked?.size) {
-      update({ selected: null, selectedIndex: null, marked: new Set() });
+      // The marks and the selection go; the cursor keeps its place, so the
+      // next arrow moves from here and not from the top.
+      update({ selected: null, marked: new Set() });
       anchorIndex = null;
     } else if (seeking()) { searchBox.value = ''; runSearch(''); }
     else if (read().chips.length) { update({ chips: [] }); viewMoved(); }
@@ -1617,7 +1675,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnRight' : 'turnLeft' };
-  if (key in cullActions && ['library', 'loupe'].includes(read().view) && read().selected?.hash) {
+  if (key in cullActions && ['library', 'loupe'].includes(read().view) && selection().length) {
     cullWorkflow.apply(cullActions[key]);
     event.preventDefault();
     return;
@@ -1647,26 +1705,57 @@ document.addEventListener('keydown', (event) => {
   }
 });
 
-document.querySelector('[data-sort]').addEventListener('change', (event) => {
+document.querySelector('[data-sort]').addEventListener('change', async (event) => {
+  // The photograph under the cursor is what the person was looking at; a
+  // new order finds it again rather than dropping it.
+  const held = read().selected;
   update({ sort: event.target.value });
+  remember(SORT_KEY, event.target.value);
   workspace.scrollTo({ top: 0 });
-  loadView();
+  await loadView();
+  if (!held || read().view !== 'library' || seeking()) return;
+  const at = await product.position(held.id, read().sort, viewOf()).catch(() => null);
+  if (at !== null && at >= 0 && read().sort === event.target.value) selectIndex(at, { open: false });
 });
+{
+  const sort = recall(SORT_KEY, 'newest');
+  const options = [...document.querySelector('[data-sort]').options].map((o) => o.value);
+  if (options.includes(sort)) {
+    update({ sort });
+    document.querySelector('[data-sort]').value = sort;
+  }
+}
 
-document.querySelector('[data-density]').addEventListener('input', (event) => {
+const density = document.querySelector('[data-density]');
+density.value = rowHeight;
+density.addEventListener('input', (event) => {
   // The lens anchors the first visible cell across the re-layout itself; a
   // selection, when there is one, is what the person is looking at.
   rowHeight = Number(event.target.value);
+  remember(DENSITY_KEY, rowHeight);
   visibleGrid();
   if (read().selectedIndex !== null) {
     scrollIndexIntoView(read().selectedIndex);
     visibleGrid();
   }
 });
+workspace.addEventListener('wheel', (event) => {
+  // Ctrl+wheel is the grid's own zoom: the same slider, driven from where
+  // the eyes already are.
+  if (!event.ctrlKey || read().view !== 'library') return;
+  event.preventDefault();
+  const next = Math.max(Number(density.min), Math.min(Number(density.max),
+    rowHeight - Math.sign(event.deltaY) * Number(density.step || 10)));
+  if (next === rowHeight) return;
+  density.value = next;
+  density.dispatchEvent(new Event('input'));
+}, { passive: false });
 
 // The same verbs under the mouse as in the bar and on the keys — one list
 // for wherever a photograph can be right-clicked.
-const photoVerbs = () => [
+const photoVerbs = () => (read().view === 'trash' ? [
+  { label: 'Restore — U', run: () => trashWorkflow.restoreSelected() },
+] : [
   ...CULL_MENU.map(({ action, label }) => ({
     label,
     run: () => cullWorkflow.apply(action),
@@ -1694,10 +1783,10 @@ const photoVerbs = () => [
       }
     },
   },
-];
+]);
 grid.addEventListener('contextmenu', (event) => {
   const cell = event.target.closest('.photo-cell[data-kind="photo"]');
-  if (!cell || read().view !== 'library') return;
+  if (!cell || !['library', 'trash'].includes(read().view)) return;
   const index = Number(cell.dataset.index);
   const photo = read().photos.get(index);
   if (photo && !selection().includes(photo.id)) void selectPhoto(index);
@@ -1730,12 +1819,7 @@ loupeStrip.addEventListener('wheel', (event) => {
 // Sidebar sections fold from their headings, and the folds are remembered —
 // a long library keeps only the shelves it is using in view.
 const FOLDED_KEY = 'azimuth.folded-sections';
-let folded;
-try {
-  folded = new Set(JSON.parse(localStorage.getItem(FOLDED_KEY) || '[]'));
-} catch {
-  folded = new Set();
-}
+const folded = new Set(recall(FOLDED_KEY, []));
 function applyFolds() {
   for (const section of document.querySelectorAll('.sidebar section')) {
     const name = section.querySelector('.eyebrow')?.textContent || '';
@@ -1748,12 +1832,12 @@ document.querySelector('.sidebar').addEventListener('click', (event) => {
   const name = head.textContent;
   if (folded.has(name)) folded.delete(name);
   else folded.add(name);
-  localStorage.setItem(FOLDED_KEY, JSON.stringify([...folded]));
+  remember(FOLDED_KEY, [...folded]);
   applyFolds();
 });
 applyFolds();
 
-setPanels(loadPanels(), { remember: false });
+setPanels(loadPanels(), { keep: false });
 subscribe(render);
 product.home().then((where) => (where
   ? Promise.all([loadView(), loadFolders(), albumsPanel.refresh(), peoplePanel.refresh(), labelsPanel.refresh()])

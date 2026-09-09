@@ -284,6 +284,10 @@ class Library:
         self._open()
         return queries.size(self.conn, scope)
 
+    def position(self, photo_id: int, sort: str, view: dict | None = None) -> int | None:
+        self._open()
+        return queries.position(self.conn, int(photo_id), sort, self.viewing(view))
+
     def identifiers(self, scope: Scope = EVERYTHING, *, trashed: bool = False) -> list[int]:
         """Every photo id the scope holds — what Select All means, which is
         the view's whole answer and never just the pages a scroller loaded."""
@@ -1581,6 +1585,10 @@ class OwnedLibrary:
 
                 def finish() -> None:
                     self._intake_stop.set()
+                    # The follower opens its own connection each pass; the
+                    # catalog is released only once it has stopped.
+                    if self._follower is not None:
+                        self._follower.join(timeout=15.0)
                     self._intake_executor.shutdown(wait=True, cancel_futures=False)
                     self._scan_executor.shutdown(wait=True, cancel_futures=False)
                     self._derive_executor.shutdown(wait=True, cancel_futures=False)

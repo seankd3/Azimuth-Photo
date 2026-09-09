@@ -62,6 +62,7 @@ export const library = Object.freeze({
   forgetMissing: (folder = '', dry = false) => invoke('forget_missing', folder, dry),
   adoptTrack: () => invoke('adopt_track'),
   identifiers: (view = null, trashed = false) => invoke('identifiers', view, trashed),
+  position: (id, sort, view = null) => invoke('position', id, sort, view),
   exportFolder: (folder) => invoke('export_settings', null, folder),
   exportPhotos: (ids, quality = 92, longEdge = 0, rename = '') => invoke('export_photos', ids, quality, longEdge, rename),
   cards: () => invoke('cards'),

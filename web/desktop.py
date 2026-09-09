@@ -149,6 +149,9 @@ class Desktop:
     def size(self, view: dict | None = None) -> int:
         return self._run(lambda library: library.size(library.viewing(view)))
 
+    def position(self, photo_id: int, sort: str = "newest", view: dict | None = None) -> int | None:
+        return self._run(lambda library: library.position(int(photo_id), str(sort), view))
+
     def identifiers(self, view: dict | None = None, trashed: bool = False) -> list[int]:
         return self._run(lambda library: library.identifiers(
             library.viewing(view), trashed=bool(trashed)))

@@ -85,16 +85,17 @@ def change(
     column, default, valid = decisions.PROJECTED[family]
     requested = _ids(image_ids)
     rows = _photos(conn, requested, column)
-    missing = [requested[index] for index, row in enumerate(rows) if row["id"] is None]
-    unidentified = [int(row["id"]) for row in rows if row["id"] and not row["hash"]]
-    if missing or unidentified:
-        raise ValueError(
-            f"cannot change {family}; missing={missing}, unidentified={unidentified}"
-        )
+    # A decision belongs to an identity, and identity arrives shortly after
+    # a sweep; a photograph that has none yet is passed over and counted,
+    # never a reason to refuse the rest -- Select All then P must pick what
+    # it can. A row that left under the window is passed over the same way.
+    missing = sum(1 for row in rows if row["id"] is None)
+    unidentified = sum(1 for row in rows if row["id"] and not row["hash"])
 
     by_hash: dict[str, dict] = {}
     for row in rows:
-        by_hash.setdefault(str(row["hash"]), row)
+        if row["id"] and row["hash"]:
+            by_hash.setdefault(str(row["hash"]), row)
 
     changes = []
     try:
@@ -125,7 +126,8 @@ def change(
     except BaseException:
         conn.rollback()
         raise
-    return {"requested": len(requested), "changed": changes}
+    return {"requested": len(requested), "changed": changes,
+            "unidentified": unidentified, "missing": missing}
 
 
 def pick(conn, image_ids: Iterable[int]) -> dict:

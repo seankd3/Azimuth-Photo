@@ -232,6 +232,23 @@ def folders(conn) -> list[dict]:
     ]
 
 
+def position(conn, photo_id: int, sort: str, scope: Scope = EVERYTHING) -> int | None:
+    """Where one photograph sits in a sort of a scope, or None if it is not
+    there -- what lets a selection survive a change of sort. One ordered
+    pass over the scope, the same ORDER BY the page uses, so the two cannot
+    disagree."""
+
+    if sort not in SORTS:
+        raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
+    clause, args = where(scope)
+    row = conn.execute(
+        f"SELECT at FROM (SELECT i.id, ROW_NUMBER() OVER (ORDER BY {SORTS[sort]}) - 1 AS at"
+        f" FROM images i WHERE {IN_LIBRARY} AND ({clause})) WHERE id = ?",
+        (*args, int(photo_id)),
+    ).fetchone()
+    return None if row is None else int(row["at"])
+
+
 def size(conn, scope: Scope = EVERYTHING) -> int:
     """How many photographs a scope holds -- the total a page window needs."""
 
@@ -477,16 +494,18 @@ def reindex(conn) -> dict[str, int]:
     repair is to stop having duplicate rows, not to key decisions on `id`.
     """
 
-    counts: dict[str, int] = {}
-    for family, (column, default, valid) in decisions.PROJECTED.items():
-        intended = {}
+    plans: dict[str, dict] = {}
+    for family, (_column, default, valid) in decisions.PROJECTED.items():
+        plans[family] = {}
         for subject, value in decisions.current(conn, family).items():
             value = default if value is None else value
             if not valid(value):
                 raise ValueError(f"invalid {family} decision: {value!r}")
-            intended[subject] = (value,)
-        counts[family] = projection.project(conn, "content_hash", (column,), intended)
-    return counts
+            plans[family][subject] = (value,)
+    return {
+        family: projection.project(conn, "content_hash", (decisions.PROJECTED[family][0],), intended)
+        for family, intended in plans.items()
+    }
 
 
 def rerank(conn, subjects=None, vectors=None) -> int:

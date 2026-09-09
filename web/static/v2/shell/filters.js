@@ -43,7 +43,13 @@ export function createFilterBar({ product, read, update, onChange }) {
     return chips().map((chip) => say(chip, state)).join(' · ');
   }
 
+  let shown = '';
   function render(state) {
+    // The bar is rebuilt only when it would read differently: every store
+    // update passes through here, and a rebuild mid-click drops the click.
+    const key = chips().map((chip) => `${chip.not ? '!' : ''}${say(chip, state)}`).join('\u0001');
+    if (key === shown) return;
+    shown = key;
     bar.replaceChildren(...chips().map((chip, index) => {
       const pill = document.createElement('button');
       pill.type = 'button';
