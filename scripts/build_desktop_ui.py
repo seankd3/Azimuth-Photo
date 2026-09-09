@@ -55,6 +55,9 @@ def main() -> int:
     if not ESBUILD.is_file():
         print("esbuild is missing. Run npm ci before building the desktop UI.", file=sys.stderr)
         return 2
+    if any(not folder.is_dir() for folder in FONTS.values()):
+        print("the web fonts are missing. Run npm ci before building the desktop UI.", file=sys.stderr)
+        return 2
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
     bundle = OUTPUT.with_suffix(".js")
     subprocess.run(
@@ -71,15 +74,17 @@ def main() -> int:
         cwd=ROOT,
         check=True,
     )
-    OUTPUT.write_text(
-        render(
-            TEMPLATE.read_text(encoding="utf-8"),
-            CSS.read_text(encoding="utf-8"),
-            bundle.read_text(encoding="utf-8"),
-        ),
-        encoding="utf-8",
-    )
-    bundle.unlink()
+    try:
+        OUTPUT.write_text(
+            render(
+                TEMPLATE.read_text(encoding="utf-8"),
+                CSS.read_text(encoding="utf-8"),
+                bundle.read_text(encoding="utf-8"),
+            ),
+            encoding="utf-8",
+        )
+    finally:
+        bundle.unlink(missing_ok=True)
     print(OUTPUT)
     return 0
 

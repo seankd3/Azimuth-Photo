@@ -245,8 +245,10 @@ export function createFilterBar({ product, read, update, onChange }) {
     if (event.key !== 'Backspace' && event.key !== 'Delete') return;
     const held = event.target.closest('[data-chip], [data-drop]');
     if (!held) return;
-    dropChip(Number(held.dataset.chip ?? held.dataset.drop));
-    bar.querySelector('[data-chip]:last-of-type')?.focus();
+    const at = Number(held.dataset.chip ?? held.dataset.drop);
+    dropChip(at);
+    const labels = bar.querySelectorAll('[data-chip]');
+    (labels[Math.min(at, labels.length - 1)] || document.querySelector('[data-action="add-chip"]'))?.focus();
     event.preventDefault();
   });
 

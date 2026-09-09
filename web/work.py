@@ -106,22 +106,27 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
     # pay for an empty IN list.
     nearest = f"i.id IN ({hole}) DESC, " if ids else ""
     carried = f", {kind.keyed[1]} AS keyed" if keyed else ""
-    source, args = _owed_from(kind, recipe, scope, keyed=keyed)
-    return [dict(row) for row in conn.execute(
-        f"""
-        SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken{carried}
-        {source}
-        ORDER BY {nearest}i.date_taken DESC, i.id DESC
-        LIMIT ?
-        """,
-        # In SQL order: the join's kind and recipe, then the scope's arguments
-        # in the WHERE, then the on-screen ids in the ORDER BY. This bound the
-        # ids *before* the scope for as long as it has existed, which was
-        # invisible only because `EVERYTHING` carries no arguments — the first
-        # caller to pass a real scope and an on-screen list at once would have
-        # got them swapped.
-        (*args, *ids, int(limit)),
-    )]
+
+    def ask(living: str, room: int) -> list[dict]:
+        source, args = _owed_from(kind, recipe, scope, keyed=keyed, living=living)
+        return [dict(row) for row in conn.execute(
+            f"""
+            SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken{carried}
+            {source}
+            ORDER BY {nearest}i.date_taken DESC, i.id DESC
+            LIMIT ?
+            """,
+            # In SQL order: the join's kind and recipe, then the scope's
+            # arguments in the WHERE, then the on-screen ids in the ORDER BY.
+            (*args, *ids, int(room)),
+        )]
+
+    # The library first, on its own index; then, for the kinds Trash is
+    # looked at with, whatever Trash owes, on its own small index.
+    rows = ask(LIVING, limit)
+    if kind.name in SHOWN and len(rows) < limit:
+        rows += ask(TRASHED, limit - len(rows))
+    return rows
 
 
 def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = EVERYTHING) -> int:
@@ -135,16 +140,26 @@ def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = 
     predicate is shared with `owed` so the two cannot drift.
     """
 
-    source, args = _owed_from(kind, recipe, scope)
-    count = int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
-    if kind.keyed is not None:
-        source, args = _owed_from(kind, recipe, scope, keyed=True)
+    count = 0
+    for living in ((LIVING, TRASHED) if kind.name in SHOWN else (LIVING,)):
+        source, args = _owed_from(kind, recipe, scope, living=living)
         count += int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
+        if kind.keyed is not None:
+            source, args = _owed_from(kind, recipe, scope, keyed=True, living=living)
+            count += int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
     return count
 
 
+# The kinds a photograph in Trash still owes: you look at Trash to decide
+# what to restore. The heavy kinds (vectors, faces, light) wait for a
+# photograph to be back in the library.
+SHOWN = frozenset(("grid", "loupe"))
+LIVING = "i.status != 'trashed'"
+TRASHED = "i.status = 'trashed'"
+
+
 def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
-               *, keyed: bool = False) -> tuple[str, tuple]:
+               *, keyed: bool = False, living: str = LIVING) -> tuple[str, tuple]:
     """The anti-join itself: what is owed, before anyone says what to do with it.
 
     Trash owes nothing: a photograph waits there to be forgotten, and the
@@ -166,7 +181,7 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
             FROM images i
             LEFT JOIN cache c
                    ON c.hash = i.content_hash AND c.kind = ? AND c.recipe = ?
-            WHERE i.status != 'trashed'
+            WHERE {living}
               AND i.content_hash IS NOT NULL
               AND i.tail IS NOT NULL
               AND i.vc_of IS NULL
@@ -186,7 +201,7 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
         LEFT JOIN cache c
                ON c.hash = i.content_hash AND c.kind = ?
               AND c.recipe = ? || {expression} || ?
-        WHERE i.status != 'trashed'
+        WHERE {living}
           AND i.content_hash IS NOT NULL
           AND i.tail IS NOT NULL
           AND i.vc_of IS NULL

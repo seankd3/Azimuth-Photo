@@ -255,6 +255,8 @@ function selection() {
   return selected ? [selected.id] : [];
 }
 let anchorIndex = null;
+// Where an arrow run is heading while its row loads; null when it landed.
+let cursorAt = null;
 // A search is words in the box or a selection asked alike — one door.
 const seeking = () => Boolean(read().query || (read().like || []).length);
 const asked = () => ({ query: read().query, like: read().like || [] });
@@ -1167,12 +1169,14 @@ async function selectIndex(index, { open = loupeOpen(), shift = false } = {}) {
   }
   const bounded = Math.max(0, Math.min(read().total - 1, index));
   if (!Number.isFinite(bounded)) return;
-  // The cursor moves now; the row it lands on may still be on its way. A
-  // run of arrows then counts from where the cursor is, not where the last
-  // row arrived, so no press is lost at a page boundary.
-  update({ selectedIndex: bounded });
+  // The run keeps its own place: the next arrow counts from here even while
+  // the row is still on its way, and the ring, the accent and the verbs all
+  // move together only when it has arrived -- never a ring on one cell and
+  // a verb on another.
+  cursorAt = bounded;
   if (!read().photos.has(bounded)) await pages.ensure(bounded);
-  if (read().selectedIndex !== bounded) return;
+  if (cursorAt !== bounded) return;
+  cursorAt = null;
   const photo = read().photos.get(bounded);
   if (!photo) return;
   // Behind an open loupe the grid is display: none; laying it out there
@@ -1471,20 +1475,25 @@ document.addEventListener('click', (event) => {
   }
   if (action === 'all-photos') {
     searchBox.value = '';
-    if (read().view === 'rank') update({ folders: [], album: null, chips: [], query: '' });
-    else if (read().view === 'trash' && parked?.key === JSON.stringify({ ...viewOf() })) {
-      update({ view: 'library', selected: null, selectedIndex: null });
-      void unpark();
-      return;
-    } else update({ view: 'library', folders: [], album: null, chips: [], query: '',
-                    selected: null, selectedIndex: null });
+    if (read().view === 'rank') update({ folders: [], album: null, chips: [], query: '', like: [] });
+    else {
+      // All photos is always the whole library. A peek at Trash parked from
+      // the bare library lands back where it was; from anywhere else the
+      // reset stands and the park is dropped.
+      const back = read().view === 'trash' && parked !== null;
+      parked = back ? parked : null;
+      update({ view: 'library', folders: [], album: null, chips: [], query: '', like: [],
+               selected: null, selectedIndex: null });
+      if (back) { void unpark(); return; }
+    }
     viewMoved();
   }
   if (action === 'trash-view' && read().view !== 'trash') {
-    // A peek at Trash remembers where the library was; leaving lands back
-    // there, cursor and scroll intact, if the view is the same one.
-    parked = { key: JSON.stringify(viewOf()), scrollTop: workspace.scrollTop,
-               index: read().selectedIndex, id: read().selected?.id ?? null };
+    // A peek at Trash from the bare library remembers where it was; All
+    // photos lands back there, cursor and scroll intact.
+    const bare = read().view === 'library' && !(read().folders || []).length && !read().album
+      && !(read().chips || []).length && !seeking();
+    parked = bare ? { scrollTop: workspace.scrollTop, index: read().selectedIndex } : null;
     update({ view: 'trash' });
     workspace.scrollTo({ top: 0 });
     loadView();
@@ -1669,7 +1678,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  const current = read().selectedIndex;
+  const current = cursorAt ?? read().selectedIndex;
   const key = event.key.toLowerCase();
   if (key === 'b' && ['library', 'loupe'].includes(read().view) && selection().length) {
     albumsPanel.toss();

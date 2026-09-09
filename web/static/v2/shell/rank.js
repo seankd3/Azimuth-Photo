@@ -261,6 +261,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, onLeav
     let missing = arrivals.filter(([, next]) => !next).length;
     if (missing && state.filling) {
       await state.filling;
+      if (generation !== state.generation) { state.busy = false; return; }  // undone or left meanwhile
       for (const entry of arrivals) {
         if (!entry[1]) entry[1] = state.buffer.shift() || null;
       }

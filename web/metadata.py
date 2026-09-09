@@ -54,13 +54,17 @@ def reindex(conn) -> dict[str, int]:
     ).fetchall():
         entry = {"state": row["state"], "value": row["value"]}
         try:
-            intended[row["hash"]] = _values(decoded(entry), chosen.get(row["hash"]))
+            answer = decoded(entry)
         except ValueError:
+            # A cache row that cannot be read is dropped and re-owed; a date
+            # decision that cannot be read is a different fault and raises.
             conn.execute(
                 "DELETE FROM cache WHERE hash = ? AND kind = ? AND recipe = '{}'",
                 (row["hash"], KIND.name),
             )
             discarded += 1
+            continue
+        intended[row["hash"]] = _values(answer, chosen.get(row["hash"]))
     projected = projection.project(
         conn, "content_hash",
         ("date_taken", "camera_make", "camera_model", "lens", "width", "height"), intended)

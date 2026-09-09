@@ -40,8 +40,9 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     // The picture on hand may be a grid tile standing in for the loupe
     // rendition: fit is the photograph's fit, so a stand-in fills the stage
     // as the real picture will, up to the photograph's own pixels.
-    const ceiling = state.native && image.naturalWidth
-      ? Math.max(1, (turned() ? state.native.h : state.native.w) / image.naturalWidth) : 1;
+    const shown = turned() ? image.naturalHeight : image.naturalWidth;
+    const ceiling = state.native && shown
+      ? Math.max(1, (turned() ? state.native.h : state.native.w) / shown) : 1;
     state.fit = Math.min(box.width / w, box.height / h, ceiling);
     // 100% is one image pixel to one device pixel — the sharpness read.
     state.full = 1 / (window.devicePixelRatio || 1);

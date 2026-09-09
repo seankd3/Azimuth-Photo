@@ -92,6 +92,13 @@ def cameras_of(conn) -> list[dict]:
         " GROUP BY camera_model ORDER BY photos DESC")]
 
 
+def shape_stamp(conn) -> tuple:
+    """What the facets depend on, cheaply: the live and trashed counts. A
+    cull, a forget or a sweep moves one of them."""
+
+    return (queries.counts(conn)["photos"], trash.count(conn))
+
+
 def facets_of(conn) -> dict:
     """The library's shape, for the search drop: years, cameras, the top
     roots, and orientations, each counted in identities. Every entry is a
@@ -154,9 +161,10 @@ class Library:
         # the follower every few seconds, so a page read never probes a disk
         # -- an absent share made every page wait on its timeout.
         self.here: list[int] = attached_now(self.conn)
-        # The search drop's shape, made on the sweep lane after a sweep that
-        # changed something; None until asked or swept.
-        self._facets: dict | None = None
+        # The search drop's shape with the stamp it was made at, made on the
+        # sweep lane after a sweep that changed something or on first ask;
+        # a stamp that moved (a cull, a forget) remakes it.
+        self._facets: tuple | None = None
         # What the window says it is looking at, most recent statement wins.
         # Read by the worker on every step, so the first tiles made are the
         # ones on screen; nothing else about the worker's order changes.
@@ -326,6 +334,15 @@ class Library:
         self._open()
         return queries.counts(self.conn)
 
+    def changed(self, said):
+        """The library's answer moved under the window -- rows left or came
+        back, counts and chapters with them. `swept` is the window's cue to
+        re-read what it holds, whoever moved it: a sweep, a cull, a forget."""
+
+        self.swept += 1
+        self._facets = None
+        return said
+
     def pick(self, photo_ids) -> dict:
         self._open()
         return cull.pick(self.conn, photo_ids)
@@ -336,15 +353,15 @@ class Library:
 
     def reject(self, photo_ids) -> dict:
         self._open()
-        return cull.reject(self.conn, photo_ids)
+        return self.changed(cull.reject(self.conn, photo_ids))
 
     def restore(self, photo_ids) -> dict:
         self._open()
-        return cull.restore(self.conn, photo_ids)
+        return self.changed(cull.restore(self.conn, photo_ids))
 
     def undo_cull(self, changes) -> dict:
         self._open()
-        return cull.undo(self.conn, changes)
+        return self.changed(cull.undo(self.conn, changes))
 
     def turn(self, photo_ids, by: int = 90) -> dict:
         self._open()
@@ -784,12 +801,13 @@ class Library:
         return cameras_of(self.conn)
 
     def facets(self) -> dict:
-        """The made answer, or made now the first time it is asked."""
+        """The made answer while its stamp still holds; made now otherwise."""
 
         self._open()
-        if self._facets is None:
-            self._facets = facets_of(self.conn)
-        return self._facets
+        stamp = shape_stamp(self.conn)
+        if self._facets is None or self._facets[0] != stamp:
+            self._facets = (stamp, facets_of(self.conn))
+        return self._facets[1]
 
     def _sample_tiles(self, scope) -> list[dict]:
         rows = self._with_urls(queries.photos(
@@ -957,7 +975,7 @@ class Library:
             return {"forgotten": count, "dry": True}
         cursor = self.conn.execute(f"DELETE FROM images WHERE id IN ({missing})", args)
         self.conn.commit()
-        return {"forgotten": int(cursor.rowcount)}
+        return self.changed({"forgotten": int(cursor.rowcount)})
 
     def forget(self, photo_ids) -> dict:
         """Drop rows that no drive holds. A row is an address; its decisions
@@ -992,11 +1010,12 @@ class Library:
 
     def empty_trash(self, expected_count: int, *, dry_run: bool = False) -> dict:
         self._open()
-        return trash.empty(
+        said = trash.empty(
             self.conn,
             expected_count=int(expected_count),
             dry_run=bool(dry_run),
         )
+        return said if dry_run else self.changed(said)
 
     def details(self, photo_id: int) -> dict | None:
         """Return and project embedded browse metadata for one photograph."""
@@ -1290,7 +1309,7 @@ class OwnedLibrary:
             # its shelves, folders and chapters on `swept`, and a quiet
             # minute must not cost that.
             if any(said.get(k) for k in ("photos_added", "photos_moved", "copies_retired", "edits_adopted")):
-                self._library._facets = facets_of(conn)
+                self._library._facets = (shape_stamp(conn), facets_of(conn))
                 self._library.swept += 1
             return said
         finally:
@@ -1303,6 +1322,9 @@ class OwnedLibrary:
             repair(conn)
         finally:
             conn.close()
+            # The repair may have moved columns the window is showing
+            # (stacks, dates); it re-reads once the repair lands.
+            self._library.changed(None)
 
     async def export_files(self, photo_ids, destination: str, *, quality: int = 92,
                            long_edge: int = 0, rename: str = "") -> dict:

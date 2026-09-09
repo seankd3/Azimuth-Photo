@@ -249,3 +249,21 @@ finding was checked and the numbers said no.
 | U3 | Three spellings of whether a photograph is here (cell, loupe note, inspector) | one presence(photo) in kit | open |
 | U4 | Modals escaped two ways | one open-modal rung (FR1) | open |
 | U5 | Two dayTitle functions and two chapter walks | kit/days.js: title() and chapters() | open |
+
+## Refutation of the polish pass (2026-09-09, second read)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| X1 | All photos stopped resetting the view once Trash had been peeked at | park only from the bare library; All photos always resets | shipped |
+| X2 | The cursor ring moved to a row before it arrived while the verbs still acted on the old one | the arrow run keeps its own place; ring, accent and verbs move together | shipped |
+| X3 | Select All then P on unidentified photographs said nothing | a cull that changed nothing says why | shipped |
+| X4 | Facets kept counting trashed photographs after a cull | a stamp of live and trashed counts remakes them | shipped |
+| X5 | Folder counts and day chapters never re-read after a cull once quiet sweeps stopped bumping swept | the product says when its answer moved: cull, forget, empty, undo | shipped |
+| X6 | A repair that moved stacks behind the paint was never announced | the repair says it changed the library | shipped |
+| X7 | A photograph rejected before its tile was made was a grey box in Trash forever | Trash still owes its tiles, on its own small index | shipped |
+| X8 | Removing a chip from the keyboard dropped focus to the body | focus lands on the chip that took its place | shipped |
+| X9 | The Undo button hid while its revert was still live | a notice without a way back leaves the button | shipped |
+| X10 | The bundler died on a traceback when the fonts were not installed | it says to run npm ci | shipped |
+| X11 | The loupe's fit ceiling mixed axes for a turned photograph | matching axes | shipped |
+| X12 | A pick that waited on a fill could write onto an undone set | the generation is checked after the wait | shipped |
+| X13 | An unreadable date decision churned a good metadata cache row every repair | a bad decision raises; only a bad row is dropped | shipped |

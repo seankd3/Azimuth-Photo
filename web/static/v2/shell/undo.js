@@ -35,7 +35,8 @@ export function createUndo() {
       revertTimer = setTimeout(forget, SHOWN_MS);
     }
     toast.querySelector('[data-toast-copy]').textContent = message;
-    button.hidden = !nextRevert;
+    // A notice without a way back leaves the live Undo where it is.
+    if (nextRevert) button.hidden = false;
     toast.hidden = false;
     timer = setTimeout(() => { toast.hidden = true; }, SHOWN_MS);
   }

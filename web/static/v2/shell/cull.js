@@ -32,7 +32,12 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
     const { selectedIndex } = state;
     try {
       const result = await action.call(product, ids);
-      if (!result.changed.length) return;
+      if (!result.changed.length) {
+        if (result.unidentified) notify(result.unidentified === 1
+          ? 'That photograph is not identified yet — try again in a moment.'
+          : `None of these ${result.unidentified.toLocaleString()} are identified yet — try again in a moment.`);
+        return;
+      }
 
       if (action.removes) {
         await removed(result.changed, selectedIndex);
