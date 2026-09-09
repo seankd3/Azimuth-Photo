@@ -148,6 +148,8 @@ function photoCell(photo, index, actions) {
   const flag = element('span', 'pick-flag');
   flag.setAttribute('aria-hidden', 'true');
   cell.append(image, flag);
+  // A star earned by the ranking, worn where the ranking is the order.
+  if (photo.stars > 0) cell.dataset.stars = photo.stars;
   if (photo.stack) {
     // A cover fronts its run — a burst, a timelapse, a panorama sweep —
     // and the badge opens it in place: the members take their seats right
@@ -284,6 +286,7 @@ function reconcileGrid(grid, state, actions, layout, range) {
 
 function renderGrid(grid, state, actions) {
   grid.setAttribute('aria-busy', String(state.loading));
+  grid.classList.toggle('is-best', state.sort === 'best' || state.sort === 'stars');
 
   if (state.total === 0 && !state.loading) {
     grid.style.height = '';

@@ -77,7 +77,7 @@ finding was checked and the numbers said no.
 | R3 | Digits and arrows do not follow the packed order | renumber to reading order | shipped |
 | R4 | No look-closer inside a round | Z or F opens the loupe on the hovered card, Esc returns | shipped |
 | R5 | Progress counts coverage, not what was earned | `earned` (seen ≥ 3) plus percent sorted | shipped |
-| R6 | Rerank queues behind sweeps on the scan lane; no star on Best tiles | own derive lane; star on tiles in Best sort | shipped (lane); the star on Best tiles is open under V-wave |
+| R6 | Rerank queues behind sweeps on the scan lane; no star on Best tiles | own derive lane; star on tiles in Best sort | shipped |
 | R7 | The empty state is pinned top-left | absolute, grid-centred | shipped |
 | R8 | Title and progress ignore chips | use the filters' `describe` | shipped |
 | R9 | Size not remembered; resizing reloads the set | remember; grow or shrink in place | shipped |
