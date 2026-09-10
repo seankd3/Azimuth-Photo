@@ -641,8 +641,11 @@ def date_range(date_taken: str) -> tuple[str, str] | None:
     return None
 
 
-def folder_tree(conn) -> list[dict]:
+def folder_tree(conn, attached: Iterable[int] | None = None) -> list[dict]:
     """One tree over every drive, because a folder is a prefix of a tail.
+
+    `attached` is the drives here now, when the caller has looked; without
+    it each drive's marker is read here.
 
     Lightroom shows a tree per source, so the same shoot filed on two disks
     appears twice and the owner has to know which copy they are clicking. Here
@@ -669,8 +672,9 @@ def folder_tree(conn) -> list[dict]:
 
     drive_of = {}
     record_attached = False
+    here = None if attached is None else {int(d) for d in attached}
     for row in conn.execute("SELECT id, uuid, label, root, is_record FROM drives"):
-        online = drive_model.root_of(conn, row["uuid"]) is not None
+        online = (drive_model.root_of(conn, row["uuid"]) is not None) if here is None else int(row["id"]) in here
         drive_of[int(row["id"])] = {
             "label": row["label"] or row["root"],
             "is_record": bool(row["is_record"]),

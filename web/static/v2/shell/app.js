@@ -849,12 +849,13 @@ async function loadView() {
   }
 }
 
-async function refreshInPlace({ shelves = true } = {}) {
+async function refreshInPlace({ shelves = true, count = shelves } = {}) {
   // The library changed under the window -- a sweep admitted photographs or
   // the worker finished one -- so re-read what is on screen without
   // resetting it. A worker tick changes only the tiles, so it re-reads only
   // the pages; the counts, drives, Trash and shelves (albums, people,
   // labels) are asked again when a sweep or a lane rewrite says they moved.
+  // A scan in progress grows the count and the pages, nothing else.
   const generation = pages.generation;
   const { view, query } = read();
   const key = JSON.stringify(viewOf());
@@ -863,7 +864,7 @@ async function refreshInPlace({ shelves = true } = {}) {
     shelves ? product.counts() : held.counts,
     shelves ? product.drives() : held.drives,
     shelves ? product.trashCount() : held.counts.trash,
-    view === 'trash' || seeking() ? Promise.resolve(0) : shelves ? product.size(viewOf()) : held.total,
+    view === 'trash' || seeking() ? Promise.resolve(0) : count ? product.size(viewOf()) : held.total,
     shelves ? product.albums() : held.albums,
     shelves ? product.people().catch(() => held.people) : held.people,
     shelves ? product.labels().catch(() => held.labels) : held.labels,
@@ -1237,8 +1238,10 @@ async function scanDrive(drive) {
     const scan = product.refresh(drive.uuid).finally(() => { finished = true; });
     await loadView();
     while (!finished) {
+      // The grid grows as the walk finds photographs; the shelves are
+      // read once, when the walk lands.
       await delay(500);
-      await refreshInPlace();
+      await refreshInPlace({ shelves: false, count: true });
     }
     const result = await scan;
     await refreshInPlace();

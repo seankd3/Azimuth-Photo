@@ -199,6 +199,10 @@ class Library:
         # sweep lane after a sweep that changed something or on first ask;
         # a stamp that moved (a cull, a forget) remakes it.
         self._facets: tuple | None = None
+        # The folder tree, the same way: a second at 150k tails, made on the
+        # sweep lane after a sweep that changed something, keyed by the
+        # stamp and the sweep count since only a sweep or a cull moves it.
+        self._tree: tuple | None = None
         self._refacet_pending = False
         self._owner = None   # the OwnedLibrary, once one holds this
         # What the window says it is looking at, most recent statement wins.
@@ -351,10 +355,17 @@ class Library:
 
     def folders(self) -> list[dict]:
         """One tree over every drive, each node with its count and whether
-        everything under it has a copy on a record drive."""
+        everything under it has a copy on a record drive. The made answer,
+        as `facets` is: made here only the first time; a key that moved asks
+        the sweep lane for a fresh one and answers with the last meanwhile."""
 
         self._open()
-        return queries.folder_tree(self.conn)
+        key = (shape_stamp(self.conn), self.swept)
+        if self._tree is None:
+            self._tree = (key, queries.folder_tree(self.conn, attached=self.here))
+        elif self._tree[0] != key:
+            self._refacet()
+        return self._tree[1]
 
     def look(self, photo_ids) -> int:
         """The window says which photographs it is showing; the worker makes
@@ -388,11 +399,20 @@ class Library:
         self._refacet()
         return said
 
+    def _reshape(self, conn, swept: int | None = None) -> None:
+        """The library's shape, remade: the facets and the folder tree, on
+        whichever lane called. `swept` is the count the tree is for, when the
+        caller is about to move it."""
+
+        self._facets = (shape_stamp(conn), facets_of(conn))
+        self._tree = ((self._facets[0], self.swept if swept is None else swept),
+                      queries.folder_tree(conn, attached=self.here))
+
     def _refacet(self) -> None:
-        """Remake the facets on the sweep lane, at most one in flight."""
+        """Remake the shape on the sweep lane, at most one in flight."""
 
         if self._owner is None:
-            self._facets = None   # no lane to make it on: made on the next ask
+            self._reshape(self.conn)   # no lane to make it on: made here, now
             return
         if self._refacet_pending:
             return
@@ -402,11 +422,11 @@ class Library:
             try:
                 conn = model.connect(self.catalog_path)
                 try:
-                    self._facets = (shape_stamp(conn), facets_of(conn))
+                    self._reshape(conn)
                 finally:
                     conn.close()
             except Exception:
-                log.exception("facets could not be remade")
+                log.exception("the shape could not be remade")
             finally:
                 self._refacet_pending = False
 
@@ -1514,7 +1534,7 @@ class OwnedLibrary:
             # its shelves, folders and chapters on `swept`, and a quiet
             # minute must not cost that.
             if any(said.get(k) for k in ("photos_added", "photos_moved", "copies_retired", "edits_adopted")):
-                self._library._facets = (shape_stamp(conn), facets_of(conn))
+                self._library._reshape(conn, self._library.swept + 1)
                 self._library.swept += 1
             return said
         finally:

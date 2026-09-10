@@ -166,6 +166,15 @@ class FreshCatalogTests(unittest.TestCase):
 
             with boot.Library(catalog, tile_root) as reopened:
                 again = reopened.browse()
+                # The folder tree is a made answer: the same object until
+                # the library's shape moves, then remade (here, with no
+                # sweep lane to make it on, at the next ask).
+                tree = reopened.folders()
+                self.assertIs(tree, reopened.folders())
+                self.assertEqual(tree[0]["total_count"], 1)
+                Image.new("RGB", (900, 600), "teal").save(os.path.join(photo_root, "2026", "second.jpg"), "JPEG")
+                reopened.refresh(attached["uuid"])
+                self.assertEqual(reopened.folders()[0]["total_count"], 2)
             tile_file = Path(again[0]["tile"].removeprefix("file:///"))
             body = tile_file.read_bytes()
 
