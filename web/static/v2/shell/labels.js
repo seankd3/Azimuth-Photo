@@ -74,7 +74,7 @@ export function createLabelsPanel({ product, update, browse, ask, notify, undo }
     try {
       if (action === 'rename-label') {
         const row = list.querySelector(`[data-term="${CSS.escape(word)}"]`);
-        const called = await ask('Rename to', row || list, word, { not: (list.querySelectorAll('[data-term]') && [...list.querySelectorAll('[data-term]')].map((r) => r.dataset.term).filter((t) => t !== word)) });
+        const called = await ask('Rename to', row || list, word, { not: (list.querySelectorAll('[data-term]') && [...list.querySelectorAll('[data-term]')].map((r) => r.dataset.term).filter((t) => t !== word)), kind: 'word' });
         if (!called || called === word) return;
         await product.renameLabel(word, called);
         await refresh();

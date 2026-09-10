@@ -8,6 +8,7 @@ operations from whichever native surface replaces the current shell.
 from __future__ import annotations
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
@@ -32,6 +33,8 @@ import tiles
 import work
 from model import cache, copies, criteria, cull, decisions, drives, intake, photos, sets, trash
 from model.scope import EVERYTHING, Scope, all_of, any_of, covers_only, folded, folder as in_folder, ids as these, outside, where as scope_where
+
+log = logging.getLogger(__name__)
 
 Result = TypeVar("Result")
 # How many photographs a window may say it is looking at. A viewport holds a
@@ -386,13 +389,16 @@ class Library:
         self._refacet_pending = True
 
         def make():
-            conn = model.connect(self.catalog_path)
             try:
-                made = (shape_stamp(conn), facets_of(conn))
+                conn = model.connect(self.catalog_path)
+                try:
+                    self._facets = (shape_stamp(conn), facets_of(conn))
+                finally:
+                    conn.close()
+            except Exception:
+                log.exception("facets could not be remade")
             finally:
-                conn.close()
-            self._facets = made
-            self._refacet_pending = False
+                self._refacet_pending = False
 
         self._owner.submit_sweep(make)
 

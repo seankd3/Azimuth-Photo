@@ -256,9 +256,10 @@ def position(conn, photo_id: int, sort: str, scope: Scope = EVERYTHING) -> int |
 
     The count of rows that sort before it, spelled from the same ORDER BY
     the page uses with SQLite's own rules (NULL first ascending, last
-    descending), so the two cannot disagree. A window over the whole scope
-    said the same thing in 156-340 ms at 150k rows; a counted range on the
-    sort's index says it in ~15.
+    descending), so the two cannot disagree. One counted pass with no
+    window to materialise: 156-340 ms became 17-50 at 150k rows. (The
+    OR-of-prefixes predicate is not sargable, so this is a scan, not a
+    seek; a row-value comparison would seek but cannot say NULL's order.)
     """
 
     if sort not in SORTS:

@@ -239,11 +239,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .folder-row { gap: 4px; padding: 5px 8px 5px calc(8px + var(--depth, 0) * 14px); }
 .folder-row:focus-visible { outline: 1px solid var(--focus); outline-offset: -1px; }
 .name-pop .form-error:empty { display: none; }
-.side-row.is-drop { background: var(--accent-tint); outline: 1px solid var(--accent); }
+.side-row.is-drop, .folder-row.is-drop { background: var(--accent-tint); outline: 1px solid var(--accent); }
 .side-row .smart-mark { color: var(--accent); font-size: var(--t-label); }
 /* a drop that is refused says so where it is refused */
-.side-row.is-refused { position: relative; outline: 1px dashed var(--warn); outline-offset: -1px; cursor: not-allowed; }
-.side-row.is-refused[data-why]::after {
+.side-row.is-refused, .folder-row.is-refused { position: relative; outline: 1px dashed var(--warn); outline-offset: -1px; cursor: not-allowed; }
+.side-row.is-refused[data-why]::after, .folder-row.is-refused[data-why]::after {
   content: attr(data-why); position: absolute; left: 10px; right: 10px; top: 100%; z-index: 5;
   padding: 4px 8px; border: 1px solid var(--line-strong); border-radius: var(--radius);
   background: var(--raised); color: var(--warn); font: var(--t-label)/1.4 var(--sans); white-space: normal; pointer-events: none;

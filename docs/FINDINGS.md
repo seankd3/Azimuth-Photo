@@ -522,3 +522,14 @@ finding was checked and the numbers said no.
 | N13 | A burst could not be judged as a round of its own | N surveys the marked frames in Rank, sized to the burst; the survey ends with the sitting | shipped |
 | N14 | No sharpness read on the eyes without a hand on the mouse | . puts the next face at 100% under the centre (a faces verb over the face pass) | shipped |
 | N15 | No photos here yet | photographs (U31) | shipped |
+| X36 | Tab from a context-bar button folded the panels: the bar sits inside the workspace | Tab folds only from the stages themselves | shipped |
+| X37 | Right or Left in the folder tree threw the cursor to the top; two tab stops | the cursor's row survives a rebuild; one stop | shipped |
+| X38 | A silent single-frame way back left a stale batch toast whose Undo rebound | keep() puts any standing toast away | shipped |
+| X39 | One failed facets remake froze the filter offers for the process | the flag clears in finally; the failure is logged | shipped |
+| X40 | Eight away heads stopped a chores step before identity work and other drives | misses are counted per root; the walk goes on | shipped |
+| X41 | A refused drop on a folder row was invisible | folder rows wear the drop styles | shipped |
+| X42 | L toggled Lights Out from any focused row, Shift and Alt included | a plain L from the library or the loupe, not on a control | shipped |
+| X43 | Renaming a label to a taken word said album | the popover names its noun | shipped |
+| X44 | rename_label would raise before a home was chosen | the rank nudge waits for a product | shipped |
+| X45 | outside() kept the substr scan and a second spelling of under-this-folder | not_of(folder(path)) | shipped |
+| X46 | position()'s docstring claimed an index seek | says the one counted pass it is | shipped |

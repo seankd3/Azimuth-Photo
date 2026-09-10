@@ -270,7 +270,8 @@ class Desktop:
 
     def rename_label(self, word: str, called: str) -> dict:
         said = self._run(lambda library: library.rename_label(str(word), str(called)))
-        self._product.rank_soon()
+        if self._product is not None:
+            self._product.rank_soon()
         return said
 
     def forget_label(self, word: str) -> dict:

@@ -48,6 +48,11 @@ export function createUndo() {
   // A way back with no toast: the act showed itself where it landed (a flag
   // on the tile), so nothing more is said, and Ctrl+Z still has it.
   function keep(nextRevert) {
+    // A toast still standing from an earlier act must not offer its Undo
+    // for this one.
+    clearTimeout(timer);
+    toast.hidden = true;
+    button.hidden = true;
     clearTimeout(revertTimer);
     revert = nextRevert;
     revertTimer = setTimeout(forget, SHOWN_MS);

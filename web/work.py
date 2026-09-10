@@ -51,7 +51,8 @@ log = logging.getLogger(__name__)
 # batch -- one item is still done per step. It is the number of away or
 # unreadable photographs the worker will step over to find one it can do.
 CANDIDATES = 64
-# Located-nowhere heads a step tolerates before it stops looking.
+# Located-nowhere heads under one root a step tolerates before it stops
+# probing that root.
 MISSES = 8
 
 
@@ -368,20 +369,25 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
     # A head that cannot be located is normal (its drive is away); a run of
     # them means the drive is away for all of them, and probing every head
     # every five seconds was the idle churn with an archive unplugged.
-    misses = 0
+    # A drive that is away is away for every head on it: once eight heads
+    # under one root could not be located, the rest of that root are
+    # skipped without a probe, and the walk goes on to identity work and
+    # to other roots.
+    misses: dict[str, int] = {}
     for _age_key, what, kind, recipe, row in heads:
         if what == "identity":
             if _identify_one(conn, row):
                 conn.commit()
                 return {"did": "identity", "photo": row["id"]}
             continue
+        root = str(row["tail"] or "").split("/", 1)[0]
+        if misses.get(root, 0) >= MISSES:
+            continue
         find = kind.source or (lambda conn, row: photos.locate(
             conn, row["tail"], expected_size=row["file_size"]))
         source = find(conn, row)
         if source is None:
-            misses += 1
-            if misses >= MISSES:
-                return None
+            misses[root] = misses.get(root, 0) + 1
             continue
         entry = cache.make(conn, row["hash"], kind, source, recipe)
         if entry is not None and kind.project is not None:

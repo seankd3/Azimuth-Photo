@@ -121,8 +121,7 @@ def outside(path: str) -> Scope:
 
     if not path:
         return EVERYTHING
-    prefix = str(path).replace("\\", "/").rstrip("/") + "/"
-    return Scope("substr(i.tail, 1, ?) != ?", (len(prefix), prefix))
+    return not_of(folder(path))
 
 
 def starred(least: int) -> Scope:

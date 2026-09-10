@@ -1441,7 +1441,7 @@ function renderFolders(state) {
       row.setAttribute('aria-level', String(depth + 1));
       row.setAttribute('aria-selected', String(active));
       // One tab stop for the tree: the active folder, else the first row.
-      row.tabIndex = active || rows.length === 0 ? 0 : -1;
+      row.tabIndex = -1;
       const open = state.open.has(node.path);
       if (node.children.length) row.setAttribute('aria-expanded', String(open));
       const disclosure = document.createElement('span');
@@ -1466,9 +1466,14 @@ function renderFolders(state) {
   walk(state.tree, 0);
   const tree = document.querySelector('[data-folder-tree]');
   tree.setAttribute('role', 'tree');
-  const hadFocus = tree.contains(document.activeElement);
+  // One tab stop: the row the keyboard was on, else the active folder,
+  // else the first; a rebuild (Right opened a node) keeps the cursor's row.
+  const standing = tree.contains(document.activeElement) ? document.activeElement.dataset.folder : null;
   tree.replaceChildren(...rows);
-  if (hadFocus) tree.querySelector('.folder-row[tabindex="0"]')?.focus({ preventScroll: true });
+  const stop = (standing && rows.find((r) => r.dataset.folder === standing))
+    || rows.find((r) => r.classList.contains('is-active')) || rows[0];
+  if (stop) stop.tabIndex = 0;
+  if (standing && stop) stop.focus({ preventScroll: true });
 }
 
 // A folder is where the file is: a drop is refused with the reason.
@@ -2000,7 +2005,8 @@ document.addEventListener('keydown', (event) => {
     // chrome control it is Tab, so every button can be reached without a
     // mouse. On an empty library the only thing worth reaching is the one
     // button in the empty state; folding panels there would strand the keyboard.
-    const fromChrome = target !== document.body && !target.closest('.workspace');
+    const fromChrome = target !== document.body
+      && !target.closest('.photo-grid, .rank-stage, .loupe-stage, .face-wall, .import-stage');
     if (fromChrome) return;
     if (read().view === 'library' && read().total === 0 && !read().loading) return;
     const panels = read().panels;
@@ -2032,7 +2038,8 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
-  if (key === 'l' && !event.ctrlKey && !event.metaKey) {
+  if (key === 'l' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey && !onControl
+      && ['library', 'loupe'].includes(read().view)) {
     // Lights out: the chrome goes dark to judge tone; L again brings it back.
     shell.classList.toggle('is-lights-out');
     event.preventDefault();

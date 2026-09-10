@@ -90,9 +90,10 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
   let namedFrom = null;   // where focus goes back when the popover closes
   let openedBy = null;    // the click that opened it bubbles to document once
   let taken = () => [];   // names the answer may not repeat
+  let noun = 'album';     // what a taken name is called
   const nameError = namePop.querySelector('[data-name-error]');
 
-  function prompt(title, anchor, initial = '', { not = [] } = {}) {
+  function prompt(title, anchor, initial = '', { not = [], kind = 'album' } = {}) {
     // The anchor is a node or a rect captured before its menu was hidden —
     // a hidden node measures at the corner of the window.
     askName?.(null);
@@ -101,6 +102,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       namedFrom = anchor instanceof Element ? anchor : null;
       openedBy = window.event || null;
       taken = () => not.map((n) => n.toLowerCase());
+      noun = kind;
       nameError.textContent = '';
       namePop.querySelector('[data-name-title]').textContent = title;
       nameInput.value = initial;
@@ -131,7 +133,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
   function checkName() {
     const value = nameInput.value.trim();
     const dup = value && taken().includes(value.toLowerCase());
-    nameError.textContent = dup ? `There is already an album called “${value}”.` : '';
+    nameError.textContent = dup ? `There is already ${noun === 'album' ? 'an album' : `a ${noun}`} called “${value}”.` : '';
     nameOk.disabled = !value || dup;
     return Boolean(value) && !dup;
   }
