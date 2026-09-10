@@ -424,3 +424,62 @@ finding was checked and the numbers said no.
 | X33 | Import's rows were measured from its newest day, not its grid | the grid template's column count | shipped |
 | X34 | Letting go of a Develop slider kept it 400 ms late | the release flushes after the change it causes | shipped |
 | X35 | Rank, Crop and Develop could not be driven in the harness | stubs for rank, round, the cull verbs and develop_state | shipped |
+
+## Feel (fifth round, 2026-09-10)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| W1 | Tab folds panels from everywhere, so no chrome control can be reached by keyboard | Tab folds from the photographs and the body; from a chrome control it traverses (resolves KB1) | open |
+| W2 | Folder rows are divs: unreachable, inaudible, no tree semantics | buttons in a tree: roving tabindex, arrows, Left/Right fold, Home/End, aria-expanded | open |
+| W3 | The search drop steals Enter when the mouse rests over it | a pointerover counts only after a real pointermove since the last render | open |
+| W4 | First run: Enter opens the OS picker (focus lands on Change…) | focus the dialog until the proposal lands, then the submit | open |
+| W5 | The export dialog opens on its close button, so Enter throws it away | focus the submit | open |
+| W6 | Export says Exporting before the destination is chosen, then goes silent | nothing until chosen; progress on the status line; the outcome on the toast | open |
+| W7 | Opening the loupe, Rank, People or Import drops the keyboard on the body | each stage focuses its own first thing | open |
+| W8 | A marked set is invisible to a screen reader | aria-pressed from the marks; aria-current on the cursor | open |
+| W9 | The name popover is an unlabelled field you can Tab out of | role dialog, labelled, two-stop focus | open |
+| W10 | The first outside click never dismisses a popover opened from the topbar | compare against the opening event, not a flag | open |
+| W11 | A duplicate album name is discovered after the popover closed and the text is gone | validated in the popover against the albums on hand | open |
+| W12 | Renaming an album says nothing unless it had children | always said | open |
+| W13 | Recent searches can only be forgotten with a mouse | Delete on a Recent row forgets it | open |
+| W14 | Labels have no verbs: a taught word can never be renamed or forgotten | the same menu grammar: Rename…, Forget this word | open |
+| W15 | Browsing a label or a person leaves no sidebar row marked | marked from the worn chip | open |
+| W16 | The ~ before counts is never explained | one clause in the row title | open |
+| W17 | The safety dot has no legend | a title per state; a line on the sheet | open |
+| W18 | A refused drop looks like an accepted one and never says why | refusal in warn with the reason | open |
+| W19 | Only album rows accept a drop; others refuse silently | people and labels accept (they are chips); folders refuse with a word | open |
+| W20 | Dragging files from Explorer lights an album as accepting, then nothing | highlight only for the app's own drag | open |
+| W21 | The loupe cannot be panned from the keyboard | arrows pan while zoomed; Home recentres | open |
+| W22 | Double-click in the loupe zooms in and straight back out | the paired click is swallowed | open |
+| W23 | The zoom chip reads Z 100% to a screen reader | aria-label kept in step | open |
+| W24 | The loupe's trouble note is silent | role status | open |
+| W25 | The status line and result label are never announced | role status on both | open |
+| W26 | 2 drives away · here when it is | when they are | open |
+| W27 | Mapping the space is app vocabulary; one status string has a period | Learning what your photographs look like; no period | open |
+| W28 | The timeline's date label is mouse-only | the keyboard scrub says the day | open |
+| W29 | The timeline slider is announced horizontal | aria-orientation vertical, the keys in the label | open |
+| W30 | Every failure speaks the bridge's words | kit/why.js: known phrases mapped, otherwise what the person was doing | open |
+| W31 | The export size chooser has no group or pressed state | role group, aria-pressed | open |
+| W32 | The Add-folder dialog announces itself as the folder's name | aria-label names the act | open |
+| W33 | Import… keeps its label while an import runs | Importing… with a title that says it is the way back | open |
+| W34 | The drop never tells a screen reader what Enter will do while typing | the everything row is the active descendant by default | open |
+| W35 | The drop's listbox holds untyped headings and wrappers | groups and presentation roles; the cap is aria-hidden | open |
+| W36 | Seven caps on seven offer sections; one uncapped | one cap rule | open |
+| W37 | Toast strings drift in number, tense and punctuation | one house style; the eight rewritten | open |
+| W38 | Context menus are lists, not menus | menu, menuitem, separator roles | open |
+| W39 | The card chip carries aria-live on a hidden button | dropped; the status line announces | open |
+| W40 | The grid is N tab stops | roving tabindex on the cursor | open |
+| U29 | aria-pressed vs aria-selected for the chosen photograph | pressed on buttons, selected in listboxes — one rule written down | open |
+| U30 | Work in flight on the status line vs the toast | the status line (W6) | open |
+| U31 | photos / frames / photographs | photographs | open |
+| U32 | Colon, em dash, semicolon as the outcome joiner | one joiner | open |
+| U33 | Three names for the sidecar act | one | open |
+| U34 | The comes-back sentence written twice | once | open |
+| U35 | Two spellings of already-imported in one sentence | one | open |
+| U36 | Two ways to run a search from the box, one remembers | one | open |
+| U37 | Two measurements of the same rail point | one | open |
+| U38 | Two names for All photos | one | open |
+| U39 | presence() punctuates three ways | one | open |
+| U40 | Two number formats in one file | toLocaleString | open |
+| U41 | Two dialog focus policies | aim at the act (W4, W5) | open |
+| U42 | Two policies for marking the current view in the sidebar | one (W15) | open |
