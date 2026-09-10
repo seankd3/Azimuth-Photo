@@ -63,14 +63,16 @@ SORTS = {
     "newest": "i.date_taken DESC, i.id DESC",
     "oldest": "i.date_taken ASC, i.id ASC",
     "best": "i.elo DESC, i.id DESC",
-    "stars": "i.stars DESC, i.date_taken DESC",
-    "folder": "i.tail ASC",
+    # Every order ends in the id, so ties have one order on every page and
+    # `position()` can count what sorts before a photograph exactly.
+    "stars": "i.stars DESC, i.date_taken DESC, i.id DESC",
+    "folder": "i.tail ASC, i.id ASC",
     # The grid has offered these two since it was written and neither had an
     # entry, so both fell through the caller's `.get(..., "newest")` and served
     # date order under a control reading "Camera" or "Size". 121,755 rows carry
     # a camera and every row carries a size, so both are real orders; what was
     # missing was the row in this table.
-    "camera": "i.camera_model IS NULL, i.camera_model ASC, i.date_taken DESC",
+    "camera": "i.camera_model IS NULL, i.camera_model ASC, i.date_taken DESC, i.id DESC",
     "file_size": "i.file_size DESC, i.id DESC",
     # "filename" was mapped to `folder`, which sorts by the whole path -- so a
     # library organised by date sorted by date under a control reading
@@ -232,29 +234,74 @@ def folders(conn) -> list[dict]:
     ]
 
 
+def _keys(sort: str) -> list[tuple[str, bool]]:
+    """The sort's ORDER BY as (expression, descending) pairs."""
+
+    keys = []
+    for part in SORTS[sort].split(","):
+        part = part.strip()
+        head, _, tail = part.rpartition(" ")
+        # Parenthesised: an expression like `i.camera_model IS NULL` must
+        # not bind its `<` or `IS` tighter than the comparison around it.
+        if tail.upper() in ("ASC", "DESC"):
+            keys.append((f"({head})", tail.upper() == "DESC"))
+        else:
+            keys.append((f"({part})", False))
+    return keys
+
+
 def position(conn, photo_id: int, sort: str, scope: Scope = EVERYTHING) -> int | None:
     """Where one photograph sits in a sort of a scope, or None if it is not
-    there -- what lets a selection survive a change of sort. One ordered
-    pass over the scope, the same ORDER BY the page uses, so the two cannot
-    disagree."""
+    there -- what lets a selection survive a change of sort.
+
+    The count of rows that sort before it, spelled from the same ORDER BY
+    the page uses with SQLite's own rules (NULL first ascending, last
+    descending), so the two cannot disagree. A window over the whole scope
+    said the same thing in 156-340 ms at 150k rows; a counted range on the
+    sort's index says it in ~15.
+    """
 
     if sort not in SORTS:
         raise ValueError(f"no such sort: {sort!r}; have {sorted(SORTS)}")
     clause, args = where(scope)
-    row = conn.execute(
-        f"SELECT at FROM (SELECT i.id, ROW_NUMBER() OVER (ORDER BY {SORTS[sort]}) - 1 AS at"
-        f" FROM images i WHERE {IN_LIBRARY} AND ({clause})) WHERE id = ?",
-        (*args, int(photo_id)),
+    keys = _keys(sort)
+    target = conn.execute(
+        f"SELECT {', '.join(expr for expr, _ in keys)} FROM images i"
+        f" WHERE i.id = ? AND {IN_LIBRARY} AND ({clause})",
+        (int(photo_id), *args),
     ).fetchone()
-    return None if row is None else int(row["at"])
+    if target is None:
+        return None
+    # Precedes on the first key, or equal there and precedes on the next...
+    before, equal = [], []
+    for (expr, desc), value in zip(keys, tuple(target)):
+        if desc:
+            first = f"({expr} IS NOT NULL AND (? IS NULL OR {expr} > ?))"
+        else:
+            first = f"(({expr} IS NULL AND ? IS NOT NULL) OR {expr} < ?)"
+        before.append("(" + " AND ".join([*equal, first]) + ")")
+        equal.append(f"{expr} IS ?")
+    # Bind in text order: each clause repeats the equalities before it.
+    params: list = []
+    values = tuple(target)
+    for k in range(len(keys)):
+        params.extend(values[:k])
+        params.extend([values[k], values[k]])
+    count = conn.execute(
+        f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY} AND ({clause}) AND ({' OR '.join(before)})",
+        (*args, *params),
+    ).fetchone()[0]
+    return int(count)
 
 
 def size(conn, scope: Scope = EVERYTHING) -> int:
-    """How many photographs a scope holds -- the total a page window needs."""
+    """How many photographs a scope holds -- the total a page window needs.
+    Walked on the browse index, which covers the library rule: the planner
+    scanned the table for a bare COUNT (93 ms) against 12 ms on the index."""
 
     clause, args = where(scope)
     return int(conn.execute(
-        f"SELECT COUNT(*) FROM images i WHERE {IN_LIBRARY} AND ({clause})", args
+        f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_date WHERE {IN_LIBRARY} AND ({clause})", args
     ).fetchone()[0])
 
 
@@ -277,7 +324,7 @@ def counts(conn) -> dict:
         "photos": ask(
             f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_date WHERE {IN_LIBRARY}"),
         "starred": ask(
-            f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_stars"
+            f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_star_date_id"
             f" WHERE {IN_LIBRARY} AND i.stars > 0"),
         "unidentified": ask("SELECT COUNT(*) FROM images WHERE content_hash IS NULL"),
     }
@@ -343,7 +390,7 @@ def days(conn, scope: Scope = EVERYTHING) -> list[dict]:
             SELECT CASE WHEN i.date_taken IS NULL OR i.date_taken = '' THEN ''
                         ELSE substr(i.date_taken, 1, 10) END AS day,
                    COUNT(*) AS count
-            FROM images i
+            FROM images i INDEXED BY idx_browse_date
             WHERE {IN_LIBRARY} AND ({clause})
             GROUP BY day ORDER BY day = '', day DESC
             """,
@@ -530,19 +577,19 @@ def rerank(conn, subjects=None, vectors=None) -> int:
 
     scores = rank.ranking(conn, subjects, vectors)
     # The shoot is the folder: a star can be earned in the world or there.
-    shoots = {
-        row["hash"]: row["tail"].rsplit("/", 1)[0]
-        for row in conn.execute(
-            "SELECT content_hash AS hash, tail FROM images"
-            " WHERE content_hash IS NOT NULL AND tail IS NOT NULL")
-    }
+    rows = conn.execute(
+        "SELECT id, content_hash AS hash, tail FROM images"
+        " WHERE content_hash IS NOT NULL AND tail IS NOT NULL").fetchall()
+    shoots = {row["hash"]: row["tail"].rsplit("/", 1)[0] for row in rows}
     starred = rank.stars(scores, rank.seen(conn), shoots)
     # Every identified row is intended: what the ranking scores gets its
-    # score and star, everything else returns to base and none.
+    # score and star, everything else returns to base and none. Keyed by
+    # id (the rows are already in hand) and the score rounded to a tenth,
+    # so a prediction that barely moved does not rewrite two indexes.
     intended = {
-        digest: (scores.get(digest, rank.BASE), starred.get(digest, 0)) for digest in shoots
+        row["id"]: (round(scores.get(row["hash"], rank.BASE), 1), starred.get(row["hash"], 0)) for row in rows
     }
-    projection.project(conn, "content_hash", ("elo", "stars"), intended)
+    projection.project(conn, "id", ("elo", "stars"), intended, slice_rows=500)
     return len(scores)
 
 

@@ -1284,7 +1284,7 @@ class SetsAreDecisions(CoreCase):
             for column in row
         )
 
-        self.assertIn("idx_browse_stars", plan)
+        self.assertIn("idx_browse_star_date_id", plan)
 
     def test_ambiguous_identifiers_and_non_photo_members_are_refused(self):
         with self.assertRaises(ValueError):
@@ -1312,7 +1312,17 @@ class LibraryQueriesRefuse(CoreCase):
                 "INSERT INTO images(tail, content_hash, date_taken, elo) VALUES (?, ?, ?, ?)",
                 (f"Raws/p{n}.jpg", chr(97 + n) * 64, when, 1500 + n * 10))
         self.conn.commit()
-        for sort in ("newest", "oldest", "best", "folder"):
+        # Ties, undated rows and every sort: the counted range must agree
+        # with the page's ORDER BY under SQLite's NULL rules, or a change of
+        # sort lands the selection one off.
+        self.conn.executemany(
+            "INSERT INTO images(tail, content_hash, date_taken, elo, stars, filename, camera_model, file_size)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [("Raws/tie1.jpg", "d" * 64, "2026-01-02 10:00:00", 1500.0, 2, "tie1.jpg", "R5", 10),
+             ("Raws/tie2.jpg", "e" * 64, "2026-01-02 10:00:00", 1500.0, 2, "tie2.jpg", None, 10),
+             ("Raws/undated.jpg", "f" * 64, None, 1200.0, 0, "undated.jpg", "RP", None)])
+        self.conn.commit()
+        for sort in ("newest", "oldest", "best", "stars", "folder", "camera", "file_size", "filename", "added"):
             page = library_surface.photos(self.conn, sort=sort, limit=10, offset=0)
             for at, row in enumerate(page):
                 self.assertEqual(library_surface.position(self.conn, row["id"], sort), at, sort)

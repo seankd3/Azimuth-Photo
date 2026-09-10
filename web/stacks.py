@@ -22,6 +22,7 @@ with a band around each; the person collapses them, one or all.
 from __future__ import annotations
 
 import datetime as dt
+from typing import Iterable
 import statistics
 
 from model import decisions, projection
@@ -62,15 +63,32 @@ def runs(times: list[dt.datetime]) -> list[tuple[int, int]]:
     return found
 
 
-def project(conn) -> int:
+def project(conn, touched: Iterable[str] | None = None) -> int:
     """Rebuild ``stack_of`` from the stack decisions. Returns the number of
-    stacked members."""
+    stacked members. With ``touched`` (content hashes), only those
+    identities and their covers are re-projected: what one S or Shift+S
+    changed, without walking the library (measured 650 ms and the write
+    lock for its whole span)."""
 
-    cover_of = {member: cover for member, cover in decisions.current(conn, decisions.STACK).items() if cover}
+    if touched is None:
+        cover_of = {member: cover for member, cover in decisions.current(conn, decisions.STACK).items() if cover}
+        rows = conn.execute(
+            "SELECT id, content_hash FROM images WHERE tail IS NOT NULL AND vc_of IS NULL ORDER BY id").fetchall()
+    else:
+        wanted = set(touched)
+        cover_of = {}
+        for digest in list(wanted):
+            cover = decisions.latest(conn, digest, decisions.STACK)
+            if cover:
+                cover_of[digest] = cover
+                wanted.add(cover)
+        marks = ",".join("?" for _ in wanted)
+        rows = conn.execute(
+            f"SELECT id, content_hash FROM images WHERE content_hash IN ({marks}) AND tail IS NOT NULL"
+            " AND vc_of IS NULL ORDER BY id", tuple(wanted)).fetchall()
     ids_of: dict[str, list[int]] = {}
     intended: dict[int, tuple] = {}
-    for row in conn.execute(
-        "SELECT id, content_hash FROM images WHERE tail IS NOT NULL AND vc_of IS NULL ORDER BY id"):
+    for row in rows:
         intended[row["id"]] = (None,)
         if row["content_hash"]:
             ids_of.setdefault(row["content_hash"], []).append(row["id"])
@@ -82,7 +100,7 @@ def project(conn) -> int:
         for member_id in ids_of.get(member, ()):
             intended[member_id] = (cover_ids[0],)
             members += 1
-    projection.project(conn, "id", ("stack_of",), intended)
+    projection.project(conn, "id", ("stack_of",), intended, only=touched is not None)
     return members
 
 
@@ -145,7 +163,7 @@ def stack(conn, photo_ids) -> dict:
         decisions.decide(conn, member["content_hash"], decisions.STACK, cover["content_hash"])
     # A cover stands on its own: whatever it sat behind before, it no longer does.
     decisions.decide(conn, cover["content_hash"], decisions.STACK, None)
-    project(conn)
+    project(conn, touched=[r["content_hash"] for r in rows])
     conn.commit()
     return {"cover": int(cover["id"]), "members": [int(r["id"]) for r in rows[1:]]}
 
@@ -157,14 +175,18 @@ def unstack(conn, photo_ids) -> dict:
     wanted = [int(i) for i in photo_ids]
     marks = ",".join("?" for _ in wanted)
     freed: list[int] = []
+    touched: list[str] = []
     for row in conn.execute(
-            f"SELECT id, content_hash, stack_of FROM images WHERE id IN ({marks}) AND content_hash IS NOT NULL", wanted):
+            f"SELECT id, content_hash, stack_of FROM images WHERE id IN ({marks}) AND content_hash IS NOT NULL", wanted).fetchall():
         if row["stack_of"] is not None:
             decisions.decide(conn, row["content_hash"], decisions.STACK, None)
             freed.append(int(row["id"]))
-        for member in conn.execute("SELECT id, content_hash FROM images WHERE stack_of = ?", (row["id"],)):
+            touched.append(row["content_hash"])
+        for member in conn.execute("SELECT id, content_hash FROM images WHERE stack_of = ?", (row["id"],)).fetchall():
             decisions.decide(conn, member["content_hash"], decisions.STACK, None)
             freed.append(int(member["id"]))
-    project(conn)
+            touched.append(member["content_hash"])
+    if touched:
+        project(conn, touched=touched)
     conn.commit()
     return {"unstacked": sorted(set(freed))}

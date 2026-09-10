@@ -141,12 +141,13 @@ DROP INDEX IF EXISTS idx_photos_stars;
 DROP INDEX IF EXISTS idx_live_date;
 DROP INDEX IF EXISTS idx_live_best;
 DROP INDEX IF EXISTS idx_live_stars;
+DROP INDEX IF EXISTS idx_browse_stars;
 CREATE INDEX IF NOT EXISTS idx_browse_date
     ON images(date_taken ASC, id ASC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_browse_best
     ON images(elo DESC, id DESC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_browse_stars
-    ON images(stars DESC, date_taken DESC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_browse_star_date_id
+    ON images(stars DESC, date_taken DESC, id DESC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
 -- The member set is small (covers stay NULL), so the partial index costs
 -- nothing and pays for every cover's member count.
 CREATE INDEX IF NOT EXISTS idx_stacked ON images(stack_of) WHERE stack_of IS NOT NULL;

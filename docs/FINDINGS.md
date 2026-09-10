@@ -488,15 +488,15 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| P12 | Scroll stutter inside a folder or with a camera/stars chip: 70–1,100 ms per page (unindexable substr scope, row fetch per walked entry) | folder scope as a tail range on idx_photos_tail; stars+best through idx_browse_stars | open |
-| P13 | S lags 650 ms and holds the write lock: stack/unstack re-project the whole library | project only the touched identities on stack/unstack | open |
-| P14 | size(), days() and the rank total table-scan: 150–430 ms per view change | INDEXED BY the browse index; rank total once per scope | open |
-| P15 | position() numbers the whole scope: 156–340 ms per sort change | keyset count on the sort's index | open |
-| P16 | Chores burn 260–1,000 ms of queries per step and repeat every 5 s with the archive away | skip the trash half for keyed passes; stop probing after the first locate miss | open |
-| P17 | Page cache 2 MB, mmap off on a 130 MB catalog: every scan 1.5–5× slower | mmap 256 MB in connect() | open |
-| P18 | rerank writes by content_hash, 0.8 s lock per slice | UPDATE by id; quantize elo; slice 500 | open |
-| P19 | facets recompute 1 s on the UI lane after any cull | computed on the sweep lane; the UI only reads | open |
-| P20 | boot.repair is 5.7 s of CPU behind first paint | one-shot residue repairs gated by a decision row; metadata reindex only when its rows moved | open |
-| P21 | Lexical search walks the library per keystroke (100–165 ms) | LIKE on tail only; camera/lens/date terms resolve to chips | open |
-| P22 | albums() runs a windowed COUNT per album | sets.counts() one pass | open |
+| P12 | Scroll stutter inside a folder or with a camera/stars chip: 70–1,100 ms per page (unindexable substr scope, row fetch per walked entry) | folder scope as a tail range on idx_photos_tail (page 1,094→9 ms) | shipped |
+| P13 | S lags 650 ms and holds the write lock: stack/unstack re-project the whole library | project only the touched identities on stack/unstack | shipped: stack/unstack project only what they touched (666→0.5 ms) |
+| P14 | size(), days() and the rank total table-scan: 150–430 ms per view change | INDEXED BY the browse index; rank total once per scope | shipped: size 93→5 ms, days 146→73 ms on the browse index |
+| P15 | position() numbers the whole scope: 156–340 ms per sort change | keyset count on the sort's index | shipped: a counted range, 156–341→21–29 ms; every sort now ends in the id |
+| P16 | Chores burn 260–1,000 ms of queries per step and repeat every 5 s with the archive away | skip the trash half for keyed passes; stop probing after the first locate miss | shipped: keyed passes skip Trash; a step stops after 8 located-nowhere heads |
+| P17 | Page cache 2 MB, mmap off on a 130 MB catalog: every scan 1.5–5× slower | mmap 256 MB in connect() | shipped: mmap 256 MB |
+| P18 | rerank writes by content_hash, 0.8 s lock per slice | UPDATE by id; quantize elo; slice 500 | shipped: by id, elo rounded to a tenth, slices of 500 |
+| P19 | facets recompute 1 s on the UI lane after any cull | computed on the sweep lane; the UI only reads | shipped: remade on the sweep lane; the window reads the last answer meanwhile |
+| P20 | boot.repair is 5.7 s of CPU behind first paint | one-shot residue repairs gated by a decision row; metadata reindex only when its rows moved | shipped: residue rules run once per catalog; metadata reindex only when a newer answer exists |
+| P21 | Lexical search walks the library per keystroke (100–165 ms) | LIKE on tail only; camera/lens/date terms resolve to chips | measured: mmap halves it; resolving camera/lens/date words to chips is a search redesign, parked |
+| P22 | albums() runs a windowed COUNT per album | sets.counts() one pass | measured: 117 ms for 21 albums; the row shows the union-and-library count, which one pass over decisions cannot say; revisit past ~100 albums |
 | P23 | 423 B per page row; the four presence booleans are folded into one word anyway | measured: low priority, left | measured: left as is |

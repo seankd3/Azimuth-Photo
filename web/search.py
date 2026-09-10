@@ -55,7 +55,7 @@ def _lexical(conn, query: str, limit: int, scope: Scope) -> list[int]:
 
     `LIKE` is deliberate here and safe: this is a human's substring search
     over text columns, not a path prefix test. Where a *prefix* is meant —
-    folder browsing — `library.photos` uses `substr()` instead, because
+    folder browsing — `scope.folder` is a range over the tail index, because
     `LIKE` is ASCII-case-insensitive and a bracket in a folder name would
     become a character class.
     """

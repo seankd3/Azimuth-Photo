@@ -59,31 +59,48 @@ def repair(conn) -> None:
     window used to wait for them before it opened.
     """
 
+    # The residue rules below are one-shot repairs of retired rules; once a
+    # catalog has been through them they cost a scan for nothing, so the
+    # log remembers which version of them ran.
+    RESIDUE = "residue-2026-09-10"
+    residue_done = decisions.latest(conn, work.MACHINE, "repaired") == RESIDUE
     # Residue of the retired rule that stored a projection failure as the
     # photograph's answer: "failed" rows with no value, poisoned by a
     # moment's lock contention, which stopped 27 real photos from ever
     # learning their shape. Dropping them re-owes the work.
-    conn.execute(
-        "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
-        " AND note LIKE 'ProjectionError:%'")
+    if not residue_done:
+        conn.execute(
+            "DELETE FROM cache WHERE state = 'failed' AND value IS NULL"
+            " AND note LIKE 'ProjectionError:%'")
     # A camera raw always carries a date, so a dateless metadata answer for
     # one is an old reader's -- CR3s read with IFD0's map before the CMT2
     # fix (657 rows), DNGs whose Exif IFD sat past the old bounded read
     # (2,086 rows: Lightroom's converter writes it after the image data).
     # Dropping the answer re-owes the read to the fixed reader.
-    conn.execute(
-        "DELETE FROM cache WHERE kind = 'metadata'"
-        " AND value NOT LIKE '%date_taken%'"
-        " AND hash IN (SELECT content_hash FROM images"
-        "              WHERE file_ext IN ('.cr3', '.dng')"
-        "                AND content_hash IS NOT NULL)")
-    # Answers from a reader older than this one (no exposure facts) are
-    # re-owed to the current reader. No-op once every row carries its version.
-    conn.execute(
-        "DELETE FROM cache WHERE kind = 'metadata' AND recipe = '{}'"
-        " AND value NOT LIKE '%\"v\":2%'")
+    if not residue_done:
+        conn.execute(
+            "DELETE FROM cache WHERE kind = 'metadata'"
+            " AND value NOT LIKE '%date_taken%'"
+            " AND hash IN (SELECT content_hash FROM images"
+            "              WHERE file_ext IN ('.cr3', '.dng')"
+            "                AND content_hash IS NOT NULL)")
+        # Answers from a reader older than this one (no exposure facts) are
+        # re-owed to the current reader. No-op once every row carries its version.
+        conn.execute(
+            "DELETE FROM cache WHERE kind = 'metadata' AND recipe = '{}'"
+            " AND value NOT LIKE '%\"v\":2%'")
+        decisions.decide(conn, work.MACHINE, "repaired", RESIDUE)
     conn.commit()
-    embedded_metadata.reindex(conn)
+    # The metadata columns are rebuilt only when a metadata answer has
+    # arrived since the last rebuild: the log keeps the newest answer's
+    # time, and a start where nothing changed skips 150,000 decodes.
+    newest = conn.execute(
+        "SELECT MAX(at) FROM cache WHERE kind = ?", (embedded_metadata.KIND.name,)).fetchone()[0]
+    if newest is None or decisions.latest(conn, work.MACHINE, "metadata-projected") != newest:
+        embedded_metadata.reindex(conn)
+        if newest is not None:
+            decisions.decide(conn, work.MACHINE, "metadata-projected", newest)
+            conn.commit()
     developing.reindex(conn)
     stacks.project(conn)
 
@@ -170,6 +187,8 @@ class Library:
         # sweep lane after a sweep that changed something or on first ask;
         # a stamp that moved (a cull, a forget) remakes it.
         self._facets: tuple | None = None
+        self._refacet_pending = False
+        self._owner = None   # the OwnedLibrary, once one holds this
         # What the window says it is looking at, most recent statement wins.
         # Read by the worker on every step, so the first tiles made are the
         # ones on screen; nothing else about the worker's order changes.
@@ -344,11 +363,34 @@ class Library:
     def changed(self, said):
         """The library's answer moved under the window -- rows left or came
         back, counts and chapters with them. `swept` is the window's cue to
-        re-read what it holds, whoever moved it: a sweep, a cull, a forget."""
+        re-read what it holds, whoever moved it: a sweep, a cull, a forget.
+        The facets are remade off this lane: the window keeps reading the
+        last answer while the sweep lane makes the next."""
 
         self.swept += 1
-        self._facets = None
+        self._refacet()
         return said
+
+    def _refacet(self) -> None:
+        """Remake the facets on the sweep lane, at most one in flight."""
+
+        if self._owner is None:
+            self._facets = None   # no lane to make it on: made on the next ask
+            return
+        if self._refacet_pending:
+            return
+        self._refacet_pending = True
+
+        def make():
+            conn = model.connect(self.catalog_path)
+            try:
+                made = (shape_stamp(conn), facets_of(conn))
+            finally:
+                conn.close()
+            self._facets = made
+            self._refacet_pending = False
+
+        self._owner.submit_sweep(make)
 
     def pick(self, photo_ids) -> dict:
         self._open()
@@ -819,12 +861,16 @@ class Library:
         return cameras_of(self.conn)
 
     def facets(self) -> dict:
-        """The made answer while its stamp still holds; made now otherwise."""
+        """The made answer; made here only the first time. A stamp that
+        moved asks the sweep lane for a fresh one and answers with the last
+        meanwhile, so the window never waits a second for its offers."""
 
         self._open()
-        stamp = shape_stamp(self.conn)
-        if self._facets is None or self._facets[0] != stamp:
-            self._facets = (stamp, facets_of(self.conn))
+        if self._facets is None:
+            self._facets = (shape_stamp(self.conn), facets_of(self.conn))
+            return self._facets[1]
+        if self._facets[0] != shape_stamp(self.conn):
+            self._refacet()
         return self._facets[1]
 
     def _sample_tiles(self, scope) -> list[dict]:
@@ -1178,6 +1224,7 @@ class OwnedLibrary:
         self.cards: list[dict] = []
         try:
             self._library = self._executor.submit(Library, catalog_path, tile_root).result()
+            self._library._owner = self
         except BaseException:
             self._derive_executor.shutdown(wait=True, cancel_futures=True)
             self._scan_executor.shutdown(wait=True, cancel_futures=True)
@@ -1315,6 +1362,11 @@ class OwnedLibrary:
                     self.shaped += 1
         finally:
             conn.close()
+
+    def submit_sweep(self, work_item):
+        """Run something on the sweep lane -- the library's own long reads."""
+
+        return self._scan_executor.submit(work_item)
 
     def _sweep(self, drive_uuid: str, under: str = "") -> dict:
         conn = model.connect(self._library.catalog_path)

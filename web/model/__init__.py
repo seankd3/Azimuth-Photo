@@ -32,6 +32,11 @@ def connect(path: str = ":memory:", *, timeout: float = 30.0) -> sqlite3.Connect
         if path != ":memory:":
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA synchronous=NORMAL")
+            # The catalog is read through the page cache of the OS, shared by
+            # every lane, instead of a 2 MB per-connection cache: measured on
+            # a 130 MB catalog, the scan-shaped queries (owed, days, a scoped
+            # page) ran 1.5-5x faster with nothing else changed.
+            conn.execute("PRAGMA mmap_size=268435456")
         # SQLite has no ALTER ... IF NOT EXISTS, so a column the schema
         # gained after catalogs existed is added here first — the one
         # migration shape the schema file cannot say — and the schema's own

@@ -97,12 +97,18 @@ def not_of(scope: Scope) -> Scope:
 
 
 def folder(path: str) -> Scope:
-    """Everything filed under one folder, by tail prefix."""
+    """Everything filed under one folder, by tail prefix.
+
+    A prefix is a range: every tail from ``prefix`` up to the next string
+    after it, which ``idx_photos_tail`` answers with a seek. ``substr()``
+    said the same thing and could use no index, so a folder's page cost a
+    row fetch per skipped entry (measured 74-1,094 ms a page at depth)."""
 
     if not path:
         return EVERYTHING
     prefix = str(path).replace("\\", "/").rstrip("/") + "/"
-    return Scope("substr(i.tail, 1, ?) = ?", (len(prefix), prefix))
+    # The character after '/' in byte order closes the range.
+    return Scope("i.tail >= ? AND i.tail < ?", (prefix, prefix[:-1] + chr(ord("/") + 1)))
 
 
 def outside(path: str) -> Scope:

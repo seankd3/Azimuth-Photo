@@ -23,7 +23,8 @@ from typing import Iterable
 SLICE = 2000
 
 
-def project(conn, key: str, columns: Iterable[str], intended: dict) -> int:
+def project(conn, key: str, columns: Iterable[str], intended: dict, *,
+            only: bool = False, slice_rows: int = SLICE) -> int:
     """Make ``images.<columns>`` say ``intended[key]`` for every keyed row.
 
     ``intended`` maps a key (a content hash, or an id) to the tuple of values
@@ -35,16 +36,28 @@ def project(conn, key: str, columns: Iterable[str], intended: dict) -> int:
     columns = tuple(columns)
     listed = ", ".join(columns)
     differing: dict = {}
-    for row in conn.execute(f"SELECT {key}, {listed} FROM images WHERE {key} IS NOT NULL"):
-        wanted = intended.get(row[0])
-        if wanted is not None and tuple(row)[1:] != tuple(wanted):
-            differing[row[0]] = (*wanted, row[0])
+    # `only`: read just the keyed rows instead of the whole table -- the
+    # shape for a handful of rows changed by one act.
+    if only:
+        keys = list(intended)
+        reads = (
+            conn.execute(
+                f"SELECT {key}, {listed} FROM images WHERE {key} IN ({','.join('?' for _ in chunk)})", chunk)
+            for chunk in (keys[at:at + 500] for at in range(0, len(keys), 500))
+        )
+    else:
+        reads = (conn.execute(f"SELECT {key}, {listed} FROM images WHERE {key} IS NOT NULL"),)
+    for read in reads:
+        for row in read:
+            wanted = intended.get(row[0])
+            if wanted is not None and tuple(row)[1:] != tuple(wanted):
+                differing[row[0]] = (*wanted, row[0])
     assignments = ", ".join(f"{column} = ?" for column in columns)
     written = 0
     rows = list(differing.values())
-    for start in range(0, len(rows), SLICE):
+    for start in range(0, len(rows), slice_rows):
         cursor = conn.executemany(
-            f"UPDATE images SET {assignments} WHERE {key} = ?", rows[start:start + SLICE])
+            f"UPDATE images SET {assignments} WHERE {key} = ?", rows[start:start + slice_rows])
         written += cursor.rowcount
         conn.commit()
     conn.commit()

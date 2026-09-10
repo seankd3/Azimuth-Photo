@@ -51,6 +51,8 @@ log = logging.getLogger(__name__)
 # batch -- one item is still done per step. It is the number of away or
 # unreadable photographs the worker will step over to find one it can do.
 CANDIDATES = 64
+# Located-nowhere heads a step tolerates before it stops looking.
+MISSES = 8
 
 
 # Whether chores should run at all is a *preference*, and a preference is a
@@ -124,7 +126,9 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
     # The library first, on its own index; then, for the kinds Trash is
     # looked at with, whatever Trash owes, on its own small index.
     rows = ask(LIVING, limit)
-    if kind.name in SHOWN and len(rows) < limit:
+    # Trash wears no edit, so a keyed pass (a developed photograph's own
+    # rendition) has nothing to ask it.
+    if kind.name in SHOWN and not keyed and len(rows) < limit:
         rows += ask(TRASHED, limit - len(rows))
     return rows
 
@@ -361,6 +365,10 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
                 heads.append((_age(row), kind.name, kind, variant, row))
     heads.sort(key=lambda head: head[0], reverse=True)
 
+    # A head that cannot be located is normal (its drive is away); a run of
+    # them means the drive is away for all of them, and probing every head
+    # every five seconds was the idle churn with an archive unplugged.
+    misses = 0
     for _age_key, what, kind, recipe, row in heads:
         if what == "identity":
             if _identify_one(conn, row):
@@ -371,6 +379,9 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
             conn, row["tail"], expected_size=row["file_size"]))
         source = find(conn, row)
         if source is None:
+            misses += 1
+            if misses >= MISSES:
+                return None
             continue
         entry = cache.make(conn, row["hash"], kind, source, recipe)
         if entry is not None and kind.project is not None:
