@@ -123,6 +123,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
     const asks = maybe.slice(0, 3).map((pair) => {
       const card = document.createElement('div');
       card.className = 'same-card';
+      card.tabIndex = -1;
       card.setAttribute('role', 'group');
       card.setAttribute('aria-label', `Same person? ${pair.a.term} and ${pair.b.term}`);
       const faces = document.createElement('div');
@@ -143,7 +144,9 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       const yes = document.createElement('button');
       yes.type = 'button';
       yes.className = 'primary-button';
-      yes.textContent = 'Yes';
+      // Two introduced people becoming one: say which name survives.
+      const survives = pair.a.settled && pair.b.settled && pair.a.term !== pair.b.term;
+      yes.textContent = survives ? `Yes — both are “${pair.a.term}”` : 'Yes';
       yes.title = 'The same person (Y)';
       const no = document.createElement('button');
       no.type = 'button';
@@ -155,6 +158,9 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       card.addEventListener('keydown', (event) => {
         if (event.key === 'y' || event.key === 'Y') { void sameAs(pair, yes); event.preventDefault(); event.stopPropagation(); }
         if (event.key === 'n' || event.key === 'N') { void apart(pair); event.preventDefault(); event.stopPropagation(); }
+        // The card's own arrows are the browser's; the wall's cursor must
+        // not pull focus away mid-question.
+        if (event.key.startsWith('Arrow')) event.stopPropagation();
       });
       const answers = document.createElement('div');
       answers.className = 'same-answers';
@@ -162,6 +168,11 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       card.append(faces, question, answers);
       return card;
     });
+    // A rewrite keeps the keyboard where it was: on a question, the next
+    // question (else the wall); on the wall, the wall's cursor.
+    const focused = document.activeElement;
+    const inQuestion = stage.contains(focused) && focused.closest('.same-card');
+    const onWall = stage.contains(focused) && focused.closest('.face-card');
     stage.replaceChildren(...asks, ...order.map((entry, index) => {
       const card = document.createElement('div');
       card.className = 'face-card' + (index === cursor ? ' is-focus' : '');
@@ -196,6 +207,8 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       card.append(look, name, count, call);
       return card;
     }));
+    if (inQuestion) (stage.querySelector('.same-card .primary-button') || stage.querySelector('.face-card-look'))?.focus({ preventScroll: true });
+    else if (onWall) markWall();
   }
 
   function markWall(focus = true) {
@@ -211,7 +224,13 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
 
   function key(event) {
     // The wall's keys: arrows move by card and row, Enter browses, N names,
-    // Esc leaves -- introducing thirty Someones never needs the mouse.
+    // Esc leaves -- introducing thirty Someones never needs the mouse. Y
+    // from anywhere on the wall answers the first question; N is the
+    // card's own key, because on the wall N names.
+    if ((event.key === 'y' || event.key === 'Y') && maybe.length && !event.ctrlKey && !event.metaKey) {
+      void sameAs(maybe[0], stage.querySelector('.same-card .primary-button'));
+      return true;
+    }
     const cards = stage.querySelectorAll('.face-card');
     if (!cards.length) return false;
     const across = columnsOf(cards);
@@ -240,12 +259,14 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
     if (!called) called = await ask('One person — their name', anchor, '');
     if (!called) return;
     try {
-      await product.samePeople(pair.a.exemplar, pair.b.exemplar, called);
+      // The way back replays the log: every face named by this Yes answers
+      // to what it answered to before, whichever side and however many.
+      const done = await product.samePeople(pair.a.exemplar, pair.b.exemplar, called);
       undo.show(`“${pair.a.term}” and “${pair.b.term}” are one: “${called}”.`, async () => {
-        await product.unnamePerson(pair.a.settled ? pair.b.exemplar : pair.a.exemplar);
+        await product.unnameSince(done.since);
         await renamed();
       });
-      void renamed();
+      await renamed();
     } catch (error) {
       notify(why(error));
     }

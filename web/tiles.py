@@ -99,7 +99,12 @@ class Store:
     @property
     def ready(self) -> Scope:
         """Photographs whose grid tile exists -- what a surface can show the
-        instant it asks, with nothing decoded on the way.
+        instant it asks, with nothing decoded on the way."""
+
+        return self.made(self.grid)
+
+    def made(self, kind: cache.Kind) -> Scope:
+        """Photographs whose plain rendition of this kind exists.
 
         Spelled in literals rather than bound arguments so the same sentence
         serves as a kind's `wants`, which has no argument channel; every value
@@ -108,7 +113,7 @@ class Store:
 
         return Scope(
             f"EXISTS (SELECT 1 FROM cache t WHERE t.hash = i.content_hash"
-            f" AND t.kind = '{GRID}' AND t.recipe = '{{}}' AND t.state = '{cache.READY}')"
+            f" AND t.kind = '{kind.name}' AND t.recipe = '{{}}' AND t.state = '{cache.READY}')"
         )
 
     def path(self, digest: str, size: int, edit=None) -> str:

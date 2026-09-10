@@ -806,12 +806,7 @@ class BackupRefuses(CoreCase):
 
     def test_a_failed_verify_leaves_nothing_behind(self):
         image, _ = self._queued()
-        real = photos.same_bytes
-        with patch.object(
-            photos,
-            "same_bytes",
-            side_effect=lambda left, right: False if ".copying-" in left else real(left, right),
-        ):
+        with patch.object(photos, "copy_verified", return_value=None):
             self.assertEqual(backup.back_up(self.conn, image), "verify failed")
         target = os.path.join(self.cold_root, TAIL.replace("/", os.sep))
         self.assertFalse(os.path.exists(target))
@@ -896,7 +891,14 @@ class PuttingAFileDown(CoreCase):
         source = os.path.join(self.tmp, "card.CR3")
         with open(source, "wb") as handle:
             handle.write(b"straight-off-the-card")
-        result = photos.put(self.conn, source, self.hot["uuid"], TAIL)
+        # The source is read once, as it is copied, and the copy once, to
+        # verify it: the bytes are hashed on their way through, and that
+        # digest is what the row records.
+        with patch.object(photos, "content_hash", wraps=photos.content_hash) as hashed, \
+                patch.object(photos, "same_bytes", wraps=photos.same_bytes) as compared:
+            result = photos.put(self.conn, source, self.hot["uuid"], TAIL)
+        self.assertEqual(hashed.call_count, 1)
+        self.assertEqual(compared.call_count, 0)
         self.assertEqual(result["outcome"], "written")
         self.assertEqual(Path(result["path"]).read_bytes(), b"straight-off-the-card")
         self.assertEqual(result["hash"], photos.content_hash(source))
@@ -2660,6 +2662,11 @@ class SharpnessIsRelative(CoreCase):
         # A crop too small to read says so instead of guessing.
         tiny = sharpness.measure(self._picture("tiny.jpg", blur=False), [[0.5, 0.5, 0.02, 0.02]])
         self.assertIsNone(tiny["faces"][0]["q"])
+        # A face at the frame's edge is measured on what is there, and the
+        # subject ratio does not vanish for it.
+        edge = sharpness.measure(self._picture("edge.jpg", blur=False), [[-0.05, -0.05, 0.3, 0.3]])
+        self.assertIsNotNone(edge["subject"])
+        self.assertLessEqual(edge["faces"][0]["px"], 128)
 
     def test_eyes_are_said_from_both_and_never_from_a_small_one(self):
         import sharpness
@@ -3053,7 +3060,7 @@ class ASplitPersonHealsByName(CoreCase):
     shelf row, all their photographs, and the newest name outvoting the
     older ones a healed split still carries."""
 
-    def _face(self, tail, direction):
+    def _face(self, tail, direction, score=0.9, weight=1.0, also=()):
         import base64
         import json
 
@@ -3064,13 +3071,66 @@ class ASplitPersonHealsByName(CoreCase):
         digest = hashlib.blake2b(tail.encode(), digest_size=32).hexdigest()
         self.conn.execute("UPDATE images SET content_hash = ? WHERE id = ?", (digest, photo_id))
         vec = np.zeros(512, dtype=np.float16)
-        vec[direction] = 1.0
-        value = json.dumps({"n": 1, "boxes": [[0.4, 0.3, 0.2, 0.2]], "scores": [0.9],
+        vec[direction] = weight
+        for at, w in also:
+            vec[at] = w
+        value = json.dumps({"n": 1, "boxes": [[0.4, 0.3, 0.2, 0.2]], "scores": [score],
                             "vecs": base64.b64encode(vec.tobytes()).decode("ascii")})
         self.conn.execute(
             "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
             " VALUES (?, 'faces', ?, 'ready', ?, 1)", (digest, facing.RECIPE, value))
         return digest
+
+    def test_a_no_holds_for_the_groups_those_faces_are_in(self):
+        # The wall asked again after a No because the pair was keyed on
+        # exemplars, which move when a stronger face joins; and worse, the
+        # next rewrite raised (the query left out the decision's value), so
+        # nothing about people was rewritten again for the life of the
+        # catalog. The No is said about two faces and holds for their groups.
+        import people as persons
+
+        for i in range(3):
+            self._face(f"Raws/left-{i}.CR2", 0)
+        for i in range(3):
+            self._face(f"Raws/right-{i}.CR2", 7, weight=0.893, also=((0, 0.45),))
+        self.conn.commit()
+        persons.repeople(self.conn)
+        asked = persons.maybe_same(self.conn)
+        self.assertEqual(len(asked), 1)
+        persons.keep_apart(self.conn, asked[0]["a"], asked[0]["b"])
+        persons.repeople(self.conn)
+        self.assertEqual(persons.maybe_same(self.conn), [])
+        # A stronger face takes over the exemplar; the No still holds.
+        self._face("Raws/right-9.CR2", 7, score=0.99, weight=0.893, also=((0, 0.45),))
+        self.conn.commit()
+        persons.repeople(self.conn)
+        self.assertEqual(persons.maybe_same(self.conn), [])
+
+    def test_the_way_back_from_a_yes_replays_the_log(self):
+        # A Yes names whole groups; a rename cannot undo it (a rename moves
+        # everyone under the old name, the other side too). The log knows
+        # what each face answered to before, and says it again.
+        import people as persons
+
+        for i in range(3):
+            self._face(f"Raws/left-{i}.CR2", 0)
+        for i in range(3):
+            self._face(f"Raws/right-{i}.CR2", 7, weight=0.893, also=((0, 0.45),))
+        self.conn.commit()
+        persons.repeople(self.conn)
+        held = {g["name"]: g for g in persons.groups(self.conn)}
+        persons.name(self.conn, held["Someone 1"]["exemplar"], "Ada")
+        persons.name(self.conn, held["Someone 2"]["exemplar"], "Bob")
+        persons.repeople(self.conn)
+        held = {g["name"]: g for g in persons.groups(self.conn)}
+        since = persons.last_word(self.conn)
+        persons.name(self.conn, held["Ada"]["exemplar"], "Ada")
+        persons.name(self.conn, held["Bob"]["exemplar"], "Ada")
+        persons.repeople(self.conn)
+        self.assertEqual([g["name"] for g in persons.groups(self.conn)], ["Ada"])
+        persons.unname_since(self.conn, since)
+        persons.repeople(self.conn)
+        self.assertEqual(sorted(g["name"] for g in persons.groups(self.conn)), ["Ada", "Bob"])
 
     def test_naming_two_groups_alike_folds_them_and_rename_wins(self):
         import people as persons

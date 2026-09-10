@@ -42,7 +42,7 @@ STUB = r"""<script>
     const count = day === dates[dates.length - 1] ? N - photos.length : Math.min(5, N - photos.length);
     days.push({ day, count });
     for (let i = 0; i < count; i += 1, id += 1) {
-      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null,
+      photos.push({ id, hash: `h${id}`, tail: `Raws/Digital/2026/${day}/p${id}.cr3`, tile: null, loupe: null, sharp: { subject: 1.5, eyes: 'open' },
         width: 6000, height: 4000, status: 'unflagged', rotate: 0, stack: 0, stars: 0,
         reachable: true, tile_failed: false, date_taken: `${day} 12:00:00`, camera_model: 'EOS R5' });
     }
@@ -73,7 +73,11 @@ STUB = r"""<script>
     forget_label: () => ({ id: 'l1' }), remember_album: () => true,
     freeze_album: () => ({ frozen: 3, criteria: [{ is: 'stars', least: 3 }] }), redefine_album: (id) => ({ id }),
     name_person: () => ({ named: 'Ada' }), unname_person: (e) => ({ unnamed: e }),
-    maybe_same: () => [{ a: { exemplar: 'h1:0', term: 'Someone 1', settled: false, samples: [] }, b: { exemplar: 'h2:0', term: 'Ada', settled: true, samples: [] }, close: 0.44 }], same_people: (a, b, called) => ({ named: called }), keep_apart: (a, b) => ({ apart: `${a}|${b}` }),
+    maybe_same: () => [
+      { a: { exemplar: 'h1:0', term: 'Someone 1', settled: false, samples: [] }, b: { exemplar: 'h2:0', term: 'Ada', settled: true, samples: [] }, close: 0.44 },
+      { a: { exemplar: 'h3:0', term: 'Someone 2', settled: false, samples: [] }, b: { exemplar: 'h4:0', term: 'Someone 3', settled: false, samples: [] }, close: 0.41 },
+    ],
+    same_people: (a, b, called) => ({ named: called, since: 7 }), keep_apart: (a, b) => ({ apart: `${a}|${b}` }), unname_since: (since) => ({ unnamed: since }),
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
     intake_status: () => ({ running: false }), forget_missing: () => ({}),
     rank: (n) => ({ photos: photos.slice(0, n), judged: 0, earned: 0, total: N }),

@@ -56,6 +56,7 @@ export const library = Object.freeze({
   unnamePerson: (exemplar) => invoke('unname_person', exemplar),
   maybeSame: () => invoke('maybe_same'),
   samePeople: (a, b, called) => invoke('same_people', a, b, called),
+  unnameSince: (since) => invoke('unname_since', since),
   keepApart: (a, b) => invoke('keep_apart', a, b),
   saveView: (name, view) => invoke('save_view', name, view),
   savePhotos: (name, ids) => invoke('save_photos', name, ids),

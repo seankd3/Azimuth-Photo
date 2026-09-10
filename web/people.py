@@ -185,39 +185,40 @@ def repeople(conn) -> int:
     )
     # The question the wall asks: pairs of groups close enough in the face
     # space to be one person, nearest first, never a pair the owner kept
-    # apart and never two groups that already answer to the same name.
-    kept_apart = {str(row["subject"]) for row in conn.execute(
-        "SELECT subject FROM decisions WHERE family = ?", (APART,))
-        if decisions.loaded(row)}
-    centres = []
-    for group, name in merged:
-        if len({owners[face][0] for face in group}) < FLOOR:
-            centres.append(None)
+    # apart and never two groups that already answer to the same name. A
+    # No was said about two faces and holds for whichever groups those
+    # faces are in now, so a stronger face taking over an exemplar does not
+    # bring the question back. Two groups whose centres sit even closer
+    # than SAME are still two groups (the clustering is greedy over faces),
+    # and the most confident question of all.
+    group_of = {f"{owners[face][0]}:{owners[face][1]}": at
+                for at, (group, _) in enumerate(merged) for face in group}
+    kept_apart = set()
+    for row in conn.execute("SELECT subject, value FROM decisions WHERE family = ?", (APART,)):
+        if not decisions.loaded(row):
             continue
-        centre = matrix[group].mean(axis=0)
-        centres.append(centre / (np.linalg.norm(centre) or 1.0))
-    by_exemplar = {entry["exemplar"]: entry for entry in summary}
-    exemplars = []
-    for (group, name), centre in zip(merged, centres):
-        strongest = max(group, key=lambda face: scores[face]) if centre is not None else None
-        exemplars.append(f"{owners[strongest][0]}:{owners[strongest][1]}" if strongest is not None else None)
+        sides = [group_of.get(face) for face in str(row["subject"]).split("|")]
+        if len(sides) == 2 and None not in sides:
+            kept_apart.add((min(sides), max(sides)))
+    shown = {entry["exemplar"] for entry in summary}
+    exemplar_of = {}
+    for at, (group, _) in enumerate(merged):
+        if len({owners[face][0] for face in group}) >= FLOOR:
+            strongest = max(group, key=lambda face: scores[face])
+            exemplar_of[at] = f"{owners[strongest][0]}:{owners[strongest][1]}"
+    asked = [at for at in exemplar_of if exemplar_of[at] in shown]
     maybe = []
-    for a in range(len(merged)):
-        if centres[a] is None:
-            continue
-        for b in range(a + 1, len(merged)):
-            if centres[b] is None:
+    if len(asked) >= 2:
+        import numpy as np
+
+        centres = np.stack([matrix[merged[at][0]].mean(axis=0) for at in asked]).astype(np.float32)
+        centres /= np.maximum(np.linalg.norm(centres, axis=1, keepdims=True), 1e-9)
+        close = np.triu(centres @ centres.T, 1)
+        for i, j in zip(*np.nonzero(close >= NEAR)):
+            a, b = asked[int(i)], asked[int(j)]
+            if (a, b) in kept_apart or (merged[a][1] and merged[a][1] == merged[b][1]):
                 continue
-            close = float(centres[a] @ centres[b])
-            if close < NEAR or close >= SAME:
-                continue
-            pair = "|".join(sorted((exemplars[a], exemplars[b])))
-            if pair in kept_apart:
-                continue
-            if merged[a][1] and merged[a][1] == merged[b][1]:
-                continue
-            if exemplars[a] in by_exemplar and exemplars[b] in by_exemplar:
-                maybe.append({"a": exemplars[a], "b": exemplars[b], "close": round(close, 3)})
+            maybe.append({"a": exemplar_of[a], "b": exemplar_of[b], "close": round(float(close[i, j]), 3)})
     maybe.sort(key=lambda m: -m["close"])
     conn.execute(
         "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
@@ -254,8 +255,8 @@ def maybe_same(conn) -> list[dict]:
 
 
 def keep_apart(conn, a: str, b: str) -> dict:
-    """The owner's No: these two groups are two people. Remembered, so the
-    wall never asks about this pair again."""
+    """The owner's No: these two groups are two people. Remembered against
+    the two faces, so the wall never asks about their groups again."""
 
     pair = "|".join(sorted((str(a), str(b))))
     decisions.decide(conn, pair, APART, True)
@@ -291,6 +292,29 @@ def name(conn, exemplar: str, called: str) -> dict:
                 decisions.decide(conn, subject, FAMILY, called)
     conn.commit()
     return {"named": called}
+
+
+def last_word(conn) -> int:
+    """The log's last id: what `unname_since` winds back to."""
+
+    return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
+
+
+def unname_since(conn, since: int) -> dict:
+    """Every word said about a face after `since` taken back: each such face
+    answers to what it answered to before, or to nothing. The way back from
+    a Yes, which names whole groups at once -- a rename cannot undo it,
+    because a rename moves everyone under the old name, the other side too."""
+
+    subjects = [str(row["subject"]) for row in conn.execute(
+        "SELECT DISTINCT subject FROM decisions WHERE family = ? AND id > ?", (FAMILY, int(since)))]
+    for subject in subjects:
+        prior = conn.execute(
+            "SELECT value FROM decisions WHERE family = ? AND subject = ? AND id <= ?"
+            " ORDER BY id DESC LIMIT 1", (FAMILY, subject, int(since))).fetchone()
+        decisions.decide(conn, subject, FAMILY, str(decisions.loaded(prior) or "") if prior else "")
+    conn.commit()
+    return {"unnamed": len(subjects)}
 
 
 def unname(conn, exemplar: str) -> dict:

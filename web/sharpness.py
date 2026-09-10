@@ -4,14 +4,22 @@ Every classical focus measure confounds low texture with defocus and most of
 them reward noise, so nothing here is an absolute score and nothing here is
 a verdict. Two facts per photograph, one per face, all relative:
 
-* a map of local variation over the 1,024 px tile in 32 px blocks, kept as
-  its 50th, 75th and 90th percentiles -- the frame's own texture;
+* a map of local variation over the loupe rendition at 1,024 px in 32 px
+  blocks, kept as its 50th, 75th and 90th percentiles -- the frame's own
+  texture, and its noise: the map does not tell them apart, which is why
+  it is only ever read as a ratio;
 * for the largest face, the map inside its box against the frame's 75th
   percentile -- the subject ratio: above one the subject is sharper than
   its surroundings (a portrait against bokeh), below it the focus missed;
 * for every face, Zhu & Milanfar's gradient-covariance measure on the face
   crop from the 4,096 px rendition (the one measure that penalises noise as
-  well as blur), with the crop's size in pixels as its reliability gate.
+  well as blur), with the crop's size in pixels as its reliability gate;
+* for every face large enough, each eye's openness and sharpness from the
+  106 landmarks, and one word for the largest face's eyes.
+
+Always the 4,096 px loupe rendition, never a stand-in: the same recipe must
+be the same answer for every photograph, or the numbers cannot be compared
+across the library.
 
 The facts are read by the inspector and, later, weighted by the fit on the
 owner's own rounds -- never blended into a score here. Research:
@@ -22,7 +30,8 @@ from __future__ import annotations
 
 import json
 
-KEY = "zm3"          # the measure's version; a change re-owes every answer
+KEY = "zm4"          # the measure's version; a change re-owes every answer
+RECIPE = json.dumps({"model": KEY}, separators=(",", ":"), sort_keys=True)
 BLOCK = 32           # the map's grain on the 1,024 px tile
 FACE_LEAST = 48      # a face crop narrower than this says nothing reliable
 EYE_LEAST = 20       # an eye narrower than this cannot be read either way
@@ -32,13 +41,25 @@ OPEN = 0.25
 CLOSED = 0.15
 
 
-def _grey(image, longest: int):
-    import numpy as np
+def _grey(path: str, longest: int):
+    """The frame at `longest`, decoded at that scale (a JPEG decodes at a
+    quarter of its size for a quarter of the work when asked before it is
+    loaded, which a copy of a loaded image cannot be)."""
 
-    held = image.copy()
-    held.draft("L", (longest, longest))
-    held.thumbnail((longest, longest))
-    return np.asarray(held.convert("L"), dtype=np.float32)
+    import numpy as np
+    from PIL import Image
+
+    with Image.open(path) as held:
+        held.draft("L", (longest, longest))
+        held.thumbnail((longest, longest))
+        return np.asarray(held.convert("L"), dtype=np.float32)
+
+
+def _clamped(left, top, right, bottom, width, height):
+    """A box held inside the frame; a box off the frame's edge is measured
+    on what is there, not on black padding."""
+
+    return (max(0, int(left)), max(0, int(top)), min(int(width), int(right)), min(int(height), int(bottom)))
 
 
 def _mlv_map(grey):
@@ -133,7 +154,7 @@ def _eyes(image, frame_bgr, left, top, right, bottom):
         x0, y0 = contour.min(axis=0)
         x1, y1 = contour.max(axis=0)
         pad = 0.4 * max(x1 - x0, y1 - y0)
-        box = (int(max(0, x0 - pad)), int(max(0, y0 - pad)), int(x1 + pad), int(y1 + pad))
+        box = _clamped(x0 - pad, y0 - pad, x1 + pad, y1 + pad, image.width, image.height)
         px = int(min(box[2] - box[0], box[3] - box[1]))
         q = None
         if px >= EYE_LEAST:
@@ -150,15 +171,14 @@ def measure(path: str, boxes=()) -> dict:
     import numpy as np
     from PIL import Image
 
+    grey = _grey(path, 1024)
     with Image.open(path) as image:
         width, height = image.size
-        grey = _grey(image, 1024)
         faces = []
         frame_bgr = None
         for box in boxes:
             x, y, w, h = (float(v) for v in box)
-            left, top = int(x * width), int(y * height)
-            right, bottom = int((x + w) * width), int((y + h) * height)
+            left, top, right, bottom = _clamped(x * width, y * height, (x + w) * width, (y + h) * height, width, height)
             if right - left < FACE_LEAST or bottom - top < FACE_LEAST:
                 faces.append({"q": None, "px": min(right - left, bottom - top), "box": box, "eyes": []})
                 continue
@@ -177,8 +197,9 @@ def measure(path: str, boxes=()) -> dict:
     if boxes:
         x, y, w, h = (float(v) for v in max(boxes, key=lambda b: float(b[2]) * float(b[3])))
         rows, cols = amount.shape
-        r0, r1 = int(y * rows), max(int(y * rows) + 1, int((y + h) * rows))
-        c0, c1 = int(x * cols), max(int(x * cols) + 1, int((x + w) * cols))
+        r0 = max(0, int(y * rows))
+        c0 = max(0, int(x * cols))
+        r1, c1 = max(r0 + 1, int((y + h) * rows)), max(c0 + 1, int((x + w) * cols))
         inside = amount[r0:r1, c0:c1]
         if inside.size and frame["p75"] > 0:
             subject = round(float(np.percentile(inside, 75)) / frame["p75"], 3)
@@ -190,9 +211,11 @@ def measure(path: str, boxes=()) -> dict:
 
 def kind(tiles, faces_kind):
     """Sharpness as a cache capability: computed on the CPU from the loupe
-    rendition when it exists (the eyes need the pixels) and the grid tile
-    otherwise, with the faces the face pass already found."""
+    rendition once it exists (the eyes need the pixels; a stand-in would be
+    a different answer under the same recipe), with the faces the face pass
+    already found, on a machine that has the landmark model."""
 
+    import faces as facing
     import render
     from model import cache
 
@@ -206,8 +229,9 @@ def kind(tiles, faces_kind):
 
         import faces as facing
 
-        loupe = tiles.path(row["hash"], render.LOUPE)
-        path = loupe if os.path.isfile(loupe) else tiles.path(row["hash"], render.GRID)
+        path = tiles.path(row["hash"], render.LOUPE)
+        if not os.path.isfile(path):
+            return None   # the row says ready but the file is gone: owed, not failed
         held = cache.get(conn, row["hash"], faces_kind, {"model": facing.KEY})
         boxes = []
         if held is not None and held.get("state") == cache.READY and held.get("value"):
@@ -221,7 +245,8 @@ def kind(tiles, faces_kind):
         params=("model",),
         ahead=lambda: ({"model": KEY},),
         evictable=False,
-        wants=tiles.ready.sql,
+        wants=tiles.made(tiles.loupe).sql,
+        here=facing.ready,
         source=source,
     )
 
@@ -230,8 +255,8 @@ def of(conn, digest: str) -> dict | None:
     """The facts as last written, or None until the pass has been there."""
 
     row = conn.execute(
-        "SELECT value FROM cache WHERE kind = 'sharpness' AND hash = ? AND state = 'ready'"
-        " ORDER BY at DESC LIMIT 1", (digest,)).fetchone()
+        "SELECT value FROM cache WHERE kind = 'sharpness' AND hash = ? AND recipe = ? AND state = 'ready'",
+        (digest, RECIPE)).fetchone()
     if row is None or not row["value"]:
         return None
     held = row["value"]

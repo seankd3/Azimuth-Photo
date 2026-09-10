@@ -307,6 +307,12 @@ class Desktop:
             self._product.rank_soon()
         return said
 
+    def unname_since(self, since: int) -> dict:
+        said = self._run(lambda library: library.unname_since(int(since)))
+        if self._product is not None:
+            self._product.rank_soon()
+        return said
+
     def unname_person(self, exemplar: str) -> dict:
         said = self._run(lambda library: library.unname_person(str(exemplar)))
         if self._product is not None:

@@ -901,6 +901,7 @@ const WORKING = {
   embedding: 'Learning what your photographs look like',
   faces: 'Finding faces',
   photostats: 'Measuring light',
+  sharpness: 'Measuring focus',
 };
 
 async function followLibrary() {
@@ -2295,6 +2296,16 @@ const TIPS = {
   'toggle-left': 'Show or hide the sidebar', 'toggle-right': 'Show or hide the details', 'toggle-top': 'Show or hide the top bar',
   pick: 'Pick, or clear the pick', turn: 'Turn left \u00b7 Shift turns right', reject: 'Reject', 'search-clear': 'Clear the search',
   'undo-toast': 'Take it back', 'close-loupe': 'Close the loupe',
+  'all-photos': 'All photographs', 'trash-view': 'Trash', 'new-album': 'New album\u2026', 'collapse-stacks': 'Fold or open every stack',
+  'crop-reset': 'Remove the crop', 'crop-cancel': 'Leave the crop as it was', 'crop-apply': 'Apply the crop',
+  'edit-reset': 'Reset the edit', 'edit-close': 'Close Develop',
+  'import-card': 'Import the card\u2026', 'close-import': 'Cancel the import', 'check-new': 'Check only the new photographs',
+  'check-all': 'Check every photograph', 'check-none': 'Uncheck everything', 'start-import': 'Import the checked photographs', 'stop-import': 'Stop the import',
+  'change-home': 'Change where the library lives\u2026', 'close-drive': 'Close', 'close-empty': 'Close', 'close-export': 'Close',
+  'synchronize-folder': 'Synchronize this folder with the disk', 'forget-missing': 'Forget the missing photographs\u2026',
+  'adopt-track': 'Add a GPS track (GPX)\u2026', 'export-folder': 'Save metadata for Lightroom', 'rescan-drive': 'Re-scan this drive now',
+  'rename-album': 'Rename the album\u2026', 'freeze-album': 'Freeze into a plain album', 'delete-album': 'Delete the album',
+  'rename-label': 'Rename the word\u2026', 'forget-label': 'Forget the word', 'name-ok': 'Save the name',
 };
 const KEY_OF = new Map();
 for (const [, keys] of SHORTCUTS) for (const [key, , actions] of keys) for (const action of actions || []) if (!KEY_OF.has(action)) KEY_OF.set(action, key);
@@ -2304,6 +2315,7 @@ for (const [action, tip] of Object.entries(TIPS)) {
 }
 // The command line: what the tooltips say, for every verb that is on the
 // screen right now, by the same words. Choosing one presses its button.
+const onScreen = (node) => !node.disabled && node.getClientRects().length > 0;
 function commands(query) {
   const seen = new Set();
   const found = [];
@@ -2311,12 +2323,20 @@ function commands(query) {
   for (const node of document.querySelectorAll('[data-action]')) {
     const action = node.dataset.action;
     const tip = TIPS[action];
-    if (!tip || seen.has(action) || node.disabled || !node.getClientRects().length) continue;
+    if (!tip || seen.has(action) || !onScreen(node)) continue;
     if (want && !tip.toLowerCase().includes(want)) continue;
     seen.add(action);
     found.push({
       label: tip.replace(/\u2026$/, ''), count: KEY_OF.get(action), glyph: 'chevron',
-      run: () => { searchBox.value = ''; node.click(); },
+      run: () => {
+        // The box empties the way Clear does, so the grid follows it; the
+        // button is found again now, since shelves re-render underneath.
+        searchBox.value = '';
+        searchBox.dispatchEvent(new Event('input', { bubbles: true }));
+        const button = [...document.querySelectorAll(`[data-action="${action}"]`)].find(onScreen);
+        if (button) button.click();
+        else notify('That verb has left the screen.');
+      },
     });
   }
   return found;

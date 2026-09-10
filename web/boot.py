@@ -1089,19 +1089,23 @@ class Library:
 
         self._open()
         by_exemplar = {g["exemplar"]: g for g in persons.groups(self.conn)}
-        out = []
-        for pair in persons.maybe_same(self.conn):
-            a, b = by_exemplar.get(pair["a"]), by_exemplar.get(pair["b"])
-            if not a or not b:
-                continue
-            out.append({
-                "a": {"exemplar": a["exemplar"], "term": a["name"], "settled": bool(a.get("settled")),
-                      "samples": self._face_samples(a["sample"][:1])},
-                "b": {"exemplar": b["exemplar"], "term": b["name"], "settled": bool(b.get("settled")),
-                      "samples": self._face_samples(b["sample"][:1])},
-                "close": pair["close"],
-            })
-        return out
+        # The wall shows three questions; their six faces are one read.
+        pairs = [(by_exemplar.get(p["a"]), by_exemplar.get(p["b"]), p["close"])
+                 for p in persons.maybe_same(self.conn)]
+        pairs = [(a, b, close) for a, b, close in pairs if a and b][:3]
+        looks = {}
+        for entry, look in zip(
+            [g["sample"][0] for a, b, _ in pairs for g in (a, b) if g["sample"]],
+            self._face_samples([g["sample"][0] for a, b, _ in pairs for g in (a, b) if g["sample"]]),
+        ):
+            looks.setdefault(entry["hash"], look)
+
+        def side(g):
+            sample = g["sample"][:1]
+            return {"exemplar": g["exemplar"], "term": g["name"], "settled": bool(g.get("settled")),
+                    "samples": [looks[s["hash"]] for s in sample if s["hash"] in looks]}
+
+        return [{"a": side(a), "b": side(b), "close": close} for a, b, close in pairs]
 
     def same_people(self, a: str, b: str, called: str) -> dict:
         """The owner's Yes: both groups answer to one name, which is how a
@@ -1111,9 +1115,19 @@ class Library:
         import people as persons
 
         self._open()
+        since = persons.last_word(self.conn)
         persons.name(self.conn, a, called)
         persons.name(self.conn, b, called)
-        return {"named": called}
+        return {"named": called, "since": since}
+
+    def unname_since(self, since: int) -> dict:
+        """The way back from a Yes: every face named after `since` answers
+        to what it answered to before."""
+
+        import people as persons
+
+        self._open()
+        return persons.unname_since(self.conn, int(since))
 
     def keep_apart(self, a: str, b: str) -> dict:
         import people as persons
@@ -1275,8 +1289,10 @@ class Library:
         # How this photograph's score is known: the rounds it was actually
         # in. Zero with a moved score means the ranking predicted it.
         answer["rounds"] = rank.seen(self.conn).get(digest, 0)
-        # Where the sharpness sits, when the pass has been there.
-        answer["sharp"] = sharpness.of(self.conn, digest)
+        # Where the sharpness sits, when the pass has been there: the two
+        # facts the inspector says; the whole record stays for the fit.
+        held = sharpness.of(self.conn, digest)
+        answer["sharp"] = {"subject": held.get("subject"), "eyes": held.get("eyes")} if held else None
         # Every name this photograph wears — palette tags, groups the space
         # formed, people — so the panel can answer "why is this here".
         import json as coding
@@ -1491,7 +1507,7 @@ class OwnedLibrary:
                     (facing.RECIPE,),
                 ).fetchone()[0],
                 conn.execute(
-                    "SELECT MAX(id) FROM decisions WHERE family = ?", (persons.FAMILY,)
+                    "SELECT MAX(id) FROM decisions WHERE family IN (?, ?)", (persons.FAMILY, persons.APART)
                 ).fetchone()[0],
             )
             if key == self._ranked:

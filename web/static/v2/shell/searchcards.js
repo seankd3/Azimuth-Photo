@@ -57,10 +57,13 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
   const SAY = { landscape: 'Landscape', portrait: 'Portrait', square: 'Square' };
 
-  const commanding = () => box.value.startsWith('>');
+  const commanding = () => box.value.trimStart().startsWith('>');
 
   function offers(text) {
-    if (commanding()) return [['Commands', commands(text.slice(1).trim())]];
+    if (commanding()) {
+      const found = commands(text.trimStart().slice(1).trim());
+      return found.length ? [['Commands', found]] : [];
+    }
     const query = text.trim().toLowerCase();
     const match = (label) => !query || label.toLowerCase().includes(query);
     const held = facets || { years: [], cameras: [], orientations: [], roots: [] };
@@ -163,6 +166,13 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       row.append(hint);
       rows.push(row);
       items.push({ run: () => commit(text) });
+    }
+    if (commanding() && !sections.length) {
+      const none = document.createElement('p');
+      none.className = 'eyebrow';
+      none.textContent = 'No verb on the screen matches';
+      none.setAttribute('role', 'presentation');
+      rows.push(none);
     }
     for (const [title, entries] of sections) {
       const head = document.createElement('p');
@@ -321,7 +331,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     if (event.key === 'Enter') {
       clearTimeout(typeTimer);
       if (cursor >= 0) pick(cursor);
-      else if (commanding()) { if (items.length) pick(0); }
+      else if (commanding()) { if (items.length) pick(0); else close(); }
       else { close(); commit(box.value); }
       event.preventDefault();
       return;

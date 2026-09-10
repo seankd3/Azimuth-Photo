@@ -610,13 +610,13 @@ finding was checked and the numbers said no.
 | BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | shipped: 0.2 ms after the first draw |
 | BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | counted first, one matrix allocated, filled row by row from the cursor; measured on 20k synthetic vectors: peak 194 MB → 93 MB, same time | shipped |
 | BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | shipped |
-| BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | Select All stays a scope the verbs resolve in SQL | open |
+| BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | deferred: the verbs' contract is ids in, changed ids out (patch and undo ride the answer); Select All as a scope means verbs by scope with a count back and a reload, its own round | open |
 | BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | shipped |
 | BC15 | Pending cells repaint continuously: background animated, a paint per cell per frame | opacity on the veil | shipped |
 | BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | shipped: plus a filename index (page at depth 96 → within budget) |
-| FR1 | An import reads every file five times | hash while copying; verify in one read | open |
-| FR2 | Staging opens every file's EXIF on the card: half a minute of seeks | mtime for the day; tags read at bring time | open |
-| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | on the intake lane, coalesced | open |
+| FR1 | An import reads every file five times | `photos.copy_verified`: the bytes are hashed on their way through the copy and the copy is hashed once to verify; the row records that digest; the backup copies the same way (the third variant of copy-then-compare is gone); the card is read twice (identity, then the copy) and the copy once | shipped |
+| FR2 | Staging opens every file's EXIF on the card: half a minute of seeks | deferred: the capture second is how a re-inserted card is recognised (the import renames files, so the name never matches); mtime would lose that; the honest answer is reading the tags on the intake lane with the count growing, which the stage already shows | open |
+| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | deferred to an import round with FR7: the stage's own lane and a key→cell map are one change | open |
 | FR4 | The first grid tile always decodes at loupe size, so small embedded previews never qualify: 3 s a frame | decode at grid size when only the grid tile is owed | shipped |
 | FR5 | Ejecting the card mid-import yields 1,900 unreadable and phase done | the run stops and says the card was removed | shipped |
 | FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | shipped |
@@ -629,6 +629,36 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | PE-M1 | Two groups of one person could only be merged by naming each the same word, by hand | the wall asks: pairs of groups close in the face space (NEAR ≤ cos < SAME, never a pair kept apart) as one inline card — two faces, Same person? Yes / No, Y/N keys; Yes heals as naming does (a name asked for when neither has one), No is a decision that keeps them apart | shipped |
 | X47 | The People wall crashed on a face with no sample: icon() rejected a two-word class | icon() takes a class list | shipped |
+
+## Refutation (people, sharpness, the command line; 2026-09-10, by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X48 | After the first No, every people rewrite raised (the apart query left out the decision's value) and the shelf, wall and per-photo people rows stopped updating for the life of the catalog, silently | the value is selected; a test says No and rewrites | shipped |
+| X49 | A No was keyed on two exemplars, which move when a stronger face joins a group, so the question came back | the No is said about two faces and holds for whichever groups those faces are in now | shipped |
+| X50 | A No never moved the rank lane's change key, so the wall's list kept the pair until the next launch | the key reads the apart family too | shipped |
+| X51 | The same sharpness recipe answered from the loupe when it existed and the grid tile otherwise: numbers not comparable across the library, and the eye gates meaningless at 1,024 px | one rendition only, the loupe; `wants` is the loupe's own scope (`tiles.made`); a missing file is owed again, not failed; key zm4 | shipped |
+| X52 | A face box off the frame's edge was measured on black padding, with a confident verdict; a face at the left or top edge lost its subject ratio to a negative slice | boxes and eye crops clamped to the frame; the ratio's block indices floored at zero; a test at the edge | shipped |
+| X53 | A missing rendition file made a permanent failed row | `source` returns None when the loupe file is gone | shipped |
+| X54 | The pass ran with no landmark model and every eye answer was None; old-key rows were read back | `here=faces.ready`; `of()` reads the current recipe only | shipped |
+| X55 | `_grey` copied the loaded 4,096 px image and called `draft` on the copy, a no-op | the frame is decoded at a quarter scale from its own handle | shipped |
+| X56 | The module claimed the frame map measured sharpness; it measures texture and noise alike | said so; only ever read as a ratio | shipped |
+| X57 | Every details read shipped every face box and both eyes' numbers to the inspector, which says two words | the inspector gets subject and eyes; the record stays for the fit | shipped |
+| X58 | The sharpness facts vanish from the inspector with the archive away, since details() needs the original | later: read the tile-derived facts on the tile-only path | open |
+| X59 | The way back from a Yes unnamed one side: with neither side introduced the merge stayed half-applied; with both introduced a name was destroyed | the log replays: every face named after the Yes answers to what it answered to before (`unname_since`); a test merges Ada and Bob and gets both back | shipped |
+| X60 | The card's Y/N never fired from the wall (the card could not take focus); N there opens the name dialog | Y anywhere on the wall answers the first question; the card is focusable and N is its own key; the arrows stay with the browser inside it | shipped |
+| X61 | Answering dropped the keyboard on the floor: the focused button was replaced | focus lands on the next question, else the wall's cursor | shipped |
+| X62 | Yes on two introduced people never said which name survives | the button says "Yes — both are Ada" | shipped |
+| X63 | Pairs at or above SAME were never asked about, though greedy clustering leaves such groups apart | the upper bound dropped | shipped |
+| X64 | The pair search walked every cluster pair in Python: 9 s at 3,000 groups | one matmul over the centres | shipped |
+| X65 | `maybeSame` made 24 catalog reads for three cards | three pairs, six faces, one read | shipped |
+| X66 | `>zzz` showed an orphan Commands header and Enter did nothing | "No verb on the screen matches"; Enter closes | shipped |
+| X67 | A command emptied the box without telling it, so the grid kept the old search and Clear hid | the box is emptied the way Clear is | shipped |
+| X68 | "Every verb on the screen" was 17 of 47 | every data-action has a tip, so every one is a command and has a tooltip | shipped |
+| X69 | A leading space defeated the command line | leading space ignored | shipped |
+| X70 | A command clicked a button captured earlier, detached by a re-render: silent no-op | the button is found again when chosen; if it left the screen, it says so | shipped |
+| X71 | The sharpness pass said "Working" on the status line | Measuring focus | shipped |
+| X72 | The harness stub carried no sharp facts and only a one-sided question | sharp on every stub photo; a second, both-unsettled pair; unname_since | shipped |
 
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
