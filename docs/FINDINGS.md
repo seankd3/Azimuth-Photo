@@ -442,12 +442,12 @@ finding was checked and the numbers said no.
 | W11 | A duplicate album name is discovered after the popover closed and the text is gone | validated in the popover against the albums on hand | shipped |
 | W12 | Renaming an album says nothing unless it had children | always said | shipped |
 | W13 | Recent searches can only be forgotten with a mouse | Delete on a Recent row forgets it | shipped |
-| W14 | Labels have no verbs: a taught word can never be renamed or forgotten | the same menu grammar: Rename…, Forget this word | open |
+| W14 | Labels have no verbs: a taught word can never be renamed or forgotten | the same menu grammar: Rename…, Forget this word | shipped |
 | W15 | Browsing a label or a person leaves no sidebar row marked | marked from the worn chip | shipped |
 | W16 | The ~ before counts is never explained | one clause in the row title | shipped |
 | W17 | The safety dot has no legend | a title per state; a line on the sheet | shipped |
 | W18 | A refused drop looks like an accepted one and never says why | refusal in warn with the reason | shipped |
-| W19 | Only album rows accept a drop; others refuse silently | people and labels accept (they are chips); folders refuse with a word | open |
+| W19 | Only album rows accept a drop; others refuse silently | people and labels accept (they are chips); folders refuse with a word | shipped |
 | W20 | Dragging files from Explorer lights an album as accepting, then nothing | highlight only for the app's own drag | shipped |
 | W21 | The loupe cannot be panned from the keyboard | arrows pan while zoomed; Home recentres | shipped |
 | W22 | Double-click in the loupe zooms in and straight back out | the paired click is swallowed | shipped |
@@ -476,7 +476,7 @@ finding was checked and the numbers said no.
 | U33 | Three names for the sidecar act | one | shipped |
 | U34 | The comes-back sentence written twice | once | shipped |
 | U35 | Two spellings of already-imported in one sentence | one | shipped |
-| U36 | Two ways to run a search from the box, one remembers | one | open |
+| U36 | Two ways to run a search from the box, one remembers | one | shipped |
 | U37 | Two measurements of the same rail point | one | shipped |
 | U38 | Two names for All photos | one | shipped |
 | U39 | presence() punctuates three ways | one | shipped |

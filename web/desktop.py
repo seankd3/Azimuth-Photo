@@ -265,6 +265,14 @@ class Desktop:
     def labels(self) -> list[dict]:
         return self._run(lambda library: library.labels())
 
+    def rename_label(self, word: str, called: str) -> dict:
+        said = self._run(lambda library: library.rename_label(str(word), str(called)))
+        self._product.rank_soon()
+        return said
+
+    def forget_label(self, word: str) -> dict:
+        return self._run(lambda library: library.forget_label(str(word)))
+
     def teach(self, word: str, photo_ids: list[int], yes: bool) -> dict:
         if self._product is None:
             raise RuntimeError("Choose where Azimuth should live first.")

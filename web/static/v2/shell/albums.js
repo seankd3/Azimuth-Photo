@@ -5,6 +5,7 @@
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
+import { acceptDrops } from '../kit/drop.js';
 import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
@@ -317,44 +318,12 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     }
   });
 
-  tree.addEventListener('dragover', (event) => {
-    const row = event.target.closest('[data-album]');
-    if (!row) return;
-    // Only the app's own photographs are a drag here; files from outside
-    // are refused with the reason.
-    const ours = [...event.dataTransfer.types].includes('text/azimuth-ids');
-    event.preventDefault();
-    if (!ours || row.dataset.album === 'last-import') {
-      // What came in last is a fact, not a shelf: a drop here is refused,
-      // and the row says so.
-      event.dataTransfer.dropEffect = 'none';
-      row.classList.add('is-refused');
-      row.dataset.why = ours ? 'Last import is a record, not a shelf' : 'Only photographs already in the library can be filed';
-      return;
-    }
-    // Smart albums take the drop too: what you drag in is pinned in past
-    // the rules — the exception the pro tools never had.
-    event.dataTransfer.dropEffect = 'copy';
-    row.classList.add('is-drop');
-  });
-  tree.addEventListener('dragleave', (event) => {
-    const row = event.target.closest('[data-album]');
-    // Crossing between a row's own children fires dragleave too.
-    if (row && !row.contains(event.relatedTarget)) { row.classList.remove('is-drop', 'is-refused'); delete row.dataset.why; }
-  });
-  tree.addEventListener('drop', (event) => {
-    const row = event.target.closest('[data-album]');
-    if (!row) return;
-    event.preventDefault();
-    const refused = row.dataset.album === 'last-import' || !row.classList.contains('is-drop');
-    row.classList.remove('is-drop', 'is-refused');
-    delete row.dataset.why;
-    if (refused) return;
-    let ids = [];
-    try {
-      ids = JSON.parse(event.dataTransfer.getData('text/azimuth-ids') || '[]');
-    } catch { ids = []; }
-    if (ids.length) void addTo(row.dataset.album, ids);
+  // Smart albums take the drop too: what you drag in is pinned in past the
+  // rules -- the exception the pro tools never had. What came in last is a
+  // fact, not a shelf.
+  acceptDrops(tree, '[data-album]', {
+    judge: (row) => (row.dataset.album === 'last-import' ? 'Last import is a record, not a shelf' : null),
+    drop: (row, ids) => addTo(row.dataset.album, ids),
   });
 
   // ---- the photograph's menu: built for the moment it opens ----

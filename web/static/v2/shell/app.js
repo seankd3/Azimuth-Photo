@@ -1,3 +1,4 @@
+import { acceptDrops, IDS } from '../kit/drop.js';
 import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { library as product } from '../net/index.js';
@@ -368,6 +369,9 @@ function browseChip(chip) {
 const labelsPanel = createLabelsPanel({
   product,
   update,
+  notify,
+  undo,
+  ask: (title, anchor, initial, options) => albumsPanel.ask(title, anchor, initial, options),
   browse: (term) => browseChip({ is: 'label', values: [term] }),
 });
 const editPanel = createEditPanel({
@@ -654,7 +658,7 @@ function visibleGrid() {
       } else {
         ids = selection();
       }
-      event.dataTransfer.setData('text/azimuth-ids', JSON.stringify(ids));
+      event.dataTransfer.setData(IDS, JSON.stringify(ids));
       event.dataTransfer.effectAllowed = 'copy';
       if (ids.length > 1) {
         // The ghost says how many ride along, not just the cell under the cursor.
@@ -1436,6 +1440,12 @@ function renderFolders(state) {
   tree.replaceChildren(...rows);
   if (hadFocus) tree.querySelector('.folder-row[tabindex="0"]')?.focus({ preventScroll: true });
 }
+
+// A folder is where the file is: a drop is refused with the reason.
+acceptDrops(document.querySelector('[data-folder-tree]'), '.folder-row', {
+  judge: () => 'A folder is where the file is on disk — move the file to move it',
+  drop: () => {},
+});
 
 // The tree's keys: arrows walk the visible rows, Right opens, Left folds
 // or climbs, Home and End are the ends, typing finds a name.

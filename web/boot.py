@@ -956,6 +956,37 @@ class Library:
         out.sort(key=lambda entry: entry["count"], reverse=True)
         return out
 
+    def rename_label(self, word: str, called: str) -> dict:
+        """Call a taught word something else. The teaching stays: the set
+        keeps its members and its answers under the new name."""
+
+        import labels as taught
+
+        self._open()
+        set_id = taught._find(self.conn, word)
+        if set_id is None:
+            raise ValueError(f"no word called {word!r}")
+        if taught._find(self.conn, called) not in (None, set_id):
+            raise ValueError(f"there is already a word called {called.strip()!r}")
+        said = sets.rename(self.conn, set_id, called)
+        self.conn.commit()
+        return {"id": set_id, "word": said["name"] if said else called}
+
+    def forget_label(self, word: str) -> dict:
+        """Stop offering a taught word. The way back is remember_album on
+        the id returned: a label is a set, and a forgotten set can be
+        remembered."""
+
+        import labels as taught
+
+        self._open()
+        set_id = taught._find(self.conn, word)
+        if set_id is None:
+            raise ValueError(f"no word called {word!r}")
+        sets.forget(self.conn, set_id)
+        self.conn.commit()
+        return {"id": set_id}
+
     def teach(self, word: str, photo_ids, yes: bool, space=None) -> dict:
         """One answer about one word: these photographs are (Y) or are not
         (N) what it means. The first answer creates the word.

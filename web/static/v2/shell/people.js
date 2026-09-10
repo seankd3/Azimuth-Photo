@@ -8,6 +8,7 @@
 
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
+import { acceptDrops } from '../kit/drop.js';
 import { why } from '../kit/why.js';
 import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
@@ -211,6 +212,10 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     const settled = row.dataset.settled === '1' || (!row.dataset.settled && !row.dataset.term.startsWith('Someone'));
     void introduce(row.dataset.person, row.dataset.term, settled, row);
   };
+  acceptDrops(list, '.person-row', {
+    judge: () => 'A person is found by their face, not filed by hand',
+    drop: () => {},
+  });
   list.addEventListener('contextmenu', nameFrom);
   stage.addEventListener('contextmenu', nameFrom);
   list.addEventListener('keydown', (event) => {

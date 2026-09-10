@@ -67,7 +67,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const past = recents().filter(match).slice(0, query ? 3 : 5);
     if (past.length) {
       sections.push(['Recent', past.map((q) => ({
-        label: q, glyph: 'recent', run: () => { box.value = q; search(q); },
+        label: q, glyph: 'recent', run: () => { box.value = q; commit(q); },
         dismiss: () => { forget(q); render(); },
       }))]);
     }
