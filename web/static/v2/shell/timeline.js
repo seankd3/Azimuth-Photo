@@ -38,7 +38,8 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
   // The rail is a scroll control: it takes the keyboard like one.
   track.tabIndex = 0;
   track.setAttribute('role', 'slider');
-  track.setAttribute('aria-label', 'Timeline');
+  track.setAttribute('aria-orientation', 'vertical');
+  track.setAttribute('aria-label', 'Timeline — arrows a day, Page keys a year');
 
   const y = (index) => (total ? (index / total) * height : 0);
   const at = (offsetY) => Math.max(0, Math.min(total - 1, Math.floor((offsetY / height) * total)));
@@ -116,9 +117,15 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
   // The keyboard walks chapters: arrows a day, Page keys a year, Home and
   // End the ends. The same place() and scrollTo() the pointer uses.
   function jump(index) {
-    const cell = place(Math.max(0, Math.min(total - 1, index)));
+    const to = Math.max(0, Math.min(total - 1, index));
+    const cell = place(to);
     if (cell) scrollTo(cell.top);
+    // The keyboard scrub says the day too, and the word leaves with the focus.
+    say(y(to));
+    clearTimeout(idle);
+    idle = setTimeout(() => { label.hidden = true; }, 1500);
   }
+  track.addEventListener('blur', () => { label.hidden = true; });
   track.addEventListener('keydown', (event) => {
     if (!chapters.length) return;
     const current = indexAt(workspace.scrollTop) ?? 0;
@@ -186,7 +193,7 @@ export function createTimeline({ workspace, before, top, place, indexAt, scrollT
     if (event.button !== 0) return;
     pressed = true;
     track.setPointerCapture(event.pointerId);
-    const index = say(event.offsetY);
+    const index = say(event.clientY - track.getBoundingClientRect().top);
     const cell = place(index);
     if (cell) scrollTo(cell.top);
     event.preventDefault();

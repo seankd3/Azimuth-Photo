@@ -233,6 +233,8 @@ function reconcileGrid(grid, state, actions, layout, range) {
       : cell?.dataset.kind === 'skeleton';
     if (!matches) cell = photo ? photoCell(photo, index, actions) : skeletonCell(index);
     positionCell(cell, layout, index, photo);
+    // One tab stop for the grid: the cursor, else the first cell in view.
+    cell.tabIndex = index === (state.selectedIndex ?? range.start) ? 0 : -1;
     // Marked wears the accent; the keyboard cursor is its own quieter ring,
     // so where you are is visible inside what you have.
     cell.classList.toggle('is-selected', Boolean(photo && state.marked?.has(photo.id)) || (!photo && index === state.selectedIndex));
@@ -248,7 +250,9 @@ function reconcileGrid(grid, state, actions, layout, range) {
       const { state: where, said } = presence(photo, cell.dataset.empty === '');
       const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
       cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
-      cell.setAttribute('aria-pressed', String(index === state.selectedIndex));
+      cell.setAttribute('aria-pressed', String(Boolean(state.marked?.has(photo.id))));
+      if (index === state.selectedIndex) cell.setAttribute('aria-current', 'true');
+      else cell.removeAttribute('aria-current');
       // A cell that stays keeps its badge; the badge keeps up with the set.
       const badge = cell.querySelector('.stack-badge');
       if (badge) {

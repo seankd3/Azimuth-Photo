@@ -9,6 +9,7 @@
 // to the status line, the outcome arrives as a toast, and Import… reopens
 // the details (and Stop) while it runs.
 
+import { why } from '../kit/why.js';
 import { recall, remember } from '../kit/remembered.js';
 import { title as dayName } from '../kit/days.js';
 
@@ -71,7 +72,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     try {
       staged = await product.stage(source);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
       return;
     } finally {
       clearInterval(looking);
@@ -315,9 +316,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     backButton.textContent = 'Back';
     backButton.title = 'Back to the library (Esc)';
     const parts = [`${(status.brought || 0).toLocaleString()} imported`];
-    if (status.already) parts.push(`${status.already} already there`);
-    if (status.skipped) parts.push(`${status.skipped} already in the library`);
-    if (status.failed) parts.push(`${status.failed} could not be imported`);
+    if (status.already) parts.push(`${status.already.toLocaleString()} already in the library`);
+    if (status.skipped) parts.push(`${status.skipped.toLocaleString()} already in the library`);
+    if (status.failed) parts.push(`${status.failed.toLocaleString()} could not be imported`);
     const cleared = state.isCard && clearBox.checked && (status.cleared || 0) >= total && status.phase === 'done';
     const said = (status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');

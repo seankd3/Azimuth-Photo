@@ -5,8 +5,8 @@
 
 const SAID = {
   here: 'Here',
-  pending: 'Preparing this photograph…',
-  unshowable: 'This photograph cannot be shown.',
+  pending: 'Preparing this photograph',
+  unshowable: 'This photograph cannot be shown',
   away: 'On a drive that is away',
   missing: 'Missing — no drive holds it',
 };

@@ -22,6 +22,7 @@ const state = {
   like: [],
   days: [],
   importing: '',
+  doing: '',
   total: 0,
   loading: true,
   scanning: false,

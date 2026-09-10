@@ -6,6 +6,8 @@
 // not the Undo — Ctrl+Z still reverses the cull until its own eight
 // seconds are up, and never a decision the person has stopped thinking
 // about.
+import { why } from '../kit/why.js';
+
 const SHOWN_MS = 8000;
 // A notice with no way back has nothing to wait for.
 const NOTICE_MS = 3500;
@@ -57,7 +59,7 @@ export function createUndo() {
     try {
       await current();
     } catch (reason) {
-      show(reason.message);
+      show(why(reason));
     }
   }
 

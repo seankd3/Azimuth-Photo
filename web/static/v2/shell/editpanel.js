@@ -4,6 +4,8 @@
 // loupe, nothing written; releasing keeps it as one decision. Double-click
 // a slider's name to rest it, Reset to rest them all, D or Done to leave.
 
+import { why } from '../kit/why.js';
+
 const GROUPS = [
   ['Light', [
     ['Exposure2012', 'Exposure', -5, 5, 0.05],
@@ -105,7 +107,7 @@ export function createEditPanel({ product, notify, undo, preview, applied, shown
     try {
       held = await product.developState(photo.id);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
       return;
     }
     if (state.photo !== photo) return;
@@ -144,7 +146,7 @@ export function createEditPanel({ product, notify, undo, preview, applied, shown
       } catch (error) {
         // A look that cannot be made is said once, not swallowed — the
         // silent version hid a real failure for an afternoon.
-        if (asked === state.showing) notify(error.message);
+        if (asked === state.showing) notify(why(error));
       }
     }, 80);
   }
@@ -157,7 +159,7 @@ export function createEditPanel({ product, notify, undo, preview, applied, shown
     try {
       await product.develop(id, patch);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
       return;
     }
     state.settings = { ...state.settings, ...patch };

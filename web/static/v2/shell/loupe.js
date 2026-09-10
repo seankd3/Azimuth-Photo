@@ -71,6 +71,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     image.style.cursor = zoomed ? (pointer ? 'grabbing' : 'grab') : 'zoom-in';
     // The chip names what pressing it does, with where you are as a suffix.
     word.textContent = zoomed ? `Fit · ${Math.round(state.scale * (window.devicePixelRatio || 1) * 100)}%` : '100%';
+    chip.setAttribute('aria-label', zoomed ? 'Fit the whole photograph' : 'Show at 100%');
   }
 
   function toFit() {
@@ -171,10 +172,14 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
       apply();
     }
   });
+  let lastTap = 0;
   image.addEventListener('pointerup', (event) => {
     if (!pointer || event.pointerId !== pointer.id) return;
     const tapped = !pointer.moved;
     pointer = null;
+    // The second tap of a double is the same question, not its answer.
+    if (tapped && event.timeStamp - lastTap < 350) { apply(); return; }
+    if (tapped) lastTap = event.timeStamp;
     if (tapped) {
       // The click asks the sharpness question at this spot — or, already
       // zoomed, steps back to the whole picture.
@@ -220,5 +225,15 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   }
   chip.addEventListener('click', toggle);
 
-  return Object.freeze({ show, toFit, escape, clear, reset, refresh, toggle });
+  // The keyboard walks a zoomed picture: a fraction of the view per press.
+  function pan(fx, fy) {
+    const box = area();
+    state.tx += fx * box.width;
+    state.ty += fy * box.height;
+    apply();
+  }
+  function recentre() { state.tx = 0; state.ty = 0; apply(); }
+  const zoomed = () => state.mode === 'zoom';
+
+  return Object.freeze({ show, toFit, escape, clear, reset, refresh, toggle, pan, recentre, zoomed });
 }

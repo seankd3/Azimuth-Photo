@@ -18,6 +18,7 @@ const RECENT = 48;
 const ASPECT_MIN = 0.4;
 const ASPECT_MAX = 2.6;
 
+import { why } from '../kit/why.js';
 import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
 
@@ -114,7 +115,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
           renderProgress();
         }
       } catch (error) {
-        notify(error.message);
+        notify(why(error));
       } finally {
         state.filling = null;
       }
@@ -154,7 +155,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
       render();
       void fill();
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -208,7 +209,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
           remember([photo]);
         }
       } catch (error) {
-        notify(error.message);
+        notify(why(error));
       }
     }
     state.selected = Math.min(state.selected, state.set.length - 1);
@@ -308,7 +309,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     writing.then((recorded) => {
       const over = losers.length;
       undo.show(
-        `Chose ${winner.tail.split('/').pop()} over ${over === 1 ? 'one other' : `${over} others`}.`,
+        `${winner.tail.split('/').pop()} chosen over ${over === 1 ? 'one other' : `${over} others`}.`,
         async () => {
           await product.unround(recorded.decision);
           if (!isOpen()) { await onLeave(); return; }   // the grid behind may be sorted by it

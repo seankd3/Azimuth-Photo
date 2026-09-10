@@ -1,3 +1,5 @@
+import { why } from '../kit/why.js';
+
 export function createTrashWorkflow({ product, read, reload, notify, undo, selection }) {
   const dialog = document.querySelector('[data-empty-dialog]');
   const form = document.querySelector('[data-empty-form]');
@@ -24,7 +26,7 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
           () => product.undoCull(result.changed).then(reload));
       }
     } catch (reason) {
-      notify(reason.message);
+      notify(why(reason));
     }
   }
 
@@ -39,7 +41,7 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
       dialog.showModal();
       form.elements.count.focus();
     } catch (reason) {
-      notify(reason.message);
+      notify(why(reason));
     }
   }
 
@@ -63,7 +65,7 @@ export function createTrashWorkflow({ product, read, reload, notify, undo, selec
       closeDialog();
       await reload();
       notify(result.errors.length
-        ? `${result.emptied.length.toLocaleString()} deleted; ${result.errors.length.toLocaleString()} could not be deleted.`
+        ? `${result.emptied.length.toLocaleString()} photographs permanently deleted, ${result.errors.length.toLocaleString()} could not be.`
         : `${result.emptied.length.toLocaleString()} photographs permanently deleted.`);
     } catch (reason) {
       error.textContent = reason.message;

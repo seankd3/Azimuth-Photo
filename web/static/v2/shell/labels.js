@@ -17,9 +17,13 @@ export function createLabelsPanel({ product, update, browse }) {
   }
 
   let seen = null;
+  let wornSeen = '';
+  const worn = (state) => (state.chips || []).filter((c) => c.is === 'label' && !c.not).flatMap((c) => c.values).join('\u0001');
   function render(state) {
-    if (seen === state.labels) return;
+    if (seen === state.labels && wornSeen === worn(state)) return;
     seen = state.labels;
+    wornSeen = worn(state);
+    const active = new Set(wornSeen ? wornSeen.split('\u0001') : []);
     const held = state.labels || [];
     section.hidden = held.length === 0;
     if (section.hidden) {
@@ -29,9 +33,9 @@ export function createLabelsPanel({ product, update, browse }) {
     list.replaceChildren(...held.map((entry) => {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'side-row';
+      row.className = 'side-row' + (active.has(entry.term) ? ' is-active' : '');
       row.dataset.term = entry.term;
-      row.title = `${entry.term} — a word you taught; Y and N inside its view refine it`;
+      row.title = `${entry.term} — a word you taught; Y and N inside its view refine it. About ${entry.count.toLocaleString()}: the count settles as the word is taught`;
       const mark = icon('label');
       const name = document.createElement('span');
       name.className = 'leaf';

@@ -64,16 +64,18 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
     // What you asked before, first, narrowed by what you type -- a half-typed
     // repeat is exactly what these complete. Each can be forgotten.
-    const past = recents().filter(match);
+    const past = recents().filter(match).slice(0, query ? 3 : 5);
     if (past.length) {
       sections.push(['Recent', past.map((q) => ({
         label: q, glyph: 'recent', run: () => { box.value = q; search(q); },
         dismiss: () => { forget(q); render(); },
       }))]);
     }
+    // One cap for every section: five at rest, three once a word narrows.
+    const CAP = query ? 3 : 5;
     const albums = (read().albums || [])
       .filter((c) => (!c.pinned || c.count) && c.count && match(c.name))
-      .slice(0, 6)
+      .slice(0, CAP)
       .map((c) => ({
         label: c.name, count: c.count, glyph: c.smart ? 'smart' : 'album',
         run: () => applyChip({ is: 'in', values: [c.id] }),
@@ -81,7 +83,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     if (albums.length) sections.push(['Albums', albums]);
 
     // The introduced, with their faces; Someones wait in the sidebar.
-    const people = (read().people || []).filter((p) => p.settled && match(p.term)).slice(0, query ? 3 : 4)
+    const people = (read().people || []).filter((p) => p.settled && match(p.term)).slice(0, CAP)
       .map((p) => ({
         label: p.term, count: `~${p.count.toLocaleString()}`, glyph: 'person',
         strip: p.samples || [],
@@ -90,7 +92,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     if (people.length) sections.push(['People', people]);
 
     // The words you have taught, tilde-counted until calibration.
-    const labels = (read().labels || []).filter((l) => match(l.term)).slice(0, query ? 4 : 5)
+    const labels = (read().labels || []).filter((l) => match(l.term)).slice(0, CAP)
       .map((l) => ({
         label: l.term, count: `~${l.count.toLocaleString()}`, glyph: 'label',
         run: () => applyChip({ is: 'label', values: [l.term] }),
@@ -99,21 +101,21 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
     // The shoots time itself declares: a session card is a taken chip, so
     // it counts, composes, and saves like every other fact.
-    const shoots = (sessions || []).filter((s) => match(s.title)).slice(0, query ? 3 : 5)
+    const shoots = (sessions || []).filter((s) => match(s.title)).slice(0, CAP)
       .map((s) => ({
         label: s.title, count: s.count, glyph: 'clock',
         run: () => applyChip({ is: 'taken', from: s.from.slice(0, 10), to: s.to.slice(0, 10) }),
       }));
     if (shoots.length) sections.push(['Sessions', shoots]);
 
-    const years = held.years.filter((y) => match(y.year)).slice(0, query ? 3 : 6)
+    const years = held.years.filter((y) => match(y.year)).slice(0, CAP)
       .map((y) => ({
         label: y.year, count: y.photos, glyph: 'calendar',
         run: () => applyChip({ is: 'taken', from: `${y.year}-01-01`, to: `${y.year}-12-31` }),
       }));
     if (years.length) sections.push(['Years', years]);
 
-    const cameras = held.cameras.filter((c) => match(c.model)).slice(0, query ? 4 : 5)
+    const cameras = held.cameras.filter((c) => match(c.model)).slice(0, CAP)
       .map((c) => ({
         label: c.model, count: c.photos, glyph: 'camera',
         run: () => applyChip({ is: 'camera', values: [c.model] }),
@@ -130,7 +132,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
         label: SAY[o.orientation], count: o.photos, glyph: o.orientation === 'portrait' ? 'portrait' : 'landscape',
         run: () => applyChip({ is: 'orientation', values: [o.orientation] }),
       }));
-    if (kinds.length || shapes.length) sections.push(['Kind and shape', [...kinds, ...shapes]]);
+    if (kinds.length || shapes.length) sections.push(['Kind and shape', [...kinds, ...shapes].slice(0, CAP)]);
 
     return sections;
   }
@@ -139,6 +141,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
   const hint = document.createElement('kbd');
   hint.textContent = '⏎';
+  hint.setAttribute('aria-hidden', 'true');
 
   function render() {
     const text = box.value;
@@ -161,6 +164,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       const head = document.createElement('p');
       head.className = 'eyebrow';
       head.textContent = title;
+      head.setAttribute('role', 'presentation');
       rows.push(head);
       for (const entry of entries) {
         const row = document.createElement('button');
@@ -208,6 +212,8 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
           dismiss.addEventListener('click', (event) => { event.stopPropagation(); entry.dismiss(); });
           const pair = document.createElement('span');
           pair.className = 'drop-pair';
+          pair.setAttribute('role', 'presentation');
+          row.title = 'Delete forgets this search';
           pair.append(row, dismiss);
           rows.push(pair);
         } else rows.push(row);
@@ -219,10 +225,12 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       if (option) { option.id = `search-offer-${option.dataset.item}`; option.setAttribute('role', 'option'); }
     }
     cursor = -1;
+    movedSince = false;
     drop.replaceChildren(...rows);
     drop.hidden = rows.length === 0;
     box.setAttribute('aria-expanded', String(!drop.hidden));
-    box.removeAttribute('aria-activedescendant');
+    // Enter's row is the active descendant from the first keystroke.
+    mark();
     place();
   }
 
@@ -274,6 +282,9 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
   // cursor: a row scrolled under a still mouse must not take the cursor.
   let pointerAt = null;
   let keyedAt = null;
+  // A row that appears under a still mouse must not take the cursor: only
+  // a pointer that has moved since the last render may.
+  let movedSince = false;
   box.setAttribute('role', 'combobox');
   box.setAttribute('aria-autocomplete', 'list');
   box.setAttribute('aria-expanded', 'false');
@@ -308,6 +319,15 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       event.preventDefault();
       return;
     }
+    if ((event.key === 'Delete' || event.key === 'Backspace') && cursor >= 0 && items[cursor]?.dismiss && !box.value) {
+      // On a Recent row, Delete forgets it and keeps the cursor's place.
+      const at = cursor;
+      items[cursor].dismiss();
+      cursor = Math.min(at, items.length - 1);
+      mark();
+      event.preventDefault();
+      return;
+    }
     if (event.key === 'Escape') {
       clearTimeout(typeTimer);
       // First Esc puts the offers away; the second clears the words and
@@ -330,10 +350,10 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const row = event.target.closest('.drop-row');
     if (row) pick(Number(row.dataset.item));
   });
-  drop.addEventListener('pointermove', (event) => { pointerAt = [event.clientX, event.clientY]; });
+  drop.addEventListener('pointermove', (event) => { pointerAt = [event.clientX, event.clientY]; movedSince = true; });
   drop.addEventListener('pointerover', (event) => {
     const row = event.target.closest('.drop-row');
-    if (!row) return;
+    if (!row || !movedSince) return;
     if (keyedAt && pointerAt && keyedAt[0] === pointerAt[0] && keyedAt[1] === pointerAt[1]) return;
     cursor = Number(row.dataset.item);
     mark();

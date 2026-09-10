@@ -8,6 +8,7 @@
 
 const WAITING = 3;   // Someones shown in the sidebar before the wall takes over
 
+import { why } from '../kit/why.js';
 import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
 import { icon } from '../kit/icons.js';
@@ -25,7 +26,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     } catch (error) {
       // A library without faces yet has nobody to list; anything else is
       // said, because a silent read looks exactly like no faces.
-      if (!/no faces|no people/i.test(String(error.message))) notify(error.message);
+      if (!/no faces|no people/i.test(String(error.message))) notify(why(error));
     }
   }
 
@@ -43,18 +44,21 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
 
   let seen = null;
   let seenView = null;
+  let wornSeen = '';
+  const worn = (state) => (state.chips || []).filter((c) => c.is === 'person' && !c.not).flatMap((c) => c.values).join('\u0001');
   function render(state) {
     if (stage.hidden !== (state.view !== 'people')) stage.hidden = state.view !== 'people';
-    if (seen === state.people && seenView === state.view) return;
+    if (seen === state.people && seenView === state.view && wornSeen === worn(state)) return;
     seen = state.people;
     seenView = state.view;
+    wornSeen = worn(state);
     const held = state.people || [];
     section.hidden = held.length === 0;
-    renderRows(held);
+    renderRows(held, new Set(wornSeen ? wornSeen.split('\u0001') : []));
     if (!stage.hidden) renderWall(held);
   }
 
-  function renderRows(held) {
+  function renderRows(held, active = new Set()) {
     if (section.hidden) {
       list.replaceChildren();
       return;
@@ -64,13 +68,13 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     const rows = [...named, ...waiting.slice(0, WAITING)].map((entry) => {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'side-row person-row';
+      row.className = 'side-row person-row' + (active.has(entry.term) ? ' is-active' : '');
       row.dataset.term = entry.term;
       row.dataset.person = entry.person;
       row.dataset.settled = entry.settled ? '1' : '0';
-      row.title = !entry.settled
+      row.title = (!entry.settled
         ? 'Someone the library keeps seeing — click to see them; N or right-click names them'
-        : `${entry.term} — N or right-click renames`;
+        : `${entry.term} — N or right-click renames`) + `. About ${entry.count.toLocaleString()}: the count settles as faces are read`;
       const name = document.createElement('span');
       name.className = 'leaf';
       name.textContent = entry.term;
@@ -181,7 +185,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     if (!called || called === current) return;
     try {
       await product.namePerson(exemplar, called);
-      const said = `“${called}” — the library will gather their photographs now.`;
+      const said = `“${called}” named. Their photographs gather as the library reads.`;
       // A rename can be taken back by naming them what they were; a first
       // naming has no former name to return to.
       if (settled) undo.show(said, async () => { await product.namePerson(exemplar, current); await renamed(); });
@@ -189,7 +193,7 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
       // The lane regroups and the pulse says so; the shelf re-reads then.
       void renamed();
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 

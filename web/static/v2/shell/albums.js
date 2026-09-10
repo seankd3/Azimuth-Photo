@@ -5,6 +5,7 @@
 // shelf is the name: America/Utah sits under America, and a parent browses
 // as the union of what is under it.
 
+import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
 
@@ -20,7 +21,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     try {
       update({ albums: await product.albums() });
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -86,16 +87,20 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
 
   const nameOk = namePop.querySelector('[data-action="name-ok"]');
   let namedFrom = null;   // where focus goes back when the popover closes
-  let justOpened = false; // the click that opened it bubbles to document once
+  let openedBy = null;    // the click that opened it bubbles to document once
+  let taken = () => [];   // names the answer may not repeat
+  const nameError = namePop.querySelector('[data-name-error]');
 
-  function prompt(title, anchor, initial = '') {
+  function prompt(title, anchor, initial = '', { not = [] } = {}) {
     // The anchor is a node or a rect captured before its menu was hidden —
     // a hidden node measures at the corner of the window.
     askName?.(null);
     return new Promise((resolve) => {
       askName = resolve;
       namedFrom = anchor instanceof Element ? anchor : null;
-      justOpened = true;
+      openedBy = window.event || null;
+      taken = () => not.map((n) => n.toLowerCase());
+      nameError.textContent = '';
       namePop.querySelector('[data-name-title]').textContent = title;
       nameInput.value = initial;
       nameOk.disabled = !initial.trim();
@@ -120,45 +125,64 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     resolve?.(value);
   }
 
-  nameInput.addEventListener('input', () => { nameOk.disabled = !nameInput.value.trim(); });
-  nameOk.addEventListener('click', () => answer(nameInput.value.trim() || null));
-  nameInput.addEventListener('keydown', (event) => {
-    if (event.key === 'Enter') {
-      // An empty name is not an answer; the field simply waits.
-      if (nameInput.value.trim()) answer(nameInput.value.trim());
+  // A name already on the shelf is refused where it is typed, with the
+  // text kept, instead of after the popover has closed.
+  function checkName() {
+    const value = nameInput.value.trim();
+    const dup = value && taken().includes(value.toLowerCase());
+    nameError.textContent = dup ? `There is already an album called “${value}”.` : '';
+    nameOk.disabled = !value || dup;
+    return Boolean(value) && !dup;
+  }
+  nameInput.addEventListener('input', checkName);
+  nameOk.addEventListener('click', () => { if (checkName()) answer(nameInput.value.trim()); });
+  namePop.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target === nameInput) {
+      // An empty or taken name is not an answer; the field simply waits.
+      if (checkName()) answer(nameInput.value.trim());
       event.preventDefault();
     }
     if (event.key === 'Escape') { answer(null); event.preventDefault(); event.stopPropagation(); }
+    if (event.key === 'Tab') {
+      // Two stops, field and Save, and nothing past them.
+      const forward = !event.shiftKey;
+      const onField = event.target === nameInput;
+      if ((forward && !onField) || (!forward && onField)) { answer(null); return; }
+      (onField ? nameOk : nameInput).focus();
+      event.preventDefault();
+    }
   });
 
   // ---- verbs ----
 
+  const albumNames = () => (read().albums || []).map((c) => c.name);
+
   async function create(anchor) {
-    const name = await prompt('New album', anchor);
+    const name = await prompt('New album', anchor, '', { not: albumNames() });
     if (!name) return;
     try {
       await product.createAlbum(name);
       await refresh();
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
   async function saveView(anchor) {
     // The chips already say what this view is; the name box opens saying it.
-    const name = await prompt('Save this view as', anchor, describe(read()));
+    const name = await prompt('Save this view as', anchor, describe(read()), { not: albumNames() });
     if (!name) return;
     try {
       await product.saveView(name, viewOf());
       await refresh();
       notify(`“${name}” keeps these filters, live.`);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
   async function keepResults(anchor) {
-    const name = await prompt('Save these results as', anchor, read().query);
+    const name = await prompt('Save these results as', anchor, read().query, { not: albumNames() });
     if (!name) return;
     try {
       const answered = await product.find({
@@ -170,7 +194,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         ? `“${name}” keeps the top ${kept.kept.toLocaleString()} of ${answered.total.toLocaleString()} results.`
         : `“${name}” keeps ${kept.kept.toLocaleString()} photographs from this search.`);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -184,7 +208,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         ? `${word(moved.added)} added to Quick album — ${moved.count.toLocaleString()} there now.`
         : `${word(moved.removed)} out of Quick album — ${moved.count.toLocaleString()} there now.`);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -206,7 +230,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         ? `${word} excluded from “${here.name}”.`
         : `${word} out of “${here.name}”.`);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -223,7 +247,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
         if (read().album === id) await reload();
       });
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -233,7 +257,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       await refresh();
       await reload();
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   }
 
@@ -265,10 +289,10 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       if (action === 'rename-album') {
         const current = (read().albums.find((c) => c.id === id) || {}).name || '';
         const row = tree.querySelector(`[data-album="${id}"]`);
-        const name = await prompt('Rename to', row || tree, current);
+        const name = await prompt('Rename to', row || tree, current, { not: albumNames().filter((n) => n !== current) });
         if (name) {
           const renamed = await product.renameAlbum(id, name);
-          if (renamed?.followed) notify(`Renamed. ${renamed.followed} album${renamed.followed === 1 ? '' : 's'} under it followed.`);
+          notify(`“${current}” renamed to “${name}”.${renamed?.followed ? ` ${renamed.followed} album${renamed.followed === 1 ? '' : 's'} under it followed.` : ''}`);
         }
       }
       if (action === 'freeze-album') {
@@ -289,19 +313,23 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       }
       await refresh();
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
     }
   });
 
   tree.addEventListener('dragover', (event) => {
     const row = event.target.closest('[data-album]');
     if (!row) return;
+    // Only the app's own photographs are a drag here; files from outside
+    // are refused with the reason.
+    const ours = [...event.dataTransfer.types].includes('text/azimuth-ids');
     event.preventDefault();
-    if (row.dataset.album === 'last-import') {
+    if (!ours || row.dataset.album === 'last-import') {
       // What came in last is a fact, not a shelf: a drop here is refused,
       // and the row says so.
       event.dataTransfer.dropEffect = 'none';
       row.classList.add('is-refused');
+      row.dataset.why = ours ? 'Last import is a record, not a shelf' : 'Only photographs already in the library can be filed';
       return;
     }
     // Smart albums take the drop too: what you drag in is pinned in past
@@ -312,14 +340,15 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
   tree.addEventListener('dragleave', (event) => {
     const row = event.target.closest('[data-album]');
     // Crossing between a row's own children fires dragleave too.
-    if (row && !row.contains(event.relatedTarget)) row.classList.remove('is-drop', 'is-refused');
+    if (row && !row.contains(event.relatedTarget)) { row.classList.remove('is-drop', 'is-refused'); delete row.dataset.why; }
   });
   tree.addEventListener('drop', (event) => {
     const row = event.target.closest('[data-album]');
     if (!row) return;
     event.preventDefault();
-    const refused = row.dataset.album === 'last-import';
+    const refused = row.dataset.album === 'last-import' || !row.classList.contains('is-drop');
     row.classList.remove('is-drop', 'is-refused');
+    delete row.dataset.why;
     if (refused) return;
     let ids = [];
     try {
@@ -341,6 +370,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     const item = (label, run) => {
       const button = document.createElement('button');
       button.type = 'button';
+      button.setAttribute('role', 'menuitem');
       button.textContent = label;
       button.addEventListener('click', () => { hideMenu(photoMenu); void run(); });
       return button;
@@ -362,10 +392,10 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       rows.push(item(`Add to “${entry.name}”`, () => addTo(entry.id, ids)));
     }
     rows.push(item('New album from selection…', async () => {
-      const name = await prompt('New album from selection', spot);
+      const name = await prompt('New album from selection', spot, '', { not: albumNames() });
       if (!name) return;
-      const kept = await product.savePhotos(name, ids).catch((error) => { notify(error.message); return null; });
-      if (kept) { await refresh(); notify(`“${name}” keeps ${kept.kept} photographs.`); }
+      const kept = await product.savePhotos(name, ids).catch((error) => { notify(why(error)); return null; });
+      if (kept) { await refresh(); notify(`“${name}” keeps ${kept.kept.toLocaleString()} photographs.`); }
     }));
     if (viewing) {
       rows.push(item(
@@ -383,7 +413,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     // The click that just opened the popover bubbles here in the same
     // dispatch; it must not also be the click that closes it. Every later
     // outside click answers "no", whatever else it goes on to do.
-    if (justOpened) { justOpened = false; return; }
+    if (event === openedBy) return;
     if (!namePop.hidden && !namePop.contains(event.target)) answer(null);
   });
 

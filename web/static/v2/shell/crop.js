@@ -6,6 +6,8 @@
 // image, exactly as the sidecar spells it; the owner's turn is a display
 // transform mapped through, same as everywhere else.
 
+import { why } from '../kit/why.js';
+
 const EDGE = 14;          // how close counts as grabbing an edge, in px
 const LEAST = 0.02;       // no crop thinner than 2% survives a drag
 
@@ -24,7 +26,7 @@ export function createCropSurface({ product, notify, undo, applied }) {
     try {
       held = await product.developState(photo.id);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
       return;
     }
     if (!held.plain) {
@@ -67,7 +69,7 @@ export function createCropSurface({ product, notify, undo, applied }) {
     try {
       await product.develop(id, patch);
     } catch (error) {
-      notify(error.message);
+      notify(why(error));
       return;
     }
     close();

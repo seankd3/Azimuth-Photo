@@ -13,7 +13,7 @@
     <button class="panel-tab tab-right" type="button" data-action="toggle-right" aria-label="Show or hide the right panel">›</button>
     <button class="panel-tab tab-top" type="button" data-action="toggle-top" aria-label="Show or hide the top bar">˄</button>
     <header class="topbar">
-      <button class="brand" type="button" data-action="all-photos" aria-label="Show all photos">
+      <button class="brand" type="button" data-action="all-photos" aria-label="All photos">
         <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><g fill="none" stroke="currentColor"><circle cx="16" cy="16" r="13" stroke-width="1.2" opacity=".5"></circle><path d="M16 3v4M16 25v4M3 16h4M25 16h4" stroke-width="1.2" opacity=".5"></path><path d="M16 8.5 20.5 21 16 17.8 11.5 21Z" fill="var(--accent)" stroke="none"></path></g></svg>
         <span>Azimuth<span class="wm-dim"> Photo</span></span>
       </button>
@@ -26,7 +26,7 @@
         <button class="search-clear" type="button" data-action="search-clear" data-icon-only="close" aria-label="Clear the search"></button>
       </div>
       <div class="top-actions">
-        <button class="card-chip" type="button" data-action="import-card" hidden aria-live="polite">Card · <span data-card-label></span></button>
+        <button class="card-chip" type="button" data-action="import-card" hidden>Card · <span data-card-label></span></button>
         <button class="quiet-button" type="button" data-action="import-folder">Import…</button>
         <button class="quiet-button" type="button" data-action="export" hidden>Export…</button>
         <button class="quiet-button" type="button" data-action="add-folder">Add folder…</button>
@@ -66,12 +66,12 @@
         <div class="section-heading"><button class="eyebrow" type="button">Drives</button></div>
         <div class="drive-list" data-drive-list></div>
       </section>
-      <p class="sidebar-status" data-status></p>
+      <p class="sidebar-status" data-status role="status"></p>
     </aside>
 
     <main class="workspace">
       <div class="contextbar">
-        <span data-result-label>Loading your library…</span>
+        <span data-result-label role="status">Loading your library…</span>
         <div class="cull-actions" data-cull-actions hidden>
           <button class="quiet-button" type="button" data-action="pick"><kbd>P</kbd> Pick</button>
           <button class="quiet-button" type="button" data-action="turn" title="Turn left · Shift+click or Shift+R turns right"><kbd>R</kbd> Rotate</button>
@@ -122,9 +122,9 @@
       </div>
       <section class="photo-grid" data-grid aria-label="Photo library" aria-busy="true"></section>
       <section class="import-stage" data-import-stage aria-label="Photographs to import" hidden></section>
-      <section class="rank-stage" data-rank aria-label="Rank" hidden></section>
-      <section class="face-wall" data-people-stage aria-label="People" hidden></section>
-      <section class="loupe-stage" data-loupe aria-label="Photo preview" hidden>
+      <section class="rank-stage" data-rank aria-label="Rank" tabindex="-1" hidden></section>
+      <section class="face-wall" data-people-stage aria-label="People" tabindex="-1" hidden></section>
+      <section class="loupe-stage" data-loupe aria-label="Photo preview" tabindex="-1" hidden>
         <button class="loupe-close" type="button" data-action="close-loupe" data-icon-only="close" aria-label="Close preview"></button>
         <img data-loupe-image alt="">
         <p class="loupe-note" data-loupe-note hidden></p>
@@ -208,7 +208,7 @@
     </form>
   </dialog>
 
-  <dialog class="drive-dialog" data-drive-dialog aria-labelledby="drive-title">
+  <dialog class="drive-dialog" data-drive-dialog aria-label="Add a folder to the library">
     <form data-drive-form>
       <button class="dialog-close" type="button" data-action="close-drive" data-icon-only="close" aria-label="Close"></button>
       <p class="eyebrow">Add to the library</p>
@@ -234,26 +234,26 @@
     </form>
   </dialog>
 
-  <menu class="context-menu" data-folder-menu hidden>
-    <button type="button" data-action="synchronize-folder">Synchronize folder</button>
-    <hr>
-    <button type="button" data-action="forget-missing">Forget missing photos…</button>
-    <button type="button" data-action="adopt-track">Add GPS track (GPX)…</button>
-    <button type="button" data-action="export-folder">Save metadata for Lightroom</button>
+  <menu class="context-menu" role="menu" data-folder-menu hidden>
+    <button type="button" role="menuitem" data-action="synchronize-folder">Synchronize folder</button>
+    <hr role="separator">
+    <button type="button" role="menuitem" data-action="forget-missing">Forget missing photos…</button>
+    <button type="button" role="menuitem" data-action="adopt-track">Add GPS track (GPX)…</button>
+    <button type="button" role="menuitem" data-action="export-folder">Save metadata for Lightroom</button>
   </menu>
 
 
-  <menu class="context-menu" data-drive-menu hidden>
-    <button type="button" data-action="rescan-drive">Re-scan now</button>
+  <menu class="context-menu" role="menu" data-drive-menu hidden>
+    <button type="button" role="menuitem" data-action="rescan-drive">Re-scan now</button>
   </menu>
 
-  <menu class="context-menu" data-album-menu hidden>
-    <button type="button" data-action="rename-album">Rename…</button>
-    <button type="button" data-action="freeze-album">Freeze into a plain album</button>
-    <button type="button" data-action="delete-album">Delete album</button>
+  <menu class="context-menu" role="menu" data-album-menu hidden>
+    <button type="button" role="menuitem" data-action="rename-album">Rename…</button>
+    <button type="button" role="menuitem" data-action="freeze-album">Freeze into a plain album</button>
+    <button type="button" role="menuitem" data-action="delete-album">Delete album</button>
   </menu>
 
-  <menu class="context-menu" data-photo-menu hidden></menu>
+  <menu class="context-menu" role="menu" data-photo-menu hidden></menu>
   <dialog class="confirm-dialog keys-dialog" data-keys-dialog aria-labelledby="keys-title">
     <form method="dialog">
       <button class="dialog-close" type="submit" data-icon-only="close" aria-label="Close"></button>
@@ -262,12 +262,13 @@
       <div class="keys-body" data-keys-body></div>
     </form>
   </dialog>
-  <menu class="context-menu" data-chip-menu hidden></menu>
+  <menu class="context-menu" role="menu" data-chip-menu hidden></menu>
   <div class="popover" data-chip-editor hidden></div>
   <div class="popover search-drop" data-search-drop hidden></div>
-  <div class="popover name-pop" data-name-pop hidden>
-    <p class="eyebrow" data-name-title>Name</p>
-    <input type="text" data-name-input autocomplete="off" spellcheck="false">
+  <div class="popover name-pop" data-name-pop role="dialog" aria-labelledby="name-title" hidden>
+    <p class="eyebrow" id="name-title" data-name-title>Name</p>
+    <input type="text" data-name-input aria-labelledby="name-title" autocomplete="off" spellcheck="false">
+    <p class="form-error" data-name-error role="alert"></p>
     <button class="primary-button" type="button" data-action="name-ok">Save</button>
   </div>
 
@@ -278,11 +279,11 @@
       <h1 id="export-title" data-export-count>Export</h1>
       <p class="dialog-copy">Full-quality JPEGs of what the library shows — edits applied, capture facts carried.</p>
       <p class="eyebrow">Long edge</p>
-      <div class="kind-choice export-size" data-export-size>
-        <button type="button" data-edge="0" class="is-active">Full</button>
-        <button type="button" data-edge="4096">4096</button>
-        <button type="button" data-edge="2048">2048</button>
-        <button type="button" data-edge="1024">1024</button>
+      <div class="kind-choice export-size" data-export-size role="group" aria-label="Long edge">
+        <button type="button" data-edge="0" class="is-active" aria-pressed="true">Full</button>
+        <button type="button" data-edge="4096" aria-pressed="false">4096</button>
+        <button type="button" data-edge="2048" aria-pressed="false">2048</button>
+        <button type="button" data-edge="1024" aria-pressed="false">1024</button>
       </div>
       <label class="export-quality">Quality <span data-quality-value>92</span>
         <input data-export-quality type="range" min="60" max="100" step="1" value="92">

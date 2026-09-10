@@ -1,3 +1,4 @@
+import { why } from '../kit/why.js';
 import { showMenu, hideMenu } from '../kit/menu.js';
 import { library as product } from '../net/index.js';
 import { PageCache } from '../kit/page-cache.js';
@@ -204,6 +205,7 @@ function notify(message) {
 }
 const driveList = document.querySelector('[data-drive-list]');
 let drivesSeen = '';
+let viewShown = null;
 
 const DENSITY_KEY = 'azimuth.row-height';
 const SORT_KEY = 'azimuth.sort';
@@ -246,7 +248,7 @@ async function toggleStack(coverId) {
       update({ days: await product.days(viewOf()) });
     }
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -273,13 +275,12 @@ async function teach(word, yes) {
     // refresh right behind it is authoritative: an excluded photograph
     // leaves the word's view as the key lands, not on the lane's rhythm.
     await product.teach(word, ids, yes);
-    notify(yes
-      ? (ids.length === 1 ? `Anchored to “${word}”.` : `${ids.length} anchored to “${word}”.`)
-      : (ids.length === 1 ? `Not “${word}” — learning.` : `${ids.length} excluded from “${word}” — learning.`));
+    const n = ids.length === 1 ? 'This photograph' : `${ids.length.toLocaleString()} photographs`;
+    notify(yes ? `${n} taught as “${word}”.` : `${n} taught as not “${word}”.`);
     void labelsPanel.refresh();
     await refreshInPlace();
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -305,7 +306,7 @@ const pages = new PageCache({
       : product.photos({ sort: read().sort, limit, offset, view: viewOf() }),
   onPage: (photos, total) => update({ photos, total }),
   onError: (error) => {
-    notify(`Some photos could not be loaded. ${error.message}`);
+    notify(`Some photographs could not be loaded. ${why(error)}`);
   },
 });
 const undo = createUndo();
@@ -692,10 +693,13 @@ async function chooseHome() {
   const submit = homeForm.querySelector('[type="submit"]');
   submit.disabled = true;
   homeDialog.showModal();
-  submit.focus();
+  // Nothing takes Enter until there is a proposal to accept: the dialog
+  // itself holds the focus, then the submit does.
+  homeDialog.focus();
   try {
     homePath.textContent = await product.proposeHome();
     submit.disabled = !homePath.textContent;
+    if (!submit.disabled) submit.focus();
   } catch (error) {
     homePath.textContent = '';
     homeError.textContent = error.message;
@@ -728,7 +732,7 @@ async function openDriveDialog() {
   try {
     root = await product.chooseFolder();
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
     return;
   }
   if (!root) return;
@@ -807,7 +811,7 @@ async function loadView() {
   } catch (error) {
     if (!pages.isCurrent(requestGeneration)) return;
     update({ loading: false });
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -849,13 +853,17 @@ async function refreshInPlace({ shelves = true } = {}) {
 // worker is doing. The keys are the cache kinds' own names.
 // What the line says for each state, in one place: finding is the sweep
 // walking disks, reading is the worker opening files.
+let cardSaid = '';
+const COMES_BACK = (n) => (n === 1
+  ? 'Forgotten. It comes back, with its decisions, if the file ever does.'
+  : `${n.toLocaleString()} missing photographs forgotten. They come back, with their decisions, if the files ever do.`);
 const SAYING = { finding: 'Finding your photographs…' };
 const WORKING = {
   identity: 'Identifying photographs',
   metadata: 'Reading photographs',
   grid: 'Making tiles',
   loupe: 'Making tiles',
-  embedding: 'Mapping the space',
+  embedding: 'Learning what your photographs look like',
   faces: 'Finding faces',
   photostats: 'Measuring light',
 };
@@ -904,7 +912,7 @@ async function followLibrary() {
           }
         }
       } catch (error) {
-        notify(error.message);
+        notify(why(error));
       }
     }
   }
@@ -920,10 +928,10 @@ async function forgetSelected() {
     if (result.forgotten) {
       await loadView();
       selectIndex(Math.min(selectedIndex, Math.max(0, read().total - 1)));
-      notify('Forgotten. It comes back, with its decisions, if the file ever does.');
+      notify(COMES_BACK(1));
     }
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -949,6 +957,7 @@ function openExportDialog() {
     `Export ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}`;
   renameHint();
   exportDialog.showModal();
+  exportDialog.querySelector('[type="submit"]').focus();
 }
 function renameHint() {
   const name = exportDialog.querySelector('[data-export-rename]').value.trim();
@@ -965,6 +974,7 @@ exportDialog.querySelector('[data-export-size]').addEventListener('click', (even
   if (!button) return;
   for (const other of exportDialog.querySelectorAll('[data-export-size] [data-edge]')) {
     other.classList.toggle('is-active', other === button);
+    other.setAttribute('aria-pressed', String(other === button));
   }
 });
 document.querySelector('[data-export-form]').addEventListener('submit', (event) => {
@@ -976,15 +986,17 @@ document.querySelector('[data-export-form]').addEventListener('submit', (event) 
   localStorage.setItem(EXPORT_KEY, JSON.stringify({ edge, quality, rename }));
   exportDialog.close();
   if (!ids.length) return;
-  notify(`Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…`);
+  // Work in flight lives on the status line; the toast is for the outcome.
+  update({ doing: `Exporting ${ids.length.toLocaleString()} photograph${ids.length === 1 ? '' : 's'}…` });
   product.exportPhotos(ids, quality, edge, rename).then((said) => {
-    if (!said.chosen) { notify(''); return; }
+    update({ doing: '' });
+    if (!said.chosen) return;
     const parts = [];
     if (said.exported) parts.push(`${said.exported.toLocaleString()} exported`);
     if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
     if (said.failed) parts.push(`${said.failed.toLocaleString()} failed`);
-    notify(`${parts.join(', ') || 'Nothing exported'} — ${said.destination}`);
-  }).catch((error) => notify(error.message));
+    notify(`${parts.join(', ') || 'Nothing exported'} — in ${said.destination}.`);
+  }).catch((error) => { update({ doing: '' }); notify(why(error)); });
 });
 
 // Forgetting the missing is a large act with no undo, so it is armed: the
@@ -1015,11 +1027,11 @@ async function forgetMissing(folder) {
     disarmForget();
     const result = await product.forgetMissing(folder || '');
     await Promise.all([loadView(), loadFolders()]);
-    notify(`${result.forgotten.toLocaleString()} missing photograph${result.forgotten === 1 ? '' : 's'} forgotten. They come back, with their decisions, if the files ever do.`);
+    notify(COMES_BACK(result.forgotten));
   } catch (error) {
     folderMenu.hidden = true;
     disarmForget();
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -1038,6 +1050,7 @@ async function showCards() {
     chip.dataset.root = cards[0].root;
     chip.querySelector('[data-card-label]').textContent = cards[0].label;
     chip.title = `Import from ${cards[0].label} (I)`;
+    if (cards[0].label !== cardSaid) { cardSaid = cards[0].label; notify(`A card is in: ${cards[0].label}. I imports it.`); }
   }
 }
 
@@ -1063,7 +1076,7 @@ async function synchronizeFolder(folder) {
     if (retired) parts.push(`${retired.toLocaleString()} no longer there`);
     notify(parts.length ? `Synchronized: ${parts.join(', ')}.` : 'Synchronized — nothing changed.');
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   } finally {
     synchronizing = false;
     update({ scanning: false });
@@ -1107,7 +1120,7 @@ async function loadFolders() {
   try {
     update({ tree: await product.folders() });
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -1132,13 +1145,13 @@ async function restack(verb, ids) {
     if (!members.length) { notify(verb === 'stack' ? 'No burst around this frame — mark the frames and press S.' : 'Nothing here is stacked.'); return; }
     await refreshInPlace();
     const n = members.length;
-    undo.show(verb === 'stack' ? `Stacked ${n} frames.` : `Unstacked ${n} frames.`, async () => {
+    undo.show(`${verb === 'stack' ? 'Stacked' : 'Unstacked'} ${n.toLocaleString()} photograph${n === 1 ? '' : 's'}.`, async () => {
       if (verb === 'stack') await product.unstack([members[0]]);
       else await product.stack(members);
       await refreshInPlace();
     });
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   }
 }
 
@@ -1197,10 +1210,10 @@ async function scanDrive(drive) {
     await refreshInPlace();
     await loadFolders();
     notify(result.applied
-      ? `${result.photos_added.toLocaleString()} photos added.`
+      ? `${result.photos_added.toLocaleString()} photograph${result.photos_added === 1 ? '' : 's'} added.`
       : result.reason || 'The folder could not be fully read.');
   } catch (error) {
-    notify(error.message);
+    notify(why(error));
   } finally {
     update({ scanning: false });
   }
@@ -1275,7 +1288,7 @@ function detailsSoon(photo) {
       const details = await product.photo(photo.id);
       if (read().selected?.id === photo.id) update({ selected: { ...read().selected, ...details } });
     } catch (error) {
-      if (read().selected?.id === photo.id) notify(error.message);
+      if (read().selected?.id === photo.id) notify(why(error));
     }
   }, 120);
 }
@@ -1337,6 +1350,7 @@ function showPhoto(photo) {
   }
 }
 
+document.querySelector('[data-loupe-note]').setAttribute('role', 'status');
 function renderLoupe(photo) {
   const source = photo.loupe || photo.tile || '';
   const note = document.querySelector('[data-loupe-note]');
@@ -1382,20 +1396,28 @@ function renderFolders(state) {
   const rows = [];
   const walk = (nodes, depth) => {
     for (const node of nodes) {
-      const row = document.createElement('div');
-      row.className = 'folder-row' + (state.view === 'library' && (state.folders || []).includes(node.path) ? ' is-active' : '');
+      const active = state.view === 'library' && (state.folders || []).includes(node.path);
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'folder-row' + (active ? ' is-active' : '');
       row.style.setProperty('--depth', depth);
       row.dataset.folder = node.path;
       row.title = node.path;
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-level', String(depth + 1));
+      row.setAttribute('aria-selected', String(active));
+      // One tab stop for the tree: the active folder, else the first row.
+      row.tabIndex = active || rows.length === 0 ? 0 : -1;
       const open = state.open.has(node.path);
-      const disclosure = document.createElement('button');
-      disclosure.type = 'button';
+      if (node.children.length) row.setAttribute('aria-expanded', String(open));
+      const disclosure = document.createElement('span');
       disclosure.className = 'disclosure' + (node.children.length ? ' has-children' : '') + (open ? ' is-open' : '');
       disclosure.dataset.toggle = node.path;
-      disclosure.setAttribute('aria-label', open ? 'Collapse' : 'Expand');
       disclosure.append(icon('chevron'));
       const safety = document.createElement('span');
       safety.className = `safety ${node.safety === 'unknown' && !anyRecord ? 'quiet' : node.safety}`;
+      safety.title = node.safety === 'at-risk' ? 'Some of these exist only on the working disk'
+        : node.safety === 'unknown' && anyRecord ? 'The record drive is away, so nobody can say' : '';
       const name = document.createElement('span');
       name.className = 'folder-name';
       name.textContent = node.name;
@@ -1408,8 +1430,54 @@ function renderFolders(state) {
     }
   };
   walk(state.tree, 0);
-  document.querySelector('[data-folder-tree]').replaceChildren(...rows);
+  const tree = document.querySelector('[data-folder-tree]');
+  tree.setAttribute('role', 'tree');
+  const hadFocus = tree.contains(document.activeElement);
+  tree.replaceChildren(...rows);
+  if (hadFocus) tree.querySelector('.folder-row[tabindex="0"]')?.focus({ preventScroll: true });
 }
+
+// The tree's keys: arrows walk the visible rows, Right opens, Left folds
+// or climbs, Home and End are the ends, typing finds a name.
+let treeTyped = '';
+let treeTypedAt = 0;
+document.querySelector('[data-folder-tree]').addEventListener('keydown', (event) => {
+  const row = event.target.closest('.folder-row');
+  if (!row) return;
+  const rows = [...document.querySelectorAll('[data-folder-tree] .folder-row')];
+  const at = rows.indexOf(row);
+  const go = (next) => {
+    if (!next) return;
+    for (const r of rows) r.tabIndex = r === next ? 0 : -1;
+    next.focus();
+  };
+  const open = new Set(read().open);
+  if (event.key === 'ArrowDown') go(rows[Math.min(rows.length - 1, at + 1)]);
+  else if (event.key === 'ArrowUp') go(rows[Math.max(0, at - 1)]);
+  else if (event.key === 'Home') go(rows[0]);
+  else if (event.key === 'End') go(rows[rows.length - 1]);
+  else if (event.key === 'ArrowRight') {
+    if (row.getAttribute('aria-expanded') === 'false') { open.add(row.dataset.folder); update({ open }); }
+    else if (row.getAttribute('aria-expanded') === 'true') go(rows[at + 1]);
+    else return;
+  } else if (event.key === 'ArrowLeft') {
+    if (row.getAttribute('aria-expanded') === 'true') { open.delete(row.dataset.folder); update({ open }); }
+    else {
+      const level = Number(row.getAttribute('aria-level'));
+      let up = at - 1;
+      while (up >= 0 && Number(rows[up].getAttribute('aria-level')) >= level) up -= 1;
+      go(rows[up]);
+    }
+  } else if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const now = Date.now();
+    treeTyped = now - treeTypedAt < 800 ? treeTyped + event.key.toLowerCase() : event.key.toLowerCase();
+    treeTypedAt = now;
+    const found = rows.slice(at + 1).concat(rows.slice(0, at + 1))
+      .find((r) => r.querySelector('.folder-name').textContent.toLowerCase().startsWith(treeTyped));
+    go(found);
+  } else return;
+  event.preventDefault();
+});
 
 function renderChrome(state) {
   albumsPanel.render(state);
@@ -1446,9 +1514,9 @@ function renderChrome(state) {
   // While an import runs the line carries the way out too.
   stopImport.hidden = !state.importing;
   status.textContent = state.home === null
-    ? 'Choose where Azimuth should live to begin.'
-    : state.importing
-      ? state.importing
+    ? 'Choose where Azimuth should live to begin'
+    : state.importing || state.doing
+      ? state.importing || state.doing
       : state.scanning
         ? SAYING.finding
         : working
@@ -1457,10 +1525,17 @@ function renderChrome(state) {
              working.rate ? `${working.rate.toLocaleString()} / min` : null,
             ].filter(Boolean).join(' · ')
           : away.length
-            ? `${away.length === 1 ? (away[0].label || 'A drive') : `${away.length} drives`} away · those photographs are here when it is`
+            ? `${away.length === 1 ? `${away[0].label || 'A drive'} away · those photographs are here when it is` : `${away.length} drives away · those photographs are here when they are`}`
             : state.counts.unidentified
               ? `Catching up · ${state.counts.unidentified.toLocaleString()} left`
               : 'Up to date';
+  const importButton = document.querySelector('[data-action="import-folder"]');
+  const midImport = Boolean(state.importing);
+  if ((importButton.dataset.mid === '1') !== midImport) {
+    importButton.dataset.mid = midImport ? '1' : '0';
+    importButton.textContent = midImport ? 'Importing…' : 'Import…';
+    importButton.title = midImport ? 'Back to the import that is running' : TIPS['import-folder'];
+  }
   const searching = state.view === 'library' && Boolean(state.query || (state.like || []).length);
   const ranking = state.view === 'rank';
   const holding = state.view === 'loupe';
@@ -1487,6 +1562,20 @@ function renderChrome(state) {
   document.querySelector('[data-rank-mode]').hidden = !ranking;
   document.querySelector('[data-action="rank"]').hidden = state.view !== 'library' || searching;
   document.querySelector('[data-action="leave-rank"]').hidden = !ranking;
+  // A view change hands the keyboard to the stage that arrived, so the
+  // focus never falls to the body and the change is heard.
+  if (state.view !== viewShown) {
+    viewShown = state.view;
+    const stage = ranking ? document.querySelector('[data-rank]')
+      : holding ? loupe
+        : walled ? document.querySelector('[data-people-stage]')
+          : intaking ? null
+            : grid;
+    if (stage && !stage.contains(document.activeElement)) {
+      const first = stage.querySelector('.rank-card.is-selected, .face-card.is-focus, .strip-cell.is-current, .photo-cell.is-selected, .photo-cell');
+      (first || stage).focus({ preventScroll: true });
+    }
+  }
   document.querySelector('[data-result-label]').hidden = ranking || holding || walled || intaking;
   document.querySelector('[data-density]').closest('label').hidden = ranking || holding || walled || intaking;
   // The chips narrow the library view; Trash and the loupe are not places
@@ -1658,20 +1747,21 @@ document.addEventListener('click', (event) => {
   if (action === 'export-folder') {
     const folder = folderMenu.dataset.folder || '';
     folderMenu.hidden = true;
-    notify('Writing sidecars…');
+    update({ doing: 'Saving metadata for Lightroom…' });
     product.exportFolder(folder).then((said) => {
       const parts = [];
       if (said.written) parts.push(`${said.written.toLocaleString()} written`);
       if (said.unchanged) parts.push(`${said.unchanged.toLocaleString()} already current`);
       if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
-      notify(`Lightroom metadata: ${parts.join(', ') || 'nothing to write'}.`);
-    }).catch((error) => notify(error.message));
+      update({ doing: '' });
+      notify(`Metadata for Lightroom: ${parts.join(', ') || 'nothing to write'}.`);
+    }).catch((error) => { update({ doing: '' }); notify(why(error)); });
   }
   if (action === 'adopt-track') {
     folderMenu.hidden = true;
     product.adoptTrack().then((said) => {
       if (said.chosen) notify(said.placed ? `${said.placed.toLocaleString()} photographs placed from the track.` : 'The track covers none of your photographs — check the camera clock.');
-    }).catch((error) => notify(error.message));
+    }).catch((error) => notify(why(error)));
   }
   if (action === 'rescan-drive') {
     driveMenu.hidden = true;
@@ -1682,7 +1772,7 @@ document.addEventListener('click', (event) => {
     // While an import runs, Import… is the door back to its details — no
     // folder picker in the way.
     if (intakeWorkflow.running()) intakeWorkflow.open('');
-    else product.chooseFolder().then((chosen) => { if (chosen) intakeWorkflow.open(chosen); }).catch((error) => notify(error.message));
+    else product.chooseFolder().then((chosen) => { if (chosen) intakeWorkflow.open(chosen); }).catch((error) => notify(why(error)));
   }
   if (action === 'import-card') {
     const root = document.querySelector('[data-action="import-card"]').dataset.root;
@@ -1781,7 +1871,7 @@ document.addEventListener('keydown', (event) => {
       const home = read().selectedIndex ?? library.indexAt(workspace.scrollTop) ?? 0;
       update({ marked: new Set(ids), selectedIndex: home,
                selected: read().selected ?? read().photos.get(home) ?? null });
-    }).catch((error) => notify(error.message));
+    }).catch((error) => notify(why(error)));
     return;
   }
   if (event.key === '?' && !isTyping) {
@@ -1852,8 +1942,12 @@ document.addEventListener('keydown', (event) => {
   }
   if (isTyping) return;
   if (event.key === 'Tab') {
-    // On an empty library the only thing worth reaching is the one button in
-    // the empty state; folding panels there would strand the keyboard.
+    // Tab folds the panels only from the photographs or from nowhere: on a
+    // chrome control it is Tab, so every button can be reached without a
+    // mouse. On an empty library the only thing worth reaching is the one
+    // button in the empty state; folding panels there would strand the keyboard.
+    const fromChrome = target !== document.body && !target.closest('.workspace');
+    if (fromChrome) return;
     if (read().view === 'library' && read().total === 0 && !read().loading) return;
     const panels = read().panels;
     if (event.shiftKey) {
@@ -1948,6 +2042,19 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   const extend = { shift: event.shiftKey };
+  if (loupeOpen() && loupeView.zoomed() && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) {
+    // Zoomed in, the arrows walk the picture (Shift: half a view); Home
+    // recentres. At Fit they are next and previous again.
+    if (event.key === 'Home') loupeView.recentre();
+    else {
+      const part = event.shiftKey ? 0.5 : 0.1;
+      const dx = event.key === 'ArrowLeft' ? part : event.key === 'ArrowRight' ? -part : 0;
+      const dy = event.key === 'ArrowUp' ? part : event.key === 'ArrowDown' ? -part : 0;
+      loupeView.pan(dx, dy);
+    }
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
     const move = event.key === 'ArrowLeft' ? -1 : 1;
     selectIndex((current ?? (move > 0 ? -1 : read().total)) + move, extend);
@@ -1994,7 +2101,8 @@ const SHORTCUTS = [
   ['Filters', [['Backspace, Delete', 'Remove the chip'], ['Esc', 'Close the editor']]],
   ['The rail', [['Arrows', 'A day'], ['PageUp / PageDown', 'A year'], ['Home / End', 'The ends']]],
   ['The loupe', [
-    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous'], ['F', 'Leave the clean room'], ['Esc', 'Fit, then close', ['close-loupe', 'leave-rank']],
+    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous; zoomed in, walk the picture'], ['Shift+Arrows', 'Zoomed in, half a view'], ['Home', 'Zoomed in, the centre'],
+    ['F', 'Leave the clean room'], ['Esc', 'Fit, then close', ['close-loupe', 'leave-rank']],
   ]],
   ['Rank', [
     ['1\u20139, 0, -, =', 'Pick that card'], ['Arrows', 'Move, or pick a side of a pair'], ['Enter', 'Pick the selected'],
@@ -2004,6 +2112,7 @@ const SHORTCUTS = [
   ['Crop', [['Arrows', 'Nudge 1%'], ['Shift+Arrows', 'Nudge 5%'], ['Alt+Arrows', 'Grow or shrink'], ['0', 'Remove the crop'], ['Enter', 'Apply']]],
   ['Import', [['Arrows', 'Move'], ['Space', 'Check or uncheck'], ['Ctrl+A', 'Select all'], ['Enter', 'Import']]],
   ['Trash', [['U', 'Restore', ['restore']]]],
+  ['Folders', [['Arrows', 'Walk; Left and Right fold and open'], ['Home / End', 'First / last'], ['Amber dot', 'Only on the working disk'], ['Hollow ring', 'The record drive is away']]],
   ['Teaching', [['Y / N', 'This is / is not the word']]],
 ];
 const TIPS = {
@@ -2139,9 +2248,9 @@ const photoVerbs = () => (read().view === 'trash' ? [
         if (said.written) parts.push(`${said.written.toLocaleString()} written`);
         if (said.unchanged) parts.push(`${said.unchanged.toLocaleString()} already current`);
         if (said.missing) parts.push(`${said.missing.toLocaleString()} not here`);
-        notify(`Lightroom metadata: ${parts.join(', ') || 'nothing to write'}.`);
+        notify(`Metadata for Lightroom: ${parts.join(', ') || 'nothing to write'}.`);
       } catch (error) {
-        notify(error.message);
+        notify(why(error));
       }
     },
   },

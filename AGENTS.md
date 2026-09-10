@@ -117,6 +117,10 @@ is not a query, a decision or a cache kind has no layer to live in.
 - Static reachability is not permission to delete. Before removing a surface,
   inspect operational commands, checks, documentation, and git change history;
   hand-run and externally invoked behavior is invisible to an import graph.
+- In the window, which photograph is chosen is said one way per shape: a
+  button (a grid cell, a card) says `aria-pressed`; an option in a listbox
+  or a row in a tree says `aria-selected`; the keyboard's cursor says
+  `aria-current`. Never two of these on one element.
 - Reliability comes from having one of each thing, not from more checks. One
   rule for whether a photo is in the library, in one place, used everywhere. A
   rule copied into two hundred queries is two hundred chances to disagree, and
