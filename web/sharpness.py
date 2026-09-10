@@ -22,9 +22,14 @@ from __future__ import annotations
 
 import json
 
-KEY = "zm2"          # the measure's version; a change re-owes every answer
+KEY = "zm3"          # the measure's version; a change re-owes every answer
 BLOCK = 32           # the map's grain on the 1,024 px tile
 FACE_LEAST = 48      # a face crop narrower than this says nothing reliable
+EYE_LEAST = 20       # an eye narrower than this cannot be read either way
+# Openness is the eye contour's height over its width: an open eye reads
+# about 0.3-0.5, a closed one about 0.1; between is "can't tell".
+OPEN = 0.25
+CLOSED = 0.15
 
 
 def _grey(image, longest: int):
@@ -86,6 +91,58 @@ def _zhu_milanfar(grey) -> float:
     return round(float(np.percentile(q, 90)), 3)
 
 
+def openness(points) -> float:
+    """An eye contour's height over its width."""
+
+    import numpy as np
+
+    pts = np.asarray(points, dtype=np.float32)
+    width = float(pts[:, 0].max() - pts[:, 0].min())
+    height = float(pts[:, 1].max() - pts[:, 1].min())
+    return round(height / width, 3) if width > 0 else 0.0
+
+
+def eyes_said(eyes) -> str | None:
+    """Open, closed, or unsure -- from both eyes, never from one, and never
+    from an eye too small to read (the tri-state the culling tools settled
+    on, because a wrong "closed" costs a keeper)."""
+
+    readable = [e for e in eyes if e.get("px", 0) >= EYE_LEAST and e.get("open") is not None]
+    if len(readable) < 2:
+        return "unsure" if eyes else None
+    if all(e["open"] >= OPEN for e in readable):
+        return "open"
+    if all(e["open"] <= CLOSED for e in readable):
+        return "closed"
+    return "unsure"
+
+
+def _eyes(image, frame_bgr, left, top, right, bottom):
+    """Both eyes of one face: openness and sharpness from the 2d106
+    contours, or nothing when the landmark model is not here."""
+
+    import numpy as np
+
+    import faces as facing
+
+    marks = facing.landmarks(frame_bgr, (left, top, right, bottom))
+    if marks is None:
+        return []
+    out = []
+    for contour in (marks[facing.RIGHT_EYE], marks[facing.LEFT_EYE]):
+        x0, y0 = contour.min(axis=0)
+        x1, y1 = contour.max(axis=0)
+        pad = 0.4 * max(x1 - x0, y1 - y0)
+        box = (int(max(0, x0 - pad)), int(max(0, y0 - pad)), int(x1 + pad), int(y1 + pad))
+        px = int(min(box[2] - box[0], box[3] - box[1]))
+        q = None
+        if px >= EYE_LEAST:
+            crop = np.asarray(image.crop(box).convert("L"), dtype=np.float32)
+            q = _zhu_milanfar(crop)
+        out.append({"open": openness(contour), "q": q, "px": px})
+    return out
+
+
 def measure(path: str, boxes=()) -> dict:
     """The facts, from one rendition and the face boxes already found on
     it (fractions of the frame: x, y, w, h)."""
@@ -97,15 +154,19 @@ def measure(path: str, boxes=()) -> dict:
         width, height = image.size
         grey = _grey(image, 1024)
         faces = []
+        frame_bgr = None
         for box in boxes:
             x, y, w, h = (float(v) for v in box)
             left, top = int(x * width), int(y * height)
             right, bottom = int((x + w) * width), int((y + h) * height)
             if right - left < FACE_LEAST or bottom - top < FACE_LEAST:
-                faces.append({"q": None, "px": min(right - left, bottom - top), "box": box})
+                faces.append({"q": None, "px": min(right - left, bottom - top), "box": box, "eyes": []})
                 continue
             crop = np.asarray(image.crop((left, top, right, bottom)).convert("L"), dtype=np.float32)
-            faces.append({"q": _zhu_milanfar(crop), "px": min(right - left, bottom - top), "box": box})
+            if frame_bgr is None:
+                frame_bgr = np.asarray(image.convert("RGB"))[:, :, ::-1]
+            eyes = _eyes(image, frame_bgr, left, top, right, bottom)
+            faces.append({"q": _zhu_milanfar(crop), "px": min(right - left, bottom - top), "box": box, "eyes": eyes})
     amount = _mlv_map(grey)
     frame = {
         "p50": round(float(np.percentile(amount, 50)), 2),
@@ -121,7 +182,10 @@ def measure(path: str, boxes=()) -> dict:
         inside = amount[r0:r1, c0:c1]
         if inside.size and frame["p75"] > 0:
             subject = round(float(np.percentile(inside, 75)) / frame["p75"], 3)
-    return {"frame": frame, "faces": faces, "subject": subject}
+    # The largest face's eyes are the photograph's: one word, or none.
+    largest = max(faces, key=lambda f: f["px"]) if faces else None
+    return {"frame": frame, "faces": faces, "subject": subject,
+            "eyes": eyes_said(largest["eyes"]) if largest and largest.get("eyes") else None}
 
 
 def kind(tiles, faces_kind):

@@ -2613,6 +2613,22 @@ class SharpnessIsRelative(CoreCase):
         tiny = sharpness.measure(self._picture("tiny.jpg", blur=False), [[0.5, 0.5, 0.02, 0.02]])
         self.assertIsNone(tiny["faces"][0]["q"])
 
+    def test_eyes_are_said_from_both_and_never_from_a_small_one(self):
+        import sharpness
+
+        wide = [(0, 5), (2, 2), (5, 0), (8, 0), (10, 2), (12, 5), (10, 8), (8, 10), (5, 10), (2, 8)]
+        shut = [(0, 5), (3, 4.6), (6, 4.4), (9, 4.6), (12, 5), (9, 5.4), (6, 5.6), (3, 5.4), (1, 5.1), (11, 5.1)]
+        self.assertGreater(sharpness.openness(wide), sharpness.OPEN)
+        self.assertLess(sharpness.openness(shut), sharpness.CLOSED)
+        both_open = [{"open": 0.4, "px": 30}, {"open": 0.38, "px": 28}]
+        both_shut = [{"open": 0.1, "px": 30}, {"open": 0.12, "px": 28}]
+        one_small = [{"open": 0.4, "px": 30}, {"open": 0.1, "px": 12}]
+        self.assertEqual(sharpness.eyes_said(both_open), "open")
+        self.assertEqual(sharpness.eyes_said(both_shut), "closed")
+        self.assertEqual(sharpness.eyes_said(one_small), "unsure")
+        self.assertEqual(sharpness.eyes_said([{"open": 0.4, "px": 30}, {"open": 0.1, "px": 30}]), "unsure")
+        self.assertIsNone(sharpness.eyes_said([]))
+
 
 class ANameCanBeTakenBack(CoreCase):
     def test_a_first_naming_is_undone_by_taking_the_name_back(self):

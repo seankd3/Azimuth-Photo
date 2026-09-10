@@ -73,6 +73,43 @@ def _model():
     return _loaded
 
 
+_marker = None
+
+
+def _landmarker():
+    """The 106-point landmark model buffalo_l ships, loaded once: the eye
+    contours the sharpness pass reads openness and eye sharpness from."""
+
+    global _marker
+    if _marker is None:
+        with _lock:
+            if _marker is None:
+                from insightface.model_zoo import get_model
+
+                model = get_model(os.path.join(_home(), "2d106det.onnx"), providers=["CPUExecutionProvider"])
+                model.prepare(ctx_id=-1)
+                _marker = model
+    return _marker
+
+
+# The 2d106 contours: ten points around each eye.
+RIGHT_EYE = slice(33, 43)
+LEFT_EYE = slice(87, 97)
+
+
+def landmarks(frame_bgr, bbox_xyxy):
+    """The 106 landmarks of one face on a BGR frame, in frame pixels, or
+    None when the model is not here. `bbox_xyxy` is the face box in pixels."""
+
+    if not ready():
+        return None
+    import numpy as np
+    from insightface.app.common import Face
+
+    face = Face(bbox=np.asarray(bbox_xyxy, dtype=np.float32), det_score=1.0)
+    return _landmarker().get(frame_bgr, face)
+
+
 def found(source: str) -> dict:
     """Every face on one photograph: normalized boxes, confidences, and unit
     identity vectors, as one JSON-serializable answer."""
