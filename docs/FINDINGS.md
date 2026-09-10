@@ -510,3 +510,12 @@ finding was checked and the numbers said no.
 | N3 | A sharpness run at 100% must survive the arrows | measured: already so — the loupe keeps scale and position across frames | measured: already so |
 | N4 | A press is not felt | a 3% dip for the moment a button is down, transform only, 100 ms | shipped |
 | D2 | ui-architecture.md's vocabulary named Refine, Collections and Sources; the app says Rank, Albums, Folders | the doctrine says what the app says, and carries the study's numbers | shipped |
+| N5 | A wait under 200 ms flashed Loading… over the last answer | the word appears only for a wait a person would notice | shipped |
+| N6 | The loupe faded in on every open, an act done many times an hour | instant, by the frequency rule; one easing curve token for what does move | shipped |
+| N7 | No Lightroom letters for the two most-used moves | E opens the loupe, G is the grid from any stage | shipped |
+| N8 | The filmstrip recentred on every arrow | it stays put while the current frame is in view | shipped |
+| N9 | The loupe never taught its keys | a hint under the picture on the first three opens | shipped |
+| N10 | A toast under the pointer expired while being read | the clock waits under the hand | shipped |
+| N11 | Text could be selected across the photographs | no selection on the stages | shipped |
+| N12 | Counts beside each other jittered as digits changed | tabular figures on every count | shipped |
+| H1 | A harness stub that was missing answered null and passed | it throws | shipped |

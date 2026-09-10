@@ -89,7 +89,10 @@ STUB = r"""<script>
     if (typeof name !== 'string' || name === 'then') return undefined;
     return (...args) => {
       window.__calls.push([performance.now() | 0, name, target[name] ? 'ok' : 'MISSING']);
-      return Promise.resolve(target[name] ? target[name](...args) : null);
+      // A verb the stub lacks fails loud: a null that passed for an answer
+      // let whole stages pass every headless run while broken.
+      if (!target[name]) return Promise.reject(new Error(`the harness has no ${name}`));
+      return Promise.resolve(target[name](...args));
     };
   } }) };
 })();

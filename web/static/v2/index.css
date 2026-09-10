@@ -33,6 +33,8 @@
   --t-meta: 12px;
   --t-body: 13px;
   --t-title: 15px;
+  /* the one easing for anything that arrives: fast out, settled */
+  --ease-out: cubic-bezier(.23, 1, .32, 1);
   --t-head: 18px;
   --t-display: 26px;
   /* the measures every surface shares: the context bar's height, the loupe
@@ -99,7 +101,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   color: var(--text-3);
   font: var(--t-body)/1 var(--mono);
   cursor: pointer;
-  transition: color .12s ease, background .12s ease;
+  transition: color .12s var(--ease-out), background .12s var(--ease-out);
 }
 .panel-tab:hover { color: var(--text); background: rgb(38 40 45 / 95%); }
 /* the side tabs straddle their seam, so neither covers a chapter's title */
@@ -250,7 +252,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .section-heading .eyebrow { margin-bottom: 0; }
 /* sections fold from their headings; the fold is a quiet chevron */
 .sidebar .eyebrow { display: inline-flex; align-items: center; gap: 2px; border: 0; background: transparent; padding: 0; text-align: left; cursor: pointer; }
-.sidebar .eyebrow .icon { width: 12px; height: 12px; opacity: .4; transform: rotate(90deg); transition: transform .12s ease, opacity .12s ease; }
+.sidebar .eyebrow .icon { width: 12px; height: 12px; opacity: .4; transform: rotate(90deg); transition: transform .12s var(--ease-out), opacity .12s var(--ease-out); }
 .sidebar .eyebrow:hover .icon, .sidebar section.is-folded .eyebrow .icon { opacity: .8; }
 .sidebar section.is-folded .eyebrow .icon { transform: none; }
 .sidebar section.is-folded > *:not(.section-heading):not(.eyebrow) { display: none; }
@@ -277,7 +279,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
   visibility: hidden;
 }
-.folder-row .disclosure .icon { width: 12px; height: 12px; transition: transform .12s ease; }
+.folder-row .disclosure .icon { width: 12px; height: 12px; transition: transform .12s var(--ease-out); }
 .folder-row .disclosure.has-children { visibility: visible; }
 .folder-row .disclosure.is-open .icon { transform: rotate(90deg); }
 .folder-row .safety { width: 6px; height: 6px; flex: none; border-radius: 50%; margin-right: 4px; }
@@ -331,6 +333,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .contextbar input[type="range"]:hover::-webkit-slider-thumb, .contextbar input[type="range"]:focus-visible::-webkit-slider-thumb { background: var(--text); }
 .contextbar input[type="range"]:focus-visible { outline: none; }
 
+.photo-grid, .loupe-strip, .rank-stage, .face-wall, .import-stage { user-select: none; }
 .photo-grid {
   position: relative;
   min-height: calc(100% - var(--ctx));
@@ -522,7 +525,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .rank-card {
   position: absolute;
   overflow: hidden;
-  animation: arrive .16s ease;
+  animation: arrive .12s var(--ease-out);
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -759,6 +762,17 @@ button kbd { color: var(--text-3); font: var(--t-label)/1 var(--mono); }
 .glance { display: grid; gap: 22px; }
 .glance .facts { margin-top: 12px; }
 .glance-hint { margin: 0; color: var(--text-3); font-size: var(--t-meta); line-height: 1.5; }
+/* every number that can change beside another sits in tabular figures */
+.view-title span, .sidebar-status, .facts dd, .drop-count, .grid-chapter .count, .stack-badge, .import-progress, .timeline-label { font-variant-numeric: tabular-nums; }
+/* the loupe's first lesson: its keys, under the picture, three times */
+.loupe-hint {
+  position: absolute; left: 50%; bottom: calc(var(--strip) + 14px); transform: translateX(-50%); z-index: 2;
+  margin: 0; padding: 6px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: rgb(14 15 17 / 88%); color: var(--text-2); font: var(--t-meta)/1.6 var(--sans); white-space: nowrap; pointer-events: none;
+}
+.loupe-hint kbd { margin: 0 2px 0 8px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px; color: var(--text); font: var(--t-label)/1.5 var(--mono); }
+.loupe-hint kbd:first-child { margin-left: 0; }
+.loupe-stage.is-full .loupe-hint { display: none; }
 .inspector-heading .eyebrow { margin-left: 0; }
 .inspector-heading h2 { margin: 0; overflow-wrap: anywhere; font-size: var(--t-title); line-height: 1.35; }
 .facts { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 10px 12px; margin-top: 26px; font-size: var(--t-meta); }
@@ -1067,8 +1081,7 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
 
 .loupe-stage { position: relative; height: calc(100% - var(--ctx)); background: #000; overflow: hidden; }
 /* the loupe arrives: a short fade, no hard cut (reduced motion turns it off below) */
-.loupe-stage:not([hidden]) { animation: loupe-in .12s ease; }
-@keyframes loupe-in { from { opacity: 0; } }
+/* the loupe opens many times an hour: it is instant, by the frequency rule */
 .loupe-stage > img {
   position: absolute;
   left: 50%;

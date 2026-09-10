@@ -60,6 +60,14 @@ export function createUndo() {
     toast.hidden = true;
   }
 
+  // A hand resting on the toast is reading it: the clock waits, then
+  // starts over when the hand leaves.
+  toast.addEventListener('mouseenter', () => clearTimeout(timer));
+  toast.addEventListener('mouseleave', () => {
+    clearTimeout(timer);
+    if (!toast.hidden) timer = setTimeout(() => { toast.hidden = true; }, button.hidden ? NOTICE_MS : SHOWN_MS);
+  });
+
   async function run() {
     if (!revert) return;
     const current = revert;

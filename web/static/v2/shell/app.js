@@ -165,10 +165,16 @@ function renderStrip(state) {
     cell.classList.add('is-current');
     cell.tabIndex = 0;
     cell.setAttribute('aria-selected', 'true');
-    loupeStrip.scrollTo({
-      left: cell.offsetLeft - (loupeStrip.clientWidth - cell.offsetWidth) / 2,
-      behavior: rebuilt || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-    });
+    // The strip stays where it is while the current frame is in view; it
+    // recentres only when the frame has left the band (or the strip is new).
+    const left = cell.offsetLeft - loupeStrip.scrollLeft;
+    const outside = left < 0 || left + cell.offsetWidth > loupeStrip.clientWidth;
+    if (rebuilt || outside) {
+      loupeStrip.scrollTo({
+        left: cell.offsetLeft - (loupeStrip.clientWidth - cell.offsetWidth) / 2,
+        behavior: rebuilt || matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      });
+    }
   }
 }
 
@@ -207,6 +213,7 @@ function notify(message) {
 const driveList = document.querySelector('[data-drive-list]');
 let drivesSeen = '';
 let viewShown = null;
+let loadingSince = null;
 
 const DENSITY_KEY = 'azimuth.row-height';
 const SORT_KEY = 'azimuth.sort';
@@ -1336,6 +1343,15 @@ async function selectIndex(index, { open = loupeOpen(), shift = false } = {}) {
   if (open) showPhoto(photo);
 }
 
+// The loupe teaches its grammar on its first three opens, then never again.
+const TAUGHT_KEY = 'azimuth.loupe-taught';
+function teachLoupe() {
+  const hint = document.querySelector('[data-loupe-hint]');
+  const times = Number(recall(TAUGHT_KEY, 0)) || 0;
+  hint.hidden = times >= 3;
+  if (times < 3) remember(TAUGHT_KEY, times + 1);
+}
+
 function showPhoto(photo) {
   // The loupe shows the best picture the row has: the loupe tile, else the
   // grid tile scaled up while the loupe tile is made first (the library is
@@ -1377,7 +1393,7 @@ function renderLoupe(photo) {
 function openPhoto(index) {
   if (read().selectedIndex !== index) selectPhoto(index);
   const photo = read().photos.get(index);
-  if (photo) showPhoto(photo);
+  if (photo) { if (!loupeOpen()) teachLoupe(); showPhoto(photo); }
 }
 
 
@@ -1487,6 +1503,7 @@ document.querySelector('[data-folder-tree]').addEventListener('keydown', (event)
     go(found);
   } else return;
   event.preventDefault();
+  event.stopPropagation();
 });
 
 function renderChrome(state) {
@@ -1512,9 +1529,22 @@ function renderChrome(state) {
   document.querySelector('[data-trash-count]').textContent = state.counts.trash.toLocaleString();
   // The label speaks about the person's photographs, not the app's memory:
   // how many are selected, or nothing — the title already carries the count.
-  document.querySelector('[data-result-label]').textContent = state.loading
-    ? (seeking() ? 'Searching…' : 'Loading your library…')
-    : state.marked?.size > 1 ? `${state.marked.size.toLocaleString()} selected` : '';
+  // A wait under 200 ms shows nothing: the last answer stays on screen and
+  // the word appears only for a wait a person would notice.
+  const label = document.querySelector('[data-result-label]');
+  const marked = state.marked?.size > 1 ? `${state.marked.size.toLocaleString()} selected` : '';
+  if (state.loading) {
+    if (loadingSince === null) {
+      loadingSince = setTimeout(() => {
+        if (read().loading) label.textContent = seeking() ? 'Searching…' : 'Loading your library…';
+      }, 200);
+    }
+    if (!label.textContent.endsWith('…')) label.textContent = marked;
+  } else {
+    clearTimeout(loadingSince);
+    loadingSince = null;
+    label.textContent = marked;
+  }
   // The running import outranks the reading chatter: it is the one thing
   // the person just asked for.
   // Always a sentence, never a blank: the import you asked for, the sweep,
@@ -1843,7 +1873,7 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (intakeWorkflow.isOpen()) {
-    if (event.key === 'Escape') intakeWorkflow.close();
+    if (event.key === 'Escape' || ((event.key === 'g' || event.key === 'G') && !isTyping && !onControl)) intakeWorkflow.close();
     if (event.key === 'Enter' && !isTyping && !onControl) {
       intakeWorkflow.finish();
       event.preventDefault();
@@ -1973,12 +2003,21 @@ document.addEventListener('keydown', (event) => {
   if (rankWorkflow.isOpen()) {
     // A focused control (a size or mode button) keeps Enter and Space.
     if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
+    if ((event.key === 'g' || event.key === 'G') && !isTyping) { rankWorkflow.close(); event.preventDefault(); return; }
     if (rankWorkflow.key(event)) event.preventDefault();
     return;
   }
 
   const current = cursorAt ?? read().selectedIndex;
   const key = event.key.toLowerCase();
+  // The grid and the loupe by their Lightroom letters: G back to the grid
+  // from the loupe, E into the loupe from the grid.
+  if (key === 'g' && loupeOpen() && !event.ctrlKey && !event.metaKey) { closeLoupe(); event.preventDefault(); return; }
+  if (key === 'e' && read().view === 'library' && read().selectedIndex !== null && !event.ctrlKey && !event.metaKey) {
+    openPhoto(read().selectedIndex);
+    event.preventDefault();
+    return;
+  }
   if (key === 'l' && !event.ctrlKey && !event.metaKey) {
     // Lights out: the chrome goes dark to judge tone; L again brings it back.
     shell.classList.toggle('is-lights-out');
@@ -2054,6 +2093,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (read().view === 'people') {
     if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
+    if ((event.key === 'g' || event.key === 'G') && !isTyping) { update({ view: 'library' }); event.preventDefault(); return; }
     if (peoplePanel.key(event)) event.preventDefault();
     return;
   }
@@ -2106,7 +2146,7 @@ const SHORTCUTS = [
   ]],
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
-    ['Enter / Space', 'Open the loupe'], ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
+    ['Enter / Space / E', 'Open the loupe'], ['G', 'Back to the grid, from anywhere'], ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
     ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
   ]],
