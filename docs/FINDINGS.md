@@ -533,3 +533,12 @@ finding was checked and the numbers said no.
 | X44 | rename_label would raise before a home was chosen | the rank nudge waits for a product | shipped |
 | X45 | outside() kept the substr scan and a second spelling of under-this-folder | not_of(folder(path)) | shipped |
 | X46 | position()'s docstring claimed an index seek | says the one counted pass it is | shipped |
+
+## Rank, from the owner's sitting (2026-09-10)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| RK1 | Learn dealt the bottom of the library: among equally unsure windows the lowest-predicted came first, and finding rounds waited for 95% coverage | ties go to the highest rated; finding rounds are half the sitting once there are leaders (2n judged) | shipped |
+| RK2 | Diverse dealt one afternoon: the pool was one window of ids, one or two shoots | eight windows across the scope; without vectors, one frame per day in turn | shipped |
+| J1 | No journeys to read a round's feel against the last | scripts/journeys/*.js, six probes to a gallery | shipped |
+| M1 | The monthly numbers: repairs 7% of September's commits by subject (August 2.7%); app.js touched by 27 of 55 commits | measured; app.js is the assembly point — a split by surface is the next shape decision | measured |

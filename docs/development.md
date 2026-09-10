@@ -91,6 +91,10 @@ touch the screen:
   the page, captures the window with `PrintWindow`, and closes. Pixels, tiles,
   the worker, the lot, with nothing on the desktop.
 - `test_desktop.py` crosses the real bridge with no window at all.
+- `scripts/journeys/*.js` are the probes for what a photographer actually
+  does (cull, loupe, survey, search, album, people), each run through
+  `native_proof.py` to a screenshot; the gallery is read side by side with the
+  last round's, never diffed.
 
 `sim_rank.py` and `sim_learn.py` are the instruments the ranking modes were
 chosen with; `make_test_library.py` builds a few hundred real photos on fast

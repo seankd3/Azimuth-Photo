@@ -348,12 +348,12 @@ def _somewhere(upper: int) -> int:
 
 
 def _finding_round() -> bool:
-    """Learn's coin: one round in three finds, the rest teach. Its own
-    function so a test can hold it still."""
+    """Learn's coin: half the rounds find among the leaders, half teach.
+    Its own function so a test can hold it still."""
 
     import random
 
-    return random.random() < 1 / 3
+    return random.random() < 0.5
 
 
 def seen(conn) -> dict[str, int]:
@@ -424,13 +424,21 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
     # every row it skips, which on this library cost 850 ms; `id >= ?` is an
     # index seek and costs nothing. Wrapping to the start when the window falls
     # off the end keeps the last few thousand photographs reachable.
+    # Several windows, not one: ids are handed out in import order, so one
+    # window of four thousand is one or two shoots, and a "diverse" round
+    # drawn from it could only be as diverse as one afternoon. Eight seeks
+    # at random ids span the scope for the price of eight index seeks.
     window = 4000
+    windows = 8
     highest = conn.execute("SELECT MAX(id) FROM images").fetchone()[0] or 0
-    select = "SELECT i.id, i.content_hash AS hash, i.width, i.height, i.rotate, i.elo FROM images i"
-    pool = [dict(row) for row in conn.execute(
-        f"{select} WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
-        (*args, _somewhere(highest), window),
-    )]
+    select = ("SELECT i.id, i.content_hash AS hash, i.width, i.height, i.rotate, i.elo,"
+              " i.date_taken FROM images i")
+    pool: list[dict] = []
+    for _ in range(windows):
+        pool += [dict(row) for row in conn.execute(
+            f"{select} WHERE {where} AND i.id >= ? ORDER BY i.id LIMIT ?",
+            (*args, _somewhere(highest), window // windows),
+        )]
     if len(pool) < window:
         pool += [dict(row) for row in conn.execute(
             f"{select} WHERE {where} ORDER BY i.id LIMIT ?", (*args, window - len(pool)),
@@ -534,7 +542,15 @@ def _learn(pool: list[dict], n: int) -> list[dict]:
       crowd is one huge uncertain window, so coverage falls out free.
     * **Finding** — the least-worn of the current top band (15%), spread
       across it, because pure uncertainty stops visiting the leaders once
-      their ratings separate, and the stars read the top.
+      their ratings separate, and the stars read the top. Half the rounds,
+      as soon as there are leaders to find among: the person is here to
+      find the best, and a sitting that only teaches the floor feels like
+      being shown the worst of the library.
+
+    Among equally uncertain windows the highest-rated one is taught first:
+    the unjudged crowd all wears the same uncertainty, and the window that
+    happened to come first in rating order was the lowest-predicted -- the
+    bottom of the library, dealt round after round.
 
     Measured (scripts/sim_learn.py, 3 seeds, 600 rounds of 9 over 2,000):
     this mixture dominates every other mode on both answers at once —
@@ -555,8 +571,8 @@ def _learn(pool: list[dict], n: int) -> list[dict]:
     mu = np.asarray([float(p["rating"]) for p in pool])
     sigma = np.asarray([wear(p) for p in pool])
 
-    covered = sum(1 for p in pool if p["comparisons"] > 0) >= 0.95 * len(pool)
-    if covered and _finding_round():
+    judged = sum(1 for p in pool if p["comparisons"] > 0)
+    if judged >= 2 * n and _finding_round():
         # The least-worn nearest the band's cut: the bubble. Membership of
         # the top is decided at its boundary — the extreme leaders are
         # already safely in, so rounds there change nothing the stars read.
@@ -578,7 +594,8 @@ def _learn(pool: list[dict], n: int) -> list[dict]:
         random.shuffle(rest)
         return chosen + rest
 
-    order = np.argsort(mu, kind="stable")
+    # Descending, so among tied windows argmax lands on the highest rated.
+    order = np.argsort(-mu, kind="stable")
     if len(order) <= n:
         return [pool[int(i)] for i in order]
     sums = np.convolve(sigma[order], np.ones(n), mode="valid")
@@ -600,8 +617,9 @@ def _spread(pool: list[dict], n: int, space) -> list[dict]:
     photograph's wear rises and it leaves the tier — the spread progresses
     through the scope instead of orbiting its extremes.
 
-    Without vectors the spread is by rating — even steps across the least-
-    worn slice's whole range."""
+    Without vectors the spread is across capture time -- even steps through
+    the least-worn slice's days, which is across shoots -- and by rating
+    when the dates are not there to spread by."""
 
     import random
 
@@ -611,6 +629,21 @@ def _spread(pool: list[dict], n: int, space) -> list[dict]:
     seen_in_space = [p for p in pool if p["hash"] in placed]
     if len(seen_in_space) < max(4, n):
         fresh = sorted(pool, key=lambda p: p["comparisons"])[: max(4 * n, 48)]
+        by_day: dict[str, list[dict]] = {}
+        for p in fresh:
+            if p.get("date_taken"):
+                by_day.setdefault(str(p["date_taken"])[:10], []).append(p)
+        if len(by_day) >= n:
+            # One frame per day in turn, the days in order: a round is as
+            # many shoots as it has seats, never one evening six times.
+            picked: list[dict] = []
+            lanes = [sorted(frames, key=lambda p: p["comparisons"]) for _day, frames in sorted(by_day.items())]
+            while len(picked) < len(fresh):
+                for lane in lanes:
+                    if lane:
+                        picked.append(lane.pop(0))
+            picked += [p for p in fresh if not p.get("date_taken")]
+            return picked
         ranked = sorted(fresh, key=lambda p: p["rating"])
         if len(ranked) <= n:
             return ranked

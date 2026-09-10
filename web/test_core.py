@@ -2561,8 +2561,8 @@ class AModeIsAnOrdering(CoreCase):
         try:
             rank._finding_round = lambda: True   # would find — but not yet
             taught = rank.candidates(self.conn, 4, mode="learn")
-            # Half the pool is unseen: no finding rounds before coverage,
-            # and the teaching window is exactly the unseen (most
+            # Four judged is not yet leaders for a round of four (eight are):
+            # teaching, and the window is exactly the unseen (most
             # uncertain, ratings tied — one contiguous window).
             self.assertTrue(all(p["comparisons"] == 0 for p in taught))
 
@@ -2577,6 +2577,45 @@ class AModeIsAnOrdering(CoreCase):
             self.assertEqual(len(taught), 4)
         finally:
             rank._finding_round = held
+
+
+class ARoundFindsTheTop(CoreCase):
+    """The owner's two complaints from a real sitting (09-10): Learn dealt
+    the bottom of the library, Diverse dealt one afternoon."""
+
+    def test_learn_teaches_the_highest_rated_of_the_equally_unsure(self):
+        # Sixteen unjudged photographs, predicted from 1000 up to 1750: the
+        # uncertainty is the same for all, so the window taught first is the
+        # top of the prediction, never the floor.
+        for i in range(16):
+            photo_id = self.photo(f"Raws/u{i}.cr3")
+            self.conn.execute("UPDATE images SET content_hash = ?, elo = ? WHERE id = ?",
+                              (f"{i:064x}", 1000 + i * 50, photo_id))
+        self.conn.commit()
+        held = rank._finding_round
+        try:
+            rank._finding_round = lambda: False
+            taught = rank.candidates(self.conn, 4, mode="learn")
+        finally:
+            rank._finding_round = held
+        self.assertEqual(sorted(p["rating"] for p in taught), [1600.0, 1650.0, 1700.0, 1750.0])
+
+    def _at(self, tail, when):
+        pid = self.photo(tail)
+        self.conn.execute("UPDATE images SET date_taken = ?, content_hash = ? WHERE id = ?", (when, f"{pid:064x}", pid))
+        return pid
+
+    def test_diverse_spans_shoots_when_no_vectors_are_made(self):
+        # Forty frames from one evening and one frame from each of five other
+        # days: a diverse round of six is six days, not the evening six times.
+        for i in range(40):
+            self._at(f"Raws/evening{i}.cr3", f"2026-05-26 21:00:{i:02d}")
+        others = [self._at(f"Raws/day{i}.cr3", f"2026-0{i + 1}-01 12:00:00") for i in range(5)]
+        self.conn.commit()
+        spread = rank.candidates(self.conn, 6, mode="diverse")
+        days = {str(p["date_taken"])[:10] for p in spread}
+        self.assertGreaterEqual(len(days), 5, days)
+        self.assertTrue(set(others) & {p["id"] for p in spread})
 
 
 class AnEditIsADecision(CoreCase):
