@@ -292,6 +292,21 @@ class Desktop:
         self._product.rank_soon()
         return said
 
+    def maybe_same(self) -> list[dict]:
+        return self._run(lambda library: library.maybe_same())
+
+    def same_people(self, a: str, b: str, called: str) -> dict:
+        said = self._run(lambda library: library.same_people(str(a), str(b), str(called)))
+        if self._product is not None:
+            self._product.rank_soon()
+        return said
+
+    def keep_apart(self, a: str, b: str) -> dict:
+        said = self._run(lambda library: library.keep_apart(str(a), str(b)))
+        if self._product is not None:
+            self._product.rank_soon()
+        return said
+
     def unname_person(self, exemplar: str) -> dict:
         said = self._run(lambda library: library.unname_person(str(exemplar)))
         if self._product is not None:

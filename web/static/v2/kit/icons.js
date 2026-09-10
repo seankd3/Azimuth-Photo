@@ -25,7 +25,8 @@ export function icon(name, className = 'icon') {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
   svg.setAttribute('aria-hidden', 'true');
-  svg.classList.add(className, `icon-${name}`);
+  // A class name may carry several classes ('icon icon-big').
+  svg.classList.add(...className.split(' ').filter(Boolean), `icon-${name}`);
   const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
   if (!(name in PATHS)) throw new Error(`No icon named ${name}`);
   path.setAttribute('d', PATHS[name]);

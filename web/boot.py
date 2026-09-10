@@ -1037,6 +1037,46 @@ class Library:
         said = persons.name(self.conn, exemplar, called)
         return said
 
+    def maybe_same(self) -> list[dict]:
+        """The wall's question: pairs of groups close enough to be one
+        person, each side with its face and its name."""
+
+        import people as persons
+
+        self._open()
+        by_exemplar = {g["exemplar"]: g for g in persons.groups(self.conn)}
+        out = []
+        for pair in persons.maybe_same(self.conn):
+            a, b = by_exemplar.get(pair["a"]), by_exemplar.get(pair["b"])
+            if not a or not b:
+                continue
+            out.append({
+                "a": {"exemplar": a["exemplar"], "term": a["name"], "settled": bool(a.get("settled")),
+                      "samples": self._face_samples(a["sample"][:1])},
+                "b": {"exemplar": b["exemplar"], "term": b["name"], "settled": bool(b.get("settled")),
+                      "samples": self._face_samples(b["sample"][:1])},
+                "close": pair["close"],
+            })
+        return out
+
+    def same_people(self, a: str, b: str, called: str) -> dict:
+        """The owner's Yes: both groups answer to one name, which is how a
+        split heals. A name is needed; with neither side introduced, the
+        wall asks for one first."""
+
+        import people as persons
+
+        self._open()
+        persons.name(self.conn, a, called)
+        persons.name(self.conn, b, called)
+        return {"named": called}
+
+    def keep_apart(self, a: str, b: str) -> dict:
+        import people as persons
+
+        self._open()
+        return persons.keep_apart(self.conn, a, b)
+
     def unname_person(self, exemplar: str) -> dict:
         """Take a first naming back: the face is a Someone again."""
 

@@ -22,6 +22,11 @@ from model import decisions
 # precision — a split person is one Name away from whole, a merged pair of
 # strangers is a lie.
 SAME = 0.5
+# Two groups whose centres sit this close are worth one question: are these
+# the same person? Below it the clusterer keeps them apart on its own.
+NEAR = 0.38
+# What the owner said of a pair: "apart" keeps two groups two people.
+APART = "apart"
 # A person seen in this many photographs is worth a row.
 FLOOR = 3
 FAMILY = "person"
@@ -178,26 +183,84 @@ def repeople(conn) -> int:
         " VALUES (?, 'people', ?, 'ready', ?, unixepoch())",
         [(photo, faces.RECIPE, json.dumps(sorted(names))) for photo, names in worn.items()],
     )
+    # The question the wall asks: pairs of groups close enough in the face
+    # space to be one person, nearest first, never a pair the owner kept
+    # apart and never two groups that already answer to the same name.
+    kept_apart = {str(row["subject"]) for row in conn.execute(
+        "SELECT subject FROM decisions WHERE family = ?", (APART,))
+        if decisions.loaded(row)}
+    centres = []
+    for group, name in merged:
+        if len({owners[face][0] for face in group}) < FLOOR:
+            centres.append(None)
+            continue
+        centre = matrix[group].mean(axis=0)
+        centres.append(centre / (np.linalg.norm(centre) or 1.0))
+    by_exemplar = {entry["exemplar"]: entry for entry in summary}
+    exemplars = []
+    for (group, name), centre in zip(merged, centres):
+        strongest = max(group, key=lambda face: scores[face]) if centre is not None else None
+        exemplars.append(f"{owners[strongest][0]}:{owners[strongest][1]}" if strongest is not None else None)
+    maybe = []
+    for a in range(len(merged)):
+        if centres[a] is None:
+            continue
+        for b in range(a + 1, len(merged)):
+            if centres[b] is None:
+                continue
+            close = float(centres[a] @ centres[b])
+            if close < NEAR or close >= SAME:
+                continue
+            pair = "|".join(sorted((exemplars[a], exemplars[b])))
+            if pair in kept_apart:
+                continue
+            if merged[a][1] and merged[a][1] == merged[b][1]:
+                continue
+            if exemplars[a] in by_exemplar and exemplars[b] in by_exemplar:
+                maybe.append({"a": exemplars[a], "b": exemplars[b], "close": round(close, 3)})
+    maybe.sort(key=lambda m: -m["close"])
     conn.execute(
         "INSERT OR REPLACE INTO cache (hash, kind, recipe, state, value, at)"
         " VALUES (?, 'faces', ?, 'ready', ?, unixepoch())",
-        (GROUPS, faces.RECIPE, json.dumps(summary)),
+        (GROUPS, faces.RECIPE, json.dumps({"groups": summary, "maybe": maybe[:12]})),
     )
     conn.commit()
     return len(summary)
 
 
-def groups(conn) -> list[dict]:
-    """The summary as last written: every group worth a row, named or not."""
-
+def _summary(conn) -> dict:
     row = conn.execute(
         "SELECT value FROM cache WHERE kind = 'faces' AND hash = ? AND recipe = ?",
         (GROUPS, faces.RECIPE),
     ).fetchone()
     if row is None:
-        return []
+        return {"groups": [], "maybe": []}
     held = row["value"]
-    return json.loads(held if isinstance(held, str) else bytes(held).decode("utf-8"))
+    loaded = json.loads(held if isinstance(held, str) else bytes(held).decode("utf-8"))
+    # The summary was a bare list before the wall asked questions.
+    return loaded if isinstance(loaded, dict) else {"groups": loaded, "maybe": []}
+
+
+def groups(conn) -> list[dict]:
+    """The summary as last written: every group worth a row, named or not."""
+
+    return _summary(conn)["groups"]
+
+
+def maybe_same(conn) -> list[dict]:
+    """Pairs of groups worth one question, nearest first."""
+
+    return _summary(conn)["maybe"]
+
+
+def keep_apart(conn, a: str, b: str) -> dict:
+    """The owner's No: these two groups are two people. Remembered, so the
+    wall never asks about this pair again."""
+
+    pair = "|".join(sorted((str(a), str(b))))
+    decisions.decide(conn, pair, APART, True)
+    conn.commit()
+    return {"apart": pair}
 
 
 def name(conn, exemplar: str, called: str) -> dict:

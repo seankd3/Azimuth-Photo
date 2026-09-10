@@ -622,3 +622,10 @@ finding was checked and the numbers said no.
 | FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | shipped |
 | FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | a key→cell map; only what changed is touched | open |
 | FR8 | The first-run path is clean | measured: keep | measured: keep |
+
+## People (2026-09-10)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| PE-M1 | Two groups of one person could only be merged by naming each the same word, by hand | the wall asks: pairs of groups close in the face space (NEAR ≤ cos < SAME, never a pair kept apart) as one inline card — two faces, Same person? Yes / No, Y/N keys; Yes heals as naming does (a name asked for when neither has one), No is a decision that keeps them apart | shipped |
+| X47 | The People wall crashed on a face with no sample: icon() rejected a two-word class | icon() takes a class list | shipped |

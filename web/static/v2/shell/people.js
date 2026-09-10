@@ -14,14 +14,20 @@ import { columnsOf } from '../kit/days.js';
 import { emptyState } from '../lens/library.js';
 import { icon } from '../kit/icons.js';
 
-export function createPeoplePanel({ product, _read, update, notify, undo, browse, renamed, ask }) {
+export function createPeoplePanel({ product, read, update, notify, undo, browse, renamed, ask }) {
   const section = document.querySelector('[data-people-section]');
   const list = document.querySelector('[data-people-list]');
   const stage = document.querySelector('[data-people-stage]');
   // The wall's cursor: which card the keys act on.
   let cursor = -1;
 
+  let maybe = [];
   async function refresh() {
+    try {
+      maybe = await product.maybeSame();
+    } catch {
+      maybe = [];
+    }
     try {
       update({ people: await product.people() });
     } catch (error) {
@@ -112,7 +118,51 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     }
     const order = [...held.filter((e) => !e.settled), ...held.filter((e) => e.settled)];
     cursor = Math.min(cursor, order.length - 1);
-    stage.replaceChildren(...order.map((entry, index) => {
+    // The questions first: two faces the library thinks are one person.
+    // Yes heals the split as naming does; No keeps them apart for good.
+    const asks = maybe.slice(0, 3).map((pair) => {
+      const card = document.createElement('div');
+      card.className = 'same-card';
+      card.setAttribute('role', 'group');
+      card.setAttribute('aria-label', `Same person? ${pair.a.term} and ${pair.b.term}`);
+      const faces = document.createElement('div');
+      faces.className = 'same-faces';
+      for (const side of [pair.a, pair.b]) {
+        const who = document.createElement('div');
+        who.className = 'same-side';
+        who.append(face({ samples: side.samples }, 'face-card-face'));
+        const name = document.createElement('p');
+        name.className = 'face-card-name';
+        name.textContent = side.term;
+        who.append(name);
+        faces.append(who);
+      }
+      const question = document.createElement('p');
+      question.className = 'same-question';
+      question.textContent = 'Same person?';
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'primary-button';
+      yes.textContent = 'Yes';
+      yes.title = 'The same person (Y)';
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'quiet-button';
+      no.textContent = 'No';
+      no.title = 'Two people — never ask again (N)';
+      yes.addEventListener('click', () => void sameAs(pair, yes));
+      no.addEventListener('click', () => void apart(pair));
+      card.addEventListener('keydown', (event) => {
+        if (event.key === 'y' || event.key === 'Y') { void sameAs(pair, yes); event.preventDefault(); event.stopPropagation(); }
+        if (event.key === 'n' || event.key === 'N') { void apart(pair); event.preventDefault(); event.stopPropagation(); }
+      });
+      const answers = document.createElement('div');
+      answers.className = 'same-answers';
+      answers.append(yes, no);
+      card.append(faces, question, answers);
+      return card;
+    });
+    stage.replaceChildren(...asks, ...order.map((entry, index) => {
       const card = document.createElement('div');
       card.className = 'face-card' + (index === cursor ? ' is-focus' : '');
       // One cursor: the picture button takes the keyboard (it has a real
@@ -181,6 +231,35 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
       return true;
     }
     return false;
+  }
+
+  async function sameAs(pair, anchor) {
+    // The name both will answer to: a side already introduced gives it;
+    // with neither introduced, the wall asks for one.
+    let called = pair.a.settled ? pair.a.term : pair.b.settled ? pair.b.term : null;
+    if (!called) called = await ask('One person — their name', anchor, '');
+    if (!called) return;
+    try {
+      await product.samePeople(pair.a.exemplar, pair.b.exemplar, called);
+      undo.show(`“${pair.a.term}” and “${pair.b.term}” are one: “${called}”.`, async () => {
+        await product.unnamePerson(pair.a.settled ? pair.b.exemplar : pair.a.exemplar);
+        await renamed();
+      });
+      void renamed();
+    } catch (error) {
+      notify(why(error));
+    }
+  }
+
+  async function apart(pair) {
+    try {
+      await product.keepApart(pair.a.exemplar, pair.b.exemplar);
+      maybe = maybe.filter((m) => m !== pair);
+      renderWall(read().people || []);
+      notify(`“${pair.a.term}” and “${pair.b.term}” stay two people.`);
+    } catch (error) {
+      notify(why(error));
+    }
   }
 
   async function introduce(exemplar, current, settled, anchor) {

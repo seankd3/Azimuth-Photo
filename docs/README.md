@@ -33,6 +33,8 @@ When documents disagree, the owner for that kind of fact wins.
 - [Guided-filter masking](guided-filter.md) — the mask-refine primitive and its
   measurements in [`examples/guided-filter/`](examples/guided-filter/).
 - [Performance budgets](PERF_BUDGETS.md) — user-visible latency constraints.
+- [Taste, sharpness and culling research](taste-and-culling-research.md) —
+  the 09-10 studies distilled: the facets, the head, the experiments in order.
 - [Gate study](GATES.md) — evidence behind the mechanical constraints.
 - [Rewrite ledger](REWRITE_LEDGER.md) — exact rebuilt, proven, and removed
   inventory.
