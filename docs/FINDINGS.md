@@ -577,14 +577,14 @@ finding was checked and the numbers said no.
 | LP3 | The context bar overflows at 1280 and scrolls the workspace sideways | the bar scrolls on its own axis | shipped |
 | LP4 | A long search phrase collapses the search box to zero | min-width on the search column; ellipsis on the title | shipped |
 | LP5 | The keys sheet is two columns inside a vertical scroller at 800 px | one column below 900 px of height | shipped |
-| LP6 | Rank at 9 wastes a quarter of the stage; 12 buys smaller cards | the last shelf stretches into the leftover height | open |
+| LP6 | Rank at 9 wastes a quarter of the stage; 12 buys smaller cards | rejected: stretching one shelf gives its cards more area than the rest, and equal area is the law a round is honest by (a size bias would be written into durable ranking data); the leftover is the price of it, and [ ] change how many are dealt | rejected |
 | LP7 | A 237 px card is not a judgement | sizes below the floor are offered with the reason, disabled | shipped |
 | LP8 | The filmstrip eats 11% of an 800 px window | the strip scales with the height | shipped |
 | LP9 | The export dialog cannot shrink and its size group is a 2×2 | one dialog width rule; a single-row size group | shipped |
 | LP10 | A popover can run off the bottom at 768 | height clamped to the space at the chosen side | shipped: one absolute ceiling (HK6); per-side clamp folded in |
 | HK1 | The density slider tops out at 320 on 4K | the range driven from the grid's width | shipped |
 | HK2 | The filmstrip is 29 fixed cells, left-aligned in a 4K void | sized from the strip's width; centred when it underfills | shipped |
-| HK3 | An edited loupe is a 2048 px preview upscaled and called 100% | rendered at the screen's size; or the chip says preview | open |
+| HK3 | An edited loupe is a 2048 px preview upscaled and called 100% | an edited photograph's loupe stops at the preview's own pixels (no native ceiling to upscale to) and the chip says Preview, never a 100% it cannot deliver | shipped |
 | HK4 | Panel widths are absolute: a ribbon at 4K | clamped panel widths | shipped |
 | HK5 | The People wall is a field of 164 px cards at 4K | card width clamped to the viewport | shipped |
 | HK6 | Four viewport rules for popover heights; two unbounded at 2160 | one rule with an absolute ceiling | shipped |
@@ -606,9 +606,9 @@ finding was checked and the numbers said no.
 | BC6 | Every owed head re-reads a drive marker file from disk | `attached_now` is drive id → root, looked at once a pass; `locate(roots=)` joins the tail to it and reads no marker; the test forbids a marker read during a step | shipped |
 | BC7 | Adding a big folder saturates the library lane with a full-shelf poll every 500 ms | the scan's poll re-reads only what grows (the pages and the count); the shelves, drives, albums, people and labels are read once when the walk lands | shipped |
 | BC8 | swept costs 1.1 s of the interactive lane: the folder tree is built there | the tree is a made answer like the facets (`_reshape` makes both on the sweep lane after a sweep that changed something; keyed by the stamp and the sweep count); the interactive lane makes it only the first time and answers with the last while a fresh one is made; the drives' markers are not re-read for it | shipped |
-| BC9 | A search on screen re-runs the whole fusion per page every 2 s | the ranked id list memoised per query, scope and generation | open |
+| BC9 | A search on screen re-runs the whole fusion per page every 2 s | the last search's ranked ids are kept with what they were asked of (words, seeds, view, space count, whether the words had a vector, the shape stamp, the sweep count, the denied set); a page and the two-second re-read are slices of it | shipped |
 | BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | shipped: 0.2 ms after the first draw |
-| BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | preallocated and filled from an unfetched cursor | open |
+| BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | counted first, one matrix allocated, filled row by row from the cursor; measured on 20k synthetic vectors: peak 194 MB → 93 MB, same time | shipped |
 | BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | shipped |
 | BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | Select All stays a scope the verbs resolve in SQL | open |
 | BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | shipped |
