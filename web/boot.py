@@ -43,13 +43,18 @@ Result = TypeVar("Result")
 LOOKING_AT_MOST = 400
 
 
-def attached_now(conn) -> list[int]:
-    """The drives attached right now, answered by looking at each marker."""
+def attached_now(conn) -> dict[int, str]:
+    """The drives attached right now and where each one is, answered by
+    looking at each marker once. Every read that follows -- a page, the
+    worker's next step, locating a photograph -- answers from this instead
+    of touching a disk."""
 
-    return [
-        int(row["id"]) for row in conn.execute("SELECT id, uuid FROM drives")
-        if drives.online(conn, row["uuid"])
-    ]
+    here = {}
+    for row in conn.execute("SELECT id, uuid FROM drives"):
+        root = drives.root_of(conn, row["uuid"])
+        if root is not None:
+            here[int(row["id"])] = root
+    return here
 
 
 def repair(conn) -> None:
@@ -189,7 +194,7 @@ class Library:
         # Which drives are here, by their markers. Looked at once now and by
         # the follower every few seconds, so a page read never probes a disk
         # -- an absent share made every page wait on its timeout.
-        self.here: list[int] = attached_now(self.conn)
+        self.here: dict[int, str] = attached_now(self.conn)
         # The search drop's shape with the stamp it was made at, made on the
         # sweep lane after a sweep that changed something or on first ask;
         # a stamp that moved (a cull, a forget) remakes it.
@@ -207,6 +212,7 @@ class Library:
             (embedded_metadata.KIND, *self.tiles.kinds, self.space,
              self.looking_at_people, self.knowing_looks, self.knowing_sharpness),
             on_screen=lambda: self._looking,
+            attached=lambda: self.here,
             ceiling_bytes=self.tiles.ceiling_bytes,
             # A decode is one core for a third of a second; a quarter of the
             # machine's threads keeps the interactive lane and the disk free.
@@ -323,7 +329,7 @@ class Library:
         ))
 
     def _here(self) -> list[int]:
-        return self.here
+        return list(self.here)
 
     def size(self, scope: Scope = EVERYTHING) -> int:
         self._open()

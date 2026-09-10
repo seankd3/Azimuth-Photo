@@ -602,8 +602,8 @@ finding was checked and the numbers said no.
 | BC2 | counts.unidentified counts rows the worker will never take (no tail, a derived copy): Catching up forever | one predicate, the worker's | shipped |
 | BC3 | size() and days() pin the date index, defeating the folder range and the stars index: 44 ms vs 0.03 ms | the hint only for the bare library | shipped: 44 ms → 0.03 ms on a folder |
 | BC4 | The tile ceiling is never enforced during a backfill: eviction runs only when idle | the sweep on a clock; free space re-read | shipped: every two minutes |
-| BC5 | With the archive away the worker re-probes the same 64 away heads every step | the attached list in the anti-join for kinds read from the original | open |
-| BC6 | Every owed head re-reads a drive marker file from disk | locate() takes the published attached list | open |
+| BC5 | With the archive away the worker re-probes the same 64 away heads every step | the follower's attached list reaches every step; a kind that reads the original is not asked for a photograph whose every copy row is on an away drive (one with no copy row is still tried); +0.2 ms on the anti-join with the disk here | shipped |
+| BC6 | Every owed head re-reads a drive marker file from disk | `attached_now` is drive id → root, looked at once a pass; `locate(roots=)` joins the tail to it and reads no marker; the test forbids a marker read during a step | shipped |
 | BC7 | Adding a big folder saturates the library lane with a full-shelf poll every 500 ms | poll the pulse; the shelves once when the sweep lands | open |
 | BC8 | swept costs 1.1 s of the interactive lane: the folder tree is built there | the tree on the sweep lane beside the facets | open |
 | BC9 | A search on screen re-runs the whole fusion per page every 2 s | the ranked id list memoised per query, scope and generation | open |

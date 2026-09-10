@@ -1493,6 +1493,27 @@ class OwedIsAQuery(CoreCase):
         self.assertNotIn("no-tail", [row["hash"] for row in work.owed(self.conn, self.thumb)])
         self.assertEqual(work.step(self.conn, (self.thumb,), yield_to=lambda: False)["photo"], reachable)
 
+    def test_the_attached_list_spares_an_away_drive_every_probe(self):
+        # With the archive unplugged, every step asked for the same heads
+        # and probed each one by reading a marker file. The follower's
+        # attached list answers both: the anti-join leaves out what is
+        # only on an away drive, and locating never opens a marker.
+        here = self._catalogued("Raws/here.CR3")
+        gone = self._catalogued("Raws/gone.CR3")
+        self.conn.execute(
+            "INSERT INTO copies(photo_id, drive_id, seen_at) VALUES (?, ?, 0), (?, ?, 0)",
+            (here, self.hot["id"], gone, self.cold["id"]))
+        self.conn.commit()
+        attached = {self.hot["id"]: self.hot_root}
+        self.assertEqual([r["id"] for r in work.owed(self.conn, self.thumb)], [gone, here])
+        self.assertEqual([r["id"] for r in work.owed(self.conn, self.thumb, attached=attached)], [here])
+        with patch.object(drives, "read_marker", side_effect=AssertionError("a marker was read")):
+            did = work.step(self.conn, (self.thumb,), attached=attached, yield_to=lambda: False)
+        self.assertEqual(did["photo"], here)
+        # A photograph nobody has placed yet is still tried.
+        unplaced = self._catalogued("Raws/unplaced.CR3")
+        self.assertIn(unplaced, [r["id"] for r in work.owed(self.conn, self.thumb, attached=attached)])
+
     def test_a_failure_is_not_rediscovered_every_pass(self):
         boom = cache.Kind(name="boom", compute=lambda source, hash: 1 / 0)
         self._catalogued()

@@ -257,8 +257,12 @@ def locate(
     *,
     expected_size: int | None = None,
     expected_modified_ns: int | None = None,
+    roots: dict[int, str] | None = None,
 ) -> str | None:
-    """A path this machine can open for `tail`, or None if no drive has it."""
+    """A path this machine can open for `tail`, or None if no drive has it.
+
+    `roots` is the attached list already looked at (drive id to root); with
+    it no marker is read here. Without it every drive's marker is."""
 
     if not tail:
         return None
@@ -267,7 +271,11 @@ def locate(
     except ValueError:
         return None
     for drive in _by_preference(conn):
-        path = drives.path_for(conn, drive["uuid"], tail)
+        if roots is None:
+            path = drives.path_for(conn, drive["uuid"], tail)
+        else:
+            root = roots.get(int(drive["id"]))
+            path = os.path.join(root, tail.replace("/", os.sep)) if root else None
         if path and is_file(path, expected_size, expected_modified_ns):
             return path
     return None

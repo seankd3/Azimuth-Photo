@@ -86,8 +86,15 @@ def set_paused(conn, stop: bool) -> bool:
 
 
 def owed(conn, kind: cache.Kind, *, recipe: dict | None = None,
-         scope: Scope = EVERYTHING, limit: int = 200, keyed: bool = False) -> list[dict]:
+         scope: Scope = EVERYTHING, limit: int = 200, keyed: bool = False,
+         attached: dict[int, str] | None = None) -> list[dict]:
     """Photos that should have this answer and do not. The whole scheduler.
+
+    `attached` is the drives here now (id to root). Given, a kind that reads
+    the original is not asked for a photograph whose every known copy is on
+    a drive that is away: the debt stands (`owing` still counts it), but this
+    step cannot pay it, and asking was the idle churn with the archive
+    unplugged -- eight probes per root per step, each reading a marker.
 
     A failed entry counts as answered: it is in `cache` with `state='failed'`,
     so the anti-join steps over it and the worker does not rediscover the same
@@ -109,7 +116,7 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None,
     carried = f", {kind.keyed[1]} AS keyed" if keyed else ""
 
     def ask(living: str, room: int) -> list[dict]:
-        source, args = _owed_from(kind, recipe, scope, keyed=keyed, living=living)
+        source, args = _owed_from(kind, recipe, scope, keyed=keyed, living=living, attached=attached)
         return [dict(row) for row in conn.execute(
             f"""
             SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken{carried}
@@ -160,7 +167,8 @@ TRASHED = "i.status = 'trashed'"
 
 
 def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
-               *, keyed: bool = False, living: str = LIVING) -> tuple[str, tuple]:
+               *, keyed: bool = False, living: str = LIVING,
+               attached: dict[int, str] | None = None) -> tuple[str, tuple]:
     """The anti-join itself: what is owed, before anyone says what to do with it.
 
     Trash owes nothing: a photograph waits there to be forgotten, and the
@@ -176,6 +184,17 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
     """
 
     narrowed, scope_args = where(scope)
+    # A kind that reads the original cannot be paid from a drive that is
+    # away. A copy row is a hint, so only a photograph whose every hint is
+    # away is left out; one with no hint at all is still tried.
+    reach, reach_args = "", ()
+    if attached is not None and kind.source is None:
+        holes = ",".join("?" for _ in attached) or "NULL"
+        reach = (
+            f" AND (EXISTS (SELECT 1 FROM copies k WHERE k.photo_id = i.id AND k.drive_id IN ({holes}))"
+            " OR NOT EXISTS (SELECT 1 FROM copies k WHERE k.photo_id = i.id))"
+        )
+        reach_args = tuple(int(d) for d in attached)
     # Trash is small and has its own partial index; the planner needs to be
     # told, as every partial index here does.
     table = "images i INDEXED BY idx_trashed" if living == TRASHED else "images i"
@@ -191,9 +210,9 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
               AND i.vc_of IS NULL
               AND c.hash IS NULL
               AND ({kind.wants})
-              AND ({narrowed})
+              AND ({narrowed}){reach}
             """,
-            (kind.name, cache.canonical(kind, recipe), *scope_args),
+            (kind.name, cache.canonical(kind, recipe), *scope_args, *reach_args),
         )
     param, expression = kind.keyed
     base = cache.canonical(kind, recipe)
@@ -212,9 +231,9 @@ def _owed_from(kind: cache.Kind, recipe: dict | None, scope: Scope,
           AND {expression} IS NOT NULL
           AND c.hash IS NULL
           AND ({kind.wants})
-          AND ({narrowed})
+          AND ({narrowed}){reach}
         """,
-        (kind.name, prefix, suffix, *scope_args),
+        (kind.name, prefix, suffix, *scope_args, *reach_args),
     )
 
 
@@ -263,8 +282,8 @@ def debt(conn, kinds: Iterable[cache.Kind]) -> dict[str, int]:
     return tally
 
 
-def _identify_one(conn, row) -> bool:
-    path = photos.locate(conn, row["tail"], expected_size=row["file_size"])
+def _identify_one(conn, row, attached: dict[int, str] | None = None) -> bool:
+    path = photos.locate(conn, row["tail"], expected_size=row["file_size"], roots=attached)
     if path is None:
         return False
     digest = photos.content_hash(path)
@@ -294,6 +313,7 @@ def _identify_one(conn, row) -> bool:
 
 
 def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
+         attached: dict[int, str] | None = None,
          yield_to: Callable[[], bool] | None = None,
          share: tuple[int, int] = (0, 1)) -> dict | None:
     """Do the single most-owed thing, or nothing at all. Returns what it did.
@@ -314,6 +334,10 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     keeps a worker to the photographs whose id leaves that remainder, so two
     lanes never want the same one and each is newest-first within its part.
 
+    `attached` is the drives here now, looked at once by the follower: the
+    step neither asks for nor probes a photograph that is only on a drive
+    that is away, and locating never reads a marker.
+
     `yield_to` is accepted for callers that want to stand down entirely (a
     battery saver, a test). It defaults to never, because chores running is the
     normal state.
@@ -331,13 +355,14 @@ def step(conn, kinds: Iterable[cache.Kind], *, on_screen: Iterable[int] = (),
     looked = [int(i) for i in on_screen]
     scopes = (only(looked), EVERYTHING) if looked else (EVERYTHING,)
     for scope in scopes:
-        did = _most_owed(conn, tuple(kinds), all_of(scope, part))
+        did = _most_owed(conn, tuple(kinds), all_of(scope, part), attached)
         if did is not None:
             return did
     return None
 
 
-def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None:
+def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope,
+               attached: dict[int, str] | None = None) -> dict | None:
     """Within one scope: the newest photograph's first owed thing.
 
     Each debt is asked for its newest few candidates rather than one, because
@@ -355,29 +380,27 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
         if not kind.here():
             continue
         for recipe in kind.ahead():
-            for row in owed(conn, kind, recipe=recipe, scope=scope, limit=CANDIDATES):
+            for row in owed(conn, kind, recipe=recipe, scope=scope, limit=CANDIDATES, attached=attached):
                 heads.append((_age(row), kind.name, kind, recipe, row))
             if kind.keyed is None:
                 continue
             # The per-photograph variants: same kind, same base recipe, the
             # photo's own fragment as the first key.
             for row in owed(conn, kind, recipe=recipe, scope=scope,
-                            limit=CANDIDATES, keyed=True):
+                            limit=CANDIDATES, keyed=True, attached=attached):
                 variant = {**(recipe or {}), kind.keyed[0]: json.loads(row["keyed"])}
                 heads.append((_age(row), kind.name, kind, variant, row))
     heads.sort(key=lambda head: head[0], reverse=True)
 
-    # A head that cannot be located is normal (its drive is away); a run of
-    # them means the drive is away for all of them, and probing every head
-    # every five seconds was the idle churn with an archive unplugged.
-    # A drive that is away is away for every head on it: once eight heads
-    # under one root could not be located, the rest of that root are
-    # skipped without a probe, and the walk goes on to identity work and
-    # to other roots.
+    # A head that cannot be located is normal (its drive is away, and it
+    # has no copy row to say so); a run of them means the drive is away for
+    # all of them. Once eight heads under one root could not be located,
+    # the rest of that root are skipped without a probe, and the walk goes
+    # on to identity work and to other roots.
     misses: dict[str, int] = {}
     for _age_key, what, kind, recipe, row in heads:
         if what == "identity":
-            if _identify_one(conn, row):
+            if _identify_one(conn, row, attached):
                 conn.commit()
                 return {"did": "identity", "photo": row["id"]}
             continue
@@ -385,7 +408,7 @@ def _most_owed(conn, kinds: tuple[cache.Kind, ...], scope: Scope) -> dict | None
         if misses.get(root, 0) >= MISSES:
             continue
         find = kind.source or (lambda conn, row: photos.locate(
-            conn, row["tail"], expected_size=row["file_size"]))
+            conn, row["tail"], expected_size=row["file_size"], roots=attached))
         source = find(conn, row)
         if source is None:
             misses[root] = misses.get(root, 0) + 1
@@ -445,11 +468,13 @@ class Chores:
         kinds: Iterable[cache.Kind],
         *,
         on_screen: Callable[[], Iterable[int]] = lambda: (),
+        attached: Callable[[], dict[int, str] | None] = lambda: None,
         yield_to: Callable[[], bool] = lambda: False,
         ceiling_bytes: int | None = None,
         lanes: int = 1,
     ):
         self._open_conn = open_conn
+        self._attached = attached
         self._kinds = tuple(kinds)
         self._on_screen = on_screen
         self._yield_to = yield_to
@@ -526,6 +551,7 @@ class Chores:
                         conn,
                         self._kinds,
                         on_screen=self._on_screen(),
+                        attached=self._attached(),
                         yield_to=self._yield_to,
                         share=(lane, self._lanes),
                     )
