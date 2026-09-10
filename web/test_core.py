@@ -1501,10 +1501,12 @@ class OwedIsAQuery(CoreCase):
         self.assertEqual(work.owed(self.conn, boom), [])
 
     def test_what_is_on_screen_is_served_first(self):
+        # Closeness to the eyes is the step's own first pass — the on-screen
+        # ids as a scope of their own — never an ORDER BY over the anti-join.
         self._catalogued("Raws/a.CR3")
         watching = self._catalogued("Raws/b.CR3")
-        owed = work.owed(self.conn, self.thumb, on_screen=[watching])
-        self.assertEqual(owed[0]["id"], watching)
+        did = work.step(self.conn, (self.thumb,), on_screen=[watching])
+        self.assertEqual(did["photo"], watching)
 
     def test_the_owner_can_stop_chores_and_it_survives_a_restart(self):
         # A preference is a decision, so it is a row in the log rather than a

@@ -166,6 +166,13 @@ class Store:
                         render.fit(held.convert("RGB"), min(render.LOUPE, 2048)), edit)
             else:
                 image = render.pixels(source, min(render.LOUPE, 2048), edit=edit)
+        elif size < render.LOUPE:
+            # Only the grid is owed: decode at the grid's size, so the
+            # camera's embedded JPEG qualifies for almost every file and the
+            # first grid fills in a tenth of a second a frame instead of a
+            # full demosaic (2-3 s). The loupe is made when it is asked for.
+            image = render.pixels(source, size)
+            return self._publish(target, render.encode(image))
         else:
             image = render.pixels(source, render.LOUPE)
 

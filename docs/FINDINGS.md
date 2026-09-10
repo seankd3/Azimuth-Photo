@@ -598,27 +598,27 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| BC1 | The status line can never say Up to date: debt() counts kinds the machine cannot make (embedding, faces with no GPU), 1.6 s every 30 s | debt gated on kind.here(), as the step already is | open |
-| BC2 | counts.unidentified counts rows the worker will never take (no tail, a derived copy): Catching up forever | one predicate, the worker's | open |
-| BC3 | size() and days() pin the date index, defeating the folder range and the stars index: 44 ms vs 0.03 ms | the hint only for the bare library | open |
-| BC4 | The tile ceiling is never enforced during a backfill: eviction runs only when idle | the sweep on a clock; free space re-read | open |
+| BC1 | The status line can never say Up to date: debt() counts kinds the machine cannot make (embedding, faces with no GPU), 1.6 s every 30 s | debt gated on kind.here(), as the step already is | shipped |
+| BC2 | counts.unidentified counts rows the worker will never take (no tail, a derived copy): Catching up forever | one predicate, the worker's | shipped |
+| BC3 | size() and days() pin the date index, defeating the folder range and the stars index: 44 ms vs 0.03 ms | the hint only for the bare library | shipped: 44 ms → 0.03 ms on a folder |
+| BC4 | The tile ceiling is never enforced during a backfill: eviction runs only when idle | the sweep on a clock; free space re-read | shipped: every two minutes |
 | BC5 | With the archive away the worker re-probes the same 64 away heads every step | the attached list in the anti-join for kinds read from the original | open |
 | BC6 | Every owed head re-reads a drive marker file from disk | locate() takes the published attached list | open |
 | BC7 | Adding a big folder saturates the library lane with a full-shelf poll every 500 ms | poll the pulse; the shelves once when the sweep lands | open |
 | BC8 | swept costs 1.1 s of the interactive lane: the folder tree is built there | the tree on the sweep lane beside the facets | open |
 | BC9 | A search on screen re-runs the whole fusion per page every 2 s | the ranked id list memoised per query, scope and generation | open |
-| BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | open |
+| BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | shipped: 0.2 ms after the first draw |
 | BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | preallocated and filled from an unfetched cursor | open |
-| BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | open |
+| BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | shipped |
 | BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | Select All stays a scope the verbs resolve in SQL | open |
-| BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | open |
-| BC15 | Pending cells repaint continuously: background animated, a paint per cell per frame | opacity on the veil | open |
-| BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | open |
+| BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | shipped |
+| BC15 | Pending cells repaint continuously: background animated, a paint per cell per frame | opacity on the veil | shipped |
+| BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | shipped: plus a filename index (page at depth 96 → within budget) |
 | FR1 | An import reads every file five times | hash while copying; verify in one read | open |
 | FR2 | Staging opens every file's EXIF on the card: half a minute of seeks | mtime for the day; tags read at bring time | open |
 | FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | on the intake lane, coalesced | open |
-| FR4 | The first grid tile always decodes at loupe size, so small embedded previews never qualify: 3 s a frame | decode at grid size when only the grid tile is owed | open |
-| FR5 | Ejecting the card mid-import yields 1,900 unreadable and phase done | the run stops and says the card was removed | open |
-| FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | open |
+| FR4 | The first grid tile always decodes at loupe size, so small embedded previews never qualify: 3 s a frame | decode at grid size when only the grid tile is owed | shipped |
+| FR5 | Ejecting the card mid-import yields 1,900 unreadable and phase done | the run stops and says the card was removed | shipped |
+| FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | shipped |
 | FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | a key→cell map; only what changed is touched | open |
 | FR8 | The first-run path is clean | measured: keep | measured: keep |

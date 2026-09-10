@@ -404,7 +404,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   font: 700 var(--t-meta)/var(--t-head) system-ui, sans-serif;
   text-align: center;
 }
-.photo-cell[data-empty="pending"] { background: var(--tile); animation: breathe 1.4s ease-in-out infinite alternate; }
+.photo-cell[data-empty="pending"] { background: var(--tile); }
+.photo-cell[data-empty="pending"] > .veil { background: #22242a; opacity: 0; animation: breathe 1.4s ease-in-out infinite alternate; }
 .photo-cell[data-empty="unshowable"]::after,
 .photo-cell[data-empty="away"]::after {
   content: "";
@@ -456,8 +457,10 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 /* the keyboard cursor is its own quieter ring: on the import stage too,
    where the checked cell is the mark and the cursor is the ring */
 .photo-cell.is-focus, .stage-cell.is-selected { outline: 1px solid var(--ring); outline-offset: -4px; }
-.photo-skeleton { position: absolute; background: var(--tile); animation: breathe 1.4s ease-in-out infinite alternate; }
-@keyframes breathe { to { background: #22242a; } }
+.photo-skeleton { position: absolute; background: var(--tile); }
+.photo-skeleton > .veil { background: #22242a; opacity: 0; animation: breathe 1.4s ease-in-out infinite alternate; }
+/* the breath is an opacity on the veil: a composite per frame, not a paint per cell */
+@keyframes breathe { to { opacity: 1; } }
 
 /* Rank: the stage takes the grid's place; cards are equal-area at their own shape */
 .workspace:has(.rank-stage:not([hidden])), .workspace:has(.loupe-stage:not([hidden])) { overflow: hidden; }

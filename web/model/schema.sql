@@ -156,6 +156,10 @@ CREATE INDEX IF NOT EXISTS idx_trashed
     ON images(id) WHERE status = 'trashed' AND tail IS NOT NULL;
 -- Folder browsing is a prefix of a tail, and a sweep looks photos up by one.
 CREATE INDEX IF NOT EXISTS idx_photos_tail ON images(tail);
+-- The filename sort walks this the way the date sort walks idx_browse_date:
+-- without it a page at depth was 96 ms of sorting the whole library.
+CREATE INDEX IF NOT EXISTS idx_browse_filename
+    ON images(filename ASC, id ASC, stack_of) WHERE status != 'trashed' AND tail IS NOT NULL;
 -- Identity: what `identify()` asks, and what every cache row is keyed on.
 CREATE INDEX IF NOT EXISTS idx_photos_hash ON images(content_hash);
 -- The one debt that is not a cache kind, newest first, cursor-free.

@@ -243,6 +243,10 @@ def bring(
         try:
             identity = photos.content_hash(source)
         except OSError as error:
+            if not os.path.isdir(os.path.dirname(source)):
+                # The card is gone: one sentence, not a line per file.
+                tally["removed"] = True
+                break
             tally["failed"] += 1
             note("unreadable", candidate, error=str(error))
             continue

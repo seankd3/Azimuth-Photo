@@ -20,6 +20,7 @@ row). Measure first; then the budget is the measurement, held.
 The measurements behind the current numbers live in `FINDINGS.md`
 §Performance (a fresh 150,000-row catalog, 2026-09-09): a page at any depth in
 tens of milliseconds, a rerank that writes only what changed, the window open
-before any repair runs. The V1 bench scripts, the perf CI gate and the
-committed baseline this document once described were deleted with the server;
-a V2 bench is owed and will be named here when it exists.
+before any repair runs. `scripts/bench.py <catalog.db> [--budget]` is the
+V2 bench: one line per verb on a scratch copy of a catalog, a budget per
+shape (whole library, a folder, a chip), and `--budget` fails a run over
+them. The numbers behind each budget are the rows in `FINDINGS.md`.

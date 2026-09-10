@@ -301,8 +301,12 @@ def size(conn, scope: Scope = EVERYTHING) -> int:
     scanned the table for a bare COUNT (93 ms) against 12 ms on the index."""
 
     clause, args = where(scope)
+    # The hint is for the bare library, where the planner scanned the table
+    # for a bare COUNT; a narrowed scope has its own index (a folder's tail
+    # range, the stars), and the hint would only defeat it (44 ms vs 0.03).
+    hint = " INDEXED BY idx_browse_date" if scope is EVERYTHING else ""
     return int(conn.execute(
-        f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_date WHERE {IN_LIBRARY} AND ({clause})", args
+        f"SELECT COUNT(*) FROM images i{hint} WHERE {IN_LIBRARY} AND ({clause})", args
     ).fetchone()[0])
 
 
@@ -327,7 +331,10 @@ def counts(conn) -> dict:
         "starred": ask(
             f"SELECT COUNT(*) FROM images i INDEXED BY idx_browse_star_date_id"
             f" WHERE {IN_LIBRARY} AND i.stars > 0"),
-        "unidentified": ask("SELECT COUNT(*) FROM images WHERE content_hash IS NULL"),
+        # The rows the worker will take, and only those: a copy without a
+        # tail is not owed identity, and counting it said Catching up forever.
+        "unidentified": ask(
+            "SELECT COUNT(*) FROM images i WHERE i.content_hash IS NULL AND i.vc_of IS NULL AND i.tail IS NOT NULL"),
     }
 
 
@@ -384,6 +391,7 @@ def days(conn, scope: Scope = EVERYTHING) -> list[dict]:
     """
 
     clause, args = where(scope)
+    hint = " INDEXED BY idx_browse_date" if scope is EVERYTHING else ""
     return [
         {"day": row["day"], "count": row["count"]}
         for row in conn.execute(
@@ -391,7 +399,7 @@ def days(conn, scope: Scope = EVERYTHING) -> list[dict]:
             SELECT CASE WHEN i.date_taken IS NULL OR i.date_taken = '' THEN ''
                         ELSE substr(i.date_taken, 1, 10) END AS day,
                    COUNT(*) AS count
-            FROM images i INDEXED BY idx_browse_date
+            FROM images i{hint}
             WHERE {IN_LIBRARY} AND ({clause})
             GROUP BY day ORDER BY day = '', day DESC
             """,

@@ -316,11 +316,11 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     backButton.textContent = 'Back';
     backButton.title = 'Back to the library (Esc)';
     const parts = [`${(status.brought || 0).toLocaleString()} imported`];
-    if (status.already) parts.push(`${status.already.toLocaleString()} already in the library`);
+    if (status.already) parts.push(`${status.already.toLocaleString()} already at their place`);
     if (status.skipped) parts.push(`${status.skipped.toLocaleString()} already in the library`);
     if (status.failed) parts.push(`${status.failed.toLocaleString()} could not be imported`);
     const cleared = state.isCard && clearBox.checked && (status.cleared || 0) >= total && status.phase === 'done';
-    const said = (status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
+    const said = (status.removed ? 'The card was removed. ' : status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
     progress.textContent = said;
     progressed('');

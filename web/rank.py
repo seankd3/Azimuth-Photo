@@ -686,12 +686,17 @@ def _orientation(photo: dict) -> str:
 EARNED = 3
 
 
+_PROGRESS: dict[tuple, dict[str, int]] = {}
+
+
 def progress(conn, scope: Scope = EVERYTHING) -> dict[str, int]:
     """How much of a scope has been looked at: `judged` have been in a round,
     `earned` in three or more, which is when a place stops being a guess.
 
     Not a percentage of anything invented, just how much of what you are
     looking at you have looked at, and how much of that is settled.
+    Remembered per scope until the round log moves: two DISTINCT counts
+    over the whole scope were ~260 ms of every draw.
     """
 
     import json
@@ -700,6 +705,12 @@ def progress(conn, scope: Scope = EVERYTHING) -> dict[str, int]:
     if not counts:
         return {"judged": 0, "earned": 0}
     clause, args = scope_where(scope)
+    head = conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions WHERE family = ?",
+                        (decisions.COMPARE,)).fetchone()[0]
+    key = (clause, tuple(args), int(head), len(counts))
+    held = _PROGRESS.get(key)
+    if held is not None:
+        return dict(held)
 
     def within(members) -> int:
         return int(conn.execute(
@@ -709,8 +720,11 @@ def progress(conn, scope: Scope = EVERYTHING) -> dict[str, int]:
             (*args, json.dumps(sorted(members))),
         ).fetchone()[0])
 
-    return {"judged": within(counts),
-            "earned": within([h for h, n in counts.items() if n >= EARNED])}
+    answer = {"judged": within(counts),
+              "earned": within([h for h, n in counts.items() if n >= EARNED])}
+    _PROGRESS.clear()
+    _PROGRESS[key] = dict(answer)
+    return answer
 
 
 def judged(conn, scope: Scope = EVERYTHING) -> int:

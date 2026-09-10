@@ -24,7 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "web"))
 
 import library
 import model
+import rank
+import search as finding
 import stacks
+import tiles
+import work
 from boot import facets_of
 from model.scope import covers_only
 from model.scope import folder as in_folder
@@ -49,6 +53,7 @@ def main(argv: list[str]) -> int:
             os.remove(scratch + ext)
     shutil.copy(argv[1], scratch)
     conn = model.connect(scratch)
+    store = tiles.Store(os.path.join(tempfile.gettempdir(), "azimuth-bench-tiles"))
     total = library.size(conn)
     deep = max(0, total - 200)
     named = [a for a in argv[2:] if not a.startswith("--")]
@@ -59,8 +64,10 @@ def main(argv: list[str]) -> int:
 
     # The budgets, in ms on a 150k catalog with the machine at rest: a row
     # over its budget is printed OVER, and `--budget` makes that a failure.
-    BUDGET = {"photos": 40, "size": 30, "days": 200, "position": 80, "counts": 30, "stacks.stack": 20,
-              "stacks.unstack": 20, "facets_of": 1500, "stacks.project": 1500}
+    BUDGET = {"photos": 40, "size everything": 30, "size folder": 5, "days everything": 200, "days folder": 10,
+              "position": 80, "counts": 30, "stacks.stack": 20, "stacks.unstack": 20, "facets_of": 1500,
+              "stacks.project": 1500, "folder_tree": 1500, "search": 200, "rank.candidates": 150,
+              "rank.progress": 150, "work.owed": 10}
     over = []
 
     def row(name, fn):
@@ -86,6 +93,11 @@ def main(argv: list[str]) -> int:
         row(f"position {sort}", lambda s=sort: library.position(conn, first, s))
     row("counts", lambda: library.counts(conn))
     row("facets_of", lambda: facets_of(conn))
+    row("folder_tree", lambda: library.folder_tree(conn))
+    row("search lexical", lambda: finding.search(conn, "2016", limit=200))
+    row("rank.candidates learn", lambda: rank.candidates(conn, 9, mode="learn"))
+    row("rank.progress", lambda: rank.progress(conn))
+    row("work.owed grid", lambda: work.owed(conn, store.grid, limit=64))
     row("stacks.project (whole)", lambda: stacks.project(conn))
     ids = [r[0] for r in conn.execute(
         "SELECT id FROM images WHERE tail IS NOT NULL AND content_hash IS NOT NULL ORDER BY date_taken LIMIT 3")]

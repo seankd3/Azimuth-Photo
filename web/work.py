@@ -85,7 +85,7 @@ def set_paused(conn, stop: bool) -> bool:
     return stop
 
 
-def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Iterable[int] = (),
+def owed(conn, kind: cache.Kind, *, recipe: dict | None = None,
          scope: Scope = EVERYTHING, limit: int = 200, keyed: bool = False) -> list[dict]:
     """Photos that should have this answer and do not. The whole scheduler.
 
@@ -102,12 +102,10 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
     owed work.
     """
 
-    ids = [int(i) for i in on_screen]
-    hole = ",".join("?" for _ in ids)
-    # Closeness to your eyes, spelled as an ORDER BY. The on-screen clause is
-    # omitted entirely when nothing is on screen, so a background pass does not
-    # pay for an empty IN list.
-    nearest = f"i.id IN ({hole}) DESC, " if ids else ""
+    # Closeness to your eyes is not an ORDER BY here: `step()` asks the
+    # on-screen ids as a scope of their own first, which the indexes answer
+    # in a millisecond; an IN-list DESC in the ORDER BY turned the walk into
+    # a sort of the whole anti-join (measured 886 ms against 1.1).
     carried = f", {kind.keyed[1]} AS keyed" if keyed else ""
 
     def ask(living: str, room: int) -> list[dict]:
@@ -116,12 +114,10 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None, on_screen: Itera
             f"""
             SELECT i.id, i.content_hash AS hash, i.tail, i.file_size, i.date_taken{carried}
             {source}
-            ORDER BY {nearest}i.date_taken DESC, i.id DESC
+            ORDER BY i.date_taken DESC, i.id DESC
             LIMIT ?
             """,
-            # In SQL order: the join's kind and recipe, then the scope's
-            # arguments in the WHERE, then the on-screen ids in the ORDER BY.
-            (*args, *ids, int(room)),
+            (*args, int(room)),
         )]
 
     # The library first, on its own index; then, for the kinds Trash is
@@ -255,6 +251,11 @@ def debt(conn, kinds: Iterable[cache.Kind]) -> dict[str, int]:
 
     tally = {"identity": _unidentified_count(conn)}
     for kind in kinds:
+        # A kind this machine cannot make (no face model, no GPU for the
+        # space) is not a debt: the step skips it, and so does the count,
+        # or the status line said Catching up forever.
+        if not kind.here():
+            continue
         try:
             tally[kind.name] = sum(owing(conn, kind, recipe=recipe) for recipe in kind.ahead())
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
@@ -453,6 +454,7 @@ class Chores:
         self._on_screen = on_screen
         self._yield_to = yield_to
         self._ceiling_bytes = ceiling_bytes
+        self._swept_at = 0.0
         self._lanes = max(1, int(lanes))
         self._stopped = threading.Event()
         # One wake event per lane. A shared one lost wakeups: the first lane
@@ -541,7 +543,11 @@ class Chores:
                     except Exception:
                         log.exception("worker=chores debt failed")
 
-                if did is None and lane == 0 and self._ceiling_bytes is not None:
+                # The ceiling is kept on a clock, not on idleness: during a
+                # backfill lane 0 is never idle, and every grid tile publishes
+                # a loupe beside it, so the store grew unchecked.
+                if lane == 0 and self._ceiling_bytes is not None and time.monotonic() - self._swept_at > 120.0:
+                    self._swept_at = time.monotonic()
                     try:
                         freed = sweep_cache(conn, self._ceiling_bytes, self._kinds)
                         if freed:

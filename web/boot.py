@@ -1714,6 +1714,7 @@ class OwnedLibrary:
         def loop() -> None:
             first = True
             passes = 0
+            sweeping = None
             while not self._stop_following.wait(0 if first else 5.0):
                 # A card that arrives is noticed within seconds, and so is a
                 # drive: the attached list is looked at here, once a pass,
@@ -1744,12 +1745,13 @@ class OwnedLibrary:
                         return
                     if first:
                         self._scan_executor.submit(self._repair)
-                    future = self._scan_executor.submit(self._synchronize, "", not first)
-                try:
-                    future.result()
-                except Exception:  # noqa: BLE001 - a failed sweep is logged by its lane
-                    pass
-                self.rank_soon()
+                    # One sweep in flight at a time, never awaited here: a
+                    # card inserted or the archive coming back is noticed
+                    # on the next pass even while the first archive walk
+                    # (minutes on a USB disk) is still running.
+                    if sweeping is None or sweeping.done():
+                        sweeping = self._scan_executor.submit(self._synchronize, "", not first)
+                        sweeping.add_done_callback(lambda _f: self.rank_soon())
                 first = False
 
         self._stop_following = threading.Event()
