@@ -1322,10 +1322,16 @@ class LibraryQueriesRefuse(CoreCase):
              ("Raws/tie2.jpg", "e" * 64, "2026-01-02 10:00:00", 1500.0, 2, "tie2.jpg", None, 10),
              ("Raws/undated.jpg", "f" * 64, None, 1200.0, 0, "undated.jpg", "RP", None)])
         self.conn.commit()
-        for sort in ("newest", "oldest", "best", "stars", "folder", "camera", "file_size", "filename", "added"):
-            page = library_surface.photos(self.conn, sort=sort, limit=10, offset=0)
-            for at, row in enumerate(page):
-                self.assertEqual(library_surface.position(self.conn, row["id"], sort), at, sort)
+        # A scope with its own bound arguments (a folder range, a handful of
+        # ids) sits ahead of the per-clause repeats; a wrong order would land
+        # the selection one off after a sort change.
+        from model.scope import EVERYTHING, folder as in_folder, ids as these
+        scopes = (EVERYTHING, in_folder("Raws"), these([1, 2, 4, 5]))
+        for scope in scopes:
+            for sort in ("newest", "oldest", "best", "stars", "folder", "camera", "file_size", "filename", "added"):
+                page = library_surface.photos(self.conn, sort=sort, limit=10, offset=0, scope=scope)
+                for at, row in enumerate(page):
+                    self.assertEqual(library_surface.position(self.conn, row["id"], sort, scope), at, (sort, scope.sql))
         self.assertIsNone(library_surface.position(self.conn, 999, "newest"))
 
     def test_a_cull_passes_over_the_unidentified_and_says_so(self):
