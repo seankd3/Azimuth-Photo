@@ -57,9 +57,12 @@ def _grey(path: str, longest: int):
 
 def _clamped(left, top, right, bottom, width, height):
     """A box held inside the frame; a box off the frame's edge is measured
-    on what is there, not on black padding."""
+    on what is there, not on black padding, and a box wholly off it is
+    empty."""
 
-    return (max(0, int(left)), max(0, int(top)), min(int(width), int(right)), min(int(height), int(bottom)))
+    x0, y0 = min(max(0, int(left)), int(width)), min(max(0, int(top)), int(height))
+    x1, y1 = min(max(x0, int(right)), int(width)), min(max(y0, int(bottom)), int(height))
+    return (x0, y0, x1, y1)
 
 
 def _mlv_map(grey):
@@ -192,6 +195,9 @@ def measure(path: str, boxes=()) -> dict:
         "p50": round(float(np.percentile(amount, 50)), 2),
         "p75": round(float(np.percentile(amount, 75)), 2),
         "p90": round(float(np.percentile(amount, 90)), 2),
+        # The rendition's own size: a small original is measured at its own
+        # pixels, and the fit must know the scale a number was read at.
+        "longest": int(max(width, height)),
     }
     subject = None
     if boxes:
@@ -249,6 +255,13 @@ def kind(tiles, faces_kind):
         here=facing.ready,
         source=source,
     )
+
+
+def tidy(conn) -> int:
+    """The rows of a measure no longer asked for, gone: never evicted and
+    never read, they would sit in the catalog for good."""
+
+    return conn.execute("DELETE FROM cache WHERE kind = 'sharpness' AND recipe != ?", (RECIPE,)).rowcount
 
 
 def of(conn, digest: str) -> dict | None:

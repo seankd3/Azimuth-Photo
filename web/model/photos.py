@@ -100,7 +100,10 @@ def copy_verified(source: str, staging: str) -> str | None:
         return None
     shutil.copystat(source, staging)
     made = digest.hexdigest()
-    return made if content_hash(staging) == made else None
+    try:
+        return made if content_hash(staging) == made else None
+    except OSError:   # the copy moved under the read (an indexer, a sync): not verified
+        return None
 
 
 def same_bytes(left: str, right: str) -> bool:

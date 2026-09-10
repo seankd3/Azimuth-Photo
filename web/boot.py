@@ -61,6 +61,9 @@ def attached_now(conn) -> dict[int, str]:
 def repair(conn) -> None:
     """Bring the derived columns back to what the log and the cache say.
 
+    The sharpness rows of a measure no longer asked for go here too: never
+    evicted, never read, they would sit in the catalog for good.
+
     Every column that is an index over something else -- the metadata
     columns over the cache, `develop` over the log, `stack_of` over the
     dates -- is rebuilt here, writing only the rows that differ, so a start
@@ -74,6 +77,7 @@ def repair(conn) -> None:
     # log remembers which version of them ran.
     RESIDUE = "residue-2026-09-10"
     residue_done = decisions.latest(conn, work.MACHINE, "repaired") == RESIDUE
+    sharpness.tidy(conn)
     # Residue of the retired rule that stored a projection failure as the
     # photograph's answer: "failed" rows with no value, poisoned by a
     # moment's lock contention, which stopped 27 real photos from ever
@@ -128,7 +132,8 @@ def shape_stamp(conn) -> tuple:
     """What the facets depend on, cheaply: the live and trashed counts. A
     cull, a forget or a sweep moves one of them."""
 
-    return (queries.counts(conn)["photos"], trash.count(conn))
+    return (int(conn.execute(f"SELECT COUNT(*) FROM images i WHERE {queries.IN_LIBRARY}").fetchone()[0]),
+            trash.count(conn))
 
 
 def facets_of(conn) -> dict:
@@ -401,7 +406,10 @@ class Library:
         last answer while the sweep lane makes the next."""
 
         self.swept += 1
-        self._refacet()
+        if self._owner is None:
+            self._facets = self._tree = None   # made on the next ask
+        else:
+            self._refacet()
         return said
 
     def _reshape(self, conn, swept: int | None = None) -> None:
@@ -423,7 +431,7 @@ class Library:
             return
         self._refacet_pending = True
 
-        def make():
+        def make():  # noqa: D401
             try:
                 conn = model.connect(self.catalog_path)
                 try:
@@ -435,7 +443,10 @@ class Library:
             finally:
                 self._refacet_pending = False
 
-        self._owner.submit_sweep(make)
+        try:
+            self._owner.submit_sweep(make)
+        except Exception:  # noqa: BLE001 -- the lane is closing; the next ask remakes
+            self._refacet_pending = False
 
     def pick(self, photo_ids) -> dict:
         self._open()
@@ -669,9 +680,10 @@ class Library:
         # What the answer depends on: the words, the seeds, the view, the
         # space (count-keyed, as its memo is), whether the words had a
         # vector, the library's shape, and what is denied.
-        key = (query, tuple(like), json.dumps(view, sort_keys=True, default=str),
+        key = (query, tuple(sorted(like)), json.dumps(view, sort_keys=True, default=str),
                len(space[0]) if space else None, query_vector is not None,
-               shape_stamp(self.conn), self.swept, frozenset(omit))
+               shape_stamp(self.conn), self.swept, frozenset(omit),
+               self.conn.execute("SELECT MAX(id) FROM decisions").fetchone()[0])
         if self._found is None or self._found[0] != key:
             self._found = (key, finding.search(
                 self.conn, query, space=space, query_vector=query_vector,
@@ -974,7 +986,7 @@ class Library:
             cx, cy = x + w / 2, y + h / 2 - h * 0.08  # a breath above centre: eyes
             view = (f"inset({pc(cy - side / 2)}% {pc(1 - (cx + side / 2))}%"
                     f" {pc(1 - (cy + side / 2))}% {pc(cx - side / 2)}%)")
-            out.append({"tile": tile, "view": view})
+            out.append({"tile": tile, "view": view, "hash": entry["hash"], "box": list(entry["box"])})
         return out
 
     def people(self) -> list[dict]:
@@ -1089,21 +1101,18 @@ class Library:
 
         self._open()
         by_exemplar = {g["exemplar"]: g for g in persons.groups(self.conn)}
-        # The wall shows three questions; their six faces are one read.
+        # Every question's faces in one read, each look keyed by the face
+        # it is (the photograph and the box: two people share a frame).
         pairs = [(by_exemplar.get(p["a"]), by_exemplar.get(p["b"]), p["close"])
                  for p in persons.maybe_same(self.conn)]
-        pairs = [(a, b, close) for a, b, close in pairs if a and b][:3]
-        looks = {}
-        for entry, look in zip(
-            [g["sample"][0] for a, b, _ in pairs for g in (a, b) if g["sample"]],
-            self._face_samples([g["sample"][0] for a, b, _ in pairs for g in (a, b) if g["sample"]]),
-        ):
-            looks.setdefault(entry["hash"], look)
+        pairs = [(a, b, close) for a, b, close in pairs if a and b]
+        wanted = [g["sample"][0] for a, b, _ in pairs for g in (a, b) if g["sample"]]
+        looks = {(look["hash"], tuple(look["box"])): look for look in self._face_samples(wanted)}
 
         def side(g):
             sample = g["sample"][:1]
             return {"exemplar": g["exemplar"], "term": g["name"], "settled": bool(g.get("settled")),
-                    "samples": [looks[s["hash"]] for s in sample if s["hash"] in looks]}
+                    "samples": [looks[key] for s in sample if (key := (s["hash"], tuple(s["box"]))) in looks]}
 
         return [{"a": side(a), "b": side(b), "close": close} for a, b, close in pairs]
 
@@ -1118,16 +1127,16 @@ class Library:
         since = persons.last_word(self.conn)
         persons.name(self.conn, a, called)
         persons.name(self.conn, b, called)
-        return {"named": called, "since": since}
+        return {"named": called, "since": since, "until": persons.last_word(self.conn)}
 
-    def unname_since(self, since: int) -> dict:
-        """The way back from a Yes: every face named after `since` answers
-        to what it answered to before."""
+    def unname_since(self, since: int, until: int | None = None) -> dict:
+        """The way back from a Yes: every face named in (since, until]
+        answers to what it answered to before."""
 
         import people as persons
 
         self._open()
-        return persons.unname_since(self.conn, int(since))
+        return persons.unname_since(self.conn, int(since), None if until is None else int(until))
 
     def keep_apart(self, a: str, b: str) -> dict:
         import people as persons

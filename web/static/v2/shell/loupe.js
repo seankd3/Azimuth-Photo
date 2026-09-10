@@ -73,7 +73,9 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     // An edited photograph is shown from a 2,048 px preview of the edit:
     // the chip says Preview, never a 100% it cannot deliver.
     const close = state.preview ? 'Preview' : '100%';
-    word.textContent = zoomed ? `Fit · ${Math.round(state.scale * (window.devicePixelRatio || 1) * 100)}%` : close;
+    word.textContent = zoomed
+      ? (state.preview ? 'Fit · preview' : `Fit · ${Math.round(state.scale * (window.devicePixelRatio || 1) * 100)}%`)
+      : close;
     chip.setAttribute('aria-label', zoomed ? 'Fit the whole photograph' : state.preview ? 'Show the preview at its own pixels' : 'Show at 100%');
   }
 
@@ -108,7 +110,7 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
     // A stand-in tile fills the stage up to the photograph's own pixels;
     // an edited photograph's rendition is a preview with no larger truth
     // behind it, so it stops at its own.
-    state.preview = Boolean(photo.develop);
+    state.preview = Boolean(photo.develop) && Boolean(photo.loupe) && source === photo.loupe;
     state.native = photo.width && photo.height && !state.preview ? { w: photo.width, h: photo.height } : null;
     if (fresh) {
       image.dataset.source = source;

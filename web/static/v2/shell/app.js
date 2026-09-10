@@ -2039,6 +2039,12 @@ document.addEventListener('keydown', (event) => {
   // A focused control keeps its own keys: a letter, Enter, Space or an
   // arrow on a button is that button's, never a photograph's verb. The
   // app's chords (Ctrl, Alt) and the two chrome keys (F6, Tab) pass.
+  // The wall's Y is the one letter that acts from a focused card: it
+  // answers the question at the top, wherever the cursor is.
+  if (read().view === 'people' && (event.key === 'y' || event.key === 'Y') && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    if (peoplePanel.key(event)) event.preventDefault();
+    return;
+  }
   if (onControl && !event.ctrlKey && !event.metaKey && !event.altKey
       && (event.key.length === 1 || ['Enter', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key))
       && event.key !== '?' && event.key !== '/') return;
@@ -2329,11 +2335,12 @@ function commands(query) {
     found.push({
       label: tip.replace(/\u2026$/, ''), count: KEY_OF.get(action), glyph: 'chevron',
       run: () => {
-        // The box empties the way Clear does, so the grid follows it; the
-        // button is found again now, since shelves re-render underneath.
+        // The button is found again now, since shelves re-render
+        // underneath; then the box empties the way Clear does, so the grid
+        // follows it (Clear itself hides once the box is empty).
+        const button = [...document.querySelectorAll(`[data-action="${action}"]`)].find(onScreen);
         searchBox.value = '';
         searchBox.dispatchEvent(new Event('input', { bubbles: true }));
-        const button = [...document.querySelectorAll(`[data-action="${action}"]`)].find(onScreen);
         if (button) button.click();
         else notify('That verb has left the screen.');
       },

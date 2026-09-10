@@ -347,7 +347,9 @@ def space(conn) -> tuple[list[str], object]:
         subjects.append(str(row["hash"]))
     if matrix is None:
         return [], None
-    return subjects, matrix[:len(subjects)]
+    # Rows that left between the count and the walk: the buffer is trimmed
+    # for real, not viewed, since the space is held for the whole session.
+    return subjects, matrix if len(subjects) == count else matrix[:len(subjects)].copy()
 
 
 def _somewhere(upper: int) -> int:

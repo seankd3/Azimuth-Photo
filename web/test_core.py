@@ -3121,21 +3121,28 @@ class ASplitPersonHealsByName(CoreCase):
             self._face(f"Raws/left-{i}.CR2", 0)
         for i in range(3):
             self._face(f"Raws/right-{i}.CR2", 7, weight=0.893, also=((0, 0.45),))
+        for i in range(3):
+            self._face(f"Raws/third-{i}.CR2", 3)
         self.conn.commit()
         persons.repeople(self.conn)
-        held = {g["name"]: g for g in persons.groups(self.conn)}
-        persons.name(self.conn, held["Someone 1"]["exemplar"], "Ada")
-        persons.name(self.conn, held["Someone 2"]["exemplar"], "Bob")
+        by_exemplar = {g["exemplar"]: g for g in persons.groups(self.conn)}
+        asked = persons.maybe_same(self.conn)[0]
+        persons.name(self.conn, asked["a"], "Ada")
+        persons.name(self.conn, asked["b"], "Bob")
         persons.repeople(self.conn)
-        held = {g["name"]: g for g in persons.groups(self.conn)}
         since = persons.last_word(self.conn)
-        persons.name(self.conn, held["Ada"]["exemplar"], "Ada")
-        persons.name(self.conn, held["Bob"]["exemplar"], "Ada")
+        persons.name(self.conn, asked["a"], "Ada")
+        persons.name(self.conn, asked["b"], "Ada")
+        until = persons.last_word(self.conn)
         persons.repeople(self.conn)
-        self.assertEqual([g["name"] for g in persons.groups(self.conn)], ["Ada"])
-        persons.unname_since(self.conn, since)
+        self.assertEqual(sorted(g["name"] for g in persons.groups(self.conn)), ["Ada", "Someone 1"])
+        # A word said after the Yes, about someone else, is not the Yes's
+        # to take back.
+        third = next(e for e in by_exemplar if e not in (asked["a"], asked["b"]))
+        persons.name(self.conn, third, "Cy")
+        persons.unname_since(self.conn, since, until)
         persons.repeople(self.conn)
-        self.assertEqual(sorted(g["name"] for g in persons.groups(self.conn)), ["Ada", "Bob"])
+        self.assertEqual(sorted(g["name"] for g in persons.groups(self.conn)), ["Ada", "Bob", "Cy"])
 
     def test_naming_two_groups_alike_folds_them_and_rename_wins(self):
         import people as persons

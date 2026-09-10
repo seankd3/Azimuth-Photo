@@ -200,13 +200,12 @@ def repeople(conn) -> int:
         sides = [group_of.get(face) for face in str(row["subject"]).split("|")]
         if len(sides) == 2 and None not in sides:
             kept_apart.add((min(sides), max(sides)))
-    shown = {entry["exemplar"] for entry in summary}
     exemplar_of = {}
     for at, (group, _) in enumerate(merged):
         if len({owners[face][0] for face in group}) >= FLOOR:
             strongest = max(group, key=lambda face: scores[face])
             exemplar_of[at] = f"{owners[strongest][0]}:{owners[strongest][1]}"
-    asked = [at for at in exemplar_of if exemplar_of[at] in shown]
+    asked = list(exemplar_of)
     maybe = []
     if len(asked) >= 2:
         import numpy as np
@@ -300,18 +299,23 @@ def last_word(conn) -> int:
     return int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
 
 
-def unname_since(conn, since: int) -> dict:
-    """Every word said about a face after `since` taken back: each such face
-    answers to what it answered to before, or to nothing. The way back from
-    a Yes, which names whole groups at once -- a rename cannot undo it,
-    because a rename moves everyone under the old name, the other side too."""
+def unname_since(conn, since: int, until: int | None = None) -> dict:
+    """Every word said about a face in (since, until] taken back: each such
+    face answers to what it answered to before, or to nothing. The way back
+    from a Yes, which names whole groups at once -- a rename cannot undo it,
+    because a rename moves everyone under the old name, the other side too.
+    The prior word is the one that outranked, as `_names` reads it: your own
+    over an imported one, then the latest."""
 
+    until = int(until) if until is not None else last_word(conn)
     subjects = [str(row["subject"]) for row in conn.execute(
-        "SELECT DISTINCT subject FROM decisions WHERE family = ? AND id > ?", (FAMILY, int(since)))]
+        "SELECT DISTINCT subject FROM decisions WHERE family = ? AND id > ? AND id <= ?",
+        (FAMILY, int(since), until))]
     for subject in subjects:
         prior = conn.execute(
-            "SELECT value FROM decisions WHERE family = ? AND subject = ? AND id <= ?"
-            " ORDER BY id DESC LIMIT 1", (FAMILY, subject, int(since))).fetchone()
+            f"SELECT value FROM decisions WHERE family = ? AND subject = ? AND id <= ?"
+            f" ORDER BY {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 1",
+            (FAMILY, subject, int(since))).fetchone()
         decisions.decide(conn, subject, FAMILY, str(decisions.loaded(prior) or "") if prior else "")
     conn.commit()
     return {"unnamed": len(subjects)}

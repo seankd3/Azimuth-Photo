@@ -145,8 +145,8 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       yes.type = 'button';
       yes.className = 'primary-button';
       // Two introduced people becoming one: say which name survives.
-      const survives = pair.a.settled && pair.b.settled && pair.a.term !== pair.b.term;
-      yes.textContent = survives ? `Yes — both are “${pair.a.term}”` : 'Yes';
+      const survives = (pair.a.settled || pair.b.settled) && pair.a.term !== pair.b.term;
+      yes.textContent = survives ? `Yes — both are “${pair.a.settled ? pair.a.term : pair.b.term}”` : 'Yes';
       yes.title = 'The same person (Y)';
       const no = document.createElement('button');
       no.type = 'button';
@@ -208,7 +208,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       return card;
     }));
     if (inQuestion) (stage.querySelector('.same-card .primary-button') || stage.querySelector('.face-card-look'))?.focus({ preventScroll: true });
-    else if (onWall) markWall();
+    else if (onWall) { if (cursor < 0) cursor = 0; markWall(); }
   }
 
   function markWall(focus = true) {
@@ -263,7 +263,7 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
       // to what it answered to before, whichever side and however many.
       const done = await product.samePeople(pair.a.exemplar, pair.b.exemplar, called);
       undo.show(`“${pair.a.term}” and “${pair.b.term}” are one: “${called}”.`, async () => {
-        await product.unnameSince(done.since);
+        await product.unnameSince(done.since, done.until);
         await renamed();
       });
       await renamed();

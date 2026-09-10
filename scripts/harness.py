@@ -77,7 +77,7 @@ STUB = r"""<script>
       { a: { exemplar: 'h1:0', term: 'Someone 1', settled: false, samples: [] }, b: { exemplar: 'h2:0', term: 'Ada', settled: true, samples: [] }, close: 0.44 },
       { a: { exemplar: 'h3:0', term: 'Someone 2', settled: false, samples: [] }, b: { exemplar: 'h4:0', term: 'Someone 3', settled: false, samples: [] }, close: 0.41 },
     ],
-    same_people: (a, b, called) => ({ named: called, since: 7 }), keep_apart: (a, b) => ({ apart: `${a}|${b}` }), unname_since: (since) => ({ unnamed: since }),
+    same_people: (a, b, called) => ({ named: called, since: 7 }), keep_apart: (a, b) => ({ apart: `${a}|${b}` }), unname_since: (since, until) => ({ unnamed: [since, until] }),
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
     intake_status: () => ({ running: false }), forget_missing: () => ({}),
     rank: (n) => ({ photos: photos.slice(0, n), judged: 0, earned: 0, total: N }),

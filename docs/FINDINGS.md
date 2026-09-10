@@ -660,6 +660,33 @@ finding was checked and the numbers said no.
 | X71 | The sharpness pass said "Working" on the status line | Measuring focus | shipped |
 | X72 | The harness stub carried no sharp facts and only a one-sided question | sharp on every stub photo; a second, both-unsettled pair; unname_since | shipped |
 
+## Refutation of the refutation and the performance rows (2026-09-10, by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X73 | The wall's faces were zipped against a filtered list: with a tile missing (the archive away) every question showed the wrong person | each look carries its photograph and box; the wall keys on both | shipped |
+| X74 | Two groups whose top sample is the same frame (two people in one photograph) showed the same face twice | keyed on the box, not the photograph alone | shipped |
+| X75 | The word a face answered to before a Yes was read by id alone, not by authority: an imported name could outrank your own on the way back | the prior word is read as `_names` reads it | shipped |
+| X76 | The way back from a Yes took back every word said after it, a later naming of someone else included | the Yes says the log ids it wrote; the way back takes exactly those; a test names a third person after the Yes | shipped |
+| X77 | Y from a focused card never reached the wall: the button guard ate every letter | Y on the People view goes to the wall before the guard | shipped |
+| X78 | With no sweep lane (tests, scripts) every cull remade the facets and the tree inline | ownerless stays lazy: made on the next ask | shipped |
+| X79 | The shape stamp counted five things to use two, on every search and folders ask | two counts | shipped |
+| X80 | The search memo missed a pick, a star, a round: the stamp counts rows | the log's last id is in the key; the seeds are sorted | shipped |
+| X81 | A dead filter over the exemplars (its membership test was the summary's own) | gone | shipped |
+| X82 | Choosing "Clear the search" from the command line reported failure: Clear hides itself once the box is empty | the button is found before the box empties | shipped |
+| X83 | An edited photograph's grid tile stand-in stopped filling the stage while the preview was still being made | preview only once the loaded source is the rendition | shipped |
+| X84 | Sharpness rows of an old measure sat in the catalog for good: never evicted, never read | `sharpness.tidy` at repair | shipped |
+| X85 | A box wholly off the frame recorded a negative size | clamped both ends; a rendition's own longest edge recorded with the frame facts (a small original is measured at its own pixels) | shipped |
+| X86 | A copy touched by an indexer between the write and the verify read raised instead of failing the verify | an OSError on the verify is "not verified" | shipped |
+| X87 | The status line said Catching up with the archive away and nothing doing: the count did not know what the step knows | the debt is counted with the attached list too | shipped |
+| X88 | Rows leaving between the count and the walk left a view over the whole buffer | copied when short | shipped |
+| X89 | The Yes button named the survivor only when both sides were introduced | whenever one is | shipped |
+| X90 | The wall was capped at three questions on the product side, so answering three left it empty until the next rewrite | every pair comes back; the wall shows three | shipped |
+| X91 | `_refacet_pending` could stick if the lane refused the job | reset on refusal | shipped |
+| X92 | Zoomed on a preview the chip claimed a percentage of the original | Fit · preview | shipped |
+| X93 | Loupe eviction bounds sharpness coverage (the pass wants the plain loupe row, which the ceiling may drop first) | known: the ceiling is half the free disk; a photograph's sharpness is owed again when its loupe is remade | open |
+| X94 | A ready loupe row whose file is gone counts as a locate miss for its root | known, rare; a sentinel would be the fix | open |
+
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
 | # | User impact | Fix | Status |

@@ -137,7 +137,8 @@ def owed(conn, kind: cache.Kind, *, recipe: dict | None = None,
     return rows
 
 
-def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = EVERYTHING) -> int:
+def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = EVERYTHING,
+          attached: dict[int, str] | None = None) -> int:
     """How many are owed. The same anti-join, counted instead of listed.
 
     A status line wanted this and had to `len()` a list of up to 100,000 rows to
@@ -150,10 +151,10 @@ def owing(conn, kind: cache.Kind, *, recipe: dict | None = None, scope: Scope = 
 
     count = 0
     for living in ((LIVING, TRASHED) if kind.name in SHOWN else (LIVING,)):
-        source, args = _owed_from(kind, recipe, scope, living=living)
+        source, args = _owed_from(kind, recipe, scope, living=living, attached=attached)
         count += int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
         if kind.keyed is not None:
-            source, args = _owed_from(kind, recipe, scope, keyed=True, living=living)
+            source, args = _owed_from(kind, recipe, scope, keyed=True, living=living, attached=attached)
             count += int(conn.execute(f"SELECT COUNT(*) {source}", args).fetchone()[0])
     return count
 
@@ -265,8 +266,10 @@ def _unidentified_count(conn) -> int:
     return int(conn.execute(f"SELECT COUNT(*) {_UNIDENTIFIED}").fetchone()[0])
 
 
-def debt(conn, kinds: Iterable[cache.Kind]) -> dict[str, int]:
-    """How much is owed, per kind. What a status line reads; nothing depends on it."""
+def debt(conn, kinds: Iterable[cache.Kind], *, attached: dict[int, str] | None = None) -> dict[str, int]:
+    """How much is owed, per kind, of what this machine can pay now. What a
+    status line reads; nothing depends on it. `attached` is the step's own,
+    or the line said Catching up with the archive away and nothing doing."""
 
     tally = {"identity": _unidentified_count(conn)}
     for kind in kinds:
@@ -276,7 +279,7 @@ def debt(conn, kinds: Iterable[cache.Kind]) -> dict[str, int]:
         if not kind.here():
             continue
         try:
-            tally[kind.name] = sum(owing(conn, kind, recipe=recipe) for recipe in kind.ahead())
+            tally[kind.name] = sum(owing(conn, kind, recipe=recipe, attached=attached) for recipe in kind.ahead())
         except Exception:  # a kind whose `wants` needs a column this catalog lacks
             log.debug("worker=debt kind=%s could not be counted", kind.name)
     return tally
@@ -565,7 +568,7 @@ class Chores:
                 if lane == 0 and (did or self.left) and time.monotonic() - self._counted_at > 30.0:
                     self._counted_at = time.monotonic()
                     try:
-                        self.left = {k: n for k, n in debt(conn, self._kinds).items() if n}
+                        self.left = {k: n for k, n in debt(conn, self._kinds, attached=self._attached()).items() if n}
                     except Exception:
                         log.exception("worker=chores debt failed")
 

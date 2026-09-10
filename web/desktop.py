@@ -307,8 +307,8 @@ class Desktop:
             self._product.rank_soon()
         return said
 
-    def unname_since(self, since: int) -> dict:
-        said = self._run(lambda library: library.unname_since(int(since)))
+    def unname_since(self, since: int, until: int | None = None) -> dict:
+        said = self._run(lambda library: library.unname_since(int(since), until))
         if self._product is not None:
             self._product.rank_soon()
         return said
