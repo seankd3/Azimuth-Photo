@@ -159,15 +159,10 @@ function photoCell(photo, index, actions) {
     const open = actions.stackOpen?.(photo.id);
     const badge = element('span', 'stack-badge' + (open ? ' is-open' : ''));
     badge.append(icon('stack'), String(photo.stack + 1));
-    badge.setAttribute('role', 'button');
-    badge.tabIndex = 0;
+    // A mark with a click, not a control inside a control: the keyboard
+    // folds and opens a stack with S, and the cell's own name says the set.
+    badge.setAttribute('aria-hidden', 'true');
     badge.title = open ? `A stack of ${photo.stack + 1} — fold it (S)` : `A stack of ${photo.stack + 1} — open it (S)`;
-    badge.addEventListener('keydown', (event) => {
-      if (event.key !== 'Enter' && event.key !== ' ') return;
-      event.preventDefault();
-      event.stopPropagation();
-      actions.stack?.(photo, index);
-    });
     badge.addEventListener('click', (event) => {
       event.stopPropagation();
       actions.stack?.(photo, index);
@@ -249,7 +244,9 @@ function reconcileGrid(grid, state, actions, layout, range) {
       cell.dataset.missing = photo.placed ? '0' : '1';
       const { state: where, said } = presence(photo, cell.dataset.empty === '');
       const why = where === 'here' ? '' : `, ${said.replace(/[.…]$/, '')}`;
-      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${why}`);
+      const stars = photo.stars > 0 ? `, ${photo.stars} star${photo.stars === 1 ? '' : 's'}` : '';
+      const stacked = photo.stack ? `, a stack of ${photo.stack + 1}` : '';
+      cell.setAttribute('aria-label', `${picked ? 'Picked, ' : ''}${photo.tail || `Photo ${photo.id}`}${stars}${stacked}${why}`);
       cell.setAttribute('aria-pressed', String(Boolean(state.marked?.has(photo.id))));
       if (index === state.selectedIndex) cell.setAttribute('aria-current', 'true');
       else cell.removeAttribute('aria-current');

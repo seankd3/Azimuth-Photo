@@ -234,5 +234,8 @@ export function createEditPanel({ product, notify, undo, preview, applied, shown
     if (state.photo && photo.id !== state.photo.id) void open(photo);
   }
 
-  return Object.freeze({ open, close, isOpen, follows });
+  // The keyboard's way in: the first slider.
+  function focus() { groups.querySelector('input')?.focus({ preventScroll: true }); }
+
+  return Object.freeze({ open, close, isOpen, follows, focus });
 }

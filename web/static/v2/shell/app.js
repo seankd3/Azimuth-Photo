@@ -1910,6 +1910,7 @@ document.addEventListener('keydown', (event) => {
   }
   if (editPanel.isOpen() && (event.key === 'Escape' || event.key === 'd' || event.key === 'D') && (!isTyping || isSliding)) {
     editPanel.close();
+    loupe.focus({ preventScroll: true });
     event.preventDefault();
     return;
   }
@@ -2000,6 +2001,27 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (isTyping) return;
+  // A focused control keeps its own keys: a letter, Enter, Space or an
+  // arrow on a button is that button's, never a photograph's verb. The
+  // app's chords (Ctrl, Alt) and the two chrome keys (F6, Tab) pass.
+  if (onControl && !event.ctrlKey && !event.metaKey && !event.altKey
+      && (event.key.length === 1 || ['Enter', ' ', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key))
+      && event.key !== '?' && event.key !== '/') return;
+  // K1: F6 walks the chrome — bar, sidebar, inspector, topbar — from
+  // wherever the keyboard is; Shift+F6 walks it backwards.
+  if (event.key === 'F6') {
+    const regions = ['.contextbar', '.sidebar', '.inspector', '.topbar']
+      .map((s) => document.querySelector(s)).filter((r) => r && !r.hidden && r.offsetParent !== null);
+    const at = regions.findIndex((r) => r.contains(document.activeElement));
+    const step = event.shiftKey ? -1 : 1;
+    for (let k = 1; k <= regions.length; k += 1) {
+      const region = regions[(at + step * k + regions.length * 2) % regions.length];
+      const first = region.querySelector('button:not([hidden]):not([disabled]), [tabindex="0"], input:not([hidden]), select:not([hidden])');
+      if (first && first.offsetParent !== null) { first.focus({ preventScroll: true }); break; }
+    }
+    event.preventDefault();
+    return;
+  }
   if (event.key === 'Tab') {
     // Tab folds the panels only from the photographs or from nowhere: on a
     // chrome control it is Tab, so every button can be reached without a
@@ -2008,6 +2030,13 @@ document.addEventListener('keydown', (event) => {
     const fromChrome = target !== document.body
       && !target.closest('.photo-grid, .rank-stage, .loupe-stage, .face-wall, .import-stage');
     if (fromChrome) return;
+    if (read().view === 'import') {
+      // The import's controls live in the inspector: Tab goes to them
+      // instead of folding them away.
+      document.querySelector('[data-import-panel] button:not([hidden]), [data-import-panel] input')?.focus();
+      event.preventDefault();
+      return;
+    }
     if (read().view === 'library' && read().total === 0 && !read().loading) return;
     const panels = read().panels;
     if (event.shiftKey) {
@@ -2088,7 +2117,7 @@ document.addEventListener('keydown', (event) => {
       if (!loupeOpen()) showPhoto(read().selected);
       // The panel lives in the inspector; the clean room has none.
       if (loupe.classList.contains('is-full')) toggleFull(false);
-      void editPanel.open(read().selected);
+      void editPanel.open(read().selected).then(() => editPanel.focus());
     }
     event.preventDefault();
     return;
@@ -2192,7 +2221,7 @@ document.addEventListener('keydown', (event) => {
 // the tooltips can never disagree.
 const SHORTCUTS = [
   ['Everywhere', [
-    ['?', 'This sheet'], ['/', 'Search'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
+    ['?', 'This sheet'], ['/', 'Search'], ['F6', 'The chrome: bar, sidebar, details, top bar'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
     ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'], ['L', 'Lights out'],
   ]],
   ['The grid', [

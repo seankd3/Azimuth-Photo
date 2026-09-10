@@ -552,25 +552,25 @@ finding was checked and the numbers said no.
 
 | # | User impact | Fix | Status |
 |---|---|---|---|
-| K1 | No key moves focus from the photographs into the chrome | F6 cycles bar → sidebar → inspector → topbar; on the sheet | open |
-| K2 | A letter typed on a focused chrome button fires a photo verb | the control guard hoisted before the verb ladder | open |
-| K3 | Enter or Space on a focused chrome button opens the loupe | same guard | open |
-| K4 | Arrows yank focus from the chrome back to the grid | same guard | open |
-| K5 | The Develop panel is unreachable by keyboard | D focuses the first slider; Esc and D return to the loupe | open |
-| K6 | Tab during an import hides the import panel and drops focus | the fold refuses while a panel owns the focus | open |
-| K7 | Esc out of the + Filter menu drops focus to the body | the chip menu opens through showMenu | open |
-| K8 | Rank loses the keyboard on every pick | the selected card is focused after render | open |
+| K1 | No key moves focus from the photographs into the chrome | F6 cycles bar → sidebar → inspector → topbar; on the sheet | shipped |
+| K2 | A letter typed on a focused chrome button fires a photo verb | the control guard hoisted before the verb ladder | shipped |
+| K3 | Enter or Space on a focused chrome button opens the loupe | same guard | shipped |
+| K4 | Arrows yank focus from the chrome back to the grid | same guard | shipped |
+| K5 | The Develop panel is unreachable by keyboard | D focuses the first slider; Esc and D return to the loupe | shipped |
+| K6 | Tab during an import hides the import panel and drops focus | the fold refuses while a panel owns the focus | shipped |
+| K7 | Esc out of the + Filter menu drops focus to the body | the chip menu opens through showMenu | shipped |
+| K8 | Rank loses the keyboard on every pick | the selected card is focused after render | shipped |
 | K9 | Export, New album and Add folder have no key and no menu entry | a > command mode in the search box reaching every verb | open |
-| K10 | Every stack badge is a permanent tab stop | the badge roves with its cell | open |
+| K10 | Every stack badge is a permanent tab stop | the badge roves with its cell | shipped |
 | SR1 | The status line speaks the worker's pace every two seconds | announce state changes only; the pace is aria-hidden | open |
 | SR2 | A cull, a pick and a view change announce nothing | one polite live region every act writes one sentence to | open |
 | SR3 | The toast's text is set while hidden, so it is often not announced | text after visible; the toast stays in the tree | open |
-| SR4 | The stack badge is a control nested in a control | the badge leaves the button; the count is in the cell's name | open |
+| SR4 | The stack badge is a control nested in a control | the badge leaves the button; the count is in the cell's name | shipped |
 | SR5 | Drive rows are inert divs; Re-scan is mouse-only | buttons in the row primitive; the state in the name | open |
-| SR6 | Chip field menu items have no menuitem role | the role on the item builder | open |
+| SR6 | Chip field menu items have no menuitem role | the role on the item builder | shipped |
 | SR7 | The chip editor and the likeness popover are unlabelled boxes | role dialog, labelled by their eyebrow | open |
 | SR8 | The People wall card is a focusable div wrapping two buttons | the picture button roves; the card is a container | open |
-| SR9 | Stars are announced to nobody | the stars in the cell's name | open |
+| SR9 | Stars are announced to nobody | the stars in the cell's name | shipped |
 | SR10 | The safety dot and the drop's dismiss are silent or invalid | role img with a label; the dismiss out of the listbox | open |
 | LP1 | 40% of a 1280 px window is chrome; no breakpoint above 1050 | a middle rung at 1440 | open |
 | LP2 | Three photographs per row on a 13-inch at the default density | the default seeded from the grid's width | open |
@@ -592,3 +592,4 @@ finding was checked and the numbers said no.
 | HK8 | The page is smaller than one 4K viewport at the densest setting | page size from the measured viewport | open |
 | HK9 | Rank stops at 12 where the screen could hold more | 16 and 20 offered when the card clears the floor | open |
 | HK10 | The verbs sit 3,300 px from the view controls at 4K | the bar's content capped at 1600 px, centred | open |
+| RK3 | Tournament felt laggy between a click and the next set | the 120 ms beat before the swap removed; past a pair the cards use the 1,024 px grid tile, not the 4,096 px loupe | shipped |

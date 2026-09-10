@@ -8,6 +8,7 @@
 // library can execute. A new chip joins on its first real value, an emptied
 // chip leaves, and nothing half-made can reach a query.
 
+import { showMenu, hideMenu } from '../kit/menu.js';
 import { icon } from '../kit/icons.js';
 
 // The one vocabulary: what a field is called wherever it appears (the
@@ -228,6 +229,7 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
   menu.replaceChildren(...OFFERED.map((field) => {
     const item = document.createElement('button');
     item.type = 'button';
+    item.setAttribute('role', 'menuitem');
     item.dataset.field = field;
     item.textContent = FIELD_LABEL[field];
     return item;
@@ -259,15 +261,15 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
   });
 
   document.querySelector('[data-action="add-chip"]').addEventListener('click', (event) => {
-    place(menu, event.currentTarget);
-    menu.querySelector('[data-field]')?.focus();
+    const at = event.currentTarget.getBoundingClientRect();
+    showMenu(menu, at.left, at.bottom + 6);
     event.stopPropagation();
   });
 
   menu.addEventListener('click', (event) => {
     const field = event.target.closest('[data-field]')?.dataset.field;
     if (!field) return;
-    menu.hidden = true;
+    hideMenu(menu);
     const fresh = field === 'stars' ? { is: 'stars', least: 3 }
       : field === 'taken' ? { is: 'taken', from: '', to: '' }
       : { is: field, values: [] };
@@ -290,14 +292,14 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
         && !event.target.closest('[data-chip]') && !event.target.closest('[data-field]')) {
       closeEditor();
     }
-    if (!menu.hidden && !menu.contains(event.target)) menu.hidden = true;
+    if (!menu.hidden && !menu.contains(event.target)) hideMenu(menu);
   });
 
   document.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || (editor.hidden && menu.hidden)) return;
     const at = editing?.index ?? null;
     closeEditor();
-    menu.hidden = true;
+    hideMenu(menu);
     // The keyboard goes back to the chip it came from, or to the + button.
     ((at !== null && bar.querySelector(`[data-chip="${at}"]`)) || document.querySelector('[data-action="add-chip"]'))?.focus();
     event.preventDefault();

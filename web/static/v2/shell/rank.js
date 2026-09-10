@@ -79,9 +79,12 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
 
   function sourceFor(photo) {
     // The grid tile is 1,024 px; a card wider than that on this screen shows
-    // the loupe when one exists. A pair on a maximized 4K window is that case.
+    // the loupe when one exists — a pair on a large window. Past a pair the
+    // grid tile is the answer: a 4,096 px loupe decodes in the hundreds of
+    // milliseconds, and two of them per pick was the lag between a click and
+    // the next set on a 1.5x display.
     const cells = SIZES[state.size] || SIZES[9];
-    const wide = (stage.clientWidth / cells[0]) * window.devicePixelRatio > 1024;
+    const wide = state.size <= 2 && (stage.clientWidth / cells[0]) * window.devicePixelRatio > 1024;
     return (wide && photo.loupe) || photo.tile;
   }
 
@@ -238,10 +241,10 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     if (!winner || state.set.length < 2) return;
     state.busy = true;
     const generation = state.generation;
-    // The pick is seen for a beat before it leaves.
+    // The pick is marked as it leaves; nothing waits on the mark. A round
+    // is an act done hundreds of times a sitting, and a beat held before
+    // the swap read as lag (the owner, 09-10).
     stage.querySelector(`[data-index="${index}"]`)?.classList.add('is-picked');
-    await delay(120);
-    if (generation !== state.generation) { state.busy = false; state.queued = null; return; }
     const losers = state.set.filter((_, i) => i !== index);
     const before = { set: state.set.slice(), age: state.age.slice() };
 
@@ -632,6 +635,10 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     }));
     layout();
     renderProgress();
+    // The keyboard stays on the stage: a rebuilt set focuses its cursor.
+    if (document.activeElement === document.body || stage.contains(document.activeElement)) {
+      (stage.querySelector('.rank-card.is-selected') || stage).focus({ preventScroll: true });
+    }
   }
 
   stage.addEventListener('click', (event) => {
