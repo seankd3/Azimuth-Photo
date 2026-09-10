@@ -570,8 +570,9 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
   function renderProgress() {
     const app = read();
     const shelf = (app.albums || []).find((c) => c.id === app.album);
-    const place = shelf ? `“${shelf.name.split('/').pop()}”`
-      : (app.folders || []).length ? app.folders.map((f) => f.split('/').pop()).join(' + ') : 'your library';
+    const place = app.survey ? `the ${app.survey.length} marked`
+      : shelf ? `“${shelf.name.split('/').pop()}”`
+        : (app.folders || []).length ? app.folders.map((f) => f.split('/').pop()).join(' + ') : 'your library';
     const narrowed = describe ? describe() : '';
     const where = narrowed ? `${place} · ${narrowed}` : place;
     // Sorted is earned: three rounds settle a place. Seen is one.

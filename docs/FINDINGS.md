@@ -519,3 +519,6 @@ finding was checked and the numbers said no.
 | N11 | Text could be selected across the photographs | no selection on the stages | shipped |
 | N12 | Counts beside each other jittered as digits changed | tabular figures on every count | shipped |
 | H1 | A harness stub that was missing answered null and passed | it throws | shipped |
+| N13 | A burst could not be judged as a round of its own | N surveys the marked frames in Rank, sized to the burst; the survey ends with the sitting | shipped |
+| N14 | No sharpness read on the eyes without a hand on the mouse | . puts the next face at 100% under the centre (a faces verb over the face pass) | shipped |
+| N15 | No photos here yet | photographs (U31) | shipped |

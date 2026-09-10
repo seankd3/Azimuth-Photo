@@ -23,6 +23,7 @@ const state = {
   days: [],
   importing: '',
   doing: '',
+  survey: null,
   total: 0,
   loading: true,
   scanning: false,

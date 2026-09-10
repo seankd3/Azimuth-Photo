@@ -68,7 +68,7 @@ STUB = r"""<script>
     days: (view) => days.map((d, i) => (i === 0 ? { ...d, count: d.count + shown(view).length - N } : d)),
     sessions: () => [],
     albums: () => [], cameras: () => [], facets: () => ({}), people: () => [], labels: () => [], cards: () => [],
-    teach: (word, ids) => ({ word, taught: ids.length }), rename_label: (word, called) => ({ id: 'l1', word: called }),
+    teach: (word, ids) => ({ word, taught: ids.length }), faces: () => [[0.4, 0.3, 0.2, 0.25]], rename_label: (word, called) => ({ id: 'l1', word: called }),
     forget_label: () => ({ id: 'l1' }), remember_album: () => true,
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
     intake_status: () => ({ running: false }), forget_missing: () => ({}),

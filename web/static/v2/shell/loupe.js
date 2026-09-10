@@ -225,6 +225,23 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   }
   chip.addEventListener('click', toggle);
 
+  // 100% with a point of the picture (fractions of the unturned frame)
+  // under the centre of the stage: the sharpness read on a face.
+  function focusAt(px, py) {
+    measure();
+    const { w, h } = sizes();
+    // The box is in the unturned frame; the turn moves the point with it.
+    let [fx, fy] = [px, py];
+    if (state.turn === 90) [fx, fy] = [1 - py, px];
+    else if (state.turn === 180) [fx, fy] = [1 - px, 1 - py];
+    else if (state.turn === 270) [fx, fy] = [py, 1 - px];
+    state.scale = Math.max(state.full, state.fit * 1.0001);
+    state.mode = 'zoom';
+    state.tx = -(fx - 0.5) * w * state.scale;
+    state.ty = -(fy - 0.5) * h * state.scale;
+    apply();
+  }
+
   // The keyboard walks a zoomed picture: a fraction of the view per press.
   function pan(fx, fy) {
     const box = area();
@@ -235,5 +252,5 @@ export function createLoupe({ stage, image, inset = () => 0, onTrouble = () => {
   function recentre() { state.tx = 0; state.ty = 0; apply(); }
   const zoomed = () => state.mode === 'zoom';
 
-  return Object.freeze({ show, toFit, escape, clear, reset, refresh, toggle, pan, recentre, zoomed });
+  return Object.freeze({ show, toFit, escape, clear, reset, refresh, toggle, pan, recentre, zoomed, focusAt });
 }

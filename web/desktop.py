@@ -259,6 +259,9 @@ class Desktop:
     def facets(self) -> dict:
         return self._run(lambda library: library.facets())
 
+    def faces(self, photo_id: int) -> list[list[float]]:
+        return self._run(lambda library: library.faces(int(photo_id)))
+
     def people(self) -> list[dict]:
         return self._run(lambda library: library.people())
 

@@ -58,6 +58,7 @@ export const library = Object.freeze({
   facets: () => invoke('facets'),
   people: () => invoke('people'),
   labels: () => invoke('labels'),
+  faces: (id) => invoke('faces', id),
   teach: (word, ids, yes) => invoke('teach', word, ids, yes),
   renameLabel: (word, called) => invoke('rename_label', word, called),
   forgetLabel: (word) => invoke('forget_label', word),

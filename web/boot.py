@@ -274,6 +274,10 @@ class Library:
             parts.append(self._shelf(str(view["album"])))
         if view.get("chips"):
             parts.append(criteria.compile(self.conn, view["chips"]))
+        if view.get("ids"):
+            # A survey: the marked photographs and nothing else, so a burst
+            # can be judged in a round of its own.
+            parts.append(these([int(i) for i in view["ids"]]))
         # Stacks are open unless the person collapsed them: collapsed, the
         # members wait behind their cover except the covers opened; open,
         # they sit in place except the covers folded. A stack chip is the
@@ -1115,6 +1119,23 @@ class Library:
             dry_run=bool(dry_run),
         )
         return said if dry_run else self.changed(said)
+
+    def faces(self, photo_id: int) -> list[list[float]]:
+        """The faces found on one photograph, as boxes in fractions of the
+        picture (x, y, w, h) -- what the loupe zooms to for a sharpness
+        read on the eyes. Empty until the face pass has been there."""
+
+        import faces as facing
+
+        self._open()
+        row = self._photo_row(photo_id)
+        if row is None or not row["hash"]:
+            return []
+        held = cache.get(self.conn, row["hash"], self.looking_at_people, {"model": facing.KEY})
+        if held is None or held.get("state") != cache.READY or not held.get("value"):
+            return []
+        boxes, _scores, _matrix = facing.unpack(held["value"])
+        return [[float(v) for v in box] for box in boxes]
 
     def details(self, photo_id: int) -> dict | None:
         """Return and project embedded browse metadata for one photograph."""

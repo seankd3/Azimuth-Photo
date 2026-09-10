@@ -225,10 +225,12 @@ const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, mil
 // What the window is looking at, as the bridge speaks it. Null when it is
 // the whole library, so the server sees "no view" rather than three empties.
 function viewOf() {
-  const { folders, album, chips, collapsed, expanded, folded } = read();
+  const { folders, album, chips, collapsed, expanded, folded, survey } = read();
   const exceptions = [...((collapsed ? expanded : folded) || [])];
-  if (!(folders || []).length && !album && !(chips || []).length && !exceptions.length && !collapsed) return null;
+  if (!(folders || []).length && !album && !(chips || []).length && !exceptions.length && !collapsed && !survey) return null;
   const view = { folders, album, chips };
+  // A survey: Rank draws from the marked photographs and nothing else.
+  if (survey) view.ids = survey;
   if (collapsed) view.collapsed = true;
   if (exceptions.length) view[collapsed ? 'expanded' : 'folded'] = exceptions;
   return view;
@@ -462,7 +464,9 @@ const rankWorkflow = createRankWorkflow({
   },
   onLeave: async () => {
     // Rounds moved the ranking, and the view may have moved under the
-    // sitting; the grid comes back re-read either way.
+    // sitting; the grid comes back re-read either way. A survey ends with
+    // the sitting.
+    if (read().survey) update({ survey: null });
     await loadView();
   },
 });
@@ -633,7 +637,7 @@ function visibleGrid() {
         : inAlbum ? 'Nothing in this album yet.'
           : searching ? 'Nothing matches.'
             : inFolder ? (read().folders.length === 1 ? 'Nothing in this folder yet.' : 'Nothing in these folders yet.')
-              : narrowed ? 'Nothing matches these filters.' : 'No photos here yet.',
+              : narrowed ? 'Nothing matches these filters.' : 'No photographs here yet.',
     emptyCopy: inTrash
       ? 'Rejected photographs stay recoverable here until you empty Trash.'
       : scanning
@@ -1390,6 +1394,16 @@ function renderLoupe(photo) {
   }
 }
 
+let facing = { id: null, at: -1 };
+async function focusFace(photo) {
+  const boxes = await product.faces(photo.id).catch(() => []);
+  if (!boxes.length) { notify('No face has been read on this photograph.'); return; }
+  facing = { id: photo.id, at: facing.id === photo.id ? (facing.at + 1) % boxes.length : 0 };
+  const [x, y, w, h] = boxes[facing.at];
+  // A breath above the box's centre: the eyes.
+  loupeView.focusAt(x + w / 2, y + h * 0.42);
+}
+
 function openPhoto(index) {
   if (read().selectedIndex !== index) selectPhoto(index);
   const photo = read().photos.get(index);
@@ -2085,6 +2099,23 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  // Survey: the marked frames of a burst go to Rank as a round of their
+  // own (Lightroom's N), sized to the burst.
+  if (key === 'n' && read().view === 'library' && (read().marked?.size || 0) >= 2 && !event.ctrlKey && !event.metaKey) {
+    const ids = [...read().marked];
+    update({ survey: ids });
+    const sizes = [2, 4, 6, 9, 12];
+    void rankWorkflow.resize(sizes.find((n) => n >= ids.length) || 12).then(() => rankWorkflow.open());
+    event.preventDefault();
+    return;
+  }
+  // Face focus: . puts the first face at 100% under the centre, again the
+  // next, and round; a picture with no faces read says so.
+  if (key === '.' && loupeOpen() && read().selected && !event.ctrlKey && !event.metaKey) {
+    void focusFace(read().selected);
+    event.preventDefault();
+    return;
+  }
   const cullActions = { p: 'pick', u: 'clear', x: 'reject', r: event.shiftKey ? 'turnRight' : 'turnLeft' };
   if (key in cullActions && ['library', 'loupe'].includes(read().view) && selection().length) {
     cullWorkflow.apply(cullActions[key]);
@@ -2146,7 +2177,8 @@ const SHORTCUTS = [
   ]],
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
-    ['Enter / Space / E', 'Open the loupe'], ['G', 'Back to the grid, from anywhere'], ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
+    ['Enter / Space / E', 'Open the loupe'], ['G', 'Back to the grid, from anywhere'], ['N', 'Survey the marked frames in Rank'],
+    ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
     ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],
   ]],
@@ -2157,7 +2189,7 @@ const SHORTCUTS = [
   ['Filters', [['Backspace, Delete', 'Remove the chip'], ['Esc', 'Close the editor']]],
   ['The rail', [['Arrows', 'A day'], ['PageUp / PageDown', 'A year'], ['Home / End', 'The ends']]],
   ['The loupe', [
-    ['Z / Space', 'Fit or 100%'], ['Arrows', 'Next / previous; zoomed in, walk the picture'], ['Shift+Arrows', 'Zoomed in, half a view'], ['Home', 'Zoomed in, the centre'],
+    ['Z / Space', 'Fit or 100%'], ['.', 'The next face at 100%'], ['Arrows', 'Next / previous; zoomed in, walk the picture'], ['Shift+Arrows', 'Zoomed in, half a view'], ['Home', 'Zoomed in, the centre'],
     ['F', 'Leave the clean room'], ['Esc', 'Fit, then close', ['close-loupe', 'leave-rank']],
   ]],
   ['Rank', [
