@@ -79,6 +79,30 @@ def content_hash(path: str) -> str:
     return digest.hexdigest()
 
 
+def copy_verified(source: str, staging: str) -> str | None:
+    """Copy `source` to `staging`, hashing the bytes as they pass, then hash
+    the copy: the source read once, the copy once, and one digest that both
+    agree on -- or None when they do not, or the source changed underneath.
+
+    An import and a backup both copy and verify; this is the one shape of
+    it. Before, a copy was made and then both files were read again to
+    compare them, and the import hashed the copy a third time to record it.
+    """
+
+    digest = hashlib.blake2b(digest_size=HASH_DIGEST_BYTES)
+    with open(source, "rb") as reading, open(staging, "wb") as writing:
+        before = os.fstat(reading.fileno())
+        while chunk := reading.read(READ_CHUNK_BYTES):
+            digest.update(chunk)
+            writing.write(chunk)
+        after = os.fstat(reading.fileno())
+    if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
+        return None
+    shutil.copystat(source, staging)
+    made = digest.hexdigest()
+    return made if content_hash(staging) == made else None
+
+
 def same_bytes(left: str, right: str) -> bool:
     """Whether two files contain exactly the same bytes.
 
@@ -107,15 +131,16 @@ def _fingerprint(entry) -> tuple[int, int, int]:
     return entry.st_size, entry.st_mtime_ns, entry.st_ctime_ns
 
 
-def identify(conn, path: str) -> dict:
+def identify(conn, path: str, digest: str | None = None) -> dict:
     """What photo is this, and do we already know it?
 
     Returns the full-content hash and size always, and an `id` when a catalogued
     photo shares that identity. Matching bytes may add a copy; rows are never
     silently merged because each may already carry irreplaceable decisions.
+    `digest` is the hash when the caller has just made the file and knows it.
     """
 
-    digest = content_hash(path)
+    digest = digest or content_hash(path)
     row = conn.execute(
         "SELECT id FROM images WHERE content_hash = ? AND vc_of IS NULL LIMIT 1", (digest,)
     ).fetchone()
@@ -160,8 +185,8 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     os.makedirs(os.path.dirname(target), exist_ok=True)
     staging = f"{target}.importing-{uuid.uuid4().hex}"
     try:
-        shutil.copy2(source, staging)
-        if not same_bytes(staging, source):
+        made = copy_verified(source, staging)
+        if made is None:
             return {"outcome": "verify failed"}
         publish_without_overwrite(staging, target)
     except OSError as error:
@@ -176,16 +201,16 @@ def put(conn, source: str, drive_uuid: str, tail: str) -> dict:
     return {
         "outcome": "written",
         "path": target,
-        **_record(conn, target, drive_uuid, tail),
+        **_record(conn, target, drive_uuid, tail, digest=made),
     }
 
 
-def _record(conn, path: str, drive_uuid: str, tail: str) -> dict:
+def _record(conn, path: str, drive_uuid: str, tail: str, digest: str | None = None) -> dict:
     """Make a verified file a photo and a copy fact in one transaction."""
 
     from model import copies
 
-    known = identify(conn, path)
+    known = identify(conn, path, digest=digest)
     photo_id = known["id"]
     if photo_id is None:
         photo_id = admit(conn, path, tail)

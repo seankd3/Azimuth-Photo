@@ -16,7 +16,6 @@ to authorize deleting one.
 from __future__ import annotations
 
 import os
-import shutil
 import time
 import uuid
 
@@ -88,8 +87,7 @@ def back_up(conn, photo_id: int, *, dry_run: bool = False) -> str:
     os.makedirs(os.path.dirname(target), exist_ok=True)
     staging = f"{target}.copying-{uuid.uuid4().hex}"
     try:
-        shutil.copy2(source, staging)
-        if not photos.same_bytes(staging, source):
+        if photos.copy_verified(source, staging) is None:
             return "verify failed"
         photos.publish_without_overwrite(staging, target)
     except OSError as exc:
