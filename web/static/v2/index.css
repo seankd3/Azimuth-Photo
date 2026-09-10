@@ -163,6 +163,14 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   cursor: pointer;
 }
 .quiet-button:hover { border-color: var(--hover-line); color: var(--text); }
+/* a press is felt: a hair smaller for the moment the button is down */
+.quiet-button, .primary-button, .danger-button, .mini-button, .rank-size button, .kind-choice button { transition: transform .1s cubic-bezier(.23, 1, .32, 1); }
+.quiet-button:active, .primary-button:active, .danger-button:active, .mini-button:active, .rank-size button:active, .kind-choice button:active { transform: scale(.97); }
+/* lights out: the chrome recedes so the photographs can be judged */
+.app-shell.is-lights-out .sidebar, .app-shell.is-lights-out .inspector, .app-shell.is-lights-out .topbar, .app-shell.is-lights-out .contextbar {
+  background: #000; border-color: transparent; opacity: .28; transition: opacity .2s ease;
+}
+.app-shell.is-lights-out .sidebar:hover, .app-shell.is-lights-out .inspector:hover, .app-shell.is-lights-out .topbar:hover, .app-shell.is-lights-out .contextbar:hover { opacity: .9; }
 .danger-button {
   border: 1px solid #8c4d4a;
   border-radius: var(--radius);

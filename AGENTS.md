@@ -154,6 +154,16 @@ One command, and the smallest half of it when the change is small:
 Report exact commands and results. Never claim a UI reproduction or passing
 suite that did not occur.
 
+How a polish round runs, and there is only ever one in flight: a read-only
+audit against HEAD (defects, duplications, and taste against
+`docs/ui-architecture.md`) refills `docs/FINDINGS.md`; one hand lands the
+shared shape first and then the surfaces, one commit per row cluster with
+the row numbers in the subject; a different model refutes the diff before
+push; the native proof and `scripts/bench.py` carry the numbers. A medium
+or large fix states its one sentence and what it deletes in the commit. When
+the ledger runs dry, the next audit widens the lens (a persona, a catalog
+size, a surface) instead of stopping.
+
 ## Documentation hygiene
 
 Each durable fact has one owner:

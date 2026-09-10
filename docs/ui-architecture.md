@@ -81,13 +81,30 @@ interrupting.
 
 ## Speed covenant
 
-Performance budgets are design constraints, not optimizations:
+Performance budgets are design constraints, not optimizations. The numbers
+are the ones the craft-obsessed teams publish (Superhuman: every interaction
+under 100 ms, 50 ms inside; Nielsen: 0.1 s feels instant, 1 s keeps flow,
+10 s loses attention; Linear: no loading states, stale content over a
+spinner):
 
-- Cull/Refine loop response: < 50 ms perceived. No spinner may ever appear
-  inside a loop a photographer repeats a thousand times.
-- Scope switch: skeletons within 300 ms; photos on pure black (#000); blur or
-  color placeholders over gray shimmer when available.
-- Grid scroll at 47k+ photos: virtualized; scrolling is the product.
+- A keystroke in the cull loop paints its answer in the same frame, under
+  50 ms, never past 100. No spinner may ever appear inside a loop a
+  photographer repeats a thousand times.
+- Next photograph in the loupe: paint *something* (the grid tile) under
+  100 ms and sharpen in place; the decode happens behind the picture.
+- Scope switch: the last answer stays until the next one lands; skeletons
+  within 300 ms; photos on pure black (#000). A wait under ~200 ms shows no
+  indicator at all.
+- A search answers under 1 s; anything past 10 s says how far it is and can
+  be stopped.
+- Grid scroll at 150k photos: virtualized; scrolling is the product.
+- Motion follows frequency, not taste: an act done a hundred times a day
+  (a flag, a grid move, a menu) has no motion; tens a day gets 100-160 ms;
+  a surface that arrives (a dialog, the loupe) 120-250 ms and never past
+  300; ease-out only, transform and opacity only, never a scale from zero.
+  `prefers-reduced-motion` keeps the fades and drops the movement.
+- `scripts/bench.py` is the instrument for the product boundary; a
+  performance row in `FINDINGS.md` ships with its before and after.
 
 ## Interaction canon
 
@@ -96,8 +113,27 @@ Patterns adopted deliberately (and their sources):
 - Zoom at click point in Loupe (Photo Mechanic).
 - Ctrl/Cmd-scroll continuous grid density; semantic zoom at extremes (Apple).
 - Corner-check selection model with shift-range (Google Photos).
-- Undo-first: no confirmations; every action is a toast with Undo.
-- Esc layers out one surface at a time; focus returns to the invoking control.
+- Undo-first: no confirmations; every change to a set or a photograph has a
+  way back. Feedback lands where the act did: a single flag or star shows on
+  the tile in the same frame and its Undo waits silently on Ctrl+Z; a toast
+  is for a batch or an effect off screen, 3.5 s for a notice, 8 s with a
+  way back, and it retargets rather than stacks (Rauno; Apple HIG).
+- Esc layers out one surface at a time; focus returns to the invoking
+  control and never falls to the body. Every view change hands the keyboard
+  to the stage that arrived.
+- An empty state is a verb, not an illustration; the first run choreographs
+  one moment (the first grid from embedded previews) before any decode.
+- Rest state carries the information; hover only adds. No affordance is
+  hover-only. Tooltips carry the key. A drag lifts on movement past a
+  threshold, never on press; a drop target says its reason when it refuses.
+- Lights Out (L) darkens the chrome to judge tone; the culling rhythm is
+  decide, advance, decide, with auto-advance as the default.
+- The reference set behind these, kept short: Rauno Freiberg's *Invisible
+  Details of Interaction Design* and *Web Interface Guidelines*; Emil
+  Kowalski's motion standards; Linear's *Why is quality so rare* and *How we
+  run projects*; Superhuman's PMF engine (First Round); Nielsen's three
+  response-time limits; the Lightroom Classic culling and zoom grammar
+  (Lens Lounge, Kost).
 - ">" command mode in the omnibox; Ctrl/Cmd+K (Linear).
 - Neutral gray chrome near photos; photos on pure black. One accent color,
   active states only. Amber strictly for offline/simulated warnings.
@@ -106,7 +142,9 @@ Patterns adopted deliberately (and their sources):
 
 ## Vocabulary
 
-User-facing words, chosen once: **Refine** (not rank/compare), **Best of**
-(not top-rated), **Picked/Rejected** (not keep/toss), **Sorted %** (not
-confidence/coverage), **Sources** (not folders/volumes), **Collections** (not
-albums). The word "scope" is internal; users just see what they're viewing.
+User-facing words, chosen once, as the shipped V2 says them: **Rank** (the
+stage; a round is *chosen over*), **Best** (the sort), **Picked / Rejected**
+(the cull, never keep/toss), **Albums** (plain and smart), **Labels** (taught
+words), **People**, **Folders** and **Drives**, **Trash**, **photographs**
+(the counted noun everywhere). The word "scope" is internal; users just see
+what they are viewing.

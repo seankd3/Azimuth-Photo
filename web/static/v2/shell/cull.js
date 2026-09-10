@@ -57,8 +57,13 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
       }
       const passed = result.unidentified
         ? ` ${result.unidentified === 1 ? 'One is' : `${result.unidentified} are`} not identified yet.` : '';
-      undo.show(action.message(ids.length - result.unidentified) + passed,
-        () => product.undoCull(result.changed).then(seat ? seat.restored : reload));
+      const back = () => product.undoCull(result.changed).then(seat ? seat.restored : reload);
+      // One frame flagged or turned shows itself on the tile in the same
+      // frame; a toast would say what the eye already saw. Its way back
+      // waits on Ctrl+Z. A batch, a reject (the row left) or a word about
+      // the unidentified still speaks.
+      if (ids.length === 1 && !action.removes && !passed && !seat) undo.keep(back);
+      else undo.show(action.message(ids.length - result.unidentified) + passed, back);
     } catch (reason) {
       notify(reason.message);
     } finally {

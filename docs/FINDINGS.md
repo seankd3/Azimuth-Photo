@@ -500,3 +500,13 @@ finding was checked and the numbers said no.
 | P21 | Lexical search walks the library per keystroke (100–165 ms) | LIKE on tail only; camera/lens/date terms resolve to chips | measured: mmap halves it; resolving camera/lens/date words to chips is a search redesign, parked |
 | P22 | albums() runs a windowed COUNT per album | sets.counts() one pass | measured: 117 ms for 21 albums; the row shows the union-and-library count, which one pass over decisions cannot say; revisit past ~100 albums |
 | P23 | 423 B per page row; the four presence booleans are folded into one word anyway | measured: low priority, left | measured: left as is |
+
+## Craft (from the study of Notion, Linear, Superhuman, Raycast and Lightroom, 2026-09-10)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| N1 | A single flag or turn raised a toast for what the tile already showed | the way back waits silently on Ctrl+Z; a batch, a reject or a word about the unidentified still speaks | shipped |
+| N2 | No way to darken the chrome to judge tone | Lights Out on L | shipped |
+| N3 | A sharpness run at 100% must survive the arrows | measured: already so — the loupe keeps scale and position across frames | measured: already so |
+| N4 | A press is not felt | a 3% dip for the moment a button is down, transform only, 100 ms | shipped |
+| D2 | ui-architecture.md's vocabulary named Refine, Collections and Sources; the app says Rank, Albums, Folders | the doctrine says what the app says, and carries the study's numbers | shipped |

@@ -45,6 +45,14 @@ export function createUndo() {
     timer = setTimeout(() => { toast.hidden = true; }, nextRevert ? SHOWN_MS : NOTICE_MS);
   }
 
+  // A way back with no toast: the act showed itself where it landed (a flag
+  // on the tile), so nothing more is said, and Ctrl+Z still has it.
+  function keep(nextRevert) {
+    clearTimeout(revertTimer);
+    revert = nextRevert;
+    revertTimer = setTimeout(forget, SHOWN_MS);
+  }
+
   // Esc puts the surface away; the way back keeps its own clock, so Ctrl+Z
   // still works for the moment it was promised.
   function dismiss() {
@@ -63,5 +71,5 @@ export function createUndo() {
     }
   }
 
-  return Object.freeze({ hide, run, show, dismiss, pending: () => revert !== null, visible: () => !toast.hidden });
+  return Object.freeze({ hide, run, show, keep, dismiss, pending: () => revert !== null, visible: () => !toast.hidden });
 }

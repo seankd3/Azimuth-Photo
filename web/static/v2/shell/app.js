@@ -1979,6 +1979,12 @@ document.addEventListener('keydown', (event) => {
 
   const current = cursorAt ?? read().selectedIndex;
   const key = event.key.toLowerCase();
+  if (key === 'l' && !event.ctrlKey && !event.metaKey) {
+    // Lights out: the chrome goes dark to judge tone; L again brings it back.
+    shell.classList.toggle('is-lights-out');
+    event.preventDefault();
+    return;
+  }
   if (key === 'b' && ['library', 'loupe'].includes(read().view) && selection().length) {
     albumsPanel.toss();
     event.preventDefault();
@@ -2096,7 +2102,7 @@ document.addEventListener('keydown', (event) => {
 const SHORTCUTS = [
   ['Everywhere', [
     ['?', 'This sheet'], ['/', 'Search'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
-    ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'],
+    ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'], ['L', 'Lights out'],
   ]],
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
