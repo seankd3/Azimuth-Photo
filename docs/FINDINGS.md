@@ -560,7 +560,7 @@ finding was checked and the numbers said no.
 | K6 | Tab during an import hides the import panel and drops focus | the fold refuses while a panel owns the focus | shipped |
 | K7 | Esc out of the + Filter menu drops focus to the body | the chip menu opens through showMenu | shipped |
 | K8 | Rank loses the keyboard on every pick | the selected card is focused after render | shipped |
-| K9 | Export, New album and Add folder have no key and no menu entry | a > command mode in the search box reaching every verb | open |
+| K9 | Export, New album and Add folder have no key and no menu entry | a leading > in the search box lists every enabled verb on the screen by its tooltip, with its key; typing narrows, Enter presses the first, the sheet teaches > | shipped |
 | K10 | Every stack badge is a permanent tab stop | the badge roves with its cell | shipped |
 | SR1 | The status line speaks the worker's pace every two seconds | announce state changes only; the pace is aria-hidden | shipped |
 | SR2 | A cull, a pick and a view change announce nothing | one polite live region every act writes one sentence to | shipped |
@@ -635,7 +635,7 @@ finding was checked and the numbers said no.
 | # | User impact | Fix | Status |
 |---|---|---|---|
 | E2-1 | Nothing said where the sharpness sits: a missed focus and a bokeh portrait looked alike to every surface | a `sharpness` cache kind on the CPU behind the tiles: the frame's local-variation map (p50/p75/p90), the largest face's box against the frame (subject ratio), and Zhu–Milanfar's noise-aware measure on every face crop from the 4,096 px rendition (gated by crop size); the inspector says the numbers, never a verdict | shipped |
-| E2-2 | Eyes: open/closed/can't tell, and each eye's own sharpness | EAR from the 2d106 contours plus OCEC (112 KB) on eye crops; the landmark model runs in the sharpness pass | open |
+| E2-2 | Eyes: open/closed/can't tell, and each eye's own sharpness | the 106-landmark model buffalo_l already ships runs in the sharpness pass on each face over 48 px; each eye's contour height over width is its openness and Zhu–Milanfar on the padded eye crop its sharpness; the photograph's word is the largest face's, said only when both eyes are readable and agree (open ≥ 0.25, closed ≤ 0.15, else Cannot tell); the inspector says it; OCEC left out (the contour alone read every proof face; add it only if E5 shows blinks slipping through) | shipped |
 | E1 | The head fits strength, then ridge on strength: two stages, one seam | one Plackett–Luce fit on the rounds with the facet block; measured on held-out duels | open |
 | E3 | Within a genre the direction reaches only +.35 | a per-cluster residual penalised toward zero | open |
 | E4 | Learn's uncertainty is feature-blind | Bayesian-ridge variance as σ; top-two finding rounds | open |

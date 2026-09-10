@@ -622,6 +622,7 @@ const searchCards = createSearchCards({
   box: searchBox,
   search: runSearch,
   applyChip,
+  commands,
 });
 
 let lookTimer = null;
@@ -2251,7 +2252,7 @@ document.addEventListener('keydown', (event) => {
 // the tooltips can never disagree.
 const SHORTCUTS = [
   ['Everywhere', [
-    ['?', 'This sheet'], ['/', 'Search'], ['F6', 'The chrome: bar, sidebar, details, top bar'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
+    ['?', 'This sheet'], ['/', 'Search'], ['>', 'In the search box: every verb on the screen'], ['F6', 'The chrome: bar, sidebar, details, top bar'], ['Tab', 'Fold the side panels', ['toggle-left', 'toggle-right']], ['Shift+Tab', 'Fold everything', ['toggle-top']],
     ['Esc', 'Back one step'], ['Ctrl+Z', 'Undo', ['undo-toast']], ['Ctrl+A', 'Select all'], ['L', 'Lights out'],
   ]],
   ['The grid', [
@@ -2297,6 +2298,25 @@ for (const [, keys] of SHORTCUTS) for (const [key, , actions] of keys) for (cons
 for (const [action, tip] of Object.entries(TIPS)) {
   const key = KEY_OF.get(action);
   for (const node of document.querySelectorAll(`[data-action="${action}"]`)) if (!node.title) node.title = key ? `${tip} (${key})` : tip;
+}
+// The command line: what the tooltips say, for every verb that is on the
+// screen right now, by the same words. Choosing one presses its button.
+function commands(query) {
+  const seen = new Set();
+  const found = [];
+  const want = query.toLowerCase();
+  for (const node of document.querySelectorAll('[data-action]')) {
+    const action = node.dataset.action;
+    const tip = TIPS[action];
+    if (!tip || seen.has(action) || node.disabled || !node.getClientRects().length) continue;
+    if (want && !tip.toLowerCase().includes(want)) continue;
+    seen.add(action);
+    found.push({
+      label: tip.replace(/\u2026$/, ''), count: KEY_OF.get(action), glyph: 'chevron',
+      run: () => { searchBox.value = ''; node.click(); },
+    });
+  }
+  return found;
 }
 const keysDialog = document.querySelector('[data-keys-dialog]');
 {

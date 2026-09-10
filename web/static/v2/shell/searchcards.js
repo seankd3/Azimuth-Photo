@@ -4,13 +4,14 @@
 // meaning search runs underneath. Every card is a fact the chip language
 // can say back, so clicking one applies chips: countable, explainable,
 // saveable, and it scopes Rank like any other narrowing. Enter is always
-// the meaning search; the cards never take it away.
+// the meaning search; the cards never take it away. A leading > turns the
+// box into the command line: every verb on the screen, by its tooltip.
 
 import { icon } from '../kit/icons.js';
 
 const RECENT_KEY = 'azimuth.recent-searches';
 
-export function createSearchCards({ product, read, _update, box, search, applyChip }) {
+export function createSearchCards({ product, read, _update, box, search, applyChip, commands }) {
   const drop = document.querySelector('[data-search-drop]');
   let facets = null;        // {years, cameras, orientations, roots} once asked
   let sessions = [];        // the latest shoots, named, fetched with the facets
@@ -56,7 +57,10 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
 
   const SAY = { landscape: 'Landscape', portrait: 'Portrait', square: 'Square' };
 
+  const commanding = () => box.value.startsWith('>');
+
   function offers(text) {
+    if (commanding()) return [['Commands', commands(text.slice(1).trim())]];
     const query = text.trim().toLowerCase();
     const match = (label) => !query || label.toLowerCase().includes(query);
     const held = facets || { years: [], cameras: [], orientations: [], roots: [] };
@@ -150,7 +154,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     const rows = [];
     // The row that does what was typed comes first, where the eye and
     // ArrowDown both land; the offers narrow underneath it.
-    if (text.trim()) {
+    if (text.trim() && !commanding()) {
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'drop-row drop-everything';
@@ -246,8 +250,9 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
       row.classList.toggle('is-cursor', Number(row.dataset.item) === cursor);
     }
     // The ⏎ rides whatever Enter would run: the cursor row, else the
-    // everything row when there is one.
-    const current = drop.querySelector('.is-cursor') || drop.querySelector('.drop-everything');
+    // everything row when there is one, else the first command.
+    const current = drop.querySelector('.is-cursor') || drop.querySelector('.drop-everything')
+      || (commanding() ? drop.querySelector('.drop-row') : null);
     if (current) current.append(hint);
     if (current) box.setAttribute('aria-activedescendant', current.id);
     else box.removeAttribute('aria-activedescendant');
@@ -297,8 +302,9 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     render();
     // The meaning search runs underneath as it always has.
     clearTimeout(typeTimer);
-    // Typing searches; only Enter or a card remembers the words.
-    typeTimer = setTimeout(() => search(box.value.trim()), 300);
+    // Typing searches; only Enter or a card remembers the words. A
+    // command line is not a query.
+    if (!commanding()) typeTimer = setTimeout(() => search(box.value.trim()), 300);
   });
   box.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -315,6 +321,7 @@ export function createSearchCards({ product, read, _update, box, search, applyCh
     if (event.key === 'Enter') {
       clearTimeout(typeTimer);
       if (cursor >= 0) pick(cursor);
+      else if (commanding()) { if (items.length) pick(0); }
       else { close(); commit(box.value); }
       event.preventDefault();
       return;
