@@ -2276,6 +2276,24 @@ class SearchNeverRefuses(CoreCase):
         self.assertIn(cat, found)
         self.assertNotIn(twin, found)           # denied is denied in search too
 
+    def test_a_search_is_fused_once_and_its_pages_are_slices(self):
+        # Every page, and the two-second re-read while a search was on
+        # screen, ran the whole fusion again. The last answer is kept with
+        # what it was asked of; only a change to that asks again.
+        self._photo("Raws/2026/cat-01.CR2")
+        self._photo("Raws/2026/cat-02.CR2")
+        with patch.object(boot.finding, "search", wraps=boot.finding.search) as fused:
+            first = self.library.search("cat", limit=1, offset=0)["photos"]
+            second = self.library.search("cat", limit=1, offset=1)["photos"]
+            self.assertEqual(fused.call_count, 1)
+            self.assertNotEqual(first[0]["id"], second[0]["id"])
+            self.library.search("dog")
+            self.assertEqual(fused.call_count, 2)
+            # A photograph that arrived moves the shape, so the words ask again.
+            self._photo("Raws/2026/cat-03.CR2")
+            self.library.search("dog")
+            self.assertEqual(fused.call_count, 3)
+
     def test_two_folders_are_one_view(self):
         # A shoot that spanned two days browses as their union — several
         # folders are one view, the same answer a folder chip with two

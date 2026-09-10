@@ -8,6 +8,7 @@ operations from whichever native surface replaces the current shell.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -203,6 +204,10 @@ class Library:
         # sweep lane after a sweep that changed something, keyed by the
         # stamp and the sweep count since only a sweep or a cull moves it.
         self._tree: tuple | None = None
+        # The last search's ranked ids with what they were asked of: a page
+        # and the two-second re-read are slices of it, never the fusion
+        # again. One entry, because paging is always the last search.
+        self._found: tuple | None = None
         self._refacet_pending = False
         self._owner = None   # the OwnedLibrary, once one holds this
         # What the window says it is looking at, most recent statement wins.
@@ -661,8 +666,17 @@ class Library:
         import labels as taught
 
         omit |= set(taught.denied(self.conn, query))
-        ranked = finding.search(self.conn, query, space=space, query_vector=query_vector,
-                                scope=self.viewing(view), omit=frozenset(omit))
+        # What the answer depends on: the words, the seeds, the view, the
+        # space (count-keyed, as its memo is), whether the words had a
+        # vector, the library's shape, and what is denied.
+        key = (query, tuple(like), json.dumps(view, sort_keys=True, default=str),
+               len(space[0]) if space else None, query_vector is not None,
+               shape_stamp(self.conn), self.swept, frozenset(omit))
+        if self._found is None or self._found[0] != key:
+            self._found = (key, finding.search(
+                self.conn, query, space=space, query_vector=query_vector,
+                scope=self.viewing(view), omit=frozenset(omit)))
+        ranked = self._found[1]
         page = ranked[int(offset):int(offset) + max(1, int(limit))]
         rows = {row["id"]: row for row in queries.photos(
             self.conn, scope=these(page), sort="newest", limit=max(1, len(page)),
