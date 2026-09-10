@@ -328,15 +328,26 @@ def space(conn) -> tuple[list[str], object]:
 
     import embed
 
-    rows = conn.execute(
-        "SELECT hash, value FROM cache WHERE kind = 'embedding' AND recipe = ?"
-        " AND state = 'ready' AND value IS NOT NULL",
-        (embed.RECIPE,),
-    ).fetchall()
-    if not rows:
+    # Counted first and filled in place from the cursor: a list of the rows
+    # and then a stack of them peaked at twice the matrix (1.4 GB at 150k).
+    ready = ("FROM cache WHERE kind = 'embedding' AND recipe = ?"
+             " AND state = 'ready' AND value IS NOT NULL")
+    count = int(conn.execute(f"SELECT COUNT(*) {ready}", (embed.RECIPE,)).fetchone()[0])
+    if not count:
         return [], None
-    subjects = [str(row["hash"]) for row in rows]
-    return subjects, np.stack([np.frombuffer(row["value"], dtype=np.float32) for row in rows])
+    subjects: list[str] = []
+    matrix = None
+    for row in conn.execute(f"SELECT hash, value {ready}", (embed.RECIPE,)):
+        if len(subjects) == count:
+            break
+        vector = np.frombuffer(row["value"], dtype=np.float32)
+        if matrix is None:
+            matrix = np.empty((count, vector.shape[0]), dtype=np.float32)
+        matrix[len(subjects)] = vector   # a second width fails here, loudly
+        subjects.append(str(row["hash"]))
+    if matrix is None:
+        return [], None
+    return subjects, matrix[:len(subjects)]
 
 
 def _somewhere(upper: int) -> int:
