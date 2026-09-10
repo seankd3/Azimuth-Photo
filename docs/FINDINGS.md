@@ -644,7 +644,7 @@ finding was checked and the numbers said no.
 | X55 | `_grey` copied the loaded 4,096 px image and called `draft` on the copy, a no-op | the frame is decoded at a quarter scale from its own handle | shipped |
 | X56 | The module claimed the frame map measured sharpness; it measures texture and noise alike | said so; only ever read as a ratio | shipped |
 | X57 | Every details read shipped every face box and both eyes' numbers to the inspector, which says two words | the inspector gets subject and eyes; the record stays for the fit | shipped |
-| X58 | The sharpness facts vanish from the inspector with the archive away, since details() needs the original | later: read the tile-derived facts on the tile-only path | open |
+| X58 | The inspector's facts vanish with the archive away, since details() needed the original | with the original away, the cached metadata entry answers and the derived facts ride along; a test hides the file and asks again | shipped |
 | X59 | The way back from a Yes unnamed one side: with neither side introduced the merge stayed half-applied; with both introduced a name was destroyed | the log replays: every face named after the Yes answers to what it answered to before (`unname_since`); a test merges Ada and Bob and gets both back | shipped |
 | X60 | The card's Y/N never fired from the wall (the card could not take focus); N there opens the name dialog | Y anywhere on the wall answers the first question; the card is focusable and N is its own key; the arrows stay with the browser inside it | shipped |
 | X61 | Answering dropped the keyboard on the floor: the focused button was replaced | focus lands on the next question, else the wall's cursor | shipped |

@@ -208,6 +208,11 @@ class FreshCatalogTests(unittest.TestCase):
                 enriched = work.step(product.conn, (embedded_metadata.KIND,))
                 answer = product.details(photo["id"])
                 projected = product.browse()[0]
+                # With the file away (the archive unplugged), the facts the
+                # cache already holds still answer.
+                os.rename(source, source + ".away")
+                self.assertEqual(product.details(photo["id"])["camera_model"], answer["camera_model"])
+                os.rename(source + ".away", source)
                 corrected_date = product.set_date(photo["id"], "2020-01-02 04:05:06")
                 with self.assertRaises(ValueError):
                     product.set_date(photo["id"], "2020-19-40")

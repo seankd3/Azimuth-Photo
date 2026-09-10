@@ -1268,13 +1268,19 @@ class Library:
         self._open()
         found = self._source_identity(photo_id)
         if found is None:
-            return None
-        source, digest = found
-        entry = cache.make(
-            self.conn, digest, embedded_metadata.KIND, source
-        )
-        if entry is None:
-            return None
+            # The original is away: what the cache read from it when it was
+            # here still answers, and so do the facts the tiles derived.
+            row = self.conn.execute(
+                "SELECT content_hash AS hash FROM images WHERE id = ?", (int(photo_id),)).fetchone()
+            digest = row["hash"] if row else None
+            entry = cache.get(self.conn, digest, embedded_metadata.KIND) if digest else None
+            if entry is None or entry.get("state") != cache.READY:
+                return None
+        else:
+            source, digest = found
+            entry = cache.make(self.conn, digest, embedded_metadata.KIND, source)
+            if entry is None:
+                return None
         if not cache.project(
             self.conn, digest, photo_id, embedded_metadata.KIND, entry
         ):
