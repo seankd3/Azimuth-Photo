@@ -483,3 +483,20 @@ finding was checked and the numbers said no.
 | U40 | Two number formats in one file | toLocaleString | open |
 | U41 | Two dialog focus policies | aim at the act (W4, W5) | open |
 | U42 | Two policies for marking the current view in the sidebar | one (W15) | open |
+
+## Performance (fifth round, 2026-09-10, measured on a 150k copy)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| P12 | Scroll stutter inside a folder or with a camera/stars chip: 70–1,100 ms per page (unindexable substr scope, row fetch per walked entry) | folder scope as a tail range on idx_photos_tail; stars+best through idx_browse_stars | open |
+| P13 | S lags 650 ms and holds the write lock: stack/unstack re-project the whole library | project only the touched identities on stack/unstack | open |
+| P14 | size(), days() and the rank total table-scan: 150–430 ms per view change | INDEXED BY the browse index; rank total once per scope | open |
+| P15 | position() numbers the whole scope: 156–340 ms per sort change | keyset count on the sort's index | open |
+| P16 | Chores burn 260–1,000 ms of queries per step and repeat every 5 s with the archive away | skip the trash half for keyed passes; stop probing after the first locate miss | open |
+| P17 | Page cache 2 MB, mmap off on a 130 MB catalog: every scan 1.5–5× slower | mmap 256 MB in connect() | open |
+| P18 | rerank writes by content_hash, 0.8 s lock per slice | UPDATE by id; quantize elo; slice 500 | open |
+| P19 | facets recompute 1 s on the UI lane after any cull | computed on the sweep lane; the UI only reads | open |
+| P20 | boot.repair is 5.7 s of CPU behind first paint | one-shot residue repairs gated by a decision row; metadata reindex only when its rows moved | open |
+| P21 | Lexical search walks the library per keystroke (100–165 ms) | LIKE on tail only; camera/lens/date terms resolve to chips | open |
+| P22 | albums() runs a windowed COUNT per album | sets.counts() one pass | open |
+| P23 | 423 B per page row; the four presence booleans are folded into one word anyway | measured: low priority, left | measured: left as is |
