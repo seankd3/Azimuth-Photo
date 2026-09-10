@@ -22,7 +22,10 @@ import { presence } from '../kit/presence.js';
 import { icon } from '../kit/icons.js';
 import { createTimeline } from './timeline.js';
 
-const PAGE = 200;
+// A page is at least a viewport at the densest setting, so a 4K window
+// does not straddle three pages on every scroll frame; never past what the
+// library serves at once.
+const PAGE = Math.min(500, Math.max(200, Math.ceil(window.innerWidth / 150) * Math.ceil(window.innerHeight / 150)));
 const CONTEXTBAR_HEIGHT = 46;
 const library = getLens('library');
 const workspace = document.querySelector('.workspace');
@@ -108,11 +111,15 @@ let stripStart = null;
 function renderStrip(state) {
   if (!loupeOpen() || loupe.classList.contains('is-full')) return;
   const current = state.selectedIndex ?? 0;
-  if (stripStart === null || current < stripStart + 7 || current >= stripStart + 22) {
-    stripStart = Math.max(0, Math.min(current - 14, state.total - 29));
+  // As many cells as the band holds plus a few either side; a 4K band is
+  // not a 29-cell island on the left.
+  const span = Math.max(15, Math.ceil(loupeStrip.clientWidth / 73) + 6);
+  const quarter = Math.floor(span / 4);
+  if (stripStart === null || current < stripStart + quarter || current >= stripStart + span - quarter) {
+    stripStart = Math.max(0, Math.min(current - Math.floor(span / 2), state.total - span));
   }
   const start = stripStart;
-  const end = Math.min(state.total, start + 29);
+  const end = Math.min(state.total, start + span);
   void pages.ensureRange(start, end);
   let signature = `${start}:${end}`;
   for (let index = start; index < end; index += 1) {
@@ -213,11 +220,20 @@ function notify(message) {
 const driveList = document.querySelector('[data-drive-list]');
 let drivesSeen = '';
 let viewShown = null;
+// One polite live region: a view's name on change, a cull's outcome, a
+// round's result. Written after a beat so the same sentence twice is heard.
+const saidTo = document.querySelector('[data-said]');
+function say(sentence) {
+  saidTo.textContent = '';
+  requestAnimationFrame(() => { saidTo.textContent = sentence; });
+}
 let loadingSince = null;
 
 const DENSITY_KEY = 'azimuth.row-height';
 const SORT_KEY = 'azimuth.sort';
-let rowHeight = recall(DENSITY_KEY, 180);
+// The remembered density, else one seeded from the window: six across at
+// the default, whatever the screen — 150 on a 13-inch, 320 on a 4K.
+let rowHeight = recall(DENSITY_KEY, Math.max(150, Math.min(320, Math.round((window.innerWidth - 508) / 6))));
 let scrollFrame = null;
 
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -451,6 +467,7 @@ const rankWorkflow = createRankWorkflow({
   read,
   update,
   notify,
+  say,
   undo,
   // The cull workflow is made after this one; the stage calls it at key time.
   cull: (verb, options) => cullWorkflow.apply(verb, options),
@@ -481,6 +498,7 @@ function refreshAlbumsSoon() {
 const cullWorkflow = createCullWorkflow({
   product,
   read,
+  say,
   reload: () => loadView(),
   selection,
   patch: (changed) => {
@@ -1452,6 +1470,8 @@ function renderFolders(state) {
       safety.className = `safety ${node.safety === 'unknown' && !anyRecord ? 'quiet' : node.safety}`;
       safety.title = node.safety === 'at-risk' ? 'Some of these exist only on the working disk'
         : node.safety === 'unknown' && anyRecord ? 'The record drive is away, so nobody can say' : '';
+      if (safety.title) { safety.setAttribute('role', 'img'); safety.setAttribute('aria-label', safety.title); }
+      else safety.setAttribute('aria-hidden', 'true');
       const name = document.createElement('span');
       name.className = 'folder-name';
       name.textContent = node.name;
@@ -1572,22 +1592,29 @@ function renderChrome(state) {
   const away = (state.drives || []).filter((d) => !d.attached);
   // While an import runs the line carries the way out too.
   stopImport.hidden = !state.importing;
-  status.textContent = state.home === null
-    ? 'Choose where Azimuth should live to begin'
+  // The word is what is said aloud (a state: what the worker is doing, a
+  // drive away, up to date); the pace is the numbers beside it, read by
+  // eye and never spoken, so a screen reader is not told the count every
+  // two seconds.
+  const [wordSaid, pace] = state.home === null
+    ? ['Choose where Azimuth should live to begin', '']
     : state.importing || state.doing
-      ? state.importing || state.doing
+      ? [state.importing || state.doing, '']
       : state.scanning
-        ? SAYING.finding
+        ? [SAYING.finding, '']
         : working
-          ? [working.word,
-             working.left ? `${working.left.toLocaleString()} left` : null,
-             working.rate ? `${working.rate.toLocaleString()} / min` : null,
-            ].filter(Boolean).join(' · ')
+          ? [working.word, [working.left ? `${working.left.toLocaleString()} left` : null,
+                            working.rate ? `${working.rate.toLocaleString()} / min` : null].filter(Boolean).join(' · ')]
           : away.length
-            ? `${away.length === 1 ? `${away[0].label || 'A drive'} away · those photographs are here when it is` : `${away.length} drives away · those photographs are here when they are`}`
+            ? [`${away.length === 1 ? `${away[0].label || 'A drive'} away · those photographs are here when it is` : `${away.length} drives away · those photographs are here when they are`}`, '']
             : state.counts.unidentified
-              ? `Catching up · ${state.counts.unidentified.toLocaleString()} left`
-              : 'Up to date';
+              ? ['Catching up', `${state.counts.unidentified.toLocaleString()} left`]
+              : ['Up to date', ''];
+  const statusWord = status.querySelector('[data-status-word]');
+  const statusPace = status.querySelector('[data-status-pace]');
+  if (statusWord.textContent !== wordSaid) statusWord.textContent = wordSaid;
+  const paced = pace ? ` · ${pace}` : '';
+  if (statusPace.textContent !== paced) statusPace.textContent = paced;
   const importButton = document.querySelector('[data-action="import-folder"]');
   const midImport = Boolean(state.importing);
   if ((importButton.dataset.mid === '1') !== midImport) {
@@ -1625,6 +1652,7 @@ function renderChrome(state) {
   // focus never falls to the body and the change is heard.
   if (state.view !== viewShown) {
     viewShown = state.view;
+    say({ library: 'Library', trash: 'Trash', rank: 'Rank', loupe: 'Loupe', people: 'People', import: 'Import' }[state.view] || state.view);
     const stage = ranking ? document.querySelector('[data-rank]')
       : holding ? loupe
         : walled ? document.querySelector('[data-people-stage]')
@@ -1713,10 +1741,12 @@ function renderChrome(state) {
   if (drivesKey !== drivesSeen) {
     drivesSeen = drivesKey;
     driveList.replaceChildren(...state.drives.map((drive) => {
-      const row = document.createElement('div');
-      row.className = 'drive-row';
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'side-row drive-row';
       row.dataset.drive = drive.uuid;
-      row.title = `${drive.root}${drive.attached ? '' : ' — away'}`;
+      row.title = `${drive.root}${drive.attached ? '' : ' — away'} — Shift+F10 for its menu`;
+      row.setAttribute('aria-label', `${drive.label || drive.root}, ${drive.attached ? 'attached' : 'away'}`);
       const light = document.createElement('span');
       light.className = drive.attached ? 'drive-light is-online' : 'drive-light';
       const name = document.createElement('span');

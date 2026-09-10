@@ -115,11 +115,10 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     stage.replaceChildren(...order.map((entry, index) => {
       const card = document.createElement('div');
       card.className = 'face-card' + (index === cursor ? ' is-focus' : '');
-      // One cursor: the card itself takes the keyboard; the ring is the
-      // browser's own focus, and the whole card is the way to the person.
-      card.tabIndex = index === cursor ? 0 : -1;
+      // One cursor: the picture button takes the keyboard (it has a real
+      // name); the ring is the browser's own focus; the whole card is the
+      // way to the person.
       card.addEventListener('click', (event) => { if (!event.target.closest('button')) browse(entry.term); });
-      card.addEventListener('focus', () => { cursor = index; markWall(false); });
       card.dataset.term = entry.term;
       card.dataset.person = entry.person;
       card.dataset.index = index;
@@ -128,6 +127,9 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
       look.type = 'button';
       look.className = 'face-card-look';
       look.title = `See ${entry.term}'s photographs`;
+      look.setAttribute('aria-label', `${entry.term}, about ${entry.count.toLocaleString()} photographs — see them`);
+      look.tabIndex = index === cursor ? 0 : -1;
+      look.addEventListener('focus', () => { cursor = index; markWall(false); });
       look.append(face(entry, 'face-card-face'));
       look.addEventListener('click', () => browse(entry.term));
       const name = document.createElement('p');
@@ -150,11 +152,11 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     for (const card of stage.querySelectorAll('.face-card')) {
       const here = Number(card.dataset.index) === cursor;
       card.classList.toggle('is-focus', here);
-      card.tabIndex = here ? 0 : -1;
+      card.querySelector('.face-card-look').tabIndex = here ? 0 : -1;
     }
     const held = stage.querySelector('.face-card.is-focus');
     held?.scrollIntoView({ block: 'nearest' });
-    if (focus) held?.focus({ preventScroll: true });
+    if (focus) held?.querySelector('.face-card-look')?.focus({ preventScroll: true });
   }
 
   function key(event) {

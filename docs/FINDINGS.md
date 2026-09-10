@@ -562,34 +562,63 @@ finding was checked and the numbers said no.
 | K8 | Rank loses the keyboard on every pick | the selected card is focused after render | shipped |
 | K9 | Export, New album and Add folder have no key and no menu entry | a > command mode in the search box reaching every verb | open |
 | K10 | Every stack badge is a permanent tab stop | the badge roves with its cell | shipped |
-| SR1 | The status line speaks the worker's pace every two seconds | announce state changes only; the pace is aria-hidden | open |
-| SR2 | A cull, a pick and a view change announce nothing | one polite live region every act writes one sentence to | open |
-| SR3 | The toast's text is set while hidden, so it is often not announced | text after visible; the toast stays in the tree | open |
+| SR1 | The status line speaks the worker's pace every two seconds | announce state changes only; the pace is aria-hidden | shipped |
+| SR2 | A cull, a pick and a view change announce nothing | one polite live region every act writes one sentence to | shipped |
+| SR3 | The toast's text is set while hidden, so it is often not announced | text after visible; the toast stays in the tree | shipped |
 | SR4 | The stack badge is a control nested in a control | the badge leaves the button; the count is in the cell's name | shipped |
-| SR5 | Drive rows are inert divs; Re-scan is mouse-only | buttons in the row primitive; the state in the name | open |
+| SR5 | Drive rows are inert divs; Re-scan is mouse-only | buttons in the row primitive; the state in the name | shipped |
 | SR6 | Chip field menu items have no menuitem role | the role on the item builder | shipped |
-| SR7 | The chip editor and the likeness popover are unlabelled boxes | role dialog, labelled by their eyebrow | open |
-| SR8 | The People wall card is a focusable div wrapping two buttons | the picture button roves; the card is a container | open |
+| SR7 | The chip editor and the likeness popover are unlabelled boxes | role dialog, labelled by their eyebrow | shipped |
+| SR8 | The People wall card is a focusable div wrapping two buttons | the picture button roves; the card is a container | shipped |
 | SR9 | Stars are announced to nobody | the stars in the cell's name | shipped |
-| SR10 | The safety dot and the drop's dismiss are silent or invalid | role img with a label; the dismiss out of the listbox | open |
-| LP1 | 40% of a 1280 px window is chrome; no breakpoint above 1050 | a middle rung at 1440 | open |
-| LP2 | Three photographs per row on a 13-inch at the default density | the default seeded from the grid's width | open |
-| LP3 | The context bar overflows at 1280 and scrolls the workspace sideways | the bar scrolls on its own axis | open |
-| LP4 | A long search phrase collapses the search box to zero | min-width on the search column; ellipsis on the title | open |
-| LP5 | The keys sheet is two columns inside a vertical scroller at 800 px | one column below 900 px of height | open |
+| SR10 | The safety dot and the drop's dismiss are silent or invalid | role img with a label; the dismiss out of the listbox | shipped |
+| LP1 | 40% of a 1280 px window is chrome; no breakpoint above 1050 | a middle rung at 1440 | shipped |
+| LP2 | Three photographs per row on a 13-inch at the default density | the default seeded from the grid's width | shipped |
+| LP3 | The context bar overflows at 1280 and scrolls the workspace sideways | the bar scrolls on its own axis | shipped |
+| LP4 | A long search phrase collapses the search box to zero | min-width on the search column; ellipsis on the title | shipped |
+| LP5 | The keys sheet is two columns inside a vertical scroller at 800 px | one column below 900 px of height | shipped |
 | LP6 | Rank at 9 wastes a quarter of the stage; 12 buys smaller cards | the last shelf stretches into the leftover height | open |
-| LP7 | A 237 px card is not a judgement | sizes below the floor are offered with the reason, disabled | open |
-| LP8 | The filmstrip eats 11% of an 800 px window | the strip scales with the height | open |
-| LP9 | The export dialog cannot shrink and its size group is a 2×2 | one dialog width rule; a single-row size group | open |
-| LP10 | A popover can run off the bottom at 768 | height clamped to the space at the chosen side | open |
-| HK1 | The density slider tops out at 320 on 4K | the range driven from the grid's width | open |
-| HK2 | The filmstrip is 29 fixed cells, left-aligned in a 4K void | sized from the strip's width; centred when it underfills | open |
+| LP7 | A 237 px card is not a judgement | sizes below the floor are offered with the reason, disabled | shipped |
+| LP8 | The filmstrip eats 11% of an 800 px window | the strip scales with the height | shipped |
+| LP9 | The export dialog cannot shrink and its size group is a 2×2 | one dialog width rule; a single-row size group | shipped |
+| LP10 | A popover can run off the bottom at 768 | height clamped to the space at the chosen side | shipped: one absolute ceiling (HK6); per-side clamp folded in |
+| HK1 | The density slider tops out at 320 on 4K | the range driven from the grid's width | shipped |
+| HK2 | The filmstrip is 29 fixed cells, left-aligned in a 4K void | sized from the strip's width; centred when it underfills | shipped |
 | HK3 | An edited loupe is a 2048 px preview upscaled and called 100% | rendered at the screen's size; or the chip says preview | open |
-| HK4 | Panel widths are absolute: a ribbon at 4K | clamped panel widths | open |
-| HK5 | The People wall is a field of 164 px cards at 4K | card width clamped to the viewport | open |
-| HK6 | Four viewport rules for popover heights; two unbounded at 2160 | one rule with an absolute ceiling | open |
-| HK7 | The rail stays 44 px on a 2,000 px screen | track and label step scale with the rail's height | open |
-| HK8 | The page is smaller than one 4K viewport at the densest setting | page size from the measured viewport | open |
-| HK9 | Rank stops at 12 where the screen could hold more | 16 and 20 offered when the card clears the floor | open |
-| HK10 | The verbs sit 3,300 px from the view controls at 4K | the bar's content capped at 1600 px, centred | open |
+| HK4 | Panel widths are absolute: a ribbon at 4K | clamped panel widths | shipped |
+| HK5 | The People wall is a field of 164 px cards at 4K | card width clamped to the viewport | shipped |
+| HK6 | Four viewport rules for popover heights; two unbounded at 2160 | one rule with an absolute ceiling | shipped |
+| HK7 | The rail stays 44 px on a 2,000 px screen | track and label step scale with the rail's height | shipped |
+| HK8 | The page is smaller than one 4K viewport at the densest setting | page size from the measured viewport | shipped |
+| HK9 | Rank stops at 12 where the screen could hold more | 16 and 20 offered when the card clears the floor | shipped |
+| HK10 | The verbs sit 3,300 px from the view controls at 4K | the bar's content capped at 1600 px, centred | shipped |
 | RK3 | Tournament felt laggy between a click and the next set | the 120 ms beat before the swap removed; past a pair the cards use the 1,024 px grid tile, not the 4,096 px loupe | shipped |
+
+## Personas (sixth round): 150k on a slow drive, first run and a card
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| BC1 | The status line can never say Up to date: debt() counts kinds the machine cannot make (embedding, faces with no GPU), 1.6 s every 30 s | debt gated on kind.here(), as the step already is | open |
+| BC2 | counts.unidentified counts rows the worker will never take (no tail, a derived copy): Catching up forever | one predicate, the worker's | open |
+| BC3 | size() and days() pin the date index, defeating the folder range and the stars index: 44 ms vs 0.03 ms | the hint only for the bare library | open |
+| BC4 | The tile ceiling is never enforced during a backfill: eviction runs only when idle | the sweep on a clock; free space re-read | open |
+| BC5 | With the archive away the worker re-probes the same 64 away heads every step | the attached list in the anti-join for kinds read from the original | open |
+| BC6 | Every owed head re-reads a drive marker file from disk | locate() takes the published attached list | open |
+| BC7 | Adding a big folder saturates the library lane with a full-shelf poll every 500 ms | poll the pulse; the shelves once when the sweep lands | open |
+| BC8 | swept costs 1.1 s of the interactive lane: the folder tree is built there | the tree on the sweep lane beside the facets | open |
+| BC9 | A search on screen re-runs the whole fusion per page every 2 s | the ranked id list memoised per query, scope and generation | open |
+| BC10 | Each Rank draw pays two COUNT(DISTINCT) scans and a second parse of the round log: ~300 ms | seen()/rounds() memoised on the log's head; progress per sitting | open |
+| BC11 | rank.space() peaks at twice the matrix (~1.4 GB) while loading | preallocated and filled from an unfetched cursor | open |
+| BC12 | owed()'s on_screen ORDER BY is dead in the product and costs 886 ms when used | deleted; the docstring says closeness is the scoped first pass | open |
+| BC13 | Ctrl+A at 150k ships 148,000 ids across the bridge and back on every verb | Select All stays a scope the verbs resolve in SQL | open |
+| BC14 | The follower notices no card and no drive for the whole first archive sweep | the sweep not awaited inside the loop | open |
+| BC15 | Pending cells repaint continuously: background animated, a paint per cell per frame | opacity on the veil | open |
+| BC16 | The bench has no row for the verbs found slow; PERF_BUDGETS.md says no V2 bench exists | rows added, budgets per shape, the doc names the bench | open |
+| FR1 | An import reads every file five times | hash while copying; verify in one read | open |
+| FR2 | Staging opens every file's EXIF on the card: half a minute of seeks | mtime for the day; tags read at bring time | open |
+| FR3 | Every staged thumbnail decodes a raw on the bridge thread, unbounded | on the intake lane, coalesced | open |
+| FR4 | The first grid tile always decodes at loupe size, so small embedded previews never qualify: 3 s a frame | decode at grid size when only the grid tile is owed | open |
+| FR5 | Ejecting the card mid-import yields 1,900 unreadable and phase done | the run stops and says the card was removed | open |
+| FR6 | A mixed import prints the same sentence twice (already vs skipped) | one clause for identity, one for the file already at its place | open |
+| FR7 | The stage is not virtualised; a day checkbox costs ~4,000 DOM queries | a key→cell map; only what changed is touched | open |
+| FR8 | The first-run path is clean | measured: keep | measured: keep |

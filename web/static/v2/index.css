@@ -40,8 +40,9 @@
   /* the measures every surface shares: the context bar's height, the loupe
      strip's band, the brand column */
   --ctx: 46px;
-  --strip: 86px;
-  --brand: 228px;
+  --strip: clamp(64px, 11vh, 86px);
+  --brand: clamp(190px, 14vw, 260px);
+  --rail: clamp(44px, 2.4vh, 72px);
   --sans: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   /* Inter 400/500/600 and Plex Mono 400/500 ride inside the document, so a
      fresh machine wears the same face as azimuthphoto.com */
@@ -68,7 +69,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 
 .app-shell {
   --left: var(--brand);
-  --right: 280px;
+  --right: clamp(240px, 17vw, 360px);
   --top: 58px;
   position: relative;
   display: grid;
@@ -113,8 +114,8 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .tab-top { top: var(--top); left: 50%; width: 96px; height: 14px; transform: translate(-50%, -50%); border-radius: 8px; font-size: var(--t-label); }
 .hide-top .tab-top { transform: translateX(-50%) scaleY(-1); border-top: 0; border-radius: 0 0 8px 8px; }
 /* while the rail is up, the right tab steps aside by the rail's width */
-.app-shell:not(.hide-right):has(.timeline:not([hidden])) .tab-right { right: calc(var(--right) + 34px); }
-.app-shell.hide-right:has(.timeline:not([hidden])) .tab-right { right: 44px; transform: translateY(-50%) scaleX(-1); border-right: 1px solid var(--line); border-radius: 8px; }
+.app-shell:not(.hide-right):has(.timeline:not([hidden])) .tab-right { right: calc(var(--right) + var(--rail) - 10px); }
+.app-shell.hide-right:has(.timeline:not([hidden])) .tab-right { right: var(--rail); transform: translateY(-50%) scaleX(-1); border-right: 1px solid var(--line); border-radius: 8px; }
 .hide-left .tab-left, .hide-right .tab-right, .hide-top .tab-top { color: var(--text-2); }
 
 .topbar {
@@ -151,7 +152,9 @@ button:focus-visible, input:focus-visible, select:focus-visible {
 .drop-row.is-cursor .drop-glyph .icon, .side-row.is-active .icon { color: var(--accent); }
 .stack-badge .icon, button kbd .icon { width: 12px; height: 12px; vertical-align: -2px; margin-right: 3px; }
 
-.view-title { display: flex; align-items: baseline; gap: 10px; padding: 0 18px; }
+.view-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; padding: 0 18px; }
+.view-title strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-search { min-width: 220px; }
 .view-title span { color: var(--text-3); font-size: var(--t-body); }
 .top-actions { display: flex; align-items: center; gap: 8px; padding-right: 14px; }
 .quiet-button {
@@ -299,7 +302,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
    the band it lives in: a margin, so the grid's own width shrinks and the
    last column stops under the rail's edge */
 .workspace:has(.timeline:not([hidden])) { scrollbar-width: none; }
-.workspace:has(.timeline:not([hidden])) .photo-grid { margin-right: 44px; }
+.workspace:has(.timeline:not([hidden])) .photo-grid { margin-right: var(--rail); }
 .contextbar {
   position: sticky;
   top: 0;
@@ -308,7 +311,11 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   align-items: center;
   gap: 18px;
   min-height: var(--ctx);
-  padding: 0 14px;
+  /* the bar's content stays within a saccade of the photographs on a wide
+     screen, and scrolls on its own axis on a narrow one */
+  padding: 0 max(14px, calc((100% - 1600px) / 2));
+  overflow-x: auto;
+  scrollbar-width: none;
   border-bottom: 1px solid var(--line);
   background: rgb(18 19 22 / 94%);
   backdrop-filter: blur(12px);
@@ -475,7 +482,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   height: calc(100% - var(--ctx));
 }
 .face-card {
-  width: 164px;
+  width: clamp(164px, 12vw, 260px);
   padding: 12px 12px 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -503,7 +510,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   border-radius: 50%;
   background: var(--tile);
 }
-.face-card-face { --face-size: 130px; }
+.face-card-face { --face-size: calc(clamp(164px, 12vw, 260px) - 34px); }
 .drop-strip img.face { --face-size: 26px; }
 .face-card-look:hover .face-card-face { outline: 1px solid var(--accent); }
 .face-card:focus-visible, .face-card.is-focus { outline: 1px solid var(--ring); outline-offset: -4px; }
@@ -682,7 +689,7 @@ button:focus-visible, input:focus-visible, select:focus-visible {
   position: fixed;
   z-index: 40;
   min-width: 220px;
-  max-height: min(62vh, calc(100vh - 24px));
+  max-height: min(62vh, calc(100vh - 24px), 720px);
   overflow-y: auto;
   padding: 12px 14px;
   border: 1px solid var(--line-strong);
@@ -861,6 +868,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 /* the key sheet: two columns of the table every tooltip reads */
 .keys-dialog { width: min(720px, calc(100vw - 40px)); }
 .keys-body { columns: 2; column-gap: 32px; max-height: 60vh; overflow-y: auto; }
+@media (max-height: 900px) { .keys-body { columns: 1; } }
 .keys-body .eyebrow { margin: 14px 0 6px; break-after: avoid; }
 .keys-body .eyebrow:first-child { margin-top: 0; }
 .keys { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; margin: 0; font-size: var(--t-meta); break-inside: avoid; }
@@ -1017,7 +1025,7 @@ dialog::backdrop { background: rgb(0 0 0 / 72%); backdrop-filter: blur(8px); }
 .destinations { margin: 0; font: var(--t-meta)/1.6 var(--mono); color: var(--text-2); }
 .status-stop { margin: 8px 10px 0; }
 .import-into { margin: 8px 0 0; font: var(--t-meta)/1.5 var(--mono); color: var(--text-3); overflow-wrap: anywhere; }
-.export-dialog { width: 400px; }
+.export-size { grid-template-columns: repeat(4, 1fr); }
 .export-dialog .eyebrow { margin: 16px 0 6px; }
 .export-size button { min-width: 70px; }
 .export-quality, .export-rename { display: block; margin: 14px 0 0; font-size: var(--t-body); color: var(--text-2); }
@@ -1116,8 +1124,8 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
 .strip-cell {
   position: relative;
   flex: none;
-  width: 68px;
-  height: 68px;
+  width: calc(var(--strip) - 18px);
+  height: calc(var(--strip) - 18px);
   padding: 0;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -1164,6 +1172,10 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
   .topbar { grid-template-columns: 210px minmax(0, 1fr) auto; }
   .inspector { display: none; }
 }
+/* the one live region for what an act said: present, never seen */
+.said { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.loupe-strip { justify-content: safe center; }
+.rank-size button:disabled { opacity: .35; cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
@@ -1175,7 +1187,7 @@ body:has(.loupe-stage:not([hidden]):not(.is-full)) .toast { bottom: calc(var(--s
 .timeline { position: sticky; top: var(--ctx); height: 0; z-index: 3; }
 .timeline-track, .timeline-marker, .timeline-label { position: absolute; }
 .timeline-track {
-  right: 0; top: 0; width: 44px;
+  right: 0; top: 0; width: var(--rail);
   cursor: pointer;
 }
 .timeline { pointer-events: none; }

@@ -123,6 +123,7 @@ export function createFilterBar({ product, read, update, onChange, undo = null }
     editor.replaceChildren();
     const title = document.createElement('p');
     title.className = 'eyebrow';
+    title.id = 'chip-editor-title';
     title.textContent = FIELD_LABEL[chip.is];
     editor.append(title);
 

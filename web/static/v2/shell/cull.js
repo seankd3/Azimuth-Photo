@@ -19,7 +19,7 @@ const ACTIONS = Object.freeze({
   turnLeft: { call: (product, ids) => product.turn(ids, 270), message: () => 'Turned left.' },
 });
 
-export function createCullWorkflow({ product, read, reload, patch, removed, selection, selectIndex, notify, undo }) {
+export function createCullWorkflow({ product, read, reload, patch, removed, selection, selectIndex, notify, undo, say = () => {} }) {
   let busy = false;
 
   // The one path for a decision, from the grid, the loupe or a stage that
@@ -62,7 +62,7 @@ export function createCullWorkflow({ product, read, reload, patch, removed, sele
       // frame; a toast would say what the eye already saw. Its way back
       // waits on Ctrl+Z. A batch, a reject (the row left) or a word about
       // the unidentified still speaks.
-      if (ids.length === 1 && !action.removes && !passed && !seat) undo.keep(back);
+      if (ids.length === 1 && !action.removes && !passed && !seat) { undo.keep(back); say(action.message(1)); }
       else undo.show(action.message(ids.length - result.unidentified) + passed, back);
     } catch (reason) {
       notify(reason.message);

@@ -8,7 +8,10 @@
 
 // How many at once -> the cells they sit in. Five sizes, all the person
 // needs: a duel, and four grids up to the twelve a maximized window holds.
-const SIZES = { 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3] };
+const SIZES = { 2: [2, 1], 4: [2, 2], 6: [3, 2], 9: [3, 3], 12: [4, 3], 16: [4, 4], 20: [5, 4] };
+// A card narrower than this is not a judgement; a size that would pack
+// below it is offered disabled, with the reason.
+const CARD_FLOOR = 320;
 // Identities kept out of the next sets, so a frame does not come straight
 // back round -- never more than the scope can spare, so a small album is
 // not dead-ended by its own memory.
@@ -22,7 +25,7 @@ import { why } from '../kit/why.js';
 import { emptyState } from '../lens/library.js';
 import { recall, remember as keep } from '../kit/remembered.js';
 
-export function createRankWorkflow({ product, read, update, notify, undo, cull, onLeave, onLook, viewOf, describe }) {
+export function createRankWorkflow({ product, read, update, notify, undo, cull, onLeave, onLook, viewOf, describe, say = () => {} }) {
   const stage = document.querySelector('[data-rank]');
   const MODES = ['learn', 'random', 'diverse', 'tournament'];
   const MODE_KEY = 'azimuth.rank-mode';
@@ -308,6 +311,7 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     void fill();
     state.busy = false;
 
+    say(`${winner.tail.split('/').pop()} chosen.`);
     // Undo waits only for its handle — the write that was already running.
     writing.then((recorded) => {
       const over = losers.length;
@@ -586,9 +590,15 @@ export function createRankWorkflow({ product, read, update, notify, undo, cull, 
     const label = document.querySelector('[data-rank-progress]');
     if (label) label.textContent = ranked + sitting;
     for (const button of document.querySelectorAll('[data-rank-size] button')) {
-      const on = Number(button.dataset.size) === state.size;
+      const n = Number(button.dataset.size);
+      const on = n === state.size;
       button.classList.toggle('is-active', on);
       button.setAttribute('aria-pressed', String(on));
+      const cells = SIZES[n] || [1, 1];
+      const card = Math.min(stage.clientWidth / cells[0], stage.clientHeight / cells[1] * 1.5);
+      const small = stage.clientWidth > 0 && card < CARD_FLOOR && !on;
+      button.disabled = small;
+      button.title = small ? `${n} at once would make each photograph too small to judge here` : '';
     }
     for (const button of document.querySelectorAll('[data-rank-mode] button')) {
       const on = button.dataset.mode === state.mode;

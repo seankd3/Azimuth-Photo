@@ -66,12 +66,13 @@
         <div class="section-heading"><button class="eyebrow" type="button">Drives</button></div>
         <div class="drive-list" data-drive-list></div>
       </section>
-      <p class="sidebar-status" data-status role="status"></p>
+      <p class="sidebar-status" data-status><span data-status-word role="status"></span><span data-status-pace aria-hidden="true"></span></p>
+      <p class="said" data-said aria-live="polite"></p>
     </aside>
 
     <main class="workspace">
       <div class="contextbar">
-        <span data-result-label role="status">Loading your library…</span>
+        <span data-result-label>Loading your library…</span>
         <div class="cull-actions" data-cull-actions hidden>
           <button class="quiet-button" type="button" data-action="pick"><kbd>P</kbd> Pick</button>
           <button class="quiet-button" type="button" data-action="turn" title="Turn left · Shift+click or Shift+R turns right"><kbd>R</kbd> Rotate</button>
@@ -82,7 +83,7 @@
           <button class="chip-label" type="button" data-like-seeds title="See the photographs this search is like"></button>
           <button class="drop-chip" type="button" data-like-clear data-icon-only="close" aria-label="Stop searching by likeness"></button>
         </span>
-        <div class="popover like-pop" data-like-pop hidden></div>
+        <div class="popover like-pop" data-like-pop role="dialog" aria-label="More like these" hidden></div>
         <div class="chip-bar" data-chips></div>
         <button class="quiet-button" type="button" data-action="add-chip">+ Filter</button>
         <button class="quiet-button" type="button" data-action="save-view" hidden>Save as album…</button>
@@ -95,6 +96,8 @@
           <button type="button" data-size="6">6</button>
           <button type="button" data-size="9">9</button>
           <button type="button" data-size="12">12</button>
+          <button type="button" data-size="16">16</button>
+          <button type="button" data-size="20">20</button>
         </div>
         <div class="rank-size" data-rank-mode hidden role="group" aria-label="How the set is drawn">
           <button type="button" data-mode="learn" title="The fastest route to the best ranking — teaches where it is least sure, finds among the leaders (M cycles)">Learn</button>
@@ -114,7 +117,7 @@
           </select>
         </label>
         <label>Size
-          <input data-density type="range" min="150" max="320" value="180" step="10">
+          <input data-density type="range" min="150" max="640" value="180" step="10">
         </label>
         <button class="quiet-button" type="button" data-action="rank">Rank</button>
         <button class="quiet-button" type="button" data-action="restore" hidden>Restore</button>
@@ -268,7 +271,7 @@
     </form>
   </dialog>
   <menu class="context-menu" role="menu" data-chip-menu hidden></menu>
-  <div class="popover" data-chip-editor hidden></div>
+  <div class="popover" data-chip-editor role="dialog" aria-labelledby="chip-editor-title" hidden></div>
   <div class="popover search-drop" data-search-drop hidden></div>
   <div class="popover name-pop" data-name-pop role="dialog" aria-labelledby="name-title" hidden>
     <p class="eyebrow" id="name-title" data-name-title>Name</p>
