@@ -28,6 +28,7 @@ import places
 import rank
 import render
 import search as finding
+import sharpness
 import stacks
 import tiles
 import work
@@ -181,6 +182,9 @@ class Library:
         # And the photographic facts the embedding throws away — palette,
         # tone, sharpness, and the color/bw/sepia word the Look chip reads.
         self.knowing_looks = photostats.kind(self.tiles)
+        # Where the sharpness sits, per photograph and per face: computed on
+        # the CPU behind the tiles and the faces, read by the inspector.
+        self.knowing_sharpness = sharpness.kind(self.tiles, self.looking_at_people)
         self.conn = model.connect(self.catalog_path)
         # Which drives are here, by their markers. Looked at once now and by
         # the follower every few seconds, so a page read never probes a disk
@@ -201,7 +205,7 @@ class Library:
         self.chores = work.Chores(
             lambda: model.connect(self.catalog_path),
             (embedded_metadata.KIND, *self.tiles.kinds, self.space,
-             self.looking_at_people, self.knowing_looks),
+             self.looking_at_people, self.knowing_looks, self.knowing_sharpness),
             on_screen=lambda: self._looking,
             ceiling_bytes=self.tiles.ceiling_bytes,
             # A decode is one core for a third of a second; a quarter of the
@@ -1231,6 +1235,8 @@ class Library:
         # How this photograph's score is known: the rounds it was actually
         # in. Zero with a moved score means the ranking predicted it.
         answer["rounds"] = rank.seen(self.conn).get(digest, 0)
+        # Where the sharpness sits, when the pass has been there.
+        answer["sharp"] = sharpness.of(self.conn, digest)
         # Every name this photograph wears — palette tags, groups the space
         # formed, people — so the panel can answer "why is this here".
         import json as coding

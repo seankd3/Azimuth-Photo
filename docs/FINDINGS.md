@@ -629,3 +629,14 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | PE-M1 | Two groups of one person could only be merged by naming each the same word, by hand | the wall asks: pairs of groups close in the face space (NEAR ≤ cos < SAME, never a pair kept apart) as one inline card — two faces, Same person? Yes / No, Y/N keys; Yes heals as naming does (a name asked for when neither has one), No is a decision that keeps them apart | shipped |
 | X47 | The People wall crashed on a face with no sample: icon() rejected a two-word class | icon() takes a class list | shipped |
+
+## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| E2-1 | Nothing said where the sharpness sits: a missed focus and a bokeh portrait looked alike to every surface | a `sharpness` cache kind on the CPU behind the tiles: the frame's local-variation map (p50/p75/p90), the largest face's box against the frame (subject ratio), and Zhu–Milanfar's noise-aware measure on every face crop from the 4,096 px rendition (gated by crop size); the inspector says the numbers, never a verdict | shipped |
+| E2-2 | Eyes: open/closed/can't tell, and each eye's own sharpness | EAR from the 2d106 contours plus OCEC (112 KB) on eye crops; the landmark model runs in the sharpness pass | open |
+| E1 | The head fits strength, then ridge on strength: two stages, one seam | one Plackett–Luce fit on the rounds with the facet block; measured on held-out duels | open |
+| E3 | Within a genre the direction reaches only +.35 | a per-cluster residual penalised toward zero | open |
+| E4 | Learn's uncertainty is feature-blind | Bayesian-ridge variance as σ; top-two finding rounds | open |
+| E5 | Burst-best is unmeasured | facets alone against the owner's picks within cadence stacks; the why on the tile from the largest term | open |

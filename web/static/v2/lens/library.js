@@ -405,6 +405,17 @@ function indexAt(scrollTop) {
 // What the selection is, said in facts. One photograph: its own. Several:
 // the set's -- how many, the span of days, the cameras, the cull tally --
 // from the rows the window already holds.
+// The subject against its frame, as the numbers say it: above one the
+// subject is sharper than its surroundings, below it the focus missed.
+// A face carries its own measure when the crop was large enough to read.
+function sharpnessSaid(sharp) {
+  // Only the ratio is a sentence on its own; a face's own measure is a
+  // number for the fit, not for the eye, until it has something to stand
+  // against.
+  if (!sharp || sharp.subject === null || sharp.subject === undefined) return '';
+  return `subject ${sharp.subject.toFixed(1)}× the frame`;
+}
+
 function renderInspector(panel, selected, actions = {}) {
   const marked = actions.marked;
   // The panel is rebuilt only when what it would say has changed: the
@@ -513,6 +524,7 @@ function renderInspector(panel, selected, actions = {}) {
     ['Camera', [selected.camera_make, selected.camera_model].filter(Boolean).join(' ') || unknown, { chip: selected.camera_model && { is: 'camera', values: [selected.camera_model] } }],
     ['Place', place],
     ['Lens', selected.lens || unknown],
+    ['Sharpness', sharpnessSaid(selected.sharp), { said: true }],
     ['Dimensions', selected.width && selected.height ? `${selected.width} × ${selected.height}` : ''],
     ['Size', selected.file_size ? `${(selected.file_size / 1e6).toFixed(1)} MB` : ''],
     ['Folder', folder || 'The drive\u2019s root', folder ? { folder } : { said: true }],

@@ -2581,6 +2581,39 @@ class AModeIsAnOrdering(CoreCase):
             rank._finding_round = held
 
 
+class SharpnessIsRelative(CoreCase):
+    """The subject against its frame, never an absolute score."""
+
+    def _picture(self, name, blur):
+        import numpy as np
+        from PIL import Image, ImageFilter
+
+        rng = np.random.default_rng(7)
+        # A textured frame with a face-sized patch of fine detail in the middle.
+        frame = rng.integers(90, 160, (512, 512), dtype=np.uint8)
+        frame[192:320, 192:320] = (np.indices((128, 128)).sum(axis=0) % 8 < 4) * 200 + 30
+        image = Image.fromarray(frame, "L").convert("RGB")
+        if blur:
+            image = image.filter(ImageFilter.GaussianBlur(4))
+        path = os.path.join(self.tmp, name)
+        image.save(path, "JPEG", quality=95)
+        return path
+
+    def test_a_blurred_frame_measures_lower_and_the_subject_is_relative(self):
+        import sharpness
+
+        box = [[0.375, 0.375, 0.25, 0.25]]
+        sharp = sharpness.measure(self._picture("sharp.jpg", blur=False), box)
+        soft = sharpness.measure(self._picture("soft.jpg", blur=True), box)
+        self.assertGreater(sharp["frame"]["p90"], soft["frame"]["p90"])
+        self.assertGreater(sharp["faces"][0]["q"], soft["faces"][0]["q"])
+        self.assertIsNotNone(sharp["subject"])
+        self.assertGreater(sharp["subject"], 1.0, "the detailed patch is sharper than its frame")
+        # A crop too small to read says so instead of guessing.
+        tiny = sharpness.measure(self._picture("tiny.jpg", blur=False), [[0.5, 0.5, 0.02, 0.02]])
+        self.assertIsNone(tiny["faces"][0]["q"])
+
+
 class ANameCanBeTakenBack(CoreCase):
     def test_a_first_naming_is_undone_by_taking_the_name_back(self):
         import people as persons
