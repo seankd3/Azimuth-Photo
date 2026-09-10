@@ -838,7 +838,20 @@ class Library:
             sets.add(self.conn, set_id, held)
         sets.redefine(self.conn, set_id, None)
         self.conn.commit()
-        return {"frozen": len(held)}
+        # The rules ride back so the freeze can be taken back: redefine
+        # with them and the album is smart again, its frozen members pinned
+        # in past the rules as any dragged-in photograph is.
+        return {"frozen": len(held), "criteria": said["criteria"]}
+
+    def redefine_album(self, set_id: str, criteria) -> dict:
+        """Give an album rules again -- the way back from a freeze."""
+
+        self._open()
+        said = sets.redefine(self.conn, set_id, criteria)
+        if said is None:
+            raise ValueError("no such album")
+        self.conn.commit()
+        return said
 
     def save_view(self, name: str, view: dict | None) -> dict:
         """The current view, kept: folder and album fold into chips, so
@@ -1023,6 +1036,14 @@ class Library:
         self._open()
         said = persons.name(self.conn, exemplar, called)
         return said
+
+    def unname_person(self, exemplar: str) -> dict:
+        """Take a first naming back: the face is a Someone again."""
+
+        import people as persons
+
+        self._open()
+        return persons.unname(self.conn, exemplar)
 
     # ---- rank ----
 

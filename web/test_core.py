@@ -2143,7 +2143,7 @@ class CollectionsAreOneSurface(CoreCase):
         self.assertEqual(self._ids(self.library._shelf(smart["id"])), {a_id, b_id})
         self.library.remove_from_album(smart["id"], [a_id])
         self.assertEqual(self._ids(self.library._shelf(smart["id"])), {b_id})
-        self.assertEqual(self.library.freeze_album(smart["id"]), {"frozen": 1})
+        self.assertEqual(self.library.freeze_album(smart["id"]), {"frozen": 1, "criteria": [{"is": "stars", "least": 3}]})
         self.assertEqual(self._ids(self.library._shelf(smart["id"])), {b_id})
         with self.assertRaises(ValueError):
             self.library.freeze_album(smart["id"])       # already plain
@@ -2577,6 +2577,16 @@ class AModeIsAnOrdering(CoreCase):
             self.assertEqual(len(taught), 4)
         finally:
             rank._finding_round = held
+
+
+class ANameCanBeTakenBack(CoreCase):
+    def test_a_first_naming_is_undone_by_taking_the_name_back(self):
+        import people as persons
+
+        persons.name(self.conn, "abc:0", "Ada")
+        self.assertEqual(persons._names(self.conn)["abc:0"][0], "Ada")
+        persons.unname(self.conn, "abc:0")
+        self.assertNotIn("abc:0", persons._names(self.conn), "an empty word is no name")
 
 
 class ARoundFindsTheTop(CoreCase):

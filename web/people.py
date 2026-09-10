@@ -228,3 +228,15 @@ def name(conn, exemplar: str, called: str) -> dict:
                 decisions.decide(conn, subject, FAMILY, called)
     conn.commit()
     return {"named": called}
+
+
+def unname(conn, exemplar: str) -> dict:
+    """The name taken back from a face: an empty word in the log, which
+    `_names` already reads as unnamed. The way back from a first
+    introduction, whose former name was nothing."""
+
+    if ":" not in str(exemplar):
+        raise ValueError("that face is not one the groups know")
+    decisions.decide(conn, str(exemplar), FAMILY, "")
+    conn.commit()
+    return {"unnamed": str(exemplar)}

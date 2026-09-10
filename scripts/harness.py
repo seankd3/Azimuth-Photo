@@ -70,6 +70,8 @@ STUB = r"""<script>
     albums: () => [], cameras: () => [], facets: () => ({}), people: () => [], labels: () => [], cards: () => [],
     teach: (word, ids) => ({ word, taught: ids.length }), faces: () => [[0.4, 0.3, 0.2, 0.25]], rename_label: (word, called) => ({ id: 'l1', word: called }),
     forget_label: () => ({ id: 'l1' }), remember_album: () => true,
+    freeze_album: () => ({ frozen: 3, criteria: [{ is: 'stars', least: 3 }] }), redefine_album: (id) => ({ id }),
+    name_person: () => ({ named: 'Ada' }), unname_person: (e) => ({ unnamed: e }),
     identifiers: () => photos.map((p) => p.id), search: () => ({ photos: [], total: 0 }),
     intake_status: () => ({ running: false }), forget_missing: () => ({}),
     rank: (n) => ({ photos: photos.slice(0, n), judged: 0, earned: 0, total: N }),

@@ -300,7 +300,11 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       }
       if (action === 'freeze-album') {
         const frozen = await product.freezeAlbum(id);
-        notify(`Frozen — ${frozen.frozen.toLocaleString()} photographs are now yours to edit by hand.`);
+        undo.show(`Frozen — ${frozen.frozen.toLocaleString()} photographs are now yours to edit by hand.`, async () => {
+          await product.redefineAlbum(id, frozen.criteria);
+          await refresh();
+          if (read().album === id) await reload();
+        });
       }
       if (action === 'delete-album') {
         const name = (read().albums.find((c) => c.id === id) || {}).name || 'Album';

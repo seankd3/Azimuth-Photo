@@ -247,6 +247,9 @@ class Desktop:
     def freeze_album(self, set_id: str) -> dict:
         return self._run(lambda library: library.freeze_album(str(set_id)))
 
+    def redefine_album(self, set_id: str, criteria) -> dict:
+        return self._run(lambda library: library.redefine_album(str(set_id), criteria))
+
     def save_view(self, name: str, view: dict | None = None) -> dict:
         return self._run(lambda library: library.save_view(str(name), view))
 
@@ -287,6 +290,12 @@ class Desktop:
         said = self._run(lambda library: library.teach(str(word), photo_ids, bool(yes), space=space))
         self._product.shaped += 1
         self._product.rank_soon()
+        return said
+
+    def unname_person(self, exemplar: str) -> dict:
+        said = self._run(lambda library: library.unname_person(str(exemplar)))
+        if self._product is not None:
+            self._product.rank_soon()
         return said
 
     def name_person(self, exemplar: str, called: str) -> dict:

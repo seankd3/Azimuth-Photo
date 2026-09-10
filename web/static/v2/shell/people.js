@@ -187,10 +187,13 @@ export function createPeoplePanel({ product, _read, update, notify, undo, browse
     try {
       await product.namePerson(exemplar, called);
       const said = `“${called}” named. Their photographs gather as the library reads.`;
-      // A rename can be taken back by naming them what they were; a first
-      // naming has no former name to return to.
-      if (settled) undo.show(said, async () => { await product.namePerson(exemplar, current); await renamed(); });
-      else notify(said);
+      // A rename is taken back by naming them what they were; a first
+      // naming by taking the name back, so the face is a Someone again.
+      undo.show(said, async () => {
+        if (settled) await product.namePerson(exemplar, current);
+        else await product.unnamePerson(exemplar);
+        await renamed();
+      });
       // The lane regroups and the pulse says so; the shelf re-reads then.
       void renamed();
     } catch (error) {

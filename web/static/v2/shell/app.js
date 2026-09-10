@@ -2106,6 +2106,19 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     return;
   }
+  // The pass: V cycles what the grid shows — everything, the unflagged
+  // (the second pass after a reject pass), the picked (the survivors).
+  if (key === 'v' && read().view === 'library' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+    const held = read().chips || [];
+    const worn = held.find((c) => c.is === 'status' && !c.not);
+    const next = !worn ? 'unflagged' : worn.values[0] === 'unflagged' ? 'picked' : null;
+    const rest = held.filter((c) => c !== worn);
+    update({ chips: next ? [...rest, { is: 'status', values: [next] }] : rest });
+    viewMoved();
+    notify(next === 'unflagged' ? 'The unflagged.' : next === 'picked' ? 'The picked.' : 'Everything.');
+    event.preventDefault();
+    return;
+  }
   // Survey: the marked frames of a burst go to Rank as a round of their
   // own (Lightroom's N), sized to the burst.
   if (key === 'n' && read().view === 'library' && (read().marked?.size || 0) >= 2 && !event.ctrlKey && !event.metaKey) {
@@ -2185,6 +2198,7 @@ const SHORTCUTS = [
   ['The grid', [
     ['Arrows', 'Move the cursor'], ['Shift+Arrows', 'Extend the selection'], ['Home / End', 'First / last'],
     ['Enter / Space / E', 'Open the loupe'], ['G', 'Back to the grid, from anywhere'], ['N', 'Survey the marked frames in Rank'],
+    ['V', 'The pass: everything, the unflagged, the picked'],
     ['P / U', 'Pick / clear the pick', ['pick']], ['X', 'Reject', ['reject']],
     ['R / Shift+R', 'Turn left / right', ['turn']], ['B', 'Toss into the Quick album'], ['S', 'Stack the marked frames, or the burst around this one; open or fold a stack'], ['Shift+S', 'Unstack'],
     ['F', 'The clean room'], ['C', 'Crop'], ['D', 'Develop'], ['I', 'Import the card'], ['Ctrl+Wheel', 'Density'],

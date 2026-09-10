@@ -2,7 +2,7 @@
 """The product boundary, timed on a catalog copy, so a performance row ships
 with its number and the next round compares instead of rediscovering.
 
-    web\\.venv\\Scripts\\python.exe scripts\\bench.py <catalog.db> [folder-prefix]
+    web\\.venv\\Scripts\\python.exe scripts\\bench.py <catalog.db> [folder-prefix] [--budget]
 
 The catalog is copied to a scratch file first; nothing is written to the
 one named. Prints one line per verb: the median of three runs in ms, and
@@ -51,13 +51,25 @@ def main(argv: list[str]) -> int:
     conn = model.connect(scratch)
     total = library.size(conn)
     deep = max(0, total - 200)
-    prefix = argv[2] if len(argv) > 2 else (
+    named = [a for a in argv[2:] if not a.startswith("--")]
+    prefix = named[0] if named else (
         conn.execute("SELECT tail FROM images WHERE tail IS NOT NULL LIMIT 1").fetchone()[0].rsplit("/", 2)[0])
     scoped = in_folder(prefix)
     first = conn.execute("SELECT id FROM images WHERE tail IS NOT NULL AND status != 'trashed' LIMIT 1").fetchone()[0]
 
+    # The budgets, in ms on a 150k catalog with the machine at rest: a row
+    # over its budget is printed OVER, and `--budget` makes that a failure.
+    BUDGET = {"photos": 40, "size": 30, "days": 200, "position": 80, "counts": 30, "stacks.stack": 20,
+              "stacks.unstack": 20, "facets_of": 1500, "stacks.project": 1500}
+    over = []
+
     def row(name, fn):
-        print(f"{name:<40} {timed(fn):8.1f} ms")
+        took = timed(fn)
+        limit = next((ms for key, ms in BUDGET.items() if name.startswith(key)), None)
+        flag = "  OVER" if limit is not None and took > limit else ""
+        if flag:
+            over.append(name)
+        print(f"{name:<40} {took:8.1f} ms{flag}")
 
     print(f"catalog {argv[1]}  rows {total:,}  folder {prefix}")
     for sort in ("newest", "best", "stars", "filename"):
@@ -81,6 +93,9 @@ def main(argv: list[str]) -> int:
         row("stacks.stack (3 frames)", lambda: stacks.stack(conn, ids))
         row("stacks.unstack (cover)", lambda: stacks.unstack(conn, ids[:1]))
     conn.close()
+    if "--budget" in argv and over:
+        print(f"over budget: {', '.join(over)}")
+        return 1
     return 0
 
 

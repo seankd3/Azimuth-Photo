@@ -542,3 +542,53 @@ finding was checked and the numbers said no.
 | RK2 | Diverse dealt one afternoon: the pool was one window of ids, one or two shoots | eight windows across the scope; without vectors, one frame per day in turn | shipped |
 | J1 | No journeys to read a round's feel against the last | scripts/journeys/*.js, six probes to a gallery | shipped |
 | M1 | The monthly numbers: repairs 7% of September's commits by subject (August 2.7%); app.js touched by 27 of 55 commits | measured; app.js is the assembly point — a split by surface is the next shape decision | measured |
+| O1 | No second pass: after rejecting, seeing only the unflagged or only the picked took the filter menu | V cycles the pass: everything, the unflagged, the picked | shipped |
+| O2 | Freezing an album was one-way | the rules ride back; Undo redefines the album | shipped |
+| O3 | A first naming had no way back | the name is taken back and the face is a Someone again | shipped |
+| O4 | The bench had no budgets, so a regression was a number nobody compared | budgets per verb; --budget fails the run | shipped |
+| S12 | Fold the drive list into the folder tree | rejected: the tree is one tree over every drive by design (library.folder_tree); a drive is a property of its nodes, and the Drives section carries the drive's own facts | rejected: by design |
+
+## Personas (sixth round, 2026-09-10): keyboard, screen reader, 13-inch, 4K
+
+| # | User impact | Fix | Status |
+|---|---|---|---|
+| K1 | No key moves focus from the photographs into the chrome | F6 cycles bar → sidebar → inspector → topbar; on the sheet | open |
+| K2 | A letter typed on a focused chrome button fires a photo verb | the control guard hoisted before the verb ladder | open |
+| K3 | Enter or Space on a focused chrome button opens the loupe | same guard | open |
+| K4 | Arrows yank focus from the chrome back to the grid | same guard | open |
+| K5 | The Develop panel is unreachable by keyboard | D focuses the first slider; Esc and D return to the loupe | open |
+| K6 | Tab during an import hides the import panel and drops focus | the fold refuses while a panel owns the focus | open |
+| K7 | Esc out of the + Filter menu drops focus to the body | the chip menu opens through showMenu | open |
+| K8 | Rank loses the keyboard on every pick | the selected card is focused after render | open |
+| K9 | Export, New album and Add folder have no key and no menu entry | a > command mode in the search box reaching every verb | open |
+| K10 | Every stack badge is a permanent tab stop | the badge roves with its cell | open |
+| SR1 | The status line speaks the worker's pace every two seconds | announce state changes only; the pace is aria-hidden | open |
+| SR2 | A cull, a pick and a view change announce nothing | one polite live region every act writes one sentence to | open |
+| SR3 | The toast's text is set while hidden, so it is often not announced | text after visible; the toast stays in the tree | open |
+| SR4 | The stack badge is a control nested in a control | the badge leaves the button; the count is in the cell's name | open |
+| SR5 | Drive rows are inert divs; Re-scan is mouse-only | buttons in the row primitive; the state in the name | open |
+| SR6 | Chip field menu items have no menuitem role | the role on the item builder | open |
+| SR7 | The chip editor and the likeness popover are unlabelled boxes | role dialog, labelled by their eyebrow | open |
+| SR8 | The People wall card is a focusable div wrapping two buttons | the picture button roves; the card is a container | open |
+| SR9 | Stars are announced to nobody | the stars in the cell's name | open |
+| SR10 | The safety dot and the drop's dismiss are silent or invalid | role img with a label; the dismiss out of the listbox | open |
+| LP1 | 40% of a 1280 px window is chrome; no breakpoint above 1050 | a middle rung at 1440 | open |
+| LP2 | Three photographs per row on a 13-inch at the default density | the default seeded from the grid's width | open |
+| LP3 | The context bar overflows at 1280 and scrolls the workspace sideways | the bar scrolls on its own axis | open |
+| LP4 | A long search phrase collapses the search box to zero | min-width on the search column; ellipsis on the title | open |
+| LP5 | The keys sheet is two columns inside a vertical scroller at 800 px | one column below 900 px of height | open |
+| LP6 | Rank at 9 wastes a quarter of the stage; 12 buys smaller cards | the last shelf stretches into the leftover height | open |
+| LP7 | A 237 px card is not a judgement | sizes below the floor are offered with the reason, disabled | open |
+| LP8 | The filmstrip eats 11% of an 800 px window | the strip scales with the height | open |
+| LP9 | The export dialog cannot shrink and its size group is a 2×2 | one dialog width rule; a single-row size group | open |
+| LP10 | A popover can run off the bottom at 768 | height clamped to the space at the chosen side | open |
+| HK1 | The density slider tops out at 320 on 4K | the range driven from the grid's width | open |
+| HK2 | The filmstrip is 29 fixed cells, left-aligned in a 4K void | sized from the strip's width; centred when it underfills | open |
+| HK3 | An edited loupe is a 2048 px preview upscaled and called 100% | rendered at the screen's size; or the chip says preview | open |
+| HK4 | Panel widths are absolute: a ribbon at 4K | clamped panel widths | open |
+| HK5 | The People wall is a field of 164 px cards at 4K | card width clamped to the viewport | open |
+| HK6 | Four viewport rules for popover heights; two unbounded at 2160 | one rule with an absolute ceiling | open |
+| HK7 | The rail stays 44 px on a 2,000 px screen | track and label step scale with the rail's height | open |
+| HK8 | The page is smaller than one 4K viewport at the densest setting | page size from the measured viewport | open |
+| HK9 | Rank stops at 12 where the screen could hold more | 16 and 20 offered when the card clears the floor | open |
+| HK10 | The verbs sit 3,300 px from the view controls at 4K | the bar's content capped at 1600 px, centred | open |
