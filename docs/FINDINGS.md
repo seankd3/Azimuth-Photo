@@ -940,6 +940,12 @@ The first round run by the `polish` workflow from a cloud session: eight scouts,
 | RK3 | The harness rebuilt its document only when it was missing, so a proof could run against the UI of an hour ago | the window's rule: rebuilt when any source under `web/static/v2/` or the template is newer | shipped |
 | RK4 | "every click causes all the images to flash black for a second, jarring and annoying": Rank's render rebuilt every card on every pick, so seven photographs that stayed got new `<img>` elements (black until their bitmaps painted again) and ran the arrival animation again | a card stays for a photograph that stays: render touches only the slots that changed and does not so much as move the rest. Harness, set of nine, one pick: before, 9 cards rebuilt and 9 animating; after, 7 the same nodes, 2 new, 2 animating | shipped |
 
+## The large fixture, first build (2026-09-12)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| LF1 | The pin assigned each frame's day, hour and minute from its own item id and only the seconds from its place on the page, so "consecutive frames consecutive seconds" never happened: 6,137 frames, three shared minutes, no stack proposals | the date is a function of the manifest: one photographer's catalogued month falls in fives three seconds apart, each five with its own day and minute; `--redate` reassigns without a download | shipped |
+| LF2 | Every fixture frame says its camera is "Kodachrome", so the cameras facet has one entry over 6,137 photographs; a facet with one value proves nothing about the facet | leave until a proof needs cameras; the medium is the honest answer for a scan, and a second constant would be a lie of a different kind | deferred |
 ## Craft, from the owner's sitting (2026-09-12)
 
 | # | Finding | Fix | Status |
