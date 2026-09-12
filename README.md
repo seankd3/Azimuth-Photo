@@ -259,6 +259,32 @@ embedding space grows; everything else works from the first tile.
 
 [Install](docs/INSTALL.md) covers the frozen build and the first library.
 
+## Join in
+
+Everything below, with the four-field finding spelled out and the open
+problems described, is at **[azimuthphoto.com/contribute](https://azimuthphoto.com/contribute/)**.
+The short version:
+
+- **Bring a library.** Point it at a folder of your own photographs and cull
+  one shoot with the keyboard. Every surface is developed against a real
+  150,000-photo archive; a second real archive finds what one cannot.
+- **File a finding, not a bug.** [docs/FINDINGS.md](docs/FINDINGS.md) is the
+  ledger every audit writes into: what it did to you, in product words · where
+  (file and line) · the concrete fix · how much it matters. A row closes only
+  in the commit that does the work. That four-field row is the whole
+  contribution, and it is how the rows above got fixed.
+- **Add a journey.** [scripts/journeys/](scripts/journeys/) holds one small
+  script per thing a photographer actually does, each run through the
+  off-screen rig to a screenshot. If a real task is not covered, that is a
+  contribution.
+- **What is open.** Develop is parked on a measured parity gap; there is no
+  phone and no sharing; the taste program has experiments E1 and E3–E5 still to
+  run. The design documents say why, with the numbers.
+
+The build history — three acts, with the mistakes left in — is the
+[Field Log](https://azimuthphoto.com/log/), and the loop it runs on today is
+[written down there](https://azimuthphoto.com/log/#loop).
+
 ## Docs
 
 - [**docs/CORE.md**](docs/CORE.md) — the 2.0 design. Start here.
@@ -269,6 +295,7 @@ embedding space grows; everything else works from the first tile.
 
 ---
 
-*Azimuth is developed against the author's own 150,000-photo working archive —
-every screenshot above is that real library, on one machine. Your photos are
-your own; the app ships empty and hungry.*
+*Azimuth is developed by [Sean Kenneth Doherty](https://seankennethdoherty.com)
+against his own 150,000-photo working archive — every screenshot above is that
+real library, on one machine. Your photos are your own; the app ships empty
+and hungry.*
