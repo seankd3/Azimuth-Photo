@@ -436,6 +436,8 @@ class BringingPhotographsIn(CoreCase):
         self.assertEqual((again["brought"], again["culled"], again["culled_keys"]), (0, 1, ["DCIM/100CANON/IMG_0007.JPG"]))
         asked = intake.bring(self.conn, self.hot["uuid"], intake.RAWS, intake.scan(self.conn, card), include_culled=True)
         self.assertEqual((asked["brought"], asked["culled"]), (1, 0))
+        # Brought back on purpose is a decision: the log no longer says culled.
+        self.assertEqual(decisions.latest(self.conn, image["content_hash"], decisions.STATUS), "unflagged")
 
     def test_bring_stops_between_files_and_resumes_by_running_again(self):
         card = self.card({f"IMG_{n:04d}.JPG": self.jpeg(seed=chr(97 + n)) for n in range(4)})

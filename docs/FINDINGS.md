@@ -706,6 +706,31 @@ finding was checked and the numbers said no.
 | PF4 | An import's progress lives only in the panel and the status line | the taskbar button carries it (ITaskbarList3 progress), the way every professional app's long job does | open |
 | PF5 | The app never says which build it is | the keys sheet's foot says Azimuth Photo · 2026.9.12 (commit), read from the launcher's version resource or git | open |
 
+## Refutation of the sitting (2026-09-12, by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| X95 | Bringing a culled photograph back left the log saying trashed: the next status rebuild would trash it again | bringing it back is a decision written to the log; the test checks it | shipped |
+| X96 | The "bring them anyway" button lived in a panel that had already closed | the offer rides the toast, whose button says what it does; the toast takes a label | shipped |
+| X97 | A remembered Move from a card would have deleted a folder's originals | the mode is remembered per kind of source; a folder starts on Copy | shipped |
+| X98 | The wall's own word was overwritten by a stale read within milliseconds, then corrected seconds later | the wall keeps its word until the lane's count moves (`shaped` on the state) | shipped |
+| X99 | An answered question came back on the wall until the lane rewrote | the same gate | shipped |
+| X100 | The pulse told the grid before the rerank had written the order; a people failure stopped the rerank | the lane says so after the rerank as well; the people rewrite cannot stop it | shipped |
+| X101 | With the top bar hidden its tab was half off-screen | the tab hangs from the seam; hidden, it sits at the top edge whole | shipped |
+| X102 | A rename to a name someone already wears showed two cards with that name | the card folds into the twin at once, as the rewrite will | shipped |
+| X103 | The join note promised a merge on a case difference the model would not make | the join keeps the spelling in use: "alice" joins "Alice" | shipped |
+| X104 | Enter on an empty import was a silent no-op | "Nothing is checked." | shipped |
+| X105 | The day hairline and the month tick sat on different baselines and insets | one baseline, one inset | shipped |
+| X106 | The join note was announced as an alert on every keystroke; the Copy/Move choice had no pressed state | a status when it is a note; aria-pressed on the choice | shipped |
+| X107 | A second launch could bring an Explorer window named Azimuth Photo to the front | the window must be titled Azimuth Photo and owned by an Azimuth process | shipped |
+| X108 | A second launch during the first's startup exited with nothing on screen | it looks for the window for five seconds first | shipped |
+| X109 | The log took INFO from every library in the process | the app's own modules at INFO; libraries keep their level | shipped |
+| X110 | A worker thread ending by SystemExit was logged as an uncaught error | not any more | shipped |
+| X111 | The launcher hard-coded python312.dll and skipped a stale copy | the running interpreter's version, always the base's own | shipped |
+| X112 | The launcher's version named a commit the exe does not run | the day it was made; the log names the commit | shipped |
+| X113 | A Start Menu shortcut in a subfolder would have been left stale beside a new one at the root | every shortcut of that name is rewritten; one is made only when none exists | shipped |
+| X114 | Writing resources invalidates the interpreter's signature | known and said in the docstring: a local file carries no mark of the web; a scanner that objects gets an exclusion | closed |
+
 ## Taste and sharpness program (2026-09-10, from docs/taste-and-culling-research.md)
 
 | # | User impact | Fix | Status |

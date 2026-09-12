@@ -99,14 +99,61 @@ def one_at_a_time() -> bool:
     kernel32 = ctypes.windll.kernel32
     handle = kernel32.CreateMutexW(None, False, r"Local\AzimuthPhoto.Desktop")
     if kernel32.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
-        user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, "Azimuth Photo")
-        if hwnd:
-            user32.ShowWindow(hwnd, 9)   # SW_RESTORE
-            user32.SetForegroundWindow(hwnd)
+        # The first may still be opening its window (a double-click is two
+        # launches a beat apart): look for a while before giving up.
+        for _ in range(20):
+            hwnd = _our_window()
+            if hwnd:
+                user32 = ctypes.windll.user32
+                user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+                user32.SetForegroundWindow(hwnd)
+                break
+            time.sleep(0.25)
         return False
     _MUTEX = handle   # held for the life of the process
     return True
+
+
+def _our_window() -> int:
+    """The running app's window: titled Azimuth Photo *and* owned by an
+    Azimuth process -- an Explorer window on a folder of that name is not it."""
+
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    found = 0
+
+    def visit(hwnd, _lparam):
+        nonlocal found
+        length = user32.GetWindowTextLengthW(hwnd)
+        if length != len("Azimuth Photo"):
+            return True
+        title = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(hwnd, title, length + 1)
+        if title.value != "Azimuth Photo":
+            return True
+        pid = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        process = kernel32.OpenProcess(0x1000, False, pid.value)   # PROCESS_QUERY_LIMITED_INFORMATION
+        if not process:
+            return True
+        try:
+            size = wintypes.DWORD(1024)
+            path = ctypes.create_unicode_buffer(size.value)
+            if kernel32.QueryFullProcessImageNameW(process, 0, path, ctypes.byref(size)):
+                name = os.path.basename(path.value).lower()
+                if name in ("azimuth photo.exe", "pythonw.exe", "python.exe"):
+                    found = hwnd
+                    return False
+        finally:
+            kernel32.CloseHandle(process)
+        return True
+
+    callback = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)(visit)
+    user32.EnumWindows(callback, 0)
+    return found
 
 
 def keep_a_log(where: str | None) -> None:
@@ -126,12 +173,18 @@ def keep_a_log(where: str | None) -> None:
     except OSError:
         return
     handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    # The app's own modules speak at INFO; every library keeps its own
+    # level, or the file would be theirs.
+    ours = {p.stem for p in Path(__file__).parent.glob("*.py")} | {"azimuth", "model", "photo"}
+    handler.addFilter(lambda record: record.name.split(".")[0] in ours or record.levelno >= logging.WARNING)
     root = logging.getLogger()
     root.addHandler(handler)
-    if root.level > logging.INFO or root.level == logging.NOTSET:
-        root.setLevel(logging.INFO)
+    for name in ours:
+        logging.getLogger(name).setLevel(logging.INFO)
 
     def uncaught(kind, value, trace):
+        if kind is SystemExit:
+            return
         logging.getLogger("azimuth").critical("uncaught", exc_info=(kind, value, trace))
 
     sys.excepthook = uncaught

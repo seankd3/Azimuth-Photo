@@ -31,12 +31,15 @@ export function createUndo() {
     forget();
   }
 
-  function show(message, nextRevert = null) {
+  function show(message, nextRevert = null, label = 'Undo') {
     clearTimeout(timer);
     if (nextRevert) {
       clearTimeout(revertTimer);
       revert = nextRevert;
       revertTimer = setTimeout(forget, SHOWN_MS);
+      // The way back is usually Undo; an offer (bring them anyway) says
+      // what it does, and Ctrl+Z takes it the same way.
+      button.textContent = label;
     }
     // A notice without a way back leaves the live Undo where it is.
     if (nextRevert) button.hidden = false;

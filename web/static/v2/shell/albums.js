@@ -103,7 +103,7 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
       namedFrom = anchor instanceof Element ? anchor : null;
       openedBy = window.event || null;
       taken = () => not.map((n) => n.toLowerCase());
-      joining = () => joins.map((n) => n.toLowerCase());
+      joining = () => joins;
       noun = kind;
       nameError.textContent = '';
       namePop.querySelector('[data-name-title]').textContent = title;
@@ -137,19 +137,23 @@ export function createAlbumsPanel({ product, read, update, notify, undo, reload,
     const dup = value && taken().includes(value.toLowerCase());
     // A name someone already answers to is not a clash for a person: it
     // is how a split heals. The field says so before Save is pressed.
-    const join = !dup && value && joining().includes(value.toLowerCase());
+    // The join keeps the spelling already in use: "alice" joins "Alice".
+    const join = !dup && value ? joined(value) : null;
     nameError.classList.toggle('is-note', Boolean(join));
+    nameError.setAttribute('role', join ? 'status' : 'alert');
     nameError.textContent = dup ? `There is already ${noun === 'album' ? 'an album' : `a ${noun}`} called “${value}”.`
-      : join ? `Joins “${value}” — the two become one person.` : '';
+      : join ? `Joins “${join}” — the two become one person.` : '';
     nameOk.disabled = !value || dup;
     return Boolean(value) && !dup;
   }
+  const joined = (value) => joining().find((n) => n.toLowerCase() === value.toLowerCase()) || null;
+  const said = () => { const value = nameInput.value.trim(); return joined(value) || value; };
   nameInput.addEventListener('input', checkName);
-  nameOk.addEventListener('click', () => { if (checkName()) answer(nameInput.value.trim()); });
+  nameOk.addEventListener('click', () => { if (checkName()) answer(said()); });
   namePop.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && event.target === nameInput) {
       // An empty or taken name is not an answer; the field simply waits.
-      if (checkName()) answer(nameInput.value.trim());
+      if (checkName()) answer(said());
       event.preventDefault();
     }
     if (event.key === 'Escape') { answer(null); event.preventDefault(); event.stopPropagation(); }

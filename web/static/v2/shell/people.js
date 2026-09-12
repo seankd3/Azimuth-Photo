@@ -22,7 +22,12 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
   let cursor = -1;
 
   let maybe = [];
+  // The lane's count when the wall last spoke for itself: until it moves,
+  // a re-read would only bring back the groups from before the verb.
+  let wornAt = null;
   async function refresh() {
+    if (wornAt !== null && read().shaped === wornAt) return;
+    wornAt = null;
     try {
       maybe = await product.maybeSame();
     } catch {
@@ -290,7 +295,11 @@ export function createPeoplePanel({ product, read, update, notify, undo, browse,
   // groups land underneath within the second.
   function wear(exemplar, called, absorbing = null) {
     const held = read().people || [];
-    const gone = absorbing ? held.find((p) => p.person === absorbing) : null;
+    // A name someone already answers to folds the two cards, as the
+    // rewrite will.
+    const twin = absorbing ? null : held.find((p) => p.person !== exemplar && p.settled && p.term === called);
+    const gone = absorbing ? held.find((p) => p.person === absorbing) : twin || null;
+    wornAt = read().shaped ?? null;
     update({
       people: held
         .filter((p) => p !== gone)

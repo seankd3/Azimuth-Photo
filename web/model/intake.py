@@ -270,11 +270,16 @@ def bring(
                 _clear(source, tally)
             note("already in the library", candidate)
             continue
-        if not held and not include_culled and decisions.latest(conn, identity, decisions.STATUS) == "trashed":
+        culled = not held and decisions.latest(conn, identity, decisions.STATUS) == "trashed"
+        if culled and not include_culled:
             tally["culled"] += 1
             tally["culled_keys"].append(candidate["key"])
             note("culled before", candidate)
             continue
+        if culled:
+            # Brought back on purpose: the log says so, or the next rebuild
+            # of the status column would read the old cull and trash it again.
+            decisions.decide(conn, identity, decisions.STATUS, "unflagged")
 
         name = candidate["name"]
         outcome = None

@@ -28,7 +28,8 @@ ICON = ROOT / "desktop" / "icon.ico"
 SCRIPTS = WEB / ".venv" / "Scripts"
 NAME = "Azimuth Photo"
 EXE = SCRIPTS / f"{NAME}.exe"
-DLLS = ("python3.dll", "python312.dll", "vcruntime140.dll", "vcruntime140_1.dll")
+DLLS = ("python3.dll", f"python{sys.version_info.major}{sys.version_info.minor}.dll",
+        "vcruntime140.dll", "vcruntime140_1.dll")
 
 
 def base_home() -> Path:
@@ -49,12 +50,18 @@ def version() -> tuple[tuple[int, int, int, int], str]:
     except Exception:  # noqa: BLE001 - a build outside git still has a date
         commit = "local"
     now = time.localtime()
-    return (now.tm_year, now.tm_mon, now.tm_mday, 0), f"{now.tm_year}.{now.tm_mon}.{now.tm_mday} ({commit})"
+    # The exe runs whatever the checkout is, so its version is the day it
+    # was made; the commit is the log's to say.
+    del commit
+    return (now.tm_year, now.tm_mon, now.tm_mday, 0), f"{now.tm_year}.{now.tm_mon}.{now.tm_mday}"
 
 
 def dress(exe: Path) -> None:
     """The compass and the version resource, written into the exe: what
-    Task Manager, the taskbar and the file's Properties say the program is."""
+    Task Manager, the taskbar and the file's Properties say the program is.
+    Writing resources leaves the interpreter's own signature invalid; a
+    locally made file carries no mark of the web, so Windows runs it, and a
+    scanner that objects is answered with an exclusion for the venv."""
 
     from PyInstaller.utils.win32.icon import CopyIcons_FromIco
     from PyInstaller.utils.win32.versioninfo import (
@@ -94,8 +101,8 @@ def make() -> Path:
     shutil.copyfile(home / "pythonw.exe", EXE)
     for dll in DLLS:
         source = home / dll
-        if source.is_file() and not (SCRIPTS / dll).is_file():
-            shutil.copyfile(source, SCRIPTS / dll)
+        if source.is_file():
+            shutil.copyfile(source, SCRIPTS / dll)   # always the base's own, never a stale one
     dress(EXE)
     return EXE
 
@@ -127,8 +134,12 @@ def shortcuts(exe: Path) -> list[str]:
     entry = WEB / "desktop.py"
     script = f"""
 $sh = New-Object -ComObject WScript.Shell
+$links = @()
 foreach ($folder in @($sh.SpecialFolders('Desktop'), $sh.SpecialFolders('Programs'))) {{
-  $link = Join-Path $folder '{NAME}.lnk'
+  $found = Get-ChildItem -LiteralPath $folder -Recurse -Filter '{NAME}.lnk' -ErrorAction SilentlyContinue | ForEach-Object {{ $_.FullName }}
+  if ($found) {{ $links += $found }} else {{ $links += (Join-Path $folder '{NAME}.lnk') }}
+}}
+foreach ($link in $links) {{
   $s = $sh.CreateShortcut($link)
   $s.TargetPath = '{exe}'
   $s.Arguments = '"{entry}"'

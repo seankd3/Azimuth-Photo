@@ -1532,18 +1532,23 @@ class OwnedLibrary:
             # it at once -- not after the whole space has been reranked.
             # Needs no model: the vectors are already in the rows.
             if key[2:] != self._peopled and key[2]:
-                persons.repeople(conn)
+                try:
+                    persons.repeople(conn)
+                except Exception:  # noqa: BLE001 -- the ranking must not wait on the faces
+                    log.exception("the people could not be rewritten")
                 self._peopled = key[2:]
                 self.shaped += 1
             # The matrix is hundreds of megabytes on a full library and the
             # rows are append-only, so it is re-read only when the count
             # moved; a sitting of rounds reranks against the space in memory,
-            # and only when the rounds or the space moved.
+            # and only when the rounds or the space moved. The window hears
+            # of it separately: the grid's order is the rerank's.
             if self._space is None or self._space[0] != key[1]:
                 self._space = (key[1], *rank.space(conn))
             _count, subjects, vectors = self._space
             if self._ranked is None or key[:2] != self._ranked[:2]:
                 queries.rerank(conn, subjects, vectors)
+                self.shaped += 1
             self._ranked = key
             # Labels too: when a word was taught or the space grew, every
             # taught word's answer rewrites whole.

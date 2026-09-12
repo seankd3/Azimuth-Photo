@@ -13,7 +13,7 @@ import { why } from '../kit/why.js';
 import { recall, remember } from '../kit/remembered.js';
 import { title as dayName } from '../kit/days.js';
 
-export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown }) {
+export function createIntakeWorkflow({ product, notify, afterImport, progressed = () => {}, enter, leave, isShown, offer = () => {} }) {
   const title = document.querySelector('[data-import-title]');
   const sourceLine = document.querySelector('[data-import-source]');
   const stage = document.querySelector('[data-import-stage]');
@@ -94,7 +94,9 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     title.textContent = isCard ? 'Import from card' : 'Import folder';
     sourceLine.textContent = `${staged.source} — ${staged.candidates.length.toLocaleString()} photographs` +
       (staged.receiving ? `, into ${staged.receiving}` : '');
-    state.mode = recall('azimuth.import-mode', 'copy') === 'move' ? 'move' : 'copy';
+    // Remembered per kind of source: a Move learned on a card must never
+    // reach a folder on the working disk.
+    state.mode = recall(isCard ? 'azimuth.import-mode.card' : 'azimuth.import-mode.folder', 'copy') === 'move' ? 'move' : 'copy';
     state.culled = [];
     culledButton.hidden = true;
     // Erasing the card is never the default: it is chosen once, then
@@ -236,6 +238,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     // is verified, so a stopped or failed import never loses a file.
     for (const button of modeChoice.querySelectorAll('[data-mode]')) {
       button.classList.toggle('is-active', button.dataset.mode === state.mode);
+      button.setAttribute('aria-pressed', String(button.dataset.mode === state.mode));
     }
     modeSaid.textContent = moving()
       ? `Each file leaves the ${state.isCard ? 'card' : 'source'} once its copy is verified.`
@@ -278,7 +281,12 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
   // The import of these keys; `culled` brings back what was culled
   // before, which the first run leaves out.
   async function launch(keys, culled) {
-    if (!state.kind || state.running || !keys.length) return;
+    if (!state.kind || state.running) return;
+    if (!keys.length) {
+      progress.hidden = false;
+      progress.textContent = 'Nothing is checked.';
+      return;
+    }
     state.running = true;
     startButton.hidden = true;
     culledButton.hidden = true;
@@ -344,6 +352,11 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     state.culled = status.culled_keys || [];
     culledButton.hidden = !state.culled.length;
     culledButton.textContent = `Bring the ${state.culled.length.toLocaleString()} culled before`;
+    // The panel has usually closed by now; the offer rides the toast,
+    // where the outcome lands anyway.
+    if (state.culled.length) {
+      offer(`${state.culled.length.toLocaleString()} culled before stayed out.`, () => launch(state.culled, true), 'Bring them anyway');
+    }
     const cleared = state.isCard && moving() && (status.cleared || 0) >= total && status.phase === 'done';
     const said = (status.removed ? 'The card was removed. ' : status.phase === 'stopped' ? 'Stopped. ' : status.phase === 'failed' ? `${status.error} ` : '')
       + parts.join(', ') + (cleared ? ' — card empty, safe to eject.' : '.');
@@ -437,7 +450,7 @@ export function createIntakeWorkflow({ product, notify, afterImport, progressed 
     const mode = event.target.closest('[data-mode]')?.dataset.mode;
     if (!mode) return;
     state.mode = mode;
-    remember('azimuth.import-mode', mode);
+    remember(state.isCard ? 'azimuth.import-mode.card' : 'azimuth.import-mode.folder', mode);
     render();
   });
   culledButton.addEventListener('click', () => void launch(state.culled, true));

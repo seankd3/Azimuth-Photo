@@ -345,6 +345,7 @@ const trashWorkflow = createTrashWorkflow({
   selection,
 });
 const intakeWorkflow = createIntakeWorkflow({
+  offer: (message, act, label) => undo.show(message, act, label),
   product,
   notify,
   // Import is its own workspace: entering and leaving it is a view change
@@ -921,6 +922,9 @@ async function followLibrary() {
     const moved = last !== null && pulse.done !== last.done;
     const swept = last !== null && pulse.swept !== last.swept;
     const shaped = last !== null && pulse.shaped !== last.shaped;
+    // The lane's own count, on the state: what was said optimistically
+    // holds until it moves.
+    if (last === null || shaped) update({ shaped: pulse.shaped });
     if (last === null || pulse.cards !== last.cards) showCards();
     // The status line: the kind the worker is on, what it counted as left,
     // and the pace, smoothed so two seconds of luck do not make it jump.
