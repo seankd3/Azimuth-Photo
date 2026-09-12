@@ -440,6 +440,9 @@ goal — it is permission to stop.
 - `live` "the libary wasnt loading or me when I tired to boot it from the desktop, all the improvements are great but zero bugs and zero lag are #1 goals" — 09-12 · the cause was mine, an hour old: a kit helper named `count` shadowed by a local string in the main render, so the window drew nothing; fixed in the bundle (`c391dfeb`), and the linter now refuses any shadowed name (`no-shadow`), which would have caught it before the build. Zero bugs and zero lag are the first two goals of every round from here.
 - `open` "keep working all night thanks" — 09-12 · yes.
 - `open` "how well do you understand my development intentions and vision such that you can confidently procede autonomously and really impress me?" — 09-12 · answered in the report: the vision in my own words, where I am sure, where I am not, and how I decide alone.
+- `open` "sounds like you get the gist, please continue working until I say otherwise." — 09-12 · yes: rounds until told otherwise, each refuted by another model before its push, each proven on an isolated home.
+- `open` "keep working un attended till morning" — 09-12 02:12 · yes; the night ran to b2e654d5 (34 commits: PN4, BC13 second round, X129–X192, IA1–IA19, LR1–LR23).
+- `open` "keep going" — 09-12 06:55 · yes: the rounds continue (audit, refute, prove, push); PN2 (the full-size merge as a stack cover) is designed in daylight with his eyes on the first result.
 
 ## 2. Derived queue
 
