@@ -97,6 +97,8 @@ touch the screen:
   app off-screen on an isolated `AZIMUTH_HOME`, evaluates a JavaScript probe in
   the page, captures the window with `PrintWindow`, and closes. Pixels, tiles,
   the worker, the lot, with nothing on the desktop.
+  `--size 1366x768` opens it at the 13-inch persona; every journey is run
+  there too before a round lands.
 - `test_desktop.py` crosses the real bridge with no window at all.
 - `scripts/journeys/*.js` are the probes for what a photographer actually
   does (cull, loupe, survey, search, album, people), each run through
