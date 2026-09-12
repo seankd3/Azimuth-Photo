@@ -775,6 +775,7 @@ finding was checked and the numbers said no.
 | X155 | The BURST gate (median overlap > 0.85) could never be the refusing gate under OVERLAP_MOST 0.65 | deleted; the first pair's overlap refuses a burst | shipped |
 | X156 | `sim_learn`'s fisher lane was a second copy of the shipped mode with two different tie-breaks; the E4 numbers are the learn lane's, which calls the shipped mode | the fisher lane deleted; `choose_band`'s comment says what it sorts by | shipped |
 | X157 | An idle lane stepped every five seconds, and an idle step on a caught-up catalog walks every living row per kind (100 ms at 8k on the owner's copy, seconds at 150k): a core spent on nothing, per lane, forever (found by this session's bench while the refuter ran) | an idle lane sleeps until nudged -- a sweep, a look, an import, a drive coming or going (the follower nudges now) -- with a sixty-second clock as the safety net | shipped |
+| X158 | The grid spec still held the last-row rule of 08-19 (never taller than the size) after F1 (09-09) made a short last row fill the width; the node spec had failed since, and the full check with it, unnoticed because only the Python suite was run (found by running `azimuth-check` whole) | the spec holds the shipped rule: a short last row stretches to the width within 1.6x the size and never past it; the whole check passes end to end | shipped |
 
 ## Refutation of D1-D5, PF4, PF5, E2-3 (2026-09-12, by a second model)
 

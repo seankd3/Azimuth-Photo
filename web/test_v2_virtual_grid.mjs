@@ -34,8 +34,14 @@ for (let row = 0; row < large.rows - 1; row += 1) {
   }
   assert.ok(large.rowHeights[row] > 220 * 0.55 && large.rowHeights[row] <= 220 + 1e-6, `row ${row} never exceeds the chosen size`);
 }
-// The last row is not stretched.
-assert.ok(large.rowHeights[large.rows - 1] <= 220 + 1e-6);
+// A short last row is scaled up to fill the width while that stays within
+// the stretch (1.6 x the chosen size); past it the row keeps the size.
+const lastRow = large.rows - 1;
+assert.ok(large.rowHeights[lastRow] <= 220 * 1.6 + 1e-6, 'the last row never stretches past 1.6x');
+const closing = placeGridCell(large, count - 1);
+if (large.rowHeights[lastRow] > 220 + 1e-6) {
+  assert.ok(Math.abs((closing.left + closing.width + large.padding) - 1200) < 0.05, 'a stretched last row fills the width');
+}
 
 const middle = visibleGridRange(large, large.height / 2, 900);
 assert.ok(middle.end - middle.start <= 80, 'the DOM window must stay bounded');
