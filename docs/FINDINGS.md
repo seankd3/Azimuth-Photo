@@ -763,6 +763,12 @@ finding was checked and the numbers said no.
 |---|---|---|---|
 | D1 | Thirteen lines could read "1 photographs" (the drag badge, the sidebar count, the import source and summary, a person's count, the search-kept notice, Empty Trash's notice, the selection heading); twenty more spelled their own plural | one word in the kit, `count(n, one, many)`, used by every surface that says how many | shipped |
 
+## Sidebar, search, bars and dialogs (ninth round, 2026-09-12 morning, audited by a second model)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| AL1 | Since the keyboard round of 09-10, a focused photograph, card or face (all buttons) counted as a chrome control, so after a click or an arrow every verb key and the arrows did nothing; the journeys never saw it because they pressed from the body | a control is a chrome button outside the stages; the two inner guards it made dead are gone; the journeys press from where the keyboard is. Proven in the real app: click, X rejects | shipped |
+
 ## Loupe, Rank and People (eighth round, 2026-09-12 night, audited by a second model)
 
 | # | Finding | Fix | Status |

@@ -2025,7 +2025,12 @@ document.addEventListener('keydown', (event) => {
   const isTyping = target.matches('input, select, textarea, [contenteditable="true"]');
   // A slider takes the arrows, not the letters: Esc and D still work on it.
   const isSliding = target.matches('input[type="range"]');
-  const onControl = Boolean(target.closest('button'));
+  // A control is a chrome button -- bar, sidebar, details, top bar, a
+  // dialog, a menu -- that keeps its own keys. A photograph, a card or a
+  // face on a stage is a button too, and the stage's keys are its own:
+  // for two days a focused cell swallowed X, P and the arrows.
+  const onControl = Boolean(target.closest('button'))
+    && !target.closest('.photo-grid, .rank-stage, .loupe-stage, .face-wall, .import-stage');
   // A modal is the first rung, whichever it is: Esc closes it and nothing
   // behind it hears the key. The home dialog alone cannot be dismissed.
   const modal = document.querySelector('dialog[open]');
@@ -2212,8 +2217,6 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (rankWorkflow.isOpen()) {
-    // A focused control (a size or mode button) keeps Enter and Space.
-    if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
     if ((event.key === 'g' || event.key === 'G') && !isTyping) { rankWorkflow.close(); event.preventDefault(); return; }
     if (rankWorkflow.key(event)) event.preventDefault();
     return;
@@ -2334,7 +2337,6 @@ document.addEventListener('keydown', (event) => {
     return;
   }
   if (read().view === 'people') {
-    if (onControl && (event.key === 'Enter' || event.key === ' ')) return;
     if ((event.key === 'g' || event.key === 'G') && !isTyping) { update({ view: 'library' }); event.preventDefault(); return; }
     if (peoplePanel.key(event)) event.preventDefault();
     return;
