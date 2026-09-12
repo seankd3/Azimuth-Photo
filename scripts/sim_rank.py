@@ -12,7 +12,7 @@ import tempfile
 
 import numpy as np
 
-sys.path.insert(0, r"C:\Users\smast\azimuth-sandbox\web")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web"))
 import model
 import rank
 
@@ -73,12 +73,12 @@ def session(mode, *, recent_window=RECENT, refit_every=25):
         winner = int(np.argmax(utility))
         rank.record(conn, got[winner]["id"], [p["id"] for i, p in enumerate(got) if i != winner])
         if (round_number + 1) % refit_every == 0:
-            fitted = rank.strength(conn, steps=150)
+            fitted = rank.ranking(conn)
             conn.executemany("UPDATE images SET elo = ? WHERE content_hash = ?",
                              [(v, h) for h, v in fitted.items()])
             conn.commit()
 
-    fitted = rank.strength(conn)
+    fitted = rank.ranking(conn)
     judged = [h for h in fitted if h in index]
     from scipy.stats import spearmanr
     rho = spearmanr([fitted[h] for h in judged], [hidden[index[h]] for h in judged]).statistic if len(judged) > 4 else 0.0

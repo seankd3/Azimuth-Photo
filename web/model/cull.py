@@ -14,6 +14,7 @@ what counts), so it lives here rather than growing a second copy.
 from __future__ import annotations
 
 import json
+import time
 from typing import Callable, Iterable
 
 from model import decisions
@@ -46,12 +47,59 @@ def _photos(conn, image_ids: list[int], column: str) -> list[dict]:
     ]
 
 
-def _latest_row(conn, subject: str, family: str = decisions.STATUS):
-    return conn.execute(
-        f"SELECT id, value FROM decisions WHERE subject = ? AND family = ? "
-        f"ORDER BY {decisions.AUTHORITY_SQL} DESC, at DESC, id DESC LIMIT 1",
-        (subject, family),
-    ).fetchone()
+def _latest_all(conn, subjects: Iterable[str], family: str) -> dict[str, tuple[int, object]]:
+    """The latest decision per subject -- its id and value -- by the rule
+    `decisions.latest` reads by, in one read for the whole selection."""
+
+    payload = json.dumps(sorted({str(s) for s in subjects}), separators=(",", ":"))
+    out: dict[str, tuple[int, object]] = {}
+    for row in conn.execute(
+        f"SELECT id, subject, value FROM decisions WHERE family = ?"
+        f" AND subject IN (SELECT value FROM json_each(?))"
+        f" ORDER BY {decisions.AUTHORITY_SQL} ASC, at ASC, id ASC",
+        (family, payload),
+    ):
+        out[str(row["subject"])] = (int(row["id"]), decisions.loaded(row))   # the last in this order wins
+    return out
+
+
+def _decide_all(conn, family: str, said: list[tuple[str, object]]) -> list[int]:
+    """One decision per subject, appended in one statement; their ids in
+    order. Select All then P on a whole library is one insert, not a
+    hundred and fifty thousand."""
+
+    if not said:
+        return []
+    first = int(conn.execute("SELECT COALESCE(MAX(id), 0) FROM decisions").fetchone()[0])
+    now = time.time()
+    conn.executemany(
+        "INSERT INTO decisions(subject, family, value, at, by) VALUES (?, ?, ?, ?, ?)",
+        [(str(subject), str(family), json.dumps(value), now, decisions.YOU) for subject, value in said],
+    )
+    ids = [int(row[0]) for row in conn.execute("SELECT id FROM decisions WHERE id > ? ORDER BY id", (first,))]
+    if len(ids) != len(said):
+        raise RuntimeError("the decisions written do not match the decisions made")
+    return ids
+
+
+def _project_all(conn, column: str, said: list[tuple[str, object]]) -> dict[str, int]:
+    """The column written for every subject, one statement per distinct
+    value; how many rows each subject moved."""
+
+    by_value: dict[str, list[str]] = {}
+    for subject, value in said:
+        by_value.setdefault(json.dumps(value), []).append(str(subject))
+    for key, subjects in by_value.items():
+        conn.execute(
+            f"UPDATE images SET {column} = ? WHERE content_hash IN (SELECT value FROM json_each(?))",
+            (json.loads(key), json.dumps(subjects, separators=(",", ":"))),
+        )
+    return {
+        str(row["hash"]): int(row["n"]) for row in conn.execute(
+            "SELECT content_hash AS hash, COUNT(*) AS n FROM images"
+            " WHERE content_hash IN (SELECT value FROM json_each(?)) GROUP BY content_hash",
+            (json.dumps([str(subject) for subject, _ in said], separators=(",", ":")),))
+    }
 
 
 def _previous_status(conn, subject: str) -> str:
@@ -97,31 +145,27 @@ def change(
         if row["id"] and row["hash"]:
             by_hash.setdefault(str(row["hash"]), row)
 
-    changes = []
     try:
+        # Every subject's last word in one read; the target decided in
+        # Python; then one insert and one write per distinct value. A loop
+        # of one decision per row was thirty seconds on a whole library.
+        latest_all = _latest_all(conn, by_hash, family)
+        todo: list[tuple[str, object, object]] = []
         for subject, row in by_hash.items():
-            latest = decisions.latest(conn, subject, family)
+            latest = latest_all.get(subject, (None, None))[1]
             before = latest if valid(latest) else (row["current"] if valid(row["current"]) else default)
             after = target(conn, subject, before)
             if not valid(after):
                 raise ValueError(f"invalid {family}: {after!r}")
-            if before == after:
-                continue
-            decision_id = decisions.decide(conn, subject, family, after)
-            updated = conn.execute(
-                f"UPDATE images SET {column} = ? WHERE content_hash = ?",
-                (after, subject),
-            )
-            changes.append(
-                {
-                    "subject": subject,
-                    "family": family,
-                    "before": before,
-                    "after": after,
-                    "decision": decision_id,
-                    "photos": updated.rowcount,
-                }
-            )
+            if before != after:
+                todo.append((subject, before, after))
+        ids = _decide_all(conn, family, [(subject, after) for subject, _, after in todo])
+        counts = _project_all(conn, column, [(subject, after) for subject, _, after in todo])
+        changes = [
+            {"subject": subject, "family": family, "before": before, "after": after,
+             "decision": decision_id, "photos": counts.get(subject, 0)}
+            for (subject, before, after), decision_id in zip(todo, ids)
+        ]
         conn.commit()
     except BaseException:
         conn.rollback()
@@ -175,6 +219,11 @@ def undo(conn, changes: Iterable[dict]) -> dict:
         subjects = [(str(change["subject"]), str(change.get("family", decisions.STATUS))) for change in requested]
         if len(subjects) != len(set(subjects)):
             raise ValueError("one Undo may change each identity once")
+        families = {family for _, family in subjects}
+        latest_by_family = {
+            family: _latest_all(conn, [subject for subject, held in subjects if held == family], family)
+            for family in families
+        }
         for change in requested:
             subject = str(change["subject"])
             family = str(change.get("family", decisions.STATUS))
@@ -184,34 +233,22 @@ def undo(conn, changes: Iterable[dict]) -> dict:
             decision_id = int(change["decision"])
             if not valid(before) or not valid(after):
                 raise ValueError("invalid Undo value")
-            latest = _latest_row(conn, subject, family)
-            if (
-                latest is None
-                or int(latest["id"]) != decision_id
-                or decisions.loaded(latest) != after
-            ):
+            latest = latest_by_family[family].get(subject)
+            if latest is None or latest[0] != decision_id or latest[1] != after:
                 raise ValueError(f"{family} changed after this action")
 
         reversed_changes = []
-        for change in requested:
-            subject = str(change["subject"])
-            family = str(change.get("family", decisions.STATUS))
+        for family in families:
             column = decisions.PROJECTED[family][0]
-            restored = change["before"]
-            decision_id = decisions.decide(conn, subject, family, restored)
-            conn.execute(
-                f"UPDATE images SET {column} = ? WHERE content_hash = ?",
-                (restored, subject),
-            )
-            reversed_changes.append(
-                {
-                    "subject": subject,
-                    "family": family,
-                    "before": change["after"],
-                    "after": restored,
-                    "decision": decision_id,
-                }
-            )
+            mine = [change for change in requested if str(change.get("family", decisions.STATUS)) == family]
+            said = [(str(change["subject"]), change["before"]) for change in mine]
+            ids = _decide_all(conn, family, said)
+            _project_all(conn, column, said)
+            for change, decision_id in zip(mine, ids):
+                reversed_changes.append(
+                    {"subject": str(change["subject"]), "family": family,
+                     "before": change["after"], "after": change["before"], "decision": decision_id}
+                )
         conn.commit()
     except (KeyError, TypeError, ValueError):
         conn.rollback()

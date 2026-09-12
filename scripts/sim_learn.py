@@ -22,7 +22,7 @@ import tempfile
 
 import numpy as np
 
-sys.path.insert(0, r"C:\Users\smast\azimuth-sandbox\web")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web"))
 import model
 import rank
 
@@ -129,7 +129,18 @@ def session(strategy, seed):
         else:
             mu, sigma, appearances = pool_state(conn, hashes)
             avoid = {index[h] for h in recent}
-            if strategy == "window":
+            if strategy == "fisher":
+                # E4: the shipped mixture (teach by the widest window, find
+                # at the band's cut, a coin once there are leaders) with the
+                # fit's own uncertainty instead of 1/sqrt(1+rounds).
+                unsure = rank.uncertainty(rank.rounds(conn), {h: mu[index[h]] for h in hashes})
+                sigma = np.asarray([unsure.get(h, 1.0 / np.sqrt(rank.LAM_B)) for h in hashes])
+                judged_n = int((appearances > 0).sum())
+                if judged_n >= 2 * SET and rng.random() < 0.5:
+                    members = choose_band(mu, sigma, avoid, SET)
+                else:
+                    members = choose_window(mu, sigma, avoid, SET)
+            elif strategy == "window":
                 members = choose_window(mu, sigma, avoid, SET)
             elif strategy == "top":
                 covered = (appearances > 0).mean() > 0.95
@@ -169,12 +180,12 @@ def session(strategy, seed):
                     [members[i] + 1 for i in range(len(members)) if i != winner])
         done = round_number + 1
         if done % REFIT == 0 or done in CHECKPOINTS:
-            fitted = rank.strength(conn, steps=150)
+            fitted = rank.ranking(conn)
             conn.executemany("UPDATE images SET elo = ? WHERE content_hash = ?",
                              [(v, h) for h, v in fitted.items()])
             conn.commit()
         if done in CHECKPOINTS:
-            fitted = rank.strength(conn)
+            fitted = rank.ranking(conn)
             judged = [h for h in fitted if h in index]
             from scipy.stats import spearmanr
             rho = spearmanr([fitted[h] for h in judged],

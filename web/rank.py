@@ -290,6 +290,30 @@ def ranking(conn, subjects: list[str] | None = None, vectors=None) -> dict[str, 
     return fit(rounds(conn), subjects, vectors)
 
 
+def uncertainty(log: list[tuple[str, list[str]]], scores: dict[str, float]) -> dict[str, float]:
+    """How unsure the fit is of each judged photograph's own place: one over
+    the square root of its evidence, where the evidence is what its rounds
+    could still teach (the Fisher information, `sum p(1 - p)` over every
+    round it was in, plus the pull). A photograph whose rounds were all
+    foregone conclusions is as unsure as one never judged; one that keeps
+    landing in close calls is pinned. On the fit's own scale, before
+    `SPREAD`."""
+
+    import math
+
+    evidence: dict[str, float] = {}
+    for picked, over in log:
+        members = [picked, *over]
+        values = [(scores.get(h, BASE) - BASE) / SPREAD for h in members]
+        top = max(values)
+        weights = [math.exp(v - top) for v in values]
+        total = sum(weights)
+        for h, w in zip(members, weights):
+            p = w / total
+            evidence[h] = evidence.get(h, 0.0) + p * (1.0 - p)
+    return {h: 1.0 / math.sqrt(e + LAM_B) for h, e in evidence.items()}
+
+
 # A star is the ranking's readable face, and it is earned: only a photograph
 # seen in at least this many rounds carries one. One round is luck, two a
 # coincidence, three a pattern.
@@ -501,7 +525,20 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
         photo["rating"] = float(photo["elo"] or BASE)
 
     n = max(2, int(n))
-    ordered = _ordered(pool, n, str(mode), space)
+    unsure = None
+    if str(mode) == "learn":
+        # The fit's own uncertainty over everyone the rounds touched, from
+        # the sort index's scores: what each photograph's rounds could still
+        # teach, not a count of them.
+        import json
+
+        log = rounds(conn)
+        touched = sorted({h for picked, over in log for h in (picked, *over)})
+        scores = {row["hash"]: float(row["elo"]) for row in conn.execute(
+            "SELECT content_hash AS hash, elo FROM images WHERE content_hash IN (SELECT value FROM json_each(?))",
+            (json.dumps(touched),))}
+        unsure = uncertainty(log, scores)
+    ordered = _ordered(pool, n, str(mode), space, unsure)
     if ordered:
         # A set wears its anchor's orientation when the scope can dress it:
         # two shapes side by side are judged as frames before photographs,
@@ -522,7 +559,7 @@ def candidates(conn, n: int = 12, *, scope: Scope = EVERYTHING, avoid=(),
     return chosen
 
 
-def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
+def _ordered(pool: list[dict], n: int, mode: str, space, unsure: dict[str, float] | None = None) -> list[dict]:
     """The pool, in the order one mode would take from it.
 
     One law over every mode: **a round spends its seats on the least-judged
@@ -559,7 +596,7 @@ def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
         # Not enough judged to have leaders yet: fall through to close.
 
     if mode == "learn":
-        return _learn(pool, n)
+        return _learn(pool, n, unsure or {})
 
     if mode == "diverse":
         return _spread(pool, n, space)
@@ -574,17 +611,21 @@ def _ordered(pool: list[dict], n: int, mode: str, space) -> list[dict]:
         p is not anchor, abs(p["rating"] - anchor["rating"]), p["comparisons"]))
 
 
-def _learn(pool: list[dict], n: int) -> list[dict]:
+def _learn(pool: list[dict], n: int, unsure: dict[str, float]) -> list[dict]:
     """The simulation's winner: the fastest route to the best ranking.
 
     Two kinds of round, mixed one-in-three once everything has been seen:
 
     * **Teaching** — the most uncertain photographs that are most evenly
       matched: a window slid over the rating-sorted pool to where total
-      uncertainty (1/sqrt(1+rounds)) is greatest. Information theory's
-      answer for a softmax model — a round teaches most when its outcome
-      is least foretold — and before anything is judged the flat-rating
-      crowd is one huge uncertain window, so coverage falls out free.
+      uncertainty is greatest. Information theory's answer for a softmax
+      model — a round teaches most when its outcome is least foretold —
+      and before anything is judged the flat-rating crowd is one huge
+      uncertain window, so coverage falls out free. The uncertainty is the
+      fit's own (`uncertainty`: what a photograph's rounds could still
+      teach), not a count of its rounds; measured (E4, the same
+      simulation) it moves the whole order from rho .331 to .346 and
+      top-decile recall from .458 to .463 at 600 rounds, .224 to .261 at 300.
     * **Finding** — the least-worn of the current top band (15%), spread
       across it, because pure uncertainty stops visiting the leaders once
       their ratings separate, and the stars read the top. Half the rounds,
@@ -608,13 +649,11 @@ def _learn(pool: list[dict], n: int) -> list[dict]:
     import math
     import random
 
-    def wear(photo):
-        return 1.0 / math.sqrt(1.0 + photo["comparisons"])
-
     import numpy as np
 
+    never = 1.0 / math.sqrt(LAM_B)      # unjudged: only the pull pins it
     mu = np.asarray([float(p["rating"]) for p in pool])
-    sigma = np.asarray([wear(p) for p in pool])
+    sigma = np.asarray([unsure.get(p["hash"], never) for p in pool])
 
     judged = sum(1 for p in pool if p["comparisons"] > 0)
     if judged >= 2 * n and _finding_round():
