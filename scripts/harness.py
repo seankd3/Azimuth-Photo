@@ -108,7 +108,12 @@ STUB = r"""<script>
 
 
 def build() -> Path:
-    if not DOCUMENT.is_file():
+    # The window's own rule: the document is rebuilt when any source is newer
+    # than it, so a proof never runs against the UI of an hour ago.
+    sources = [ROOT / "web" / "templates" / "v2.html", *(ROOT / "web" / "static" / "v2").rglob("*")]
+    stale = not DOCUMENT.is_file() or any(
+        path.is_file() and path.stat().st_mtime > DOCUMENT.stat().st_mtime for path in sources)
+    if stale:
         subprocess.run([sys.executable, str(ROOT / "scripts" / "build_desktop_ui.py")], check=True)
     document = DOCUMENT.read_text(encoding="utf-8")
     at = document.index("<script>")
