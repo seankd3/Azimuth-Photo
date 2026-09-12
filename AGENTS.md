@@ -162,7 +162,10 @@ the row numbers in the subject; a different model refutes the diff before
 push; the native proof and `scripts/bench.py` carry the numbers. A medium
 or large fix states its one sentence and what it deletes in the commit. When
 the ledger runs dry, the next audit widens the lens (a persona, a catalog
-size, a surface) instead of stopping.
+size, a surface) instead of stopping. Every round carries a performance lens
+too: each cost is measured against the hardware's own limit (disk bandwidth,
+decode throughput, the GPU, one bridge call per act, one paint per frame),
+before and after, and a timing is never widened to hide a wait.
 
 ## Documentation hygiene
 
