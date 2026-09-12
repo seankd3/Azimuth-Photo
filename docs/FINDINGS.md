@@ -940,6 +940,12 @@ The first round run by the `polish` workflow from a cloud session: eight scouts,
 | RK3 | The harness rebuilt its document only when it was missing, so a proof could run against the UI of an hour ago | the window's rule: rebuilt when any source under `web/static/v2/` or the template is newer | shipped |
 | RK5 | "diverse rank mode still shows images from the same sequence on the same grid": the least-worn tier is cut from a pool that arrives in filing order, and before anything is judged every photograph is equally worn, so the tie fell to the first shoot in the pool; and the fallback spread across days asked for as many days as seats before it would spread at all, else fell to a rating every unjudged frame shares, which is filing order again | the tie is broken at random before any sort by wear, and the tier spreads across days whenever it holds two. Refuter: sixty frames of one evening filed first and twelve other days, a round of six, five times: one day before, four or more after | shipped |
 
+## The large fixture, first build (2026-09-12)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| LF1 | The pin assigned each frame's day, hour and minute from its own item id and only the seconds from its place on the page, so "consecutive frames consecutive seconds" never happened: 6,137 frames, three shared minutes, no stack proposals | the date is a function of the manifest: one photographer's catalogued month falls in fives three seconds apart, each five with its own day and minute; `--redate` reassigns without a download | shipped |
+| LF2 | Every fixture frame says its camera is "Kodachrome", so the cameras facet has one entry over 6,137 photographs; a facet with one value proves nothing about the facet | leave until a proof needs cameras; the medium is the honest answer for a scan, and a second constant would be a lie of a different kind | deferred |
 ## Craft, from the owner's sitting (2026-09-12)
 
 | # | Finding | Fix | Status |
