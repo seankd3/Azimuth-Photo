@@ -129,7 +129,9 @@ async function round(scouts, perRound, fixExtra) {
           `Read the code and, where the harness or a Library can show it, observe rather than infer. ` +
           `Return at most 4 findings, the strongest first. A finding with no concrete fix is not a ` +
           `finding; a finding already closed in docs/FINDINGS.md is not a finding. Do not edit any file.`,
-        { label: `survey:${scout.key}`, phase: 'Survey', schema: FINDING },
+        // A scout only proposes; every proposal is refuted before anything changes, so
+        // the survey runs on the cheaper model and the refuters and fixers on the strong one.
+        { label: `survey:${scout.key}`, phase: 'Survey', schema: FINDING, model: 'sonnet' },
       ),
     ),
   )
